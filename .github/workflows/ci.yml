@@ -33,9 +33,23 @@ jobs:
       - name: Testes (inclui PostgreSQL real via Testcontainers)
         run: uv run pytest
 
+  secrets:
+    name: Segredos (gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Histórico inteiro: um segredo apagado num commit posterior continua público.
+          fetch-depth: 0
+      - name: gitleaks no histórico
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --config /repo/.gitleaks.toml --redact --no-banner
+
   image:
     name: Imagem
-    needs: checks
+    needs: [checks, secrets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
@@ -87,4 +101,7 @@ jobs:
           VPS_TARGET: ${{ vars.VPS_USER }}@${{ vars.VPS_HOST }}
           IMAGE_TAG: ${{ needs.image.outputs.tag }}
         # A chave da CI na VPS (usuário goblinshift) só pode executar deploy/deploy.sh (forced command).
-        run: ssh "$VPS_TARGET" "deploy $GITHUB_SHA $IMAGE_TAG"
+        run: |
+          # SC2029: expandir aqui é o objetivo; a VPS recebe o SHA e a tag já resolvidos.
+          # shellcheck disable=SC2029
+          ssh "$VPS_TARGET" "deploy $GITHUB_SHA $IMAGE_TAG"
