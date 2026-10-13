@@ -19,3 +19,6 @@ build/
 # IDE
 .idea/
 .vscode/
+
+# Worktrees temporários do Claude Code
+.claude/worktrees/
