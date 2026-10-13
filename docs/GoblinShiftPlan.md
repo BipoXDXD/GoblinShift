@@ -931,7 +931,7 @@ Consumo de conta perto da cota não é alerta, é informação no painel.
 - *Retenção:* configurada explicitamente em 30 dias (por stream ou globalmente), sem depender do padrão da versão instalada, que as fontes não confirmam.
 - *Disco:* filesystem próprio ([3.8](#s3-8)). Com o volume cheio, o OpenObserve para de ingerir e continua respondendo, então "telemetria acima de 85%" entra nos alertas de causa.
 - *Ponto cego:* se a VPS cair, a telemetria cai junto. Um monitor de uptime externo e gratuito consulta `/readyz` e avisa por um canal independente.
-- *A confirmar na fatia 0, antes de fechar o ADR 013:* consumo real de RAM e disco com tráfego sintético; e se SQL e alertas agendados funcionam sobre o stream de traces (a documentação confirma para logs). Se não funcionarem, os eventos `main` também são emitidos como registros de log OTel.
+- *Confirmado na fatia 0* ([ADR 013](adr/013-openobserve-telemetria.md)): com 20 000 requisições sintéticas na VPS, o OpenObserve foi de 210 a 246 MiB de RAM e guardou os 60 000 spans em cerca de 3,7 MiB; SQL e alertas agendados funcionam direto sobre o stream de traces, então os eventos `main` não precisam ser emitidos também como log. Destinos de alerta precisam ser URLs públicas ou e-mail, porque o OpenObserve recusa IPs privados (proteção contra SSRF).
 
 Como a aplicação só fala OTLP com o Collector, trocar de backend no futuro não muda o código.
 
@@ -943,7 +943,7 @@ Como a aplicação só fala OTLP com o Collector, trocar de backend no futuro n�
 | Recurso | Como fica no KVM 2 compartilhado                                                                                         |
 |---------|--------------------------------------------------------------------------------------------------------------------------|
 | CPU     | Executor limitado a 1 vCPU; o outro vCPU fica para API, worker, manutenção, PostgreSQL, Nginx e o outro projeto            |
-| RAM     | Executor com até 2 GiB; a pilha do GoblinShift em repouso usou cerca de 415 MiB na fatia 0                               |
+| RAM     | Executor com até 2 GiB; a pilha do GoblinShift em repouso usou cerca de 385 MiB na VPS, na fatia 0                       |
 | Disco   | 50 GiB em filesystems de tamanho fixo (abaixo); o restante fica para o sistema, imagens Docker e o outro projeto          |
 | Upgrade | Para KVM 4 quando as métricas de CPU ou os SLOs pedirem; a Hostinger faz o upgrade sem reinstalar                          |
 
@@ -1060,7 +1060,7 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 010 | Python 3.14                                                    | 3.13 (só segurança); 3.15 (recém-lançada)                                  | Linha com correções de bugs e ecossistema maduro                                                                                                                   |
 | 011 | VPS KVM 2 da Hostinger, compartilhada com outro projeto do mesmo dono | KVM 4 dedicado; uma VPS por projeto | Custo de portfólio; os recursos medidos cabem com o executor em 1 vCPU. Isolamento entre projetos depende do gVisor, risco aceito; upgrade para KVM 4 quando as métricas pedirem |
 | 012 | Serviço aberto a qualquer conta Google ou GitHub, com cotas    | Allowlist ou convite                                                       | Decisão de produto (portfólio e serviço aberto); o abuso é contido por cotas e limites ([1.8](#s1-8))                                                              |
-| 013 | OpenObserve auto-hospedado como backend de telemetria          | Honeycomb gratuito; Grafana Cloud gratuito; SigNoz                         | Leve, SQL sobre os eventos, dados na VPS e sem custo; Grafana Cloud gratuito guarda só 14 dias e o SigNoz pede 4–8 GB de RAM. Confirmado após a medição da fatia 0 |
+| 013 | OpenObserve auto-hospedado como backend de telemetria          | Honeycomb gratuito; Grafana Cloud gratuito; SigNoz                         | Leve, SQL sobre os eventos, dados na VPS e sem custo; Grafana Cloud gratuito guarda só 14 dias e o SigNoz pede 4–8 GB de RAM. Confirmado pela medição da fatia 0 |
 | 014 | Proxy de borda do host, compartilhado pelos projetos, com TLS por domínio | Cada projeto publicar a própria porta; o Nginx do GoblinShift atender também o outro projeto | Só um processo ouve na 80/443; manter a borda fora dos projetos evita que um deploy derrube o outro. A tecnologia (Nginx com certbot ou Caddy) é escolhida quando houver o primeiro domínio |
 
 [↑ Sumário](#sumario)
