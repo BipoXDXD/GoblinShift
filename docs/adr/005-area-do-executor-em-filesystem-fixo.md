@@ -1,6 +1,6 @@
 # ADR 005. Área do executor em filesystem de tamanho fixo
 
-- **Estado:** aceito
+- **Estado:** aceito (`ENOSPC` confirmado na VPS pelo teste de aceitação da fatia 1, 2026-10-13)
 - **Plano:** [1.7](../GoblinShiftPlan.md#s1-7), [3.6](../GoblinShiftPlan.md#s3-6), [3.8](../GoblinShiftPlan.md#s3-8), [3.10](../GoblinShiftPlan.md#s3-10)
 - **Referências:** [D17](../GoblinShiftReferencias.md#d-4)
 
@@ -18,6 +18,10 @@ A área de trabalho é um filesystem ext4 de tamanho fixo (6 GiB, o valor de 1.7
 |-----------------|-------------------------------------------------------------|
 | `--storage-opt` | O Docker só aplica `--storage-opt size` em XFS com `pquota` |
 | tmpfs           | Um tmpfs com teto consumiria a RAM do próprio executor      |
+
+## Medição na VPS (fatia 1)
+
+Dentro do executor sob gVisor, gravando arquivos de 512 MiB com `fsync` em `/work`, a escrita parou com `ENOSPC` depois de 5,80 GiB, em 30 a 62 s nas rodadas do teste; os cerca de 0,2 GiB restantes são metadados do ext4. Um arquivo único parou com `EFBIG` em exatamente 1 GiB, o RLIMIT_FSIZE do perfil. O banco, o storage e o sistema não foram afetados, e a área foi esvaziada ao fim de cada sonda.
 
 ## Consequências
 
