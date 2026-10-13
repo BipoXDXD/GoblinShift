@@ -46,4 +46,4 @@ O UID do executor (61000) não existe no host e só roda uma tentativa por vez, 
 ## Como verificar
 
 - `deploy/acceptance/executor_ctl.py` tem `--ulimit=nproc=64` e `--pids-limit=256` no perfil fixo.
-- Na VPS, `sudo python3 deploy/acceptance/run.py` mostra "fork bomb contido em 64 processos" com 63 processos criados e `EAGAIN`, e o perfil fixo sem divergências (`PidsLimit` 256, `ulimit nproc` 64).
+- Na VPS, `sudo python3 -B deploy/acceptance/run.py` mostra "fork bomb contido em 64 processos" com 63 processos criados e `EAGAIN`, e o perfil fixo sem divergências (`PidsLimit` 256, `ulimit nproc` 64).

@@ -44,7 +44,7 @@ Prova, dentro do executor sob gVisor e com os limites do plano (1.7), que não h
 
 ```bash
 sudo bash deploy/gvisor.sh                # instala o gVisor (já incluído no provision.sh)
-sudo python3 deploy/acceptance/run.py     # sai com 0 só se todos os critérios passarem
+sudo python3 -B deploy/acceptance/run.py  # sai com 0 só se todos passarem; -B: sem bytecode do root no checkout
 ```
 
 O `executor-ctl` em `deploy/acceptance/` é o protótipo descartável da fatia 1; a fatia 4 o substitui pelo serviço do host.
