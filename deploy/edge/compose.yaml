@@ -23,3 +23,6 @@ networks:
     ipam:
       config:
         - subnet: 172.31.0.0/24
+          # Alocação dinâmica só na metade de cima: nenhum container recebe 172.31.0.2
+          # por acaso (por exemplo, com o proxy parado) e herda a confiança dele.
+          ip_range: 172.31.0.128/25
