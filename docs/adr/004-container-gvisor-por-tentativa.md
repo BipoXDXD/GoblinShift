@@ -1,6 +1,6 @@
 # ADR 004. Um container gVisor por tentativa, criado pelo `executor-ctl`
 
-- **Estado:** aceito
+- **Estado:** aceito (confirmado pelo teste de aceitação da fatia 1 na VPS, 2026-10-13)
 - **Plano:** [1.7](../GoblinShiftPlan.md#s1-7), [2.1](../GoblinShiftPlan.md#s2-1), [3.1](../GoblinShiftPlan.md#s3-1), [3.5](../GoblinShiftPlan.md#s3-5), [3.6](../GoblinShiftPlan.md#s3-6), [3.8](../GoblinShiftPlan.md#s3-8), [3.9](../GoblinShiftPlan.md#s3-9), [3.10](../GoblinShiftPlan.md#s3-10)
 - **Referências:** [D17](../GoblinShiftReferencias.md#d-4), [D18](../GoblinShiftReferencias.md#d-4)
 
@@ -19,6 +19,23 @@ Três peças com privilégios separados. O worker confiável prepara o diretóri
 | Socket do Docker no worker             | Quem controla o daemon tem root no host; o worker teria, na prática, root sobre a VPS                                      |
 | Serviço executor fixo com subprocessos | Não dá estado novo por tentativa: o mesmo serviço sobrevive de uma tentativa para a outra                                  |
 | nsjail                                 | O plano não registra o motivo específico; o motivo principal da decisão é o isolamento forte com estado novo por tentativa |
+
+## Teste de aceitação na VPS (fatia 1)
+
+Rodado em 2026-10-13 com `deploy/acceptance/run.py`, gVisor `release-20261005.0` (plataforma systrap), Docker 29.9.0 e kernel 6.8.0-146 no host. O `executor-ctl` usado é o protótipo descartável da fatia 1, com o perfil fixo deste ADR e os limites do [ADR 015](015-limite-de-processos-sob-gvisor.md).
+
+| Critério                        | Resultado                                                                                     |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| Container sob `runsc`           | Runtime `runsc`; o sandbox vê o kernel `4.19.0-gvisor`, não o do host                         |
+| Perfil fixo                     | Rede `none`, raiz `9p ro`, sem capabilities, `no-new-privileges`, UID 61000, limites conferidos no `docker inspect` |
+| Sem rede                        | Só `lo`; conexão externa `ENETUNREACH`; DNS falha                                              |
+| `ENOSPC` aos 6 GiB              | `ENOSPC` depois de 5,80 GiB, em 30 a 62 s ([ADR 005](005-area-do-executor-em-filesystem-fixo.md)) |
+| RLIMIT_FSIZE por arquivo        | `EFBIG` em exatamente 1 GiB                                                                    |
+| Memória acima de 2 GiB          | Morto com saída 137 e `OOMKilled`; último bloco confirmado em 1984 MiB                        |
+| Fork bomb                       | 63 processos e `EAGAIN` no seguinte; com o `--pids-limit=64` inicial o sandbox morria aos 16 ([ADR 015](015-limite-de-processos-sob-gvisor.md)) |
+| Sem acesso ao `docker.sock`     | `FileNotFoundError` dentro da API, que usa a mesma imagem e o mesmo perfil que o worker terá (fatia 3); também ausente no executor |
+
+O gVisor monta um `tmpfs` próprio em `/tmp`, mesmo com a raiz read-only; o que se escreve ali fica na memória do sandbox, dentro dos 2 GiB.
 
 ## Consequências
 
