@@ -37,7 +37,19 @@ export GS_TELEMETRY_DATA="$ROOT/telemetry/data"
 compose=(docker compose --env-file "$ROOT/secrets/app.env" -f compose.yaml -f compose.prod.yaml)
 
 "${compose[@]}" pull --quiet
-"${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180
+# Migração (expand) antes da API nova; a velha continua atendendo com o schema compatível.
+"${compose[@]}" run --rm --no-TTY migrate
+# O template do Nginx vem do checkout e só é renderizado na partida: renderiza de novo e
+# recarrega sem derrubar conexões. Vem antes do rollout, para que o Nginx já resolva a API
+# pelo DNS quando os containers forem trocados.
+if [[ -n "$("${compose[@]}" ps --quiet nginx)" ]]; then
+  "${compose[@]}" exec -T nginx sh -c \
+    '/docker-entrypoint.d/20-envsubst-on-templates.sh >/dev/null && nginx -t -q && nginx -s reload'
+fi
+# API sem queda (deploy/rollout-api.sh); o resto só é recriado se a configuração mudou.
+deploy/rollout-api.sh "${compose[@]}"
+"${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180 \
+  postgres otel-collector openobserve nginx
 
 # Prontidão verificada dentro do container da API, sem depender do proxy de borda.
 readyz=(python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)")

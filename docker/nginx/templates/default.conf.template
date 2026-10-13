@@ -11,16 +11,28 @@ map "$from_edge:$http_x_forwarded_proto" $forwarded_proto {
     default                      $scheme;
 }
 
+# A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
+# na partida: durante o rollout (deploy/rollout-api.sh) há dois containers `api`, o Nginx alterna
+# entre eles e, se um recusar a conexão, tenta o outro (proxy_next_upstream padrão: error timeout,
+# nunca repetindo métodos não idempotentes). O rollout espera esse `valid` antes de parar a API velha.
+resolver 127.0.0.11 valid=5s ipv6=off;
+
 server {
     listen 80 default_server;
     server_name ${GS_DOMAIN};
     server_tokens off;
 
+    set $api http://api:8000;
+    # Logo depois do rollout, o cache do resolver ainda pode apontar para o IP de uma API que
+    # saiu da rede, e esse IP não recusa a conexão: ela fica pendurada. Na rede interna conectar
+    # leva menos de 1 ms, então 1 s basta para desistir e tentar a outra API, sem erro ao cliente.
+    proxy_connect_timeout 1s;
+
     # Teto padrão dos comandos JSON (docs/GoblinShiftPlan.md, 1.7).
     client_max_body_size 64k;
 
     location / {
-        proxy_pass http://api:8000;
+        proxy_pass $api;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
@@ -31,7 +43,7 @@ server {
     location ~ ^/api/v1/uploads/[^/]+/content$ {
         client_max_body_size 256m;
         proxy_request_buffering off;
-        proxy_pass http://api:8000;
+        proxy_pass $api;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
