@@ -55,6 +55,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# Aviso é erro: uma depreciação nova reprova a suíte em vez de passar despercebida.
+filterwarnings = ["error"]
 markers = ["integration: precisa de Docker (PostgreSQL real via Testcontainers)"]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).
