@@ -1,0 +1,21 @@
+# Livros com direitos autorais: nunca entram no repositório público.
+Livros/
+
+# Segredos e configuração local
+.secrets/
+.env
+*.img
+
+# Python e ferramentas
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,13 @@
+# Produção na VPS compartilhada (docs/GoblinShiftPlan.md, 3.8 e ADR 014).
+# O Nginx do GoblinShift entra na rede `edge`, onde o proxy de borda do host o encontra
+# pelo nome `goblinshift-web`. Nenhuma porta é publicada pelo projeto.
+services:
+  nginx:
+    networks:
+      internal: {}
+      edge:
+        aliases: [goblinshift-web]
+
+networks:
+  edge:
+    external: true

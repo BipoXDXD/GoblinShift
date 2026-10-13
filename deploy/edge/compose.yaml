@@ -1,0 +1,21 @@
+# Proxy de borda do host (docs/GoblinShiftPlan.md, ADR 014). Não pertence a nenhum projeto:
+# ouve nas portas 80/443 e encaminha por domínio para o ponto de entrada de cada projeto,
+# na rede Docker compartilhada `edge`. Instalado em /srv/edge por deploy/provision.sh.
+name: edge
+
+services:
+  proxy:
+    image: nginx:1.30.5
+    volumes:
+      - ./conf.d:/etc/nginx/conf.d:ro
+    ports:
+      - "80:80"
+    networks: [edge]
+    restart: unless-stopped
+
+networks:
+  edge:
+    name: edge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24

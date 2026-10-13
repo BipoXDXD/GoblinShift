@@ -1,0 +1,5 @@
+# Desenvolvimento local: carregado automaticamente por `docker compose` (sem -f).
+services:
+  nginx:
+    ports:
+      - "${GS_HTTP_PORT:-80}:80"

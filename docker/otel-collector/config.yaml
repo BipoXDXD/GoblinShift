@@ -1,0 +1,35 @@
+# Collector local: recebe OTLP da aplicação e repassa ao OpenObserve (docs/GoblinShiftPlan.md, 3.7).
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+
+exporters:
+  otlphttp/openobserve:
+    endpoint: http://openobserve:5080/api/default
+    headers:
+      Authorization: "Basic ${env:OPENOBSERVE_BASIC_AUTH}"
+      stream-name: default
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/openobserve]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/openobserve]
