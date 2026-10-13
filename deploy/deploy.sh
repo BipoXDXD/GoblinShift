@@ -19,10 +19,14 @@ commit="${1:?uso: deploy.sh <commit-sha> <image-tag>}"
 tag="${2:?uso: deploy.sh <commit-sha> <image-tag>}"
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "commit inválido" >&2; exit 64; }
 [[ "$tag" =~ ^sha-[0-9a-f]{12}$ ]] || { echo "tag inválida" >&2; exit 64; }
+# A imagem precisa ser a do próprio commit: impede combinar código de um commit com outro.
+[[ "$tag" == "sha-${commit:0:12}" ]] || { echo "tag não corresponde ao commit" >&2; exit 64; }
 
 ROOT=/srv/goblinshift
 cd "$ROOT/app"
-git fetch --quiet origin
+git fetch --quiet origin main
+# Só commits que já estão na main (passaram pela CI); nada de branches nem commits soltos.
+git merge-base --is-ancestor "$commit" origin/main || { echo "commit fora da main" >&2; exit 65; }
 git checkout --quiet --detach "$commit"
 
 export GS_IMAGE_TAG="$tag"

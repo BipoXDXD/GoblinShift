@@ -1,8 +1,14 @@
 # Nginx interno do GoblinShift. Em produção fica atrás do proxy de borda do host, que
 # termina o TLS (ADR 014); por isso o esquema original vem de X-Forwarded-Proto.
-map $http_x_forwarded_proto $forwarded_proto {
-    default $http_x_forwarded_proto;
-    ""      $scheme;
+# Só o proxy de borda (IP fixo na rede edge) pode informar o esquema original; de qualquer
+# outra origem, o cabeçalho é ignorado.
+map $remote_addr $from_edge {
+    172.31.0.2 1;
+    default    0;
+}
+map "$from_edge:$http_x_forwarded_proto" $forwarded_proto {
+    "~^1:(?<edge_proto>https?)$" $edge_proto;
+    default                      $scheme;
 }
 
 server {

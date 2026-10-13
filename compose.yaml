@@ -18,8 +18,9 @@ x-app: &app
     GS_DB_PASSWORD_FILE: /run/secrets/db_password
     OTEL_SERVICE_NAME: goblinshift-api
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-    # Só os proxies (Nginx interno e o de borda, na rede edge) podem definir X-Forwarded-*.
-    FORWARDED_ALLOW_IPS: 172.30.0.0/24,172.31.0.0/24
+    # Confia em X-Forwarded-* só do Nginx interno (rede própria) e do proxy de borda (IP
+    # fixo). Outros containers da rede compartilhada `edge` não são confiáveis.
+    FORWARDED_ALLOW_IPS: 172.30.0.0/24,172.31.0.2
   secrets: [db_password]
   networks: [internal]
 

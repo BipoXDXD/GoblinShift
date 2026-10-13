@@ -10,7 +10,11 @@ services:
       - ./conf.d:/etc/nginx/conf.d:ro
     ports:
       - "80:80"
-    networks: [edge]
+    networks:
+      edge:
+        # IP fixo: os projetos confiam nos cabeçalhos X-Forwarded-* só vindos daqui,
+        # não de qualquer container da rede compartilhada.
+        ipv4_address: 172.31.0.2
     restart: unless-stopped
 
 networks:
