@@ -114,11 +114,14 @@ def optional_session(request: Request, session: DbSession, now: Now) -> Principa
 OptionalSession = Annotated[Principal | None, Depends(optional_session)]
 
 
-def require_scope(scope: Scope) -> Callable[[Principal], Principal]:
-    """Dependência que autentica e exige `scope`; sem ele → 403 `INSUFFICIENT_SCOPE`."""
+def require_scope(scope: Scope) -> Callable[..., Principal]:
+    """Dependência que autentica e exige `scope`; sem ele → 403 `INSUFFICIENT_SCOPE`, auditado."""
 
-    def check_scope(principal: CurrentPrincipal) -> Principal:
+    def check_scope(
+        principal: CurrentPrincipal, request: Request, session: DbSession, now: Now
+    ) -> Principal:
         if scope not in principal.scopes:
+            _audit_failure(session, AuditEventType.ACCESS_DENIED, principal, request, now)
             raise ApiProblem(
                 ProblemCode.INSUFFICIENT_SCOPE, f"A chave não tem o escopo {scope.value}."
             )
