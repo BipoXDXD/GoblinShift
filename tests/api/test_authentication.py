@@ -184,6 +184,7 @@ def test_segredo_da_chave_nunca_aparece_nos_logs(
     assert revoked.public_id in caplog.text
     captured = caplog.text + "".join(repr(record.args) for record in caplog.records)
     for token in (valid.token, revoked.token, canary):
-        secret = token.rsplit("_", 1)[1]
+        # Tamanho fixo: o base64url do segredo também pode conter "_".
+        secret = token[-43:]
         assert secret not in captured
         assert all(secret not in response.text for response in responses)
