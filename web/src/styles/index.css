@@ -1,0 +1,4 @@
+/* Entrada dos estilos: tokens (com o Tailwind), fontes e base, nesta ordem. */
+@import "./tokens.css";
+@import "./fonts.css";
+@import "./base.css";
