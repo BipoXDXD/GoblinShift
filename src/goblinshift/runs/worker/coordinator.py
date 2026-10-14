@@ -7,7 +7,8 @@ o coordenador recebe `LostFencing`, registra e para sem escrever mais nada.
 
 Passos:
 1. `prepare`: o Runner cria a área vazia; as entradas do storage são copiadas para `inputs/`,
-   conferindo SHA-256 e tamanho, e `job.json` recebe os parâmetros fixados na aceitação.
+   conferindo SHA-256 e tamanho, `job.json` recebe os parâmetros fixados na aceitação e
+   `context.json`, a imagem do executor fixada na Run (para o manifesto, ADR 020).
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
    `processing`.
@@ -200,6 +201,11 @@ class Coordinator:
         }
         with _create_for_executor(work_dir / "job.json") as target:
             target.write(json.dumps(job, ensure_ascii=False).encode("utf-8"))
+        # Só o manifesto usa a imagem; num arquivo à parte, o executor anterior à fatia 5, que
+        # recusa chaves desconhecidas no job.json, continua aceitando o job (ADR 020).
+        context = {"executor_image": claimed.executor_image}
+        with _create_for_executor(work_dir / "context.json") as target:
+            target.write(json.dumps(context, ensure_ascii=False).encode("utf-8"))
 
     def _copy_input(
         self, content: HeldContent, position: int, inputs_dir: Path
