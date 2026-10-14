@@ -128,7 +128,8 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 def _send(client: TestClient, method: str, path: str, token: str | None = None) -> httpx.Response:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return client.request(method, _concrete(path), headers=headers)
+    # O redirect é a própria resposta (o login responde 302/303); segui-lo testaria outra rota.
+    return client.request(method, _concrete(path), headers=headers, follow_redirects=False)
 
 
 @pytest.mark.integration
