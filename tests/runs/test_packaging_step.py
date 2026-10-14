@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import func, select
@@ -24,7 +25,9 @@ from goblinshift.files.storage import FileStorage, ObjectAlreadyExistsError
 from goblinshift.files.tables import stored_object
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.tables import attempt, run_input, run_output
-from goblinshift.runs.worker import candidate_writer
+from goblinshift.runs.worker import candidate_writer, collection, package_check
+from goblinshift.runs.worker import coordinator as coordinator_module
+from goblinshift.runs.worker.collection import Collected
 from tests.runs.worker_support import (
     LEASE,
     VALID,
@@ -221,3 +224,91 @@ def test_pacote_adulterado_pelo_executor_vira_retentativa_sem_publicar_nada(
             ).scalar_one()
             is None
         )
+
+
+def test_lease_segue_renovado_durante_a_coleta(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A coleta lê tudo de out/ (o ZIP chega a 512 MiB): cada bloco lido aqui demora.
+    run_id = queue_run(factory, storage, create_user(factory), [("a.csv", NEEDS_WRITE)])
+    claimed = claim(factory, storage)
+    pause = LEASE / 8
+    margins: list[float] = []
+    monkeypatch.setattr(collection, "READ_CHUNK_BYTES", 4)
+    monkeypatch.setattr(package_check, "READ_CHUNK_BYTES", 4)
+
+    def slow_collect(*args: Any, **kwargs: Any) -> Collected:
+        heartbeat = kwargs.pop("heartbeat", lambda: None)
+
+        def slow_heartbeat() -> None:
+            heartbeat()
+            if len(margins) < 16:
+                time.sleep(pause.total_seconds())
+                margins.append(lease_margin(factory, claimed.attempt_id))
+
+        return collection.collect_outputs(*args, heartbeat=slow_heartbeat, **kwargs)
+
+    monkeypatch.setattr(f"{coordinator_module.__name__}.collect_outputs", slow_collect)
+
+    coordinator(factory, storage, local_runner(work_root)).run(claimed)
+
+    assert run_row(factory, run_id)["status"] == "succeeded"
+    assert len(margins) == 16
+    assert min(margins) > 0
+
+
+def lease_margin(factory: sessionmaker[Session], attempt_id: uuid.UUID) -> float:
+    with factory() as session:
+        margin: timedelta = session.execute(
+            select(attempt.c.lease_expires_at - func.now()).where(attempt.c.id == attempt_id)
+        ).scalar_one()
+    return margin.total_seconds()
+
+
+# --- progress.jsonl é escrito pelo sandbox: lido sem seguir link e com teto ---------------------
+
+
+def _progress_after_renew(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    plant: Callable[[Path], None],
+) -> object:
+    run_id = queue_run(factory, storage, create_user(factory), [("a.csv", VALID)])
+    claimed = claim(factory, storage)
+    runner = local_runner(work_root)
+    worker = coordinator(factory, storage, runner)
+    worker.prepare(claimed)
+    plant(runner.work_dir(claimed.attempt_id) / "progress.jsonl")
+
+    worker.renew_lease(claimed)
+
+    return run_row(factory, run_id)["summary"]
+
+
+def test_progresso_que_e_symlink_nao_e_seguido(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "fora.jsonl"
+    outside.write_bytes(b'{"position": 0}\n' * 3)
+
+    summary = _progress_after_renew(
+        factory, storage, work_root, lambda progress: progress.symlink_to(outside)
+    )
+
+    assert summary == {"progress": {"processed": 0, "total": 1}}
+
+
+def test_progresso_nunca_passa_do_total_de_entradas(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    summary = _progress_after_renew(factory, storage, work_root, _many_lines)
+
+    assert summary == {"progress": {"processed": 1, "total": 1}}
+
+
+def _many_lines(progress: Path) -> None:
+    progress.write_bytes(b"\n" * 3_000_000)
