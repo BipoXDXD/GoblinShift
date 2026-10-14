@@ -22,6 +22,7 @@ Requisitos: [uv](https://docs.astral.sh/uv/) e Docker com Compose.
 
 ```bash
 uv sync                       # ambiente e dependências
+./scripts/install-hooks.sh    # pre-commit que recusa commit com segredo (gitleaks)
 ./scripts/dev-secrets.sh      # segredos locais em .secrets/ e .env (não versionados)
 docker compose up --build     # postgres, migrate, api, nginx, otel-collector, openobserve
 curl http://localhost/readyz
@@ -38,7 +39,7 @@ uv run lint-imports           # contratos de arquitetura (docs/GoblinShiftPlan.m
 uv run pytest                 # inclui PostgreSQL real via Testcontainers
 ```
 
-Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. A CI roda o gitleaks no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
+Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
 ## CSV Janitor pela linha de comando
 
