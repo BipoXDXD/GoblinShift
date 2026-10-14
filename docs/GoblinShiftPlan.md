@@ -118,7 +118,7 @@ Como isso é feito com o Pillow está em [2.3](#s2-3).
 | Duplicatas       | `deduplicate_by`: uma ou mais colunas; lista vazia desativa. Preservar a primeira ocorrência.                                                                                                                                                                                           |
 | Colunas finais   | `output_columns`: seleção e ordem explícitas; ausência preserva todas na ordem original. Lista vazia é inválida.                                                                                                                                                                        |
 
-Os limites de campo e registro são contados em bytes UTF-8, na entrada e na saída.
+Os limites de campo e registro são contados em bytes UTF-8, na entrada e na saída. Exceder qualquer limite de tabela de 1.7 (tamanho, registros, colunas, registro ou campo) rejeita a tabela com `FIELD_LIMIT_EXCEEDED`, e o motivo diz qual limite foi; um arquivo que não é UTF-8 é rejeitado com `UNSUPPORTED_FORMAT`. Os filtros mantêm os registros que satisfazem todos os predicados. `trim_columns` remove das pontas qualquer espaço Unicode (`str.strip`).
 
 A ordem é fixa:
 
@@ -144,7 +144,7 @@ Como isso é feito com o módulo `csv` está em [2.3](#s2-3).
 
 A contagem fecha como `registros lidos = filtrados + duplicados removidos + sobreviventes`, sem contar cabeçalho ou linhas vazias ignoradas. A contagem de registros lógicos não é confundida com linhas físicas.
 
-**Fórmulas de planilha:** preservar o texto e avisar quando houver células potencialmente interpretáveis como fórmulas, isto é, que começam com `=`, `+`, `-`, `@`, tab, CR ou LF, incluindo as formas de largura total `＝`, `＋`, `－` e `＠`. O aviso informa a contagem por coluna e deixa claro que `-` gera muitos falsos positivos (números negativos). O parâmetro opcional `formula_guard` (`none`, padrão, ou `tab_prefix`) aplica, a pedido explícito do usuário, o prefixo indicado pela OWASP; sem ele, o texto não é alterado. Não executar conteúdo no preview nem declarar o CSV seguro para qualquer planilha. Quoting CSV resolve estrutura, não neutralização universal de fórmulas. [D11](GoblinShiftReferencias.md#d-3), [D19](GoblinShiftReferencias.md#d-4).
+**Fórmulas de planilha:** preservar o texto e avisar quando houver células potencialmente interpretáveis como fórmulas, isto é, que começam com `=`, `+`, `-`, `@`, tab, CR ou LF, incluindo as formas de largura total `＝`, `＋`, `－` e `＠`. O aviso informa a contagem por coluna e deixa claro que `-` gera muitos falsos positivos (números negativos). O parâmetro opcional `formula_guard` (`none`, padrão, ou `tab_prefix`) aplica, a pedido explícito do usuário, o prefixo indicado pela OWASP; sem ele, o texto não é alterado. Não executar conteúdo no preview nem declarar o CSV seguro para qualquer planilha. Quoting CSV resolve estrutura, não neutralização universal de fórmulas. O `tab_prefix` vale para as mesmas células do aviso e põe o tab dentro de aspas, como a OWASP recomenda contra o Excel; o cabeçalho não entra no aviso nem recebe prefixo. [D11](GoblinShiftReferencias.md#d-3), [D19](GoblinShiftReferencias.md#d-4).
 
 <a id="s1-4"></a>
 ### 1.4. Downloads Detox — organizar e empacotar arquivos
@@ -522,7 +522,8 @@ A seção 1 diz o que o produto faz; esta seção registra como as bibliotecas e
 - Metadados: o padrão do `save` varia por formato (sem `icc_profile`, o JPEG sai sem perfil; outros metadados podem ser copiados), então ele sempre recebe `exif`, `icc_profile` e XMP de forma explícita.
 
 **Módulo `csv`** ([1.3](#s1-3), [D11](GoblinShiftReferencias.md#d-3)):
-- Abrir com `encoding="utf-8-sig"` e `newline=""`; reader com `strict=True`; writer com `lineterminator="\r\n"` e `QUOTE_MINIMAL`.
+- Abrir com `encoding="utf-8-sig"` e `newline=""`; reader com `strict=True`.
+- A saída não usa o `csv.writer`: o `QUOTE_MINIMAL` dele não põe aspas num campo só por começar com tab, e o `tab_prefix` precisa do tab dentro de aspas. Um serializador próprio de poucas linhas segue a RFC 4180 (`\r\n`, aspas só quando necessárias), e um teste de propriedade confere a ida e volta com o `csv.reader`.
 - Mesmo em modo estrito, o módulo aceita `ab"c` como literal; é por isso que a spec declara esse comportamento em vez de prometer rejeitá-lo.
 - O reader não confere o número de campos de cada registro; o código faz isso.
 - `field_size_limit` conta caracteres, não bytes, e é estado global do módulo: é ajustado uma vez no início do executor, como proteção grosseira. Os limites em bytes são medidos por um gerador que envolve o iterador de linhas e conta os bytes UTF-8 de cada registro.
