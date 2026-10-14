@@ -21,6 +21,12 @@ if ! grep -q '^GS_CURSOR_SECRET=' "$ROOT/secrets/app.env"; then
 fi
 compose=(docker compose --env-file "$ROOT/secrets/app.env" -f compose.yaml -f compose.prod.yaml)
 
+# Imagem do executor do mesmo commit, sempre pelo digest: entra na allowlist do executor-ctl
+# antes de a API nova aceitar execuções com ela, e vai para o Compose antes do primeiro comando
+# dele, que já interpola a variável. Sem digest resolvido o deploy para aqui.
+GS_EXECUTOR_IMAGE=$(deploy/executor-image.sh "$tag" "$ROOT/executor/images.json")
+export GS_EXECUTOR_IMAGE
+
 "${compose[@]}" pull --quiet
 # Migração (expand) antes da API nova; a velha continua atendendo com o schema compatível.
 "${compose[@]}" run --rm --no-TTY migrate
