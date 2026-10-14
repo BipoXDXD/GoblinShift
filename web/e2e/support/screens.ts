@@ -4,6 +4,7 @@
 import type { Page } from "@playwright/test";
 
 import { CSV_FILES } from "../fixtures/files";
+import { AcessoPage } from "../pages/AcessoPage";
 import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { HistoricoPage } from "../pages/HistoricoPage";
@@ -156,6 +157,90 @@ export const SCREENS: readonly Screen[] = [
     },
     "Falhou",
   ),
+  {
+    name: "Bancada sem sessão (convite para entrar)",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      api.account.apiKeyValid = false;
+      await page.goto("/bancada/csv-janitor");
+      await expect(page.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    },
+  },
+  {
+    name: "Entrar",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/entrar");
+      await expect(page.getByRole("link", { name: "Entrar com GitHub" })).toBeVisible();
+    },
+  },
+  {
+    name: "Login recusado",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/?login_error=failed");
+      await expect(page.getByRole("alert")).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "Acesso com sessão e chaves",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      api.account.seedKey();
+      api.account.seedKey({
+        revoked_at: "2026-10-05T12:00:00Z",
+        last_used_at: "2026-10-04T12:00:00Z",
+      });
+      api.account.seedKey({ expires_at: "2026-10-02T12:00:00Z" });
+      await api.signIn();
+      await new AcessoPage(page).open();
+      await expect(new AcessoPage(page).keyItems()).toHaveCount(3);
+    },
+  },
+  {
+    name: "Acesso com a chave recém-criada",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await api.signIn();
+      const acesso = new AcessoPage(page);
+      await acesso.open();
+      await expect(await acesso.createKey(["Ler arquivos (files:read)"])).toBeVisible();
+    },
+  },
+  {
+    name: "Acesso: confirmar a exclusão da conta",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await api.signIn();
+      const acesso = new AcessoPage(page);
+      await acesso.open();
+      await expect(await acesso.askDeleteAccount()).toBeVisible();
+    },
+  },
+  {
+    name: "Aceite dos termos",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      await api.signIn({ termsAccepted: false });
+      await page.goto("/historico");
+      await expect(page.getByRole("button", { name: "Aceitar e continuar" })).toBeVisible();
+    },
+  },
+  {
+    name: "Termos de Uso",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/termos");
+      await expect(page.getByRole("complementary", { name: "Rascunho" })).toBeVisible();
+    },
+  },
+  {
+    name: "Aviso de Privacidade",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/privacidade");
+      await expect(page.getByRole("complementary", { name: "Rascunho" })).toBeVisible();
+    },
+  },
+  {
+    name: "Exclusão pedida",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/conta-excluida");
+      await expect(page.getByRole("heading", { level: 1, name: "Exclusão pedida" })).toBeVisible();
+    },
+  },
   {
     name: "Página não encontrada",
     open: async (page: Page): Promise<void> => {

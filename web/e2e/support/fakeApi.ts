@@ -10,6 +10,13 @@ import { z } from "zod";
 import type { components } from "../../src/api/schema";
 import { CATALOG_BODY } from "../../src/test/catalogBody";
 import { writeArtifact } from "./artifacts";
+import { E2E } from "./env";
+import {
+  FakeAccount,
+  fulfillProblem as fulfillRefusal,
+  isRefusal,
+  type SessionOptions,
+} from "./fakeAccount";
 
 type Schemas = components["schemas"];
 type Run = Schemas["RunResponse"];
@@ -54,6 +61,13 @@ export interface FakeApi {
   uploadName(uploadId: string): string | undefined;
   /** Execução parada num estado, para as telas da matriz; devolve o id. */
   seedRun(overrides: RunOverrides): string;
+  /** Sessão, termos e chaves da conta (fakeAccount.ts). */
+  readonly account: FakeAccount;
+  /**
+   * Entra com sessão no contexto, como depois do callback do login: com a sessão, a chave do
+   * processo de teste deixa de ir (support/apiKey.ts).
+   */
+  signIn(options?: SessionOptions): Promise<void>;
 }
 
 const API_PREFIX = "/api/v1";
@@ -78,9 +92,10 @@ interface StoredRun {
 }
 
 /**
- * Liga a API falsa em todas as páginas do contexto. Pedido sem `Authorization: Bearer <apiKey>`
- * recebe 401 AUTHENTICATION_REQUIRED, como na API real: é assim que a suíte prova que a chave só
- * chega pelo processo de teste (support/apiKey.ts) e nunca pelo bundle.
+ * Liga a API falsa em todas as páginas do contexto. Pedido sem sessão nem
+ * `Authorization: Bearer <apiKey>` recebe 401 AUTHENTICATION_REQUIRED, como na API real: é assim
+ * que a suíte prova que a chave só chega pelo processo de teste (support/apiKey.ts) e nunca pelo
+ * bundle. A sessão, o CSRF e o aceite dos termos seguem as regras da API (fakeAccount.ts).
  *
  * Os artefatos vão para `artifactsDir`, que o servidor local entrega (support/artifacts.ts).
  */
@@ -90,24 +105,47 @@ export async function installFakeApi(
   artifactsDir: string,
 ): Promise<FakeApi> {
   const state = new FakeState(artifactsDir);
+  const account = new FakeAccount(context, apiKey);
   await context.route(`**${API_PREFIX}/**`, async (route) => {
     const request = route.request();
-    const authorization = await request.headerValue("authorization");
-    if (authorization !== `Bearer ${apiKey}`) {
-      await fulfillProblem(route, "AUTHENTICATION_REQUIRED", {
-        status: 401,
-        headers: { "WWW-Authenticate": "Bearer" },
-      });
+    const principal = await account.identify(request);
+    if (isRefusal(principal)) {
+      await fulfillProblem(route, principal.code, principal);
       return;
     }
-    await state.handle(route, request);
+    const template = routeTemplate(request);
+    const termsRefusal = account.termsRefusal(principal, template);
+    if (termsRefusal !== null) {
+      await fulfillProblem(route, termsRefusal.code, termsRefusal);
+      return;
+    }
+    if (!(await account.handle(route, principal, template))) {
+      await state.handle(route, request);
+    }
+  });
+  await context.route("**/auth/**", async (route) => {
+    if (!(await account.handleAuth(route))) {
+      const request = route.request();
+      state.unhandled.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    }
   });
   return {
     createdRuns: state.createdRuns,
     unhandled: state.unhandled,
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
     seedRun: (overrides) => state.seedRun(overrides),
+    account,
+    signIn: (options) => account.signIn(new URL(E2E.baseUrl).origin, options),
   };
+}
+
+/** "MÉTODO /caminho" sem o /api/v1, com o id das chaves no lugar do valor. */
+function routeTemplate(request: Request): string {
+  const path = new URL(request.url()).pathname
+    .slice(API_PREFIX.length)
+    .replace(/^\/api-keys\/[^/]+$/, "/api-keys/{id}");
+  return `${request.method()} ${path}`;
 }
 
 class FakeState {
@@ -419,19 +457,5 @@ async function fulfillProblem(
   code: Schemas["ProblemCode"],
   { status, headers = {} }: Reply,
 ): Promise<void> {
-  const problem: Schemas["ProblemDetails"] = {
-    type: `https://goblinshift.dev/problems/${code.toLowerCase().replaceAll("_", "-")}`,
-    title: code,
-    status,
-    detail: `API falsa do E2E: ${code}`,
-    instance: new URL(route.request().url()).pathname,
-    code,
-    request_id: randomUUID(),
-  };
-  await route.fulfill({
-    status,
-    contentType: "application/problem+json",
-    headers,
-    body: JSON.stringify(problem),
-  });
+  await fulfillRefusal(route, { status, code, headers });
 }

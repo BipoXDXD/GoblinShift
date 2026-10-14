@@ -62,6 +62,7 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Pular para o conteúdo",
     "GoblinShift, Oficina",
     "Histórico",
+    "Acesso",
     "Tema Sistema",
     "Abrir a Bancada da CSV Janitor",
     "Abrir a Bancada da Image Forge",
