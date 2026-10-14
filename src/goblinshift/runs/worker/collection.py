@@ -21,7 +21,6 @@ Duas classes de recusa:
   como infraestrutura, com retentativa.
 """
 
-import json
 import os
 import stat
 import unicodedata
@@ -44,6 +43,7 @@ from goblinshift.processing.packaging import (
 )
 from goblinshift.processing.recipe import ItemRejectionCode, OutputGroup
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
+from goblinshift.runs.worker.strict_json import parse_strict_json
 
 _PACKAGE_LIMITS = PackageLimits()
 _ITEM_OK = "ok"
@@ -200,7 +200,7 @@ def _package_files(
 def parse_report(data: bytes, input_count: int) -> ParsedReport:
     """Confere o `report.json` contra o schema 1 documentado no pacote do executor."""
     try:
-        raw = json.loads(data, object_pairs_hook=_reject_duplicates, parse_constant=_reject)
+        raw = parse_strict_json(data)
     except ValueError as error:
         raise CollectionError(f"relatório não é JSON aceito: {error}") from None
     document = _mapping(raw, "relatório")
@@ -376,14 +376,3 @@ def _text(raw: object, where: str) -> str:
     if not isinstance(raw, str) or not raw:
         raise CollectionError(f"{where} deve ser texto não vazio")
     return raw
-
-
-def _reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result = dict(pairs)
-    if len(result) != len(pairs):
-        raise ValueError("chaves repetidas")
-    return result
-
-
-def _reject(name: str) -> object:
-    raise ValueError(f"{name} não é um valor JSON aceito")
