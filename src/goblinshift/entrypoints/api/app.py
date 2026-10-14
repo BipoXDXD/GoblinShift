@@ -9,7 +9,15 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from opentelemetry.sdk.trace.export import SpanExporter
 
-from goblinshift.entrypoints.api import artifacts, health, me, runs, runs_cancel, uploads
+from goblinshift.entrypoints.api import (
+    artifacts,
+    catalog,
+    health,
+    me,
+    runs,
+    runs_cancel,
+    uploads,
+)
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.entrypoints.api.wide_event import WideEventMiddleware, count_queries
@@ -63,6 +71,7 @@ def create_app(
     count_queries(engine)
     app.include_router(health.router)
     api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
+    api.include_router(catalog.router)
     api.include_router(me.router)
     api.include_router(uploads.router)
     api.include_router(artifacts.router)
