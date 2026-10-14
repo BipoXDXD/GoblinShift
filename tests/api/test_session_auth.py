@@ -116,11 +116,10 @@ def test_sessao_autentica_com_os_escopos_da_conta(
     response = client.get(ME, headers=_cookie_only(issued))
 
     assert response.status_code == 200
-    assert response.json() == {
-        "id": str(user_id),
-        "display_name": "Conta de teste",
-        "scopes": ["files:read", "files:write", "runs:read", "runs:write"],
-    }
+    body = response.json()
+    # Só o que a autenticação decide; limites e consumo são de `test_me_usage.py`.
+    assert (body["id"], body["via"]) == (str(user_id), "session")
+    assert body["scopes"] == ["files:read", "files:write", "runs:read", "runs:write"]
 
 
 @pytest.mark.integration
