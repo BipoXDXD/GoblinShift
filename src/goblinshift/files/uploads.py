@@ -157,7 +157,9 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
         row,
         size_bytes=row.size_bytes,
         sha256=row.sha256,
-        availability=Availability.of(deleted=row.deleted_at is not None, expired=row.expired),
+        availability=Availability.of(
+            deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+        ),
     )
 
 

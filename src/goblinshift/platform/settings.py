@@ -47,6 +47,24 @@ class Settings(BaseSettings):
     # default serve ao desenvolvimento local e é ignorado pelo git.
     storage_root: Path = Path(".storage")
 
+    # Execução (3.4 e 3.6). Só o Runner local em subprocesso existe até a fatia 4; o
+    # `executor_ctl` chega com o sandbox real.
+    runner: Literal["local", "executor_ctl"] = "local"
+    # Trava provisória até a fatia 4: em produção o worker só sobe com o Runner local se esta
+    # confirmação explícita existir, porque o subprocesso local não tem o isolamento do gVisor.
+    allow_local_runner: bool = False
+    # Raiz das áreas de trabalho das tentativas, uma por `gs-exec-{attempt_id}`.
+    work_root: Path = Path(".work")
+    # Lease da tentativa; o coordenador o renova a cada terço do prazo (3.4).
+    worker_lease_s: float = 60.0
+    # Garantia contra NOTIFY perdido: o worker consulta a fila pelo menos nesse intervalo.
+    worker_poll_interval_s: float = 2.0
+    # Teto de cada tentativa (1.7, "Duração").
+    attempt_timeout_s: float = 600.0
+    maintenance_interval_s: float = 30.0
+    # Lotes da manutenção toleram consultas mais longas que a API (3.2).
+    maintenance_statement_timeout_ms: int = 30_000
+
     # Chave HMAC dos cursores da listagem (1.6). Trocá-la invalida os cursores emitidos, o que
     # só custa ao cliente recomeçar a paginação.
     cursor_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)

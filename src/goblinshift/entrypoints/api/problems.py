@@ -41,9 +41,9 @@ class ProblemCode(StrEnum):
     """Códigos HTTP do catálogo de 1.6, mais os genéricos que o catálogo não nomeia.
 
     Os genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,
-    `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`,
-    `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`) cobrem os status da tabela de erros de 1.6
-    que não tinham código próprio. Os códigos de item e de
+    `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`,
+    `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os
+    status da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de
     execução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com
     quem os produz.
     """
@@ -54,6 +54,7 @@ class ProblemCode(StrEnum):
     AUTHENTICATION_REQUIRED = "AUTHENTICATION_REQUIRED"
     REAUTH_REQUIRED = "REAUTH_REQUIRED"
     INSUFFICIENT_SCOPE = "INSUFFICIENT_SCOPE"
+    FORBIDDEN = "FORBIDDEN"
     CSRF_FAILED = "CSRF_FAILED"
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
@@ -72,6 +73,7 @@ class ProblemCode(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     QUEUE_FULL = "QUEUE_FULL"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
     @property
     def type_uri(self) -> str:
@@ -91,6 +93,7 @@ PROBLEMS: Mapping[ProblemCode, ProblemSpec] = {
     ProblemCode.AUTHENTICATION_REQUIRED: ProblemSpec(401, "Autenticação necessária"),
     ProblemCode.REAUTH_REQUIRED: ProblemSpec(401, "Autenticação recente necessária"),
     ProblemCode.INSUFFICIENT_SCOPE: ProblemSpec(403, "Escopo insuficiente"),
+    ProblemCode.FORBIDDEN: ProblemSpec(403, "Acesso negado"),
     ProblemCode.CSRF_FAILED: ProblemSpec(403, "Verificação de CSRF recusada"),
     ProblemCode.NOT_FOUND: ProblemSpec(404, "Recurso não encontrado"),
     ProblemCode.METHOD_NOT_ALLOWED: ProblemSpec(405, "Método não permitido"),
@@ -109,16 +112,27 @@ PROBLEMS: Mapping[ProblemCode, ProblemSpec] = {
     ProblemCode.RATE_LIMITED: ProblemSpec(429, "Muitas requisições"),
     ProblemCode.INTERNAL_ERROR: ProblemSpec(500, "Erro interno"),
     ProblemCode.QUEUE_FULL: ProblemSpec(503, "Fila cheia"),
+    ProblemCode.SERVICE_UNAVAILABLE: ProblemSpec(503, "Serviço indisponível"),
 }
 
-# Status que o roteador e o Starlette produzem sozinhos, sem passar por ApiProblem.
+# Status que o roteador, o Starlette e o FastAPI produzem sozinhos, sem passar por ApiProblem.
+# Cada um aponta para o código genérico do mesmo status no catálogo; um status fora da tabela
+# cai no genérico da classe (`code_for_http_status`).
 _HTTP_STATUS_CODES: Mapping[int, ProblemCode] = {
     400: ProblemCode.BAD_REQUEST,
     401: ProblemCode.AUTHENTICATION_REQUIRED,
+    403: ProblemCode.FORBIDDEN,
     404: ProblemCode.NOT_FOUND,
     405: ProblemCode.METHOD_NOT_ALLOWED,
+    408: ProblemCode.REQUEST_TIMEOUT,
+    409: ProblemCode.STATE_CONFLICT,
+    410: ProblemCode.GONE,
     413: ProblemCode.BODY_TOO_LARGE,
     415: ProblemCode.UNSUPPORTED_MEDIA_TYPE,
+    422: ProblemCode.VALIDATION_FAILED,
+    429: ProblemCode.RATE_LIMITED,
+    500: ProblemCode.INTERNAL_ERROR,
+    503: ProblemCode.SERVICE_UNAVAILABLE,
 }
 _HTTP_DETAILS: Mapping[ProblemCode, str] = {
     ProblemCode.NOT_FOUND: "A URL não corresponde a nenhum recurso.",
@@ -196,7 +210,6 @@ def problem_response(
     detail: str,
     instance: str,
     request_id: str,
-    status: int | None = None,
     headers: Mapping[str, str] | None = None,
     errors: Sequence[Mapping[str, str]] | None = None,
 ) -> JSONResponse:
@@ -204,7 +217,7 @@ def problem_response(
     body: dict[str, Any] = {
         "type": code.type_uri,
         "title": spec.title,
-        "status": status or spec.status,
+        "status": spec.status,
         "detail": detail,
         "instance": instance,
         "code": code.value,
@@ -214,7 +227,7 @@ def problem_response(
         body["errors"] = list(errors)
     return JSONResponse(
         body,
-        status_code=status or spec.status,
+        status_code=spec.status,
         headers={**(headers or {}), REQUEST_ID_HEADER: request_id},
         media_type=PROBLEM_MEDIA_TYPE,
     )
@@ -291,11 +304,7 @@ async def _handle_validation_error(request: Request, exc: RequestValidationError
 
 
 async def _handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    code = _HTTP_STATUS_CODES.get(exc.status_code) or (
-        ProblemCode.INTERNAL_ERROR
-        if exc.status_code >= _SERVER_ERROR_MIN
-        else ProblemCode.BAD_REQUEST
-    )
+    code = code_for_http_status(exc.status_code)
     # O detalhe do Starlette não vai para o cliente: só textos fixos, escritos aqui.
     detail = _HTTP_DETAILS.get(code, PROBLEMS[code].title)
     headers = {
@@ -308,8 +317,20 @@ async def _handle_http_exception(request: Request, exc: StarletteHTTPException) 
         detail=detail,
         instance=request.url.path,
         request_id=request_id_of(request),
-        status=exc.status_code,
         headers=headers,
+    )
+
+
+def code_for_http_status(status: int) -> ProblemCode:
+    """Código do catálogo para o status de uma `HTTPException` do framework.
+
+    A resposta sai sempre com o status do código (1.6), nunca com o original: um status sem
+    código próprio vira `BAD_REQUEST` (400) ou `INTERNAL_ERROR` (500). O framework não os emite;
+    só chegariam aqui por um `raise HTTPException` avulso, e manter o par código/status do
+    catálogo vale mais que ecoar um status fora dele.
+    """
+    return _HTTP_STATUS_CODES.get(status) or (
+        ProblemCode.INTERNAL_ERROR if status >= _SERVER_ERROR_MIN else ProblemCode.BAD_REQUEST
     )
 
 

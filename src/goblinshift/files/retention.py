@@ -73,7 +73,8 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
 def expire_unused_uploads(session: Session) -> int:
     """Exclui uploads prontos vencidos sem uso aberto (1.7: "24 horas").
 
-    Upload em uso por uma execução segue válido; vence no primeiro ciclo depois do `release`.
+    Upload em uso por uma execução segue válido; o `release` da execução o estende para 48 h
+    depois do término (`objects.release`), e só então volta a valer o prazo.
     A linha permanece com `deleted_at`, porque o histórico das execuções a referencia.
     """
     open_use = exists().where(

@@ -28,3 +28,8 @@ def factory(engine: Engine) -> sessionmaker[Session]:
 @pytest.fixture
 def storage(tmp_path: Path) -> FileStorage:
     return FileStorage(tmp_path / "storage")
+
+
+@pytest.fixture
+def work_root(tmp_path: Path) -> Path:
+    return tmp_path / "work"

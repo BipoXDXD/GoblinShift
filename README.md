@@ -2,7 +2,7 @@
 
 API de processamento de arquivos por receitas — imagens, tabelas CSV e lotes de downloads — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
 
-> Em construção. Fatias 0 (fundação e deploy), 1 (protótipo do sandbox) e 2 (CSV Janitor como biblioteca pura) concluídas; próxima: **3 — fluxo durável de ponta a ponta**. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
+> Em construção. Fatias 0 (fundação e deploy), 1 (protótipo do sandbox) e 2 (CSV Janitor como biblioteca pura) concluídas; **3 — fluxo durável de ponta a ponta** em revisão. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
 
 ## Documentos
 
@@ -24,7 +24,7 @@ Requisitos: [uv](https://docs.astral.sh/uv/) e Docker com Compose.
 uv sync                       # ambiente e dependências
 ./scripts/install-hooks.sh    # pre-commit que recusa commit com segredo (gitleaks)
 ./scripts/dev-secrets.sh      # segredos locais em .secrets/ e .env (não versionados)
-docker compose up --build     # postgres, migrate, api, nginx, otel-collector, openobserve
+docker compose up --build     # postgres, migrate, api, worker, maintenance, nginx, otel-collector, openobserve
 curl http://localhost/readyz
 ```
 
@@ -64,6 +64,8 @@ uv run gs-admin revoke-key --key <public_id>
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
+Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …`.
+
 A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
 
 ## Deploy sem queda
@@ -85,14 +87,28 @@ sudo python3 -B deploy/acceptance/run.py  # sai com 0 só se todos passarem; -B:
 
 O `executor-ctl` em `deploy/acceptance/` é o protótipo descartável da fatia 1; a fatia 4 o substitui pelo serviço do host.
 
+## Execução de ponta a ponta
+
+Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, o script faz upload, execução idempotente, acompanhamento, resultados e download do CSV Janitor só com `curl`, e confere a saída byte a byte:
+
+```bash
+GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost
+```
+
+Até a fatia 4, o worker roda a receita num subprocesso do próprio container, sem gVisor ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md)); em produção isso exige `GS_ALLOW_LOCAL_RUNNER=true`, posto pelo `compose.prod.yaml`.
+
 ## Estrutura
 
 ```text
 src/goblinshift/
-  entrypoints/api/   FastAPI: /livez, /readyz e, a partir da fatia 3, /api/v1
+  entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin e gs-csv-janitor
   platform/          configuração, banco, telemetria e compatibilidade de schema
-  processing/        receitas; csv_janitor/ é o CSV Janitor, biblioteca pura
-  runs/ files/ catalog/ presets/ identity/   módulos de domínio (vazios até as próximas fatias)
+  processing/        receitas e o executor; csv_janitor/ é o CSV Janitor, biblioteca pura
+  runs/              ciclo de vida da execução: aceitação, fila, fencing, worker, manutenção
+  files/             storage, uploads, artefatos, usos, transferências e retenção
+  catalog/           receitas e versões publicadas, schemas e defaults
+  identity/          contas e chaves de API
+  presets/           presets (próximas fatias)
 migrations/          Alembic (expand/contract)
 docker/              imagem da aplicação, Nginx e OpenTelemetry Collector
 deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI e teste de aceitação do ambiente
