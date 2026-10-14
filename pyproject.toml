@@ -67,7 +67,10 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 # Aviso é erro: uma depreciação nova reprova a suíte em vez de passar despercebida.
 filterwarnings = ["error"]
-markers = ["integration: precisa de Docker (PostgreSQL real via Testcontainers)"]
+markers = [
+    "integration: precisa de Docker (PostgreSQL real via Testcontainers)",
+    "executor_image: constrói e roda a imagem do executor (precisa de Docker; runtime em GS_TEST_RUNTIME)",
+]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).
 [tool.importlinter]
