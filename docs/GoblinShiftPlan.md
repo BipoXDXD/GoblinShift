@@ -398,10 +398,12 @@ Reservar capacidade com atualização atômica no banco. Considerar arquivos rec
 | `AuditEvent`                                   | 90 dias                                           | Linha removida                                    |
 | Containers e área de trabalho do executor      | Até a coleta ser persistida                       | Removidos pelo `executor-ctl`                     |
 | Telemetria (eventos amplos e traces)           | 30 dias                                           | Expiração no backend de telemetria                |
-| Logs da aplicação e dos containers             | 14 dias                                           | Rotação                                           |
+| Logs da aplicação e dos containers             | ≥ 14 dias no volume previsto; teto de 50 MiB      | Rotação por tamanho, por serviço, no Compose      |
 | Backups do PostgreSQL                          | 30 dias                                           | Expiração no armazenamento externo ([3.8](#s3-8)) |
 
 Os jobs de expiração rodam no processo `maintenance`, em lotes, com índices parciais sobre as linhas ainda não expiradas.
+
+**Logs dos containers.** O Docker só gira log por tamanho, não por idade, e a regra verificável é o teto: cada serviço do Compose usa o driver `local` com 5 arquivos de 10 MiB, o que cobre 14 dias até cerca de 3,5 MiB de log por dia e serviço (o Nginx grava perto de 250 bytes por requisição, ou uns 15 mil acessos por dia). Com pouco tráfego, uma linha pode durar mais de 14 dias; por isso os logs seguem a mesma minimização dos eventos (3.7) e somem quando o container é recriado, o que acontece a cada deploy da imagem. A rotação fica no Compose, e nunca no `/etc/docker/daemon.json`, que vale para todos os projetos da VPS compartilhada ([3.8](#s3-8)). `tests/test_container_logs.py` confere que todo serviço de produção tem a rotação e que a soma cabe em 512 MiB da raiz.
 
 A disponibilidade é independente do estado histórico: uma execução pode continuar `succeeded` com resultados `expired`. Exclusão de saída não apaga o original; exclusão de original afeta sua disponibilidade em históricos anteriores, mas não muda os resultados já produzidos. Objetos ausentes inesperadamente são marcados `missing`, não substituídos por arquivos vazios.
 
@@ -948,6 +950,7 @@ Pillow é conferido por dimensões, orientação e transparência; CSV por valor
 - `error.code` é sempre um código do catálogo de [1.6](#s1-6), o que permite agrupar falhas por causa sem ler mensagens.
 - `user.hash` é um HMAC do `owner_id` com segredo do servidor: permite agrupar por conta sem guardar o ID nem qualquer dado pessoal.
 - Nunca entram em evento: conteúdo, nomes de arquivo, valores de parâmetros (filtros de CSV são dados do usuário), tokens, segredos e IP completo.
+- Logs de acesso seguem a mesma regra. O Uvicorn roda sem access log, porque o evento `main` já registra cada requisição. O Nginx mantém um log de acesso próprio para o que não chega à API (413 do teto de corpo, 502 e 504 do upstream), em JSON, com o cliente truncado (/24 em IPv4, /48 em IPv6), só o caminho, sem query string, Referer nem User-Agent (`docker/nginx/templates/access-log.conf.template`, provado por `tests/test_nginx_logs.py` com canários de IP e de query).
 - Sem amostragem: o volume de um serviço numa VPS cabe inteiro, e a telemetria é guardada por 30 dias, a janela dos SLOs (1.7).
 - Métricas de sistema (CPU, memória, disco por filesystem) vêm do OpenTelemetry Collector no host; as de comportamento são derivadas dos próprios eventos.
 
@@ -1002,7 +1005,7 @@ Como a aplicação só fala OTLP com o Collector, trocar de backend no futuro n�
 - `/srv/goblinshift/storage`: uploads e artefatos, filesystem de tamanho fixo de 24 GiB (os 20 GiB do ambiente mais folga), o que torna o teto do ambiente também um limite físico.
 - `/srv/goblinshift/exec-work`: área do executor, no tamanho de 1.7 ([3.6](#s3-6)).
 - `/srv/goblinshift/telemetry`: dados do OpenObserve, 10 GiB de tamanho fixo ([3.7](#s3-7)).
-- Raiz: sistema, imagens Docker e logs, com rotação de logs.
+- Raiz: sistema, imagens Docker e logs, com rotação por serviço no Compose (até 50 MiB por serviço, [1.7](#s1-7)).
 
 **Rede.** Firewall da Hostinger e do host (ufw) com só 80, 443 e SSH abertos, por regras acrescentadas, nunca substituindo as do outro projeto; SSH por chave, sem senha e sem login de root; fail2ban ativo. TLS no proxy de borda, com Let's Encrypt. PostgreSQL sem porta exposta. A proteção DDoS da Hostinger atua na borda; no Nginx, `limit_req` em `/auth/*`, `client_max_body_size` por rota e `proxy_request_buffering off` nos `PUT` de conteúdo, para não bufferizar arquivos inteiros em disco antes da API.
 

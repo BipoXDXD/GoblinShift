@@ -28,5 +28,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     GS_SERVICE_VERSION=${GS_SERVICE_VERSION}
 USER app
 EXPOSE 8000
+# Sem access log: o evento amplo `main` já registra cada requisição, sem IP completo (plano, 3.7).
 CMD ["uvicorn", "goblinshift.entrypoints.api.app:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header"]
+     "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header", \
+     "--no-access-log"]
