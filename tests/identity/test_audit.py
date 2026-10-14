@@ -1,4 +1,4 @@
-"""Auditoria de eventos de segurança (docs/GoblinShiftPlan.md, 1.8 e 3.6; ADR 025)."""
+"""Auditoria de eventos de segurança (docs/GoblinShiftPlan.md, 1.8 e 3.6; ADR 026)."""
 
 from datetime import UTC, datetime
 from ipaddress import ip_network

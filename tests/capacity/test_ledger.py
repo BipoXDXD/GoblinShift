@@ -1,4 +1,4 @@
-"""Livro-razão de capacidade com PostgreSQL real (docs/GoblinShiftPlan.md, 1.7 e 3.3; ADR 023)."""
+"""Livro-razão de capacidade com PostgreSQL real (docs/GoblinShiftPlan.md, 1.7 e 3.3; ADR 024)."""
 
 import uuid
 

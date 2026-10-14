@@ -1,4 +1,4 @@
-"""Tabelas do livro-razão de capacidade (docs/GoblinShiftPlan.md, 3.3; ADR 023).
+"""Tabelas do livro-razão de capacidade (docs/GoblinShiftPlan.md, 3.3; ADR 024).
 
 `capacity_pool` guarda o teto e o total reservado por escopo (global ou conta) e recurso;
 `resource_reservation` é o livro-razão, uma linha por reserva, de onde a manutenção recalcula o
@@ -44,7 +44,7 @@ capacity_pool = Table(
 
 # `holder_id` não tem FK: o detentor é um upload, uma Run ou um objeto, conforme `holder_kind`.
 # Associação polimórfica aceita de propósito num livro-razão interno, sem JOIN de negócio; a
-# integridade vem da reconciliação da manutenção (ADR 023).
+# integridade vem da reconciliação da manutenção (ADR 024).
 resource_reservation = Table(
     "resource_reservation",
     metadata,

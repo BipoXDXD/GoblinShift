@@ -1,4 +1,4 @@
-"""Piso de segurança do Authlib (ADR 024).
+"""Piso de segurança do Authlib (ADR 025).
 
 A 1.6.11 corrige o CVE-2026-41425 (state em modo cache sem vínculo com o navegador) e a 1.6.12 é
 a correção seguinte; abaixo disso o login por cache no Postgres fica vulnerável a CSRF de login.

@@ -67,7 +67,7 @@ def build_login_app(settings: Settings, fake: FakeProviders) -> FastAPI:
 
 
 def open_signup(app: FastAPI) -> None:
-    """Cadastro aberto nesta aplicação (o padrão é fechado, ADR 022)."""
+    """Cadastro aberto nesta aplicação (o padrão é fechado, ADR 023)."""
     app.state.web_identity = replace(app.state.web_identity, signup_open=True)
 
 

@@ -14,7 +14,7 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
 `block` bloqueia, revoga sessões e chaves e cancela a execução ativa; repetir completa o que
 faltou. `list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
-identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 022).
+identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
 """
 

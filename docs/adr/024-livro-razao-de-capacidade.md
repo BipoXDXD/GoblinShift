@@ -1,4 +1,4 @@
-# ADR 023. Livro-razão de capacidade em módulo próprio
+# ADR 024. Livro-razão de capacidade em módulo próprio
 
 - **Estado:** aceito na Fase 0 da fatia 6 (2026-10-14), decisões D-3, D-4 e D-5 do plano da fatia
 - **Plano:** [1.7](../GoblinShiftPlan.md#s1-7), [3.2](../GoblinShiftPlan.md#s3-2), [3.3](../GoblinShiftPlan.md#s3-3)

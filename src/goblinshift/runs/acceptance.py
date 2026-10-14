@@ -80,7 +80,7 @@ QUEUE_LOCK_OBJECT = 0
 _ACTIVE_RUN_PREDICATE = "status IN ('queued', 'running', 'stopping')"
 _PACKAGE_LIMITS = PackageLimits()
 # Teto de saída de uma Run (1.7): conteúdo, relatório, manifesto e ZIP. Reservado na aceitação
-# e convertido em reservas dos objetos publicados (ADR 023, D-5); cerca de 1 GiB.
+# e convertido em reservas dos objetos publicados (ADR 024, D-5); cerca de 1 GiB.
 RUN_OUTPUT_CEILING_BYTES = (
     DEFAULT_MAX_BYTES
     + REPORT_MAX_BYTES

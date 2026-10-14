@@ -1,4 +1,4 @@
-"""`GET /auth/login/{provider}` e `GET /auth/callback/{provider}` (3.6; ADRs 008, 022 e 024).
+"""`GET /auth/login/{provider}` e `GET /auth/callback/{provider}` (3.6; ADRs 008, 023 e 025).
 
 Fora de `/api/v1` e do OpenAPI. Rotas públicas: estão na allowlist da matriz de autorização.
 O `redirect_uri` sai de `WebIdentityConfig.public_origin`, nunca do header `Host`.
@@ -70,7 +70,7 @@ from goblinshift.platform.settings import OAuthClient, WebIdentityConfig
 
 try:
     from httpx2 import HTTPError, HTTPStatusError
-except ImportError:  # pragma: no cover - a imagem de produção só tem o httpx (ver ADR 024)
+except ImportError:  # pragma: no cover - a imagem de produção só tem o httpx (ver ADR 025)
     from httpx import HTTPError, HTTPStatusError  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)

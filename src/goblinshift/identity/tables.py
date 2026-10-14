@@ -96,7 +96,7 @@ web_session = Table(
 )
 
 # Cache do Authlib (`state`, `nonce`, `code_verifier`) durante o login, com TTL de 10 min (3.6).
-# O cookie `__Secure-gs_login` leva só o marcador; o conteúdo nunca sai do servidor (ADR 024).
+# O cookie `__Secure-gs_login` leva só o marcador; o conteúdo nunca sai do servidor (ADR 025).
 login_state = Table(
     "login_state",
     metadata,
@@ -109,7 +109,7 @@ login_state = Table(
 )
 
 # Eventos de segurança, guardados 90 dias (1.8). `user_id` não tem FK de propósito: o evento
-# sobrevive à purga da conta (ADR 025). Os tipos repetem `AuditEventType`; um teste confere.
+# sobrevive à purga da conta (ADR 026). Os tipos repetem `AuditEventType`; um teste confere.
 audit_event = Table(
     "audit_event",
     metadata,

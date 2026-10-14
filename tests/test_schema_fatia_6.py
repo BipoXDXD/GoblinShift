@@ -239,7 +239,7 @@ def test_ip_sem_o_truncamento_exigido_e_recusado(conn: Connection, prefix: str) 
 
 
 def test_evento_de_conta_inexistente_e_aceito_sem_fk(conn: Connection) -> None:
-    # A auditoria sobrevive à purga da conta (ADR 025): o user_id não aponta para app_user.
+    # A auditoria sobrevive à purga da conta (ADR 026): o user_id não aponta para app_user.
     conn.execute(insert(audit_event).values(**_evento(user_id=HOLDER)))
 
 

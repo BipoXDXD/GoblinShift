@@ -1,4 +1,4 @@
-"""Reserva do teto de saída da Run e conversão na publicação (1.7; ADR 023, D-5).
+"""Reserva do teto de saída da Run e conversão na publicação (1.7; ADR 024, D-5).
 
 A aceitação reserva o teto de saída com o detentor `run`. A publicação passa o tamanho de cada
 objeto publicado para uma reserva do objeto, e o estado terminal libera o resto.

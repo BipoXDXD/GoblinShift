@@ -61,7 +61,7 @@ class WebIdentityConfig:
     oauth_http_timeout_s: float
     # HMAC do token CSRF (double-submit assinado, ligado à sessão).
     csrf_key: bytes = field(repr=False)
-    # Assina o cookie `__Secure-gs_login`, que leva só o marcador do estado do login (ADR 024).
+    # Assina o cookie `__Secure-gs_login`, que leva só o marcador do estado do login (ADR 025).
     login_cookie_key: bytes = field(repr=False)
 
 
@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     # Identidade web (fatia 6, 3.6). IDs de cliente não são segredo; os segredos vêm de arquivos
     # montados pelo Compose (`*_file`), no mesmo padrão de `db_password_file`.
     public_origin: str | None = None
-    # Fechado até a abertura pública (fatia 8): identidade nova nasce bloqueada (ADR 022).
+    # Fechado até a abertura pública (fatia 8): identidade nova nasce bloqueada (ADR 023).
     signup_mode: Literal["closed", "open"] = "closed"
     google_client_id: str | None = None
     google_client_secret_file: Path | None = None

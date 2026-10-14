@@ -1,4 +1,4 @@
-"""Nomes e atributos dos cookies da identidade web (docs/GoblinShiftPlan.md, 3.6; ADR 024).
+"""Nomes e atributos dos cookies da identidade web (docs/GoblinShiftPlan.md, 3.6; ADR 025).
 
 Os nomes ficam aqui porque o `app.py` instala o cookie de login. `set_session_cookies` é chamada
 pelo callback do login (Frente A), e `clear_session_cookies`, pelo logout.

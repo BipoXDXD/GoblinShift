@@ -7,7 +7,7 @@ Create Date: 2026-10-14 18:00:00.000000
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Só acréscimos: colunas anuláveis em
 `app_user` e tabelas novas que o código da fatia 5 ignora. O pool global de armazenamento nasce
 aqui com o teto de 1.7 (20 GiB); uploads criados pela API anterior durante o deploy ficam sem
-reserva e são adotados pela reconciliação da manutenção (ADR 023).
+reserva e são adotados pela reconciliação da manutenção (ADR 024).
 """
 
 from collections.abc import Sequence
@@ -132,7 +132,7 @@ def _create_audit_event() -> None:
     op.create_table(
         "audit_event",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=True), nullable=False),
-        # Sem FK de propósito: o evento sobrevive à purga da conta (ADR 025).
+        # Sem FK de propósito: o evento sobrevive à purga da conta (ADR 026).
         sa.Column("user_id", sa.Uuid(), nullable=True),
         sa.Column("event_type", sa.Text(), nullable=False),
         sa.Column("outcome", sa.Text(), nullable=False),
