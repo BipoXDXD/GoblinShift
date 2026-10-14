@@ -177,6 +177,11 @@ def test_container_sobe_com_o_perfil_fixo(ctl: Ctl) -> None:
     assert host_config["NetworkMode"] == "none"
     assert host_config["ReadonlyRootfs"] is True
     assert host_config["CapDrop"] == ["ALL"]
+    # Limite próprio, sem depender do daemon.json do host compartilhado.
+    assert host_config["LogConfig"] == {
+        "Type": "local",
+        "Config": {"max-size": "1m", "max-file": "1", "compress": "false"},
+    }
     assert info["Config"]["User"] == f"{EXECUTOR_UID}:{ctl.group_id}"
     assert info["Config"]["Image"] == ctl.image
     mounts = {mount["Destination"]: mount["RW"] for mount in info["Mounts"]}
