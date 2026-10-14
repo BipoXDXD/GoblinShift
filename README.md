@@ -76,6 +76,8 @@ O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
 ```
 
+Logs dos containers giram por serviço no próprio Compose (driver `local`, até 50 MiB por serviço; [plano, 1.7](docs/GoblinShiftPlan.md#s1-7)). O `/etc/docker/daemon.json` da VPS é compartilhado com o outro projeto e não é alterado. O log de acesso do Nginx registra o cliente com IP truncado e o caminho sem query string; a API não tem access log, porque o evento `main` já cobre cada requisição.
+
 ## Imagem do executor
 
 Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado: nada de banco, web nem dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
