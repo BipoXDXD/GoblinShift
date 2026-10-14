@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from alembic import command
@@ -48,6 +49,21 @@ def restore_capacity_seed(conn: Connection) -> None:
 
 def run_migrations(settings: Settings, target: str) -> None:
     """Roda o Alembic com as mesmas variáveis GS_* que a aplicação usa."""
+    with _alembic_env(settings):
+        if target == "base":
+            command.downgrade(Config("alembic.ini"), "base")
+        else:
+            command.upgrade(Config("alembic.ini"), target)
+
+
+def downgrade_migrations(settings: Settings, target: str) -> None:
+    """Desce o schema até `target`, como `run_migrations` faz com "base"."""
+    with _alembic_env(settings):
+        command.downgrade(Config("alembic.ini"), target)
+
+
+@contextmanager
+def _alembic_env(settings: Settings) -> Iterator[None]:
     env = {
         "GS_DB_HOST": settings.db_host,
         "GS_DB_PORT": str(settings.db_port),
@@ -58,7 +74,4 @@ def run_migrations(settings: Settings, target: str) -> None:
     with pytest.MonkeyPatch.context() as mp:
         for key, value in env.items():
             mp.setenv(key, value)
-        if target == "base":
-            command.downgrade(Config("alembic.ini"), "base")
-        else:
-            command.upgrade(Config("alembic.ini"), target)
+        yield

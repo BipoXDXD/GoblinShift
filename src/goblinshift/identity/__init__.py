@@ -1,5 +1,5 @@
 """Login, sessões, CSRF, chaves de API, escopos, estado da conta, auditoria e limite de
-requisições por conta (generic).
+requisições por conta e aceite dos termos (generic).
 
 Ver docs/GoblinShiftPlan.md, seções 3.2 e 3.6. O módulo não conhece HTTP: os entrypoints leem
 cookies e headers e chamam estas funções. Exportações fixadas na Fase 0 da fatia 6, para que as
@@ -9,6 +9,7 @@ frentes paralelas não precisem editar este arquivo.
 from goblinshift.identity.accounts import (
     ADMIN_ISSUER,
     MAX_ACTIVE_KEYS,
+    AcceptedTerms,
     Account,
     ActiveKeyLimitError,
     InvalidDisplayNameError,
@@ -59,16 +60,19 @@ from goblinshift.identity.sessions import (
     revoke_session,
     start_session,
 )
+from goblinshift.identity.terms import CURRENT_TERMS_VERSION, TermsAcceptance, accept_terms
 from goblinshift.identity.users import ExternalIdentity, LoginRefused, resolve_login
 
 __all__ = [
     "ADMIN_ISSUER",
+    "CURRENT_TERMS_VERSION",
     "DEFAULT_KEY_DAYS",
     "KEY_PREFIX",
     "MAX_ACTIVE_KEYS",
     "MAX_KEY_DAYS",
     "RECENT_AUTH_WINDOW",
     "REQUESTS_PER_MINUTE",
+    "AcceptedTerms",
     "Account",
     "ActiveKeyLimitError",
     "AuditEventType",
@@ -87,7 +91,9 @@ __all__ = [
     "RequestClass",
     "RequestLimitExceededError",
     "Scope",
+    "TermsAcceptance",
     "UnknownAccountError",
+    "accept_terms",
     "authenticate_api_key",
     "authenticate_session",
     "block_account",

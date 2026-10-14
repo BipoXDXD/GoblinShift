@@ -19,6 +19,7 @@ from goblinshift.entrypoints.api import (
     health,
     me,
     me_delete,
+    me_terms,
     runs,
     runs_cancel,
     uploads,
@@ -33,6 +34,7 @@ from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddlewa
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.entrypoints.api.wide_event import WideEventMiddleware, count_queries
 from goblinshift.files.storage import FileStorage
+from goblinshift.identity import CURRENT_TERMS_VERSION
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.schema import read_code_revisions
 from goblinshift.platform.settings import Settings
@@ -81,6 +83,7 @@ def create_app(
     app.state.known_revisions = known_revisions
     app.state.storage = FileStorage(settings.storage_root)
     app.state.transfer_timeouts = TransferTimeouts()
+    app.state.terms_version = CURRENT_TERMS_VERSION
 
     install_problem_handlers(app)
     # Cookie de login (ADR 025): só o marcador do estado do Authlib, cujo conteúdo fica em
@@ -110,6 +113,7 @@ def create_app(
     api.include_router(catalog.router)
     api.include_router(me.router)
     api.include_router(me_delete.router)
+    api.include_router(me_terms.router)
     api.include_router(api_keys.router)
     api.include_router(uploads.router)
     api.include_router(artifacts.router)

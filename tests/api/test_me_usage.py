@@ -22,7 +22,8 @@ ME = "/api/v1/me"
 RUNS = "/api/v1/runs"
 GIB = 1024**3
 MIB = 1024**2
-ME_KEYS = {"id", "display_name", "scopes", "via", "limits", "usage"}
+ME_KEYS = {"id", "display_name", "scopes", "via", "limits", "usage", "terms"}
+TERMS_KEYS = {"current_version", "accepted_version", "accepted_at", "acceptance_required"}
 LIMIT_KEYS = {
     "runs_per_24h",
     "input_bytes_per_24h",
@@ -60,6 +61,7 @@ def test_get_me_chaves_do_json_exatamente(
     assert body.keys() == ME_KEYS
     assert body["limits"].keys() == LIMIT_KEYS
     assert body["usage"].keys() == USAGE_KEYS
+    assert body["terms"].keys() == TERMS_KEYS
 
 
 def test_conta_nova_tem_limites_de_1_7_e_consumo_zero(
