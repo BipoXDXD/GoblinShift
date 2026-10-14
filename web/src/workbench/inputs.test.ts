@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 
+import type { InputLimits } from "../catalog/inputLimits";
 import type { UploadEntry, UploadEntryState } from "../upload/useUploadBatch";
-import { MAX_RUN_INPUTS, orderEntries, runInputs, uploadAnnouncement } from "./inputs";
+import { orderEntries, runInputs as runInputsWithLimits, uploadAnnouncement } from "./inputs";
 
-function entry(localId: string, state: UploadEntryState, name = `${localId}.csv`): UploadEntry {
-  return { localId, file: new File(["x"], name), state };
+const LIMITS: InputLimits = { maxInputs: 5, maxTotalBytes: null };
+
+function entry(
+  localId: string,
+  state: UploadEntryState,
+  name = `${localId}.csv`,
+  content = "x",
+): UploadEntry {
+  return { localId, file: new File([content], name), state };
+}
+
+function runInputs(entries: readonly UploadEntry[]) {
+  return runInputsWithLimits(entries, LIMITS);
 }
 
 const ready = (uploadId: string): UploadEntryState => ({ status: "ready", uploadId, sha256: "s" });
@@ -66,14 +78,47 @@ describe("runInputs", () => {
   });
 
   it.each([
-    [MAX_RUN_INPUTS, true],
-    [MAX_RUN_INPUTS + 1, false],
-  ])("%i arquivos", (count, ok) => {
+    [5, true],
+    [6, false],
+  ])("%i arquivos com máximo 5 no catálogo", (count, ok) => {
     const entries = Array.from({ length: count }, (_, index) =>
       entry(String(index), ready(String(index))),
     );
 
     expect(runInputs(entries).ok).toBe(ok);
+  });
+
+  it("acima do máximo, a mensagem traz o máximo do catálogo", () => {
+    const entries = Array.from({ length: 3 }, (_, index) =>
+      entry(String(index), ready(String(index))),
+    );
+
+    expect(runInputsWithLimits(entries, { maxInputs: 2, maxTotalBytes: null })).toEqual({
+      ok: false,
+      message: "Use no máximo 2 arquivos.",
+    });
+  });
+
+  it.each([
+    ["no teto", 10, true],
+    ["acima do teto", 9, false],
+  ])("soma dos tamanhos %s do lote", (_, maxTotalBytes, ok) => {
+    const entries = [
+      entry("a", ready("1"), "a.zip", "12345"),
+      entry("b", ready("2"), "b.zip", "67890"),
+      entry("c", { status: "canceled" }, "c.zip", "não conta"),
+    ];
+
+    expect(runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes }).ok).toBe(ok);
+  });
+
+  it("acima do teto de bytes, a mensagem traz o teto", () => {
+    const entries = [entry("a", ready("1"), "a.zip", "x".repeat(2_000))];
+
+    expect(runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes: 1_500 })).toEqual({
+      ok: false,
+      message: "Os arquivos somam 2 kB; o máximo por execução é 1,5 kB.",
+    });
   });
 });
 

@@ -7,12 +7,9 @@ import type { RecipeFieldsProps } from "../types";
 import {
   addButtonId,
   CASE_MODES,
-  CSV_JANITOR_DEFAULTS,
   DELIMITERS,
   FILTER_OPS,
   FORMULA_GUARDS,
-  MAX_FILTERS,
-  MAX_LIST_COLUMNS,
   parseCsvJanitor,
   rowFieldId,
   singleFieldId,
@@ -20,6 +17,7 @@ import {
   type CsvJanitorFormValues,
   type FilterRow,
 } from "./schema";
+import type { CsvJanitorSettings } from "./settings";
 
 const T = TEXT.csvJanitor;
 
@@ -40,15 +38,17 @@ const COLUMN_LISTS: readonly { field: ColumnListField; label: string; hint: stri
 ];
 
 /**
- * Formulário da CSV Janitor v1, escrito à mão (2.2). Guarda os próprios valores e entrega à Bancada,
+ * Formulário da CSV Janitor v1, escrito à mão (2.2), com defaults e limites do catálogo. Guarda os próprios valores e entrega à Bancada,
  * a cada mudança, o comando validado ou os erros. Adicionar uma linha leva o foco a ela; remover
  * devolve o foco ao botão de adicionar.
  */
 export function CsvJanitorFields({
+  settings,
   errors,
   onDraftChange,
-}: RecipeFieldsProps<"csv-janitor">): ReactElement {
-  const [values, setValues] = useState(CSV_JANITOR_DEFAULTS);
+}: RecipeFieldsProps<"csv-janitor", CsvJanitorSettings>): ReactElement {
+  const [values, setValues] = useState(settings.defaults);
+  const { limits } = settings;
   const pendingFocus = useRef<string | null>(null);
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export function CsvJanitorFields({
   const update = (next: CsvJanitorFormValues, focusId: string | null = null): void => {
     pendingFocus.current = focusId;
     setValues(next);
-    onDraftChange(parseCsvJanitor(next));
+    onDraftChange(parseCsvJanitor(next, limits));
   };
 
   const errorOf = (id: string): string | null => errors.get(id) ?? null;
@@ -129,6 +129,7 @@ export function CsvJanitorFields({
       ))}
       <CaseRules
         rows={values.case_rules}
+        max={limits.maxColumns}
         errorOf={errorOf}
         onChange={(case_rules, focusId) => {
           update({ ...values, case_rules }, focusId);
@@ -136,6 +137,7 @@ export function CsvJanitorFields({
       />
       <Filters
         rows={values.filters}
+        max={limits.maxFilters}
         errorOf={errorOf}
         onChange={(filters, focusId) => {
           update({ ...values, filters }, focusId);
@@ -153,12 +155,13 @@ export function CsvJanitorFields({
 
 interface RowsProps<Row> {
   readonly rows: readonly Row[];
+  readonly max: number;
   readonly errorOf: (id: string) => string | null;
   readonly onChange: (rows: readonly Row[], focusId: string | null) => void;
 }
 
-function CaseRules({ rows, errorOf, onChange }: RowsProps<CaseRuleRow>): ReactElement {
-  const list = useRowList("case_rules", { rows, onChange, max: MAX_LIST_COLUMNS });
+function CaseRules({ rows, max, errorOf, onChange }: RowsProps<CaseRuleRow>): ReactElement {
+  const list = useRowList("case_rules", { rows, onChange, max });
   return (
     <FieldGroup
       id="csv-janitor-case_rules"
@@ -221,8 +224,8 @@ function CaseRules({ rows, errorOf, onChange }: RowsProps<CaseRuleRow>): ReactEl
   );
 }
 
-function Filters({ rows, errorOf, onChange }: RowsProps<FilterRow>): ReactElement {
-  const list = useRowList("filters", { rows, onChange, max: MAX_FILTERS });
+function Filters({ rows, max, errorOf, onChange }: RowsProps<FilterRow>): ReactElement {
+  const list = useRowList("filters", { rows, onChange, max });
   return (
     <FieldGroup
       id="csv-janitor-filters"

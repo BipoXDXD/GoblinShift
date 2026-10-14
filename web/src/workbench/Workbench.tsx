@@ -14,7 +14,7 @@ import { LiveRegion } from "../components/a11y/LiveRegion";
 import { moveItem, ReorderableList } from "../components/a11y/ReorderableList";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
-import type { RecipeModule } from "../recipes/registry";
+import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { createRun } from "../runs/commands";
 import { TEXT } from "../text";
@@ -25,7 +25,9 @@ import { UploadEntryView } from "./UploadEntryView";
 const FILES_FIELD_ID = "bancada-arquivos";
 
 interface WorkbenchProps {
-  readonly recipe: RecipeModule<RecipeId>;
+  readonly recipe: RecipeModule;
+  /** Formulário com os defaults e limites da versão no catálogo. */
+  readonly form: RecipeForm;
   readonly uploadServices: UploadServices;
 }
 
@@ -39,18 +41,18 @@ interface Submission {
  * parâmetros e executar. Os erros só aparecem depois da primeira tentativa de executar; a
  * `Idempotency-Key` acompanha o comando, então repetir o mesmo envio não cria outra execução.
  */
-export function Workbench({ recipe, uploadServices }: WorkbenchProps): ReactElement {
+export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): ReactElement {
   const client = useApiClient();
   const navigate = useNavigate();
   const batch = useUploadBatch(uploadServices);
   const [order, setOrder] = useState<readonly string[]>([]);
-  const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(recipe.initialDraft);
+  const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
   const [attempt, setAttempt] = useState(0);
   const filesHeadingId = useId();
   const parametersHeadingId = useId();
 
   const entries = orderEntries(batch.entries, order);
-  const inputs = runInputs(entries);
+  const inputs = runInputs(entries, form.inputLimits);
   const command = commandFrom(draft, inputs);
   const intent = command === null ? "" : JSON.stringify(command);
   const idempotency = useIdempotencyKey(intent);
@@ -108,7 +110,7 @@ export function Workbench({ recipe, uploadServices }: WorkbenchProps): ReactElem
             id={FILES_FIELD_ID}
             label={TEXT.workbench.chooseFiles}
             description={TEXT.workbench.chooseFilesHint}
-            accept={recipe.accept}
+            {...(recipe.accept === null ? {} : { accept: recipe.accept })}
             error={fieldErrors.get(FILES_FIELD_ID) ?? null}
             onFiles={batch.add}
           />
@@ -134,7 +136,7 @@ export function Workbench({ recipe, uploadServices }: WorkbenchProps): ReactElem
         </section>
         <section aria-labelledby={parametersHeadingId}>
           <h2 id={parametersHeadingId}>{TEXT.workbench.parametersHeading}</h2>
-          <recipe.Fields errors={fieldErrors} onDraftChange={setDraft} />
+          {form.renderFields({ errors: fieldErrors, onDraftChange: setDraft })}
         </section>
         {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
         <button type="submit" aria-disabled={mutation.isPending}>
@@ -171,10 +173,7 @@ function failureOf(error: Error): DisplayableFailure {
  * Erros por campo de um VALIDATION_FAILED, com o texto de `fieldErrorText`; `null`
  * para as outras falhas, que vão para o alerta com texto próprio.
  */
-function fieldIssuesOf(
-  failure: DisplayableFailure,
-  recipe: RecipeModule<RecipeId>,
-): FormIssue[] | null {
+function fieldIssuesOf(failure: DisplayableFailure, recipe: RecipeModule): FormIssue[] | null {
   if (failure.kind !== "problem" || failure.problem.code !== "VALIDATION_FAILED") {
     return null;
   }
@@ -206,7 +205,7 @@ function fieldErrorText(code: string, message: string): string {
   return known ?? TEXT.workbench.serverFieldErrors.fallback;
 }
 
-function fieldIdForServerPath(field: string, recipe: RecipeModule<RecipeId>): string | null {
+function fieldIdForServerPath(field: string, recipe: RecipeModule): string | null {
   // O servidor aponta o campo a partir do corpo: `body.parameters.filters.0.value`.
   const segments = field.split(".");
   const [root, ...rest] = segments[0] === "body" ? segments.slice(1) : segments;

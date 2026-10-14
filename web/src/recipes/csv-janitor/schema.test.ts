@@ -1,25 +1,37 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { z } from "zod";
 
-import spec from "../../../openapi/openapi.json";
 import type { RecipeParameters } from "../types";
+import type { CASE_MODES, DELIMITERS, FILTER_OPS, FORMULA_GUARDS } from "./schema";
 import {
-  CASE_MODES,
-  CSV_JANITOR_DEFAULTS,
   csvJanitorFieldId,
-  DELIMITERS,
-  FILTER_OPS,
-  FORMULA_GUARDS,
-  MAX_FILTERS,
-  MAX_LIST_COLUMNS,
-  parseCsvJanitor,
+  parseCsvJanitor as parseWithLimits,
   type CsvJanitorFormValues,
+  type CsvJanitorLimits,
 } from "./schema";
 
 type Parameters = RecipeParameters<"csv-janitor">;
 
+const LIMITS: CsvJanitorLimits = { maxColumns: 100, maxFilters: 5 };
+const MAX_LIST_COLUMNS = LIMITS.maxColumns;
+const MAX_FILTERS = LIMITS.maxFilters;
+
+const DEFAULT_VALUES: CsvJanitorFormValues = {
+  input_delimiter: ",",
+  output_delimiter: ",",
+  trim_columns: "",
+  case_rules: [],
+  filters: [],
+  deduplicate_by: "",
+  output_columns: "",
+  formula_guard: "none",
+};
+
 function values(overrides: Partial<CsvJanitorFormValues> = {}): CsvJanitorFormValues {
-  return { ...CSV_JANITOR_DEFAULTS, ...overrides };
+  return { ...DEFAULT_VALUES, ...overrides };
+}
+
+function parseCsvJanitor(formValues: CsvJanitorFormValues) {
+  return parseWithLimits(formValues, LIMITS);
 }
 
 function lines(count: number): string {
@@ -57,106 +69,9 @@ describe("constantes espelham os tipos gerados", () => {
   });
 });
 
-// O tipo não carrega defaults nem limites; o openapi.json versionado, sim. Se a API mudar um deles
-// e o tipo continuar igual, este teste falha.
-const specSchema = z.object({
-  paths: z.object({
-    "/api/v1/runs": z.object({
-      post: z.object({
-        requestBody: z.object({
-          content: z.object({
-            "application/json": z.object({
-              schema: z.object({
-                allOf: z.tuple([
-                  z.object({}),
-                  z.object({
-                    oneOf: z.array(
-                      z.object({
-                        properties: z.object({
-                          recipe_id: z.object({ const: z.string() }),
-                          parameters: z.object({ properties: z.record(z.string(), z.unknown()) }),
-                        }),
-                      }),
-                    ),
-                  }),
-                ]),
-              }),
-            }),
-          }),
-        }),
-      }),
-    }),
-  }),
-});
-
-const enumProperty = z.object({ enum: z.array(z.string()), default: z.string() });
-const listProperty = z.object({
-  maxItems: z.number(),
-  items: z.object({
-    properties: z.record(z.string(), z.object({ enum: z.array(z.string()) }).partial()).optional(),
-  }),
-});
-const nullableListProperty = z.object({
-  anyOf: z.tuple([z.object({ maxItems: z.number(), minItems: z.number() }), z.object({})]),
-});
-
-function specParameters(): Record<string, unknown> {
-  const variants =
-    specSchema.parse(spec).paths["/api/v1/runs"].post.requestBody.content["application/json"].schema
-      .allOf[1].oneOf;
-  const variant = variants.find(
-    (candidate) => candidate.properties.recipe_id.const === "csv-janitor",
-  );
-  if (variant === undefined) {
-    throw new Error("csv-janitor ausente da spec");
-  }
-  return variant.properties.parameters.properties;
-}
-
-describe("defaults e limites conferidos contra openapi.json", () => {
-  const properties = specParameters();
-
-  it.each(["input_delimiter", "output_delimiter"] as const)("%s", (name) => {
-    const property = enumProperty.parse(properties[name]);
-
-    expect(property.enum).toEqual([...DELIMITERS]);
-    expect(CSV_JANITOR_DEFAULTS[name]).toBe(property.default);
-  });
-
-  it("formula_guard", () => {
-    const property = enumProperty.parse(properties["formula_guard"]);
-
-    expect(property.enum).toEqual([...FORMULA_GUARDS]);
-    expect(CSV_JANITOR_DEFAULTS.formula_guard).toBe(property.default);
-  });
-
-  it.each(["trim_columns", "case_rules", "deduplicate_by"] as const)("máximo de %s", (name) => {
-    expect(listProperty.parse(properties[name]).maxItems).toBe(MAX_LIST_COLUMNS);
-  });
-
-  it("máximo de filters e operadores", () => {
-    const filters = listProperty.parse(properties["filters"]);
-
-    expect(filters.maxItems).toBe(MAX_FILTERS);
-    expect(filters.items.properties?.["op"]?.enum).toEqual([...FILTER_OPS]);
-  });
-
-  it("modos de caixa", () => {
-    const rules = listProperty.parse(properties["case_rules"]);
-
-    expect(rules.items.properties?.["mode"]?.enum).toEqual([...CASE_MODES]);
-  });
-
-  it("output_columns: de 1 ao máximo, ou null", () => {
-    const [list] = nullableListProperty.parse(properties["output_columns"]).anyOf;
-
-    expect(list).toEqual({ maxItems: MAX_LIST_COLUMNS, minItems: 1 });
-  });
-});
-
 describe("parseCsvJanitor", () => {
   it("os defaults viram um comando válido e explícito", () => {
-    const draft = parseCsvJanitor(CSV_JANITOR_DEFAULTS);
+    const draft = parseCsvJanitor(DEFAULT_VALUES);
 
     expect(draft).toEqual({
       ok: true,
@@ -269,6 +184,19 @@ describe("parseCsvJanitor", () => {
     }));
 
     expect(parseCsvJanitor(values({ filters })).ok).toBe(valid);
+  });
+});
+
+describe("parseCsvJanitor com outros limites do catálogo", () => {
+  it("usa os máximos recebidos", () => {
+    const limits: CsvJanitorLimits = { maxColumns: 2, maxFilters: 1 };
+    const filter = { key: "a", column: "c", op: "eq" as const, value: "x" };
+
+    expect(parseWithLimits(values({ trim_columns: lines(2) }), limits).ok).toBe(true);
+    expect(parseWithLimits(values({ trim_columns: lines(3) }), limits).ok).toBe(false);
+    expect(parseWithLimits(values({ filters: [filter, { ...filter, key: "b" }] }), limits).ok).toBe(
+      false,
+    );
   });
 });
 

@@ -1,8 +1,7 @@
-import type { UploadEntry, UploadEntryState } from "../upload/useUploadBatch";
+import type { InputLimits } from "../catalog/inputLimits";
+import { formatBytes } from "../format";
 import { TEXT } from "../text";
-
-/** Máximo de entradas de POST /runs (`maxItems` de `input_upload_ids` na spec). */
-export const MAX_RUN_INPUTS = 100;
+import type { UploadEntry, UploadEntryState } from "../upload/useUploadBatch";
 
 type UploadStatus = UploadEntryState["status"];
 
@@ -23,8 +22,11 @@ export type RunInputs =
   | { readonly ok: true; readonly uploadIds: readonly string[] }
   | { readonly ok: false; readonly message: string };
 
-/** Ids dos uploads prontos, na ordem da lista, ou o motivo de ainda não dar para executar. */
-export function runInputs(entries: readonly UploadEntry[]): RunInputs {
+/**
+ * Ids dos uploads prontos, na ordem da lista, ou o motivo de ainda não dar para executar. Os
+ * limites são os da versão da receita no catálogo.
+ */
+export function runInputs(entries: readonly UploadEntry[], limits: InputLimits): RunInputs {
   const kept = entries.filter((entry) => entry.state.status !== "canceled");
   if (kept.length === 0) {
     return { ok: false, message: TEXT.workbench.errors.noFiles };
@@ -32,8 +34,18 @@ export function runInputs(entries: readonly UploadEntry[]): RunInputs {
   if (kept.some((entry) => IN_PROGRESS.has(entry.state.status))) {
     return { ok: false, message: TEXT.workbench.errors.uploading };
   }
-  if (kept.length > MAX_RUN_INPUTS) {
-    return { ok: false, message: TEXT.workbench.errors.tooManyFiles(MAX_RUN_INPUTS) };
+  if (kept.length > limits.maxInputs) {
+    return { ok: false, message: TEXT.workbench.errors.tooManyFiles(limits.maxInputs) };
+  }
+  const totalBytes = kept.reduce((sum, entry) => sum + entry.file.size, 0);
+  if (limits.maxTotalBytes !== null && totalBytes > limits.maxTotalBytes) {
+    return {
+      ok: false,
+      message: TEXT.workbench.errors.tooManyBytes(
+        formatBytes(totalBytes),
+        formatBytes(limits.maxTotalBytes),
+      ),
+    };
   }
   const uploadIds = kept.flatMap((entry) =>
     entry.state.status === "ready" ? [entry.state.uploadId] : [],

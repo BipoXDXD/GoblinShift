@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { createRoutes } from "../app/routes";
 import { axeViolations } from "../test/axe";
+import { catalogHandler, catalogVersion, withVersion } from "../test/catalog";
 import {
   fakeApi,
   jsonResponse,
@@ -24,11 +25,21 @@ type RunsHandler = (request: Request) => Response | Promise<Response> | null;
 const acceptedRun = () =>
   jsonResponse({ ...runBody(), idempotency_expires_at: "2026-10-15T12:00:00Z" }, 202);
 
-function setup({
+interface SetupOptions {
+  readonly runs?: RunsHandler;
+  readonly autoResolve?: boolean;
+  readonly recipe?: string;
+  readonly catalog?: () => Response | null;
+}
+
+function renderWorkbench({
   runs = acceptedRun,
   autoResolve = true,
-}: { runs?: RunsHandler; autoResolve?: boolean } = {}) {
+  recipe = "csv-janitor",
+  catalog = catalogHandler(),
+}: SetupOptions = {}) {
   const api = fakeApi({
+    "GET /api/v1/catalog": catalog,
     "POST /api/v1/uploads": uploadIntentsHandler(),
     "POST /api/v1/runs": runs,
     [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()),
@@ -41,8 +52,15 @@ function setup({
       rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
     },
   });
-  const view = renderRoutes({ routes, path: "/bancada/csv-janitor", client: api.client });
+  const view = renderRoutes({ routes, path: `/bancada/${recipe}`, client: api.client });
   return { ...view, api, pending, user: userEvent.setup() };
+}
+
+/** Bancada já com o catálogo carregado e o formulário na tela. */
+async function setup(options: SetupOptions = {}) {
+  const view = renderWorkbench(options);
+  await screen.findByLabelText("Escolher arquivos");
+  return view;
 }
 
 async function chooseFiles(user: ReturnType<typeof userEvent.setup>, names: readonly string[]) {
@@ -74,8 +92,8 @@ async function bodyOf(request: Request | undefined) {
 }
 
 describe("Bancada", () => {
-  it("abre com o foco no título e o estado vazio da lista", () => {
-    setup();
+  it("abre com o foco no título e o estado vazio da lista", async () => {
+    await setup();
 
     expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
     expect(screen.getByRole("heading", { name: "Nenhum arquivo escolhido" })).toBeInTheDocument();
@@ -101,7 +119,7 @@ describe("Bancada", () => {
   });
 
   it("envia os arquivos escolhidos e anuncia quando ficam prontos", async () => {
-    const { user } = setup();
+    const { user } = await setup();
 
     await chooseFiles(user, ["clientes.csv"]);
 
@@ -117,7 +135,7 @@ describe("Bancada", () => {
   });
 
   it("mostra o progresso real do envio", async () => {
-    const { user, pending } = setup({ autoResolve: false });
+    const { user, pending } = await setup({ autoResolve: false });
     await chooseFiles(user, ["clientes.csv"]);
     await waitFor(() => {
       expect(pending).toHaveLength(1);
@@ -134,7 +152,7 @@ describe("Bancada", () => {
   });
 
   it("Executar sem arquivos foca o resumo de erros e não chama a API", async () => {
-    const { user, api } = setup();
+    const { user, api } = await setup();
 
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
@@ -146,7 +164,7 @@ describe("Bancada", () => {
   });
 
   it("Executar com envio em curso pede para esperar", async () => {
-    const { user, pending } = setup({ autoResolve: false });
+    const { user, pending } = await setup({ autoResolve: false });
     await chooseFiles(user, ["a.csv"]);
     await waitFor(() => {
       expect(pending).toHaveLength(1);
@@ -158,7 +176,7 @@ describe("Bancada", () => {
   });
 
   it("cria a execução na ordem escolhida e abre a tela dela", async () => {
-    const { user, api } = setup();
+    const { user, api } = await setup();
     await chooseFiles(user, ["a.csv", "b.csv"]);
     await waitUntilSent(2);
 
@@ -176,7 +194,7 @@ describe("Bancada", () => {
 
   it("repetir o mesmo comando reusa a Idempotency-Key; mudar o comando gera outra", async () => {
     let calls = 0;
-    const { user, api } = setup({
+    const { user, api } = await setup({
       runs: () => {
         calls += 1;
         return calls < 3 ? problemResponse(503, "SERVICE_UNAVAILABLE") : acceptedRun();
@@ -204,7 +222,7 @@ describe("Bancada", () => {
   });
 
   it("erros por campo do servidor aparecem no campo, com o texto do servidor", async () => {
-    const { user } = setup({
+    const { user } = await setup({
       runs: () =>
         problemResponse(422, "VALIDATION_FAILED", {
           errors: [
@@ -234,7 +252,7 @@ describe("Bancada", () => {
   });
 
   it("erro por campo fora das regras da receita ganha texto próprio pelo código", async () => {
-    const { user } = setup({
+    const { user } = await setup({
       runs: () =>
         problemResponse(422, "VALIDATION_FAILED", {
           errors: [
@@ -264,7 +282,7 @@ describe("Bancada", () => {
   });
 
   it("recusa do servidor aparece com texto próprio, nunca o problem+json", async () => {
-    const { user } = setup({ runs: () => problemResponse(409, "ACTIVE_RUN_LIMIT") });
+    const { user } = await setup({ runs: () => problemResponse(409, "ACTIVE_RUN_LIMIT") });
     await chooseFiles(user, ["a.csv"]);
     await waitUntilSent(1);
 
@@ -277,7 +295,7 @@ describe("Bancada", () => {
   });
 
   it("arquivo que falhou pode ser enviado de novo ou removido", async () => {
-    const { user, pending } = setup({ autoResolve: false });
+    const { user, pending } = await setup({ autoResolve: false });
     await chooseFiles(user, ["a.csv", "b.csv"]);
     await waitFor(() => {
       expect(pending).toHaveLength(2);
@@ -296,12 +314,163 @@ describe("Bancada", () => {
   });
 
   it("não tem violações do axe com arquivos e erros na tela", async () => {
-    const { user, container } = setup();
+    const { user, container } = await setup();
     await chooseFiles(user, ["a.csv"]);
     await waitUntilSent(1);
     await user.click(screen.getByRole("button", { name: "Adicionar regra de caixa" }));
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+  it("mostra que está carregando a receita enquanto o catálogo não chega", () => {
+    renderWorkbench({ catalog: () => null });
+
+    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
+    expect(screen.getByText("Carregando a receita.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
+  });
+
+  it("falha do catálogo aparece com texto próprio e sem formulário", async () => {
+    renderWorkbench({ catalog: () => problemResponse(503, "SERVICE_UNAVAILABLE") });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/O serviço está indisponível/);
+    expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
+  });
+
+  it.each([
+    ["sem a versão do formulário", withVersion("csv-janitor", null)],
+    [
+      "com a versão num formato desconhecido",
+      withVersion("csv-janitor", { ...catalogVersion("csv-janitor"), defaults: {} }),
+    ],
+  ])("catálogo %s: receita indisponível, sem formulário", async (_, body) => {
+    renderWorkbench({ catalog: catalogHandler(body) });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Esta receita não está disponível no momento.",
+    );
+    expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
+  });
+
+  it("o máximo de arquivos vem do catálogo", async () => {
+    const { user, api } = await setup();
+    await chooseFiles(user, ["1.csv", "2.csv", "3.csv", "4.csv", "5.csv", "6.csv"]);
+    await waitUntilSent(6);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Use no máximo 5 arquivos.");
+    expect(runRequests(api.requests)).toHaveLength(0);
+  });
+
+  it("os defaults do formulário vêm do catálogo", async () => {
+    const version = catalogVersion("csv-janitor");
+    const { user, api } = await setup({
+      catalog: catalogHandler(
+        withVersion("csv-janitor", {
+          ...version,
+          defaults: { ...version.defaults, output_delimiter: ";" },
+        }),
+      ),
+    });
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Execução" });
+    expect((await bodyOf(runRequests(api.requests)[0])).parameters).toMatchObject({
+      output_delimiter: ";",
+    });
+  });
+
+  it("Image Forge: aceita imagens e cria a execução com os parâmetros do formulário", async () => {
+    const { user, api } = await setup({ recipe: "image-forge" });
+    expect(screen.getByRole("heading", { level: 1, name: "Bancada: Image Forge" })).toHaveFocus();
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute(
+      "accept",
+      ".jpg,.jpeg,.png,.mpo,image/jpeg,image/png",
+    );
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [
+      new File(["png"], "foto.png", { type: "image/png" }),
+    ]);
+    await waitUntilSent(1);
+    await user.click(screen.getByRole("checkbox", { name: "Gerar miniaturas" }));
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Execução" });
+    const body = await bodyOf(runRequests(api.requests)[0]);
+    expect(body).toMatchObject({ recipe_id: "image-forge", recipe_version: 1 });
+    expect(body.parameters).toEqual({
+      max_width: 1600,
+      max_height: 1600,
+      output_format: "preserve",
+      jpeg_quality: 85,
+      jpeg_background: "#FFFFFF",
+      make_thumbnails: true,
+    });
+  });
+
+  it("Image Forge: erro do servidor no campo aparece no campo", async () => {
+    const { user } = await setup({
+      recipe: "image-forge",
+      runs: () =>
+        problemResponse(422, "VALIDATION_FAILED", {
+          errors: [
+            {
+              field: "body.parameters.max_width",
+              code: "less_than_equal",
+              message: "Input should be less than or equal to 4096",
+            },
+          ],
+        }),
+    });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [new File(["x"], "a.png")]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await screen.findByRole("link", { name: "O valor passa do máximo permitido." });
+    expect(
+      screen.getByRole("textbox", { name: "Largura máxima, em pixels" }),
+    ).toHaveAccessibleDescription(/Erro: O valor passa do máximo permitido\./);
+  });
+
+  it("Downloads Detox: aceita qualquer tipo e respeita o teto de bytes do catálogo", async () => {
+    const version = catalogVersion("downloads-detox");
+    const { user, api } = await setup({
+      recipe: "downloads-detox",
+      catalog: catalogHandler(
+        withVersion("downloads-detox", {
+          ...version,
+          limits: { ...version.limits, max_total_input_bytes: 4 },
+        }),
+      ),
+    });
+    expect(screen.getByLabelText("Escolher arquivos")).not.toHaveAttribute("accept");
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [new File(["12345"], "a.zip")]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Os arquivos somam 5 bytes; o máximo por execução é 4 bytes.",
+    );
+    expect(runRequests(api.requests)).toHaveLength(0);
+  });
+
+  it("Downloads Detox: cria a execução sem prefixo quando os nomes são preservados", async () => {
+    const { user, api } = await setup({ recipe: "downloads-detox" });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [new File(["x"], "a.txt")]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Execução" });
+    expect(await bodyOf(runRequests(api.requests)[0])).toMatchObject({
+      recipe_id: "downloads-detox",
+      parameters: { deduplicate: true, group_by: "kind", name_mode: "preserve" },
+    });
   });
 });

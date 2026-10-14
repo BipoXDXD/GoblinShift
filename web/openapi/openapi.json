@@ -5,6 +5,71 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/catalog": {
+      "get": {
+        "summary": "Get Catalog",
+        "operationId": "getCatalog",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "O `ETag` enviado em `If-None-Match` continua válido."
+          }
+        }
+      }
+    },
     "/api/v1/me": {
       "get": {
         "summary": "Get Me",
@@ -1080,6 +1145,124 @@
                           "recipe_version",
                           "parameters"
                         ]
+                      },
+                      {
+                        "title": "image-forge v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "image-forge"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "max_width": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "max_height": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "output_format": {
+                                "enum": [
+                                  "preserve",
+                                  "jpeg",
+                                  "png"
+                                ],
+                                "title": "OutputFormat",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "jpeg_quality": {
+                                "default": 85,
+                                "maximum": 95,
+                                "minimum": 60,
+                                "title": "Jpeg Quality",
+                                "type": "integer"
+                              },
+                              "jpeg_background": {
+                                "default": "#FFFFFF",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "title": "Jpeg Background",
+                                "type": "string"
+                              },
+                              "make_thumbnails": {
+                                "default": false,
+                                "title": "Make Thumbnails",
+                                "type": "boolean"
+                              }
+                            },
+                            "title": "ImageForgeV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "downloads-detox v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "downloads-detox"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "deduplicate": {
+                                "default": true,
+                                "title": "Deduplicate",
+                                "type": "boolean"
+                              },
+                              "group_by": {
+                                "enum": [
+                                  "kind",
+                                  "none"
+                                ],
+                                "title": "GroupBy",
+                                "type": "string",
+                                "default": "kind"
+                              },
+                              "name_mode": {
+                                "enum": [
+                                  "preserve",
+                                  "indexed"
+                                ],
+                                "title": "NameMode",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "name_prefix": {
+                                "default": "file",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "title": "Name Prefix",
+                                "type": "string"
+                              }
+                            },
+                            "title": "DownloadsDetoxV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
                       }
                     ]
                   }
@@ -1666,7 +1849,9 @@
         "type": "string",
         "enum": [
           "output",
-          "report"
+          "report",
+          "manifest",
+          "package"
         ],
         "title": "ArtifactRole"
       },
@@ -1710,6 +1895,22 @@
           "error_code"
         ],
         "title": "CancelResponse"
+      },
+      "CatalogResponse": {
+        "properties": {
+          "recipes": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeResponse"
+            },
+            "type": "array",
+            "title": "Recipes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipes"
+        ],
+        "title": "CatalogResponse"
       },
       "ContentInstructions": {
         "properties": {
@@ -2000,6 +2201,64 @@
           "sha256"
         ],
         "title": "ReceivedContent"
+      },
+      "RecipeResponse": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeVersionResponse"
+            },
+            "type": "array",
+            "title": "Versions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "versions"
+        ],
+        "title": "RecipeResponse"
+      },
+      "RecipeVersionResponse": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/VersionStatus"
+          },
+          "limits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Limits"
+          },
+          "defaults": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Defaults"
+          },
+          "parameters_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters Schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "status",
+          "limits",
+          "defaults",
+          "parameters_schema"
+        ],
+        "title": "RecipeVersionResponse"
       },
       "ResultReferenceResponse": {
         "properties": {
@@ -2322,6 +2581,15 @@
           "parameters"
         ],
         "title": "ValidatedRunResponse"
+      },
+      "VersionStatus": {
+        "type": "string",
+        "enum": [
+          "current",
+          "deprecated",
+          "retired"
+        ],
+        "title": "VersionStatus"
       }
     }
   }
