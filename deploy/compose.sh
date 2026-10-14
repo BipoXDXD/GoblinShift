@@ -20,6 +20,9 @@ release_env="$root/secrets/release.env"
   exit 1
 }
 
+# `sudo -u goblinshift` herda o diretório de quem chamou, que esse usuário pode não ler, e o
+# Compose faz stat no diretório atual.
+cd "$app"
 export GS_ENVIRONMENT=production
 export GS_SECRETS_DIR="$root/secrets"
 export GS_PG_DATA="$root/pg/data"
