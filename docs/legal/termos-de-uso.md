@@ -8,15 +8,51 @@
 > decisão do dono do serviço. Notas marcadas como **Nota para a revisão** são perguntas ao
 > revisor e saem do texto final. As fontes internas de cada afirmação técnica estão no fim.
 
-- **Versão:** [[A DEFINIR: número da versão, gravado como `terms_version` no aceite]]
-- **Vigência:** [[A DEFINIR: data de publicação]]
-- **Endereço do serviço:** [[A DEFINIR: domínio definitivo]]
+## Pendências antes de publicar
+
+> Esta seção sai do texto final. Cada marcação `[[A DEFINIR (J-n) ...]]` traz o id do
+> levantamento da fatia 8. Nenhuma delas depende de código: os pontos que se resolviam lendo a
+> implementação já foram preenchidos.
+
+**Decide o dono do serviço** (o advogado só confere a redação):
+
+- **J-4**, versão e vigência (topo). Sugestão: `v1` e a data da publicação, com a versão gravada
+  em `terms_version`.
+- **J-5**, domínio definitivo (topo). Depende da compra do domínio.
+- **J-6**, e-mails de contato e de denúncia (itens 1 e 7). Sugestão: `contato@` e `abuso@` no
+  domínio, apontando para a mesma caixa.
+- **J-7**, política de divulgação de vulnerabilidades (item 6). Sugestão: `SECURITY.md` e
+  `/.well-known/security.txt`, com o e-mail de J-6.
+- **J-8**, outras condutas proibidas (item 6). Sugestão: mineração, uso como CDN ou hospedagem
+  de arquivos, automação fora da API documentada, várias contas para contornar cotas.
+- **J-9**, prazo de resposta às denúncias (item 7). Sugestão: 72 h para a triagem; conteúdo
+  ilegal grave, na hora.
+- **J-10**, aviso prévio ou recurso no bloqueio (item 8). Sugestão: recurso por e-mail depois do
+  bloqueio, sem aviso prévio em casos de segurança.
+- **J-11**, aviso prévio no encerramento do serviço (item 8). Sugestão: 30 dias de aviso no site.
+- **J-12**, licença do código; o repositório ainda não tem `LICENSE` (item 9). Opções: MIT,
+  Apache-2.0 ou AGPL-3.0.
+- **J-13**, marca e ilustrações (item 9). Depende das licenças dos geradores dos assets.
+- **J-14**, antecedência de aviso de mudança e onde fica o histórico (item 12). Sugestão: 15 dias
+  e `docs/legal/` no Git.
+
+**Exige advogado(a):**
+
+- **J-16**, identificação de quem oferece o serviço (item 1).
+- **J-18**, idade mínima e contas de menores (item 2).
+- **J-20**, procedimento para abuso sexual infantil e conteúdo ilegal grave: autoridades,
+  preservação, prazos e a expiração de 48 h (item 7). Este procedimento não é escrito por IA.
+- **J-21**, foro em relação de consumo (item 13).
+
+- **Versão:** [[A DEFINIR (J-4): número da versão, gravado como `terms_version` no aceite]]
+- **Vigência:** [[A DEFINIR (J-4): data de publicação]]
+- **Endereço do serviço:** [[A DEFINIR (J-5): domínio definitivo]]
 
 ## 1. Quem oferece o serviço
 
-O GoblinShift é oferecido por [[A DEFINIR: nome completo ou razão social do controlador, CPF ou
+O GoblinShift é oferecido por [[A DEFINIR (J-16): nome completo ou razão social do controlador, CPF ou
 CNPJ, e endereço]] ("nós"). Contato geral, denúncias e pedidos sobre dados pessoais:
-[[A DEFINIR: e-mail de contato]].
+[[A DEFINIR (J-6): e-mail de contato]].
 
 O GoblinShift é um projeto de portfólio, gratuito, com código-fonte público. Não há plano pago
 nem cobrança de nenhum tipo.
@@ -30,7 +66,7 @@ ele, o uso não continua.
 
 Se você não concorda com estes Termos, não use o serviço.
 
-[[A DEFINIR: idade mínima para usar o serviço e o que fazer com contas de menores. Google e
+[[A DEFINIR (J-18): idade mínima para usar o serviço e o que fazer com contas de menores. Google e
 GitHub têm idade mínima própria, mas o GoblinShift não recebe a data de nascimento e não tem
 como verificar idade.]]
 
@@ -99,11 +135,11 @@ Você concorda em **não** usar o GoblinShift para:
    autorização;
 7. tentar escapar do ambiente isolado de processamento, atacar o servidor ou a rede, ou testar
    vulnerabilidades sem autorização prévia por escrito
-   [[A DEFINIR: haverá política de divulgação responsável de vulnerabilidades? Se sim, indicar
+   [[A DEFINIR (J-7): haverá política de divulgação responsável de vulnerabilidades? Se sim, indicar
    o canal e a referência aqui]];
 8. distribuir malware ou usar o serviço como intermediário de qualquer ataque.
 
-[[A DEFINIR: outras condutas proibidas que o dono queira listar.]]
+[[A DEFINIR (J-8): outras condutas proibidas que o dono queira listar.]]
 
 ## 7. Abuso sexual infantil e outros conteúdos ilegais
 
@@ -114,7 +150,7 @@ Ao tomarmos conhecimento desse conteúdo, por denúncia ou de outro modo:
   impede novos logins da mesma identidade;
 - o acesso ao conteúdo é **bloqueado imediatamente**;
 - preservamos os registros e o material necessários e comunicamos às autoridades competentes,
-  na forma da lei [[A DEFINIR com orientação jurídica: quais autoridades e canais (por exemplo,
+  na forma da lei [[A DEFINIR (J-20) com orientação jurídica: quais autoridades e canais (por exemplo,
   Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a
   preservação com a expiração automática de 48 horas; o plano registra que esse procedimento
   exige orientação jurídica e não pode ser escrito por IA]].
@@ -123,15 +159,15 @@ Para os demais conteúdos ilegais, adotamos as mesmas medidas que forem cabívei
 não faz, nesta versão, varredura automatizada do conteúdo dos arquivos para moderação: a
 contenção de abuso se apoia em limites, privacidade dos arquivos, expiração curta e denúncias.
 
-**Como denunciar:** escreva para [[A DEFINIR: e-mail de denúncias]] com o máximo de informação
+**Como denunciar:** escreva para [[A DEFINIR (J-6): e-mail de denúncias]] com o máximo de informação
 que puder (o que, quando, e qualquer identificador de execução ou de arquivo que você tenha).
 Não anexe nem reenvie conteúdo de abuso sexual infantil: descreva-o.
-[[A DEFINIR: prazo de resposta às denúncias.]]
+[[A DEFINIR (J-9): prazo de resposta às denúncias.]]
 
 ## 8. Suspensão e encerramento
 
 - **Por nós.** Podemos bloquear a conta que violar estes Termos, que puser em risco o serviço
-  ou outros usuários, ou quando a lei exigir. [[A DEFINIR: haverá aviso prévio ou canal de
+  ou outros usuários, ou quando a lei exigir. [[A DEFINIR (J-10): haverá aviso prévio ou canal de
   recurso para o bloqueio, salvo nos casos do item 7?]]
 - **Por você.** Você pode excluir sua conta a qualquer momento pela própria conta (operação
   `DELETE /me`, que exige login recente). A exclusão revoga sessões e chaves, cancela a
@@ -139,7 +175,7 @@ Não anexe nem reenvie conteúdo de abuso sexual infantil: descreva-o.
   Cópias no backup do banco de dados deixam de existir quando o backup expira, em até 30 dias
   (detalhes no Aviso de Privacidade).
 - **Fim do serviço.** Por ser um projeto de portfólio gratuito, o serviço pode ser alterado,
-  suspenso ou encerrado. [[A DEFINIR: aviso prévio mínimo em caso de encerramento.]]
+  suspenso ou encerrado. [[A DEFINIR (J-11): aviso prévio mínimo em caso de encerramento.]]
 
 ## 9. Conteúdo e propriedade
 
@@ -147,9 +183,9 @@ Não anexe nem reenvie conteúdo de abuso sexual infantil: descreva-o.
   processá-los pelo tempo e para a finalidade necessários para executar as receitas que você
   pedir e entregar os resultados a você.
 - Você declara ter o direito de enviar e processar os arquivos que envia.
-- O código do GoblinShift é público. [[A DEFINIR: licença do código-fonte; o repositório ainda
+- O código do GoblinShift é público. [[A DEFINIR (J-12): licença do código-fonte; o repositório ainda
   não tem arquivo de licença]]. Nome, marca e ilustrações do GoblinShift
-  [[A DEFINIR: condições de uso da marca e das ilustrações]].
+  [[A DEFINIR (J-13): condições de uso da marca e das ilustrações]].
 
 ## 10. Ausência de garantias e limitação de responsabilidade
 
@@ -178,13 +214,13 @@ que faz parte destes Termos.
 ## 12. Mudanças nestes Termos
 
 Podemos atualizar estes Termos. Cada versão tem número e data; a mudança de versão pede novo
-aceite no login seguinte. [[A DEFINIR: antecedência mínima de aviso para mudanças relevantes e
+aceite no login seguinte. [[A DEFINIR (J-14): antecedência mínima de aviso para mudanças relevantes e
 onde o histórico de versões fica publicado.]]
 
 ## 13. Lei aplicável e foro
 
 Estes Termos são regidos pelas leis da República Federativa do Brasil.
-[[A DEFINIR: foro. Nota para a revisão: em relação de consumo, o consumidor pode demandar no
+[[A DEFINIR (J-21): foro. Nota para a revisão: em relação de consumo, o consumidor pode demandar no
 foro do próprio domicílio (CDC, art. 101, I).]]
 
 ---
