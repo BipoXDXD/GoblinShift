@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { ApiError, createApiClient, type ApiFailure } from "./client";
+import { createApiClient } from "./client";
+import { ApiError, type ApiFailure } from "./response";
 
 const NOW_MS = Date.parse("2026-10-14T12:00:00Z");
 const thing = z.object({ id: z.string() });
