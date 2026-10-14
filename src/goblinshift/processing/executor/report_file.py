@@ -8,10 +8,12 @@ from typing import assert_never
 from goblinshift.processing.executor.job import Job
 from goblinshift.processing.recipe import (
     FailureCode,
+    ItemDuplicate,
     ItemOk,
     ItemRejected,
     RecipeFailure,
     Report,
+    ReportItem,
     ReportWarning,
 )
 
@@ -35,6 +37,7 @@ def write_report(path: Path, report: Report, job: Job, max_bytes: int = REPORT_M
 def encode_report(report: Report, job: Job) -> bytes:
     names = {entry.position: entry.original_name for entry in job.inputs}
     ok = [item for item in report.items if isinstance(item, ItemOk)]
+    rejected = [item for item in report.items if isinstance(item, ItemRejected)]
     document = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "recipe_id": job.recipe_id,
@@ -42,16 +45,18 @@ def encode_report(report: Report, job: Job) -> bytes:
         "summary": {
             "inputs": len(report.items),
             "ok": len(ok),
-            "rejected": len(report.items) - len(ok),
+            "rejected": len(rejected),
+            "duplicates": len(report.items) - len(ok) - len(rejected),
             "outputs": sum(len(item.outputs) for item in ok),
         },
         "items": [_item(item, names[item.position]) for item in report.items],
         "warnings": _warnings(report.warnings),
+        "details": dict(report.details),
     }
     return (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
 
 
-def _item(item: ItemOk | ItemRejected, original_name: str) -> dict[str, object]:
+def _item(item: ReportItem, original_name: str) -> dict[str, object]:
     match item:
         case ItemOk():
             return {
@@ -60,6 +65,7 @@ def _item(item: ItemOk | ItemRejected, original_name: str) -> dict[str, object]:
                 "status": "ok",
                 "outputs": list(item.outputs),
                 "counts": dict(item.counts),
+                "details": dict(item.details),
                 "warnings": _warnings(item.warnings),
             }
         case ItemRejected():
@@ -69,6 +75,13 @@ def _item(item: ItemOk | ItemRejected, original_name: str) -> dict[str, object]:
                 "status": "rejected",
                 "code": item.code,
                 "reason": item.reason,
+            }
+        case ItemDuplicate():
+            return {
+                "position": item.position,
+                "original_name": original_name,
+                "status": "duplicate",
+                "duplicate_of": item.duplicate_of,
             }
         case unreachable:
             assert_never(unreachable)

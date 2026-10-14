@@ -76,7 +76,13 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"], row["error_code"]) == ("succeeded", None, None)
     assert row["finished_at"] is not None
-    assert row["summary"] == {"inputs": 1, "ok": 1, "rejected": 0, "outputs": 1}
+    assert row["summary"] == {
+        "inputs": 1,
+        "ok": 1,
+        "rejected": 0,
+        "duplicates": 0,
+        "outputs": 1,
+    }
     assert outputs_of(factory, run_id) == [("clientes.csv", "output"), ("report.json", "report")]
     assert input_outcomes(factory, run_id) == [("ok", None)]
     [only] = attempts(factory, run_id)
