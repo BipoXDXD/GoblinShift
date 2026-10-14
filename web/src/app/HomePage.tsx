@@ -47,6 +47,8 @@ export function HomePage(): ReactElement {
                 className="card-link inline-flex min-h-11 items-center gap-1 font-semibold"
               >
                 {T.openWorkbench}
+                {/* O espaço fica fora do sr-only: fora do fluxo, o span perde o espaço inicial,
+                    e o nome acessível juntava as palavras ("Bancadada"). */}{" "}
                 <span className="sr-only">{T.openWorkbenchOf(recipe.title)}</span>
                 <ChevronRight aria-hidden="true" className="size-4" />
               </Link>
