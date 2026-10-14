@@ -84,19 +84,17 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Worker e manutenção (3.4). O Runner local em subprocesso é provisório até a fatia 4 (ADR 016):
-  # o executor roda no próprio container do worker, por isso o `init` que colhe os órfãos.
+  # Worker e manutenção (3.4). O Runner e o que ele exige do container ficam em cada ambiente:
+  # o local (subprocesso, só desenvolvimento) em compose.override.yaml; o executor-ctl
+  # (container gVisor por tentativa, criado pelo serviço do host) em compose.prod.yaml.
   worker:
     <<: *app
     command: ["gs-worker"]
-    init: true
     environment: &worker-env
       <<: *app-env
       GS_STORAGE_ROOT: /var/lib/goblinshift/storage/objects
-      GS_WORK_ROOT: /var/lib/goblinshift/work
-      GS_RUNNER: local
       OTEL_SERVICE_NAME: goblinshift-worker
-    volumes: [*storage, "work:/var/lib/goblinshift/work"]
+    volumes: [*storage]
     depends_on: &worker-deps
       migrate:
         condition: service_completed_successfully
@@ -106,20 +104,14 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
-  # A manutenção consulta e para executores do Runner local pelo grupo de processos, então
-  # compartilha o namespace de PIDs e a área de trabalho do worker (provisório, ADR 016).
   maintenance:
     <<: *app
     command: ["gs-maintenance"]
-    pid: "service:worker"
     environment:
       <<: *worker-env
       OTEL_SERVICE_NAME: goblinshift-maintenance
-    volumes: [*storage, "work:/var/lib/goblinshift/work"]
-    depends_on:
-      <<: *worker-deps
-      worker:
-        condition: service_started
+    volumes: [*storage]
+    depends_on: *worker-deps
     restart: unless-stopped
 
   nginx:
@@ -172,7 +164,6 @@ volumes:
   pgdata:
   telemetry:
   storage:
-  work:
 
 networks:
   internal:
