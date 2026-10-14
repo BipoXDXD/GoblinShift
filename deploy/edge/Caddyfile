@@ -1,0 +1,12 @@
+# Proxy de borda do host (ADR 014). Só opções globais; cada projeto entrega o seu trecho em
+# conf.d/<projeto>.caddy e nunca sobrescreve o de outro.
+{
+	servers {
+		# HTTP/3 fora: a 443/udp não é publicada.
+		protocols h1 h2
+		# Sem trusted_proxies, de propósito: a borda é o primeiro salto voltado para a
+		# internet e troca o X-Forwarded-For do cliente pelo IP de quem conectou.
+	}
+}
+
+import /etc/caddy/conf.d/*.caddy
