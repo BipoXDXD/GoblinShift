@@ -21,6 +21,7 @@ from sqlalchemy import Connection, Engine, Table, insert, inspect, update
 from sqlalchemy.exc import IntegrityError
 
 # Importar os módulos registra as tabelas no MetaData comum.
+import goblinshift.capacity.tables  # noqa: F401
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.identity.tables import api_key, app_user

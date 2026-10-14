@@ -47,10 +47,13 @@ def test_me_devolve_a_conta_e_os_escopos_da_chave(
     response = client.get(ME, headers=bearer(issued.token))
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    # Limites e consumo têm teste próprio (test_me_usage.py).
+    assert {key: body[key] for key in ("id", "display_name", "scopes", "via")} == {
         "id": str(user_id),
         "display_name": "Conta de teste",
         "scopes": ["files:read", "runs:write"],
+        "via": "api_key",
     }
 
 
