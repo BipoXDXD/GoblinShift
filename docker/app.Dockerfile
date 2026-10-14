@@ -15,7 +15,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 
 FROM python:3.14.8-slim-trixie
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
+ # Volumes novos herdam o dono destas pastas; sem isso nasceriam do root.
+ && install -d -o app -g app -m 700 /var/lib/goblinshift/storage /var/lib/goblinshift/work
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY alembic.ini ./

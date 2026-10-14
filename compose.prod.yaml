@@ -2,6 +2,16 @@
 # O Nginx do GoblinShift entra na rede `edge`, onde o proxy de borda do host o encontra
 # pelo nome `goblinshift-web`. Nenhuma porta é publicada pelo projeto.
 services:
+  api:
+    environment:
+      GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+  # Runner local em produção só com confirmação explícita, até a fatia 4 (ADR 016).
+  worker:
+    environment:
+      GS_ALLOW_LOCAL_RUNNER: "true"
+  maintenance:
+    environment:
+      GS_ALLOW_LOCAL_RUNNER: "true"
   nginx:
     networks:
       internal: {}
