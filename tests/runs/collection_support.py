@@ -89,7 +89,7 @@ def manifest_for(out: Path) -> dict[str, Any]:
         "schema_version": 1,
         "recipe": {"id": RECIPE, "version": 1, "executor_image": None},
         "parameters": {},
-        "inputs": [],
+        "inputs": [_manifest_input(item) for item in _report_items(out)],
         "outputs": [
             {
                 "path": name,
@@ -101,6 +101,29 @@ def manifest_for(out: Path) -> dict[str, Any]:
         ],
         "warnings": [],
     }
+
+
+def _report_items(out: Path) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = json.loads((out / "report.json").read_bytes())["items"]
+    return items
+
+
+def _manifest_input(item: dict[str, Any]) -> dict[str, Any]:
+    """A entrada do manifesto que o empacotador escreve para o item do relatório."""
+    common = {
+        "position": item["position"],
+        "original_name": item["original_name"],
+        "size": 1,
+        "sha256": "0" * 64,
+        "status": item["status"],
+    }
+    match item["status"]:
+        case "ok":
+            return {**common, "outputs": item["outputs"], "warnings": item["warnings"]}
+        case "rejected":
+            return {**common, "code": item["code"], "reason": item["reason"]}
+        case _:
+            return {**common, "duplicate_of": item["duplicate_of"]}
 
 
 def write_manifest(out: Path, manifest: object) -> None:

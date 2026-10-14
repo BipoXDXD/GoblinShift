@@ -5,7 +5,11 @@
 não confiável. O pacote só passa se disser exatamente o que out/ tem:
 
 - o manifesto (schema 1) lista em `outputs`, na ordem, as saídas citadas no relatório, cada uma com
-  o caminho, o tamanho e o SHA-256 que o worker calculou;
+  o caminho, o tamanho e o SHA-256 que o worker calculou; em `inputs`, uma entrada por item do
+  relatório, com a mesma posição, o mesmo desfecho (status, saídas, código do catálogo,
+  duplicata) e só as chaves do schema; em `recipe`, a receita da Run. Os textos (nome original,
+  motivo, avisos) são da receita, como no `report.json`; parâmetros, versão, imagem e digests das
+  entradas não são conferidos aqui;
 - o ZIP tem exatamente as saídas, o manifesto e o relatório, nessa ordem e com esses nomes. Como os
   nomes esperados são caminhos reais de out/, já conferidos pela coleta, a igualdade recusa
   entradas extras ou repetidas, caminho absoluto, `..` e diretório;
@@ -56,8 +60,26 @@ _CENTRAL_HEADER = struct.Struct("<4s6H3L5H2L")
 _CENTRAL_SIGNATURE = b"PK\x01\x02"
 # Uma entrada do diretório central: os 46 bytes fixos e o nome, sem extras nem comentário.
 _MAX_CENTRAL_ENTRY_BYTES = _CENTRAL_HEADER.size + MAX_PATH_BYTES
-# O que o zipfile levanta diante de um arquivo malformado (CRC, cabeçalho, fluxo DEFLATE).
-_MALFORMED = (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, EOFError, NotImplementedError)
+# O que o zipfile levanta diante de um arquivo malformado (CRC, cabeçalho, fluxo DEFLATE, nome
+# com a flag UTF-8 e bytes inválidos). A leitura canônica já recusa os conhecidos; isto é a rede.
+_MALFORMED = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    zlib.error,
+    EOFError,
+    NotImplementedError,
+    UnicodeDecodeError,
+)
+# Chaves do manifesto de schema 1 (`processing/packaging/manifest.py`).
+_MANIFEST_KEYS = {"schema_version", "recipe", "parameters", "inputs", "outputs", "warnings"}
+_RECIPE_KEYS = {"id", "version", "executor_image"}
+_OUTPUT_KEYS = {"path", "size", "sha256", "source_position"}
+_INPUT_COMMON_KEYS = {"position", "original_name", "size", "sha256", "status"}
+_INPUT_KEYS = {
+    "ok": _INPUT_COMMON_KEYS | {"outputs", "warnings"},
+    "rejected": _INPUT_COMMON_KEYS | {"code", "reason"},
+    "duplicate": _INPUT_COMMON_KEYS | {"duplicate_of"},
+}
 
 
 class PackageError(Exception):
@@ -77,8 +99,24 @@ class DigestedFile(Protocol):
     def sha256(self) -> bytes: ...
 
 
-def verify_manifest(data: bytes, contents: Sequence[DigestedFile]) -> None:
-    """O manifesto lista exatamente `contents`, na ordem, com tamanho e SHA-256."""
+@dataclass(frozen=True)
+class ManifestInput:
+    """O desfecho de uma entrada como o relatório já conferido o dá."""
+
+    position: int
+    status: str  # "ok", "rejected" ou "duplicate"
+    outputs: tuple[str, ...]
+    code: str | None
+    duplicate_of: int | None
+
+
+def verify_manifest(
+    data: bytes,
+    contents: Sequence[DigestedFile],
+    inputs: Sequence[ManifestInput],
+    recipe_id: str,
+) -> None:
+    """O manifesto lista exatamente `contents` e `inputs`, na ordem, para a receita da Run."""
     try:
         document = parse_strict_json(data)
     except ValueError:
@@ -87,10 +125,45 @@ def verify_manifest(data: bytes, contents: Sequence[DigestedFile]) -> None:
         document.get("schema_version"), MANIFEST_SCHEMA_VERSION
     ):
         raise PackageError("manifesto com schema_version desconhecida")
-    listed = document.get("outputs")
+    if document.keys() != _MANIFEST_KEYS or not _is_recipe(document["recipe"], recipe_id):
+        raise PackageError("manifesto com chaves ou receita fora do schema 1")
+    listed = document["outputs"]
     expected = [(item.name, item.size, item.sha256.hex()) for item in contents]
     if not isinstance(listed, list) or [_listed(raw) for raw in listed] != expected:
         raise PackageError("manifesto não lista exatamente as saídas coletadas")
+    listed_inputs = document["inputs"]
+    expected_inputs = [_input_fields(item) for item in inputs]
+    if (
+        not isinstance(listed_inputs, list)
+        or [_listed_input(raw) for raw in listed_inputs] != expected_inputs
+    ):
+        raise PackageError("manifesto não lista as entradas como o relatório")
+
+
+def _is_recipe(raw: object, recipe_id: str) -> bool:
+    return isinstance(raw, dict) and raw.keys() == _RECIPE_KEYS and raw["id"] == recipe_id
+
+
+def _input_fields(item: ManifestInput) -> tuple[object, ...]:
+    return (item.position, item.status, item.outputs, item.code, item.duplicate_of)
+
+
+def _listed_input(raw: object) -> tuple[object, ...] | None:
+    if not isinstance(raw, dict):
+        return None
+    status = raw.get("status")
+    keys = _INPUT_KEYS.get(status) if isinstance(status, str) else None
+    outputs = raw.get("outputs", [])
+    if keys is None or raw.keys() != keys or not isinstance(outputs, list):
+        return None
+    position, duplicate_of = raw["position"], raw.get("duplicate_of")
+    return (
+        position if _is_int(position) else None,
+        status,
+        tuple(outputs),
+        raw.get("code"),
+        duplicate_of if _is_int(duplicate_of) else None,
+    )
 
 
 def verify_zip(path: Path, expected: Sequence[DigestedFile], heartbeat: Callable[[], None]) -> None:
@@ -241,7 +314,7 @@ def _require_same_content(
 
 
 def _listed(raw: object) -> tuple[object, object, object] | None:
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or raw.keys() != _OUTPUT_KEYS:
         return None
     size = raw.get("size")
     return (raw.get("path"), size if _is_int(size) else None, raw.get("sha256"))
