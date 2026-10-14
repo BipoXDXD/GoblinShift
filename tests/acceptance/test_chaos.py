@@ -329,7 +329,8 @@ def test_linha_de_tentativa_e_lida_do_psql() -> None:
     )
 
 
-EXPECTED_NAMES = {"caos-1.csv", "caos-2.csv", "report.json"}
+# Desde a fatia 5, toda execução publica também o manifesto e o pacote (ADR 019).
+EXPECTED_NAMES = {"caos-1.csv", "caos-2.csv", "report.json", "manifest.json", "csv-janitor.zip"}
 
 
 def published(generation: int = 2) -> list[OutputRow]:
@@ -337,6 +338,8 @@ def published(generation: int = 2) -> list[OutputRow]:
         OutputRow(0, "output", "caos-1.csv", generation),
         OutputRow(1, "output", "caos-2.csv", generation),
         OutputRow(2, "report", "report.json", generation),
+        OutputRow(3, "manifest", "manifest.json", generation),
+        OutputRow(4, "package", "csv-janitor.zip", generation),
     ]
 
 
@@ -356,6 +359,20 @@ def test_publicacao_unica_da_geracao_final_passa() -> None:
 )
 def test_publicacao_faltando_duplicada_ou_de_geracao_vencida_falha(rows: list[OutputRow]) -> None:
     assert not chaos.judge_publication(rows, final_generation=2, expected=EXPECTED_NAMES).passed
+
+
+@pytest.mark.parametrize(
+    ("position", "role"), [(3, "output"), (4, "output"), (2, "output"), (0, "package")]
+)
+def test_publicacao_com_papel_trocado_falha(position: int, role: str) -> None:
+    rows = published()
+    rows[position] = OutputRow(position, role, rows[position].file_name, 2)
+
+    assert not chaos.judge_publication(rows, final_generation=2, expected=EXPECTED_NAMES).passed
+
+
+def test_nomes_esperados_incluem_relatorio_manifesto_e_pacote_da_receita() -> None:
+    assert chaos.expected_publication({"caos-1.csv", "caos-2.csv"}) == EXPECTED_NAMES
 
 
 def test_linha_de_saida_publicada_e_lida_do_psql() -> None:

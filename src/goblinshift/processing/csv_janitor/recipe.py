@@ -16,7 +16,6 @@ from goblinshift.processing.csv_janitor.params import Params
 from goblinshift.processing.csv_janitor.results import TableCleaned, TableRejected
 from goblinshift.processing.names import safe_stem
 from goblinshift.processing.recipe import (
-    InputContractError,
     InputFile,
     ItemOk,
     ItemRejected,
@@ -25,6 +24,7 @@ from goblinshift.processing.recipe import (
     Progress,
     Report,
     ReportWarning,
+    require_max_inputs,
 )
 
 RECIPE_ID = "csv-janitor"
@@ -42,10 +42,7 @@ class CsvJanitorV1:
     def run(
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
-        if len(inputs) > self._max_tables:
-            raise InputContractError(
-                f"{len(inputs)} tabelas; o limite por execução é {self._max_tables}"
-            )
+        require_max_inputs(inputs, self._max_tables, "tabelas")
         items: list[ItemOk | ItemRejected] = []
         for table in inputs:
             items.append(self._clean_one(table, params, out))

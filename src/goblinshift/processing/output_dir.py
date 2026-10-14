@@ -19,7 +19,7 @@ import unicodedata
 from collections.abc import Buffer, Iterator, Sequence
 from pathlib import Path
 
-from goblinshift.processing.names import has_unsafe_char
+from goblinshift.processing.names import has_unsafe_char, split_extension
 from goblinshift.processing.recipe import (
     FailureCode,
     OutputFile,
@@ -100,7 +100,7 @@ class FileSystemOutputDir:
         return group.value
 
     def _claim_unique(self, prefix: str, name: str, position: int) -> str:
-        stem, extension = _split_extension(name)
+        stem, extension = split_extension(name)
         candidates = (
             prefix + _fit(stem, suffix, extension) for suffix in _collision_suffixes(position)
         )
@@ -126,14 +126,6 @@ def _validated_nfc(name: str) -> str:
     if has_unsafe_char(normalized):
         raise InvalidOutputNameError(f"nome de saída com caractere de controle: {name!r}")
     return normalized
-
-
-def _split_extension(name: str) -> tuple[str, str]:
-    """Separa a extensão no último ponto; um ponto inicial (`.config`) não é extensão."""
-    stem, dot, extension = name.rpartition(".")
-    if not dot or not stem:
-        return name, ""
-    return stem, f".{extension}"
 
 
 def _fit(stem: str, suffix: str, extension: str) -> str:

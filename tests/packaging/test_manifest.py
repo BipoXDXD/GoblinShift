@@ -155,7 +155,7 @@ def test_parametros_saem_com_chaves_ordenadas_em_todos_os_niveis() -> None:
     spec = PackageSpec(
         "csv-janitor", 1, IMAGE, {"z": [{"b": 1, "a": 2}], "a": {"y": 1, "x": 2}}, INPUTS[:1]
     )
-    report = Report(items=(ItemRejected(0, "C", "r"),))
+    report = Report(items=(ItemRejected(0, "UNSUPPORTED_FORMAT", "r"),))
 
     raw = encode_manifest(report, spec, {}).decode()
 
@@ -200,7 +200,7 @@ def test_digest_de_arquivo_que_nao_e_saida_e_erro_de_programacao() -> None:
 
 
 def test_relatorio_que_nao_casa_com_as_entradas_e_erro_de_programacao() -> None:
-    report = Report(items=(ItemRejected(0, "C", "r"),))
+    report = Report(items=(ItemRejected(0, "UNSUPPORTED_FORMAT", "r"),))
 
     with pytest.raises(ValueError, match="posições"):
         encode_manifest(report, SPEC, {})

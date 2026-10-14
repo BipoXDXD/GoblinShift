@@ -1,19 +1,22 @@
 """Rotas de teste e conferência de problem+json para os testes da API."""
 
+import contextlib
 from collections.abc import Iterator
 from typing import Annotated, Any
 from uuid import UUID
 
 import httpx2 as httpx
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy import Engine, text
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from goblinshift.entrypoints.api.dependencies import require_scope
 from goblinshift.entrypoints.api.json_command import json_command, read_json_command
 from goblinshift.entrypoints.api.problems import PROBLEMS, ProblemCode
+from goblinshift.entrypoints.api.wide_event import QUERY_STARTS_KEY
 from goblinshift.identity import Principal, Scope
 
 PROBLEM_KEYS = {"type", "title", "status", "detail", "instance", "code", "request_id"}
@@ -59,6 +62,15 @@ def add_test_routes(app: FastAPI) -> None:
             raise StreamInterruptedError("o disco sumiu no meio do download")
 
         return StreamingResponse(chunks())
+
+    @router.get("/failed-query")
+    def failed_query(request: Request) -> dict[str, int]:
+        """Consulta que o PostgreSQL recusa; devolve os inícios de consulta que sobraram."""
+        engine: Engine = request.app.state.engine
+        with engine.connect() as conn:
+            with contextlib.suppress(DBAPIError):
+                conn.execute(text("SELECT CAST('não é uuid' AS uuid)"))
+            return {"pending_query_starts": len(conn.info.get(QUERY_STARTS_KEY, []))}
 
     @router.get("/files-write")
     def files_write(
