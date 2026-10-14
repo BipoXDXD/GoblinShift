@@ -65,7 +65,9 @@ def publish(app: FastAPI, owner: uuid.UUID, content: bytes) -> uuid.UUID:
     )
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
-        return publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT).id
+        return publish_artifact(
+            session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv"
+        ).id
 
 
 def occupy_slots(

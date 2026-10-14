@@ -51,6 +51,7 @@ class DownloadTicket:
     size_bytes: int
     sha256: bytes
     role: ArtifactRole
+    file_name: str
 
 
 def create_candidate_object(
@@ -104,7 +105,11 @@ def commit_candidate(
 
 
 def publish_artifact(
-    session: Session, owner_id: uuid.UUID, object_id: uuid.UUID, role: ArtifactRole
+    session: Session,
+    owner_id: uuid.UUID,
+    object_id: uuid.UUID,
+    role: ArtifactRole,
+    file_name: str,
 ) -> ArtifactView:
     """Cria o artefato sobre um objeto `committed` do dono, com retenção de 48 h (1.7).
 
@@ -128,6 +133,7 @@ def publish_artifact(
             owner_id=owner_id,
             object_id=object_id,
             role=role,
+            file_name=file_name,
             expires_at=func.now() + ARTIFACT_TTL,
         )
         .returning(artifact.c.id, artifact.c.created_at, artifact.c.expires_at)
@@ -190,6 +196,7 @@ def open_for_download(
         select(
             artifact.c.object_id,
             artifact.c.role,
+            artifact.c.file_name,
             artifact.c.deleted_at,
             artifact.c.expires_at <= func.now(),
             stored_object.c.storage_key,
@@ -202,7 +209,7 @@ def open_for_download(
     ).one_or_none()
     if row is None:
         raise ArtifactNotFoundError
-    object_id, role, deleted_at, expired, storage_key, size_bytes, sha256 = row
+    object_id, role, file_name, deleted_at, expired, storage_key, size_bytes, sha256 = row
     if deleted_at is not None or expired:
         raise ArtifactGoneError
     holder_id = uuid.uuid7()
@@ -212,7 +219,7 @@ def open_for_download(
         # Artefato válido sobre objeto ausente (`missing`): para o dono, o conteúdo sumiu.
         raise ArtifactGoneError from None
     return DownloadTicket(
-        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role)
+        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role), file_name
     )
 
 
