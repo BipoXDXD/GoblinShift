@@ -21,6 +21,7 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -32,8 +33,7 @@ from .service import MAX_STOP_GRACE_S, ExecutorService
 from .workarea import WorkAreaDirtyError, WorkDirMissingError
 
 MAX_BODY_BYTES = 1024
-# Um corpo acima do limite, mas até este tamanho, é lido e descartado antes do 413: fechar com
-# bytes não lidos faz o cliente receber reset em vez da resposta.
+# Corpo não usado (413, 404, 405...) até este tamanho é lido e descartado antes da resposta.
 DISCARD_LIMIT_BYTES = 64 * 1024
 READ_TIMEOUT_S = 5.0
 SOCKET_MODE = 0o660
@@ -179,6 +179,7 @@ class ControlHandler(BaseHTTPRequestHandler):
 
     def setup(self) -> None:
         super().setup()
+        self._body_consumed = False
         # Prazo por leitura: vale para a linha de requisição, os cabeçalhos e o corpo.
         self.connection.settimeout(self.server.read_timeout_s)
 
@@ -275,7 +276,6 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise _invalid("Content-Length inválido")
         length = int(length_header)
         if length > MAX_BODY_BYTES:
-            self._discard(length)
             raise RequestError(
                 HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                 "body_too_large",
@@ -287,19 +287,29 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise _ClientGoneError from error
         if len(body) != length:
             raise _ClientGoneError
+        self._body_consumed = True
         return body
 
-    def _discard(self, length: int) -> None:
-        if length > DISCARD_LIMIT_BYTES:
+    def _discard_unread_body(self) -> None:
+        """Lê e descarta o corpo que a resposta não usou (erro antes de chegar a ele).
+
+        Fechar o socket com bytes não lidos faz o cliente receber reset em vez da resposta.
+        Melhor esforço: corpo grande demais, sem Content-Length ou lento fica sem descarte.
+        """
+        headers = getattr(self, "headers", None)
+        if self._body_consumed or headers is None:
             return
-        try:
-            self.rfile.read(length)
-        except TimeoutError as error:
-            raise _ClientGoneError from error
+        self._body_consumed = True
+        length = headers.get("Content-Length", "")
+        if not length.isdigit() or int(length) > DISCARD_LIMIT_BYTES:
+            return
+        with suppress(TimeoutError):
+            self.rfile.read(int(length))
 
     def _respond(self, status: int, payload: Payload) -> None:
         # Uma requisição por conexão: sem keep-alive, nada sobra no buffer para a próxima.
         self.close_connection = True
+        self._discard_unread_body()
         body = b"" if payload is None else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Connection", "close")
