@@ -18,6 +18,11 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
+from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
+from goblinshift.entrypoints.api.capacity_problems import (
+    account_storage_problem,
+    environment_storage_problem,
+)
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage, WriteFiles
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
@@ -111,7 +116,7 @@ class UploadDetails(BaseModel):
     "/uploads",
     status_code=201,
     operation_id="createUploads",
-    responses=problem_responses(400, 413, 415),
+    responses=problem_responses(400, 413, 415, 429, 503),
     openapi_extra=command_openapi(CreateUploads),
 )
 def create_uploads(
@@ -126,6 +131,10 @@ def create_uploads(
             views = create_intents(session, principal.owner_id, items)
     except InvalidUploadRequestError as error:
         raise _invalid_request(error) from None
+    except AccountCapacityExceededError:
+        raise account_storage_problem(session, principal.owner_id) from None
+    except GlobalCapacityExceededError:
+        raise environment_storage_problem() from None
     return CreatedUploads(items=[_created(view, request) for view in views])
 
 

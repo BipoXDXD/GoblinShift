@@ -33,6 +33,7 @@ from goblinshift.files.retention import (
     expire_incomplete_uploads,
     expire_unused_uploads,
     purge_deleted_objects,
+    reconcile_capacity,
 )
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
@@ -312,6 +313,10 @@ class Maintenance:
             )
         counts["objects_purged"] = report.objects
         counts["bytes_purged"] = report.bytes
+        # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
+        reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)
+        counts["capacity_pools_corrected"] = reconciled.pools_corrected
+        counts["capacity_objects_adopted"] = reconciled.objects_adopted
         return counts
 
     # Comum -----------------------------------------------------------------------------

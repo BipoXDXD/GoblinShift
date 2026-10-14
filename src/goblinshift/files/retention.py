@@ -14,8 +14,19 @@ relatório, não são engolidas.
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 
-from sqlalchemy import ColumnElement, Row, delete, exists, func, or_, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Row,
+    delete,
+    exists,
+    func,
+    or_,
+    select,
+    union_all,
+    update,
+)
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
@@ -156,6 +167,25 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
         limit_reached=len(chosen) < len(candidates),
         failed_keys=tuple(failed_keys),
     )
+
+
+def next_storage_release_in(session: Session, owner_id: uuid.UUID) -> timedelta | None:
+    """Tempo até o próximo upload ou artefato válido da conta vencer; `None` se não houver.
+
+    Base do `Retry-After` da cota de armazenamento: é a próxima liberação que se sabe prever.
+    """
+    pending = union_all(
+        select(upload.c.expires_at.label("expires_at")).where(
+            upload.c.owner_id == owner_id, upload.c.deleted_at.is_(None)
+        ),
+        select(artifact.c.expires_at.label("expires_at")).where(
+            artifact.c.owner_id == owner_id, artifact.c.deleted_at.is_(None)
+        ),
+    ).subquery()
+    wait: timedelta | None = session.execute(
+        select(func.greatest(func.min(pending.c.expires_at) - func.now(), timedelta(0)))
+    ).scalar_one()
+    return wait
 
 
 def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileReport:
