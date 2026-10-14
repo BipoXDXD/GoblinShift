@@ -136,6 +136,7 @@ class ResultReferenceResponse(BaseModel):
     artifact_id: UUID
     logical_name: str
     role: ArtifactRole
+    file_name: str
 
 
 class RunResultsResponse(BaseModel):
@@ -296,7 +297,10 @@ def get_results_route(
         expires_at=_utc(results.expires_at) if results.expires_at is not None else None,
         artifacts=[
             ResultReferenceResponse(
-                artifact_id=ref.artifact_id, logical_name=ref.logical_name, role=ref.role
+                artifact_id=ref.artifact_id,
+                logical_name=ref.logical_name,
+                role=ref.role,
+                file_name=ref.file_name,
             )
             for ref in results.references
         ],
