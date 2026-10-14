@@ -253,6 +253,24 @@ describe("useUploadBatch", () => {
     });
   });
 
+  it("remove um arquivo da lista, abortando o envio", async () => {
+    const { pending, hook } = setup();
+    act(() => {
+      hook.result.current.add([file("a.csv"), file("b.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+    const localId = hook.result.current.entries[0]?.localId ?? "";
+
+    act(() => {
+      hook.result.current.remove(localId);
+    });
+
+    expect(pending[0]?.options.signal?.aborted).toBe(true);
+    expect(hook.result.current.entries.map((entry) => entry.file.name)).toEqual(["b.csv"]);
+  });
+
   it("pede confirmação para sair da página só enquanto há envio", async () => {
     const { pending, hook } = setup();
     const leave = () => {
