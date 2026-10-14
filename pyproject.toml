@@ -97,3 +97,22 @@ forbidden_modules = [
     "goblinshift.runs",
     "goblinshift.entrypoints",
 ]
+
+[[tool.importlinter.contracts]]
+name = "runs.lifecycle é função pura: sem banco, web nem outros módulos do projeto"
+type = "forbidden"
+source_modules = ["goblinshift.runs.lifecycle"]
+forbidden_modules = [
+    "sqlalchemy",
+    "fastapi",
+    "starlette",
+    "httpx",
+    "httpx2",
+    "goblinshift.platform",
+    "goblinshift.catalog",
+    "goblinshift.files",
+    "goblinshift.identity",
+    "goblinshift.presets",
+    "goblinshift.processing",
+    "goblinshift.entrypoints",
+]
