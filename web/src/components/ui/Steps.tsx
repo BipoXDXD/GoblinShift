@@ -36,7 +36,13 @@ export function Steps({ phase }: { readonly phase: RunPhase }): ReactElement {
           >
             <Icon aria-hidden="true" className="size-4" />
             {T.steps[step]}
-            {state === "done" && <span className="sr-only"> {T.stepDone}</span>}
+            {/* Espaço fora do sr-only, que fora do fluxo perde o espaço inicial (HomePage). */}
+            {state === "done" && (
+              <>
+                {" "}
+                <span className="sr-only">{T.stepDone}</span>
+              </>
+            )}
           </li>
         );
       })}
