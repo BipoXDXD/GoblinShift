@@ -1,0 +1,2328 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GoblinShift",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/me": {
+      "get": {
+        "summary": "Get Me",
+        "operationId": "getMe",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Create Uploads",
+        "operationId": "createUploads",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "items": {
+                    "items": {
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "title": "Name"
+                        },
+                        "size": {
+                          "type": "integer",
+                          "title": "Size"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "size"
+                      ],
+                      "title": "UploadItem"
+                    },
+                    "type": "array",
+                    "title": "Items"
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "items"
+                ],
+                "title": "CreateUploads"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedUploads"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/{upload_id}/content": {
+      "put": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Put Upload Content",
+        "operationId": "putUploadContent",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/{upload_id}": {
+      "get": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Get Upload Details",
+        "operationId": "getUpload",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Delete Upload",
+        "description": "Exclusão aceita; repetir também é 202 (a remoção física espera os usos ativos).",
+        "operationId": "deleteUpload",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Upload Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Artifact Details",
+        "operationId": "getArtifact",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/download": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Download Artifact",
+        "operationId": "downloadArtifact",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        }
+      }
+    },
+    "/api/v1/runs": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Create Run",
+        "operationId": "createRun",
+        "parameters": [
+          {
+            "name": "validate_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Validate Only"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AcceptedRunResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ValidatedRunResponse"
+                    }
+                  ],
+                  "title": "Response Createrun"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "200": {
+            "description": "validate_only: parâmetros resolvidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidatedRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "input_upload_ids": {
+                        "description": "Uploads prontos, na ordem de processamento, sem repetição. Obrigatório (1 a max_inputs da versão), exceto com validate_only.",
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "uniqueItems": true,
+                        "maxItems": 100
+                      }
+                    }
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "title": "csv-janitor v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "csv-janitor"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "input_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "output_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "trim_columns": {
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Trim Columns",
+                                "type": "array"
+                              },
+                              "case_rules": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "lower",
+                                        "upper"
+                                      ],
+                                      "title": "CaseMode",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "mode"
+                                  ],
+                                  "title": "CaseRuleParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 100,
+                                "title": "Case Rules",
+                                "type": "array"
+                              },
+                              "filters": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "op": {
+                                      "enum": [
+                                        "eq",
+                                        "ne",
+                                        "contains",
+                                        "is_empty"
+                                      ],
+                                      "title": "FilterOp",
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Value"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "op"
+                                  ],
+                                  "title": "FilterParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 5,
+                                "title": "Filters",
+                                "type": "array"
+                              },
+                              "deduplicate_by": {
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Deduplicate By",
+                                "type": "array"
+                              },
+                              "output_columns": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "maxItems": 100,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Output Columns"
+                              },
+                              "formula_guard": {
+                                "enum": [
+                                  "none",
+                                  "tab_prefix"
+                                ],
+                                "title": "FormulaGuard",
+                                "type": "string",
+                                "default": "none"
+                              }
+                            },
+                            "title": "CsvJanitorV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "unevaluatedProperties": false
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List Runs Route",
+        "operationId": "listRuns",
+        "parameters": [
+          {
+            "name": "recipe_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recipe Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Status"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "created_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            }
+          },
+          {
+            "name": "created_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Run Route",
+        "operationId": "getRun",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/results": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Get Results Route",
+        "operationId": "getRunResults",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResultsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Cancel",
+        "operationId": "cancelRun",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AcceptedRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "queue_ahead": {
+            "type": "integer",
+            "title": "Queue Ahead"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "queue_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queue Expires At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunErrorBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotency_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Idempotency Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_version",
+          "status",
+          "attempt",
+          "progress",
+          "queue_ahead",
+          "created_at",
+          "queue_expires_at",
+          "deadline_at",
+          "error",
+          "idempotency_expires_at"
+        ],
+        "title": "AcceptedRunResponse"
+      },
+      "ArtifactDetails": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ArtifactRole"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "size",
+          "sha256",
+          "expires_at",
+          "availability"
+        ],
+        "title": "ArtifactDetails"
+      },
+      "ArtifactRole": {
+        "type": "string",
+        "enum": [
+          "output",
+          "report"
+        ],
+        "title": "ArtifactRole"
+      },
+      "Availability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "expired",
+          "deleted"
+        ],
+        "title": "Availability",
+        "description": "Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).\n\nNão é gravada: deriva de `deleted_at` e `expires_at`. A retenção também grava `deleted_at`\nao expirar, então a causa vem da ordem: `deleted_at` antes de `expires_at` é exclusão pedida\npelo dono, que vence a expiração; a partir de `expires_at`, o recurso venceu por retenção."
+      },
+      "CancelResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "error_code"
+        ],
+        "title": "CancelResponse"
+      },
+      "ContentInstructions": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "PUT",
+            "title": "Method"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "url",
+          "headers"
+        ],
+        "title": "ContentInstructions"
+      },
+      "CreatedUpload": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UploadState"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "content": {
+            "$ref": "#/components/schemas/ContentInstructions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "size",
+          "state",
+          "expires_at",
+          "content"
+        ],
+        "title": "CreatedUpload"
+      },
+      "CreatedUploads": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CreatedUpload"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CreatedUploads"
+      },
+      "FieldError": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "code",
+          "message"
+        ],
+        "title": "FieldError"
+      },
+      "MeResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "type": "array",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "display_name",
+          "scopes"
+        ],
+        "title": "MeResponse"
+      },
+      "Phase": {
+        "type": "string",
+        "enum": [
+          "inspecting",
+          "processing",
+          "packaging",
+          "finalizing",
+          "retry_wait"
+        ],
+        "title": "Phase",
+        "description": "Fase dentro de `running`; nos demais estados a fase é `None`."
+      },
+      "ProblemCode": {
+        "type": "string",
+        "enum": [
+          "BAD_REQUEST",
+          "JSON_INVALID",
+          "IDEMPOTENCY_KEY_INVALID",
+          "AUTHENTICATION_REQUIRED",
+          "REAUTH_REQUIRED",
+          "INSUFFICIENT_SCOPE",
+          "FORBIDDEN",
+          "CSRF_FAILED",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "REQUEST_TIMEOUT",
+          "STATE_CONFLICT",
+          "IDEMPOTENCY_IN_PROGRESS",
+          "ACTIVE_RUN_LIMIT",
+          "GONE",
+          "BODY_TOO_LARGE",
+          "UNSUPPORTED_MEDIA_TYPE",
+          "VALIDATION_FAILED",
+          "IDEMPOTENCY_KEY_REUSED",
+          "INPUT_NOT_AVAILABLE",
+          "RECIPE_VERSION_RETIRED",
+          "QUOTA_EXCEEDED",
+          "RATE_LIMITED",
+          "INTERNAL_ERROR",
+          "QUEUE_FULL",
+          "SERVICE_UNAVAILABLE"
+        ],
+        "title": "ProblemCode",
+        "description": "Códigos HTTP do catálogo de 1.6, mais os genéricos que o catálogo não nomeia.\n\nOs genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,\n`FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`,\n`GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os\nstatus da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de\nexecução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com\nquem os produz."
+      },
+      "ProblemDetails": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "code": {
+            "$ref": "#/components/schemas/ProblemCode"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FieldError"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "request_id"
+        ],
+        "title": "ProblemDetails",
+        "description": "Schema publicado no OpenAPI; as respostas são montadas por `problem_response`."
+      },
+      "Progress": {
+        "properties": {
+          "phase": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Phase"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "processed": {
+            "type": "integer",
+            "title": "Processed"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase",
+          "processed",
+          "total"
+        ],
+        "title": "Progress"
+      },
+      "ReceivedContent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UploadState"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "state",
+          "size",
+          "sha256"
+        ],
+        "title": "ReceivedContent"
+      },
+      "ResultReferenceResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Artifact Id"
+          },
+          "logical_name": {
+            "type": "string",
+            "title": "Logical Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ArtifactRole"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "logical_name",
+          "role",
+          "file_name"
+        ],
+        "title": "ResultReferenceResponse"
+      },
+      "RunErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "RunErrorBody"
+      },
+      "RunListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RunResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "next_cursor"
+        ],
+        "title": "RunListResponse"
+      },
+      "RunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "queue_ahead": {
+            "type": "integer",
+            "title": "Queue Ahead"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "queue_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queue Expires At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunErrorBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_version",
+          "status",
+          "attempt",
+          "progress",
+          "queue_ahead",
+          "created_at",
+          "queue_expires_at",
+          "deadline_at",
+          "error"
+        ],
+        "title": "RunResponse"
+      },
+      "RunResultsResponse": {
+        "properties": {
+          "published": {
+            "type": "boolean",
+            "title": "Published"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ResultReferenceResponse"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "published",
+          "expires_at",
+          "artifacts"
+        ],
+        "title": "RunResultsResponse"
+      },
+      "Scope": {
+        "type": "string",
+        "enum": [
+          "files:read",
+          "files:write",
+          "runs:read",
+          "runs:write"
+        ],
+        "title": "Scope",
+        "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\n`presets:*` entra com os presets; o banco guarda texto, então acrescentar um escopo\nnão exige migração."
+      },
+      "Status": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "stopping",
+          "succeeded",
+          "succeeded_with_warnings",
+          "canceled",
+          "failed"
+        ],
+        "title": "Status"
+      },
+      "UploadDetails": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UploadState"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "size",
+          "state",
+          "availability",
+          "sha256",
+          "created_at",
+          "ready_at",
+          "expires_at"
+        ],
+        "title": "UploadDetails"
+      },
+      "UploadState": {
+        "type": "string",
+        "enum": [
+          "created",
+          "receiving",
+          "ready",
+          "failed"
+        ],
+        "title": "UploadState"
+      },
+      "ValidatedRunResponse": {
+        "properties": {
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "input_upload_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Input Upload Ids"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recipe_id",
+          "recipe_version",
+          "input_upload_ids",
+          "parameters"
+        ],
+        "title": "ValidatedRunResponse"
+      }
+    }
+  }
+}
