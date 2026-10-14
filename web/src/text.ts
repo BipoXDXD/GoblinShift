@@ -1,0 +1,345 @@
+// Textos fixos da interface, num lugar só (D12: só pt-BR; traduzir fica restrito a este arquivo).
+// Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre os goblins só no vazio, na
+// espera e no sucesso, sempre depois da informação.
+export const TEXT = {
+  field: {
+    errorPrefix: "Erro: ",
+  },
+  reorder: {
+    instructions:
+      "Para mudar a ordem, use os botões Mover para cima e Mover para baixo, ou Alt + seta para cima e Alt + seta para baixo com o foco num deles. Também é possível arrastar.",
+    moveUp: "Mover para cima",
+    moveDown: "Mover para baixo",
+    moved: (name: string, position: number, total: number) =>
+      `${name} movido para a posição ${String(position)} de ${String(total)}.`,
+  },
+  errorSummary: {
+    title: "Corrija os itens abaixo antes de continuar.",
+  },
+  failure: {
+    network: "Não foi possível falar com o servidor. Confira a conexão e tente de novo.",
+    timeout: "O servidor demorou demais para responder. Tente de novo.",
+    unexpected: "O servidor respondeu de um jeito inesperado. Tente de novo em instantes.",
+    internal: "Algo deu errado nesta tela. Recarregue a página e tente de novo.",
+    requestId: (id: string) => `Código do pedido para suporte: ${id}`,
+    problems: {
+      BAD_REQUEST:
+        "O pedido foi recusado por estar malformado. Recarregue a página e tente de novo.",
+      JSON_INVALID:
+        "O pedido foi recusado por estar malformado. Recarregue a página e tente de novo.",
+      IDEMPOTENCY_KEY_INVALID: "O pedido foi recusado. Recarregue a página e tente de novo.",
+      AUTHENTICATION_REQUIRED: "Sua sessão terminou. Entre de novo para continuar.",
+      REAUTH_REQUIRED: "Por segurança, entre de novo para continuar.",
+      INSUFFICIENT_SCOPE: "Sua credencial não tem permissão para esta ação.",
+      FORBIDDEN: "Você não tem permissão para esta ação.",
+      CSRF_FAILED:
+        "A verificação de segurança da sessão falhou. Recarregue a página e tente de novo.",
+      TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos termos de uso.",
+      NOT_FOUND: "Não encontramos o que você pediu. Ele pode ter sido removido.",
+      METHOD_NOT_ALLOWED: "Esta ação não é aceita aqui.",
+      REQUEST_TIMEOUT: "O envio demorou demais e foi interrompido. Tente de novo.",
+      STATE_CONFLICT: "O estado mudou enquanto você agia. Atualize a página e tente de novo.",
+      IDEMPOTENCY_IN_PROGRESS:
+        "O pedido anterior ainda está sendo processado. Aguarde e tente de novo.",
+      ACTIVE_RUN_LIMIT:
+        "Você já tem uma execução em andamento. Espere ela terminar para começar outra.",
+      GONE: "Isto expirou e não está mais disponível.",
+      BODY_TOO_LARGE: "O arquivo ou o pedido passa do tamanho permitido.",
+      UNSUPPORTED_MEDIA_TYPE: "O tipo de conteúdo enviado não é aceito.",
+      VALIDATION_FAILED: "Alguns valores foram recusados. Confira os erros indicados.",
+      IDEMPOTENCY_KEY_REUSED:
+        "Este envio conflita com um pedido anterior. Recarregue a página e tente de novo.",
+      INPUT_NOT_AVAILABLE:
+        "Algum arquivo de entrada não está mais disponível. Envie os arquivos de novo.",
+      RECIPE_VERSION_RETIRED:
+        "Esta versão da receita foi retirada. Recarregue a página para usar a atual.",
+      QUOTA_EXCEEDED: "Você atingiu a cota da conta. Libere espaço ou espere a cota renovar.",
+      RATE_LIMITED: "Muitos pedidos em pouco tempo. Aguarde um pouco e tente de novo.",
+      INTERNAL_ERROR: "Erro interno no servidor. Tente de novo em instantes.",
+      QUEUE_FULL: "A fila de execuções está cheia. Tente de novo mais tarde.",
+      SERVICE_UNAVAILABLE: "O serviço está indisponível no momento. Tente de novo mais tarde.",
+    },
+    retryAfter: (seconds: number) => `Tente de novo em ${String(seconds)} s.`,
+  },
+  locale: "pt-BR",
+  theme: {
+    summary: "Tema",
+    legend: "Tema da interface",
+    options: { system: "Sistema", light: "Claro", dark: "Escuro" },
+  },
+  layout: {
+    navLabel: "Principal",
+    skipToContent: "Pular para o conteúdo",
+    brand: "GoblinShift",
+    brandLink: "GoblinShift, Oficina",
+  },
+  home: {
+    title: "Arquivos em lote, limpos pelos goblins da oficina.",
+    lead: "Escolha uma receita para começar.",
+    recipesHeading: "Receitas",
+    openWorkbench: "Abrir a Bancada",
+    // Completa o nome acessível do link sem repetir o título do cartão na tela.
+    openWorkbenchOf: (recipe: string) => `da ${recipe}`,
+    summaries: {
+      "csv-janitor":
+        "Limpa tabelas CSV: espaços nas pontas, duplicatas, colunas, caixa e filtros, sem adivinhar o significado dos dados.",
+      "image-forge":
+        "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
+      "downloads-detox":
+        "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
+    },
+  },
+  notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
+  workbench: {
+    title: (recipe: string) => `Bancada: ${recipe}`,
+    backHome: "Oficina",
+    filesHeading: "Arquivos de entrada",
+    chooseFiles: "Escolher arquivos",
+    chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
+    dropHere: "Solte para adicionar.",
+    filesChosen: (count: number) =>
+      count === 0
+        ? "Nenhum arquivo escolhido"
+        : count === 1
+          ? "1 arquivo escolhido"
+          : `${String(count)} arquivos escolhidos`,
+    orderLabel: "Ordem de processamento",
+    noFilesYet: "A bancada está vazia",
+    noFilesYetHint:
+      "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e os goblins começam.",
+    limitsHint: (maxInputs: number, maxTotal: string | null) =>
+      maxTotal === null
+        ? `Até ${String(maxInputs)} arquivos por execução.`
+        : `Até ${String(maxInputs)} arquivos por execução, somando no máximo ${maxTotal}.`,
+    parametersHeading: "Parâmetros",
+    run: "Executar",
+    creatingRun: "Criando a execução.",
+    loadingCatalog: "Carregando a receita.",
+    recipeUnavailable:
+      "Esta receita não está disponível no momento. Recarregue a página ou tente mais tarde.",
+    upload: {
+      waiting: "Na fila de envio",
+      sending: (percent: number) => `Enviando: ${String(percent)}%`,
+      progressLabel: (name: string) => `Envio de ${name}`,
+      confirming: "Confirmando o recebimento",
+      ready: "Enviado",
+      canceled: "Cancelado",
+      retry: "Enviar de novo",
+      remove: "Remover",
+      announceReady: (name: string) => `${name} enviado.`,
+      announceFailed: (name: string) => `Falha ao enviar ${name}.`,
+    },
+    serverFieldErrors: {
+      missing: "Campo obrigatório.",
+      string_too_short: "Preencha este campo.",
+      too_short: "Informe pelo menos um item.",
+      too_long: "Há itens demais neste campo.",
+      string_too_long: "O texto passa do tamanho permitido.",
+      greater_than_equal: "O valor fica abaixo do mínimo permitido.",
+      less_than_equal: "O valor passa do máximo permitido.",
+      int_type: "Informe um número inteiro.",
+      bool_type: "Escolha sim ou não.",
+      string_pattern_mismatch: "O valor não está no formato pedido.",
+      enum: "Escolha uma das opções.",
+      literal_error: "Escolha uma das opções.",
+      extra_forbidden: "Este campo não é aceito.",
+      fallback: "O servidor recusou este valor.",
+    },
+    errors: {
+      noFiles: "Escolha pelo menos um arquivo.",
+      uploading: "Espere o envio dos arquivos terminar.",
+      failedFiles: "Remova ou envie de novo os arquivos que falharam.",
+      tooManyFiles: (max: number) => `Use no máximo ${String(max)} arquivos.`,
+      tooManyBytes: (total: string, max: string) =>
+        `Os arquivos somam ${total}; o máximo por execução é ${max}.`,
+    },
+  },
+  run: {
+    title: "Execução",
+    loading: "Carregando a execução.",
+    recipe: "Receita",
+    status: "Estado",
+    phase: "Fase",
+    attempt: "Tentativa",
+    progress: "Arquivos processados",
+    progressValue: (processed: number, total: number) => `${String(processed)} de ${String(total)}`,
+    queueAhead: "Execuções à frente na fila",
+    stepsLabel: "Etapas da execução",
+    // Rótulos curtos das etapas; a frase da fase atual aparece grande, acima delas.
+    steps: {
+      inspecting: "Inspecionar",
+      processing: "Processar",
+      packaging: "Empacotar",
+      finalizing: "Finalizar",
+    },
+    stepDone: "(concluída)",
+    failureReason: "Motivo",
+    newRun: "Nova execução nesta receita",
+    backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
+    flavor: {
+      queued: "Os goblins pegam este lote assim que uma bancada vagar.",
+      succeeded: "Pronto! Os goblins terminaram o lote.",
+    },
+    statuses: {
+      queued: "Na fila",
+      running: "Em andamento",
+      stopping: "Cancelando",
+      succeeded: "Concluída",
+      succeeded_with_warnings: "Concluída com avisos",
+      canceled: "Cancelada",
+      failed: "Falhou",
+    },
+    phases: {
+      inspecting: "Inspecionando as entradas",
+      processing: "Processando os arquivos",
+      packaging: "Empacotando os resultados",
+      finalizing: "Finalizando",
+      retry_wait: "Aguardando nova tentativa",
+    },
+    results: {
+      heading: "Resultados",
+      loading: "Carregando os resultados.",
+      download: (fileName: string) => `Baixar ${fileName}`,
+      otherFiles: "Arquivos avulsos",
+      roles: {
+        output: "arquivo processado",
+        report: "relatório",
+        manifest: "manifesto",
+        package: "pacote com todos os arquivos",
+      },
+      availableUntil: (date: string) => `Disponíveis até ${date}.`,
+      empty: "Nenhum arquivo para baixar",
+      emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
+    },
+  },
+  recipeFields: {
+    invalidOption: "Escolha uma das opções.",
+  },
+  csvJanitor: {
+    title: "CSV Janitor",
+    inputDelimiter: "Delimitador dos arquivos de entrada",
+    outputDelimiter: "Delimitador dos arquivos de saída",
+    delimiters: { ",": "Vírgula (,)", ";": "Ponto e vírgula (;)", "\t": "Tabulação" },
+    columnListHint: "Uma coluna por linha, com o nome exato do cabeçalho.",
+    trimColumns: "Colunas sem espaços nas pontas",
+    trimColumnsHint: "Remove espaços do início e do fim dos valores; os espaços internos ficam.",
+    deduplicateBy: "Remover duplicatas pelas colunas",
+    deduplicateByHint: "Mantém a primeira ocorrência. Deixe vazio para não remover.",
+    outputColumns: "Colunas finais, na ordem",
+    outputColumnsHint: "Deixe vazio para manter todas as colunas na ordem original.",
+    formulaGuard: "Células que parecem fórmulas de planilha",
+    formulaGuards: {
+      none: "Manter o texto e só avisar",
+      tab_prefix: "Prefixar com tabulação (recomendação da OWASP)",
+    },
+    caseRules: "Regras de caixa",
+    caseRulesHint: "Converte os valores de uma coluna para minúsculas ou maiúsculas.",
+    caseModes: { lower: "Minúsculas", upper: "Maiúsculas" },
+    addCaseRule: "Adicionar regra de caixa",
+    filters: "Filtros",
+    filtersHint: "Mantém só os registros que atendem a todos os filtros, comparando como texto.",
+    filterOps: {
+      eq: "é igual a",
+      ne: "é diferente de",
+      contains: "contém",
+      is_empty: "está vazio",
+    },
+    addFilter: "Adicionar filtro",
+    column: (row: number) => `Coluna (linha ${String(row)})`,
+    mode: (row: number) => `Modo (linha ${String(row)})`,
+    op: (row: number) => `Condição (linha ${String(row)})`,
+    value: (row: number) => `Valor (linha ${String(row)})`,
+    removeRow: (row: number) => `Remover linha ${String(row)}`,
+    errors: {
+      columnRequired: "Informe a coluna.",
+      tooManyColumns: (max: number) => `Informe no máximo ${String(max)} colunas.`,
+      tooManyRows: (max: number) => `Use no máximo ${String(max)} linhas.`,
+    },
+  },
+  imageForge: {
+    title: "Image Forge",
+    maxWidth: "Largura máxima, em pixels",
+    maxHeight: "Altura máxima, em pixels",
+    sideHint: (min: number, max: number) =>
+      `De ${String(min)} a ${String(max)}. A imagem é reduzida para caber, mantendo a proporção; nunca é ampliada.`,
+    outputFormat: "Formato de saída",
+    outputFormats: {
+      preserve: "Manter o formato (PNG continua PNG; JPEG continua JPEG)",
+      jpeg: "JPEG",
+      png: "PNG",
+    },
+    jpegQuality: "Qualidade do JPEG",
+    jpegQualityHint: (min: number, max: number) =>
+      `De ${String(min)} a ${String(max)}. Vale só para as saídas em JPEG.`,
+    jpegBackground: "Cor de fundo da transparência no JPEG",
+    jpegBackgroundHint: "No formato #RRGGBB, como #FFFFFF para branco.",
+    makeThumbnails: "Gerar miniaturas",
+    makeThumbnailsHint: (box: number) => `Uma miniatura de até ${String(box)} pixels por imagem.`,
+    errors: {
+      integerBetween: (min: number, max: number) =>
+        `Informe um número inteiro de ${String(min)} a ${String(max)}.`,
+      hexColor: "Use o formato #RRGGBB, como #FFFFFF.",
+    },
+  },
+  downloadsDetox: {
+    title: "Downloads Detox",
+    deduplicate: "Remover arquivos repetidos",
+    deduplicateHint: "Arquivos com o mesmo conteúdo ficam uma vez só, na primeira ocorrência.",
+    groupBy: "Organização em pastas",
+    groupByOptions: {
+      kind: "Separar por tipo (imagens, tabelas, textos e arquivos compactados)",
+      none: "Tudo numa pasta só",
+    },
+    nameMode: "Nomes dos arquivos",
+    nameModes: {
+      preserve: "Manter os nomes originais",
+      indexed: "Numerar na ordem de entrada",
+    },
+    namePrefix: "Prefixo da numeração",
+    namePrefixHint: (max: number) =>
+      `Até ${String(max)} caracteres. Com o prefixo arquivo, os nomes ficam arquivo-001, arquivo-002 e assim por diante.`,
+    errors: {
+      prefixRequired: "Informe o prefixo.",
+      prefixTooLong: (max: number) => `Use no máximo ${String(max)} caracteres.`,
+      prefixSeparator: "O prefixo não pode ter / nem \\.",
+      prefixInvisible: "O prefixo não pode ter caracteres invisíveis ou de controle.",
+      prefixDot: "O prefixo não pode começar com ponto.",
+    },
+  },
+  loginSoon: {
+    title: "O login chega em breve",
+    body: "Por enquanto, as receitas rodam pela API, com uma chave de API. Quando o login abrir, a Bancada funciona por aqui.",
+  },
+  history: {
+    title: "Histórico",
+    navLink: "Histórico",
+    filters: "Filtros",
+    recipe: "Receita",
+    anyRecipe: "Todas as receitas",
+    status: "Estado",
+    anyStatus: "Todos os estados",
+    period: "Período",
+    anyPeriod: "Qualquer data",
+    periods: { "7d": "Últimos 7 dias", "30d": "Últimos 30 dias", "90d": "Últimos 90 dias" },
+    apply: "Aplicar filtros",
+    clear: "Limpar filtros",
+    loading: "Carregando as execuções.",
+    listLabel: "Execuções",
+    createdAt: (date: string) => `Criada em ${date}`,
+    // Começa pela vírgula: o espaço inicial de um texto sr-only se perde (HomePage).
+    linkDetail: (date: string) => `, criada em ${date}`,
+    loadMore: "Carregar mais",
+    loadingMore: "Carregando mais execuções.",
+    loadedMore: (count: number) =>
+      count === 1 ? "Mais 1 execução na lista." : `Mais ${String(count)} execuções na lista.`,
+    restarted: "A lista voltou ao início, porque a página seguinte expirou.",
+    empty: "Nenhuma execução ainda",
+    emptyHint: "As execuções aparecem aqui depois que você roda uma receita na Bancada.",
+    goToWorkshop: "Escolher uma receita na Oficina",
+    noMatches: "Nenhuma execução com esses filtros",
+    noMatchesHint: "Mude ou limpe os filtros para ver mais execuções.",
+    recentHeading: "Execuções recentes",
+    recentEmptyHint: "Escolha uma receita acima para começar.",
+    seeAll: "Ver o histórico completo",
+  },
+} as const;

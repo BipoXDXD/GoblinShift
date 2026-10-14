@@ -9,10 +9,12 @@ import uuid
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
+from goblinshift.runs.worker import runner as runner_module
 from goblinshift.runs.worker.runner import ExecutorPhase, LocalRunner, RunnerError
 from tests.runs.fake_executor import IGNORING_TERM
 
@@ -21,6 +23,8 @@ WAIT_TIMEOUT_S = 15.0
 # Quanto o "init" do teste leva para colher o zumbi: bem depois do primeiro sinal do `stop`, bem
 # antes de a carência e a confirmação do SIGKILL se esgotarem.
 REAP_AFTER_S = 1.0
+# Bem abaixo do tempo de subida de um interpretador Python: o lançador nunca termina a tempo.
+UNREACHABLE_LAUNCH_TIMEOUT_S = 0.001
 
 
 def fake_runner(
@@ -40,6 +44,17 @@ def wait_for(condition: Callable[[], bool]) -> None:
 
 def wait_exit(runner: LocalRunner, attempt_id: uuid.UUID) -> None:
     wait_for(lambda: not runner.status(attempt_id).is_running)
+
+
+def group_gone(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        # macOS: o grupo só tem zumbis ainda não colhidos.
+        return False
+    return False
 
 
 def test_status_de_tentativa_nunca_iniciada_e_absent(tmp_path: Path) -> None:
@@ -95,6 +110,39 @@ def test_stop_de_grupo_que_so_tem_zumbis_espera_a_colheita_sem_falhar(tmp_path: 
         init.join()
 
     assert status.phase is ExecutorPhase.EXITED
+
+
+def test_lancador_que_estoura_o_prazo_vira_runner_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner_module, "LAUNCH_TIMEOUT_S", UNREACHABLE_LAUNCH_TIMEOUT_S)
+    runner = fake_runner(tmp_path, "sleep", "30")
+
+    with pytest.raises(RunnerError, match="lançador"):
+        runner.start(uuid.uuid7(), LOCAL_EXECUTOR_IMAGE)
+
+
+def test_lancador_que_estoura_o_prazo_nao_deixa_executor_vivo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner_module, "LAUNCH_TIMEOUT_S", UNREACHABLE_LAUNCH_TIMEOUT_S)
+    launched: list[subprocess.Popen[bytes]] = []
+
+    class RecordingPopen(subprocess.Popen[bytes]):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            launched.append(self)
+
+    monkeypatch.setattr(subprocess, "Popen", RecordingPopen)
+    runner = fake_runner(tmp_path, "sleep", "30")
+
+    with pytest.raises(RunnerError):
+        runner.start(uuid.uuid7(), LOCAL_EXECUTOR_IMAGE)
+
+    # O lançador é líder do próprio grupo, onde também ficariam o supervisor e o executor.
+    (launcher,) = launched
+    assert launcher.returncode is not None
+    wait_for(lambda: group_gone(launcher.pid))
 
 
 def test_outro_runner_enxerga_o_executor_pelo_nome(tmp_path: Path) -> None:

@@ -125,13 +125,14 @@ services:
     depends_on: *worker-deps
     restart: unless-stopped
 
+  # Nginx com o build da SPA e a própria configuração (docker/web.Dockerfile).
   nginx:
-    image: nginx:1.30.5
+    image: ghcr.io/bipoxdxd/goblinshift-web:${GS_IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
     environment:
       GS_DOMAIN: ${GS_DOMAIN:-_}
-      NGINX_ENVSUBST_FILTER: ^GS_
-    volumes:
-      - ./docker/nginx/templates:/etc/nginx/templates:ro
     depends_on:
       api:
         condition: service_healthy

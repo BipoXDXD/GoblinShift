@@ -26,6 +26,7 @@ dependencies = [
 [project.scripts]
 gs-admin = "goblinshift.entrypoints.admin_cli:main"
 gs-csv-janitor = "goblinshift.entrypoints.csv_janitor_cli:main"
+gs-export-openapi = "goblinshift.entrypoints.openapi_export:main"
 gs-maintenance = "goblinshift.entrypoints.maintenance:main"
 gs-worker = "goblinshift.entrypoints.worker:main"
 
@@ -98,6 +99,7 @@ markers = [
     "integration: precisa de Docker (PostgreSQL real via Testcontainers)",
     "executor_image: constrói e roda a imagem do executor (precisa de Docker; runtime em GS_TEST_RUNTIME)",
     "executor_ctl: executor-ctl com Docker real (runtime em GS_TEST_RUNTIME, padrão runc)",
+    "nginx_image: constrói e sobe a imagem do Nginx com a SPA (docker/web.Dockerfile; precisa de Docker)",
     "nginx: Nginx real com os templates do repositório (precisa de Docker)",
     "backup: backup e restauração do PostgreSQL contra S3 local (precisa de Docker, age e curl)",
     "openobserve: SLOs e alertas contra OpenObserve e Collector reais (precisa de Docker)",

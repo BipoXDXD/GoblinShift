@@ -3,8 +3,8 @@
 Cada `GET /auth/login/{provider}` grava uma linha em `login_state` sem autenticação, então o
 Nginx limita `/auth/*` por cliente: 10 por minuto, com rajada de 10. O cliente é o IP que a borda
 informa no X-Forwarded-For; de quem não é a borda, o cabeçalho é ignorado, para ninguém escapar do
-limite (nem forjar o IP da auditoria) trocando o valor a cada pedido. A API falsa ecoa o
-X-Forwarded-For que recebeu.
+limite (nem forjar o IP da auditoria) trocando o valor a cada pedido. A API falsa ecoa, em
+`API_ECHO`, o X-Forwarded-For que recebeu.
 """
 
 import json
@@ -12,7 +12,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.test_nginx_logs import NginxLogs
+from tests.test_nginx_logs import API_ECHO, NginxLogs
 
 pytestmark = pytest.mark.nginx
 
@@ -43,20 +43,20 @@ def _statuses(stack: NginxLogs, client: str, path: str, count: int, *headers: st
 
 
 def test_api_recebe_o_ip_do_cliente_informado_pela_borda(stack: NginxLogs) -> None:
-    response = stack.fetch(stack.edge, "/eco", "X-Forwarded-For: 203.0.113.7")
+    response = stack.fetch(stack.edge, API_ECHO, "X-Forwarded-For: 203.0.113.7")
 
     assert response.body == "203.0.113.7"
 
 
 def test_api_recebe_so_o_ip_do_cliente_e_nao_a_cadeia(stack: NginxLogs) -> None:
     """A borda troca o cabeçalho pelo IP de quem conectou nela; o Nginx repassa um IP só."""
-    response = stack.fetch(stack.edge, "/eco", "X-Forwarded-For: 192.0.2.50, 203.0.113.8")
+    response = stack.fetch(stack.edge, API_ECHO, "X-Forwarded-For: 192.0.2.50, 203.0.113.8")
 
     assert response.body == "203.0.113.8"
 
 
 def test_ip_informado_por_quem_nao_e_a_borda_e_ignorado(stack: NginxLogs) -> None:
-    response = stack.fetch(stack.other, "/eco", "X-Forwarded-For: 203.0.113.9")
+    response = stack.fetch(stack.other, API_ECHO, "X-Forwarded-For: 203.0.113.9")
 
     assert response.body == stack.ip(stack.other)
 
