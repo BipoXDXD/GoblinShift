@@ -381,6 +381,23 @@ describe("Bancada", () => {
     expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
   });
 
+  it("sem login, o 401 do catálogo vira o aviso de login em breve, sem erro nem formulário", async () => {
+    renderWorkbench({ catalog: () => problemResponse(401, "AUTHENTICATION_REQUIRED") });
+
+    const notice = await screen.findByRole("region", { name: "O login chega em breve" });
+    expect(notice).toHaveTextContent(/chave de API/);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toBeVisible();
+  });
+
+  it("outro 401 que não é falta de login continua como erro", async () => {
+    renderWorkbench({ catalog: () => problemResponse(401, "REAUTH_REQUIRED") });
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "O login chega em breve" })).toBeNull();
+  });
+
   it("falha do catálogo aparece com texto próprio e sem formulário", async () => {
     renderWorkbench({ catalog: () => problemResponse(503, "SERVICE_UNAVAILABLE") });
 
