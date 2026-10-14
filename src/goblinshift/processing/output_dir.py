@@ -19,6 +19,7 @@ import unicodedata
 from collections.abc import Buffer, Iterator, Sequence
 from pathlib import Path
 
+from goblinshift.processing.names import has_unsafe_char
 from goblinshift.processing.recipe import (
     FailureCode,
     OutputFile,
@@ -122,7 +123,7 @@ def _validated_nfc(name: str) -> str:
         raise InvalidOutputNameError(f"nome de saída inválido: {name!r}")
     if any(separator in normalized for separator in _SEPARATORS):
         raise InvalidOutputNameError(f"nome de saída com separador: {name!r}")
-    if any(unicodedata.category(char) == "Cc" for char in normalized):
+    if has_unsafe_char(normalized):
         raise InvalidOutputNameError(f"nome de saída com caractere de controle: {name!r}")
     return normalized
 

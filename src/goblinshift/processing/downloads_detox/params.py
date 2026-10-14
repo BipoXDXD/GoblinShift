@@ -5,10 +5,11 @@
 parâmetros já resolvidos, com o default de `name_prefix` sempre presente.
 """
 
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+
+from goblinshift.processing.names import has_unsafe_char
 
 MAX_NAME_PREFIX_CHARS = 40
 DEFAULT_NAME_PREFIX = "file"
@@ -48,8 +49,10 @@ def _validate_name_prefix(prefix: str) -> None:
         raise InvalidParametersError(f"name_prefix passa de {MAX_NAME_PREFIX_CHARS} caracteres")
     if any(separator in prefix for separator in _SEPARATORS):
         raise InvalidParametersError("name_prefix não pode ter separador de caminho")
-    if any(unicodedata.category(char) == "Cc" for char in prefix):
-        raise InvalidParametersError("name_prefix não pode ter caractere de controle")
+    if has_unsafe_char(prefix):
+        raise InvalidParametersError(
+            "name_prefix não pode ter caractere de controle nem de formato invisível"
+        )
     if prefix.startswith("."):
         # Geraria arquivo oculto (A18).
         raise InvalidParametersError("name_prefix não pode começar com ponto")

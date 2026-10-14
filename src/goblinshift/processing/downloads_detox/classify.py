@@ -93,7 +93,7 @@ _MARKUP_OPENINGS = (
     "<?xml",
 )
 _MARKUP_CHARS = max(len(opening) for opening in _MARKUP_OPENINGS)
-_BOM = "﻿"
+_BOM = "\ufeff"
 _NUL = "\x00"
 
 

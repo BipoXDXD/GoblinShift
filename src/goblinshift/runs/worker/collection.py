@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
+from goblinshift.processing.names import has_unsafe_char
 from goblinshift.processing.output_dir import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_FILES,
@@ -262,8 +263,8 @@ def _require_output_name(component: str, name: str) -> None:
         raise CollectionError(f"out/ contém nome longo demais: {name!r}")
     if unicodedata.normalize("NFC", component) != component:
         raise CollectionError(f"out/ contém nome fora de NFC: {name!r}")
-    if any(unicodedata.category(char) == "Cc" for char in component):
-        raise CollectionError(f"out/ contém nome com caractere de controle: {name!r}")
+    if has_unsafe_char(component):
+        raise CollectionError(f"out/ contém nome com caractere de controle ou formato: {name!r}")
 
 
 def _read_no_follow(path: Path, max_bytes: int) -> bytes:
