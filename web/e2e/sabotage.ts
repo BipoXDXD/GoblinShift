@@ -172,6 +172,25 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "histórico: Carregar mais sumiu",
+    spec: ["history.spec.ts", "-g", "Carregar mais"],
+    plant: (dist) => {
+      addStylesheet(dist, 'ul[aria-label="Execuções"] ~ button { display: none !important; }');
+    },
+  },
+  {
+    name: "histórico: o filtro não vai para a URL",
+    spec: ["history.spec.ts", "-g", "filtrar por estado"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `const push = history.pushState.bind(history);
+        history.pushState = (state, title, url) =>
+          push(state, title, typeof url === "string" ? url.split("?")[0] : url);`,
+      );
+    },
+  },
+  {
     name: "chave de API: canário embutido no bundle",
     spec: ["api-key.spec.ts", "-g", "não aparece"],
     env: { GS_E2E_API_KEY: PLANTED_KEY },
