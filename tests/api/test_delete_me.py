@@ -15,9 +15,8 @@ from goblinshift.identity.tables import app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run
-from tests.api.simulated_session import FakeSessions
+from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
-from tests.identity.pending_fronts import install_domain_stand_ins
 from tests.identity.support import new_key, new_user
 from tests.runs.worker_support import queue_run
 
@@ -28,9 +27,8 @@ NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
-def sessions(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> FakeSessions:
-    install_domain_stand_ins(monkeypatch)
-    return FakeSessions(app, NOW)
+def sessions(app: FastAPI) -> SimulatedSessions:
+    return SimulatedSessions(app, NOW)
 
 
 def deletion_requested_at(factory: sessionmaker[Session], owner_id: UUID) -> datetime | None:
@@ -51,7 +49,7 @@ def events_of(factory: sessionmaker[Session], owner_id: UUID) -> list[str]:
 
 
 def test_delete_me_marca_a_exclusao_revoga_tudo_e_limpa_o_navegador(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     issued = new_key(factory, owner, now=NOW)
@@ -71,7 +69,7 @@ def test_delete_me_marca_a_exclusao_revoga_tudo_e_limpa_o_navegador(
 def test_delete_me_cancela_a_execucao_ativa(
     client: TestClient,
     factory: sessionmaker[Session],
-    sessions: FakeSessions,
+    sessions: SimulatedSessions,
     app: FastAPI,
 ) -> None:
     owner = new_user(factory)
@@ -88,7 +86,7 @@ def test_delete_me_cancela_a_execucao_ativa(
 
 
 def test_repetir_delete_me_202_mantem_o_primeiro_pedido(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner)
@@ -102,7 +100,7 @@ def test_repetir_delete_me_202_mantem_o_primeiro_pedido(
 
 
 def test_delete_me_com_login_de_11_min_401_reauth_required(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     issued = new_key(factory, owner, now=NOW)
@@ -117,7 +115,7 @@ def test_delete_me_com_login_de_11_min_401_reauth_required(
 
 
 def test_delete_me_com_login_de_10_min_exatos_aceita(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner, minutes_ago=10)
@@ -129,7 +127,7 @@ def test_delete_me_com_login_de_10_min_exatos_aceita(
 def test_delete_me_nao_toca_outra_conta(
     client: TestClient,
     factory: sessionmaker[Session],
-    sessions: FakeSessions,
+    sessions: SimulatedSessions,
     app: FastAPI,
 ) -> None:
     owner, other = new_user(factory), new_user(factory)

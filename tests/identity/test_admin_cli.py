@@ -17,7 +17,6 @@ from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run as run_table
-from tests.identity.pending_fronts import install_domain_stand_ins
 from tests.identity.support import new_user
 from tests.runs.worker_support import queue_run
 
@@ -167,11 +166,6 @@ def storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FileStorage:
     root = tmp_path / "storage"
     monkeypatch.setenv("GS_STORAGE_ROOT", str(root))
     return FileStorage(root)
-
-
-@pytest.fixture(autouse=True)
-def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
-    install_domain_stand_ins(monkeypatch)
 
 
 def status_of(factory: sessionmaker[Session], user_id: str) -> str:

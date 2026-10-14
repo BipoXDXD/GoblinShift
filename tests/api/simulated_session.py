@@ -1,8 +1,10 @@
 """Sessão web simulada para os testes das rotas da Frente C (`/api-keys`, `DELETE /me`).
 
-O login (Frente A) e o cookie de sessão (Frente B) não fazem parte destes testes: a credencial
-entra trocando `authenticate` por um Principal de sessão escolhido pelo teste. CSRF e a recusa de
-chave em rota de sessão ficam na matriz de autorização, com a autenticação real.
+O login e o cookie de sessão não fazem parte destes testes: a credencial entra trocando
+`authenticate` por um Principal de sessão escolhido pelo teste. Isso deixa o teste escolher a idade
+do login e repetir um pedido depois que a própria sessão foi revogada (a corrida de dois pedidos
+já autenticados). CSRF, a recusa de chave em rota de sessão e a sessão real ficam na matriz de
+autorização e em `test_session_auth.py`.
 """
 
 from datetime import datetime, timedelta
@@ -13,10 +15,9 @@ from fastapi import FastAPI
 from goblinshift.entrypoints.api.dependencies import authenticate, current_time
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from goblinshift.identity import Principal, Scope
-from tests.identity.pending_fronts import install_route_stand_ins
 
 
-class FakeSessions:
+class SimulatedSessions:
     """Quem o app vê como autenticado por sessão, e o relógio da API."""
 
     def __init__(self, app: FastAPI, now: datetime) -> None:
@@ -24,7 +25,6 @@ class FakeSessions:
         self._principal: Principal | None = None
         app.dependency_overrides[authenticate] = self._current
         app.dependency_overrides[current_time] = lambda: self.now
-        install_route_stand_ins(app)
 
     def sign_in(self, owner_id: UUID, *, minutes_ago: float = 1) -> None:
         """Sessão da conta com login no provedor há `minutes_ago` minutos."""

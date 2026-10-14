@@ -1,9 +1,4 @@
-"""Login ponta a ponta com a sessão real da Frente B (sem `StoredSessions`).
-
-Fica em xfail estrito enquanto `start_session` for stub: quando a Frente B chegar, o teste passa,
-o xfail estrito reprova a suíte e quem integrar apaga a marca (e, com ela, a necessidade de
-`StoredSessions` nos outros testes do login).
-"""
+"""Login ponta a ponta: o cookie emitido pelo callback autentica pela sessão real."""
 
 from datetime import UTC, datetime
 

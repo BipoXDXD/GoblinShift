@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.identity import MAX_ACTIVE_KEYS, authenticate_api_key
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
-from tests.api.simulated_session import FakeSessions
+from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import new_user
 
@@ -34,8 +34,8 @@ SUMMARY_KEYS = {
 
 
 @pytest.fixture
-def sessions(app: FastAPI) -> FakeSessions:
-    return FakeSessions(app, NOW)
+def sessions(app: FastAPI) -> SimulatedSessions:
+    return SimulatedSessions(app, NOW)
 
 
 def create_key(client: TestClient, body: object = VALID) -> dict[str, Any]:
@@ -72,7 +72,7 @@ def authenticates(factory: sessionmaker[Session], token: str) -> bool:
 
 
 def test_post_cria_chave_e_mostra_o_segredo_uma_vez(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner)
@@ -91,7 +91,7 @@ def test_post_cria_chave_e_mostra_o_segredo_uma_vez(
 
 
 def test_get_depois_do_post_nao_traz_segredo_nem_hash(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     sessions.sign_in(new_user(factory))
     created = create_key(client)
@@ -122,7 +122,7 @@ def test_get_depois_do_post_nao_traz_segredo_nem_hash(
 def test_post_com_campo_extra_422_e_nada_gravado(
     client: TestClient,
     factory: sessionmaker[Session],
-    sessions: FakeSessions,
+    sessions: SimulatedSessions,
     extra: dict[str, str],
 ) -> None:
     owner = new_user(factory)
@@ -162,7 +162,7 @@ def test_post_com_campo_extra_422_e_nada_gravado(
     ],
 )
 def test_post_invalido_422_e_nada_gravado(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions, body: object
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions, body: object
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner)
@@ -175,7 +175,7 @@ def test_post_invalido_422_e_nada_gravado(
 
 @pytest.mark.parametrize("days", [1, 90])
 def test_post_aceita_as_fronteiras_de_validade(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions, days: int
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions, days: int
 ) -> None:
     sessions.sign_in(new_user(factory))
 
@@ -185,7 +185,7 @@ def test_post_aceita_as_fronteiras_de_validade(
 
 
 def test_post_sem_dias_usa_30(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     sessions.sign_in(new_user(factory))
 
@@ -195,7 +195,7 @@ def test_post_sem_dias_usa_30(
 
 
 def test_sexta_chave_ativa_409(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner)
@@ -209,7 +209,7 @@ def test_sexta_chave_ativa_409(
 
 
 def test_emitir_chave_com_login_de_11_min_401_reauth_required(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner, minutes_ago=11)
@@ -221,7 +221,7 @@ def test_emitir_chave_com_login_de_11_min_401_reauth_required(
 
 
 def test_emitir_chave_com_login_de_10_min_exatos_aceita(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     sessions.sign_in(new_user(factory), minutes_ago=10)
 
@@ -229,7 +229,7 @@ def test_emitir_chave_com_login_de_10_min_exatos_aceita(
 
 
 def test_conta_bloqueada_depois_da_autenticacao_nao_emite(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     # O bloqueio pode chegar entre a autenticação e a emissão: a trava da conta decide.
     owner = new_user(factory)
@@ -247,7 +247,7 @@ def test_conta_bloqueada_depois_da_autenticacao_nao_emite(
 
 
 def test_get_lista_so_as_chaves_da_propria_conta(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner, intruder = new_user(factory), new_user(factory)
     sessions.sign_in(owner)
@@ -266,7 +266,7 @@ def test_get_lista_so_as_chaves_da_propria_conta(
 
 
 def test_delete_revoga_a_propria_chave_e_repetir_e_204(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner = new_user(factory)
     sessions.sign_in(owner)
@@ -289,7 +289,7 @@ def test_delete_revoga_a_propria_chave_e_repetir_e_204(
 
 
 def test_outra_conta_recebe_404_sem_dados_e_a_chave_fica_intacta(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     owner, intruder = new_user(factory), new_user(factory)
     sessions.sign_in(owner)
@@ -313,7 +313,7 @@ def test_outra_conta_recebe_404_sem_dados_e_a_chave_fica_intacta(
 
 
 def test_delete_de_chave_inexistente_404(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     sessions.sign_in(new_user(factory))
 
@@ -323,7 +323,7 @@ def test_delete_de_chave_inexistente_404(
 
 
 def test_delete_com_id_que_nao_e_uuid_422(
-    client: TestClient, factory: sessionmaker[Session], sessions: FakeSessions
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
 ) -> None:
     sessions.sign_in(new_user(factory))
 
