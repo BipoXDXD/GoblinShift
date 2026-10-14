@@ -24,7 +24,7 @@ from goblinshift.files.storage import FileStorage, ObjectAlreadyExistsError
 from goblinshift.files.tables import stored_object
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.tables import attempt, run_input, run_output
-from goblinshift.runs.worker import coordinator as coordinator_module
+from goblinshift.runs.worker import candidate_writer
 from tests.runs.worker_support import (
     LEASE,
     VALID,
@@ -143,7 +143,7 @@ def test_lease_segue_renovado_durante_a_gravacao_dos_candidatos(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Blocos de 4 bytes: a cópia vira muitas iterações, e cada uma pausa até passar do lease.
-    monkeypatch.setattr(coordinator_module, "COPY_CHUNK_BYTES", 4)
+    monkeypatch.setattr(candidate_writer, "COPY_CHUNK_BYTES", 4)
     storage = SlowStorage(tmp_path / "storage", factory)
     run_id = queue_run(factory, storage, create_user(factory), [("a.csv", NEEDS_WRITE)])
     claimed = claim(factory, storage)
@@ -165,7 +165,7 @@ def test_cancelamento_durante_a_gravacao_e_percebido_na_renovacao(
     work_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(coordinator_module, "COPY_CHUNK_BYTES", 4)
+    monkeypatch.setattr(candidate_writer, "COPY_CHUNK_BYTES", 4)
     storage = SlowStorage(tmp_path / "storage", factory)
     owner = create_user(factory)
     run_id = queue_run(factory, storage, owner, [("a.csv", NEEDS_WRITE)])
