@@ -2,24 +2,18 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it } from "vitest";
 
+import { appRoutes } from "../test/appRoutes";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi } from "../test/fakeApi";
-import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
-import { createRoutes } from "./routes";
 
 function renderAt(path: string) {
   const api = fakeApi({ "GET /api/v1/catalog": catalogHandler() });
-  const { uploader } = fakeUploader({ autoResolve: true });
-  const routes = createRoutes({
-    uploadServices: {
-      client: api.client,
-      uploader,
-      rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-    },
-  });
-  return { ...renderRoutes({ routes, path, client: api.client }), user: userEvent.setup() };
+  return {
+    ...renderRoutes({ routes: appRoutes(api.client), path, client: api.client }),
+    user: userEvent.setup(),
+  };
 }
 
 // As telas carregam por rota (lazy): o título só existe depois que o chunk da tela chega.

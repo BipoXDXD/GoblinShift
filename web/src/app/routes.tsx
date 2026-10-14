@@ -7,14 +7,16 @@ import { PATHS } from "./paths";
 
 export interface AppServices {
   readonly uploadServices: UploadServices;
+  /** Relógio em ms (Date.now no navegador): o período do Histórico conta a partir dele. */
+  readonly now: () => number;
 }
 
 /**
  * Cada tela é um chunk próprio (`lazy`), baixado só quando a rota abre: o JS inicial fica com o
  * React, o router e a moldura. A 404 fica no chunk de entrada porque a Bancada também a usa e
- * ela é pequena. Histórico e Acesso entram com as fatias que os sustentam.
+ * ela é pequena. Acesso entra com a fatia 6, que o sustenta.
  */
-export function createRoutes({ uploadServices }: AppServices): RouteObject[] {
+export function createRoutes({ uploadServices, now }: AppServices): RouteObject[] {
   return [
     {
       element: <Layout />,
@@ -34,6 +36,13 @@ export function createRoutes({ uploadServices }: AppServices): RouteObject[] {
           lazy: async () => {
             const { WorkbenchPage } = await import("../workbench/WorkbenchPage");
             return { element: <WorkbenchPage uploadServices={uploadServices} /> };
+          },
+        },
+        {
+          path: PATHS.history,
+          lazy: async () => {
+            const { HistoryPage } = await import("../history/HistoryPage");
+            return { element: <HistoryPage now={now} /> };
           },
         },
         {

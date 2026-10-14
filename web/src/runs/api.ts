@@ -4,7 +4,7 @@ import type { ApiClient } from "../api/client";
 import type { ApiResponse } from "../api/response";
 
 // Espelhos em runtime dos schemas da spec; api.test.ts trava a igualdade com os tipos gerados.
-const RUN_STATUSES = [
+export const RUN_STATUSES = [
   "queued",
   "running",
   "stopping",
