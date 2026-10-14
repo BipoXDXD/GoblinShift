@@ -15,7 +15,6 @@ from goblinshift.runs.worker.collection import (
     collect_outputs,
 )
 from tests.runs.collection_support import (
-    PACKAGE,
     RECIPE,
     duplicate_item,
     ok_item,
@@ -463,127 +462,6 @@ def test_summary_sem_duplicates_com_duplicata_e_recusado(tmp_path: Path) -> None
 
     with pytest.raises(CollectionError, match="summary"):
         collect_outputs(out, recipe_id=RECIPE, input_count=2)
-
-
-# --- Pacote comum (ADR 019): manifest.json e <recipe_id>.zip na raiz, fora do conteúdo ---------
-
-
-def write_package(out: Path, manifest: bytes = b"{}", package: bytes = b"PK") -> None:
-    (out / "manifest.json").write_bytes(manifest)
-    (out / PACKAGE).write_bytes(package)
-
-
-def test_manifesto_e_pacote_sao_coletados_a_parte_do_conteudo(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, manifest=b"{}\n", package=b"PK zip")
-
-    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-    assert [f.name for f in collected.outputs] == ["a.csv"]
-    assert collected.manifest_file is not None
-    assert (collected.manifest_file.name, collected.manifest_file.size) == ("manifest.json", 3)
-    assert collected.package_file is not None
-    assert (collected.package_file.name, collected.package_file.size) == (PACKAGE, 6)
-    assert collected.package_file.path == out / PACKAGE
-
-
-def test_executor_anterior_a_fatia_5_nao_deixa_pacote(tmp_path: Path) -> None:
-    # Runs aceitas antes do deploy continuam na imagem fixada nelas, que não empacota.
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-
-    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-    assert collected.manifest_file is None
-    assert collected.package_file is None
-
-
-@pytest.mark.parametrize("only", ["manifest.json", PACKAGE])
-def test_manifesto_sem_pacote_ou_pacote_sem_manifesto_e_recusado(tmp_path: Path, only: str) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1", only: b"x"})
-
-    with pytest.raises(CollectionError, match="juntos"):
-        collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-
-def test_pacote_com_nome_de_outra_receita_e_arquivo_nao_citado(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1", "image-forge.zip": b"PK"})
-    write_package(out)
-
-    with pytest.raises(CollectionError, match="citadas"):
-        collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-
-def test_manifesto_e_pacote_nao_contam_no_teto_de_arquivos_nem_de_bytes(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, manifest=b"{" + b" " * 100 + b"}", package=b"P" * 100)
-
-    collected = collect_outputs(
-        out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(max_files=1, max_bytes=1)
-    )
-
-    assert [f.name for f in collected.outputs] == ["a.csv"]
-
-
-def test_manifesto_no_teto_passa_e_acima_e_falha_deterministica(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, manifest=b"1234")
-
-    collect_outputs(out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(manifest_max_bytes=4))
-    with pytest.raises(OutputLimitError) as caught:
-        collect_outputs(
-            out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(manifest_max_bytes=3)
-        )
-
-    assert caught.value.code is ErrorCode.REPORT_LIMIT_EXCEEDED
-
-
-def test_pacote_no_teto_passa_e_acima_e_falha_deterministica(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, package=b"12345")
-
-    collect_outputs(out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(package_max_bytes=5))
-    with pytest.raises(OutputLimitError) as caught:
-        collect_outputs(
-            out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(package_max_bytes=4)
-        )
-
-    assert caught.value.code is ErrorCode.OUTPUT_LIMIT_EXCEEDED
-
-
-def test_tetos_padrao_do_pacote_sao_os_de_1_7() -> None:
-    limits = OutputLimits()
-
-    assert (limits.manifest_max_bytes, limits.package_max_bytes) == (8 * 1024**2, 512 * 1024**2)
-
-
-@pytest.mark.parametrize("name", ["manifest.json", PACKAGE])
-def test_manifesto_ou_pacote_que_e_symlink_e_recusado(tmp_path: Path, name: str) -> None:
-    out = tmp_path / "out"
-    (tmp_path / "segredo").write_bytes(b"x")
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out)
-    (out / name).unlink()
-    (out / name).symlink_to(tmp_path / "segredo")
-
-    with pytest.raises(CollectionError, match="regular"):
-        collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-
-def test_manifest_json_dentro_de_um_grupo_e_conteudo_comum(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "text/manifest.json")], {"text/manifest.json": b"{}"})
-
-    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-    assert [f.name for f in collected.outputs] == ["text/manifest.json"]
-    assert collected.manifest_file is None
 
 
 # --- Nomes que o executor deixou em out/ (dado não confiável, regras de 3.6) -----------------

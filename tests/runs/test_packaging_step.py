@@ -23,7 +23,7 @@ from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage, ObjectAlreadyExistsError
 from goblinshift.files.tables import stored_object
 from goblinshift.runs.cancellation import cancel_run
-from goblinshift.runs.tables import attempt
+from goblinshift.runs.tables import attempt, run_input, run_output
 from goblinshift.runs.worker import coordinator as coordinator_module
 from tests.runs.worker_support import (
     LEASE,
@@ -190,3 +190,34 @@ def test_cancelamento_durante_a_gravacao_e_percebido_na_renovacao(
             select(stored_object.c.state).where(stored_object.c.attempt_id == claimed.attempt_id)
         ).scalars()
         assert set(states) <= {ObjectState.DELETE_REQUESTED}
+
+
+def test_pacote_adulterado_pelo_executor_vira_retentativa_sem_publicar_nada(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory), [("a.csv", VALID)])
+    claimed = claim(factory, storage)
+
+    coordinator(factory, storage, local_runner(work_root, "tamper-package")).run(claimed)
+
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"], row["summary"]) == (
+        "running",
+        "retry_wait",
+        {"progress": {"processed": 1, "total": 1}},
+    )
+    [only] = attempts(factory, run_id)
+    assert only["error_code"] == "EXECUTOR_UNAVAILABLE"
+    with factory() as session:
+        assert (
+            session.execute(
+                select(func.count()).select_from(run_output).where(run_output.c.run_id == run_id)
+            ).scalar_one()
+            == 0
+        )
+        assert (
+            session.execute(
+                select(run_input.c.outcome).where(run_input.c.run_id == run_id)
+            ).scalar_one()
+            is None
+        )

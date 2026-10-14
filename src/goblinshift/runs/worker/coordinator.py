@@ -147,10 +147,10 @@ class _LeaseKeeper:
 
     def beating(self, chunks: Iterable[bytes]) -> Iterator[bytes]:
         for chunk in chunks:
-            self._beat()
+            self.beat()
             yield chunk
 
-    def _beat(self) -> None:
+    def beat(self) -> None:
         if time.monotonic() - self._last < self._every_s:
             return
         self._last = time.monotonic()
@@ -411,9 +411,13 @@ class Coordinator:
     def _package_and_publish(self, claimed: ClaimedAttempt) -> Applied:
         self.reach_phase(claimed, Phase.PACKAGING)
         out_dir = self._runner.work_dir(claimed.attempt_id) / "out"
+        keeper = self._lease_keeper(claimed)
         try:
             collected = collect_outputs(
-                out_dir, len(claimed.input_upload_ids), recipe_id=claimed.recipe_id
+                out_dir,
+                len(claimed.input_upload_ids),
+                recipe_id=claimed.recipe_id,
+                heartbeat=keeper.beat,
             )
         except OutputLimitError as limit:
             code = limit.code
@@ -422,7 +426,7 @@ class Coordinator:
                 lambda _loaded: DeterministicFailure(claimed.generation, code),
                 attempt_error=code,
             )
-        except CollectionError as error:
+        except (CollectionError, OSError) as error:
             logger.warning("coleta recusada", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
         try:
@@ -448,10 +452,11 @@ class Coordinator:
         calcula, não é gravado de novo: o artefato aponta para o objeto da entrada enquanto ele
         estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos"). A leitura e a cópia
         renovam o lease a cada terço do prazo; parada pedida no meio levanta `_StopRequested`.
+        O SHA-256 de cada saída é o que a coleta calculou ao ler `out/`.
         """
-        keeper = _LeaseKeeper(lambda: self.renew_lease(claimed), self._config.renew_every)
+        keeper = self._lease_keeper(claimed)
         files = _files_to_publish(collected)
-        reused = self._reusable_objects(claimed, files, keeper)
+        reused = self._reusable_objects(claimed, files)
         to_write = [
             (index, output) for index, (output, _role) in enumerate(files) if index not in reused
         ]
@@ -493,15 +498,9 @@ class Coordinator:
         ]
 
     def _reusable_objects(
-        self,
-        claimed: ClaimedAttempt,
-        files: list[tuple[OutputFile, ArtifactRole]],
-        keeper: _LeaseKeeper,
+        self, claimed: ClaimedAttempt, files: list[tuple[OutputFile, ArtifactRole]]
     ) -> dict[int, uuid.UUID]:
-        """Índice da saída → objeto da entrada com o mesmo conteúdo, ainda `committed`.
-
-        Só saídas de conteúdo, e só as do tamanho de alguma entrada são lidas para o hash.
-        """
+        """Índice da saída de conteúdo → objeto da entrada com o mesmo conteúdo, `committed`."""
         with self._factory() as session, session.begin():
             contents = held_input_contents(session, claimed.owner_id, claimed.input_upload_ids)
         # A primeira entrada com o conteúdo vence, como a primeira ocorrência do Detox.
@@ -509,13 +508,10 @@ class Coordinator:
         for content in contents:
             if content.committed:
                 by_content.setdefault((content.sha256, content.size_bytes), content.object_id)
-        sizes = {size for _sha256, size in by_content}
         reused = {}
         for index, (output, role) in enumerate(files):
-            if role is not ArtifactRole.OUTPUT or output.size not in sizes:
-                continue
-            object_id = by_content.get((_sha256_of(output.path, keeper), output.size))
-            if object_id is not None:
+            object_id = by_content.get((output.sha256, output.size))
+            if role is ArtifactRole.OUTPUT and object_id is not None:
                 reused[index] = object_id
         return reused
 
@@ -648,6 +644,9 @@ class Coordinator:
             raise LostFencing(f"{type(event).__name__} recusado: {decision.reason}")
         return apply_transition(session, loaded, decision)
 
+    def _lease_keeper(self, claimed: ClaimedAttempt) -> _LeaseKeeper:
+        return _LeaseKeeper(lambda: self.renew_lease(claimed), self._config.renew_every)
+
     def _lock_running(self, session: Session, claimed: ClaimedAttempt) -> None:
         loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
         if loaded.state.status is Status.STOPPING:
@@ -676,14 +675,6 @@ def _files_to_publish(collected: Collected) -> list[tuple[OutputFile, ArtifactRo
     if collected.package_file is not None:
         files.append((collected.package_file, ArtifactRole.PACKAGE))
     return files
-
-
-def _sha256_of(path: Path, keeper: _LeaseKeeper) -> bytes:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in keeper.beating(_chunks(source)):
-            digest.update(chunk)
-    return digest.digest()
 
 
 def _create_for_executor(path: Path) -> BinaryIO:
