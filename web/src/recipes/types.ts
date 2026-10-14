@@ -19,10 +19,15 @@ export type RecipeDraft<K extends RecipeId> =
   | { readonly ok: true; readonly command: RecipeCommandFor<K> }
   | { readonly ok: false; readonly issues: readonly FormIssue[] };
 
-/** O que a Bancada passa ao formulário de uma receita. */
-export interface RecipeFieldsProps<K extends RecipeId> {
+/** O que a Bancada passa ao formulário de qualquer receita. */
+export interface RecipeFormProps<K extends RecipeId> {
   /** Erro de cada controle, pelo id; já filtrado para mostrar só depois de uma tentativa de envio. */
   readonly errors: ReadonlyMap<string, string>;
   /** Chamado a cada mudança, com o comando válido ou os erros do formulário inteiro. */
   readonly onDraftChange: (draft: RecipeDraft<K>) => void;
+}
+
+/** Props do formulário de uma receita: as da Bancada mais os defaults e limites do catálogo. */
+export interface RecipeFieldsProps<K extends RecipeId, S> extends RecipeFormProps<K> {
+  readonly settings: S;
 }

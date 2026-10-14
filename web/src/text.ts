@@ -76,6 +76,9 @@ export const TEXT = {
     parametersHeading: "Parâmetros",
     run: "Executar",
     creatingRun: "Criando a execução.",
+    loadingCatalog: "Carregando a receita.",
+    recipeUnavailable:
+      "Esta receita não está disponível no momento. Recarregue a página ou tente mais tarde.",
     upload: {
       waiting: "Na fila de envio",
       sending: (percent: number) => `Enviando: ${String(percent)}%`,
@@ -93,6 +96,12 @@ export const TEXT = {
       string_too_short: "Preencha este campo.",
       too_short: "Informe pelo menos um item.",
       too_long: "Há itens demais neste campo.",
+      string_too_long: "O texto passa do tamanho permitido.",
+      greater_than_equal: "O valor fica abaixo do mínimo permitido.",
+      less_than_equal: "O valor passa do máximo permitido.",
+      int_type: "Informe um número inteiro.",
+      bool_type: "Escolha sim ou não.",
+      string_pattern_mismatch: "O valor não está no formato pedido.",
       enum: "Escolha uma das opções.",
       literal_error: "Escolha uma das opções.",
       extra_forbidden: "Este campo não é aceito.",
@@ -103,6 +112,8 @@ export const TEXT = {
       uploading: "Espere o envio dos arquivos terminar.",
       failedFiles: "Remova ou envie de novo os arquivos que falharam.",
       tooManyFiles: (max: number) => `Use no máximo ${String(max)} arquivos.`,
+      tooManyBytes: (total: string, max: string) =>
+        `Os arquivos somam ${total}; o máximo por execução é ${max}.`,
     },
   },
   run: {
@@ -137,11 +148,19 @@ export const TEXT = {
       heading: "Resultados",
       loading: "Carregando os resultados.",
       download: (fileName: string) => `Baixar ${fileName}`,
-      roles: { output: "arquivo processado", report: "relatório" },
+      roles: {
+        output: "arquivo processado",
+        report: "relatório",
+        manifest: "manifesto",
+        package: "pacote com todos os arquivos",
+      },
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
     },
+  },
+  recipeFields: {
+    invalidOption: "Escolha uma das opções.",
   },
   csvJanitor: {
     title: "CSV Janitor",
@@ -183,7 +202,58 @@ export const TEXT = {
       columnRequired: "Informe a coluna.",
       tooManyColumns: (max: number) => `Informe no máximo ${String(max)} colunas.`,
       tooManyRows: (max: number) => `Use no máximo ${String(max)} linhas.`,
-      invalidOption: "Escolha uma das opções.",
+    },
+  },
+  imageForge: {
+    title: "Image Forge",
+    legend: "Parâmetros das imagens",
+    maxWidth: "Largura máxima, em pixels",
+    maxHeight: "Altura máxima, em pixels",
+    sideHint: (min: number, max: number) =>
+      `De ${String(min)} a ${String(max)}. A imagem é reduzida para caber, mantendo a proporção; nunca é ampliada.`,
+    outputFormat: "Formato de saída",
+    outputFormats: {
+      preserve: "Manter o formato (PNG continua PNG; JPEG continua JPEG)",
+      jpeg: "JPEG",
+      png: "PNG",
+    },
+    jpegQuality: "Qualidade do JPEG",
+    jpegQualityHint: (min: number, max: number) =>
+      `De ${String(min)} a ${String(max)}. Vale só para as saídas em JPEG.`,
+    jpegBackground: "Cor de fundo da transparência no JPEG",
+    jpegBackgroundHint: "No formato #RRGGBB, como #FFFFFF para branco.",
+    makeThumbnails: "Gerar miniaturas",
+    makeThumbnailsHint: (box: number) => `Uma miniatura de até ${String(box)} pixels por imagem.`,
+    errors: {
+      integerBetween: (min: number, max: number) =>
+        `Informe um número inteiro de ${String(min)} a ${String(max)}.`,
+      hexColor: "Use o formato #RRGGBB, como #FFFFFF.",
+    },
+  },
+  downloadsDetox: {
+    title: "Downloads Detox",
+    legend: "Parâmetros da organização",
+    deduplicate: "Remover arquivos repetidos",
+    deduplicateHint: "Arquivos com o mesmo conteúdo ficam uma vez só, na primeira ocorrência.",
+    groupBy: "Organização em pastas",
+    groupByOptions: {
+      kind: "Separar por tipo (imagens, tabelas, textos e arquivos compactados)",
+      none: "Tudo numa pasta só",
+    },
+    nameMode: "Nomes dos arquivos",
+    nameModes: {
+      preserve: "Manter os nomes originais",
+      indexed: "Numerar na ordem de entrada",
+    },
+    namePrefix: "Prefixo da numeração",
+    namePrefixHint: (max: number) =>
+      `Até ${String(max)} caracteres. Com o prefixo arquivo, os nomes ficam arquivo-001, arquivo-002 e assim por diante.`,
+    errors: {
+      prefixRequired: "Informe o prefixo.",
+      prefixTooLong: (max: number) => `Use no máximo ${String(max)} caracteres.`,
+      prefixSeparator: "O prefixo não pode ter / nem \\.",
+      prefixInvisible: "O prefixo não pode ter caracteres invisíveis ou de controle.",
+      prefixDot: "O prefixo não pode começar com ponto.",
     },
   },
 } as const;

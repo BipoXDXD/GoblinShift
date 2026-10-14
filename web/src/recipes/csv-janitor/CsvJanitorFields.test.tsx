@@ -5,12 +5,28 @@ import { describe, expect, it, vi } from "vitest";
 import { axeViolations } from "../../test/axe";
 import type { RecipeDraft } from "../types";
 import { CsvJanitorFields } from "./CsvJanitorFields";
-import { MAX_FILTERS } from "./schema";
+import type { CsvJanitorSettings } from "./settings";
+
+const MAX_FILTERS = 3;
+
+const SETTINGS: CsvJanitorSettings = {
+  defaults: {
+    input_delimiter: ";",
+    output_delimiter: ",",
+    trim_columns: "",
+    case_rules: [],
+    filters: [],
+    deduplicate_by: "",
+    output_columns: "",
+    formula_guard: "none",
+  },
+  limits: { maxColumns: 100, maxFilters: MAX_FILTERS },
+};
 
 function setup(errors: ReadonlyMap<string, string> = new Map()) {
   const onDraftChange = vi.fn<(draft: RecipeDraft<"csv-janitor">) => void>();
   const user = userEvent.setup();
-  render(<CsvJanitorFields errors={errors} onDraftChange={onDraftChange} />);
+  render(<CsvJanitorFields settings={SETTINGS} errors={errors} onDraftChange={onDraftChange} />);
   const lastDraft = (): RecipeDraft<"csv-janitor"> => {
     const draft = onDraftChange.mock.lastCall?.[0];
     if (draft === undefined) {
@@ -29,12 +45,12 @@ function parametersOf(draft: RecipeDraft<"csv-janitor">) {
 }
 
 describe("CsvJanitorFields", () => {
-  it("mostra os defaults da spec", () => {
+  it("mostra os defaults do catálogo", () => {
     setup();
 
     expect(
       screen.getByRole("combobox", { name: "Delimitador dos arquivos de entrada" }),
-    ).toHaveValue(",");
+    ).toHaveValue(";");
     expect(
       screen.getByRole("combobox", { name: "Células que parecem fórmulas de planilha" }),
     ).toHaveValue("none");
@@ -101,7 +117,7 @@ describe("CsvJanitorFields", () => {
     ]);
   });
 
-  it(`não passa de ${String(MAX_FILTERS)} filtros`, async () => {
+  it(`não passa do máximo de filtros do catálogo (${String(MAX_FILTERS)})`, async () => {
     const { user } = setup();
     const add = screen.getByRole("button", { name: "Adicionar filtro" });
     for (let index = 0; index < MAX_FILTERS + 1; index += 1) {

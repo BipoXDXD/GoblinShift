@@ -5,24 +5,26 @@ import type { RunCommand } from "./types";
 // Trava o formato que o gerador produz para o corpo de POST /runs: `allOf` (campos comuns) +
 // `oneOf` das versões do catálogo, discriminado por `recipe_id`. Uma receita nova na API
 // muda este teste de propósito, para o formulário dela ser escrito à mão (2.2).
+type Variant<K extends RunCommand["recipe_id"]> = Extract<RunCommand, { recipe_id: K }>;
+
 describe("contrato gerado de POST /runs", () => {
   it("discrimina as variantes pelo recipe_id literal", () => {
-    expectTypeOf<RunCommand["recipe_id"]>().toEqualTypeOf<"csv-janitor">();
+    expectTypeOf<RunCommand["recipe_id"]>().toEqualTypeOf<
+      "csv-janitor" | "image-forge" | "downloads-detox"
+    >();
   });
 
   it("fixa a versão de cada variante como literal", () => {
-    type CsvJanitor = Extract<RunCommand, { recipe_id: "csv-janitor" }>;
-
-    expectTypeOf<CsvJanitor["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
   });
 
-  it("dá a cada variante os próprios parâmetros, sem index signature", () => {
-    type CsvJanitorParameters = Extract<RunCommand, { recipe_id: "csv-janitor" }>["parameters"];
+  it("dá à CSV Janitor os próprios parâmetros, sem index signature", () => {
+    type Parameters = Variant<"csv-janitor">["parameters"];
 
-    expectTypeOf<CsvJanitorParameters["input_delimiter"]>().toEqualTypeOf<
-      "," | ";" | "\t" | undefined
-    >();
-    expectTypeOf<keyof CsvJanitorParameters>().toEqualTypeOf<
+    expectTypeOf<Parameters["input_delimiter"]>().toEqualTypeOf<"," | ";" | "\t" | undefined>();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
       | "input_delimiter"
       | "output_delimiter"
       | "trim_columns"
@@ -31,6 +33,33 @@ describe("contrato gerado de POST /runs", () => {
       | "deduplicate_by"
       | "output_columns"
       | "formula_guard"
+    >();
+  });
+
+  it("dá ao Image Forge os próprios parâmetros, sem index signature", () => {
+    type Parameters = Variant<"image-forge">["parameters"];
+
+    expectTypeOf<Parameters["output_format"]>().toEqualTypeOf<
+      "preserve" | "jpeg" | "png" | undefined
+    >();
+    expectTypeOf<Parameters["max_width"]>().toEqualTypeOf<number | undefined>();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
+      | "max_width"
+      | "max_height"
+      | "output_format"
+      | "jpeg_quality"
+      | "jpeg_background"
+      | "make_thumbnails"
+    >();
+  });
+
+  it("dá ao Downloads Detox os próprios parâmetros, sem index signature", () => {
+    type Parameters = Variant<"downloads-detox">["parameters"];
+
+    expectTypeOf<Parameters["group_by"]>().toEqualTypeOf<"kind" | "none" | undefined>();
+    expectTypeOf<Parameters["name_mode"]>().toEqualTypeOf<"preserve" | "indexed" | undefined>();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
+      "deduplicate" | "group_by" | "name_mode" | "name_prefix"
     >();
   });
 

@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { findRecipe } from "./registry";
+import { catalogVersion } from "../test/catalog";
+import { findRecipe, RECIPE_LIST } from "./registry";
 
 describe("findRecipe", () => {
-  it("encontra a CSV Janitor", () => {
-    const recipe = findRecipe("csv-janitor");
-
-    expect(recipe?.title).toBe("CSV Janitor");
-    expect(recipe?.initialDraft.ok).toBe(true);
+  it.each([
+    ["csv-janitor", "CSV Janitor"],
+    ["image-forge", "Image Forge"],
+    ["downloads-detox", "Downloads Detox"],
+  ] as const)("encontra %s", (id, title) => {
+    expect(findRecipe(id)?.title).toBe(title);
   });
 
-  it.each(["image-forge", "", "__proto__", "toString", "constructor"])("não encontra %j", (id) => {
+  it.each(["media-mill", "", "__proto__", "toString", "constructor"])("não encontra %j", (id) => {
     expect(findRecipe(id)).toBeNull();
   });
 
@@ -18,5 +20,34 @@ describe("findRecipe", () => {
     expect(findRecipe("csv-janitor")?.fieldIdFor(["filters", "0", "value"])).toBe(
       "csv-janitor-filters-0-value",
     );
+  });
+});
+
+describe("formFor", () => {
+  it.each(RECIPE_LIST.map((recipe) => [recipe.id, recipe] as const))(
+    "%s: os defaults do catálogo já formam um comando válido",
+    (id, recipe) => {
+      const form = recipe.formFor(catalogVersion(id));
+
+      expect(form?.initialDraft).toMatchObject({
+        ok: true,
+        command: { recipe_id: id, recipe_version: recipe.version },
+      });
+    },
+  );
+
+  it("traz os limites de entrada da versão", () => {
+    const form = findRecipe("downloads-detox")?.formFor(catalogVersion("downloads-detox"));
+
+    expect(form?.inputLimits).toEqual({ maxInputs: 100, maxTotalBytes: 503316480 });
+  });
+
+  it.each([
+    ["sem max_inputs", { limits: { columns: 100 } }],
+    ["defaults de outra receita", { defaults: catalogVersion("image-forge").defaults }],
+  ])("catálogo incompatível (%s) → sem formulário", (_, override) => {
+    const recipe = findRecipe("csv-janitor");
+
+    expect(recipe?.formFor({ ...catalogVersion("csv-janitor"), ...override })).toBeNull();
   });
 });

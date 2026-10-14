@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Catalog */
+        get: operations["getCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -242,7 +259,7 @@ export interface components {
          * ArtifactRole
          * @enum {string}
          */
-        ArtifactRole: "output" | "report";
+        ArtifactRole: "output" | "report" | "manifest" | "package";
         /**
          * Availability
          * @description Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
@@ -264,6 +281,11 @@ export interface components {
             status: string;
             /** Error Code */
             error_code: string | null;
+        };
+        /** CatalogResponse */
+        CatalogResponse: {
+            /** Recipes */
+            recipes: components["schemas"]["RecipeResponse"][];
         };
         /** ContentInstructions */
         ContentInstructions: {
@@ -384,6 +406,31 @@ export interface components {
             size: number;
             /** Sha256 */
             sha256: string;
+        };
+        /** RecipeResponse */
+        RecipeResponse: {
+            /** Recipe Id */
+            recipe_id: string;
+            /** Versions */
+            versions: components["schemas"]["RecipeVersionResponse"][];
+        };
+        /** RecipeVersionResponse */
+        RecipeVersionResponse: {
+            /** Version */
+            version: number;
+            status: components["schemas"]["VersionStatus"];
+            /** Limits */
+            limits: {
+                [key: string]: number;
+            };
+            /** Defaults */
+            defaults: {
+                [key: string]: unknown;
+            };
+            /** Parameters Schema */
+            parameters_schema: {
+                [key: string]: unknown;
+            };
         };
         /** ResultReferenceResponse */
         ResultReferenceResponse: {
@@ -512,6 +559,11 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * VersionStatus
+         * @enum {string}
+         */
+        VersionStatus: "current" | "deprecated" | "retired";
     };
     responses: never;
     parameters: never;
@@ -521,6 +573,73 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogResponse"];
+                };
+            };
+            /** @description O `ETag` enviado em `If-None-Match` continua válido. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     getMe: {
         parameters: {
             query?: never;
@@ -1218,7 +1337,7 @@ export interface operations {
                 "application/json": {
                     /** @description Uploads prontos, na ordem de processamento, sem repetição. Obrigatório (1 a max_inputs da versão), exceto com validate_only. */
                     input_upload_ids?: string[];
-                } & {
+                } & ({
                     /** @constant */
                     recipe_id: "csv-janitor";
                     /** @constant */
@@ -1270,7 +1389,70 @@ export interface operations {
                          */
                         formula_guard?: "none" | "tab_prefix";
                     };
-                };
+                } | {
+                    /** @constant */
+                    recipe_id: "image-forge";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** ImageForgeV1Parameters */
+                    parameters: {
+                        /** @default 1600 */
+                        max_width?: number;
+                        /** @default 1600 */
+                        max_height?: number;
+                        /**
+                         * OutputFormat
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        output_format?: "preserve" | "jpeg" | "png";
+                        /**
+                         * Jpeg Quality
+                         * @default 85
+                         */
+                        jpeg_quality?: number;
+                        /**
+                         * Jpeg Background
+                         * @default #FFFFFF
+                         */
+                        jpeg_background?: string;
+                        /**
+                         * Make Thumbnails
+                         * @default false
+                         */
+                        make_thumbnails?: boolean;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "downloads-detox";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** DownloadsDetoxV1Parameters */
+                    parameters: {
+                        /**
+                         * Deduplicate
+                         * @default true
+                         */
+                        deduplicate?: boolean;
+                        /**
+                         * GroupBy
+                         * @default kind
+                         * @enum {string}
+                         */
+                        group_by?: "kind" | "none";
+                        /**
+                         * NameMode
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        name_mode?: "preserve" | "indexed";
+                        /**
+                         * Name Prefix
+                         * @default file
+                         */
+                        name_prefix?: string;
+                    };
+                });
             };
         };
         responses: {
