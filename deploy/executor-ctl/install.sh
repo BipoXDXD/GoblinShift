@@ -5,7 +5,7 @@
 # quando o pacote ou a unit mudaram (os containers das tentativas não dependem dele para rodar).
 #
 # Uso: sudo bash deploy/executor-ctl/install.sh
-# Depois de instalar ou atualizar, rode o teste de aceitação (deploy/acceptance/run.py).
+# Depois de instalar ou atualizar, rode o teste de aceitação (cd deploy && sudo python3 -B -m acceptance.run).
 set -euo pipefail
 
 GROUP=gs-exec
