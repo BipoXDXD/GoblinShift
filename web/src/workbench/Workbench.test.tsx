@@ -126,7 +126,7 @@ describe("Bancada", () => {
     );
   });
 
-  it("receita desconhecida mostra a página não encontrada", () => {
+  it("receita desconhecida mostra a página não encontrada", async () => {
     const api = fakeApi({});
     const { uploader } = fakeUploader({ autoResolve: true });
     renderRoutes({
@@ -141,7 +141,9 @@ describe("Bancada", () => {
       client: api.client,
     });
 
-    expect(screen.getByRole("heading", { level: 1, name: "Página não encontrada" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Página não encontrada" }),
+    ).toBeVisible();
   });
 
   it("envia os arquivos escolhidos e anuncia quando ficam prontos", async () => {
@@ -348,10 +350,12 @@ describe("Bancada", () => {
 
     expect(await axeViolations(container)).toEqual([]);
   });
-  it("mostra que está carregando a receita enquanto o catálogo não chega", () => {
+  it("mostra que está carregando a receita enquanto o catálogo não chega", async () => {
     renderWorkbench({ catalog: () => null });
 
-    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Bancada: CSV Janitor" }),
+    ).toHaveFocus();
     expect(screen.getByText("Carregando a receita.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
   });

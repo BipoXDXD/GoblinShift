@@ -4,13 +4,13 @@ import { describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
-  it("renderiza a rota inicial", () => {
+  it("renderiza a rota inicial", async () => {
     window.history.pushState({}, "", "/");
 
     render(<App />);
 
     expect(
-      screen.getByRole("heading", {
+      await screen.findByRole("heading", {
         level: 1,
         name: "Arquivos em lote, limpos pelos goblins da oficina.",
       }),
@@ -29,10 +29,11 @@ describe("App", () => {
     );
   });
 
-  it("a rota inicial leva à Bancada de cada receita", () => {
+  it("a rota inicial leva à Bancada de cada receita", async () => {
     window.history.pushState({}, "", "/");
 
     render(<App />);
+    await screen.findByRole("heading", { level: 1 });
 
     expect(
       within(screen.getByRole("main"))
