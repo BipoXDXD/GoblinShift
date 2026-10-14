@@ -211,7 +211,11 @@ def test_artifact_nao_aponta_para_objeto_de_outra_conta(conn: Connection) -> Non
     with barrado_por(conn, "artifact_owner_id_object_id_fkey"):
         conn.execute(
             insert(artifact).values(
-                owner_id=alice, object_id=objeto_de_bob, role="output", expires_at=UMA_HORA_DEPOIS
+                owner_id=alice,
+                object_id=objeto_de_bob,
+                role="output",
+                file_name="saida.csv",
+                expires_at=UMA_HORA_DEPOIS,
             )
         )
 
@@ -268,6 +272,7 @@ def test_run_output_nao_liga_run_a_artefato_de_outra_conta(conn: Connection) -> 
         owner_id=bob,
         object_id=objeto_de_bob,
         role="output",
+        file_name="saida.csv",
         expires_at=UMA_HORA_DEPOIS,
     )
 

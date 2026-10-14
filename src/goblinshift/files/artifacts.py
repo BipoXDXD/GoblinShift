@@ -19,7 +19,7 @@ from goblinshift.files.errors import (
 )
 from goblinshift.files.limits import ARTIFACT_TTL
 from goblinshift.files.objects import hold, release
-from goblinshift.files.states import ArtifactRole, HolderKind, ObjectState
+from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
 from goblinshift.files.tables import artifact, stored_object
 
 
@@ -38,6 +38,7 @@ class ArtifactView:
     sha256: bytes
     created_at: datetime
     expires_at: datetime
+    availability: Availability
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class DownloadTicket:
     size_bytes: int
     sha256: bytes
     role: ArtifactRole
+    file_name: str
 
 
 def create_candidate_object(
@@ -103,7 +105,11 @@ def commit_candidate(
 
 
 def publish_artifact(
-    session: Session, owner_id: uuid.UUID, object_id: uuid.UUID, role: ArtifactRole
+    session: Session,
+    owner_id: uuid.UUID,
+    object_id: uuid.UUID,
+    role: ArtifactRole,
+    file_name: str,
 ) -> ArtifactView:
     """Cria o artefato sobre um objeto `committed` do dono, com retenção de 48 h (1.7).
 
@@ -127,6 +133,7 @@ def publish_artifact(
             owner_id=owner_id,
             object_id=object_id,
             role=role,
+            file_name=file_name,
             expires_at=func.now() + ARTIFACT_TTL,
         )
         .returning(artifact.c.id, artifact.c.created_at, artifact.c.expires_at)
@@ -139,6 +146,42 @@ def publish_artifact(
         sha256=content.sha256,
         created_at=row.created_at,
         expires_at=row.expires_at,
+        availability=Availability.AVAILABLE,
+    )
+
+
+def get_artifact(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) -> ArtifactView:
+    """Metadados do artefato do dono, inclusive expirado ou excluído (com a disponibilidade).
+
+    Só o download recusa conteúdo indisponível; os metadados continuam consultáveis até a
+    retenção remover a linha.
+    """
+    row = session.execute(
+        select(
+            artifact.c.id,
+            artifact.c.object_id,
+            artifact.c.role,
+            artifact.c.created_at,
+            artifact.c.expires_at,
+            artifact.c.deleted_at,
+            (artifact.c.expires_at <= func.now()).label("expired"),
+            stored_object.c.size_bytes,
+            stored_object.c.sha256,
+        )
+        .join(stored_object, stored_object.c.id == artifact.c.object_id)
+        .where(artifact.c.id == artifact_id, artifact.c.owner_id == owner_id)
+    ).one_or_none()
+    if row is None:
+        raise ArtifactNotFoundError
+    return ArtifactView(
+        id=row.id,
+        object_id=row.object_id,
+        role=ArtifactRole(row.role),
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        availability=Availability.of(deleted=row.deleted_at is not None, expired=row.expired),
     )
 
 
@@ -153,6 +196,7 @@ def open_for_download(
         select(
             artifact.c.object_id,
             artifact.c.role,
+            artifact.c.file_name,
             artifact.c.deleted_at,
             artifact.c.expires_at <= func.now(),
             stored_object.c.storage_key,
@@ -165,7 +209,7 @@ def open_for_download(
     ).one_or_none()
     if row is None:
         raise ArtifactNotFoundError
-    object_id, role, deleted_at, expired, storage_key, size_bytes, sha256 = row
+    object_id, role, file_name, deleted_at, expired, storage_key, size_bytes, sha256 = row
     if deleted_at is not None or expired:
         raise ArtifactGoneError
     holder_id = uuid.uuid7()
@@ -175,7 +219,7 @@ def open_for_download(
         # Artefato válido sobre objeto ausente (`missing`): para o dono, o conteúdo sumiu.
         raise ArtifactGoneError from None
     return DownloadTicket(
-        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role)
+        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role), file_name
     )
 
 

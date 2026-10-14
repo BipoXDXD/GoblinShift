@@ -12,6 +12,7 @@ from goblinshift.files.artifacts import (
     commit_candidate,
     create_candidate_object,
     finish_download,
+    get_artifact,
     open_for_download,
     publish_artifact,
 )
@@ -22,7 +23,7 @@ from goblinshift.files.errors import (
     ObjectNotAvailableError,
 )
 from goblinshift.files.objects import hold, release
-from goblinshift.files.states import ArtifactRole, HolderKind
+from goblinshift.files.states import ArtifactRole, Availability, HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, upload
 from goblinshift.files.uploads import lock_ready_uploads, request_deletion
@@ -49,7 +50,9 @@ def published_artifact(
     sha256, size = storage.create_exclusive(candidate.storage_key, [content], max_bytes=100)
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
-        view = publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT)
+        view = publish_artifact(
+            session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv"
+        )
     return view.id
 
 
@@ -170,7 +173,9 @@ def test_artefato_publicado_expira_em_48_horas(
 
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
-        view = publish_artifact(session, owner, candidate.object_id, ArtifactRole.REPORT)
+        view = publish_artifact(
+            session, owner, candidate.object_id, ArtifactRole.REPORT, "report.json"
+        )
 
     assert view.role is ArtifactRole.REPORT
     assert (view.size_bytes, view.sha256) == (5, hashlib.sha256(b"saida").digest())
@@ -183,7 +188,55 @@ def test_publicar_objeto_ainda_pendente_e_recusado(factory: sessionmaker[Session
         candidate = create_candidate_object(session, owner, uuid.uuid4(), uuid.uuid4(), 1)
 
     with pytest.raises(ObjectNotAvailableError), unit_of_work(factory) as session:
-        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT)
+        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv")
+
+
+def test_artefato_do_dono_traz_metadados_e_disponibilidade(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    artifact_id = published_artifact(factory, storage, owner, b"resultado")
+
+    with factory() as session:
+        view = get_artifact(session, owner, artifact_id)
+
+    assert view.id == artifact_id
+    assert (view.size_bytes, view.sha256) == (9, hashlib.sha256(b"resultado").digest())
+    assert view.availability is Availability.AVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    [
+        ({"expires_at": func.now() - timedelta(seconds=1)}, Availability.EXPIRED),
+        ({"deleted_at": func.now()}, Availability.DELETED),
+    ],
+)
+def test_artefato_indisponivel_continua_visivel_ao_dono(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    change: dict[str, object],
+    expected: Availability,
+) -> None:
+    owner = create_user(factory, "a")
+    artifact_id = published_artifact(factory, storage, owner, b"x")
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).where(artifact.c.id == artifact_id).values(**change))
+
+    with factory() as session:
+        assert get_artifact(session, owner, artifact_id).availability is expected
+
+
+def test_artefato_alheio_ou_inexistente_da_o_mesmo_erro(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    other = create_user(factory, "b")
+    artifact_id = published_artifact(factory, storage, owner, b"segredo")
+
+    for target in [artifact_id, uuid.uuid4()]:
+        with pytest.raises(ArtifactNotFoundError), factory() as session:
+            get_artifact(session, other, target)
 
 
 def test_download_registra_uso_e_libera_ao_terminar(
@@ -246,7 +299,7 @@ def test_upload_excluido_reaproveitado_como_artefato_some_das_entradas_mas_nao_d
     view = ready_upload(factory, storage, owner, b"compartilhado")
     with unit_of_work(factory) as session:
         [ready] = lock_ready_uploads(session, owner, [view.id])
-        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT)
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
 
     with unit_of_work(factory) as session:
         request_deletion(session, owner, view.id)

@@ -50,6 +50,14 @@ class UploadSizeMismatchError(FilesError):
         self.expected_size = expected_size
 
 
+class UploadContentTooLargeError(UploadSizeMismatchError):
+    """Chegaram mais bytes que o declarado; o envio foi cortado e o upload terminou `failed`.
+
+    Subclasse do erro de tamanho porque é o mesmo desfecho para o upload; a rota a distingue
+    para responder 413 em vez de 422.
+    """
+
+
 class InputNotAvailableError(FilesError):
     """Algum upload citado não está disponível (→ 422 `INPUT_NOT_AVAILABLE`).
 
@@ -80,3 +88,10 @@ class ObjectNotAvailableError(FilesError):
 
     def __init__(self) -> None:
         super().__init__("objeto indisponível para novo uso")
+
+
+class TransferLimitReachedError(FilesError):
+    """Sem vaga de transferência simultânea para a conta ou para o ambiente (1.7; → 429)."""
+
+    def __init__(self) -> None:
+        super().__init__("limite de transferências simultâneas atingido")

@@ -26,3 +26,30 @@ class HolderKind(StrEnum):
 class ArtifactRole(StrEnum):
     OUTPUT = "output"
     REPORT = "report"
+
+
+class Availability(StrEnum):
+    """Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
+
+    Não é gravada: deriva de `deleted_at` e `expires_at`. Exclusão vence expiração, porque foi
+    um ato do dono.
+    """
+
+    AVAILABLE = "available"
+    EXPIRED = "expired"
+    DELETED = "deleted"
+
+    @classmethod
+    def of(cls, *, deleted: bool, expired: bool) -> Availability:
+        if deleted:
+            return cls.DELETED
+        if expired:
+            return cls.EXPIRED
+        return cls.AVAILABLE
+
+
+class TransferDirection(StrEnum):
+    """Envio e download têm vagas separadas (1.7: 2 uploads e 2 downloads por conta)."""
+
+    UPLOAD = "upload"
+    DOWNLOAD = "download"
