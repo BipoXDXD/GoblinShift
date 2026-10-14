@@ -41,6 +41,8 @@ from tests.runs.worker_support import (
 
 pytestmark = pytest.mark.integration
 
+UTF8_BOM = b"\xef\xbb\xbf"
+
 
 def outputs_of(factory: sessionmaker[Session], run_id: uuid.UUID) -> list[tuple[str, str]]:
     with factory() as session:
@@ -85,7 +87,12 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
         "duplicates": 0,
         "outputs": 1,
     }
-    assert outputs_of(factory, run_id) == [("clientes.csv", "output"), ("report.json", "report")]
+    assert outputs_of(factory, run_id) == [
+        ("clientes.csv", "output"),
+        ("report.json", "report"),
+        ("manifest.json", "manifest"),
+        ("csv-janitor.zip", "package"),
+    ]
     assert input_outcomes(factory, run_id) == [("ok", None)]
     [only] = attempts(factory, run_id)
     assert only["ended_at"] is not None
@@ -99,7 +106,8 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
 def test_artefato_publicado_tem_o_conteudo_limpo_na_chave_da_geracao(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
-    run_id = queue_run(factory, storage, create_user(factory))
+    # Com BOM, a saída limpa difere da entrada: vira candidato da tentativa, não reaproveitamento.
+    run_id = queue_run(factory, storage, create_user(factory), [("clientes.csv", UTF8_BOM + VALID)])
     claimed = claim(factory, storage)
 
     coordinator(factory, storage, local_runner(work_root)).run(claimed)
@@ -127,7 +135,12 @@ def test_tabela_rejeitada_termina_com_avisos(
 
     assert run_row(factory, run_id)["status"] == "succeeded_with_warnings"
     assert input_outcomes(factory, run_id) == [("ok", None), ("rejected", "CSV_STRUCTURE_INVALID")]
-    assert outputs_of(factory, run_id) == [("a.csv", "output"), ("report.json", "report")]
+    assert outputs_of(factory, run_id) == [
+        ("a.csv", "output"),
+        ("report.json", "report"),
+        ("manifest.json", "manifest"),
+        ("csv-janitor.zip", "package"),
+    ]
 
 
 def test_todas_rejeitadas_termina_failed_sem_saidas_validas(
@@ -139,7 +152,11 @@ def test_todas_rejeitadas_termina_failed_sem_saidas_validas(
 
     row = run_row(factory, run_id)
     assert (row["status"], row["error_code"]) == ("failed", "NO_VALID_OUTPUTS")
-    assert outputs_of(factory, run_id) == [("report.json", "report")]
+    assert outputs_of(factory, run_id) == [
+        ("report.json", "report"),
+        ("manifest.json", "manifest"),
+        ("csv-janitor.zip", "package"),
+    ]
     assert input_outcomes(factory, run_id) == [("rejected", "CSV_STRUCTURE_INVALID")]
     assert open_run_uses(factory, run_id) == 0
 
@@ -335,7 +352,7 @@ def test_execucao_aceita_pela_api_e_processada_pelo_worker(
 
     row = run_row(factory, accepted.run_id)
     assert row["status"] == "succeeded"
-    assert outputs_of(factory, accepted.run_id)[-1] == ("report.json", "report")
+    assert outputs_of(factory, accepted.run_id)[-1] == ("csv-janitor.zip", "package")
     assert open_run_uses(factory, accepted.run_id) == 0
 
 
