@@ -15,13 +15,7 @@ export GS_SECRETS_DIR="$ROOT/secrets"
 export GS_PG_DATA="$ROOT/pg/data"
 export GS_TELEMETRY_DATA="$ROOT/telemetry/data"
 export GS_STORAGE_DATA="$ROOT/storage"
-# Segredos gerados pela própria aplicação, criados uma vez junto dos outros: o do cursor de
-# paginação (3.3) e o do `user.hash` dos eventos amplos (3.7).
-for name in GS_CURSOR_SECRET GS_USER_HASH_SECRET; do
-  if ! grep -q "^${name}=" "$ROOT/secrets/app.env"; then
-    echo "${name}=$(openssl rand -hex 32)" >>"$ROOT/secrets/app.env"
-  fi
-done
+deploy/app-secrets.sh "$ROOT/secrets/app.env"
 compose=(docker compose --env-file "$ROOT/secrets/app.env" -f compose.yaml -f compose.prod.yaml)
 
 # Imagem do executor do mesmo commit, sempre pelo digest: entra na allowlist do executor-ctl
