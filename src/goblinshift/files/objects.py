@@ -86,7 +86,7 @@ def request_deletion_of_unreferenced(session: Session, object_ids: Collection[uu
         .where(
             stored_object.c.id.in_(ids),
             stored_object.c.state == ObjectState.COMMITTED,
-            ~_has_valid_reference(),
+            ~has_valid_reference(),
         )
         .values(state=ObjectState.DELETE_REQUESTED, delete_requested_at=func.now())
     )
@@ -105,7 +105,7 @@ def select_purgeable(limit: int) -> Select[tuple[uuid.UUID, str, int]]:
         .where(
             stored_object.c.state == ObjectState.DELETE_REQUESTED,
             ~open_use,
-            ~_has_valid_reference(),
+            ~has_valid_reference(),
         )
         .order_by(stored_object.c.delete_requested_at, stored_object.c.id)
         .limit(limit)
@@ -113,7 +113,23 @@ def select_purgeable(limit: int) -> Select[tuple[uuid.UUID, str, int]]:
     )
 
 
-def _has_valid_reference() -> ColumnElement[bool]:
+def holders_with_open_uses(
+    session: Session, holder_kind: HolderKind, limit: int
+) -> list[uuid.UUID]:
+    """Detentores do tipo com algum uso ainda aberto, para a manutenção conferir os órfãos."""
+    return list(
+        session.execute(
+            select(object_use.c.holder_id)
+            .where(object_use.c.holder_kind == holder_kind, object_use.c.ended_at.is_(None))
+            .group_by(object_use.c.holder_id)
+            .order_by(object_use.c.holder_id)
+            .limit(limit)
+        ).scalars()
+    )
+
+
+def has_valid_reference() -> ColumnElement[bool]:
+    """O objeto ainda é apontado por um upload ou artefato não excluído."""
     valid_upload = exists().where(
         and_(upload.c.object_id == stored_object.c.id, upload.c.deleted_at.is_(None))
     )
