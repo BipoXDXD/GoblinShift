@@ -507,3 +507,34 @@ def test_manifest_json_dentro_de_um_grupo_e_conteudo_comum(tmp_path: Path) -> No
 
     assert [f.name for f in collected.outputs] == ["text/manifest.json"]
     assert collected.manifest_file is None
+
+
+# --- Nomes que o executor deixou em out/ (dado não confiável, regras de 3.6) -----------------
+# Um nome fora das regras estouraria o CHECK de artifact.file_name na publicação e repetiria o
+# erro a cada tentativa; a coleta o recusa antes, como executor fora do contrato.
+
+
+def test_nome_de_180_bytes_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    name = "images/" + "a" * 176 + ".jpg"
+    write_out(out, [ok_item(0, name)], {name: b"1"})
+
+    assert [f.name for f in collect_outputs(out, recipe_id=RECIPE, input_count=1).outputs] == [name]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "images/" + "a" * 177 + ".jpg",  # 181 bytes no componente
+        "images/" + "é" * 89 + ".jpg",  # 182 bytes em UTF-8, 93 caracteres
+        "images/linha\nquebrada.jpg",
+        "images/é.jpg",  # fora de NFC
+        "a" * 177 + ".csv",
+    ],
+)
+def test_nome_fora_das_regras_de_saida_e_recusado(tmp_path: Path, name: str) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, name)], {name: b"1"})
+
+    with pytest.raises(CollectionError, match="nome"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)

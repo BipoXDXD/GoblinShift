@@ -19,12 +19,18 @@ Duas classes de recusa:
 import json
 import os
 import stat
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
-from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES
+from goblinshift.processing.output_dir import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_FILES,
+    MAX_COMPONENT_BYTES,
+    MAX_PATH_BYTES,
+)
 from goblinshift.processing.packaging import (
     MANIFEST_NAME,
     REPORT_NAME,
@@ -237,12 +243,27 @@ class _ContentBudget:
 
 
 def _regular_file(entry: os.DirEntry[str], name: str) -> OutputFile:
+    _require_output_name(entry.name, name)
     info = entry.stat(follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode):
         raise CollectionError(f"out/ contém algo que não é arquivo regular: {name!r}")
     if info.st_nlink != 1:
         raise CollectionError(f"out/ contém hardlink: {name!r}")
     return OutputFile(name, Path(entry.path), info.st_size)
+
+
+def _require_output_name(component: str, name: str) -> None:
+    """As regras de 3.6 que o `OutputDir` aplica, conferidas de novo no que o executor deixou."""
+    try:
+        size = len(component.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise CollectionError(f"out/ contém nome que não é UTF-8: {name!r}") from None
+    if size > MAX_COMPONENT_BYTES or len(name.encode()) > MAX_PATH_BYTES:
+        raise CollectionError(f"out/ contém nome longo demais: {name!r}")
+    if unicodedata.normalize("NFC", component) != component:
+        raise CollectionError(f"out/ contém nome fora de NFC: {name!r}")
+    if any(unicodedata.category(char) == "Cc" for char in component):
+        raise CollectionError(f"out/ contém nome com caractere de controle: {name!r}")
 
 
 def _read_no_follow(path: Path, max_bytes: int) -> bytes:
