@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from goblinshift.files.errors import ObjectNotAvailableError
+from goblinshift.files.limits import USED_INPUT_TTL
 from goblinshift.files.states import HolderKind, ObjectState
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 
@@ -52,16 +53,34 @@ def hold(
 
 
 def release(session: Session, holder_kind: HolderKind, holder_id: uuid.UUID) -> None:
-    """Encerra todos os usos abertos do detentor; repetir é no-op."""
-    session.execute(
-        update(object_use)
-        .where(
-            object_use.c.holder_kind == holder_kind,
-            object_use.c.holder_id == holder_id,
-            object_use.c.ended_at.is_(None),
+    """Encerra todos os usos abertos do detentor; repetir é no-op.
+
+    Para `HolderKind.RUN`, é aqui que a retenção de 48 h das entradas usadas passa a contar
+    (1.7: "48 horas após o término"): os uploads prontos desses objetos ganham
+    `expires_at = GREATEST(expires_at, now() + 48 h)`. `runs` deve chamar esta função ao
+    terminar a execução, na mesma transação que a torna terminal. Um upload excluído fica de
+    fora: a data dele já decidiu entre `deleted` e `expired`.
+    """
+    ended = (
+        session.execute(
+            update(object_use)
+            .where(
+                object_use.c.holder_kind == holder_kind,
+                object_use.c.holder_id == holder_id,
+                object_use.c.ended_at.is_(None),
+            )
+            .values(ended_at=func.now())
+            .returning(object_use.c.object_id)
         )
-        .values(ended_at=func.now())
+        .scalars()
+        .all()
     )
+    if holder_kind == HolderKind.RUN and ended:
+        session.execute(
+            update(upload)
+            .where(upload.c.object_id.in_(ended), upload.c.deleted_at.is_(None))
+            .values(expires_at=func.greatest(upload.c.expires_at, func.now() + USED_INPUT_TTL))
+        )
 
 
 def request_deletion_of_unreferenced(session: Session, object_ids: Collection[uuid.UUID]) -> None:

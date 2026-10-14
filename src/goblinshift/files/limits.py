@@ -11,10 +11,12 @@ MAX_BATCH_BYTES = 512 * MIB
 # Igual ao CHECK da coluna `upload.original_name`, contado em caracteres.
 MAX_NAME_CHARS = 255
 
-# Retenção (1.7): incompleto expira após 1 h sem atividade; pronto, após 24 h sem uso.
+# Retenção (1.7): incompleto expira após 1 h sem atividade; pronto, após 24 h sem uso; entrada
+# usada por uma execução, 48 h após o término dela, como as saídas.
 INCOMPLETE_UPLOAD_TTL = timedelta(hours=1)
 READY_UPLOAD_TTL = timedelta(hours=24)
 ARTIFACT_TTL = timedelta(hours=48)
+USED_INPUT_TTL = timedelta(hours=48)
 
 # Transferências (1.7), contadas por direção (envio ou download).
 MAX_TRANSFERS_PER_ACCOUNT = 2
