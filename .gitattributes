@@ -1,0 +1,2 @@
+# Fixtures do CSV Janitor: bytes exatos (CRLF, BOM, Latin-1), sem conversão de fim de linha.
+tests/csv_janitor/fixtures/** -text
