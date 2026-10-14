@@ -54,6 +54,10 @@ def test_parametros_vazios_recebem_todos_os_defaults() -> None:
     assert resolve({}) == DEFAULTS
 
 
+def test_defaults_resolvidos_sao_os_defaults_da_biblioteca() -> None:
+    assert params_from_mapping(resolve({})) == Params()
+
+
 def test_resolve_ordena_as_chaves_e_preserva_a_ordem_das_listas() -> None:
     raw = {
         "output_columns": ["b", "a"],
