@@ -12,6 +12,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.66b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
     "opentelemetry-sdk>=1.45.1",
+    "pillow==12.3.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.15.0",
@@ -30,6 +31,9 @@ requires = ["uv_build>=0.12.15,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# Única dependência de terceiros da imagem do executor (ADR 017): o Dockerfile instala só este
+# grupo, a partir do lock. O pin repete o de [project.dependencies]; um teste confere os dois.
+executor = ["pillow==12.3.0"]
 dev = [
     "httpx2>=2.13.1",
     "hypothesis>=6.169.0",
@@ -142,3 +146,45 @@ forbidden_modules = [
     "goblinshift.processing",
     "goblinshift.entrypoints",
 ]
+
+# Fatia 5 (etapa 0): o Pillow só existe para as receitas do executor. API, worker e manutenção não
+# decodificam imagem; carregá-lo neles só aumentaria superfície de ataque e memória. É isto que
+# obriga os __init__ de processing.image_forge e processing.executor a não importarem o PIL de
+# forma ansiosa (o catálogo importa os parâmetros do Image Forge; o worker, constantes do executor).
+[[tool.importlinter.contracts]]
+name = "Só o executor carrega o PIL"
+type = "forbidden"
+source_modules = [
+    "goblinshift.catalog",
+    "goblinshift.files",
+    "goblinshift.runs",
+    "goblinshift.presets",
+    "goblinshift.identity",
+    "goblinshift.platform",
+    "goblinshift.entrypoints",
+]
+forbidden_modules = ["PIL"]
+allow_indirect_imports = false
+
+# Cada receita é uma unidade de versão própria (1.6): mudar uma não pode mudar o comportamento de
+# outra. O que for comum vai para processing (names.py, output_dir.py), não de uma receita à outra.
+[[tool.importlinter.contracts]]
+name = "Receitas não importam umas às outras"
+type = "independence"
+modules = [
+    "goblinshift.processing.csv_janitor",
+    "goblinshift.processing.image_forge",
+    "goblinshift.processing.downloads_detox",
+]
+
+# 3.2: o pacote (manifesto e ZIP) é montado uma vez, pelo executor, depois da receita. Uma receita
+# que montasse ZIP escaparia do determinismo e dos tetos do empacotador comum.
+[[tool.importlinter.contracts]]
+name = "Receitas não empacotam"
+type = "forbidden"
+source_modules = [
+    "goblinshift.processing.csv_janitor",
+    "goblinshift.processing.image_forge",
+    "goblinshift.processing.downloads_detox",
+]
+forbidden_modules = ["goblinshift.processing.packaging", "zipfile"]

@@ -9,6 +9,15 @@ Diferenças em relação ao esboço de 3.2, todas aditivas:
   precisa citar o nome que de fato foi criado.
 - `ItemOk` carrega avisos e contagens da própria entrada: o relatório informa contagens e avisos
   por arquivo (1.1, 1.3), e `Report.warnings` fica para o que vale para a execução inteira.
+
+Fatia 5 (etapa 0, também aditiva):
+- `details`, no item e no relatório, registra fatos que não são aviso (dimensões, formato, perfil
+  de cor convertido, tipo do Detox) e por isso não mudam o estado para `succeeded_with_warnings`.
+  Vão só para o `report.json`; o manifesto não os traz.
+- `ItemDuplicate` é o terceiro desfecho de um item (Downloads Detox, 1.4). Como tipo próprio, e
+  não um campo opcional do `ItemOk`, a "duplicata com saídas" não tem como ser representada.
+- `OutputDir.create` aceita um `OutputGroup`: a subpasta de `out/` e do ZIP (1.2 e 1.4), de uma
+  lista fechada que a coleta do worker também impõe (ADR 018).
 """
 
 from collections.abc import Mapping, Sequence
@@ -33,13 +42,34 @@ class ReportWarning:
     detail: str
 
 
+type DetailValue = str | int | bool
+
+
+class OutputGroup(StrEnum):
+    """Subpastas permitidas em `out/` e no ZIP (1.2 e 1.4).
+
+    Lista fechada: a coleta do worker só aceita estas.
+    """
+
+    IMAGES = "images"
+    THUMBNAILS = "thumbnails"
+    TABLES = "tables"
+    TEXT = "text"
+    ARCHIVES = "archives"
+
+
 @dataclass(frozen=True)
 class ItemOk:
     position: int
-    outputs: Sequence[str]  # nomes finais criados em OutputDir
+    # Caminhos finais relativos a out/, como `OutputDir.create` devolveu: "a.csv" ou
+    # "images/foto.jpg". A ordem aqui é a ordem no ZIP e no manifesto.
+    outputs: Sequence[str]
     warnings: Sequence[ReportWarning] = ()
     # Contagens próprias da receita (no CSV Janitor, registros lidos, filtrados etc.).
     counts: Mapping[str, int] = field(default_factory=dict)
+    # Fatos registrados que não são aviso (não mudam o estado para succeeded_with_warnings):
+    # dimensões, formato, perfil assumido ou convertido, quadros MPO descartados, tipo do Detox.
+    details: Mapping[str, DetailValue] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -50,9 +80,26 @@ class ItemRejected:
 
 
 @dataclass(frozen=True)
+class ItemDuplicate:
+    """Detox: mesmo SHA-256 e tamanho de uma entrada anterior do lote (1.4); não gera saída."""
+
+    position: int
+    duplicate_of: int  # posição da primeira ocorrência; sempre < position
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.duplicate_of < self.position:
+            raise ValueError(f"duplicate_of {self.duplicate_of} inválido para {self.position}")
+
+
+type ReportItem = ItemOk | ItemRejected | ItemDuplicate
+
+
+@dataclass(frozen=True)
 class Report:
-    items: Sequence[ItemOk | ItemRejected]  # um por InputFile, na ordem
+    items: Sequence[ReportItem]  # um por InputFile, na ordem
     warnings: Sequence[ReportWarning] = ()
+    # Fatos da execução inteira, só para o report.json (ex.: {"resampling": "lanczos"}).
+    details: Mapping[str, DetailValue] = field(default_factory=dict)
 
     @property
     def has_outputs(self) -> bool:
@@ -93,15 +140,26 @@ class OutputRole(StrEnum):
 
 @dataclass(frozen=True)
 class OutputFile:
-    name: str  # nome final, já com as regras de 3.6 aplicadas
+    # Caminho final relativo a out/, já com as regras de 3.6: "a.csv" ou "images/foto.jpg".
+    name: str
     stream: BinaryIO
 
 
 class OutputDir(Protocol):
-    def create(self, logical_name: str, role: OutputRole, position: int) -> OutputFile:
-        """Aplica as regras de nome de 3.6 e os tetos de bytes e quantidade de 1.7.
+    def create(
+        self,
+        logical_name: str,
+        role: OutputRole,
+        position: int,
+        group: OutputGroup | None = None,
+    ) -> OutputFile:
+        """Cria a saída na raiz de out/ ou, com `group`, na subpasta do grupo.
 
-        Exceder um teto levanta `RecipeFailure(OUTPUT_LIMIT_EXCEEDED)`.
+        `logical_name` é um componente só (sem separador). `OutputFile.name` é o caminho final
+        relativo a out/ ("images/foto.jpg"). Aplica as regras de nome de 3.6 dentro do grupo
+        (colisão por `casefold()` do caminho completo; nomes reservados só na raiz) e os tetos de
+        bytes e quantidade de 1.7, somados entre todos os grupos. Exceder um teto levanta
+        `RecipeFailure(OUTPUT_LIMIT_EXCEEDED)`.
         """
         ...
 
