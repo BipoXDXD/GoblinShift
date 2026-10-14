@@ -3,6 +3,7 @@ import { useId, type ReactElement } from "react";
 import { Link } from "react-router";
 
 import { FocusHeading } from "../components/a11y/FocusHeading";
+import { RecentRuns } from "../history/RecentRuns";
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
@@ -13,8 +14,8 @@ const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
 
 /**
  * Oficina (2.2): a abertura e as receitas. A ação são os cartões, então a tela não tem botão
- * primário. A cena da oficina (P11) e as execuções recentes entram com a arte e com a listagem
- * de GET /runs.
+ * primário; as execuções recentes vêm depois das receitas. A cena da oficina (P11) entra com a
+ * arte.
  */
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
@@ -56,6 +57,7 @@ export function HomePage(): ReactElement {
           ))}
         </ul>
       </section>
+      <RecentRuns />
     </div>
   );
 }
