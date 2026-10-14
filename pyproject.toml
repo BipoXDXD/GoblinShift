@@ -46,13 +46,27 @@ dev = [
 line-length = 100
 target-version = "py314"
 
+[tool.ruff.per-file-target-version]
+# Rodam no Python do host (3.12 no Ubuntu 24.04), fora da imagem da aplicação.
+"deploy/executor_ctl/**" = "py312"
+"deploy/acceptance/**" = "py312"
+
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "N", "RUF"]
+
+[tool.ruff.lint.isort]
+# Pacote do host em deploy/, importado pelos testes via pythonpath.
+known-first-party = ["executor_ctl"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
 # O teste de aceitação chama o CLI do Docker com argumentos montados no próprio código, sem shell.
 "deploy/acceptance/**" = ["S603", "S607"]
+# O executor-ctl só fala com o Docker pelo CLI, com a lista de argumentos montada no código
+# (perfil fixo) e sem shell; nada vindo do cliente vira opção.
+"deploy/executor_ctl/**" = ["S603", "S607"]
+# Os testes de integração do executor-ctl conferem o Docker pelo mesmo CLI, sem shell.
+"tests/executor_ctl/**" = ["S101", "S603", "S607"]
 
 [tool.mypy]
 strict = true
@@ -65,11 +79,14 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# O executor-ctl é um pacote do host em deploy/, fora de src/ (roda no Python do sistema).
+pythonpath = ["deploy"]
 # Aviso é erro: uma depreciação nova reprova a suíte em vez de passar despercebida.
 filterwarnings = ["error"]
 markers = [
     "integration: precisa de Docker (PostgreSQL real via Testcontainers)",
     "executor_image: constrói e roda a imagem do executor (precisa de Docker; runtime em GS_TEST_RUNTIME)",
+    "executor_ctl: executor-ctl com Docker real (runtime em GS_TEST_RUNTIME, padrão runc)",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

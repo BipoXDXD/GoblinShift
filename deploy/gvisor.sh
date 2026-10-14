@@ -6,7 +6,8 @@
 # só acrescenta o runtime) e o Docker é recarregado, não reiniciado, então nenhum container cai.
 #
 # Uso: sudo bash deploy/gvisor.sh
-# Depois de instalar ou atualizar o runsc, rode o teste de aceitação (deploy/acceptance/run.py).
+# Depois de instalar ou atualizar o runsc, rode o teste de aceitação
+# (cd deploy && sudo python3 -B -m acceptance.run).
 set -euo pipefail
 
 KEYRING=/usr/share/keyrings/gvisor-archive-keyring.gpg
