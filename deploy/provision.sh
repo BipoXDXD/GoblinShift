@@ -65,7 +65,7 @@ EOF
 fi
 
 note "Firewall (regras acrescentadas)"
-# Portas publicadas pelo Docker contornam o ufw. Só o proxy de borda publica a 80;
+# Portas publicadas pelo Docker contornam o ufw. Só o proxy de borda publica a 80 e a 443;
 # o OpenObserve fica preso a 127.0.0.1.
 ufw allow OpenSSH >/dev/null
 ufw allow 80/tcp >/dev/null
