@@ -21,6 +21,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
+from goblinshift.entrypoints.api.wide_event import record_principal
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Principal, Scope, authenticate_api_key
 
@@ -70,6 +71,7 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
         principal = authenticate_api_key(session, token, now)
     if principal is None:
         raise _unauthenticated("A chave de API é inválida, expirou ou foi revogada.")
+    record_principal(principal.owner_id, principal.via)
     return principal
 
 

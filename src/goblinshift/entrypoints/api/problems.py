@@ -30,6 +30,8 @@ from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from goblinshift.entrypoints.api.wide_event import record_error
+
 logger = logging.getLogger(__name__)
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
@@ -214,6 +216,7 @@ def problem_response(
     errors: Sequence[Mapping[str, str]] | None = None,
 ) -> JSONResponse:
     spec = PROBLEMS[code]
+    record_error(code.value)
     body: dict[str, Any] = {
         "type": code.type_uri,
         "title": spec.title,
@@ -265,6 +268,7 @@ class RequestContextMiddleware:
             logger.exception("erro inesperado na requisição %s", request_id)
             # Com a resposta já começada não há como trocar o status; a conexão é cortada.
             if response_started:
+                record_error(ProblemCode.INTERNAL_ERROR.value)
                 raise
             response = problem_response(
                 code=ProblemCode.INTERNAL_ERROR,

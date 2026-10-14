@@ -22,6 +22,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
+      - name: Instalar o age (testes do backup do PostgreSQL)
+        run: sudo apt-get update -q && sudo apt-get install -yq age
       - name: Ruff (lint)
         run: uv run ruff check .
       - name: Ruff (formatação)

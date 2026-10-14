@@ -1,0 +1,14 @@
+# Uma vez por dia, perto das 03h de Brasília, com folga aleatória (docs/adr/022-backup-externo.md).
+[Unit]
+Description=GoblinShift: agenda o backup diário do PostgreSQL
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+# Espalha o horário para não coincidir sempre com outro job do host; o check do healthchecks.io
+# tem 2 h de tolerância.
+RandomizedDelaySec=30min
+# VPS desligada no horário: roda assim que voltar.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
