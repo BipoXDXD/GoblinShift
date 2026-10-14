@@ -131,6 +131,8 @@ export const TEXT = {
     progress: "Arquivos processados",
     progressValue: (processed: number, total: number) => `${String(processed)} de ${String(total)}`,
     queueAhead: "Execuções à frente na fila",
+    stepsLabel: "Etapas da execução",
+    stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
     statuses: {
