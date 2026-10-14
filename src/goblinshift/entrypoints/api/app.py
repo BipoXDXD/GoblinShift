@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from goblinshift.entrypoints.api import artifacts, health, me, uploads
+from goblinshift.entrypoints.api import artifacts, health, me, runs, uploads
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.files.storage import FileStorage
@@ -22,6 +22,8 @@ API_PREFIX = "/api/v1"
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    # Lido já na subida: em produção, sem o segredo a API não sobe (em vez de falhar no 1º GET).
+    settings.cursor_signing_key()
     configure_logging()
     engine = make_engine(settings)
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
@@ -52,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(me.router)
     api.include_router(uploads.router)
     api.include_router(artifacts.router)
+    api.include_router(runs.router)
     app.include_router(api)
 
     configure_tracing(app, engine, settings)

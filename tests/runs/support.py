@@ -8,12 +8,13 @@ from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
-from goblinshift.files.tables import object_use
+from goblinshift.files.tables import object_use, upload
+from goblinshift.files.uploads import request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.acceptance import RunCommand
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import idempotency_record, run, run_input
-from tests.files.support import create_user, ready_upload
+from tests.files.support import create_intent, create_user, ready_upload
 
 RECIPE_ID = "csv-janitor"
 RECIPE_VERSION = 1
@@ -104,3 +105,31 @@ def insert_finished_run(
             .returning(run.c.id)
         ).scalar_one()
     return run_id
+
+
+def unavailable_upload(
+    factory: sessionmaker[Session], storage: FileStorage, owner_id: uuid.UUID, reason: str
+) -> uuid.UUID:
+    match reason:
+        case "inexistente":
+            return uuid.uuid7()
+        case "alheio":
+            [foreign] = ready_inputs(factory, storage, new_owner(factory))
+            return foreign
+        case "nao-pronto":
+            return create_intent(factory, owner_id).id
+        case "excluido":
+            [deleted] = ready_inputs(factory, storage, owner_id)
+            with unit_of_work(factory) as session:
+                request_deletion(session, owner_id, deleted)
+            return deleted
+        case "vencido":
+            [expired] = ready_inputs(factory, storage, owner_id)
+            with unit_of_work(factory) as session:
+                session.execute(
+                    update(upload)
+                    .where(upload.c.id == expired)
+                    .values(expires_at=func.now() - timedelta(seconds=1))
+                )
+            return expired
+    raise ValueError(reason)
