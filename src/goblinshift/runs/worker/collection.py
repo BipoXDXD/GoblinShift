@@ -3,7 +3,10 @@
 O executor é código que processa conteúdo do usuário: o que ele escreve é dado não confiável.
 A coleta só aceita arquivos regulares em `out/` ou num único nível de subpasta com nome de
 `OutputGroup` (lista fechada, ADR 018), sem symlinks nem hardlinks, conta quantidade e bytes
-enquanto lê, e confere o `report.json` contra um schema próprio. Cada arquivo de conteúdo precisa
+enquanto lê, e confere o `report.json` contra um schema próprio. Na raiz, `manifest.json` e
+`<recipe_id>.zip` (fatia 5) ficam fora do orçamento de conteúdo, cada um com o seu teto de 1.7, e
+vêm juntos ou não vêm: o executor anterior à fatia 5, fixado em Runs aceitas antes do deploy, não
+empacota. Cada arquivo de conteúdo precisa
 estar citado no relatório pelo caminho relativo a `out/` ("images/a.jpg"), e cada citação precisa
 existir. A coleta roda depois que o executor terminou: ninguém mais escreve em `out/`.
 
@@ -22,10 +25,16 @@ from pathlib import Path
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
 from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES
+from goblinshift.processing.packaging import (
+    MANIFEST_NAME,
+    REPORT_NAME,
+    PackageLimits,
+    package_name_for,
+)
 from goblinshift.processing.recipe import OutputGroup
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 
-REPORT_NAME = "report.json"
+_PACKAGE_LIMITS = PackageLimits()
 _ITEM_OK = "ok"
 _ITEM_REJECTED = "rejected"
 _ITEM_DUPLICATE = "duplicate"
@@ -44,11 +53,14 @@ class OutputLimitError(Exception):
 
 @dataclass(frozen=True)
 class OutputLimits:
-    """Tetos de 1.7: 220 arquivos de conteúdo, 480 MiB somados e 8 MiB por relatório."""
+    """Tetos de 1.7: 220 arquivos de conteúdo, 480 MiB somados, 8 MiB por relatório ou manifesto
+    e 512 MiB para o ZIP."""
 
     max_files: int = DEFAULT_MAX_FILES
     max_bytes: int = DEFAULT_MAX_BYTES
     report_max_bytes: int = REPORT_MAX_BYTES
+    manifest_max_bytes: int = _PACKAGE_LIMITS.manifest_max_bytes
+    package_max_bytes: int = _PACKAGE_LIMITS.package_max_bytes
 
 
 @dataclass(frozen=True)
@@ -93,15 +105,23 @@ class Collected:
     outputs: tuple[OutputFile, ...]
     report_file: OutputFile
     report: ParsedReport
+    # Os dois juntos, ou nenhum (executor anterior à fatia 5).
+    manifest_file: OutputFile | None = None
+    package_file: OutputFile | None = None
 
 
 DEFAULT_LIMITS = OutputLimits()
 
 
 def collect_outputs(
-    out_dir: Path, input_count: int, limits: OutputLimits = DEFAULT_LIMITS
+    out_dir: Path, input_count: int, limits: OutputLimits = DEFAULT_LIMITS, *, recipe_id: str
 ) -> Collected:
-    files = _scan(out_dir, limits)
+    """`recipe_id` é o da Run, não o do relatório: dá o único nome aceito para o pacote."""
+    package_name = package_name_for(recipe_id)
+    files = _scan(out_dir, limits, frozenset({REPORT_NAME, MANIFEST_NAME, package_name}))
+    manifest_file, package_file = _package_files(
+        files.pop(MANIFEST_NAME, None), files.pop(package_name, None), limits
+    )
     report_file = files.pop(REPORT_NAME, None)
     if report_file is None:
         raise CollectionError(f"{REPORT_NAME} ausente em out/")
@@ -114,7 +134,27 @@ def collect_outputs(
     cited = [name for item in report.items for name in item.outputs]
     if len(set(cited)) != len(cited) or set(cited) != set(files):
         raise CollectionError("os arquivos de out/ não batem com as saídas citadas no relatório")
-    return Collected(tuple(files[name] for name in cited), report_file, report)
+    return Collected(
+        tuple(files[name] for name in cited), report_file, report, manifest_file, package_file
+    )
+
+
+def _package_files(
+    manifest: OutputFile | None, package: OutputFile | None, limits: OutputLimits
+) -> tuple[OutputFile | None, OutputFile | None]:
+    if (manifest is None) != (package is None):
+        raise CollectionError(f"{MANIFEST_NAME} e o pacote vêm juntos em out/, ou nenhum dos dois")
+    if manifest is not None and manifest.size > limits.manifest_max_bytes:
+        raise OutputLimitError(
+            ErrorCode.REPORT_LIMIT_EXCEEDED,
+            f"manifesto com {manifest.size} bytes; o teto é {limits.manifest_max_bytes}",
+        )
+    if package is not None and package.size > limits.package_max_bytes:
+        raise OutputLimitError(
+            ErrorCode.OUTPUT_LIMIT_EXCEEDED,
+            f"pacote com {package.size} bytes; o teto é {limits.package_max_bytes}",
+        )
+    return manifest, package
 
 
 def parse_report(data: bytes, input_count: int) -> ParsedReport:
@@ -136,7 +176,11 @@ def parse_report(data: bytes, input_count: int) -> ParsedReport:
     return ParsedReport(items, bool(warnings), counts)
 
 
-def _scan(out_dir: Path, limits: OutputLimits) -> dict[str, OutputFile]:
+def _scan(
+    out_dir: Path, limits: OutputLimits, outside_budget: frozenset[str]
+) -> dict[str, OutputFile]:
+    """Arquivos de out/ pelo caminho relativo; os nomes de `outside_budget`, só na raiz, não
+    contam nos tetos de conteúdo."""
     try:
         info = out_dir.lstat()
     except FileNotFoundError:
@@ -152,7 +196,7 @@ def _scan(out_dir: Path, limits: OutputLimits) -> dict[str, OutputFile]:
                 continue
             output = _regular_file(entry, entry.name)
             files[output.name] = output
-            if output.name != REPORT_NAME:
+            if output.name not in outside_budget:
                 budget.spend(output)
     return files
 
