@@ -1,8 +1,15 @@
 # Nginx interno do GoblinShift. Em produção fica atrás do proxy de borda do host, que
 # termina o TLS (ADR 014); por isso o esquema original vem de X-Forwarded-Proto.
-# Só o proxy de borda (IP fixo na rede edge) pode informar o esquema original; de qualquer
-# outra origem, o cabeçalho é ignorado.
-map $remote_addr $from_edge {
+
+# IP real do cliente: só o proxy de borda (IP fixo na rede edge) pode informá-lo. A borda troca
+# o X-Forwarded-For recebido da internet pelo IP de quem conectou, então o valor é um IP só. De
+# qualquer outra origem o cabeçalho é ignorado e vale o IP de quem conectou. Daqui em diante
+# $remote_addr é o cliente; $realip_remote_addr continua sendo quem conectou ao Nginx.
+set_real_ip_from 172.31.0.2;
+real_ip_header X-Forwarded-For;
+
+# O esquema original (X-Forwarded-Proto) também só vale vindo da borda.
+map $realip_remote_addr $from_edge {
     172.31.0.2 1;
     default    0;
 }
@@ -17,6 +24,11 @@ map $forwarded_proto $hsts {
     default "";
 }
 
+# /auth/* (3.8): cada início de login grava uma linha em `login_state` sem autenticação. 10 por
+# minuto por cliente real, com rajada de 10 para o vai e volta do login.
+limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
+limit_req_status 429;
+
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
 # na partida: durante o rollout (deploy/rollout-api.sh) há dois containers `api`, o Nginx alterna
 # entre eles e, se um recusar a conexão, tenta o outro (proxy_next_upstream padrão: error timeout,
@@ -29,7 +41,8 @@ server {
     server_tokens off;
     # Substitui o log `main` da imagem, que grava IP completo e query string (access-log.conf).
     access_log /var/log/nginx/access.log privacy;
-    # No `server` e em nenhum `location`: um `add_header` num bloco anula os herdados dele.
+    # Herdado por todo `location` sem `add_header` próprio. Um `add_header` num bloco anula os
+    # herdados dele: quem tem o seu repete este (tests/test_nginx_hsts.py vigia).
     add_header Strict-Transport-Security $hsts always;
 
     set $api http://api:8000;
@@ -37,26 +50,39 @@ server {
     # saiu da rede, e esse IP não recusa a conexão: ela fica pendurada. Na rede interna conectar
     # leva menos de 1 ms, então 1 s basta para desistir e tentar a outra API, sem erro ao cliente.
     proxy_connect_timeout 1s;
+    proxy_read_timeout 60s;
+    # Herdados por todo `location`, que por isso não declara `proxy_set_header` próprio. Só o IP
+    # real do cliente (já resolvido pelo real_ip), nunca a cadeia recebida: quem não é a borda
+    # não consegue injetar um IP forjado na API.
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $forwarded_proto;
 
     # Teto padrão dos comandos JSON (docs/GoblinShiftPlan.md, 1.7).
     client_max_body_size 64k;
 
     location / {
         proxy_pass $api;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $forwarded_proto;
-        proxy_read_timeout 60s;
+    }
+
+    location /auth/ {
+        limit_req zone=auth burst=10 nodelay;
+        error_page 429 = @auth_rate_limited;
+        proxy_pass $api;
+    }
+    # Mesmo formato do RATE_LIMITED da API (problem+json). Retry-After: um pedido a cada 6 s.
+    location @auth_rate_limited {
+        default_type application/problem+json;
+        add_header Retry-After 6 always;
+        add_header Strict-Transport-Security $hsts always;
+        return 429 '{"type":"https://goblinshift.dev/problems/rate-limited","title":"Muitas requisições","status":429,"detail":"Muitas tentativas de autenticação; tente de novo em alguns segundos.","code":"RATE_LIMITED","request_id":"$request_id"}';
     }
 
     # Envio de conteúdo (fatia 3): teto por arquivo e sem bufferizar em disco.
     location ~ ^/api/v1/uploads/[^/]+/content$ {
         client_max_body_size 256m;
         proxy_request_buffering off;
-        proxy_pass $api;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $forwarded_proto;
         proxy_read_timeout 600s;
+        proxy_pass $api;
     }
 }
