@@ -27,6 +27,9 @@ class HolderKind(StrEnum):
 class ArtifactRole(StrEnum):
     OUTPUT = "output"
     REPORT = "report"
+    # Fatia 5 (ADR 019): `manifest.json` e `<recipe_id>.zip` do empacotador comum.
+    MANIFEST = "manifest"
+    PACKAGE = "package"
 
 
 class Availability(StrEnum):

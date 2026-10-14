@@ -7,7 +7,8 @@ o coordenador recebe `LostFencing`, registra e para sem escrever mais nada.
 
 Passos:
 1. `prepare`: o Runner cria a área vazia; as entradas do storage são copiadas para `inputs/`,
-   conferindo SHA-256 e tamanho, e `job.json` recebe os parâmetros fixados na aceitação.
+   conferindo SHA-256 e tamanho, `job.json` recebe os parâmetros fixados na aceitação e
+   `context.json`, a imagem do executor fixada na Run (para o manifesto, ADR 021).
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
    `processing`.
@@ -41,6 +42,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object, publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
+from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage, StorageError
 from goblinshift.runs.lifecycle import (
@@ -200,6 +202,11 @@ class Coordinator:
         }
         with _create_for_executor(work_dir / "job.json") as target:
             target.write(json.dumps(job, ensure_ascii=False).encode("utf-8"))
+        # Só o manifesto usa a imagem; num arquivo à parte, o executor anterior à fatia 5, que
+        # recusa chaves desconhecidas no job.json, continua aceitando o job (ADR 021).
+        context = {"executor_image": claimed.executor_image}
+        with _create_for_executor(work_dir / "context.json") as target:
+            target.write(json.dumps(context, ensure_ascii=False).encode("utf-8"))
 
     def _copy_input(
         self, content: HeldContent, position: int, inputs_dir: Path
@@ -372,7 +379,9 @@ class Coordinator:
         self.reach_phase(claimed, Phase.PACKAGING)
         out_dir = self._runner.work_dir(claimed.attempt_id) / "out"
         try:
-            collected = collect_outputs(out_dir, len(claimed.input_upload_ids))
+            collected = collect_outputs(
+                out_dir, len(claimed.input_upload_ids), recipe_id=claimed.recipe_id
+            )
         except OutputLimitError as limit:
             code = limit.code
             return self._conclude(
@@ -385,21 +394,33 @@ class Coordinator:
             return self.fail_transiently(claimed)
         stored = self.store_candidates(claimed, collected)
         self.reach_phase(claimed, Phase.FINALIZING)
-        return self.publish(claimed, collected, stored)
+        try:
+            return self.publish(claimed, collected, stored)
+        except ObjectNotAvailableError:
+            # O dono excluiu uma entrada reaproveitada depois da gravação dos candidatos; a
+            # retentativa a encontra `delete_requested` e grava a cópia (ADR 020).
+            logger.warning("objeto reaproveitado indisponível", extra={"fields": _ids(claimed)})
+            return self.fail_transiently(claimed)
 
     def store_candidates(
         self, claimed: ClaimedAttempt, collected: Collected
     ) -> list[StoredCandidate]:
-        """Grava as saídas como candidatos em `runs/{run}/g{geração}/…`, fora de transação."""
-        files: list[tuple[OutputFile, ArtifactRole]] = [
-            *((output, ArtifactRole.OUTPUT) for output in collected.outputs),
-            (collected.report_file, ArtifactRole.REPORT),
+        """Grava as saídas como candidatos em `runs/{run}/g{geração}/…`, fora de transação.
+
+        Conteúdo idêntico a uma entrada da Run, pelo SHA-256 e tamanho que o próprio worker
+        calcula, não é gravado de novo: o artefato aponta para o objeto da entrada enquanto ele
+        estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos").
+        """
+        files = _files_to_publish(collected)
+        reused = self._reusable_objects(claimed, files)
+        to_write = [
+            (index, output) for index, (output, _role) in enumerate(files) if index not in reused
         ]
 
         def reserve(session: Session) -> list[tuple[uuid.UUID, str]]:
             self._lock_running(session, claimed)
             reserved = []
-            for _ in files:
+            for _ in to_write:
                 candidate = create_candidate_object(
                     session,
                     claimed.owner_id,
@@ -412,7 +433,7 @@ class Coordinator:
 
         reserved = run_transaction(self._factory, reserve)
         written = []
-        for (output, _role), (_object_id, key) in zip(files, reserved, strict=True):
+        for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
             with output.path.open("rb") as source:
                 written.append(self._storage.create_exclusive(key, _chunks(source), output.size))
 
@@ -422,10 +443,38 @@ class Coordinator:
                 commit_candidate(session, claimed.owner_id, object_id, sha256, size)
 
         run_transaction(self._factory, confirm)
+        object_ids = reused | {
+            index: object_id
+            for (index, _output), (object_id, _key) in zip(to_write, reserved, strict=True)
+        }
         return [
-            StoredCandidate(output.name, role, object_id)
-            for (output, role), (object_id, _key) in zip(files, reserved, strict=True)
+            StoredCandidate(output.name, role, object_ids[index])
+            for index, (output, role) in enumerate(files)
         ]
+
+    def _reusable_objects(
+        self, claimed: ClaimedAttempt, files: list[tuple[OutputFile, ArtifactRole]]
+    ) -> dict[int, uuid.UUID]:
+        """Índice da saída → objeto da entrada com o mesmo conteúdo, ainda `committed`.
+
+        Só saídas de conteúdo, e só as do tamanho de alguma entrada são lidas para o hash.
+        """
+        with self._factory() as session, session.begin():
+            contents = held_input_contents(session, claimed.owner_id, claimed.input_upload_ids)
+        # A primeira entrada com o conteúdo vence, como a primeira ocorrência do Detox.
+        by_content: dict[tuple[bytes, int], uuid.UUID] = {}
+        for content in contents:
+            if content.committed:
+                by_content.setdefault((content.sha256, content.size_bytes), content.object_id)
+        sizes = {size for _sha256, size in by_content}
+        reused = {}
+        for index, (output, role) in enumerate(files):
+            if role is not ArtifactRole.OUTPUT or output.size not in sizes:
+                continue
+            object_id = by_content.get((_sha256_of(output.path), output.size))
+            if object_id is not None:
+                reused[index] = object_id
+        return reused
 
     def publish(
         self, claimed: ClaimedAttempt, collected: Collected, stored: list[StoredCandidate]
@@ -573,6 +622,25 @@ class Coordinator:
         if code not in {c.value for c in DETERMINISTIC_CODES}:
             return None
         return ErrorCode(code)
+
+
+def _files_to_publish(collected: Collected) -> list[tuple[OutputFile, ArtifactRole]]:
+    """Conteúdo na ordem do relatório, depois relatório, manifesto e pacote (ADR 019)."""
+    files = [(output, ArtifactRole.OUTPUT) for output in collected.outputs]
+    files.append((collected.report_file, ArtifactRole.REPORT))
+    if collected.manifest_file is not None:
+        files.append((collected.manifest_file, ArtifactRole.MANIFEST))
+    if collected.package_file is not None:
+        files.append((collected.package_file, ArtifactRole.PACKAGE))
+    return files
+
+
+def _sha256_of(path: Path) -> bytes:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in _chunks(source):
+            digest.update(chunk)
+    return digest.digest()
 
 
 def _create_for_executor(path: Path) -> BinaryIO:
