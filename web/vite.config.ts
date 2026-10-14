@@ -12,8 +12,8 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     // Sem isso o Vitest troca todo CSS por módulo vazio, inclusive o `?raw` que o teste de
-    // contraste lê; os componentes não importam CSS, então o custo é só o do tokens.css.
-    css: { include: [/tokens\.css/] },
+    // contraste e o de licenças leem; os componentes não importam CSS.
+    css: { include: [/(tokens|fonts)\.css/] },
     restoreMocks: true,
     unstubGlobals: true,
     coverage: {

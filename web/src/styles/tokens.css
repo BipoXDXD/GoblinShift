@@ -116,6 +116,9 @@
   --radius-full: calc(infinity * 1px);
 
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  /* `transition` sem duração usa a rápida (hover e foco); abrir menu ou diálogo usa a base. */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: var(--ease-standard);
 }
 
 :root {
