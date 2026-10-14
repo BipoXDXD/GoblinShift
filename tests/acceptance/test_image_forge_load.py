@@ -4,7 +4,11 @@ O script inteiro só roda no host, como root e sob runsc; aqui ficam as partes p
 ele monta a partir do expected.json do gerador e o veredito sobre o que a tentativa relatou.
 """
 
+import pytest
 from acceptance import image_forge_load as load
+from acceptance.run import MAINTENANCE_CRITERION, Outcome
+
+from tests.acceptance.test_run import FakeDocker
 
 EXPECTED = {
     "recipe_id": "image-forge",
@@ -99,3 +103,48 @@ def test_veredito_falha_com_saida_diferente_de_zero() -> None:
     outcome = load.judge(exit_code=3, duration_s=100.0, timed_out=False, summary=summary(2, 4))
 
     assert not outcome.passed
+
+
+# --- Medição com a manutenção suspensa: a manutenção religada também entra no veredito ---------
+
+MEASURED = Outcome(load.CRITERION, True, "420 s")
+
+
+def test_imprime_medicao_e_manutencao_e_sai_com_0_se_as_duas_passam(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    docker = FakeDocker()
+
+    code = load.measure_with_maintenance_suspended(lambda: MEASURED, docker)
+
+    printed = capsys.readouterr().out
+    assert code == 0
+    assert f"PASSOU  {load.CRITERION}: 420 s" in printed
+    assert f"PASSOU  {MAINTENANCE_CRITERION}" in printed
+    assert docker.commands() == ["ps", "stop", "start", "inspect"]
+
+
+def test_medicao_que_falha_sai_com_1_mesmo_com_a_manutencao_de_volta(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    slow = Outcome(load.CRITERION, False, "640 s")
+
+    code = load.measure_with_maintenance_suspended(lambda: slow, FakeDocker())
+
+    printed = capsys.readouterr().out
+    assert code == 1
+    assert f"FALHOU  {load.CRITERION}: 640 s" in printed
+    assert f"PASSOU  {MAINTENANCE_CRITERION}" in printed
+
+
+def test_manutencao_que_nao_volta_reprova_a_medicao_que_passou(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = load.measure_with_maintenance_suspended(
+        lambda: MEASURED, FakeDocker(running_after_start="false")
+    )
+
+    printed = capsys.readouterr().out
+    assert code == 1
+    assert f"PASSOU  {load.CRITERION}: 420 s" in printed
+    assert f"FALHOU  {MAINTENANCE_CRITERION}" in printed

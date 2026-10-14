@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -64,10 +64,19 @@ def main() -> int:
         print("gerando as fixtures na própria imagem")
         _generate(fixtures)
         expected = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
-        [outcome] = run_with_maintenance_suspended(lambda: [measure(host, fixtures, expected)])
-    verdict = "PASSOU" if outcome.passed else "FALHOU"
-    print(f"{verdict}  {outcome.criterion}: {outcome.evidence}")
-    return 0 if outcome.passed else 1
+        return measure_with_maintenance_suspended(lambda: measure(host, fixtures, expected))
+
+
+def measure_with_maintenance_suspended(
+    measurement: Callable[[], Outcome], docker: Callable[..., str] | None = None
+) -> int:
+    """Mede com a manutenção parada e imprime todos os critérios: a medição e a manutenção
+    religada (o último resultado de `run_with_maintenance_suspended`). 0 só se todos passarem."""
+    outcomes = run_with_maintenance_suspended(lambda: [measurement()], docker)
+    for outcome in outcomes:
+        verdict = "PASSOU" if outcome.passed else "FALHOU"
+        print(f"{verdict}  {outcome.criterion}: {outcome.evidence}")
+    return 0 if all(outcome.passed for outcome in outcomes) else 1
 
 
 def plan_job(
