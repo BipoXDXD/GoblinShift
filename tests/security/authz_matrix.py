@@ -58,8 +58,8 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC, pending="A"),
     ("GET", "/auth/callback/{provider}"): Rule(Policy.PUBLIC, pending="A"),
     # Sem sessão válida também responde 204: o estado final é o mesmo (Frente B).
-    ("POST", "/auth/logout"): Rule(Policy.PUBLIC, pending="B"),
-    ("POST", "/auth/logout-all"): Rule(Policy.SESSION, pending="B"),
+    ("POST", "/auth/logout"): Rule(Policy.PUBLIC),
+    ("POST", "/auth/logout-all"): Rule(Policy.SESSION),
     # Conta.
     ("GET", f"{API}/me"): Rule(Policy.ANY_CREDENTIAL),
     ("DELETE", f"{API}/me"): Rule(Policy.RECENT_SESSION, pending="C"),
