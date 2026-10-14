@@ -10,6 +10,12 @@ map "$from_edge:$http_x_forwarded_proto" $forwarded_proto {
     "~^1:(?<edge_proto>https?)$" $edge_proto;
     default                      $scheme;
 }
+# HSTS só quando o navegador chegou por HTTPS (em http://localhost ele prenderia o navegador ao
+# HTTPS). A API não manda o header, para ele não vir dobrado; valor vazio não emite nada.
+map $forwarded_proto $hsts {
+    https   "max-age=63072000; includeSubDomains";
+    default "";
+}
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
 # na partida: durante o rollout (deploy/rollout-api.sh) há dois containers `api`, o Nginx alterna
@@ -23,6 +29,8 @@ server {
     server_tokens off;
     # Substitui o log `main` da imagem, que grava IP completo e query string (access-log.conf).
     access_log /var/log/nginx/access.log privacy;
+    # No `server` e em nenhum `location`: um `add_header` num bloco anula os herdados dele.
+    add_header Strict-Transport-Security $hsts always;
 
     set $api http://api:8000;
     # Logo depois do rollout, o cache do resolver ainda pode apontar para o IP de uma API que
