@@ -15,8 +15,7 @@ from goblinshift.catalog import Catalog, RecipeVersionRetiredError, VersionStatu
 from goblinshift.catalog.versions import CSV_JANITOR_V1
 from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.storage import FileStorage
-from goblinshift.files.tables import object_use, upload
-from goblinshift.files.uploads import request_deletion
+from goblinshift.files.tables import object_use
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs import acceptance
@@ -37,7 +36,6 @@ from goblinshift.runs.acceptance import (
     validate_run,
 )
 from goblinshift.runs.tables import idempotency_record, run, run_input
-from tests.files.support import create_intent
 from tests.runs.support import (
     count_rows,
     finish_run,
@@ -45,6 +43,7 @@ from tests.runs.support import (
     new_owner,
     ready_inputs,
     run_command,
+    unavailable_upload,
 )
 
 pytestmark = pytest.mark.integration
@@ -554,34 +553,6 @@ def test_upload_indisponivel_e_recusado_sem_criar_nada(
         accept(factory, owner, run_command([good, bad]))
 
     assert count_rows(factory) == before
-
-
-def unavailable_upload(
-    factory: sessionmaker[Session], storage: FileStorage, owner_id: uuid.UUID, reason: str
-) -> uuid.UUID:
-    match reason:
-        case "inexistente":
-            return uuid.uuid7()
-        case "alheio":
-            [foreign] = ready_inputs(factory, storage, new_owner(factory))
-            return foreign
-        case "nao-pronto":
-            return create_intent(factory, owner_id).id
-        case "excluido":
-            [deleted] = ready_inputs(factory, storage, owner_id)
-            with unit_of_work(factory) as session:
-                request_deletion(session, owner_id, deleted)
-            return deleted
-        case "vencido":
-            [expired] = ready_inputs(factory, storage, owner_id)
-            with unit_of_work(factory) as session:
-                session.execute(
-                    update(upload)
-                    .where(upload.c.id == expired)
-                    .values(expires_at=func.now() - timedelta(seconds=1))
-                )
-            return expired
-    raise ValueError(reason)
 
 
 def test_parametro_invalido_aponta_o_campo_dentro_de_parameters(
