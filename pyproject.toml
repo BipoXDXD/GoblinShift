@@ -12,6 +12,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.66b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
     "opentelemetry-sdk>=1.45.1",
+    "pillow==12.3.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.15.0",
@@ -30,6 +31,9 @@ requires = ["uv_build>=0.12.15,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# Única dependência de terceiros da imagem do executor (ADR 017): o Dockerfile instala só este
+# grupo, a partir do lock. O pin repete o de [project.dependencies]; um teste confere os dois.
+executor = ["pillow==12.3.0"]
 dev = [
     "httpx2>=2.13.1",
     "hypothesis>=6.169.0",
