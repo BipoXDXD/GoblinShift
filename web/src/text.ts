@@ -304,4 +304,8 @@ export const TEXT = {
       prefixDot: "O prefixo não pode começar com ponto.",
     },
   },
+  loginSoon: {
+    title: "O login chega em breve",
+    body: "Por enquanto, as receitas rodam pela API, com uma chave de API. Quando o login abrir, a Bancada funciona por aqui.",
+  },
 } as const;

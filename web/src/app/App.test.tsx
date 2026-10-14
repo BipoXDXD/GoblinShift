@@ -1,5 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { problemResponse } from "../test/fakeApi";
 
 import { App } from "./App";
 
@@ -54,6 +56,21 @@ describe("App", () => {
     expect(
       await screen.findByRole("link", { name: "Abrir a Bancada da CSV Janitor" }),
     ).toHaveAttribute("href", "/bancada/csv-janitor");
+  });
+
+  it("sem login, a Bancada mostra o aviso de login em breve sem repetir o pedido", async () => {
+    const fetchMock = vi.fn<typeof fetch>(() =>
+      Promise.resolve(problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.pushState({}, "", "/bancada/csv-janitor");
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("region", { name: "O login chega em breve" }),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("mostra página não encontrada para rota desconhecida", () => {
