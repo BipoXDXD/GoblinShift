@@ -54,13 +54,14 @@ target-version = "py314"
 # Rodam no Python do host (3.12 no Ubuntu 24.04), fora da imagem da aplicação.
 "deploy/executor_ctl/**" = "py312"
 "deploy/acceptance/**" = "py312"
+"deploy/openobserve/**" = "py312"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "N", "RUF"]
 
 [tool.ruff.lint.isort]
-# Pacote do host em deploy/, importado pelos testes via pythonpath.
-known-first-party = ["executor_ctl"]
+# Pacotes do host em deploy/, importados pelos testes via pythonpath.
+known-first-party = ["executor_ctl", "openobserve"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
@@ -71,6 +72,10 @@ known-first-party = ["executor_ctl"]
 "deploy/executor_ctl/**" = ["S603", "S607"]
 # Os testes de integração do executor-ctl conferem o Docker pelo mesmo CLI, sem shell.
 "tests/executor_ctl/**" = ["S101", "S603", "S607"]
+# Os testes do backup rodam os scripts reais, o curl, o age e o Docker pelo CLI, sem shell.
+"tests/backup/**" = ["S101", "S603", "S607"]
+# Os testes dos SLOs montam SQL de consulta ao OpenObserve com nomes de stream gerados por eles.
+"tests/openobserve/**" = ["S101", "S608"]
 
 [tool.mypy]
 strict = true
@@ -92,6 +97,8 @@ markers = [
     "executor_image: constrói e roda a imagem do executor (precisa de Docker; runtime em GS_TEST_RUNTIME)",
     "executor_ctl: executor-ctl com Docker real (runtime em GS_TEST_RUNTIME, padrão runc)",
     "nginx: Nginx real com os templates do repositório (precisa de Docker)",
+    "backup: backup e restauração do PostgreSQL contra S3 local (precisa de Docker, age e curl)",
+    "openobserve: SLOs e alertas contra OpenObserve e Collector reais (precisa de Docker)",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).
