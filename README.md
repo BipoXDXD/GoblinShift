@@ -64,7 +64,7 @@ uv run gs-admin revoke-key --key <public_id>
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
-Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …`.
+Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …` localmente. Na VPS, todo comando do Compose passa pelo `deploy/compose.sh` (veja abaixo): `sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin …`.
 
 A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
 
@@ -76,11 +76,23 @@ O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
 ```
 
+### Comandos manuais na VPS
+
+O Compose de produção depende da versão implantada (tag da aplicação e imagem do executor por digest), que o deploy grava em `/srv/goblinshift/secrets/release.env` (atômico, modo 600, ao lado do `app.env`). O `deploy/compose.sh` junta esse arquivo, os segredos, os dois arquivos do Compose e os diretórios de dados do host; o deploy usa o mesmo script. Rode como o usuário `goblinshift`:
+
+```bash
+sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh ps
+sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh logs --tail 100 worker
+sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin create-user --display-name "Ana"
+```
+
+Sem o arquivo (antes do primeiro deploy) o script para com uma mensagem, em vez de o Compose cair na imagem `dev`. Se um deploy falhar no meio, o arquivo guarda a versão daquela tentativa, que é a configuração aplicada por último ao projeto Compose.
+
 ## Imagem do executor
 
 Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado: nada de banco, web nem dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
 
-No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`.
+No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`, gravada pelo `deploy/release-env.sh` no `release.env` do host.
 
 ```bash
 uv run pytest -m executor_image                            # constrói a imagem e a roda com runc
