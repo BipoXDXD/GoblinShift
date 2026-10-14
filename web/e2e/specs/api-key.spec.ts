@@ -44,7 +44,7 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   expect(credentialsFromPage, "pedidos com Authorization montado pelo bundle").toEqual([]);
 });
 
-test("sem a chave do processo de teste, a API recusa e a Bancada mostra o erro", async ({
+test("sem a chave do processo de teste, a API recusa e a Bancada avisa que o login chega em breve", async ({
   browser,
 }) => {
   test.skip(E2E.artifactsDir === null, "a API falsa só existe no modo local");
@@ -52,12 +52,19 @@ test("sem a chave do processo de teste, a API recusa e a Bancada mostra o erro",
   const context = await browser.newContext();
   await installFakeApi(context, E2E.apiKey, E2E.artifactsDir ?? "");
   const page = await context.newPage();
-  const catalog = page.waitForResponse((response) => response.url().endsWith("/api/v1/catalog"));
-  await page.goto("/bancada/csv-janitor");
-  expect((await catalog).status()).toBe(401);
-  // O TanStack Query repete a consulta 3 vezes (1 + 2 + 4 s) antes de mostrar o erro.
-  await expect(page.getByText("Sua sessão terminou. Entre de novo para continuar.")).toBeVisible({
-    timeout: 12_000,
+  const catalogStatuses: number[] = [];
+  page.on("response", (response) => {
+    if (response.url().endsWith("/api/v1/catalog")) {
+      catalogStatuses.push(response.status());
+    }
   });
+  await page.goto("/bancada/csv-janitor");
+
+  // Sem login, o 401 é o estado normal até a fatia 6: aviso informativo, não erro de sessão.
+  await expect(page.getByRole("heading", { name: "O login chega em breve" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText("Sua sessão terminou.", { exact: false })).toHaveCount(0);
+  // 401 não é falha transitória: a leitura não se repete (api/queryRetry.ts).
+  expect(catalogStatuses).toEqual([401]);
   await context.close();
 });

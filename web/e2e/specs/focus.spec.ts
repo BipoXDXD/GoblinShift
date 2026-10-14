@@ -55,10 +55,13 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
   page,
 }) => {
   await page.goto("/");
+  // A tela é um chunk lazy: o Tab só começa com ela pintada, senão percorre a moldura vazia.
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   const names = (await tabThrough(page)).map((stop) => stop.name);
   expect(names).toEqual([
     "Pular para o conteúdo",
     "GoblinShift, Oficina",
+    "Histórico",
     "Tema Sistema",
     "Abrir a Bancada da CSV Janitor",
     "Abrir a Bancada da Image Forge",

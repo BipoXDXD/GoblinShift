@@ -6,6 +6,7 @@ import type { Page } from "@playwright/test";
 import { CSV_FILES } from "../fixtures/files";
 import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
+import { HistoricoPage } from "../pages/HistoricoPage";
 import type { FakeApi, RunOverrides } from "./fakeApi";
 import { expect } from "./test";
 
@@ -27,12 +28,74 @@ function runScreen(name: string, overrides: RunOverrides, visibleText: string): 
   };
 }
 
+/**
+ * Execuções paradas para as telas de lista: uma de cada estado que a lista pinta diferente, com
+ * `extra` concluídas a mais, um minuto mais antigas cada, para passar de uma página. Devolve
+ * quantas semeou.
+ */
+function seedRunHistory(api: FakeApi, extra = 0): number {
+  const recent: readonly RunOverrides[] = [
+    { status: "running", deadline_at: LATER, recipe_id: "image-forge" },
+    { status: "queued", recipe_id: "downloads-detox" },
+    { status: "failed", error: { code: "INPUT_INVALID", message: "CSV inválido." } },
+    { status: "succeeded_with_warnings", recipe_id: "image-forge" },
+    { status: "canceled" },
+    { status: "succeeded" },
+  ];
+  const all = [
+    ...recent,
+    ...Array.from({ length: extra }, () => ({ status: "succeeded" as const })),
+  ];
+  all.forEach((overrides, index) => {
+    api.seedRun({ ...overrides, created_at: minutesBefore(HISTORY_START, index) });
+  });
+  return all.length;
+}
+
+const HISTORY_START = Date.parse("2026-10-14T11:59:00Z");
+
+function minutesBefore(startMs: number, minutes: number): string {
+  return new Date(startMs - minutes * 60_000).toISOString();
+}
+
 export const SCREENS: readonly Screen[] = [
   {
     name: "Oficina",
     open: async (page: Page): Promise<void> => {
       await page.goto("/");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    },
+  },
+  {
+    name: "Oficina com execuções recentes",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      seedRunHistory(api);
+      await page.goto("/");
+      await expect(page.getByRole("link", { name: "Ver o histórico completo" })).toBeVisible();
+    },
+  },
+  {
+    name: "Histórico vazio",
+    open: async (page: Page): Promise<void> => {
+      await new HistoricoPage(page).open();
+      await expect(page.getByText("Nenhuma execução ainda")).toBeVisible();
+    },
+  },
+  {
+    name: "Histórico com Carregar mais",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      seedRunHistory(api, 25);
+      const historico = new HistoricoPage(page);
+      await historico.open();
+      await expect(page.getByRole("button", { name: "Carregar mais" })).toBeVisible();
+    },
+  },
+  {
+    name: "Histórico filtrado, sem resultado",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      seedRunHistory(api);
+      await new HistoricoPage(page).open("?estado=stopping&periodo=7d");
+      await expect(page.getByText("Nenhuma execução com esses filtros")).toBeVisible();
     },
   },
   {
