@@ -6,9 +6,13 @@ A coleta só aceita arquivos regulares em `out/` ou num único nível de subpast
 enquanto lê, e confere o `report.json` contra um schema próprio. Na raiz, `manifest.json` e
 `<recipe_id>.zip` (fatia 5) ficam fora do orçamento de conteúdo, cada um com o seu teto de 1.7, e
 vêm juntos ou não vêm: o executor anterior à fatia 5, fixado em Runs aceitas antes do deploy, não
-empacota. Cada arquivo de conteúdo precisa
-estar citado no relatório pelo caminho relativo a `out/` ("images/a.jpg"), e cada citação precisa
-existir. A coleta roda depois que o executor terminou: ninguém mais escreve em `out/`.
+empacota. Cada arquivo de conteúdo precisa estar citado no relatório pelo caminho relativo a
+`out/` ("images/a.jpg"), e cada citação precisa existir. A coleta roda depois que o executor
+terminou: ninguém mais escreve em `out/`.
+
+Cada arquivo aceito sai com o SHA-256 que o worker calculou; manifesto e ZIP precisam bater com
+eles (`package_check`). Ler tudo isso leva tempo (o ZIP chega a 512 MiB): `heartbeat` é chamado a
+cada bloco lido, para o coordenador renovar o lease.
 
 O que do relatório vai para o banco e para a API sai em tipo próprio (parse, don't validate): o
 `code` de cada rejeição, só do catálogo de 1.6 (`ItemRejectionCode`), e o `summary`, só com as
@@ -21,9 +25,11 @@ Duas classes de recusa:
   como infraestrutura, com retentativa.
 """
 
+import hashlib
 import os
 import stat
 import unicodedata
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -43,9 +49,11 @@ from goblinshift.processing.packaging import (
 )
 from goblinshift.processing.recipe import ItemRejectionCode, OutputGroup
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
+from goblinshift.runs.worker.package_check import PackageError, verify_manifest, verify_zip
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 _PACKAGE_LIMITS = PackageLimits()
+READ_CHUNK_BYTES = 1024 * 1024
 _ITEM_OK = "ok"
 _ITEM_REJECTED = "rejected"
 _ITEM_DUPLICATE = "duplicate"
@@ -79,6 +87,16 @@ class OutputLimits:
 
 @dataclass(frozen=True)
 class OutputFile:
+    name: str
+    path: Path
+    size: int
+    sha256: bytes  # calculado pelo worker ao ler o arquivo, não declarado pelo executor
+
+
+@dataclass(frozen=True)
+class _Found:
+    """Arquivo regular de out/ ainda não lido: nome, caminho e tamanho do `lstat`."""
+
     name: str
     path: Path
     size: int
@@ -153,35 +171,74 @@ class Collected:
 DEFAULT_LIMITS = OutputLimits()
 
 
+def _no_heartbeat() -> None:
+    return None
+
+
 def collect_outputs(
-    out_dir: Path, input_count: int, limits: OutputLimits = DEFAULT_LIMITS, *, recipe_id: str
+    out_dir: Path,
+    input_count: int,
+    limits: OutputLimits = DEFAULT_LIMITS,
+    *,
+    recipe_id: str,
+    heartbeat: Callable[[], None] = _no_heartbeat,
 ) -> Collected:
     """`recipe_id` é o da Run, não o do relatório: dá o único nome aceito para o pacote."""
     package_name = package_name_for(recipe_id)
     files = _scan(out_dir, limits, frozenset({REPORT_NAME, MANIFEST_NAME, package_name}))
-    manifest_file, package_file = _package_files(
+    manifest, package = _package_files(
         files.pop(MANIFEST_NAME, None), files.pop(package_name, None), limits
     )
-    report_file = files.pop(REPORT_NAME, None)
-    if report_file is None:
+    report_found = files.pop(REPORT_NAME, None)
+    if report_found is None:
         raise CollectionError(f"{REPORT_NAME} ausente em out/")
-    if report_file.size > limits.report_max_bytes:
+    if report_found.size > limits.report_max_bytes:
         raise OutputLimitError(
             ErrorCode.REPORT_LIMIT_EXCEEDED,
-            f"relatório com {report_file.size} bytes; o teto é {limits.report_max_bytes}",
+            f"relatório com {report_found.size} bytes; o teto é {limits.report_max_bytes}",
         )
-    report = parse_report(_read_no_follow(report_file.path, limits.report_max_bytes), input_count)
+    report_data = _read_no_follow(report_found.path, limits.report_max_bytes)
+    report = parse_report(report_data, input_count)
     cited = [name for item in report.items for name in item.outputs]
     if len(set(cited)) != len(cited) or set(cited) != set(files):
         raise CollectionError("os arquivos de out/ não batem com as saídas citadas no relatório")
-    return Collected(
-        tuple(files[name] for name in cited), report_file, report, manifest_file, package_file
-    )
+    outputs = tuple(_digested(files[name], heartbeat) for name in cited)
+    report_file = _from_bytes(report_found, report_data)
+    if manifest is None or package is None:
+        return Collected(outputs, report_file, report)
+    manifest_data = _read_no_follow(manifest.path, limits.manifest_max_bytes)
+    manifest_file = _from_bytes(manifest, manifest_data)
+    package_file = _digested(package, heartbeat)
+    try:
+        verify_manifest(manifest_data, outputs)
+        verify_zip(package.path, [*outputs, manifest_file, report_file], heartbeat)
+    except PackageError as error:
+        raise CollectionError(str(error)) from error
+    return Collected(outputs, report_file, report, manifest_file, package_file)
+
+
+def _digested(found: _Found, heartbeat: Callable[[], None]) -> OutputFile:
+    """Lê o arquivo sem seguir symlink, calculando o SHA-256; nunca além do tamanho do `lstat`."""
+    digest = hashlib.sha256()
+    size = 0
+    fd = os.open(found.path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as source:
+        while size <= found.size and (chunk := source.read(READ_CHUNK_BYTES)):
+            heartbeat()
+            size += len(chunk)
+            digest.update(chunk)
+    if size != found.size:
+        raise CollectionError(f"out/ mudou durante a coleta: {found.name!r}")
+    return OutputFile(found.name, found.path, size, digest.digest())
+
+
+def _from_bytes(found: _Found, data: bytes) -> OutputFile:
+    return OutputFile(found.name, found.path, len(data), hashlib.sha256(data).digest())
 
 
 def _package_files(
-    manifest: OutputFile | None, package: OutputFile | None, limits: OutputLimits
-) -> tuple[OutputFile | None, OutputFile | None]:
+    manifest: _Found | None, package: _Found | None, limits: OutputLimits
+) -> tuple[_Found | None, _Found | None]:
     if (manifest is None) != (package is None):
         raise CollectionError(f"{MANIFEST_NAME} e o pacote vêm juntos em out/, ou nenhum dos dois")
     if manifest is not None and manifest.size > limits.manifest_max_bytes:
@@ -227,9 +284,7 @@ def _summary(raw: object, items: tuple[ReportItem, ...]) -> ReportSummary:
     return expected
 
 
-def _scan(
-    out_dir: Path, limits: OutputLimits, outside_budget: frozenset[str]
-) -> dict[str, OutputFile]:
+def _scan(out_dir: Path, limits: OutputLimits, outside_budget: frozenset[str]) -> dict[str, _Found]:
     """Arquivos de out/ pelo caminho relativo; os nomes de `outside_budget`, só na raiz, não
     contam nos tetos de conteúdo."""
     try:
@@ -239,7 +294,7 @@ def _scan(
     if not stat.S_ISDIR(info.st_mode):
         raise CollectionError("out/ não é diretório regular")
     budget = _ContentBudget(limits)
-    files: dict[str, OutputFile] = {}
+    files: dict[str, _Found] = {}
     with os.scandir(out_dir) as entries:
         for entry in entries:
             if entry.is_dir(follow_symlinks=False):
@@ -252,11 +307,11 @@ def _scan(
     return files
 
 
-def _scan_group(directory: os.DirEntry[str], budget: _ContentBudget) -> dict[str, OutputFile]:
+def _scan_group(directory: os.DirEntry[str], budget: _ContentBudget) -> dict[str, _Found]:
     """Um grupo da lista fechada; dentro dele, só arquivos regulares (nenhum segundo nível)."""
     if directory.name not in _GROUPS:
         raise CollectionError(f"out/ contém subpasta fora da lista de grupos: {directory.name!r}")
-    files: dict[str, OutputFile] = {}
+    files: dict[str, _Found] = {}
     with os.scandir(directory.path) as entries:
         for entry in entries:
             output = _regular_file(entry, f"{directory.name}/{entry.name}")
@@ -274,7 +329,7 @@ class _ContentBudget:
         self._files = 0
         self._bytes = 0
 
-    def spend(self, output: OutputFile) -> None:
+    def spend(self, output: _Found) -> None:
         self._files += 1
         self._bytes += output.size
         if self._files > self._limits.max_files:
@@ -287,14 +342,14 @@ class _ContentBudget:
             )
 
 
-def _regular_file(entry: os.DirEntry[str], name: str) -> OutputFile:
+def _regular_file(entry: os.DirEntry[str], name: str) -> _Found:
     _require_output_name(entry.name, name)
     info = entry.stat(follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode):
         raise CollectionError(f"out/ contém algo que não é arquivo regular: {name!r}")
     if info.st_nlink != 1:
         raise CollectionError(f"out/ contém hardlink: {name!r}")
-    return OutputFile(name, Path(entry.path), info.st_size)
+    return _Found(name, Path(entry.path), info.st_size)
 
 
 def _require_output_name(component: str, name: str) -> None:
@@ -316,7 +371,9 @@ def _read_no_follow(path: Path, max_bytes: int) -> bytes:
     with os.fdopen(fd, "rb") as source:
         data = source.read(max_bytes + 1)
     if len(data) > max_bytes:
-        raise OutputLimitError(ErrorCode.REPORT_LIMIT_EXCEEDED, "relatório cresceu além do teto")
+        raise OutputLimitError(
+            ErrorCode.REPORT_LIMIT_EXCEEDED, "relatório ou manifesto cresceu além do teto"
+        )
     return data
 
 
