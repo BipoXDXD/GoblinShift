@@ -21,6 +21,8 @@ server {
     listen 80 default_server;
     server_name ${GS_DOMAIN};
     server_tokens off;
+    # Substitui o log `main` da imagem, que grava IP completo e query string (access-log.conf).
+    access_log /var/log/nginx/access.log privacy;
 
     set $api http://api:8000;
     # Logo depois do rollout, o cache do resolver ainda pode apontar para o IP de uma API que
