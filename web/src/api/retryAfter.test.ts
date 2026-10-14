@@ -22,6 +22,19 @@ describe("parseRetryAfterMs", () => {
     expect(parseRetryAfterMs("Wed, 14 Oct 2026 11:59:00 GMT", NOW_MS)).toBe(0);
   });
 
+  it.each([
+    ["300", 300_000],
+    ["301", 300_000],
+    ["2147484", 300_000],
+    ["99999999999999999999", 300_000],
+  ])("limita delta-seconds %j ao teto de 5 min", (header, expected) => {
+    expect(parseRetryAfterMs(header, NOW_MS)).toBe(expected);
+  });
+
+  it("limita HTTP-date distante ao teto de 5 min", () => {
+    expect(parseRetryAfterMs("Thu, 14 Oct 2027 12:00:00 GMT", NOW_MS)).toBe(300_000);
+  });
+
   it("devolve null sem header", () => {
     expect(parseRetryAfterMs(null, NOW_MS)).toBeNull();
   });
