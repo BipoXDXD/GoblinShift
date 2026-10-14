@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiError, type ApiFailure } from "../api/response";
+import { CrossOriginUrlError } from "../api/sameOrigin";
 import { FakeXhr } from "../test/fakeXhr";
 import { createContentUploader, type UploadProgress } from "./xhr";
 
@@ -26,7 +27,7 @@ const rateLimited = {
   request_id: "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a",
 };
 
-function setup(csrfToken: string | null = null) {
+function setup(csrfToken: string | null = null, url: string = content.url) {
   const xhr = new FakeXhr();
   const uploader = createContentUploader({
     createXhr: () => xhr,
@@ -37,7 +38,7 @@ function setup(csrfToken: string | null = null) {
   const file = new Blob(["abcd"]);
   const start = (signal?: AbortSignal) =>
     uploader.upload({
-      content,
+      content: { ...content, url },
       file,
       onProgress: (event) => progress.push(event),
       ...(signal === undefined ? {} : { signal }),
@@ -63,7 +64,7 @@ describe("upload de conteúdo por XHR: pedido", () => {
     void start();
 
     expect(xhr.method).toBe("PUT");
-    expect(xhr.url).toBe(content.url);
+    expect(xhr.url).toBe(new URL(content.url, window.location.origin).href);
     expect(xhr.requestHeaders.get("Content-Type")).toBe("application/octet-stream");
     expect(xhr.requestHeaders.get("Accept")).toBe("application/json, application/problem+json");
     expect(xhr.body).toBe(file);
@@ -75,6 +76,17 @@ describe("upload de conteúdo por XHR: pedido", () => {
     void start();
 
     expect(xhr.requestHeaders.get("X-CSRF-Token")).toBe("tok");
+  });
+
+  it.each([
+    "https://evil.example/api/v1/uploads/1/content",
+    "//evil.example/api/v1/uploads/1/content",
+  ])("recusa URL de outra origem (%s) sem abrir o envio nem expor o CSRF", async (url) => {
+    const { xhr, start } = setup("tok", url);
+
+    await expect(start()).rejects.toBeInstanceOf(CrossOriginUrlError);
+    expect(xhr.method).toBeNull();
+    expect(xhr.requestHeaders.size).toBe(0);
   });
 
   it("não inventa CSRF sem sessão", () => {
