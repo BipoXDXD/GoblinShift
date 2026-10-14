@@ -15,7 +15,7 @@ from goblinshift.identity.tables import app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run
-from tests.api.session_support import FakeSessions
+from tests.api.simulated_session import FakeSessions
 from tests.api.support import assert_problem
 from tests.identity.pending_fronts import install_domain_stand_ins
 from tests.identity.support import new_key, new_user

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.identity import MAX_ACTIVE_KEYS, authenticate_api_key
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
-from tests.api.session_support import FakeSessions
+from tests.api.simulated_session import FakeSessions
 from tests.api.support import assert_problem
 from tests.identity.support import new_user
 
