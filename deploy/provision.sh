@@ -39,18 +39,8 @@ EOF
   apt-get update -q
   apt-get install -yq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
-if [[ ! -f /etc/docker/daemon.json ]]; then
-  # Rotação de logs dos containers (retenção em 1.7).
-  echo '{ "log-driver": "local", "log-opts": { "max-size": "20m", "max-file": "5" } }' > /etc/docker/daemon.json
-  if [[ -z "$(docker ps -q)" ]]; then
-    systemctl restart docker
-  else
-    echo "   daemon.json criado; há containers rodando, então o Docker NÃO foi reiniciado."
-    echo "   A rotação vale após o próximo reinício planejado do Docker."
-  fi
-else
-  echo "   /etc/docker/daemon.json já existe; mantido como está."
-fi
+# A rotação de logs dos containers fica no Compose, por serviço (retenção em 1.7): o
+# /etc/docker/daemon.json vale para todos os projetos da VPS e não é alterado aqui.
 
 note "SSH só por chave e sem root (só altera se ainda não estiver assim)"
 if sshd -T | grep -qx 'permitrootlogin no' && sshd -T | grep -qx 'passwordauthentication no'; then
