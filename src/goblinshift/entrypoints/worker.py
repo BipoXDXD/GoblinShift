@@ -81,6 +81,7 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
             while not shutdown.is_set():
                 if not _work_once(factory, storage, lease, coordinator, finished):
+                    logger.debug("fila vazia; aguardando NOTIFY")
                     listener.wait(settings.worker_poll_interval_s)
     finally:
         engine.dispose()

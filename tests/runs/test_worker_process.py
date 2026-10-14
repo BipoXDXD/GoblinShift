@@ -22,6 +22,7 @@ from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.tables import attempt
 from goblinshift.runs.worker.claim import RUNS_CHANNEL
+from tests.runs.worker_process import IDLE_MESSAGE, PAUSE_WHILE_SUPERVISING
 from tests.runs.worker_support import (
     attempts,
     create_user,
@@ -35,6 +36,9 @@ pytestmark = pytest.mark.integration
 
 WORKER_SCRIPT = str(Path(__file__).with_name("worker_process.py"))
 LEASE_S = 1.5
+# Nome das sessões do worker no Postgres (libpq lê PGAPPNAME), para o teste saber quando o banco
+# encerrou as do worker morto.
+WORKER_APP_NAME = "goblinshift-worker-test"
 WAIT_S = 30.0
 
 
@@ -66,6 +70,7 @@ def worker_process(
         "GS_WORK_ROOT": str(work_root),
         "GS_WORKER_LEASE_S": str(LEASE_S),
         "GS_WORKER_POLL_INTERVAL_S": str(poll_interval_s),
+        "PGAPPNAME": WORKER_APP_NAME,
     }
     with log.open("wb") as output:
         process = subprocess.Popen(  # noqa: S603 - script do próprio teste
@@ -81,6 +86,18 @@ def worker_process(
         process.wait(timeout=WAIT_S)
 
 
+def wait_stopped(process: subprocess.Popen[bytes], timeout_s: float = WAIT_S) -> None:
+    """Espera o processo filho parar por sinal (SIGSTOP), sem colhê-lo."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        pid, status = os.waitpid(process.pid, os.WNOHANG | os.WUNTRACED)
+        if pid and os.WIFSTOPPED(status):
+            return
+        assert pid == 0, "o worker terminou em vez de pausar"
+        assert time.monotonic() < deadline, "o worker não pausou a tempo"
+        time.sleep(0.05)
+
+
 def janitor(factory: sessionmaker[Session], storage: FileStorage, work_root: Path) -> Maintenance:
     config = MaintenanceConfig(stop_grace=timedelta(seconds=2), jitter=lambda: MIN_RETRY_JITTER)
     return Maintenance(factory, storage, local_runner(work_root), config)
@@ -89,6 +106,15 @@ def janitor(factory: sessionmaker[Session], storage: FileStorage, work_root: Pat
 def executor_started(factory: sessionmaker[Session], run_id: uuid.UUID) -> bool:
     rows = attempts(factory, run_id)
     return bool(rows) and rows[-1]["executor_started_at"] is not None
+
+
+def worker_sessions(factory: sessionmaker[Session]) -> int:
+    with factory() as session:
+        count: int = session.execute(
+            text("SELECT count(*) FROM pg_stat_activity WHERE application_name = :name"),
+            {"name": WORKER_APP_NAME},
+        ).scalar_one()
+    return count
 
 
 def lease_expired(factory: sessionmaker[Session]) -> bool:
@@ -109,9 +135,11 @@ def test_notify_acorda_o_worker_antes_do_polling(
     tmp_path: Path,
 ) -> None:
     owner = create_user(factory)
-    with worker_process(
-        db_settings, storage, work_root, tmp_path / "worker.log", "exit", "0", poll_interval_s=60
-    ):
+    log = tmp_path / "worker.log"
+    with worker_process(db_settings, storage, work_root, log, "exit", "0", poll_interval_s=60):
+        # "worker pronto" sai antes do primeiro claim: a Run gravada antes de o worker ficar
+        # ocioso seria pega por esse claim, e não pelo NOTIFY.
+        wait_until(lambda: IDLE_MESSAGE in log.read_text(encoding="utf-8"))
         run_id = queue_run(factory, storage, owner)
         time.sleep(0.5)
         claimed_before_notify = run_row(factory, run_id)["claim_count"]
@@ -135,8 +163,13 @@ def test_worker_morto_por_sigkill_e_assumido_pela_manutencao(
         db_settings, storage, work_root, tmp_path / "worker.log", "sleep", "30"
     ) as worker:
         wait_until(lambda: executor_started(factory, run_id))
+        assert worker_sessions(factory) > 0, "sem as sessões do worker, a espera abaixo é vazia"
         worker.kill()
         worker.wait(timeout=WAIT_S)
+    # O kill pode cair no meio de uma renovação do lease. O Postgres só a desfaz (ou aplica o que
+    # já estava no socket) quando vê a conexão fechada; até lá a Run fica travada, e a manutenção a
+    # pula (SKIP LOCKED) ou vê o lease renovado. O worker só está morto para o banco sem sessões.
+    wait_until(lambda: worker_sessions(factory) == 0)
     [orphan] = attempts(factory, run_id)
     runner = local_runner(work_root)
     survived = runner.status(orphan["id"]).is_running
@@ -163,17 +196,18 @@ def test_worker_pausado_alem_do_lease_nao_escreve_ao_voltar(
 ) -> None:
     run_id = queue_run(factory, storage, create_user(factory))
     log = tmp_path / "worker.log"
-    with worker_process(db_settings, storage, work_root, log, "sleep", "30") as worker:
-        wait_until(lambda: executor_started(factory, run_id))
-        time.sleep(0.2)
-        worker.send_signal(signal.SIGSTOP)
+    with worker_process(
+        db_settings, storage, work_root, log, PAUSE_WHILE_SUPERVISING, "sleep", "30"
+    ) as worker:
+        wait_stopped(worker)
         wait_until(lambda: lease_expired(factory))
-        janitor(factory, storage, work_root).run_cycle()
+        counts = janitor(factory, storage, work_root).run_cycle()
         after_takeover = snapshot(factory)
 
         worker.send_signal(signal.SIGCONT)
         wait_until(lambda: "lost_fencing" in log.read_text(encoding="utf-8"))
 
+        assert counts["leases_reconciled"] == 1
         assert snapshot(factory) == after_takeover
         assert worker.poll() is None, "o worker segue vivo e volta ao laço"
     row = run_row(factory, run_id)
