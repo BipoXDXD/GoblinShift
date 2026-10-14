@@ -71,6 +71,12 @@ export function Workbench({ recipe, uploadServices }: WorkbenchProps): ReactElem
     issues.flatMap((issue) => (issue.fieldId === null ? [] : [[issue.fieldId, issue.message]])),
   );
 
+  const removeEntry = (localId: string): void => {
+    batch.remove(localId);
+    // O botão Remover some com o item: o foco volta à escolha de arquivos, e não ao body.
+    document.getElementById(FILES_FIELD_ID)?.focus();
+  };
+
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
     event.preventDefault();
     if (mutation.isPending) {
@@ -117,7 +123,7 @@ export function Workbench({ recipe, uploadServices }: WorkbenchProps): ReactElem
               getKey={(entry) => entry.localId}
               getName={(entry) => entry.file.name}
               renderItem={(entry) => (
-                <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={batch.remove} />
+                <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={removeEntry} />
               )}
               onMove={(move) => {
                 setOrder(moveItem(entries.map(localIdOf), move));
@@ -162,7 +168,7 @@ function failureOf(error: Error): DisplayableFailure {
 }
 
 /**
- * Erros por campo de um VALIDATION_FAILED, com o texto do servidor (já sem eco da entrada); `null`
+ * Erros por campo de um VALIDATION_FAILED, com o texto de `fieldErrorText`; `null`
  * para as outras falhas, que vão para o alerta com texto próprio.
  */
 function fieldIssuesOf(
@@ -176,10 +182,28 @@ function fieldIssuesOf(
   if (errors.length === 0) {
     return null;
   }
-  return errors.map(({ field, message }) => ({
+  return errors.map(({ field, code, message }) => ({
     fieldId: fieldIdForServerPath(field, recipe),
-    message,
+    message: fieldErrorText(code, message),
   }));
+}
+
+const SERVER_FIELD_ERRORS: Readonly<Record<string, string>> = TEXT.workbench.serverFieldErrors;
+const VALUE_ERROR_PREFIX = "Value error, ";
+
+/**
+ * Texto de um erro por campo. `value_error` traz a regra de negócio escrita pelo próprio GoblinShift
+ * (pt-BR, sem eco da entrada além dos nomes de coluna da pessoa), sem o prefixo do Pydantic; os
+ * outros códigos são do Pydantic, em inglês, e ganham texto próprio.
+ */
+function fieldErrorText(code: string, message: string): string {
+  if (code === "value_error") {
+    return message.startsWith(VALUE_ERROR_PREFIX)
+      ? message.slice(VALUE_ERROR_PREFIX.length)
+      : message;
+  }
+  const known = Object.hasOwn(SERVER_FIELD_ERRORS, code) ? SERVER_FIELD_ERRORS[code] : undefined;
+  return known ?? TEXT.workbench.serverFieldErrors.fallback;
 }
 
 function fieldIdForServerPath(field: string, recipe: RecipeModule<RecipeId>): string | null {

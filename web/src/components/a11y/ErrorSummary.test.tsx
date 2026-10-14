@@ -60,6 +60,27 @@ describe("ErrorSummary", () => {
     expect(screen.getByRole("alert")).toHaveFocus();
   });
 
+  it("não toma o foco quando os erros somem e voltam sem nova tentativa", () => {
+    const { rerender } = render(<ErrorSummary issues={issues} attempt={1} />);
+    rerender(<ErrorSummary issues={[]} attempt={1} />);
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+
+    rerender(<ErrorSummary issues={issues} attempt={1} />);
+
+    expect(field).toHaveFocus();
+    field.remove();
+  });
+
+  it("toma o foco quando o erro do servidor chega depois da tentativa", () => {
+    const { rerender } = render(<ErrorSummary issues={[]} attempt={1} />);
+
+    rerender(<ErrorSummary issues={issues} attempt={1} />);
+
+    expect(screen.getByRole("alert")).toHaveFocus();
+  });
+
   it("não tem violações do axe", async () => {
     const { container } = render(<Form attempt={1} />);
 

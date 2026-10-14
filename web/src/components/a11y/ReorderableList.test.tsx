@@ -33,6 +33,31 @@ function Harness(): ReactElement {
   );
 }
 
+function HarnessWithInput(): ReactElement {
+  const [text, setText] = useState("");
+  return (
+    <>
+      <label htmlFor="outro">Outro campo</label>
+      <input
+        id="outro"
+        value={text}
+        onChange={(event) => {
+          setText(event.currentTarget.value);
+        }}
+      />
+      <Harness key="lista" />
+      <ReorderableList
+        label="Segunda lista"
+        items={[{ id: "x", name: "x.csv" }]}
+        getKey={(item) => item.id}
+        getName={(item) => item.name}
+        renderItem={(item) => <span>{item.name}</span>}
+        onMove={() => undefined}
+      />
+    </>
+  );
+}
+
 function order(): string[] {
   const list = screen.getByRole("list", { name: "Ordem das entradas" });
   return within(list)
@@ -158,6 +183,17 @@ describe("ReorderableList", () => {
     expect(first).toHaveAttribute("aria-disabled", "true");
     expect(order()).toEqual(["a.csv", "b.csv", "c.csv"]);
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("movimento impossível não rouba o foco depois", async () => {
+    const user = userEvent.setup();
+    render(<HarnessWithInput />);
+
+    await user.click(button("Mover para cima x.csv"));
+    await user.click(screen.getByRole("textbox", { name: "Outro campo" }));
+    await user.keyboard("abc");
+
+    expect(screen.getByRole("textbox", { name: "Outro campo" })).toHaveFocus();
   });
 
   it("Tab percorre os botões na ordem da lista", async () => {

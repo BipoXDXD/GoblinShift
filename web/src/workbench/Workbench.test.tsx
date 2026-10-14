@@ -233,6 +233,36 @@ describe("Bancada", () => {
     ).toHaveAccessibleDescription(/Erro: a coluna 'x' não existe/);
   });
 
+  it("erro por campo fora das regras da receita ganha texto próprio pelo código", async () => {
+    const { user } = setup({
+      runs: () =>
+        problemResponse(422, "VALIDATION_FAILED", {
+          errors: [
+            {
+              field: "body.parameters.formula_guard",
+              code: "enum",
+              message: "Input should be 'none' or 'tab_prefix'",
+            },
+            {
+              field: "body.parameters.output_columns",
+              code: "value_error",
+              message: "Value error, repete colunas: ['x']",
+            },
+          ],
+        }),
+    });
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveTextContent("Escolha uma das opções.");
+    expect(summary).toHaveTextContent("repete colunas: ['x']");
+    expect(summary).not.toHaveTextContent("Input should");
+    expect(summary).not.toHaveTextContent("Value error");
+  });
+
   it("recusa do servidor aparece com texto próprio, nunca o problem+json", async () => {
     const { user } = setup({ runs: () => problemResponse(409, "ACTIVE_RUN_LIMIT") });
     await chooseFiles(user, ["a.csv"]);
@@ -262,6 +292,7 @@ describe("Bancada", () => {
     expect(screen.getByRole("list", { name: "Ordem de processamento" })).not.toHaveTextContent(
       "a.csv",
     );
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
   });
 
   it("não tem violações do axe com arquivos e erros na tela", async () => {

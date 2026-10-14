@@ -88,6 +88,16 @@ export const TEXT = {
       announceReady: (name: string) => `${name} enviado.`,
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
     },
+    serverFieldErrors: {
+      missing: "Campo obrigatório.",
+      string_too_short: "Preencha este campo.",
+      too_short: "Informe pelo menos um item.",
+      too_long: "Há itens demais neste campo.",
+      enum: "Escolha uma das opções.",
+      literal_error: "Escolha uma das opções.",
+      extra_forbidden: "Este campo não é aceito.",
+      fallback: "O servidor recusou este valor.",
+    },
     errors: {
       noFiles: "Escolha pelo menos um arquivo.",
       uploading: "Espere o envio dos arquivos terminar.",
