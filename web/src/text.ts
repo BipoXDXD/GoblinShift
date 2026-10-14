@@ -67,6 +67,7 @@ export const TEXT = {
     options: { system: "Sistema", light: "Claro", dark: "Escuro" },
   },
   layout: {
+    navLabel: "Principal",
     skipToContent: "Pular para o conteúdo",
     brand: "GoblinShift",
     brandLink: "GoblinShift, Oficina",
@@ -77,7 +78,7 @@ export const TEXT = {
     recipesHeading: "Receitas",
     openWorkbench: "Abrir a Bancada",
     // Completa o nome acessível do link sem repetir o título do cartão na tela.
-    openWorkbenchOf: (recipe: string) => ` da ${recipe}`,
+    openWorkbenchOf: (recipe: string) => `da ${recipe}`,
     summaries: {
       "csv-janitor":
         "Limpa tabelas CSV: espaços nas pontas, duplicatas, colunas, caixa e filtros, sem adivinhar o significado dos dados.",
@@ -95,6 +96,12 @@ export const TEXT = {
     chooseFiles: "Escolher arquivos",
     chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
     dropHere: "Solte para adicionar.",
+    filesChosen: (count: number) =>
+      count === 0
+        ? "Nenhum arquivo escolhido"
+        : count === 1
+          ? "1 arquivo escolhido"
+          : `${String(count)} arquivos escolhidos`,
     orderLabel: "Ordem de processamento",
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:
@@ -209,7 +216,6 @@ export const TEXT = {
   },
   csvJanitor: {
     title: "CSV Janitor",
-    legend: "Parâmetros da limpeza",
     inputDelimiter: "Delimitador dos arquivos de entrada",
     outputDelimiter: "Delimitador dos arquivos de saída",
     delimiters: { ",": "Vírgula (,)", ";": "Ponto e vírgula (;)", "\t": "Tabulação" },
@@ -251,7 +257,6 @@ export const TEXT = {
   },
   imageForge: {
     title: "Image Forge",
-    legend: "Parâmetros das imagens",
     maxWidth: "Largura máxima, em pixels",
     maxHeight: "Altura máxima, em pixels",
     sideHint: (min: number, max: number) =>
@@ -277,7 +282,6 @@ export const TEXT = {
   },
   downloadsDetox: {
     title: "Downloads Detox",
-    legend: "Parâmetros da organização",
     deduplicate: "Remover arquivos repetidos",
     deduplicateHint: "Arquivos com o mesmo conteúdo ficam uma vez só, na primeira ocorrência.",
     groupBy: "Organização em pastas",
@@ -300,5 +304,41 @@ export const TEXT = {
       prefixInvisible: "O prefixo não pode ter caracteres invisíveis ou de controle.",
       prefixDot: "O prefixo não pode começar com ponto.",
     },
+  },
+  loginSoon: {
+    title: "O login chega em breve",
+    body: "Por enquanto, as receitas rodam pela API, com uma chave de API. Quando o login abrir, a Bancada funciona por aqui.",
+  },
+  history: {
+    title: "Histórico",
+    navLink: "Histórico",
+    filters: "Filtros",
+    recipe: "Receita",
+    anyRecipe: "Todas as receitas",
+    status: "Estado",
+    anyStatus: "Todos os estados",
+    period: "Período",
+    anyPeriod: "Qualquer data",
+    periods: { "7d": "Últimos 7 dias", "30d": "Últimos 30 dias", "90d": "Últimos 90 dias" },
+    apply: "Aplicar filtros",
+    clear: "Limpar filtros",
+    loading: "Carregando as execuções.",
+    listLabel: "Execuções",
+    createdAt: (date: string) => `Criada em ${date}`,
+    // Começa pela vírgula: o espaço inicial de um texto sr-only se perde (HomePage).
+    linkDetail: (date: string) => `, criada em ${date}`,
+    loadMore: "Carregar mais",
+    loadingMore: "Carregando mais execuções.",
+    loadedMore: (count: number) =>
+      count === 1 ? "Mais 1 execução na lista." : `Mais ${String(count)} execuções na lista.`,
+    restarted: "A lista voltou ao início, porque a página seguinte expirou.",
+    empty: "Nenhuma execução ainda",
+    emptyHint: "As execuções aparecem aqui depois que você roda uma receita na Bancada.",
+    goToWorkshop: "Escolher uma receita na Oficina",
+    noMatches: "Nenhuma execução com esses filtros",
+    noMatchesHint: "Mude ou limpe os filtros para ver mais execuções.",
+    recentHeading: "Execuções recentes",
+    recentEmptyHint: "Escolha uma receita acima para começar.",
+    seeAll: "Ver o histórico completo",
   },
 } as const;

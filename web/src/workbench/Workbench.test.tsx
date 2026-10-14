@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { createRoutes } from "../app/routes";
+import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler, catalogVersion, withVersion } from "../test/catalog";
 import {
@@ -16,6 +16,7 @@ import {
   uploadIntentsHandler,
 } from "../test/fakeApi";
 import { fakeUploader } from "../test/fakeUploader";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
 const csv = (name: string) => new File(["a,b\n1,2\n"], name, { type: "text/csv" });
@@ -45,13 +46,7 @@ function renderWorkbench({
     [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()),
   });
   const { uploader, pending } = fakeUploader({ autoResolve });
-  const routes = createRoutes({
-    uploadServices: {
-      client: api.client,
-      uploader,
-      rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-    },
-  });
+  const routes = appRoutes(api.client, uploader);
   const view = renderRoutes({ routes, path: `/bancada/${recipe}`, client: api.client });
   return { ...view, api, pending, user: userEvent.setup() };
 }
@@ -95,7 +90,7 @@ describe("Bancada", () => {
   it("abre com o foco no título e o estado vazio da lista", async () => {
     await setup();
 
-    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
+    await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
   });
@@ -118,6 +113,28 @@ describe("Bancada", () => {
     );
   });
 
+  it.each(["csv-janitor", "image-forge", "downloads-detox"])(
+    "o nome Parâmetros aparece uma vez só na Bancada de %s",
+    async (recipe) => {
+      await setup({ recipe });
+
+      const named = [
+        ...screen.queryAllByRole("heading", { name: /Parâmetros/ }),
+        ...screen.queryAllByRole("group", { name: /Parâmetros/ }),
+      ];
+      expect(named.map((element) => element.textContent)).toEqual(["Parâmetros"]);
+    },
+  );
+
+  it("diz quantos arquivos estão escolhidos, em pt-BR", async () => {
+    const { user } = await setup();
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeVisible();
+
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+
+    expect(await screen.findByText("2 arquivos escolhidos")).toBeVisible();
+  });
+
   it("diz quantos arquivos e quantos bytes a receita aceita", async () => {
     await setup();
 
@@ -126,22 +143,17 @@ describe("Bancada", () => {
     );
   });
 
-  it("receita desconhecida mostra a página não encontrada", () => {
+  it("receita desconhecida mostra a página não encontrada", async () => {
     const api = fakeApi({});
-    const { uploader } = fakeUploader({ autoResolve: true });
     renderRoutes({
-      routes: createRoutes({
-        uploadServices: {
-          client: api.client,
-          uploader,
-          rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-        },
-      }),
+      routes: appRoutes(api.client),
       path: "/bancada/receita-que-nao-existe",
       client: api.client,
     });
 
-    expect(screen.getByRole("heading", { level: 1, name: "Página não encontrada" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Página não encontrada" }),
+    ).toBeVisible();
   });
 
   it("envia os arquivos escolhidos e anuncia quando ficam prontos", async () => {
@@ -209,7 +221,7 @@ describe("Bancada", () => {
     await user.click(screen.getByRole("button", { name: "Mover para cima b.csv" }));
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    await expectHeadingFocused("Execução");
     const [request] = runRequests(api.requests);
     expect(request?.headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     const body = await bodyOf(request);
@@ -348,12 +360,29 @@ describe("Bancada", () => {
 
     expect(await axeViolations(container)).toEqual([]);
   });
-  it("mostra que está carregando a receita enquanto o catálogo não chega", () => {
+  it("mostra que está carregando a receita enquanto o catálogo não chega", async () => {
     renderWorkbench({ catalog: () => null });
 
-    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
+    await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByText("Carregando a receita.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
+  });
+
+  it("sem login, o 401 do catálogo vira o aviso de login em breve, sem erro nem formulário", async () => {
+    renderWorkbench({ catalog: () => problemResponse(401, "AUTHENTICATION_REQUIRED") });
+
+    const notice = await screen.findByRole("region", { name: "O login chega em breve" });
+    expect(notice).toHaveTextContent(/chave de API/);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toBeVisible();
+  });
+
+  it("outro 401 que não é falta de login continua como erro", async () => {
+    renderWorkbench({ catalog: () => problemResponse(401, "REAUTH_REQUIRED") });
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "O login chega em breve" })).toBeNull();
   });
 
   it("falha do catálogo aparece com texto próprio e sem formulário", async () => {

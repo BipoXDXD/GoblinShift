@@ -5,6 +5,7 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import { createApiClient } from "../api/client";
 import { readCsrfCookie } from "../api/csrf";
+import { shouldRetryQuery } from "../api/queryRetry";
 import { createContentUploader } from "../upload/xhr";
 import { createRoutes } from "./routes";
 
@@ -15,7 +16,9 @@ const UPLOAD_RATE_LIMIT_FALLBACK_MS = 2_000;
 
 export function App(): ReactElement {
   // Um cliente e um router por montagem: testes e Strict Mode não compartilham cache nem histórico.
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: shouldRetryQuery } } }),
+  );
   const [apiClient] = useState(() =>
     createApiClient({
       fetch: (input, init) => window.fetch(input, init),
@@ -39,6 +42,7 @@ export function App(): ReactElement {
             random: Math.random,
           },
         },
+        now: Date.now,
       }),
     ),
   );

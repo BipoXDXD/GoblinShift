@@ -74,6 +74,17 @@ def test_nginx_da_imagem_e_fixado_por_digest() -> None:
     assert re.search(r"^FROM nginx:1\.\d+\.\d+@sha256:[0-9a-f]{64}$", texto, re.MULTILINE)
 
 
+def test_estagio_final_liga_o_pacote_ao_repositorio() -> None:
+    # Sem o rótulo de origem, o pacote nasce no GHCR solto do repositório e sem o acesso do
+    # Actions; ele só vale no estágio final, que é o que vira a imagem publicada.
+    estagio_final = DOCKERFILE.read_text().rsplit("\nFROM ", 1)[1]
+    assert re.search(
+        r"^LABEL org\.opencontainers\.image\.source=https://github\.com/BipoXDXD/GoblinShift$",
+        estagio_final,
+        re.MULTILINE,
+    )
+
+
 def test_compose_constroi_o_nginx_com_a_spa_e_sem_montar_o_template() -> None:
     nginx = _yaml(ROOT / "compose.yaml")["services"]["nginx"]
     assert nginx["image"] == "ghcr.io/bipoxdxd/goblinshift-web:${GS_IMAGE_TAG:-dev}"

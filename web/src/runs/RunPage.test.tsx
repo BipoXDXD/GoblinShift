@@ -1,10 +1,10 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { createRoutes } from "../app/routes";
+import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody, RUN_ID } from "../test/fakeApi";
-import { fakeUploader } from "../test/fakeUploader";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
@@ -33,33 +33,27 @@ function setup(
     [`GET /api/v1/runs/${RUN_ID}`]: run,
     [`GET /api/v1/runs/${RUN_ID}/results`]: results,
   });
-  const { uploader } = fakeUploader({ autoResolve: true });
-  const routes = createRoutes({
-    uploadServices: {
-      client: api.client,
-      uploader,
-      rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-    },
-  });
-  return { ...renderRoutes({ routes, path, client: api.client }), api };
+  return { ...renderRoutes({ routes: appRoutes(api.client), path, client: api.client }), api };
 }
 
 describe("Execução", () => {
-  it("abre com o foco no título e mostra o carregamento", () => {
+  it("abre com o foco no título e mostra o carregamento", async () => {
     setup(() => null);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    await expectHeadingFocused("Execução");
     expect(screen.getByText("Carregando a execução.")).toBeInTheDocument();
   });
 
-  it("id que não é UUID mostra a página não encontrada, sem chamar a API", () => {
+  it("id que não é UUID mostra a página não encontrada, sem chamar a API", async () => {
     const { api } = setup(
       () => null,
       () => null,
       "/execucoes/nao-e-uuid",
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Página não encontrada" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Página não encontrada" }),
+    ).toBeVisible();
     expect(api.requests).toHaveLength(0);
   });
 
@@ -90,6 +84,30 @@ describe("Execução", () => {
     expect(link).toHaveAttribute("download", "clientes.csv");
     const results = screen.getByRole("region", { name: "Resultados" });
     expect(within(results).getByText(/arquivo processado/)).toBeInTheDocument();
+  });
+
+  it("o link do pacote diz o papel do arquivo separado do nome", async () => {
+    setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () =>
+        jsonResponse({
+          ...publishedResults,
+          artifacts: [
+            {
+              artifact_id: ARTIFACT_ID,
+              logical_name: "pacote",
+              role: "package",
+              file_name: "resultado.zip",
+            },
+          ],
+        }),
+    );
+
+    expect(
+      await screen.findByRole("link", {
+        name: "Baixar resultado.zip (pacote com todos os arquivos)",
+      }),
+    ).toHaveAttribute("download", "resultado.zip");
   });
 
   it("concluída sem arquivos publicados mostra o estado vazio", async () => {

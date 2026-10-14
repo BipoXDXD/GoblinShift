@@ -11,6 +11,8 @@ COPY web/ ./
 RUN npm run build
 
 FROM nginx:1.30.5@sha256:9bf97bd7714f5e24c1ccd545ecb9eb5435cb6d109c97cebb15e7e455e0239edb
+# Liga o pacote do GHCR ao repositório: ele herda a visibilidade e o acesso do Actions.
+LABEL org.opencontainers.image.source=https://github.com/BipoXDXD/GoblinShift
 # Só variáveis GS_* entram no template; as do Nginx ($uri, $host…) ficam intactas.
 ENV NGINX_ENVSUBST_FILTER=^GS_ \
     GS_DOMAIN=_
