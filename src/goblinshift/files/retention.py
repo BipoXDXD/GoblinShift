@@ -154,11 +154,17 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
 def _within_governor(
     candidates: Sequence[_Candidate],
 ) -> list[_Candidate]:
-    """Prefixo dos candidatos que cabe no teto de objetos e de bytes do ciclo."""
+    """Prefixo dos candidatos que cabe no teto de objetos e de bytes do ciclo.
+
+    O primeiro candidato sempre entra: um objeto maior que o teto de bytes, sozinho na frente
+    da fila, travaria a remoção para sempre, e apagar um único objeto não é a remoção em massa
+    que o limitador existe para conter.
+    """
     chosen: list[_Candidate] = []
     total_bytes = 0
     for candidate in candidates:
-        if len(chosen) == PURGE_MAX_OBJECTS or total_bytes + candidate.size_bytes > PURGE_MAX_BYTES:
+        over_bytes = bool(chosen) and total_bytes + candidate.size_bytes > PURGE_MAX_BYTES
+        if len(chosen) == PURGE_MAX_OBJECTS or over_bytes:
             break
         chosen.append(candidate)
         total_bytes += candidate.size_bytes
