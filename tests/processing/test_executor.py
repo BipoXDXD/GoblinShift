@@ -96,7 +96,7 @@ def test_sucesso_com_rejeicao_grava_saidas_relatorio_e_progresso(tmp_path: Path)
         "schema_version": 1,
         "recipe_id": "csv-janitor",
         "recipe_version": 1,
-        "summary": {"inputs": 2, "ok": 1, "rejected": 1, "outputs": 1},
+        "summary": {"inputs": 2, "ok": 1, "rejected": 1, "duplicates": 0, "outputs": 1},
         "items": [
             {
                 "position": 0,
@@ -110,6 +110,7 @@ def test_sucesso_com_rejeicao_grava_saidas_relatorio_e_progresso(tmp_path: Path)
                     "written": 1,
                     "blank_lines_ignored": 0,
                 },
+                "details": {},
                 "warnings": [],
             },
             {
@@ -121,6 +122,7 @@ def test_sucesso_com_rejeicao_grava_saidas_relatorio_e_progresso(tmp_path: Path)
             },
         ],
         "warnings": [],
+        "details": {},
     }
     assert report["items"][1]["reason"]
     assert progress_positions(work) == [0, 1]
@@ -136,7 +138,13 @@ def test_todas_rejeitadas_terminam_com_sucesso_do_processo_e_relatorio_sem_saida
 
     assert result.returncode == ExitCode.SUCCEEDED, result.stderr
     report = json.loads((work / "out" / "report.json").read_text(encoding="utf-8"))
-    assert report["summary"] == {"inputs": 2, "ok": 0, "rejected": 2, "outputs": 0}
+    assert report["summary"] == {
+        "inputs": 2,
+        "ok": 0,
+        "rejected": 2,
+        "duplicates": 0,
+        "outputs": 0,
+    }
     assert [p.name for p in (work / "out").iterdir()] == ["report.json"]
 
 
