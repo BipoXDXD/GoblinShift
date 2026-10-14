@@ -233,11 +233,13 @@ def block_account(session: Session, owner_id: UUID, now: datetime) -> bool:
 def unblock_account(session: Session, owner_id: UUID) -> bool:
     """Libera a conta (inclusive a pendente do cadastro fechado); False se não existir.
 
-    Sessões e chaves revogadas no bloqueio continuam revogadas: a pessoa entra de novo.
+    Conta com exclusão pedida também dá False: o pedido do titular é irrevogável e a purga já
+    está a caminho, então ela nunca volta a `active`. Sessões e chaves revogadas no bloqueio
+    continuam revogadas: a pessoa entra de novo.
     """
     unblocked = session.execute(
         update(app_user)
-        .where(app_user.c.id == owner_id)
+        .where(app_user.c.id == owner_id, app_user.c.deletion_requested_at.is_(None))
         .values(status=ACTIVE_STATUS)
         .returning(app_user.c.id)
     ).first()
