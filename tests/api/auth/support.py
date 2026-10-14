@@ -17,6 +17,7 @@ from uuid import UUID
 import httpx2 as httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.trace.export import SpanExporter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -55,9 +56,11 @@ def login_settings(db_settings: Settings, tmp_path: Path, *, github: bool = True
     return db_settings.model_copy(update=update)
 
 
-def build_login_app(settings: Settings, fake: FakeProviders) -> FastAPI:
+def build_login_app(
+    settings: Settings, fake: FakeProviders, *, span_exporter: SpanExporter | None = None
+) -> FastAPI:
     """App real com os provedores apontando para o servidor falso (mesmos endereços)."""
-    app = create_app(settings)
+    app = create_app(settings, span_exporter=span_exporter)
     prepare_database(settings, app.state.engine)
     cache = PostgresLoginStateCache(app.state.session_factory)
     app.state.login_providers = auth_login.build_login_providers(
