@@ -35,6 +35,10 @@ class Settings(BaseSettings):
 
     alembic_ini: Path = Path("alembic.ini")
 
+    # Raiz do storage de objetos (3.6): fora de qualquer raiz pública servida pelo Nginx. O
+    # default serve ao desenvolvimento local e é ignorado pelo git.
+    storage_root: Path = Path(".storage")
+
     @cached_property
     def database_url(self) -> URL:
         password = (
