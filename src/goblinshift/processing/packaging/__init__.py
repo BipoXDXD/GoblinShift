@@ -27,6 +27,7 @@ from goblinshift.processing.packaging.spec import (
     Packaged,
     PackageLimits,
     PackageSpec,
+    package_name_for,
 )
 from goblinshift.processing.packaging.zip_writer import (
     COPY_CHUNK_BYTES,
@@ -50,6 +51,7 @@ __all__ = [
     "compression_for",
     "encode_manifest",
     "package",
+    "package_name_for",
 ]
 
 
