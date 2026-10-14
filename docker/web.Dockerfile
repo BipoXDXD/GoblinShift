@@ -8,6 +8,8 @@ COPY web/package.json web/package-lock.json ./
 # --ignore-scripts: nenhuma dependência precisa de script de instalação para o build.
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY web/ ./
+# Termos e privacidade entram no build a partir de docs/legal/ (web/src/legal), a fonte única.
+COPY docs/legal/ /docs/legal/
 RUN npm run build
 
 FROM nginx:1.30.5@sha256:9bf97bd7714f5e24c1ccd545ecb9eb5435cb6d109c97cebb15e7e455e0239edb

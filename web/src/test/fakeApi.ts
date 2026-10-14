@@ -2,13 +2,16 @@ import { vi, type Mock } from "vitest";
 import { z } from "zod";
 
 import { createApiClient, type ApiClient } from "../api/client";
+import { meBody } from "./account";
 
 /** Resposta de uma rota falsa; `null` deixa o pedido pendurado para sempre. */
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
 /**
  * API falsa por `fetch`: cada rota é `"MÉTODO /caminho"` (sem query) e responde pelo handler.
- * Rota sem handler responde 404 problem+json, para o teste falhar alto em vez de esperar.
+ * Rota sem handler responde 404 problem+json, para o teste falhar alto em vez de esperar. O
+ * `GET /me` do cabeçalho tem resposta padrão (sessão com os termos aceitos), que o teste troca
+ * passando o próprio handler.
  */
 export interface FakeApi {
   readonly client: ApiClient;
@@ -17,18 +20,38 @@ export interface FakeApi {
   readonly requests: readonly Request[];
 }
 
-export function fakeApi(handlers: Readonly<Record<string, Handler>>): FakeApi {
+interface FakeApiOptions {
+  /** Token do cookie de CSRF que o cliente lê; `null` é o navegador sem sessão. */
+  readonly csrfToken?: string | null;
+}
+
+export function fakeApi(
+  handlers: Readonly<Record<string, Handler>>,
+  { csrfToken = null }: FakeApiOptions = {},
+): FakeApi {
   const requests: Request[] = [];
   const fetchMock = vi.fn<typeof fetch>((input, init) => {
     const request = new Request(input, init);
     requests.push(request.clone());
     const url = new URL(request.url);
-    const handler = handlers[`${request.method} ${url.pathname}`];
+    const handler = { ...DEFAULT_HANDLERS, ...handlers }[`${request.method} ${url.pathname}`];
     const response = handler === undefined ? problemResponse(404, "NOT_FOUND") : handler(request);
     return response === null ? new Promise<Response>(() => undefined) : Promise.resolve(response);
   });
-  const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: Date.now });
+  const client = createApiClient({ fetch: fetchMock, csrfToken: () => csrfToken, now: Date.now });
   return { client, fetchMock, requests };
+}
+
+const ME_ROUTE = "GET /api/v1/me";
+const DEFAULT_HANDLERS: Readonly<Record<string, Handler>> = {
+  [ME_ROUTE]: () => jsonResponse(meBody()),
+};
+
+/** Os pedidos da tela, sem o `GET /me` que o cabeçalho faz em toda rota. */
+export function screenRequests(requests: readonly Request[]): Request[] {
+  return requests.filter(
+    (request) => `${request.method} ${new URL(request.url).pathname}` !== ME_ROUTE,
+  );
 }
 
 export function jsonResponse(

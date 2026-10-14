@@ -12,11 +12,10 @@ interface RenderRoutesOptions {
 }
 
 /** Renderiza as rotas num router em memória, com o cliente da API e um QueryClient novos. */
-export function renderRoutes({
-  routes,
-  path,
-  client,
-}: RenderRoutesOptions): RenderResult & { readonly router: ReturnType<typeof createMemoryRouter> } {
+export function renderRoutes({ routes, path, client }: RenderRoutesOptions): RenderResult & {
+  readonly router: ReturnType<typeof createMemoryRouter>;
+  readonly queryClient: QueryClient;
+} {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const view = render(
@@ -26,5 +25,12 @@ export function renderRoutes({
       </QueryClientProvider>
     </ApiClientProvider>,
   );
-  return { ...view, router };
+  return { ...view, router, queryClient };
+}
+
+/** Caminho e query atuais do router de memória, como a barra de endereço mostraria. */
+export function currentUrl(router: ReturnType<typeof createMemoryRouter>): string {
+  // type-coverage:ignore-next-line -- o Location do React Router declara `state: any`
+  const { pathname, search } = router.state.location;
+  return `${pathname}${search}`;
 }

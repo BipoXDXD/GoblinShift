@@ -5,7 +5,7 @@ import { useParams } from "react-router";
 import { useApiClient } from "../api/ApiClientContext";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { CATALOG_QUERY_KEY, findCatalogVersion, getCatalog } from "../catalog/api";
-import { QueryFailure } from "../components/feedback/QueryFailure";
+import { FailureNotice } from "../components/feedback/FailureNotice";
 import { findRecipe, type RecipeModule } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
@@ -73,6 +73,6 @@ function CatalogPending({ error }: { readonly error: Error | null }): ReactEleme
   return error === null ? (
     <p className="text-fg-muted">{TEXT.workbench.loadingCatalog}</p>
   ) : (
-    <QueryFailure error={error} />
+    <FailureNotice error={error} />
   );
 }
