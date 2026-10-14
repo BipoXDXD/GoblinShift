@@ -23,10 +23,11 @@ from goblinshift.files.errors import (
     ObjectNotAvailableError,
 )
 from goblinshift.files.objects import hold, release
+from goblinshift.files.retention import expire_unused_uploads
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, upload
-from goblinshift.files.uploads import lock_ready_uploads, request_deletion
+from goblinshift.files.uploads import get_upload, lock_ready_uploads, request_deletion
 from goblinshift.platform.db import unit_of_work
 from tests.files.support import create_intent, create_user, ready_upload
 
@@ -131,6 +132,109 @@ def test_release_repetido_e_sucesso(factory: sessionmaker[Session], storage: Fil
             release(session, HolderKind.RUN, run_id)
 
     assert open_uses(factory) == 0
+
+
+def upload_expiry(factory: sessionmaker[Session], upload_id: uuid.UUID) -> timedelta:
+    """Quanto falta, no relógio do banco, para o upload vencer."""
+    with factory() as session:
+        remaining: timedelta = session.execute(
+            select(upload.c.expires_at - func.clock_timestamp()).where(upload.c.id == upload_id)
+        ).scalar_one()
+    return remaining
+
+
+def test_release_de_execucao_estende_a_entrada_usada_para_48_h(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    run_id = uuid.uuid4()
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        hold(session, [ready.object_id], HolderKind.RUN, run_id)
+    assert upload_expiry(factory, view.id) < timedelta(hours=24)
+
+    with unit_of_work(factory) as session:
+        release(session, HolderKind.RUN, run_id)
+
+    assert timedelta(hours=47, minutes=59) < upload_expiry(factory, view.id) <= timedelta(hours=48)
+
+
+def test_upload_nunca_usado_continua_com_24_h(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+
+    assert timedelta(hours=23, minutes=59) < upload_expiry(factory, view.id) <= timedelta(hours=24)
+
+
+def test_release_de_download_nao_estende_o_upload(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    holder_id = uuid.uuid4()
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        hold(session, [ready.object_id], HolderKind.DOWNLOAD, holder_id)
+
+    with unit_of_work(factory) as session:
+        release(session, HolderKind.DOWNLOAD, holder_id)
+
+    assert upload_expiry(factory, view.id) <= timedelta(hours=24)
+
+
+def test_release_nao_encurta_o_prazo_que_ja_era_maior_que_48_h(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    run_id = uuid.uuid4()
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        hold(session, [ready.object_id], HolderKind.RUN, run_id)
+        session.execute(
+            update(upload)
+            .where(upload.c.id == view.id)
+            .values(expires_at=func.now() + timedelta(hours=100))
+        )
+
+    with unit_of_work(factory) as session:
+        release(session, HolderKind.RUN, run_id)
+
+    assert upload_expiry(factory, view.id) > timedelta(hours=99)
+
+
+def test_entrada_usada_so_vence_48_h_depois_do_release(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    run_id = uuid.uuid4()
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        hold(session, [ready.object_id], HolderKind.RUN, run_id)
+    with unit_of_work(factory) as session:
+        # A execução durou mais que as 24 h de um upload sem uso: o prazo original já passou.
+        session.execute(
+            update(upload)
+            .where(upload.c.id == view.id)
+            .values(expires_at=func.now() - timedelta(seconds=1))
+        )
+        release(session, HolderKind.RUN, run_id)
+
+    with factory() as session:
+        assert expire_unused_uploads(session) == 0
+        assert get_upload(session, owner, view.id).availability is Availability.AVAILABLE
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == view.id)
+            .values(expires_at=func.now() - timedelta(seconds=1))
+        )
+    with factory() as session:
+        assert expire_unused_uploads(session) == 1
 
 
 def test_hold_em_objeto_com_exclusao_pedida_e_recusado(
