@@ -5,8 +5,9 @@ banco, e se grava a `Transition` decidida. Toda escrita é condicionada à gera�
 lidos: se outra tentativa ou o reconciliador assumiu entre a leitura e a escrita, nenhuma linha
 muda e `LostFencing` interrompe quem chamou, que para sem escrever mais nada.
 
-Ordem de locks (3.4): Run → Attempt → arquivos. A liberação de usos fica para uma transação
-seguinte (`release_run_holds`), como na publicação e na manutenção.
+Ordem de locks (3.4): Run → Attempt → arquivos. A liberação de usos e da reserva de capacidade
+fica para uma transação seguinte (`release_run_holds`), como na publicação e na manutenção: a
+publicação só move saldo entre reservas, sem travar pool depois da Run.
 """
 
 import logging
@@ -20,10 +21,12 @@ from sqlalchemy import and_, exists, func, insert, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.files.candidates import discard_candidates
 from goblinshift.files.objects import release
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
+from goblinshift.files.tables import artifact, stored_object
 from goblinshift.runs.lifecycle import (
     TERMINAL_STATUSES,
     DiscardCandidates,
@@ -260,6 +263,7 @@ def apply_transition(
                 if publish is None:
                     raise ValueError("transição de publicação sem a função que publica")
                 publish(session)
+                _reserve_published_objects(session, loaded.run_id)
             case DiscardCandidates():
                 discarded.extend(_discard(session, loaded, effect.generation))
             case ReleaseReservations():
@@ -275,7 +279,9 @@ def apply_transition(
 
 
 def release_run_holds(session: Session, run_id: uuid.UUID, generation: int) -> None:
-    """Libera os usos de objetos da execução terminal; repetir é no-op.
+    """Libera os usos de objetos e o resto da reserva de saída da execução terminal.
+
+    Repetir é no-op.
 
     Condicionada à geração, como toda escrita (3.4): um worker atrasado não libera os usos de
     uma tentativa que não é a dele.
@@ -292,6 +298,7 @@ def release_run_holds(session: Session, run_id: uuid.UUID, generation: int) -> N
     if locked is None:
         raise LostFencing(f"execução {run_id} não está terminal na geração {generation}")
     release(session, HolderKind.RUN, run_id)
+    capacity.release(session, holder=capacity.HolderKind.RUN, holder_id=run_id)
 
 
 def complete_after_commit(
@@ -318,6 +325,41 @@ def complete_after_commit(
         )
         if on_finished is not None:
             on_finished(applied.run_id)
+
+
+def _reserve_published_objects(session: Session, run_id: uuid.UUID) -> None:
+    """Passa da reserva da Run para cada objeto publicado o tamanho dele (ADR 023, D-5).
+
+    Objeto que já tem reserva (a entrada reaproveitada como saída) não é contado de novo. O resto
+    do teto continua com a Run até `release_run_holds`.
+    """
+    published = session.execute(
+        select(stored_object.c.id, stored_object.c.size_bytes)
+        .join(artifact, artifact.c.object_id == stored_object.c.id)
+        .join(run_output, run_output.c.artifact_id == artifact.c.id)
+        .where(
+            run_output.c.run_id == run_id,
+            ~capacity.has_live_reservation(capacity.HolderKind.OBJECT, stored_object.c.id),
+        )
+        .distinct()
+        .order_by(stored_object.c.id)
+    ).all()
+    for object_id, size in published:
+        try:
+            capacity.transfer(
+                session,
+                from_holder=(capacity.HolderKind.RUN, run_id),
+                to_holder=(capacity.HolderKind.OBJECT, object_id),
+                amount=size,
+            )
+        except capacity.ReservationNotFoundError:
+            # Run aceita pela API anterior ao deploy da 0006, sem reserva de saída: publica
+            # assim mesmo, e a reconciliação da manutenção adota os objetos.
+            logger.warning(
+                "publicação sem reserva de capacidade",
+                extra={"fields": {"alert": "run_without_reservation", "run_id": str(run_id)}},
+            )
+            return
 
 
 def db_now(session: Session) -> datetime:
