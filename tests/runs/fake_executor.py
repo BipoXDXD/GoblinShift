@@ -6,9 +6,11 @@
 - `fail-once <marcador>`: na primeira vez cria o marcador e sai com 4 (infraestrutura); depois
   roda o executor real.
 - `exit <código>`: sai com o código, sem tocar no diretório.
+- `fail-deterministic <código>`: escreve `failure.json` com o código e sai com 3.
 - `ignore-term <s>`: ignora SIGTERM e dorme (obriga o SIGKILL depois da carência).
 """
 
+import json
 import signal
 import sys
 import time
@@ -32,6 +34,10 @@ def run(argv: list[str]) -> int:
             return real_executor([work_dir])
         case "exit":
             return int(rest[0])
+        case "fail-deterministic":
+            failure = {"code": rest[0], "detail": "falha provocada pelo teste"}
+            (Path(work_dir) / "failure.json").write_text(json.dumps(failure), encoding="utf-8")
+            return 3
         case "ignore-term":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
             time.sleep(float(rest[0]))
