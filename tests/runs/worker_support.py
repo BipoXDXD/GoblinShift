@@ -20,6 +20,7 @@ from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use, upload
 from goblinshift.files.uploads import create_intents, receive_content
+from goblinshift.identity import CURRENT_TERMS_VERSION
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
@@ -39,7 +40,14 @@ def create_user(factory: sessionmaker[Session], subject: str = "ana") -> uuid.UU
     with unit_of_work(factory) as session:
         user_id: uuid.UUID = session.execute(
             insert(app_user)
-            .values(issuer="test", subject=subject, display_name=subject)
+            .values(
+                issuer="test",
+                subject=subject,
+                display_name=subject,
+                # Conta comum já ativa: aceitou os termos vigentes (ADR 029).
+                terms_version=CURRENT_TERMS_VERSION,
+                terms_accepted_at=func.now(),
+            )
             .returning(app_user.c.id)
         ).scalar_one()
     return user_id

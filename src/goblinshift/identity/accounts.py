@@ -39,9 +39,27 @@ LAST_USED_RESOLUTION = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
+class AcceptedTerms:
+    version: str
+    accepted_at: datetime
+
+
+@dataclass(frozen=True)
 class Account:
     id: UUID
     display_name: str
+    issuer: str
+    accepted_terms: AcceptedTerms | None
+
+    def needs_terms_acceptance(self, current_version: str) -> bool:
+        """Conta do login sem o aceite da versão vigente (1.8; ADR 029).
+
+        As contas do operador, criadas pelo `gs-admin` (aceitação, carga), não aceitam termos: o
+        operador é quem os publica.
+        """
+        if self.issuer == ADMIN_ISSUER:
+            return False
+        return self.accepted_terms is None or self.accepted_terms.version != current_version
 
 
 @dataclass(frozen=True)
@@ -162,9 +180,25 @@ def authenticate_api_key(session: Session, token: str, now: datetime) -> Princip
 
 def find_account(session: Session, owner_id: UUID) -> Account | None:
     row = session.execute(
-        select(app_user.c.id, app_user.c.display_name).where(app_user.c.id == owner_id)
+        select(
+            app_user.c.id,
+            app_user.c.display_name,
+            app_user.c.issuer,
+            app_user.c.terms_version,
+            app_user.c.terms_accepted_at,
+        ).where(app_user.c.id == owner_id)
     ).first()
-    return None if row is None else Account(id=row.id, display_name=row.display_name)
+    if row is None:
+        return None
+    # O CHECK `app_user_terms` garante versão e data juntas, ou nenhuma das duas.
+    accepted = (
+        None
+        if row.terms_version is None
+        else AcceptedTerms(version=row.terms_version, accepted_at=row.terms_accepted_at)
+    )
+    return Account(
+        id=row.id, display_name=row.display_name, issuer=row.issuer, accepted_terms=accepted
+    )
 
 
 def _record_use(session: Session, key_id: UUID, now: datetime) -> None:
