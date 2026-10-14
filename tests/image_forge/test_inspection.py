@@ -1,5 +1,6 @@
 """Validação antes de decodificar (1.2, 1.7 e 2.3): formato, quadros, profundidade e pixels."""
 
+import struct
 import warnings
 
 import pytest
@@ -159,3 +160,13 @@ def test_mpo_usa_so_o_quadro_principal(work: Workspace) -> None:
 def test_jpeg_comum_nao_descarta_quadros(work: Workspace) -> None:
     work.add("a.jpg", media.jpeg(media.solid("RGB", (8, 8), (1, 2, 3))))
     assert only_ok(work.run()).details["mpo_frames_discarded"] == 0
+
+
+def test_png_animado_de_um_quadro_e_estatico(work: Workspace) -> None:
+    # Ambiguidade A7: só n_frames > 1 é animação.
+    still = media.png(media.solid("RGB", (4, 4), (1, 2, 3)))
+    actl = media.chunk(b"acTL", struct.pack(">II", 1, 0))
+    fctl = media.chunk(b"fcTL", struct.pack(">IIIIIHHBB", 0, 4, 4, 0, 0, 1, 1, 0, 0))
+    work.add("um-quadro.png", media.insert_after_ihdr(still, actl + fctl))
+
+    assert only_ok(work.run()).details["format_before"] == "png"
