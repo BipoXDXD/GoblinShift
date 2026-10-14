@@ -33,7 +33,7 @@ WORLD_WRITABLE_DIR = 0o777
 WORLD_READABLE_DIR = 0o755
 WORLD_READABLE_FILE = 0o644
 SUCCEEDED = 0
-PILLOW_VERSION = "12.3.0"  # ADR 017; tests/test_dependencies.py confere o mesmo pin no lock
+PILLOW_VERSION = "12.3.0"  # ADR 018; tests/test_dependencies.py confere o mesmo pin no lock
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'

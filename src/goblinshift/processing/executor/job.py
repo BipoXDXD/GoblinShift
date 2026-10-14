@@ -71,12 +71,12 @@ class ExecutionContext:
     """Fatos da execução que não mudam o processamento, só o que o manifesto registra."""
 
     # Imagem fixada na Run ("<repo>@sha256:<hex>", ou "local-dev" fora de produção). None quando
-    # o worker ainda não escreve o context.json, na janela de deploy (ADR 020).
+    # o worker ainda não escreve o context.json, na janela de deploy (ADR 021).
     executor_image: str | None
 
 
 def read_context(path: Path) -> ExecutionContext:
-    """Lê o `context.json` opcional ao lado do `job.json` (ADR 020).
+    """Lê o `context.json` opcional ao lado do `job.json` (ADR 021).
 
     Ausente é a janela de deploy (worker anterior à fatia 5), não erro. Presente, é lido como o
     job, com uma diferença: chaves desconhecidas são ignoradas (tolerant reader), para um worker

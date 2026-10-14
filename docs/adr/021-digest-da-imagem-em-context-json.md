@@ -1,8 +1,8 @@
-# ADR 020. Digest da imagem do executor no manifesto, por um `context.json` opcional
+# ADR 021. Digest da imagem do executor no manifesto, por um `context.json` opcional
 
 - **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14), pendente de revisão do usuário no PR da fatia; o arquivo passa a obrigatório num deploy posterior (contract)
 - **Plano:** [3.6](../GoblinShiftPlan.md#s3-6), [3.8](../GoblinShiftPlan.md#s3-8)
-- **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 017](017-pillow-na-imagem-do-executor.md)
+- **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 018](018-pillow-na-imagem-do-executor.md)
 
 ## Contexto
 

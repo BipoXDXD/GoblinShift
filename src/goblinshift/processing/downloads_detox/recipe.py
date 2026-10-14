@@ -2,7 +2,7 @@
 
 Tudo é decidido antes da primeira cópia, para o lote acima do teto falhar sem escrever nada.
 Os bytes saem idênticos aos da entrada; o reaproveitamento do objeto no storage é do worker
-(ADR 019), não desta receita. Duplicata e classificação não são aviso: nenhum item ganha
+(ADR 020), não desta receita. Duplicata e classificação não são aviso: nenhum item ganha
 `warnings` no caso normal, e a execução não vira `succeeded_with_warnings` por elas (A14).
 """
 

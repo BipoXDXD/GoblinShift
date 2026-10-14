@@ -1,4 +1,4 @@
-"""Pillow fixado numa versão exata, a mesma no projeto, no grupo do executor e no lock (ADR 017).
+"""Pillow fixado numa versão exata, a mesma no projeto, no grupo do executor e no lock (ADR 018).
 
 A imagem do executor instala o grupo `executor` a partir do `uv.lock`; o ambiente de testes usa
 `[project.dependencies]`. Se os dois divergirem, os testes passam com uma versão e a produção roda

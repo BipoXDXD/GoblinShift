@@ -1,4 +1,4 @@
-"""O que o empacotador recebe e devolve (docs/GoblinShiftPlan.md, 3.2 e 3.6; ADR 018)."""
+"""O que o empacotador recebe e devolve (docs/GoblinShiftPlan.md, 3.2 e 3.6; ADR 019)."""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -18,7 +18,7 @@ class PackageSpec:
 
     recipe_id: str
     recipe_version: int
-    # "<repo>@sha256:<hex>" lido do context.json; None só na janela de deploy (ADR 020).
+    # "<repo>@sha256:<hex>" lido do context.json; None só na janela de deploy (ADR 021).
     executor_image: str | None
     parameters: Mapping[str, object]  # já resolvidos pelo catálogo (o job.json)
     inputs: Sequence[InputFile]
@@ -30,7 +30,7 @@ class PackageSpec:
 
 
 def package_name_for(recipe_id: str) -> str:
-    """Única regra do nome do pacote, usada pelo executor e pela coleta do worker (ADR 018)."""
+    """Única regra do nome do pacote, usada pelo executor e pela coleta do worker (ADR 019)."""
     return f"{recipe_id}.zip"
 
 

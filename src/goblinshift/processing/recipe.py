@@ -17,7 +17,7 @@ Fatia 5 (etapa 0, também aditiva):
 - `ItemDuplicate` é o terceiro desfecho de um item (Downloads Detox, 1.4). Como tipo próprio, e
   não um campo opcional do `ItemOk`, a "duplicata com saídas" não tem como ser representada.
 - `OutputDir.create` aceita um `OutputGroup`: a subpasta de `out/` e do ZIP (1.2 e 1.4), de uma
-  lista fechada que a coleta do worker também impõe (ADR 018).
+  lista fechada que a coleta do worker também impõe (ADR 019).
 """
 
 from collections.abc import Mapping, Sequence

@@ -171,7 +171,7 @@ def test_um_byte_acima_do_teto_falha_sem_gravar_o_excesso(tmp_path: Path) -> Non
     assert (tmp_path / "b.csv").read_bytes() == b""
 
 
-# --- Grupos: um nível de subpasta, de lista fechada (ADR 018) ---------------------------------
+# --- Grupos: um nível de subpasta, de lista fechada (ADR 019) ---------------------------------
 
 IMAGES = OutputGroup.IMAGES
 THUMBNAILS = OutputGroup.THUMBNAILS

@@ -6,7 +6,7 @@ entrada, nomes reservados na raiz (`manifest.json`, `report.json` e, passado pel
 `<recipe_id>.zip`), nunca sobrescrever. Tetos: quantidade de arquivos e bytes somados entre a raiz
 e todos os grupos.
 
-Grupos (ADR 018): um nível de subpasta, só com os nomes de `OutputGroup`, criado na primeira
+Grupos (ADR 019): um nível de subpasta, só com os nomes de `OutputGroup`, criado na primeira
 saída do grupo. O caminho mais longo possível (`thumbnails/` + 180 bytes) fica abaixo dos 240
 bytes de 3.6, que é também o teto de `artifact.file_name` no banco.
 """

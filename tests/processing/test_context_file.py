@@ -1,4 +1,4 @@
-"""`context.json` opcional ao lado do `job.json`: digest da imagem para o manifesto (ADR 020)."""
+"""`context.json` opcional ao lado do `job.json`: digest da imagem para o manifesto (ADR 021)."""
 
 from pathlib import Path
 

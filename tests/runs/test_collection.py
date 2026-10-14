@@ -130,7 +130,7 @@ def test_subdiretorio_fora_da_lista_de_grupos_e_recusado(tmp_path: Path) -> None
         collect_outputs(out, recipe_id=RECIPE, input_count=1)
 
 
-# --- Grupos (ADR 018): um nível de subpasta, só com os nomes de OutputGroup ---------------------
+# --- Grupos (ADR 019): um nível de subpasta, só com os nomes de OutputGroup ---------------------
 
 
 def test_saidas_em_grupos_permitidos_sao_coletadas_com_o_caminho(tmp_path: Path) -> None:
@@ -388,7 +388,7 @@ def test_sem_relatorio_e_recusado(tmp_path: Path) -> None:
         collect_outputs(out, recipe_id=RECIPE, input_count=0)
 
 
-# --- Pacote comum (ADR 018): manifest.json e <recipe_id>.zip na raiz, fora do conteúdo ---------
+# --- Pacote comum (ADR 019): manifest.json e <recipe_id>.zip na raiz, fora do conteúdo ---------
 
 
 def write_package(out: Path, manifest: bytes = b"{}", package: bytes = b"PK") -> None:

@@ -23,7 +23,7 @@ O worker prepara, o executor só lê:
       ]
     }
 
-- `context.json` (opcional, fatia 5, ADR 020): `{"executor_image": "<repo>@sha256:<hex>"}`, a
+- `context.json` (opcional, fatia 5, ADR 021): `{"executor_image": "<repo>@sha256:<hex>"}`, a
   imagem fixada na Run, só para o manifesto. Ausente é a janela de deploy (`null` no manifesto);
   chaves desconhecidas são ignoradas, ao contrário do `job.json`.
 - `inputs/`: as entradas, conferidas por tamanho e SHA-256 antes de qualquer processamento.
@@ -31,7 +31,7 @@ O worker prepara, o executor só lê:
 O executor escreve, sempre com criação exclusiva:
 
 - `out/`: criado pelo executor (ou vazio); recebe as saídas da receita, `report.json` e, por
-  último, o pacote comum (fatia 5, ADR 018): `manifest.json` e `<recipe_id>.zip`, gravados por
+  último, o pacote comum (fatia 5, ADR 019): `manifest.json` e `<recipe_id>.zip`, gravados por
   `goblinshift.processing.packaging`. Manifesto acima de 8 MiB sai com `REPORT_LIMIT_EXCEEDED`;
   ZIP acima de 512 MiB, com `OUTPUT_LIMIT_EXCEEDED` (código 3, como a falha da receita).
 - `progress.jsonl`: uma linha `{"position": n}` por entrada avaliada (aceita ou rejeitada), na
