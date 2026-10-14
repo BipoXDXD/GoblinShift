@@ -489,6 +489,7 @@ def test_nome_de_180_bytes_e_aceito(tmp_path: Path) -> None:
         "images/a\u2066b\u2069.jpg",  # isolates
         "images/é.jpg",  # fora de NFC
         "a" * 177 + ".csv",
+        "images/a\\b.jpg",  # barra invertida: separador no Windows e em leitores de ZIP
     ],
 )
 def test_nome_fora_das_regras_de_saida_e_recusado(tmp_path: Path, name: str) -> None:

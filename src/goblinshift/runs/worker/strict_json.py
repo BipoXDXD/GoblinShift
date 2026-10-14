@@ -8,8 +8,15 @@ import json
 
 
 def parse_strict_json(data: bytes) -> object:
-    """Documento JSON; `ValueError` se não for JSON, se repetir chave ou trouxer `NaN`."""
-    return json.loads(data, object_pairs_hook=_reject_duplicates, parse_constant=_reject)
+    """Documento JSON; `ValueError` se não for JSON, se repetir chave ou trouxer `NaN`.
+
+    Aninhamento além do limite de recursão do interpretador também é `ValueError`: o `json` o
+    levanta como `RecursionError`, que escaparia de quem trata documento inválido.
+    """
+    try:
+        return json.loads(data, object_pairs_hook=_reject_duplicates, parse_constant=_reject)
+    except RecursionError:
+        raise ValueError("aninhamento profundo demais") from None
 
 
 def _reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
