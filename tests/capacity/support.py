@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.capacity import HolderKind, Resource, reserve
 from goblinshift.capacity.tables import capacity_pool, resource_reservation
+from goblinshift.identity import CURRENT_TERMS_VERSION
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 
@@ -17,7 +18,14 @@ def new_owner(factory: sessionmaker[Session]) -> uuid.UUID:
     with unit_of_work(factory) as session:
         owner: uuid.UUID = session.execute(
             insert(app_user)
-            .values(issuer="test", subject=f"conta-{uuid.uuid4()}", display_name="Conta")
+            .values(
+                issuer="test",
+                subject=f"conta-{uuid.uuid4()}",
+                display_name="Conta",
+                # Conta comum já ativa: aceitou os termos vigentes (ADR 029).
+                terms_version=CURRENT_TERMS_VERSION,
+                terms_accepted_at=func.now(),
+            )
             .returning(app_user.c.id)
         ).scalar_one()
     return owner
