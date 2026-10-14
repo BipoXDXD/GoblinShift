@@ -2,8 +2,12 @@ name: Restauração testada do backup
 
 # Todo mês, fora da VPS: baixa o dump mais recente com a chave só de leitura, decifra com a
 # chave privada age e restaura num PostgreSQL efêmero da mesma versão da produção, conferindo
-# revisão do Alembic, contas, execuções e idade do dump (docs/adr/022-backup-externo.md).
+# revisão do Alembic, contas, execuções, idade e retenção do dump (docs/adr/022-backup-externo.md).
 # Falhar aqui falha o job e pinga /fail no check "restauração mensal" do healthchecks.io.
+#
+# O log deste workflow é público. Nada de dado da produção vai para ele: o script redireciona o
+# stderr do pg_restore e do psql, e o PostgreSQL efêmero loga erros sem DETAIL, CONTEXT nem o
+# comando.
 on:
   schedule:
     - cron: "23 10 1 * *"
@@ -17,39 +21,65 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  restore:
-    name: Restaurar o dump mais recente
-    # Só depois de o armazenamento existir (variáveis do repositório definidas).
+  revisions:
+    name: Revisões do Alembic conhecidas pelo código
+    # Instala as dependências do projeto (código do PyPI) longe dos secrets: o job da restauração
+    # recebe só a lista de revisões.
     if: vars.BACKUP_S3_BUCKET != ''
     runs-on: ubuntu-24.04
-    # Environment protegido: só ele guarda a chave privada age e a chave de leitura do bucket.
-    environment: backup-restore
-    timeout-minutes: 30
-    services:
-      postgres:
-        # Mesma imagem do compose.yaml: o pg_restore precisa da mesma major do pg_dump.
-        image: postgres:18.6-trixie
-        env:
-          POSTGRES_USER: restore
-          POSTGRES_DB: restore
-          # Banco descartável, sem porta publicada: acessado só por docker exec no próprio runner.
-          POSTGRES_HOST_AUTH_METHOD: trust
-        options: >-
-          --health-cmd "pg_isready -U restore -d restore"
-          --health-interval 2s --health-timeout 3s --health-retries 30
+    timeout-minutes: 10
+    outputs:
+      known: ${{ steps.revisions.outputs.known }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
       - run: uv sync --locked
-      - name: Instalar o age
-        run: sudo apt-get update -q && sudo apt-get install -yq age
-      - name: Revisões do Alembic conhecidas pelo código
+      - name: Listar as revisões
         id: revisions
         run: |
           known=$(uv run python -c "from goblinshift.platform.schema import read_code_revisions; print(' '.join(sorted(read_code_revisions('alembic.ini')[1])))")
           echo "known=$known" >> "$GITHUB_OUTPUT"
+
+  restore:
+    name: Restaurar o dump mais recente
+    needs: revisions
+    runs-on: ubuntu-24.04
+    # Environment protegido: só ele guarda a chave privada age e a chave de leitura do bucket.
+    # A política de branches dele ("só main") é configuração do GitHub (README, passo 5).
+    environment: backup-restore
+    timeout-minutes: 30
+    env:
+      # Mesma imagem do compose.yaml: o pg_restore precisa da mesma major do pg_dump.
+      RESTORE_PG_IMAGE: postgres:18.6-trixie
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Instalar o age
+        run: sudo apt-get update -q && sudo apt-get install -yq age
+      - name: PostgreSQL efêmero
+        # `docker run` em vez de `services:`, que não aceita argumentos do servidor. Sem porta
+        # publicada: acessado só por docker exec. `terse` tira DETAIL e CONTEXT (que trazem
+        # valores das linhas) do log do servidor, e `panic` tira o comando que falhou.
+        run: |
+          docker run --detach --name restore-pg \
+            --env POSTGRES_USER=restore --env POSTGRES_DB=restore \
+            --env POSTGRES_HOST_AUTH_METHOD=trust \
+            "$RESTORE_PG_IMAGE" \
+            -c log_error_verbosity=terse -c log_min_error_statement=panic
+          # Por TCP: o servidor temporário da inicialização só escuta no socket.
+          for _ in $(seq 1 60); do
+            if docker exec restore-pg pg_isready -q -h 127.0.0.1 -U restore -d restore; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "o PostgreSQL efêmero não ficou pronto" >&2
+          exit 1
       - name: Restaurar e conferir
         env:
           BACKUP_S3_ENDPOINT: ${{ vars.BACKUP_S3_ENDPOINT }}
@@ -58,10 +88,10 @@ jobs:
           BACKUP_S3_KEY_ID: ${{ secrets.BACKUP_S3_READ_KEY_ID }}
           BACKUP_S3_SECRET: ${{ secrets.BACKUP_S3_READ_KEY }}
           AGE_IDENTITY: ${{ secrets.BACKUP_AGE_IDENTITY }}
-          RESTORE_PG_CONTAINER: ${{ job.services.postgres.id }}
+          RESTORE_PG_CONTAINER: restore-pg
           RESTORE_PG_USER: restore
           RESTORE_PG_DB: restore
-          RESTORE_KNOWN_REVISIONS: ${{ steps.revisions.outputs.known }}
+          RESTORE_KNOWN_REVISIONS: ${{ needs.revisions.outputs.known }}
           RESTORE_HEALTHCHECK_URL: ${{ secrets.RESTORE_HEALTHCHECK_URL }}
         run: |
           umask 077
@@ -69,3 +99,7 @@ jobs:
           trap 'rm -f "$identity"' EXIT
           printf '%s\n' "$AGE_IDENTITY" > "$identity"
           BACKUP_AGE_IDENTITY_FILE="$identity" bash deploy/backup/pg-restore-check.sh
+      - name: Remover o PostgreSQL efêmero
+        if: always()
+        # O runner é descartável: se a remoção falhar, a máquina inteira some no fim do job.
+        run: docker rm --force --volumes restore-pg >/dev/null 2>&1 || true

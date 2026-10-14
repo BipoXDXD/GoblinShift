@@ -9,9 +9,12 @@
 #   BACKUP_S3_ENDPOINT, BACKUP_S3_REGION, BACKUP_S3_BUCKET, BACKUP_S3_PREFIX (padrão: pg/)
 #   BACKUP_S3_KEY_ID, BACKUP_S3_SECRET  chave de aplicação só de leitura e listagem
 #   BACKUP_AGE_IDENTITY_FILE    arquivo com a chave privada age, gerada pelo age-keygen
-#   RESTORE_PG_CONTAINER, RESTORE_PG_USER, RESTORE_PG_DB   destino vazio, acessado por docker exec
+#   RESTORE_PG_CONTAINER, RESTORE_PG_USER, RESTORE_PG_DB   destino vazio, acessado por docker exec;
+#                               RESTORE_PG_USER é superusuário e só prepara o destino
+#   RESTORE_PG_ROLE             papel sem superusuário que restaura e confere (padrão: gs_restore)
 #   RESTORE_KNOWN_REVISIONS     revisões do Alembic que o código conhece, separadas por espaço
 #   RESTORE_MAX_AGE_HOURS       idade máxima do dump mais recente (padrão: 26)
+#   RESTORE_MIN_RETENTION_DAYS  retenção mínima do Object Lock em compliance (padrão: 30)
 #   RESTORE_HEALTHCHECK_URL     URL de ping do check "restauração mensal" (opcional)
 set -euo pipefail
 
@@ -24,6 +27,11 @@ require_env BACKUP_S3_ENDPOINT BACKUP_S3_REGION BACKUP_S3_BUCKET BACKUP_S3_KEY_I
   RESTORE_KNOWN_REVISIONS
 prefix="${BACKUP_S3_PREFIX:-pg/}"
 max_age_hours="${RESTORE_MAX_AGE_HOURS:-26}"
+min_retention_days="${RESTORE_MIN_RETENTION_DAYS:-30}"
+restore_role="${RESTORE_PG_ROLE:-gs_restore}"
+# Entram em SQL como identificadores: só o formato simples, sem aspas nem espaço.
+[[ "$restore_role" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "RESTORE_PG_ROLE inválido" >&2; exit 2; }
+[[ "$RESTORE_PG_DB" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "RESTORE_PG_DB inválido" >&2; exit 2; }
 healthcheck="${RESTORE_HEALTHCHECK_URL:-}"
 
 workdir="$(mktemp -d)"
@@ -45,40 +53,62 @@ fail() {
   exit 1
 }
 
-psql_value() {
+# O log do Actions é público, e os erros do PostgreSQL citam dados (`CONTEXT: COPY t, line 1:
+# "<linha>"`, `DETAIL: Key (...)=(...)`): o stderr do psql e do pg_restore vai para o $workdir,
+# apagado no fim, e o log recebe só uma mensagem genérica.
+# psql_as <papel> <sql>
+psql_as() {
   docker exec "$RESTORE_PG_CONTAINER" psql --no-psqlrc --tuples-only --no-align \
-    --set ON_ERROR_STOP=1 --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" --command="$1"
+    --set ON_ERROR_STOP=1 --username="$1" --dbname="$RESTORE_PG_DB" \
+    --command="$2" 2>>"$workdir/psql.log" ||
+    fail "consulta ao banco restaurado falhou (detalhes omitidos)"
+}
+
+# Depois do pg_restore, tudo roda como o papel da restauração: o dump pode trazer views e funções
+# que executariam com os privilégios de quem consulta.
+psql_value() {
+  psql_as "$restore_role" "$1"
 }
 
 # Restaurar por cima de tabelas existentes não provaria nada sobre o dump.
-tables="$(psql_value "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+tables="$(psql_as "$RESTORE_PG_USER" "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
 require_count tables "$tables"
 ((tables == 0)) || fail "o banco de destino precisa estar vazio (tem $tables tabelas em public)"
 
-# Listagem com até 1000 chaves; a retenção de 30 dias deixa umas 31. Se um dia passar disso,
-# falha em vez de escolher um dump que talvez não seja o mais recente.
-listing="$(s3_curl --max-time 60 "${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}?list-type=2&prefix=${prefix}")"
-[[ "$listing" != *"<IsTruncated>true</IsTruncated>"* ]] || fail "listagem truncada em ${prefix}"
-latest="$(grep -oE "<Key>${prefix}${DUMP_NAME_PATTERN}</Key>" <<<"$listing" |
-  sed -e 's/<Key>//' -e 's/<\/Key>//' | sort | tail -n 1 || true)"
-[[ -n "$latest" ]] || fail "nenhum dump em ${prefix}"
-echo "dump mais recente: $latest"
+# O dump vem de fora do runner (quem controla a VPS escreve no bucket e tem a chave pública age):
+# restaurado por um superusuário, poderia rodar `COPY ... TO PROGRAM` no runner, onde estão a
+# chave privada age e a de leitura. O papel da restauração só é dono do banco de destino.
+psql_as "$RESTORE_PG_USER" "DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$restore_role') THEN
+    CREATE ROLE $restore_role LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+  END IF;
+END \$\$" >/dev/null
+psql_as "$RESTORE_PG_USER" "ALTER DATABASE \"$RESTORE_PG_DB\" OWNER TO $restore_role" >/dev/null
+psql_as "$RESTORE_PG_USER" "ALTER SCHEMA public OWNER TO $restore_role" >/dev/null
 
-# Idade pelo instante UTC do nome; python3 porque o `date` do GNU e o do BSD não leem datas igual.
-age_hours="$(python3 -c '
-import sys
-from datetime import UTC, datetime
-stamp = datetime.strptime(sys.argv[1][-len("20260101T000000Z.dump.age"):-len(".dump.age")], "%Y%m%dT%H%M%SZ")
-print(int((datetime.now(UTC) - stamp.replace(tzinfo=UTC)).total_seconds() // 3600))
-' "$latest")"
-((age_hours < max_age_hours)) || fail "o dump mais recente tem $age_hours horas (máximo: $max_age_hours)"
+# Listagem com até 1000 chaves; a retenção de 30 dias deixa umas 31. Se um dia passar disso,
+# falha em vez de escolher um dump que talvez não seja o mais recente. O dump_check.py escolhe
+# pelo instante de envio que o S3 grava, não pelo nome, e recusa datas futuras.
+s3_curl --max-time 60 --output "$workdir/listing.xml" \
+  "${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}?list-type=2&prefix=${prefix}"
+python3 -I "$here/dump_check.py" latest --prefix "$prefix" --max-age-hours "$max_age_hours" \
+  <"$workdir/listing.xml" >"$workdir/latest.txt"
+{ read -r latest && read -r age_hours; } <"$workdir/latest.txt"
+require_count age_hours "$age_hours"
+echo "dump mais recente: $(dump_instant "$latest"), enviado há $age_hours h"
+
+# Imutável por 30 dias: sem o Object Lock em compliance, a chave da VPS sobrescreveria o dump.
+s3_curl --head --max-time 60 --output "$workdir/head.txt" "$(s3_url "$latest")"
+python3 -I "$here/dump_check.py" retention --min-days "$min_retention_days" <"$workdir/head.txt"
 
 s3_curl --max-time 1800 --output "$workdir/dump.age" "$(s3_url "$latest")"
 age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" --output "$workdir/dump" "$workdir/dump.age"
 
 # Sem dono nem privilégios: o destino efêmero não tem os papéis da produção.
 docker exec --interactive "$RESTORE_PG_CONTAINER" pg_restore --exit-on-error --no-owner \
-  --no-privileges --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" <"$workdir/dump"
+  --no-privileges --username="$restore_role" --dbname="$RESTORE_PG_DB" \
+  <"$workdir/dump" 2>"$workdir/pg_restore.log" ||
+  fail "pg_restore falhou (detalhes omitidos: podem conter dados da produção)"
 
 revision="$(psql_value "SELECT version_num FROM alembic_version")"
 require_revision revision "$revision"
@@ -90,4 +120,4 @@ require_count accounts "$accounts"
 require_count runs "$runs"
 ((accounts > 0)) || fail "o dump restaurado não tem contas"
 ((runs > 0)) || fail "o dump restaurado não tem execuções"
-echo "restauração conferida: revisão $revision, $accounts contas, $runs execuções, dump de $age_hours h"
+echo "restauração conferida: revisão $revision, dump de $age_hours h"
