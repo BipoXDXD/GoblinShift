@@ -168,13 +168,22 @@ function ringProblems(stop: FocusStop): string[] {
  * Oficina desenha o anel no ::after do link, que cobre o cartão (base.css, .card-link).
  */
 async function readFocusStop(): Promise<FocusStop | null> {
-  const element = document.activeElement;
-  if (!(element instanceof HTMLElement) || element === document.body) {
+  const focused = document.activeElement;
+  if (!(focused instanceof HTMLElement) || focused === document.body) {
     return null;
   }
+  // Controle visualmente oculto (sr-only) não mostra o próprio anel: quem a pessoa vê é o label
+  // que o contém, como o "Escolher arquivos" (base.css, .file-picker). Medir o input aprovaria um
+  // anel de 1 px recortado; sem label visível, o anel não existe.
+  const focusedRect = focused.getBoundingClientRect();
+  const visuallyHidden = focusedRect.width <= 1 || focusedRect.height <= 1;
+  const element = visuallyHidden ? (focused.closest("label") ?? focused) : focused;
   // O anel entra com transição (a classe `transition` inclui outline-color): mede o estado final.
   await Promise.all(element.getAnimations().map((animation) => animation.finished));
   const ringOf = (pseudo: string | null) => {
+    if (element === focused && visuallyHidden) {
+      return null;
+    }
     const style = getComputedStyle(element, pseudo);
     const widthPx = Number.parseFloat(style.outlineWidth);
     return style.outlineStyle === "none" || widthPx === 0
@@ -210,9 +219,9 @@ async function readFocusStop(): Promise<FocusStop | null> {
   const obscured = hit !== null && !element.contains(hit) && !hit.contains(element);
   // Aproximação do nome acessível que basta aqui: aria-label, o label do campo ou o texto dos
   // filhos separado por espaço (o resumo "Tema" + "Sistema" vira "Tema Sistema").
-  const label = "labels" in element ? (element.labels as NodeListOf<HTMLLabelElement>)[0] : null;
-  const childText = Array.from(element.childNodes, (child) => child.textContent ?? "").join(" ");
-  const name = (element.getAttribute("aria-label") ?? label?.textContent ?? childText)
+  const label = "labels" in focused ? (focused.labels as NodeListOf<HTMLLabelElement>)[0] : null;
+  const childText = Array.from(focused.childNodes, (child) => child.textContent ?? "").join(" ");
+  const name = (focused.getAttribute("aria-label") ?? label?.textContent ?? childText)
     .replace(/\s+/g, " ")
     .trim();
   return { name, ring, background, inViewport, obscured };

@@ -65,6 +65,13 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "foco: anel do botão Escolher arquivos removido (o input oculto ainda tem o dele)",
+    spec: ["focus.spec.ts", "-g", "Bancada vazia \\(CSV Janitor\\), tema light"],
+    plant: (dist) => {
+      addStylesheet(dist, ".file-picker:has(:focus-visible) { outline: none !important; }");
+    },
+  },
+  {
     name: "ordem do Tab: Executar com tabindex positivo",
     spec: ["focus.spec.ts", "-g", "Bancada: arquivos"],
     plant: (dist) => {
