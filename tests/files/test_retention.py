@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import Table, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.artifacts import open_for_download, publish_artifact
+from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
 from goblinshift.files.errors import UploadNotFoundError
 from goblinshift.files.objects import hold, release
 from goblinshift.files.retention import (
@@ -16,7 +16,7 @@ from goblinshift.files.retention import (
     expire_unused_uploads,
     purge_deleted_objects,
 )
-from goblinshift.files.states import ArtifactRole, HolderKind
+from goblinshift.files.states import ArtifactRole, Availability, HolderKind
 from goblinshift.files.storage import FileStorage, ObjectMissingError
 from goblinshift.files.tables import artifact, stored_object, upload
 from goblinshift.files.uploads import (
@@ -26,7 +26,12 @@ from goblinshift.files.uploads import (
     request_deletion,
 )
 from goblinshift.platform.db import unit_of_work
-from tests.files.support import create_intent, create_user, ready_upload
+from tests.files.support import (
+    create_intent,
+    create_user,
+    pass_expiry_after_deletion,
+    ready_upload,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -164,6 +169,34 @@ def test_upload_pronto_dentro_do_prazo_nao_expira(
         assert expire_unused_uploads(session) == 0
 
 
+def test_upload_vencido_pela_retencao_aparece_como_expirado_e_nao_como_excluido(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    expire_row(factory, upload, view.id)
+    with factory() as session:
+        expire_unused_uploads(session)
+
+    with factory() as session:
+        assert get_upload(session, owner, view.id).availability == Availability.EXPIRED
+
+
+def test_upload_excluido_pelo_usuario_antes_do_prazo_continua_excluido_depois_dele(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, view.id)
+    pass_expiry_after_deletion(factory, view.id)
+    with factory() as session:
+        assert expire_unused_uploads(session) == 0
+
+    with factory() as session:
+        assert get_upload(session, owner, view.id).availability == Availability.DELETED
+
+
 # --- Artefatos --------------------------------------------------------------------------------
 
 
@@ -183,6 +216,39 @@ def test_artefato_vencido_e_excluido_e_objeto_pedido_para_remocao(
         assert expire_artifacts(session) == 1
 
     assert object_of(factory, view.id)[0] == "delete_requested"
+
+
+def test_artefato_vencido_pela_retencao_aparece_como_expirado_e_nao_como_excluido(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
+    expire_row(factory, artifact, shared.id)
+    with factory() as session:
+        expire_artifacts(session)
+
+    with factory() as session:
+        assert get_artifact(session, owner, shared.id).availability == Availability.EXPIRED
+
+
+def test_artefato_excluido_pelo_usuario_antes_do_prazo_continua_excluido(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
+        session.execute(
+            update(artifact).where(artifact.c.id == shared.id).values(deleted_at=func.now())
+        )
+
+    with factory() as session:
+        assert expire_artifacts(session) == 0
+        assert get_artifact(session, owner, shared.id).availability == Availability.DELETED
 
 
 def test_artefato_vencido_que_divide_objeto_com_upload_valido_preserva_o_objeto(
