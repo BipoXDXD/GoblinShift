@@ -41,6 +41,8 @@ interface UploadBatch {
   /** Envia de novo um arquivo falho, com uma intenção nova (sem retomada). */
   readonly retry: (localId: string) => void;
   readonly cancel: (localId: string) => void;
+  /** Tira o arquivo do lote, abortando o envio se ainda estiver em curso. */
+  readonly remove: (localId: string) => void;
 }
 
 const ACTIVE_STATUSES: ReadonlySet<UploadEntryState["status"]> = new Set([
@@ -131,6 +133,12 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
     [setState],
   );
 
+  const remove = useCallback((localId: string) => {
+    controllers.current.get(localId)?.abort();
+    controllers.current.delete(localId);
+    setEntries((current) => current.filter((entry) => entry.localId !== localId));
+  }, []);
+
   const uploading = entries.some((entry) => ACTIVE_STATUSES.has(entry.state.status));
   useEffect(() => {
     if (!uploading) {
@@ -154,7 +162,7 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
     };
   }, []);
 
-  return { entries, add, retry, cancel };
+  return { entries, add, retry, cancel, remove };
 }
 
 function renewController(controllers: Map<string, AbortController>, localId: string): AbortSignal {
