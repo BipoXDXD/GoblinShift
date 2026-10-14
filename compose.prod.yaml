@@ -1,6 +1,6 @@
 # Produção na VPS compartilhada (docs/GoblinShiftPlan.md, 3.8 e ADR 014).
-# O Nginx do GoblinShift entra na rede `edge`, onde o proxy de borda do host o encontra
-# pelo nome `goblinshift-web`. Nenhuma porta é publicada pelo projeto.
+# O Nginx do GoblinShift entra na rede `edge` no IP reservado a ele, que o trecho do projeto
+# na borda (deploy/edge/conf.d/goblinshift.caddy) usa. Nenhuma porta é publicada pelo projeto.
 services:
   api:
     environment:
@@ -13,10 +13,15 @@ services:
     environment:
       GS_ALLOW_LOCAL_RUNNER: "true"
   nginx:
+    # Sem NET_RAW: um container comprometido na rede edge não forja ARP para assumir o IP da
+    # borda, em quem os projetos confiam (ADR 014).
+    cap_drop: [NET_RAW]
     networks:
       internal: {}
       edge:
-        aliases: [goblinshift-web]
+        # IP, e não alias: com o mesmo alias, outro container dividiria o tráfego em
+        # silêncio; com o mesmo IP, o Docker recusa.
+        ipv4_address: 172.31.0.4
 
 networks:
   edge:
