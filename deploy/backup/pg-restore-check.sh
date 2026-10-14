@@ -52,6 +52,7 @@ psql_value() {
 
 # Restaurar por cima de tabelas existentes não provaria nada sobre o dump.
 tables="$(psql_value "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+require_count tables "$tables"
 ((tables == 0)) || fail "o banco de destino precisa estar vazio (tem $tables tabelas em public)"
 
 # Listagem com até 1000 chaves; a retenção de 30 dias deixa umas 31. Se um dia passar disso,
@@ -80,10 +81,13 @@ docker exec --interactive "$RESTORE_PG_CONTAINER" pg_restore --exit-on-error --n
   --no-privileges --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" <"$workdir/dump"
 
 revision="$(psql_value "SELECT version_num FROM alembic_version")"
+require_revision revision "$revision"
 [[ " $RESTORE_KNOWN_REVISIONS " == *" $revision "* ]] ||
   fail "alembic_version $revision não é uma revisão conhecida pelo código"
 accounts="$(psql_value "SELECT count(*) FROM app_user")"
 runs="$(psql_value "SELECT count(*) FROM run")"
+require_count accounts "$accounts"
+require_count runs "$runs"
 ((accounts > 0)) || fail "o dump restaurado não tem contas"
 ((runs > 0)) || fail "o dump restaurado não tem execuções"
 echo "restauração conferida: revisão $revision, $accounts contas, $runs execuções, dump de $age_hours h"

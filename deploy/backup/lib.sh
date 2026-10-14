@@ -18,6 +18,24 @@ require_env() {
   fi
 }
 
+# require_count <rótulo> <valor>: o valor é um inteiro decimal não negativo, ou o script para.
+# Valores lidos do banco restaurado vêm de um dump que pode ser forjado, e a aritmética do bash
+# executa substituições (`a[$(comando)]`): nada do banco entra em (( )) sem passar por aqui.
+require_count() {
+  [[ "$2" =~ ^[0-9]+$ ]] || {
+    echo "valor inesperado para $1 (esperado um inteiro decimal)" >&2
+    exit 1
+  }
+}
+
+# require_revision <rótulo> <valor>: só letras minúsculas, dígitos e _, como as revisões do Alembic.
+require_revision() {
+  [[ "$2" =~ ^[0-9a-z_]+$ ]] || {
+    echo "valor inesperado para $1 (esperada uma revisão do Alembic)" >&2
+    exit 1
+  }
+}
+
 # s3_curl <argumentos do curl...>: requisição assinada com BACKUP_S3_KEY_ID/BACKUP_S3_SECRET.
 # Repete só falhas transitórias (timeout, 408, 429, 5xx); 4xx de credencial falha de primeira.
 s3_curl() {
