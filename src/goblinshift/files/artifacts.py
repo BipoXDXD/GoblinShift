@@ -181,7 +181,9 @@ def get_artifact(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
         sha256=row.sha256,
         created_at=row.created_at,
         expires_at=row.expires_at,
-        availability=Availability.of(deleted=row.deleted_at is not None, expired=row.expired),
+        availability=Availability.of(
+            deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+        ),
     )
 
 

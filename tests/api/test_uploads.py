@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.retention import expire_unused_uploads
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import upload
 from goblinshift.identity import Scope
@@ -109,6 +110,21 @@ def test_fluxo_completo_criar_enviar_ler_e_excluir(
         assert deleted.content == b""
 
     assert client.get(upload_url(first), headers=auth).json()["availability"] == "deleted"
+
+
+def test_upload_vencido_pela_manutencao_aparece_expirado_e_nao_excluido(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    _, auth = new_account(factory)
+    item = create_upload(client, auth)
+    send_content(client, auth, item, b"abc")
+    expire_upload(factory, item["id"])
+    with factory() as session:
+        assert expire_unused_uploads(session) == 1
+
+    response = client.get(upload_url(item), headers=auth)
+
+    assert response.json()["availability"] == "expired"
 
 
 def test_upload_sem_conteudo_aparece_sem_hash(

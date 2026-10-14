@@ -29,7 +29,12 @@ from goblinshift.files.uploads import (
     request_deletion,
 )
 from goblinshift.platform.db import unit_of_work
-from tests.files.support import create_intent, create_user, ready_upload
+from tests.files.support import (
+    create_intent,
+    create_user,
+    pass_expiry_after_deletion,
+    ready_upload,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -387,14 +392,14 @@ def test_upload_vencido_aparece_como_expirado(factory: sessionmaker[Session]) ->
         assert get_upload(session, owner, intent.id).availability is Availability.EXPIRED
 
 
-def test_upload_excluido_aparece_como_excluido_mesmo_vencido(
+def test_upload_excluido_antes_do_prazo_continua_excluido_depois_dele(
     factory: sessionmaker[Session],
 ) -> None:
     owner = create_user(factory, "a")
     intent = create_intent(factory, owner)
     with unit_of_work(factory) as session:
         request_deletion(session, owner, intent.id)
-    _expire_now(factory, intent.id)
+    pass_expiry_after_deletion(factory, intent.id)
 
     with factory() as session:
         assert get_upload(session, owner, intent.id).availability is Availability.DELETED
