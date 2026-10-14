@@ -182,7 +182,7 @@ class FakeExecutorCtl:
     def _stop(self, attempt_id: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
         document = _json_object(body)
         grace = None if document is None else document.get("grace_s")
-        if not isinstance(grace, int | float) or isinstance(grace, bool) or not 0 <= grace <= 10:
+        if not isinstance(grace, int) or isinstance(grace, bool) or not 0 <= grace <= 10:
             return 400, _error("invalid_body")
         if self.on_stop is not None:
             self.on_stop(attempt_id)

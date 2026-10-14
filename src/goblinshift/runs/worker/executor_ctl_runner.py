@@ -19,6 +19,7 @@ executor (outro usuário) escreveu.
 
 import http.client
 import json
+import math
 import socket
 import uuid
 from datetime import timedelta
@@ -99,13 +100,14 @@ class ExecutorCtlRunner:
         return self._status_call("GET", _path(attempt_id), None, self._call_timeout)
 
     def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
-        grace = min(grace, MAX_STOP_GRACE)
+        # Segundos inteiros (0 a 10), arredondados para cima: nunca menos carência que a pedida.
+        grace_s = math.ceil(min(grace, MAX_STOP_GRACE).total_seconds())
         # O `stop` só responde depois de SIGTERM, carência e SIGKILL: o timeout soma a carência.
         return self._status_call(
             "POST",
             f"{_path(attempt_id)}/stop",
-            {"grace_s": grace.total_seconds()},
-            self._call_timeout + grace,
+            {"grace_s": grace_s},
+            self._call_timeout + timedelta(seconds=grace_s),
         )
 
     def remove(self, attempt_id: uuid.UUID) -> None:
