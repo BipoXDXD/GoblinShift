@@ -279,6 +279,22 @@ def test_remocao_para_em_2_gib_por_ciclo(
     assert object_states(factory) == {"deleted": 2, "delete_requested": 1}
 
 
+def test_objeto_maior_que_o_teto_de_bytes_nao_trava_a_remocao(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    seed_delete_requested(factory, owner, count=2, size_bytes=3 * GIB)
+
+    with factory() as session:
+        first = purge_deleted_objects(session, storage)
+    with factory() as session:
+        second = purge_deleted_objects(session, storage)
+
+    assert (first.objects, first.limit_reached) == (1, True)
+    assert (second.objects, second.limit_reached) == (1, False)
+    assert object_states(factory) == {"deleted": 2}
+
+
 def test_remocao_sem_candidatos_nao_faz_nada(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
