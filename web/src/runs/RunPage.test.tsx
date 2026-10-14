@@ -5,6 +5,7 @@ import { createRoutes } from "../app/routes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody, RUN_ID } from "../test/fakeApi";
 import { fakeUploader } from "../test/fakeUploader";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
@@ -48,7 +49,7 @@ describe("Execução", () => {
   it("abre com o foco no título e mostra o carregamento", async () => {
     setup(() => null);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    await expectHeadingFocused("Execução");
     expect(screen.getByText("Carregando a execução.")).toBeInTheDocument();
   });
 

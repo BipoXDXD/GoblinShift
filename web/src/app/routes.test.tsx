@@ -1,10 +1,11 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catalogHandler } from "../test/catalog";
 import { fakeApi } from "../test/fakeApi";
 import { fakeUploader } from "../test/fakeUploader";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { createRoutes } from "./routes";
 
@@ -30,9 +31,7 @@ describe("rotas carregadas sob demanda", () => {
   ])("%s abre a tela e põe o foco no título", async (path, title) => {
     renderAt(path);
 
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1, name: title })).toHaveFocus();
-    });
+    await expectHeadingFocused(title);
   });
 
   it("ao navegar da Oficina para a Bancada, o foco vai ao título da tela nova", async () => {
@@ -41,8 +40,6 @@ describe("rotas carregadas sob demanda", () => {
     await user.click(await screen.findByRole("link", { name: /CSV Janitor/ }));
 
     // O título é trocado quando o catálogo chega; vale o foco no título que fica na tela.
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
-    });
+    await expectHeadingFocused("Bancada: CSV Janitor");
   });
 });

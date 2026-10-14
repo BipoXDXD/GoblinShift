@@ -16,6 +16,7 @@ import {
   uploadIntentsHandler,
 } from "../test/fakeApi";
 import { fakeUploader } from "../test/fakeUploader";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
 const csv = (name: string) => new File(["a,b\n1,2\n"], name, { type: "text/csv" });
@@ -95,7 +96,7 @@ describe("Bancada", () => {
   it("abre com o foco no título e o estado vazio da lista", async () => {
     await setup();
 
-    expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
+    await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
   });
@@ -211,7 +212,7 @@ describe("Bancada", () => {
     await user.click(screen.getByRole("button", { name: "Mover para cima b.csv" }));
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    await expectHeadingFocused("Execução");
     const [request] = runRequests(api.requests);
     expect(request?.headers.get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/);
     const body = await bodyOf(request);
@@ -353,9 +354,7 @@ describe("Bancada", () => {
   it("mostra que está carregando a receita enquanto o catálogo não chega", async () => {
     renderWorkbench({ catalog: () => null });
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Bancada: CSV Janitor" }),
-    ).toHaveFocus();
+    await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByText("Carregando a receita.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
   });
