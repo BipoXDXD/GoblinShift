@@ -41,6 +41,14 @@ uv run pytest                 # inclui PostgreSQL real via Testcontainers
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
+## Teste de carga
+
+`deploy/load/run-local.sh` roda os cenários k6 contra o Compose local (nunca contra produção: alvo fora
+da máquina ou da rede privada é recusado). Ele cria contas de teste pelo `gs-admin`, confere os
+limites da fila global e das transferências simultâneas e os SLOs de aceitação, execução e download
+numa jornada de 20 contas, e revoga as chaves ao sair. Os cenários do limite por conta e do `/auth/*`
+esperam a A2 e a fatia 6. Detalhes e números em [deploy/load/README.md](deploy/load/README.md).
+
 ## CSV Janitor pela linha de comando
 
 A receita de tabelas ([1.3](docs/GoblinShiftPlan.md#s1-3)) é uma biblioteca pura em `goblinshift.processing.csv_janitor`, só com a biblioteca padrão. A CLI chama a mesma função que o executor vai chamar:
