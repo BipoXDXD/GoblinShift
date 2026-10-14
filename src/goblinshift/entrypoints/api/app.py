@@ -8,7 +8,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from goblinshift.entrypoints.api import artifacts, health, me, runs, runs_cancel, uploads
+from goblinshift.entrypoints.api import (
+    artifacts,
+    catalog,
+    health,
+    me,
+    runs,
+    runs_cancel,
+    uploads,
+)
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.files.storage import FileStorage
@@ -54,6 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_problem_handlers(app)
     app.include_router(health.router)
     api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
+    api.include_router(catalog.router)
     api.include_router(me.router)
     api.include_router(uploads.router)
     api.include_router(artifacts.router)
