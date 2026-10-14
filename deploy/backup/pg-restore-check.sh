@@ -62,15 +62,15 @@ listing="$(s3_curl --max-time 60 "${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}?li
 latest="$(grep -oE "<Key>${prefix}${DUMP_NAME_PATTERN}</Key>" <<<"$listing" |
   sed -e 's/<Key>//' -e 's/<\/Key>//' | sort | tail -n 1 || true)"
 [[ -n "$latest" ]] || fail "nenhum dump em ${prefix}"
-echo "dump mais recente: $latest"
+echo "dump mais recente: $(dump_instant "$latest")"
 
 # Idade pelo instante UTC do nome; python3 porque o `date` do GNU e o do BSD não leem datas igual.
 age_hours="$(python3 -c '
 import sys
 from datetime import UTC, datetime
-stamp = datetime.strptime(sys.argv[1][-len("20260101T000000Z.dump.age"):-len(".dump.age")], "%Y%m%dT%H%M%SZ")
+stamp = datetime.strptime(sys.argv[1], "%Y%m%dT%H%M%SZ")
 print(int((datetime.now(UTC) - stamp.replace(tzinfo=UTC)).total_seconds() // 3600))
-' "$latest")"
+' "$(dump_instant "$latest")")"
 ((age_hours < max_age_hours)) || fail "o dump mais recente tem $age_hours horas (máximo: $max_age_hours)"
 
 s3_curl --max-time 1800 --output "$workdir/dump.age" "$(s3_url "$latest")"
