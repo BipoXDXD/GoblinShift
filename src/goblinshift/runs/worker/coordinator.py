@@ -19,7 +19,10 @@ Passos:
 4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3, ou memória
    estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
    `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
-   afetar a linha, o motivo é relido e os candidatos são descartados.
+   afetar a linha, o motivo é relido e os candidatos são descartados. Coleta e gravação dos
+   candidatos renovam o lease como o `supervise` (`_LeaseKeeper`), e erro de E/S nelas (disco do
+   storage cheio, área ilegível) é infraestrutura: falha transitória na hora, sem esperar o lease
+   vencer. Disco cheio aqui não é o limite de recurso de 1.6, que é o do sandbox do executor.
 5. `remove`: só depois de o desfecho estar no banco. Se o Runner falhar aqui, a área fica para a
    limpeza da manutenção.
 """
@@ -31,7 +34,7 @@ import os
 import random
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
@@ -127,6 +130,32 @@ class PreparationError(Exception):
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
     """A Run foi para `stopping` no meio do empacotamento: conclui pela parada."""
+
+
+class _LeaseKeeper:
+    """Renova o lease em trabalho longo fora do `supervise`, a cada `every`, entre blocos.
+
+    O primeiro bloco já renova: a última renovação do `supervise` pode estar perto de vencer.
+    Run em `stopping` (cancelamento, ou prazo vencido aplicado na renovação) levanta
+    `_StopRequested`; fencing perdido, `LostFencing`.
+    """
+
+    def __init__(self, renew: Callable[[], Status], every: timedelta) -> None:
+        self._renew = renew
+        self._every_s = every.total_seconds()
+        self._last = float("-inf")
+
+    def beating(self, chunks: Iterable[bytes]) -> Iterator[bytes]:
+        for chunk in chunks:
+            self._beat()
+            yield chunk
+
+    def _beat(self) -> None:
+        if time.monotonic() - self._last < self._every_s:
+            return
+        self._last = time.monotonic()
+        if self._renew() is Status.STOPPING:
+            raise _StopRequested
 
 
 @dataclass(frozen=True)
@@ -396,7 +425,11 @@ class Coordinator:
         except CollectionError as error:
             logger.warning("coleta recusada", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
-        stored = self.store_candidates(claimed, collected)
+        try:
+            stored = self.store_candidates(claimed, collected)
+        except (StorageError, OSError) as error:
+            logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
+            return self.fail_transiently(claimed)
         self.reach_phase(claimed, Phase.FINALIZING)
         try:
             return self.publish(claimed, collected, stored)
@@ -413,10 +446,12 @@ class Coordinator:
 
         Conteúdo idêntico a uma entrada da Run, pelo SHA-256 e tamanho que o próprio worker
         calcula, não é gravado de novo: o artefato aponta para o objeto da entrada enquanto ele
-        estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos").
+        estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos"). A leitura e a cópia
+        renovam o lease a cada terço do prazo; parada pedida no meio levanta `_StopRequested`.
         """
+        keeper = _LeaseKeeper(lambda: self.renew_lease(claimed), self._config.renew_every)
         files = _files_to_publish(collected)
-        reused = self._reusable_objects(claimed, files)
+        reused = self._reusable_objects(claimed, files, keeper)
         to_write = [
             (index, output) for index, (output, _role) in enumerate(files) if index not in reused
         ]
@@ -439,7 +474,8 @@ class Coordinator:
         written = []
         for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
             with output.path.open("rb") as source:
-                written.append(self._storage.create_exclusive(key, _chunks(source), output.size))
+                chunks = keeper.beating(_chunks(source))
+                written.append(self._storage.create_exclusive(key, chunks, output.size))
 
         def confirm(session: Session) -> None:
             self._lock_running(session, claimed)
@@ -457,7 +493,10 @@ class Coordinator:
         ]
 
     def _reusable_objects(
-        self, claimed: ClaimedAttempt, files: list[tuple[OutputFile, ArtifactRole]]
+        self,
+        claimed: ClaimedAttempt,
+        files: list[tuple[OutputFile, ArtifactRole]],
+        keeper: _LeaseKeeper,
     ) -> dict[int, uuid.UUID]:
         """Índice da saída → objeto da entrada com o mesmo conteúdo, ainda `committed`.
 
@@ -475,7 +514,7 @@ class Coordinator:
         for index, (output, role) in enumerate(files):
             if role is not ArtifactRole.OUTPUT or output.size not in sizes:
                 continue
-            object_id = by_content.get((_sha256_of(output.path), output.size))
+            object_id = by_content.get((_sha256_of(output.path, keeper), output.size))
             if object_id is not None:
                 reused[index] = object_id
         return reused
@@ -639,10 +678,10 @@ def _files_to_publish(collected: Collected) -> list[tuple[OutputFile, ArtifactRo
     return files
 
 
-def _sha256_of(path: Path) -> bytes:
+def _sha256_of(path: Path, keeper: _LeaseKeeper) -> bytes:
     digest = hashlib.sha256()
     with path.open("rb") as source:
-        for chunk in _chunks(source):
+        for chunk in keeper.beating(_chunks(source)):
             digest.update(chunk)
     return digest.digest()
 
