@@ -215,7 +215,6 @@ export const TEXT = {
   },
   csvJanitor: {
     title: "CSV Janitor",
-    legend: "Parâmetros da limpeza",
     inputDelimiter: "Delimitador dos arquivos de entrada",
     outputDelimiter: "Delimitador dos arquivos de saída",
     delimiters: { ",": "Vírgula (,)", ";": "Ponto e vírgula (;)", "\t": "Tabulação" },
@@ -257,7 +256,6 @@ export const TEXT = {
   },
   imageForge: {
     title: "Image Forge",
-    legend: "Parâmetros das imagens",
     maxWidth: "Largura máxima, em pixels",
     maxHeight: "Altura máxima, em pixels",
     sideHint: (min: number, max: number) =>
@@ -283,7 +281,6 @@ export const TEXT = {
   },
   downloadsDetox: {
     title: "Downloads Detox",
-    legend: "Parâmetros da organização",
     deduplicate: "Remover arquivos repetidos",
     deduplicateHint: "Arquivos com o mesmo conteúdo ficam uma vez só, na primeira ocorrência.",
     groupBy: "Organização em pastas",

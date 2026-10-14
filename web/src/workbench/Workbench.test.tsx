@@ -118,6 +118,19 @@ describe("Bancada", () => {
     );
   });
 
+  it.each(["csv-janitor", "image-forge", "downloads-detox"])(
+    "o nome Parâmetros aparece uma vez só na Bancada de %s",
+    async (recipe) => {
+      await setup({ recipe });
+
+      const named = [
+        ...screen.queryAllByRole("heading", { name: /Parâmetros/ }),
+        ...screen.queryAllByRole("group", { name: /Parâmetros/ }),
+      ];
+      expect(named.map((element) => element.textContent)).toEqual(["Parâmetros"]);
+    },
+  );
+
   it("diz quantos arquivos estão escolhidos, em pt-BR", async () => {
     const { user } = await setup();
     expect(screen.getByText("Nenhum arquivo escolhido")).toBeVisible();

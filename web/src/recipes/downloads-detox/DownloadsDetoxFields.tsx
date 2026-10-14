@@ -1,7 +1,6 @@
 import { useState, type ReactElement } from "react";
 
 import { Field } from "../../components/a11y/Field";
-import { FieldGroup } from "../../components/a11y/FieldGroup";
 import { TEXT } from "../../text";
 import type { RecipeFieldsProps } from "../types";
 import {
@@ -35,7 +34,7 @@ export function DownloadsDetoxFields({
     errors.get(fieldId(field)) ?? null;
 
   return (
-    <FieldGroup id="downloads-detox-parametros" legend={T.legend}>
+    <>
       <Field
         layout="inline"
         id={fieldId("deduplicate")}
@@ -114,6 +113,6 @@ export function DownloadsDetoxFields({
           )}
         </Field>
       )}
-    </FieldGroup>
+    </>
   );
 }
