@@ -44,7 +44,9 @@ export function Layout(): ReactElement {
       </a>
       <div aria-hidden="true" className="h-1 bg-accent-band" />
       <header className="border-b border-line-soft bg-surface">
-        <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between gap-4 px-4 md:px-8">
+        {/* Com Histórico, Acesso e o tema, a barra não cabe em 400 px: a navegação desce para uma
+            segunda linha em vez de empurrar a página para o lado (WCAG 1.4.10). */}
+        <div className="mx-auto flex min-h-16 w-full max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 md:px-8">
           <Link
             to={PATHS.home}
             aria-label={T.brandLink}
@@ -52,7 +54,7 @@ export function Layout(): ReactElement {
           >
             {T.brand}
           </Link>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <nav aria-label={T.navLabel} className="flex items-center gap-4">
               <NavLink to={PATHS.history} className={NAV_LINK}>
                 {TEXT.history.navLink}

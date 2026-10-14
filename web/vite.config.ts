@@ -18,6 +18,10 @@ export default defineConfig({
           groups: [
             { name: "react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
             { name: "router", test: /node_modules[\\/]react-router[\\/]/ },
+            // O z.config({ jitless }) mora no chunk do próprio Zod: ele roda antes de qualquer
+            // chunk que crie schema, seja qual for a divisão. Fora dele, um schema num chunk
+            // compartilhado nascia antes da configuração e o teste de eval violava a CSP.
+            { name: "zod", test: /node_modules[\\/]zod[\\/]|src[\\/]zodJitless\.ts$/ },
           ],
         },
       },
