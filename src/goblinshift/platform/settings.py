@@ -1,10 +1,12 @@
 """Configuração lida do ambiente (prefixo `GS_`)."""
 
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -17,6 +19,10 @@ LOCAL_EXECUTOR_IMAGE = "local-dev"
 EXECUTOR_GROUP_ID = 61001
 # Só para desenvolvimento e testes; em produção a ausência do segredo impede a API de subir.
 _DEV_CURSOR_KEY = "goblinshift-dev-only-cursor-key-not-a-secret"
+_DEV_CSRF_KEY = "goblinshift-dev-only-csrf-key-not-a-secret"
+_DEV_LOGIN_COOKIE_KEY = "goblinshift-dev-only-login-cookie-key-not-a-secret"
+# Origem do Nginx local; em produção GS_PUBLIC_ORIGIN é obrigatória.
+_DEV_PUBLIC_ORIGIN = "http://localhost"
 
 
 class MissingSecretError(RuntimeError):
@@ -25,6 +31,37 @@ class MissingSecretError(RuntimeError):
 
 class ExecutorConfigError(RuntimeError):
     """A escolha do Runner ou da imagem do executor não serve a este ambiente."""
+
+
+class WebConfigError(RuntimeError):
+    """Configuração do login e da sessão web incompleta ou imprópria para o ambiente."""
+
+
+@dataclass(frozen=True)
+class OAuthClient:
+    """Cliente registrado num provedor de login (Google ou GitHub)."""
+
+    client_id: str
+    client_secret: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class WebIdentityConfig:
+    """Tudo o que o login e a sessão web leem da configuração, já validado na subida.
+
+    `public_origin` é a única fonte do `redirect_uri` e da checagem de `Origin` (3.6): nunca o
+    header `Host`. Um provedor `None` está desligado, o que só acontece fora de produção.
+    """
+
+    public_origin: str
+    signup_open: bool
+    google: OAuthClient | None
+    github: OAuthClient | None
+    oauth_http_timeout_s: float
+    # HMAC do token CSRF (double-submit assinado, ligado à sessão).
+    csrf_key: bytes = field(repr=False)
+    # Assina o cookie `__Secure-gs_login`, que leva só o marcador do estado do login (ADR 024).
+    login_cookie_key: bytes = field(repr=False)
 
 
 class Settings(BaseSettings):
@@ -82,6 +119,102 @@ class Settings(BaseSettings):
     # só custa ao cliente recomeçar a paginação.
     cursor_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)
 
+    # Identidade web (fatia 6, 3.6). IDs de cliente não são segredo; os segredos vêm de arquivos
+    # montados pelo Compose (`*_file`), no mesmo padrão de `db_password_file`.
+    public_origin: str | None = None
+    # Fechado até a abertura pública (fatia 8): identidade nova nasce bloqueada (ADR 022).
+    signup_mode: Literal["closed", "open"] = "closed"
+    google_client_id: str | None = None
+    google_client_secret_file: Path | None = None
+    github_client_id: str | None = None
+    github_client_secret_file: Path | None = None
+    csrf_secret_file: Path | None = None
+    login_cookie_secret_file: Path | None = None
+    # Teto de cada chamada ao Google e ao GitHub (3.2, "Timeouts em toda integração").
+    oauth_http_timeout_s: float = Field(default=5.0, gt=0)
+
+    @field_validator("public_origin")
+    @classmethod
+    def _origin_only(cls, value: str | None) -> str | None:
+        """Esquema e host (com porta opcional), sem caminho, barra final, query nem usuário."""
+        if value is None:
+            return None
+        parts = urlsplit(value)
+        if (
+            parts.scheme not in {"http", "https"}
+            or not parts.hostname
+            or parts.username is not None
+            or parts.path
+            or parts.query
+            or parts.fragment
+            or value.endswith(("?", "#"))
+        ):
+            raise ValueError("use só esquema e host, como https://goblinshift.dev")
+        return value
+
+    def web_identity(self) -> WebIdentityConfig:
+        """Lê e valida a configuração do login; chamado na subida da API."""
+        production = self.environment == "production"
+        return WebIdentityConfig(
+            public_origin=self._public_origin(production),
+            signup_open=self.signup_mode == "open",
+            google=self._oauth_client(
+                production, "GOOGLE", self.google_client_id, self.google_client_secret_file
+            ),
+            github=self._oauth_client(
+                production, "GITHUB", self.github_client_id, self.github_client_secret_file
+            ),
+            oauth_http_timeout_s=self.oauth_http_timeout_s,
+            csrf_key=self._server_key(
+                production, "GS_CSRF_SECRET_FILE", self.csrf_secret_file, _DEV_CSRF_KEY
+            ),
+            login_cookie_key=self._server_key(
+                production,
+                "GS_LOGIN_COOKIE_SECRET_FILE",
+                self.login_cookie_secret_file,
+                _DEV_LOGIN_COOKIE_KEY,
+            ),
+        )
+
+    def _public_origin(self, production: bool) -> str:
+        if self.public_origin is None:
+            if production:
+                raise WebConfigError("GS_PUBLIC_ORIGIN é obrigatória em produção")
+            return _DEV_PUBLIC_ORIGIN
+        # Cookies `__Host-`/`Secure` e os redirects dos provedores exigem HTTPS.
+        if production and not self.public_origin.startswith("https://"):
+            raise WebConfigError("GS_PUBLIC_ORIGIN precisa ser https em produção")
+        return self.public_origin
+
+    @staticmethod
+    def _oauth_client(
+        production: bool, provider: str, client_id: str | None, secret_file: Path | None
+    ) -> OAuthClient | None:
+        id_name = f"GS_{provider}_CLIENT_ID"
+        secret_name = f"GS_{provider}_CLIENT_SECRET_FILE"
+        if client_id is None and secret_file is None and not production:
+            return None
+        if not client_id:
+            raise WebConfigError(f"{id_name} é obrigatório com o provedor ligado e em produção")
+        if secret_file is None:
+            if production:
+                raise MissingSecretError(f"{secret_name} é obrigatório em produção")
+            raise WebConfigError(f"{id_name} sem {secret_name}: configure os dois ou nenhum")
+        return OAuthClient(
+            client_id=client_id, client_secret=_read_secret(secret_name, secret_file)
+        )
+
+    @staticmethod
+    def _server_key(production: bool, name: str, secret_file: Path | None, dev: str) -> bytes:
+        if secret_file is None:
+            if production:
+                raise MissingSecretError(f"{name} é obrigatório em produção")
+            return dev.encode()
+        key = _read_secret(name, secret_file)
+        if len(key) < MIN_SECRET_CHARS:
+            raise WebConfigError(f"{name} precisa de pelo menos {MIN_SECRET_CHARS} caracteres")
+        return key.encode()
+
     def cursor_signing_key(self) -> bytes:
         if self.cursor_secret is not None:
             return self.cursor_secret.get_secret_value().encode()
@@ -118,3 +251,14 @@ class Settings(BaseSettings):
             port=self.db_port,
             database=self.db_name,
         )
+
+
+def _read_secret(name: str, path: Path) -> str:
+    """Conteúdo do arquivo de segredo sem espaços nas pontas; ausente ou vazio impede a subida."""
+    try:
+        value = path.read_text().strip()
+    except FileNotFoundError as error:
+        raise MissingSecretError(f"{name} aponta para um arquivo que não existe") from error
+    if not value:
+        raise MissingSecretError(f"{name} aponta para um arquivo vazio")
+    return value

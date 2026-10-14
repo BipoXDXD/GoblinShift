@@ -22,10 +22,11 @@ API_PREFIX = "/api/v1"
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    # Lidos já na subida: em produção, sem o segredo ou sem o executor-ctl e a imagem do
+    # Lidos já na subida: em produção, sem os segredos ou sem o executor-ctl e a imagem do
     # executor, a API não sobe (em vez de falhar no primeiro pedido).
     settings.cursor_signing_key()
     executor_image = settings.executor_image_for_runs()
+    web_identity = settings.web_identity()
     configure_logging()
     engine = make_engine(settings)
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
@@ -44,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.executor_image = executor_image
+    app.state.web_identity = web_identity
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.code_heads = code_heads

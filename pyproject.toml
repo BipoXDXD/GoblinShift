@@ -6,7 +6,10 @@ authors = [{ name = "BipoXDXD" }]
 requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
+    "authlib>=1.6.12",
     "fastapi>=0.121",
+    "httpx>=0.28.1",
+    "itsdangerous>=2.2",
     "opentelemetry-api>=1.45.1",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
     "opentelemetry-instrumentation-fastapi>=0.66b1",
