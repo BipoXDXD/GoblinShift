@@ -134,22 +134,9 @@ def configure_tracing(
 
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
-    processor: SpanProcessor
-    if exporter is not None:
-        processor = SimpleSpanProcessor(exporter)
-    elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        processor = BatchSpanProcessor(OTLPSpanExporter())
-    else:
+    provider = make_tracer_provider(settings, "goblinshift-api", exporter)
+    if provider is None:
         return
-    resource = Resource.create(
-        {
-            "service.name": os.environ.get("OTEL_SERVICE_NAME", "goblinshift-api"),
-            "service.version": settings.service_version,
-            "deployment.environment": settings.environment,
-        }
-    )
-    provider = TracerProvider(resource=resource)
-    provider.add_span_processor(processor)
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=provider,
@@ -160,3 +147,29 @@ def configure_tracing(
         exclude_spans=["receive", "send"],
     )
     SQLAlchemyInstrumentor().instrument(engine=engine, tracer_provider=provider)
+
+
+def make_tracer_provider(
+    settings: Settings, default_service: str, exporter: SpanExporter | None = None
+) -> TracerProvider | None:
+    """Provider com o resource do serviço; `None` sem `exporter` e sem endpoint OTLP.
+
+    Quem cria o provider chama `shutdown()` ao sair, para exportar o lote pendente.
+    """
+    processor: SpanProcessor
+    if exporter is not None:
+        processor = SimpleSpanProcessor(exporter)
+    elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        processor = BatchSpanProcessor(OTLPSpanExporter())
+    else:
+        return None
+    resource = Resource.create(
+        {
+            "service.name": os.environ.get("OTEL_SERVICE_NAME", default_service),
+            "service.version": settings.service_version,
+            "deployment.environment": settings.environment,
+        }
+    )
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(processor)
+    return provider
