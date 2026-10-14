@@ -10,7 +10,8 @@ A fatia 6 traz o login por Google (OIDC) e GitHub (OAuth 2.0), a sessão web, o 
 
 ## Decisão
 
-- **Authlib `>= 1.6.12`** (integração Starlette) para o fluxo OAuth/OIDC: PKCE S256, `state`, `nonce` e validação do ID token. `httpx` entra como dependência direta, porque a integração o usa e o pacote não o declara.
+- **Authlib `>= 1.6.12`** (integração Starlette) para o fluxo OAuth/OIDC: PKCE S256, `state`, `nonce` e validação do ID token. `httpx2` entra como dependência direta de runtime, porque a integração o usa e o pacote não o declara; sem ele, o Authlib cai no `httpx` antigo com aviso de depreciação.
+- **Sem discovery do Google** (`server_metadata_url`): os endereços de autorização, token e JWKS, o emissor e a lista de algoritmos do ID token (só `RS256`) ficam fixos no código (`identity/providers.py`). O documento de discovery sobrescreveria a lista de algoritmos aceitos com o que o provedor anuncia, e a lista fixa é a defesa contra `alg` trocado no token. Custo: se o Google mudar um endereço, o login quebra até um deploy, o que o teste de login real na VPS mostra.
 - **Estado do login no PostgreSQL** (`login_state`, TTL de 10 min), pelo cache do Authlib. O `SessionMiddleware` do Starlette guarda só o marcador, no cookie `__Secure-gs_login` com `Path=/auth`, `SameSite=Lax`, `Secure`, `Max-Age=600` e segredo próprio (`GS_LOGIN_COOKIE_SECRET_FILE`). Com `Path=/auth`, o cookie nem chega às rotas da API.
 - **Sessão server-side** em `web_session` (token opaco de 256 bits, só o hash no banco), no cookie `__Host-gs_session`. Revogação imediata, sem Redis (ADR 003).
 - **`redirect_uri` sempre de `GS_PUBLIC_ORIGIN`**, nunca do header `Host`; a mesma origem é a referência da checagem de `Origin`. Enquanto não há domínio, o código depende só dessa variável, obrigatória e `https` em produção.
@@ -36,7 +37,8 @@ A fatia 6 traz o login por Google (OIDC) e GitHub (OAuth 2.0), a sessão web, o 
 
 ## Como verificar
 
-- `tests/test_authlib_version.py`: piso no `pyproject.toml`, no lock e no ambiente.
+- `tests/test_authlib_version.py`: piso no `pyproject.toml`, no lock e no ambiente, e o `httpx2` como dependência de runtime.
+- `test_id_token_forjado_e_recusado` (`tests/api/auth/test_auth_callback_google.py`): ID token com `alg` `none`, `nonE` ou `HS256` assinado com a chave pública é recusado.
 - `tests/test_settings_secrets.py`: produção sem segredo, sem ID de cliente ou sem origem `https` não sobe.
 - Frente A: callback com `state` válido sem o cookie de login do mesmo navegador é recusado (regressão do CVE-2026-41425), e o `redirect_uri` ignora `Host: evil.example`.
 - Frente B: atributos dos cookies, CSRF por toda rota mutável da matriz e um teste de streaming do download com o middleware de cabeçalhos.

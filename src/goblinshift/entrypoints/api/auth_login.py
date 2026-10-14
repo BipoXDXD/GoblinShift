@@ -29,6 +29,7 @@ from authlib.integrations.starlette_client import (  # type: ignore[import-untyp
 )
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import RedirectResponse, Response
+from httpx2 import HTTPError, HTTPStatusError
 from joserfc.errors import JoseError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
@@ -67,11 +68,6 @@ from goblinshift.identity.providers import (
 )
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import OAuthClient, WebIdentityConfig
-
-try:
-    from httpx2 import HTTPError, HTTPStatusError
-except ImportError:  # pragma: no cover - a imagem de produção só tem o httpx (ver ADR 025)
-    from httpx import HTTPError, HTTPStatusError  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
