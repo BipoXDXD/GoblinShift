@@ -1,4 +1,4 @@
-"""Estado transitório do login no PostgreSQL (docs/GoblinShiftPlan.md, 3.6; ADR 024).
+"""Estado transitório do login no PostgreSQL (docs/GoblinShiftPlan.md, 3.6; ADR 025).
 
 O Authlib guarda `state`, `nonce`, `code_verifier` e `redirect_uri` no cache enquanto o usuário
 está no provedor; o cookie `__Secure-gs_login` leva só o marcador que prova que o callback vem do

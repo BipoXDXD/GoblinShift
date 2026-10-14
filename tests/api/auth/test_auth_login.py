@@ -1,4 +1,4 @@
-"""`GET /auth/login/{provider}`: pedido de autorização e cookie de login (3.6; ADRs 008, 024)."""
+"""`GET /auth/login/{provider}`: pedido de autorização e cookie de login (3.6; ADRs 008, 025)."""
 
 from pathlib import Path
 

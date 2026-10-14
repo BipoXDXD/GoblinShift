@@ -1,4 +1,4 @@
-"""Callback do Google (OIDC): ID token, state ligado ao navegador e sessão nova (3.6; ADR 024).
+"""Callback do Google (OIDC): ID token, state ligado ao navegador e sessão nova (3.6; ADR 025).
 
 STRIDE da fatia 6: CSRF de login, ID token forjado e fixação de sessão.
 """

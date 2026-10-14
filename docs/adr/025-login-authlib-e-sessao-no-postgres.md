@@ -1,4 +1,4 @@
-# ADR 024. Login com Authlib, sessão no PostgreSQL e defesas web com código próprio
+# ADR 025. Login com Authlib, sessão no PostgreSQL e defesas web com código próprio
 
 - **Estado:** aceito na Fase 0 da fatia 6 (2026-10-14), decisão D-6 e escolhas de biblioteca do plano da fatia
 - **Plano:** [2.1](../GoblinShiftPlan.md#s2-1), [3.3](../GoblinShiftPlan.md#s3-3), [3.6](../GoblinShiftPlan.md#s3-6)

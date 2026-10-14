@@ -1,6 +1,6 @@
 """Conta a partir da identidade externa do login (docs/GoblinShiftPlan.md, 1.8 e 3.6; Frente A).
 
-A identidade é `(issuer, subject)`, nunca e-mail (ADR 008). Com o cadastro fechado (ADR 022),
+A identidade é `(issuer, subject)`, nunca e-mail (ADR 008). Com o cadastro fechado (ADR 023),
 identidade nova nasce `blocked` e só entra depois do `gs-admin unblock`.
 
 Transaction script com a Session direto, na transação de quem chama (3.2).
@@ -45,7 +45,7 @@ def resolve_login(
 
     Um único `INSERT ... ON CONFLICT` cria a conta ou atualiza o nome de exibição, sem
     "consultar e depois inserir": dois callbacks simultâneos da mesma identidade chegam à mesma
-    linha. A conta nova nasce `active` só com o cadastro aberto (ADR 022); o cadastro aberto não
+    linha. A conta nova nasce `active` só com o cadastro aberto (ADR 023); o cadastro aberto não
     reativa uma conta que já existe bloqueada.
     """
     statement = (
@@ -73,7 +73,7 @@ def resolve_login(
 
 
 def _blocked_reason(session: Session, user_id: UUID) -> LoginRefused:
-    """Pendente é a conta bloqueada que nunca teve sessão (o critério do ADR 022)."""
+    """Pendente é a conta bloqueada que nunca teve sessão (o critério do ADR 023)."""
     had_session = session.execute(
         select(exists().where(web_session.c.user_id == user_id))
     ).scalar_one()

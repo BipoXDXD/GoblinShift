@@ -1,4 +1,4 @@
-"""Auditoria de eventos de segurança (docs/GoblinShiftPlan.md, 1.8 e 3.6; ADR 025).
+"""Auditoria de eventos de segurança (docs/GoblinShiftPlan.md, 1.8 e 3.6; ADR 026).
 
 Registra login e falha de login, logout e `logout-all`, emissão e revogação de chave,
 `REAUTH_REQUIRED`, `CSRF_FAILED`, negações de autorização, exclusão e bloqueio de conta. Nunca

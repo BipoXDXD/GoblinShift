@@ -328,7 +328,7 @@ def complete_after_commit(
 
 
 def _reserve_published_objects(session: Session, run_id: uuid.UUID) -> None:
-    """Passa da reserva da Run para cada objeto publicado o tamanho dele (ADR 023, D-5).
+    """Passa da reserva da Run para cada objeto publicado o tamanho dele (ADR 024, D-5).
 
     Objeto que já tem reserva (a entrada reaproveitada como saída) não é contado de novo. O resto
     do teto continua com a Run até `release_run_holds`.

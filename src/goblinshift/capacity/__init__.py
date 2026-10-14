@@ -1,4 +1,4 @@
-"""Livro-razão de capacidade: reservas de armazenamento por conta e no ambiente (ADR 023).
+"""Livro-razão de capacidade: reservas de armazenamento por conta e no ambiente (ADR 024).
 
 Camada de baixo, usada por `files` (reserva do upload) e `runs` (teto de saída da Run). Fila
 global, execução ativa por conta e transferências simultâneas continuam nos mecanismos de cada

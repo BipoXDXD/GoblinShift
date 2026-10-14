@@ -1,4 +1,4 @@
-# ADR 022. Cadastro fechado até a abertura pública
+# ADR 023. Cadastro fechado até a abertura pública
 
 - **Estado:** aceito na Fase 0 da fatia 6 (2026-10-14), decisão D-2 do plano da fatia; revisto na fatia 8, com a abertura
 - **Plano:** [1.8](../GoblinShiftPlan.md#s1-8), [3.6](../GoblinShiftPlan.md#s3-6), [3.9](../GoblinShiftPlan.md#s3-9)

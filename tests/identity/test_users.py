@@ -1,4 +1,4 @@
-"""Conta a partir da identidade externa, contra o PostgreSQL real (ADRs 008 e 022)."""
+"""Conta a partir da identidade externa, contra o PostgreSQL real (ADRs 008 e 023)."""
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID

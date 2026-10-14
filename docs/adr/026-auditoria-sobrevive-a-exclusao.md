@@ -1,4 +1,4 @@
-# ADR 025. Auditoria sobrevive à exclusão da conta
+# ADR 026. Auditoria sobrevive à exclusão da conta
 
 - **Estado:** aceito na Fase 0 da fatia 6 (2026-10-14), decisão D-7 do plano da fatia
 - **Plano:** [1.8](../GoblinShiftPlan.md#s1-8), [3.3](../GoblinShiftPlan.md#s3-3), [3.6](../GoblinShiftPlan.md#s3-6)

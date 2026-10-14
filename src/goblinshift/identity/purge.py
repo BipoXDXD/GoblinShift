@@ -1,7 +1,7 @@
 """Última etapa da purga de uma conta com exclusão pedida (docs/GoblinShiftPlan.md, 1.8; Frente C).
 
 Roda depois que `files` e `runs` apagaram tudo o que é da conta: remove chaves, sessões, o pool
-de capacidade (`capacity.purge_owner`) e a própria `app_user`. A auditoria fica (ADR 025).
+de capacidade (`capacity.purge_owner`) e a própria `app_user`. A auditoria fica (ADR 026).
 
 Também a retenção do que a identidade acumula: estado de login vencido, sessões encerradas há
 mais de 7 dias e eventos de auditoria com mais de 90 dias, sempre em lotes.

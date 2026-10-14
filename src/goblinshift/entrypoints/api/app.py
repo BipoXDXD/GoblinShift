@@ -83,7 +83,7 @@ def create_app(
     app.state.transfer_timeouts = TransferTimeouts()
 
     install_problem_handlers(app)
-    # Cookie de login (ADR 024): só o marcador do estado do Authlib, cujo conteúdo fica em
+    # Cookie de login (ADR 025): só o marcador do estado do Authlib, cujo conteúdo fica em
     # `login_state`. Middleware ASGI puro, que não toca respostas fora de `/auth`.
     app.add_middleware(
         SessionMiddleware,

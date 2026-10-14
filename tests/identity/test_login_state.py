@@ -1,4 +1,4 @@
-"""Estado transitório do login no PostgreSQL, como cache do Authlib (ADR 024)."""
+"""Estado transitório do login no PostgreSQL, como cache do Authlib (ADR 025)."""
 
 import asyncio
 import threading

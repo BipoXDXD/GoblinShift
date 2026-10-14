@@ -358,7 +358,7 @@ def list_accounts(session: Session) -> list[AccountListing]:
 
 
 def list_pending_accounts(session: Session) -> list[AccountListing]:
-    """Contas à espera de liberação no cadastro fechado (ADR 022).
+    """Contas à espera de liberação no cadastro fechado (ADR 023).
 
     Pendente e bloqueada por abuso têm o mesmo `status`; a pendente nunca teve sessão.
     """
