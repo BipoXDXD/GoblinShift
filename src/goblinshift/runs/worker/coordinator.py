@@ -19,7 +19,10 @@ Passos:
 4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3, ou memória
    estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
    `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
-   afetar a linha, o motivo é relido e os candidatos são descartados.
+   afetar a linha, o motivo é relido e os candidatos são descartados. Coleta e gravação dos
+   candidatos renovam o lease como o `supervise` (`_LeaseKeeper`), e erro de E/S nelas (disco do
+   storage cheio, área ilegível) é infraestrutura: falha transitória na hora, sem esperar o lease
+   vencer. Disco cheio aqui não é o limite de recurso de 1.6, que é o do sandbox do executor.
 5. `remove`: só depois de o desfecho estar no banco. Se o Runner falhar aqui, a área fica para a
    limpeza da manutenção.
 """
@@ -29,9 +32,9 @@ import json
 import logging
 import os
 import random
+import stat
 import time
-import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
@@ -40,10 +43,9 @@ from typing import BinaryIO
 from sqlalchemy import insert, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.artifacts import commit_candidate, create_candidate_object, publish_artifact
+from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
-from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage, StorageError
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
@@ -78,11 +80,11 @@ from goblinshift.runs.store import (
     run_transaction,
 )
 from goblinshift.runs.tables import attempt, run, run_input, run_output
+from goblinshift.runs.worker.candidate_writer import CandidateWriter, StoredCandidate
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import (
     Collected,
     CollectionError,
-    OutputFile,
     OutputLimitError,
     collect_outputs,
 )
@@ -94,6 +96,8 @@ EXIT_SUCCEEDED = 0
 EXIT_RECIPE_FAILURE = 3
 COPY_CHUNK_BYTES = 1024 * 1024
 FAILURE_MAX_BYTES = 64 * 1024
+# Uma linha `{"position": n}` por entrada avaliada: 1 MiB sobra para qualquer lote de 1.7.
+PROGRESS_MAX_BYTES = 1024 * 1024
 # Arquivos que o worker escreve para o executor, que os lê pelo grupo (contrato da fatia 4).
 WORKER_FILE_MODE = 0o640
 # Teto de cada tentativa (1.7, "Duração"); é duração, medida com o relógio monotônico.
@@ -129,11 +133,30 @@ class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não
     """A Run foi para `stopping` no meio do empacotamento: conclui pela parada."""
 
 
-@dataclass(frozen=True)
-class StoredCandidate:
-    name: str
-    role: ArtifactRole
-    object_id: uuid.UUID
+class _LeaseKeeper:
+    """Renova o lease em trabalho longo fora do `supervise`, a cada `every`, entre blocos.
+
+    O primeiro bloco já renova: a última renovação do `supervise` pode estar perto de vencer.
+    Run em `stopping` (cancelamento, ou prazo vencido aplicado na renovação) levanta
+    `_StopRequested`; fencing perdido, `LostFencing`.
+    """
+
+    def __init__(self, renew: Callable[[], Status], every: timedelta) -> None:
+        self._renew = renew
+        self._every_s = every.total_seconds()
+        self._last = float("-inf")
+
+    def beating(self, chunks: Iterable[bytes]) -> Iterator[bytes]:
+        for chunk in chunks:
+            self.beat()
+            yield chunk
+
+    def beat(self) -> None:
+        if time.monotonic() - self._last < self._every_s:
+            return
+        self._last = time.monotonic()
+        if self._renew() is Status.STOPPING:
+            raise _StopRequested
 
 
 class Coordinator:
@@ -151,6 +174,7 @@ class Coordinator:
         self._runner = runner
         self._config = config
         self._on_finished = on_finished
+        self._candidates = CandidateWriter(factory, storage)
 
     def run(self, claimed: ClaimedAttempt) -> Applied | None:
         """Leva a tentativa até um estado decidido; `None` se o fencing foi perdido."""
@@ -343,12 +367,23 @@ class Coordinator:
         self._apply_event(session, loaded, PhaseReached(claimed.generation, phase))
 
     def _processed_count(self, claimed: ClaimedAttempt) -> int:
+        """Linhas de `progress.jsonl`, até o total de entradas.
+
+        O arquivo é escrito pelo sandbox: não segue symlink (para `/dev/zero`, seria leitura sem
+        fim), só lê arquivo regular (um FIFO travaria o worker) e lê no máximo um teto de bytes.
+        """
+        total = len(claimed.input_upload_ids)
         progress = self._runner.work_dir(claimed.attempt_id) / "progress.jsonl"
         try:
-            with progress.open("rb") as lines:
-                return sum(1 for line in lines if line.endswith(b"\n"))
-        except FileNotFoundError:
+            fd = os.open(progress, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
+            # Ausente, symlink (ELOOP) ou ilegível: o progresso é informativo, conta zero.
             return 0
+        with os.fdopen(fd, "rb") as lines:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return 0
+            data = lines.read(PROGRESS_MAX_BYTES)
+        return min(data.count(b"\n"), total)
 
     # 4. Desfecho -----------------------------------------------------------------------
 
@@ -382,9 +417,13 @@ class Coordinator:
     def _package_and_publish(self, claimed: ClaimedAttempt) -> Applied:
         self.reach_phase(claimed, Phase.PACKAGING)
         out_dir = self._runner.work_dir(claimed.attempt_id) / "out"
+        keeper = self._lease_keeper(claimed)
         try:
             collected = collect_outputs(
-                out_dir, len(claimed.input_upload_ids), recipe_id=claimed.recipe_id
+                out_dir,
+                len(claimed.input_upload_ids),
+                recipe_id=claimed.recipe_id,
+                heartbeat=keeper.beat,
             )
         except OutputLimitError as limit:
             code = limit.code
@@ -393,10 +432,14 @@ class Coordinator:
                 lambda _loaded: DeterministicFailure(claimed.generation, code),
                 attempt_error=code,
             )
-        except CollectionError as error:
+        except (CollectionError, OSError) as error:
             logger.warning("coleta recusada", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
-        stored = self.store_candidates(claimed, collected)
+        try:
+            stored = self.store_candidates(claimed, collected)
+        except (StorageError, OSError) as error:
+            logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
+            return self.fail_transiently(claimed)
         self.reach_phase(claimed, Phase.FINALIZING)
         try:
             return self.publish(claimed, collected, stored)
@@ -409,76 +452,18 @@ class Coordinator:
     def store_candidates(
         self, claimed: ClaimedAttempt, collected: Collected
     ) -> list[StoredCandidate]:
-        """Grava as saídas como candidatos em `runs/{run}/g{geração}/…`, fora de transação.
+        """Grava as saídas como candidatos da geração, fora de transação (`CandidateWriter`).
 
-        Conteúdo idêntico a uma entrada da Run, pelo SHA-256 e tamanho que o próprio worker
-        calcula, não é gravado de novo: o artefato aponta para o objeto da entrada enquanto ele
-        estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos").
+        Cada transação trava a Run com fencing, e a cópia renova o lease a cada terço do prazo;
+        parada pedida no meio levanta `_StopRequested`.
         """
-        files = _files_to_publish(collected)
-        reused = self._reusable_objects(claimed, files)
-        to_write = [
-            (index, output) for index, (output, _role) in enumerate(files) if index not in reused
-        ]
-
-        def reserve(session: Session) -> list[tuple[uuid.UUID, str]]:
-            self._lock_running(session, claimed)
-            reserved = []
-            for _ in to_write:
-                candidate = create_candidate_object(
-                    session,
-                    claimed.owner_id,
-                    claimed.run_id,
-                    claimed.attempt_id,
-                    claimed.generation,
-                )
-                reserved.append((candidate.object_id, candidate.storage_key))
-            return reserved
-
-        reserved = run_transaction(self._factory, reserve)
-        written = []
-        for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
-            with output.path.open("rb") as source:
-                written.append(self._storage.create_exclusive(key, _chunks(source), output.size))
-
-        def confirm(session: Session) -> None:
-            self._lock_running(session, claimed)
-            for (object_id, _key), (sha256, size) in zip(reserved, written, strict=True):
-                commit_candidate(session, claimed.owner_id, object_id, sha256, size)
-
-        run_transaction(self._factory, confirm)
-        object_ids = reused | {
-            index: object_id
-            for (index, _output), (object_id, _key) in zip(to_write, reserved, strict=True)
-        }
-        return [
-            StoredCandidate(output.name, role, object_ids[index])
-            for index, (output, role) in enumerate(files)
-        ]
-
-    def _reusable_objects(
-        self, claimed: ClaimedAttempt, files: list[tuple[OutputFile, ArtifactRole]]
-    ) -> dict[int, uuid.UUID]:
-        """Índice da saída → objeto da entrada com o mesmo conteúdo, ainda `committed`.
-
-        Só saídas de conteúdo, e só as do tamanho de alguma entrada são lidas para o hash.
-        """
-        with self._factory() as session, session.begin():
-            contents = held_input_contents(session, claimed.owner_id, claimed.input_upload_ids)
-        # A primeira entrada com o conteúdo vence, como a primeira ocorrência do Detox.
-        by_content: dict[tuple[bytes, int], uuid.UUID] = {}
-        for content in contents:
-            if content.committed:
-                by_content.setdefault((content.sha256, content.size_bytes), content.object_id)
-        sizes = {size for _sha256, size in by_content}
-        reused = {}
-        for index, (output, role) in enumerate(files):
-            if role is not ArtifactRole.OUTPUT or output.size not in sizes:
-                continue
-            object_id = by_content.get((_sha256_of(output.path), output.size))
-            if object_id is not None:
-                reused[index] = object_id
-        return reused
+        keeper = self._lease_keeper(claimed)
+        return self._candidates.store(
+            claimed,
+            collected,
+            lock_running=lambda session: self._lock_running(session, claimed),
+            beating=keeper.beating,
+        )
 
     def publish(
         self, claimed: ClaimedAttempt, collected: Collected, stored: list[StoredCandidate]
@@ -513,7 +498,7 @@ class Coordinator:
             lambda loaded: Published(claimed.generation, report.outcome, loaded.now),
             attempt_error=None,
             publish=publish_outputs,
-            summary=dict(report.summary),
+            summary=report.summary.as_json(),
         )
 
     def fail_transiently(self, claimed: ClaimedAttempt) -> Applied:
@@ -561,7 +546,7 @@ class Coordinator:
         *,
         attempt_error: str | None,
         publish: Callable[[Session], None] | None = None,
-        summary: dict[str, object] | None = None,
+        summary: Mapping[str, object] | None = None,
     ) -> Applied:
         """Aplica o desfecho com o executor já terminado, numa transação curta.
 
@@ -609,6 +594,9 @@ class Coordinator:
             raise LostFencing(f"{type(event).__name__} recusado: {decision.reason}")
         return apply_transition(session, loaded, decision)
 
+    def _lease_keeper(self, claimed: ClaimedAttempt) -> _LeaseKeeper:
+        return _LeaseKeeper(lambda: self.renew_lease(claimed), self._config.renew_every)
+
     def _lock_running(self, session: Session, claimed: ClaimedAttempt) -> None:
         loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
         if loaded.state.status is Status.STOPPING:
@@ -626,25 +614,6 @@ class Coordinator:
         if code not in {c.value for c in DETERMINISTIC_CODES}:
             return None
         return ErrorCode(code)
-
-
-def _files_to_publish(collected: Collected) -> list[tuple[OutputFile, ArtifactRole]]:
-    """Conteúdo na ordem do relatório, depois relatório, manifesto e pacote (ADR 019)."""
-    files = [(output, ArtifactRole.OUTPUT) for output in collected.outputs]
-    files.append((collected.report_file, ArtifactRole.REPORT))
-    if collected.manifest_file is not None:
-        files.append((collected.manifest_file, ArtifactRole.MANIFEST))
-    if collected.package_file is not None:
-        files.append((collected.package_file, ArtifactRole.PACKAGE))
-    return files
-
-
-def _sha256_of(path: Path) -> bytes:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in _chunks(source):
-            digest.update(chunk)
-    return digest.digest()
 
 
 def _create_for_executor(path: Path) -> BinaryIO:

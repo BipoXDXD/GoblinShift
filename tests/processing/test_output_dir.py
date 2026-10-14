@@ -322,3 +322,21 @@ def test_o_maior_grupo_com_o_maior_componente_cabe_no_teto_de_caminho(tmp_path: 
     assert longest is THUMBNAILS
     assert len(path.encode()) == len("thumbnails/") + MAX_COMPONENT_BYTES
     assert len(path.encode()) <= MAX_PATH_BYTES
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("a.", "a_1.", id="ponto-final-fica-depois-do-sufixo"),
+        pytest.param(".config", ".config_1", id="ponto-inicial-nao-e-extensao"),
+        pytest.param("a.tar.gz", "a.tar_1.gz", id="so-o-ultimo-ponto"),
+        pytest.param("sem-extensao", "sem-extensao_1", id="sem-ponto"),
+    ],
+)
+def test_sufixo_de_colisao_entra_antes_da_ultima_extensao(
+    tmp_path: Path, name: str, expected: str
+) -> None:
+    out = FileSystemOutputDir(tmp_path)
+    write(out, name, 0)
+
+    assert write(out, name, 1) == expected

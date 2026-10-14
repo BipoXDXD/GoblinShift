@@ -8,12 +8,15 @@
 - `exit <código>`: sai com o código, sem tocar no diretório.
 - `fail-deterministic <código>`: escreve `failure.json` com o código e sai com 3.
 - `ignore-term <s>`: ignora SIGTERM e dorme (obriga o SIGKILL depois da carência).
+- `tamper-package`: roda o executor real e acrescenta ao ZIP de out/ uma entrada que o
+  empacotador nunca gravaria (executor comprometido).
 """
 
 import json
 import signal
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 from goblinshift.processing.executor.execution import main as real_executor
@@ -38,6 +41,12 @@ def run(argv: list[str]) -> int:
             failure = {"code": rest[0], "detail": "falha provocada pelo teste"}
             (Path(work_dir) / "failure.json").write_text(json.dumps(failure), encoding="utf-8")
             return 3
+        case "tamper-package":
+            code = real_executor([work_dir])
+            [package] = Path(work_dir, "out").glob("*.zip")
+            with zipfile.ZipFile(package, "a") as archive:
+                archive.writestr("../../etc/cron.d/x", b"* * * * * root id\n")
+            return code
         case "ignore-term":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
             time.sleep(float(rest[0]))

@@ -1,12 +1,12 @@
 """Coleta de `out/`: só arquivos regulares e listados no relatório, dentro dos tetos (3.6, 1.7)."""
 
-import json
 import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from goblinshift.processing.recipe import ItemRejectionCode
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
     CollectionError,
@@ -14,61 +14,15 @@ from goblinshift.runs.worker.collection import (
     OutputLimits,
     collect_outputs,
 )
-
-RECIPE = "csv-janitor"
-PACKAGE = "csv-janitor.zip"
-
-
-def ok_item(position: int, *outputs: str, warnings: int = 0) -> dict[str, Any]:
-    return {
-        "position": position,
-        "original_name": f"{position}.csv",
-        "status": "ok",
-        "outputs": list(outputs),
-        "counts": {},
-        "warnings": [{"code": "W", "detail": "d"}] * warnings,
-    }
-
-
-def rejected_item(position: int, code: str = "CSV_STRUCTURE_INVALID") -> dict[str, Any]:
-    return {
-        "position": position,
-        "original_name": f"{position}.csv",
-        "status": "rejected",
-        "code": code,
-        "reason": "r",
-    }
-
-
-def duplicate_item(position: int, duplicate_of: object) -> dict[str, Any]:
-    return {
-        "position": position,
-        "original_name": f"{position}.png",
-        "status": "duplicate",
-        "duplicate_of": duplicate_of,
-    }
-
-
-def write_out(out: Path, items: list[dict[str, Any]], files: dict[str, bytes]) -> None:
-    out.mkdir()
-    for name, data in files.items():
-        (out / name).parent.mkdir(exist_ok=True)
-        (out / name).write_bytes(data)
-    ok = [item for item in items if item["status"] == "ok"]
-    report = {
-        "schema_version": 1,
-        "recipe_id": "csv-janitor",
-        "recipe_version": 1,
-        "summary": {
-            "inputs": len(items),
-            "ok": len(ok),
-            "rejected": len(items) - len(ok),
-            "outputs": sum(len(item["outputs"]) for item in ok),
-        },
-        "items": items,
-        "warnings": [],
-    }
-    (out / "report.json").write_text(json.dumps(report), encoding="utf-8")
+from tests.runs.collection_support import (
+    RECIPE,
+    duplicate_item,
+    ok_item,
+    rejected_item,
+    summary_of,
+    write_out,
+    write_report,
+)
 
 
 def test_coleta_saidas_na_ordem_do_relatorio(tmp_path: Path) -> None:
@@ -388,125 +342,126 @@ def test_sem_relatorio_e_recusado(tmp_path: Path) -> None:
         collect_outputs(out, recipe_id=RECIPE, input_count=0)
 
 
-# --- Pacote comum (ADR 019): manifest.json e <recipe_id>.zip na raiz, fora do conteúdo ---------
+# --- Código e summary do relatório: dado do sandbox, parse contra o catálogo e os itens --------
 
 
-def write_package(out: Path, manifest: bytes = b"{}", package: bytes = b"PK") -> None:
-    (out / "manifest.json").write_bytes(manifest)
-    (out / PACKAGE).write_bytes(package)
-
-
-def test_manifesto_e_pacote_sao_coletados_a_parte_do_conteudo(tmp_path: Path) -> None:
+@pytest.mark.parametrize("code", list(ItemRejectionCode))
+def test_codigo_de_rejeicao_do_catalogo_e_aceito(tmp_path: Path, code: ItemRejectionCode) -> None:
     out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, manifest=b"{}\n", package=b"PK zip")
+    write_out(out, [ok_item(0, "a.csv"), rejected_item(1, code)], {"a.csv": b"1"})
 
-    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=2)
 
-    assert [f.name for f in collected.outputs] == ["a.csv"]
-    assert collected.manifest_file is not None
-    assert (collected.manifest_file.name, collected.manifest_file.size) == ("manifest.json", 3)
-    assert collected.package_file is not None
-    assert (collected.package_file.name, collected.package_file.size) == (PACKAGE, 6)
-    assert collected.package_file.path == out / PACKAGE
+    assert collected.report.items[1].code is code
 
 
-def test_executor_anterior_a_fatia_5_nao_deixa_pacote(tmp_path: Path) -> None:
-    # Runs aceitas antes do deploy continuam na imagem fixada nelas, que não empacota.
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param("EXECUTOR_UNAVAILABLE", id="codigo-de-execucao"),
+        pytest.param("OUTPUT_LIMIT_EXCEEDED", id="falha-deterministica"),
+        pytest.param("unsupported_format", id="caixa-errada"),
+        pytest.param("UNSUPPORTED_FORMAT ", id="espaco"),
+        pytest.param("<script>alert(1)</script>", id="html"),
+        pytest.param("X" * 100_000, id="enorme"),
+        pytest.param(7, id="numero"),
+        pytest.param(None, id="nulo"),
+    ],
+)
+def test_codigo_de_rejeicao_fora_do_catalogo_e_recusado(tmp_path: Path, code: object) -> None:
     out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
+    write_out(out, [ok_item(0, "a.csv"), rejected_item(1, code)], {"a.csv": b"1"})
 
-    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-    assert collected.manifest_file is None
-    assert collected.package_file is None
+    with pytest.raises(CollectionError, match="code"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
 
 
-@pytest.mark.parametrize("only", ["manifest.json", PACKAGE])
-def test_manifesto_sem_pacote_ou_pacote_sem_manifesto_e_recusado(tmp_path: Path, only: str) -> None:
+def test_summary_sai_dos_itens_conferidos(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1", only: b"x"})
+    items = [ok_item(0, "a.png", "b.png"), rejected_item(1), duplicate_item(2, 0)]
+    write_out(out, items, {"a.png": b"1", "b.png": b"2"})
 
-    with pytest.raises(CollectionError, match="juntos"):
-        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=3)
+
+    assert collected.report.summary.as_json() == {
+        "inputs": 3,
+        "ok": 1,
+        "rejected": 1,
+        "duplicates": 1,
+        "outputs": 2,
+    }
 
 
-def test_pacote_com_nome_de_outra_receita_e_arquivo_nao_citado(tmp_path: Path) -> None:
+def test_summary_sem_duplicates_do_executor_anterior_a_fatia_5_e_aceito(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1", "image-forge.zip": b"PK"})
-    write_package(out)
+    items = [ok_item(0, "a.csv"), rejected_item(1)]
+    write_out(out, items, {"a.csv": b"1"})
+    old = summary_of(items)
+    del old["duplicates"]
+    write_report_again(out, items, old)
 
-    with pytest.raises(CollectionError, match="citadas"):
-        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+    assert collected.report.summary.duplicates == 0
 
 
-def test_manifesto_e_pacote_nao_contam_no_teto_de_arquivos_nem_de_bytes(tmp_path: Path) -> None:
+def write_report_again(out: Path, items: list[dict[str, Any]], summary: object) -> None:
+    (out / "report.json").unlink()
+    write_report(out, items, summary)
+
+
+_ABSENT = object()
+
+
+def _summary_with(**changes: object) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "inputs": 2,
+        "ok": 1,
+        "rejected": 1,
+        "duplicates": 0,
+        "outputs": 1,
+    }
+    summary.update(changes)
+    return {key: value for key, value in summary.items() if value is not _ABSENT}
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        pytest.param(_summary_with(extra=1), id="chave-desconhecida"),
+        pytest.param(_summary_with(inputs=_ABSENT), id="sem-inputs"),
+        pytest.param(_summary_with(outputs=_ABSENT), id="sem-outputs"),
+        pytest.param(_summary_with(ok="1"), id="texto"),
+        pytest.param(_summary_with(ok=True), id="booleano"),
+        pytest.param(_summary_with(ok=1.0), id="fracao"),
+        pytest.param(_summary_with(rejected=-1), id="negativo"),
+        pytest.param(_summary_with(outputs=10**30), id="enorme"),
+        pytest.param(_summary_with(ok=2), id="nao-confere-com-os-itens"),
+        pytest.param(_summary_with(duplicates=1), id="duplicata-inexistente"),
+        pytest.param(_summary_with(nested={"a": 1}), id="objeto-aninhado"),
+        pytest.param([], id="lista"),
+    ],
+)
+def test_summary_fora_do_schema_ou_dos_itens_e_recusado(tmp_path: Path, summary: object) -> None:
     out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, manifest=b"{" + b" " * 100 + b"}", package=b"P" * 100)
+    items = [ok_item(0, "a.csv"), rejected_item(1)]
+    write_out(out, items, {"a.csv": b"1"})
+    write_report_again(out, items, summary)
 
-    collected = collect_outputs(
-        out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(max_files=1, max_bytes=1)
-    )
-
-    assert [f.name for f in collected.outputs] == ["a.csv"]
+    with pytest.raises(CollectionError, match="summary"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
 
 
-def test_manifesto_no_teto_passa_e_acima_e_falha_deterministica(tmp_path: Path) -> None:
+def test_summary_sem_duplicates_com_duplicata_e_recusado(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, manifest=b"1234")
+    items = [ok_item(0, "a.png"), duplicate_item(1, 0)]
+    write_out(out, items, {"a.png": b"1"})
+    summary = summary_of(items)
+    del summary["duplicates"]
+    write_report_again(out, items, summary)
 
-    collect_outputs(out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(manifest_max_bytes=4))
-    with pytest.raises(OutputLimitError) as caught:
-        collect_outputs(
-            out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(manifest_max_bytes=3)
-        )
-
-    assert caught.value.code is ErrorCode.REPORT_LIMIT_EXCEEDED
-
-
-def test_pacote_no_teto_passa_e_acima_e_falha_deterministica(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out, package=b"12345")
-
-    collect_outputs(out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(package_max_bytes=5))
-    with pytest.raises(OutputLimitError) as caught:
-        collect_outputs(
-            out, recipe_id=RECIPE, input_count=1, limits=OutputLimits(package_max_bytes=4)
-        )
-
-    assert caught.value.code is ErrorCode.OUTPUT_LIMIT_EXCEEDED
-
-
-def test_tetos_padrao_do_pacote_sao_os_de_1_7() -> None:
-    limits = OutputLimits()
-
-    assert (limits.manifest_max_bytes, limits.package_max_bytes) == (8 * 1024**2, 512 * 1024**2)
-
-
-@pytest.mark.parametrize("name", ["manifest.json", PACKAGE])
-def test_manifesto_ou_pacote_que_e_symlink_e_recusado(tmp_path: Path, name: str) -> None:
-    out = tmp_path / "out"
-    (tmp_path / "segredo").write_bytes(b"x")
-    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
-    write_package(out)
-    (out / name).unlink()
-    (out / name).symlink_to(tmp_path / "segredo")
-
-    with pytest.raises(CollectionError, match="regular"):
-        collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-
-def test_manifest_json_dentro_de_um_grupo_e_conteudo_comum(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    write_out(out, [ok_item(0, "text/manifest.json")], {"text/manifest.json": b"{}"})
-
-    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-    assert [f.name for f in collected.outputs] == ["text/manifest.json"]
-    assert collected.manifest_file is None
+    with pytest.raises(CollectionError, match="summary"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
 
 
 # --- Nomes que o executor deixou em out/ (dado não confiável, regras de 3.6) -----------------
@@ -534,6 +489,7 @@ def test_nome_de_180_bytes_e_aceito(tmp_path: Path) -> None:
         "images/a\u2066b\u2069.jpg",  # isolates
         "images/é.jpg",  # fora de NFC
         "a" * 177 + ".csv",
+        "images/a\\b.jpg",  # barra invertida: separador no Windows e em leitores de ZIP
     ],
 )
 def test_nome_fora_das_regras_de_saida_e_recusado(tmp_path: Path, name: str) -> None:

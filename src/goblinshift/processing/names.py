@@ -32,7 +32,7 @@ def safe_stem(original_name: str, fallback: str) -> str:
     nome inteiro. NFC; separadores e controles viram `_`; pontos iniciais saem (sem arquivo
     oculto nem `..`); vazio vira `fallback`.
     """
-    stem, _ = _split(original_name)
+    stem, _ = split_extension(original_name)
     return _sanitized(stem).lstrip(".") or fallback
 
 
@@ -41,18 +41,23 @@ def extension_of(original_name: str) -> str:
 
     Separadores e controles viram `_`. Acima de `MAX_EXTENSION_BYTES` não há extensão.
     """
-    _, extension = _split(original_name)
-    if not extension:
+    _, extension = split_extension(original_name)
+    if extension in ("", "."):
         return ""
-    safe = "." + _sanitized(extension)
+    safe = _sanitized(extension)
     return safe if len(safe.encode()) <= MAX_EXTENSION_BYTES else ""
 
 
-def _split(name: str) -> tuple[str, str]:
+def split_extension(name: str) -> tuple[str, str]:
+    """Radical e extensão com o ponto (".csv"), separados no último ponto.
+
+    Sem ponto, ou com o ponto só no início (`.bashrc`), não há extensão. Nome terminado em ponto
+    tem extensão "." (o `OutputDir` a preserva; `extension_of` a descarta).
+    """
     stem, dot, extension = name.rpartition(".")
     if not dot or not stem:
         return name, ""
-    return stem, extension
+    return stem, f".{extension}"
 
 
 def _sanitized(text: str) -> str:
