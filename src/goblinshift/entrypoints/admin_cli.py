@@ -179,7 +179,7 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
         if found:
             _audit(session, AuditEventType.ACCOUNT_UNBLOCKED, args.user, datetime.now(UTC))
     if not found:
-        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe ou tem exclusão pedida")
     print(f"conta {args.user} liberada", file=sys.stderr)
     return EXIT_OK
 

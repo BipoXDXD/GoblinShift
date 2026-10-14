@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
 from goblinshift.files.storage import FileStorage
-from goblinshift.identity import Scope, authenticate_api_key, block_account
+from goblinshift.identity import (
+    Scope,
+    authenticate_api_key,
+    block_account,
+    request_account_deletion,
+)
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
@@ -255,6 +260,22 @@ def test_unblock_de_conta_inexistente_sai_como_nao_encontrada(
     exit_code, _, _ = run(capsys, "unblock", "--user", str(uuid7()))
 
     assert exit_code == EXIT_NOT_FOUND
+
+
+def test_unblock_de_conta_em_exclusao_e_recusado_sem_auditoria(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    run(capsys, "block", "--user", user_id)
+    with unit_of_work(factory) as session:
+        request_account_deletion(session, UUID(user_id), datetime.now(UTC))
+
+    exit_code, _, err = run(capsys, "unblock", "--user", user_id)
+
+    assert exit_code == EXIT_NOT_FOUND
+    assert "exclusão" in err
+    assert status_of(factory, user_id) == "blocked"
+    assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
 
 
 def test_list_users_imprime_id_emissor_estado_e_criacao_sem_sujeito(
