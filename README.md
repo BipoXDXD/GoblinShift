@@ -121,6 +121,14 @@ cd deploy && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passare
 
 O teste monta o `docker run` das sondas com o perfil de produção do `executor-ctl` (`deploy/executor_ctl/profile.py`) e confere que o serviço responde no socket. Rode com o worker parado: a área de trabalho só admite uma tentativa por vez. O próprio teste para o container `maintenance` durante as sondas e o religa no fim, porque a manutenção removeria a sonda como tentativa sem registro ([ADR 017](docs/adr/017-aceitacao-suspende-a-manutencao.md)); se o teste for morto à força, ele já terá impresso o `docker start` que religa a manutenção.
 
+### Pior caso do Image Forge (na VPS, antes de publicar uma versão)
+
+Mede 100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas numa tentativa com o perfil de produção (gVisor, 1 vCPU, 2 GiB), sem passar pela API: constrói a imagem do executor do checkout, gera as fotos dentro dela e roda a tentativa na área de trabalho real, com a manutenção parada como nas sondas ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)). Rode com o worker parado:
+
+```bash
+cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.image_forge_load   # PASSOU só dentro de 600 s
+```
+
 ### Teste de caos do worker (na VPS)
 
 Prova o critério de pronto da fatia 4 ([plano, 3.7 e 3.9](docs/GoblinShiftPlan.md#s3-9)): o worker morto por SIGKILL e pausado além do lease em cada fronteira do protocolo (logo depois do claim, com o executor rodando e durante a coleta e publicação), sem publicação duplicada nem container órfão. Roda contra a pilha de produção, com a fila vazia (o teste derruba o worker e recusa começar se houver execução não terminal, container de executor ou área de trabalho suja):

@@ -29,7 +29,7 @@ O Image Forge decodifica, converte e grava JPEG e PNG, com perfis de cor e EXIF.
 - Atualizar o Pillow é uma mudança de três lugares conferida por teste (dois pins e o lock) e exige uma imagem nova do executor; Runs já aceitas continuam na imagem fixada nelas.
 - O grupo `executor` não entra no `uv sync` padrão: só o Dockerfile o usa.
 - O executor chama `image_forge.inspection.configure_pillow()` uma vez no `main`: `MAX_IMAGE_PIXELS` em 24 MP e `DecompressionBombWarning` como erro, segunda barreira atrás da validação do cabeçalho.
-- Pior caso (100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas, `scripts/measure-image-forge.sh`): referência local de 133 s (Mac, worker com Runner local, sem gVisor nem limite de CPU, 2026-10-14). A medição que vale, sob gVisor e 1 vCPU, é feita na VPS antes do merge da fatia 5. Se não couber nos 10 min da tentativa, o `max_inputs` da v1 do Image Forge cai antes de a versão chegar à `main`, e o número medido é registrado aqui.
+- Pior caso (100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas, `scripts/measure-image-forge.sh`): referência local de 133 s (Mac, worker com Runner local, sem gVisor nem limite de CPU, 2026-10-14). A medição que vale, sob gVisor e 1 vCPU, é feita na VPS antes do merge da fatia 5 com `sudo python3 -B -m acceptance.image_forge_load` (perfil de produção, sem passar pela API, porque o deploy só implanta a `main`) e, depois do deploy, com `scripts/measure-image-forge.sh`. Se não couber nos 10 min da tentativa, o `max_inputs` da v1 do Image Forge cai antes de a versão chegar à `main`, e o número medido é registrado aqui.
 
 ## Como verificar
 
