@@ -116,16 +116,10 @@ def download_artifact(
     return DownloadResponse(
         file,
         size=ticket.size_bytes,
-        filename=_download_name(ticket),
+        filename=ticket.file_name,
         timeouts=timeouts_of(request),
         on_close=finish,
     )
-
-
-def _download_name(ticket: DownloadTicket) -> str:
-    # O nome lógico da saída pertence ao RunOutput (`runs`); até ele existir, o anexo leva o
-    # papel e o ID, sem nada do usuário.
-    return f"{ticket.role.value}-{ticket.artifact_id}"
 
 
 def _finish_download(factory: sessionmaker[Session], ticket: DownloadTicket, slot_id: UUID) -> None:

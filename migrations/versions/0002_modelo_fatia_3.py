@@ -202,6 +202,7 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("object_id", sa.Uuid(), nullable=False),
         sa.Column("role", sa.Text(), nullable=False),
+        sa.Column("file_name", sa.Text(), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -210,6 +211,9 @@ def upgrade() -> None:
         ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.CheckConstraint(
+            "octet_length(file_name) BETWEEN 1 AND 240", name=op.f("artifact_file_name_check")
+        ),
         sa.CheckConstraint("role IN ('output', 'report')", name=op.f("artifact_role_check")),
         sa.ForeignKeyConstraint(
             ["owner_id", "object_id"],

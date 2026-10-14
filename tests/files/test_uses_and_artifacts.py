@@ -50,7 +50,9 @@ def published_artifact(
     sha256, size = storage.create_exclusive(candidate.storage_key, [content], max_bytes=100)
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
-        view = publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT)
+        view = publish_artifact(
+            session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv"
+        )
     return view.id
 
 
@@ -171,7 +173,9 @@ def test_artefato_publicado_expira_em_48_horas(
 
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
-        view = publish_artifact(session, owner, candidate.object_id, ArtifactRole.REPORT)
+        view = publish_artifact(
+            session, owner, candidate.object_id, ArtifactRole.REPORT, "report.json"
+        )
 
     assert view.role is ArtifactRole.REPORT
     assert (view.size_bytes, view.sha256) == (5, hashlib.sha256(b"saida").digest())
@@ -184,7 +188,7 @@ def test_publicar_objeto_ainda_pendente_e_recusado(factory: sessionmaker[Session
         candidate = create_candidate_object(session, owner, uuid.uuid4(), uuid.uuid4(), 1)
 
     with pytest.raises(ObjectNotAvailableError), unit_of_work(factory) as session:
-        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT)
+        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv")
 
 
 def test_artefato_do_dono_traz_metadados_e_disponibilidade(
@@ -295,7 +299,7 @@ def test_upload_excluido_reaproveitado_como_artefato_some_das_entradas_mas_nao_d
     view = ready_upload(factory, storage, owner, b"compartilhado")
     with unit_of_work(factory) as session:
         [ready] = lock_ready_uploads(session, owner, [view.id])
-        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT)
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
 
     with unit_of_work(factory) as session:
         request_deletion(session, owner, view.id)

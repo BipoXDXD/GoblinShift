@@ -102,9 +102,8 @@ def test_download_entrega_o_conteudo_com_os_cabecalhos_de_protecao(
     assert response.status_code == 200
     assert response.content == content
     assert set(response.headers.keys()) == DOWNLOAD_HEADERS
-    name = f"output-{artifact_id}"
     assert response.headers["content-disposition"] == (
-        f"attachment; filename=\"{name}\"; filename*=UTF-8''{name}"
+        "attachment; filename=\"saida.csv\"; filename*=UTF-8''saida.csv"
     )
     assert response.headers["content-type"] == "application/octet-stream"
     assert response.headers["content-length"] == str(len(content))
