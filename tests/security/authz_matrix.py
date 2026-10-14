@@ -62,13 +62,11 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("POST", "/auth/logout-all"): Rule(Policy.SESSION),
     # Conta.
     ("GET", f"{API}/me"): Rule(Policy.ANY_CREDENTIAL),
-    ("DELETE", f"{API}/me"): Rule(Policy.RECENT_SESSION, pending="C"),
-    # Chaves pela sessão (Frente C).
-    ("GET", f"{API}/api-keys"): Rule(Policy.SESSION, pending="C"),
-    ("POST", f"{API}/api-keys"): Rule(Policy.RECENT_SESSION, pending="C"),
-    ("DELETE", f"{API}/api-keys/{{key_id}}"): Rule(
-        Policy.SESSION, resource_param="key_id", pending="C"
-    ),
+    ("DELETE", f"{API}/me"): Rule(Policy.RECENT_SESSION),
+    # Chaves pela sessão.
+    ("GET", f"{API}/api-keys"): Rule(Policy.SESSION),
+    ("POST", f"{API}/api-keys"): Rule(Policy.RECENT_SESSION),
+    ("DELETE", f"{API}/api-keys/{{key_id}}"): Rule(Policy.SESSION, resource_param="key_id"),
     # Arquivos.
     ("POST", f"{API}/uploads"): _scope(Scope.FILES_WRITE),
     ("PUT", f"{API}/uploads/{{upload_id}}/content"): _scope(Scope.FILES_WRITE, "upload_id"),
