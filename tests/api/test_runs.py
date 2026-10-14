@@ -645,8 +645,18 @@ def test_resultados_publicados_em_ordem_de_posicao(
     assert results["published"] is True
     assert results["expires_at"] is not None
     assert results["artifacts"] == [
-        {"artifact_id": str(table), "logical_name": "dados.csv", "role": "output"},
-        {"artifact_id": str(report), "logical_name": "report.json", "role": "report"},
+        {
+            "artifact_id": str(table),
+            "logical_name": "dados.csv",
+            "role": "output",
+            "file_name": "output-final.dat",
+        },
+        {
+            "artifact_id": str(report),
+            "logical_name": "report.json",
+            "role": "report",
+            "file_name": "report-final.dat",
+        },
     ]
 
 
@@ -687,6 +697,7 @@ def publish(
                     owner_id=owner_id,
                     object_id=object_id,
                     role=role,
+                    file_name=f"{role}-final.dat",
                     expires_at=BASE_TIME + timedelta(hours=48),
                 )
                 .returning(artifact.c.id)

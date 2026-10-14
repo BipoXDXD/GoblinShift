@@ -82,6 +82,8 @@ class ResultReference:
     artifact_id: UUID
     logical_name: str
     role: ArtifactRole
+    # Nome com que o download entrega o arquivo.
+    file_name: str
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,7 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             run_output.c.artifact_id,
             run_output.c.logical_name,
             artifact.c.role,
+            artifact.c.file_name,
             artifact.c.expires_at,
         )
         .join(
@@ -160,7 +163,8 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
         .order_by(run_output.c.position)
     ).all()
     references = tuple(
-        ResultReference(row.artifact_id, row.logical_name, ArtifactRole(row.role)) for row in rows
+        ResultReference(row.artifact_id, row.logical_name, ArtifactRole(row.role), row.file_name)
+        for row in rows
     )
     # Publicados na mesma transação, os artefatos vencem juntos; o mínimo é o prazo seguro.
     expires_at = min((row.expires_at for row in rows), default=None)
