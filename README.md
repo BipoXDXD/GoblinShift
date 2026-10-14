@@ -112,6 +112,18 @@ Para cada um dos 6 cenários, o teste emite uma chave de curta duração (só na
 
 Os testes do `executor-ctl` com Docker real usam o runtime de `GS_TEST_RUNTIME` (padrão `runc`); com o gVisor instalado: `GS_TEST_RUNTIME=runsc uv run pytest -m executor_ctl tests/executor_ctl`.
 
+## Backup do PostgreSQL (fora da VPS)
+
+Dump diário cifrado com `age`, enviado ao Backblaze B2 com uma chave só de escrita, e restauração testada todo mês no GitHub Actions ([ADR 9xx](docs/adr/9xx-backup-externo.md)). Antes de ligar:
+
+1. Gere o par `age` fora da VPS (`age-keygen -o goblinshift-backup.key`), ponha a chave pública em `deploy/backup/age-recipients.txt` por PR e guarde a privada no gerenciador de senhas e no secret `BACKUP_AGE_IDENTITY`.
+2. No B2: bucket privado com regra de ciclo de vida de 30 dias, uma chave só de escrita para a VPS e uma só de leitura e listagem para a restauração.
+3. No healthchecks.io: os checks "backup diário" (1 dia, tolerância de 2 h) e "restauração mensal" (31 dias).
+4. Na VPS: `sudo bash deploy/backup/install.sh` cria `/srv/goblinshift/secrets/backup.env` vazio; preencha e rode de novo para ligar o timer. Teste já com `sudo systemctl start goblinshift-pg-backup.service`.
+5. No GitHub: environment `backup-restore` com os secrets `BACKUP_S3_READ_KEY_ID`, `BACKUP_S3_READ_KEY`, `BACKUP_AGE_IDENTITY` e `RESTORE_HEALTHCHECK_URL`, e as variáveis do repositório `BACKUP_S3_ENDPOINT`, `BACKUP_S3_REGION` e `BACKUP_S3_BUCKET`. Rode o workflow "Restauração testada do backup" à mão uma vez e registre o resultado aqui.
+
+Os testes (`uv run pytest tests/backup`) rodam os scripts reais contra PostgreSQL e S3 locais (SeaweedFS) e precisam de `age` e `curl` no PATH.
+
 ## Execução de ponta a ponta
 
 Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, o script faz upload, execução idempotente, acompanhamento, resultados e download do CSV Janitor só com `curl`, e confere a saída byte a byte:
@@ -136,5 +148,5 @@ src/goblinshift/
   presets/           presets (próximas fatias)
 migrations/          Alembic (expand/contract)
 docker/              imagem da aplicação, Nginx e OpenTelemetry Collector
-deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI e teste de aceitação do ambiente
+deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco e teste de aceitação do ambiente
 ```
