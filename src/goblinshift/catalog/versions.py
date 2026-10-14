@@ -20,6 +20,9 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
+from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
+from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
+from goblinshift.processing import downloads_detox, image_forge
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
 
@@ -121,7 +124,36 @@ CSV_JANITOR_V1 = RecipeVersion(
     limits={"max_inputs": csv_janitor.MAX_TABLES, **dataclasses.asdict(Limits())},
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1])
+_IMAGE_LIMITS = image_forge.Limits()
+
+IMAGE_FORGE_V1 = RecipeVersion(
+    recipe_id=image_forge.RECIPE_ID,
+    version=image_forge.VERSION,
+    status=VersionStatus.CURRENT,
+    parameters_model=ImageForgeV1Parameters,
+    limits={
+        "max_inputs": image_forge.MAX_INPUTS,
+        "max_pixels": _IMAGE_LIMITS.max_pixels,
+        "max_axis_px": _IMAGE_LIMITS.max_axis,
+        "thumbnail_box_px": _IMAGE_LIMITS.thumbnail_box,
+    },
+)
+
+# O teto do lote fica abaixo dos 480 MiB de conteúdo de saída (1.7): o Detox copia cada entrada
+# aceita. A aceitação só passa a impô-lo com as cotas (fatia 6); até lá, o excesso falha na
+# receita com OUTPUT_LIMIT_EXCEEDED (ambiguidade A12 do plano da fatia 5).
+DOWNLOADS_DETOX_V1 = RecipeVersion(
+    recipe_id=downloads_detox.RECIPE_ID,
+    version=downloads_detox.VERSION,
+    status=VersionStatus.CURRENT,
+    parameters_model=DownloadsDetoxV1Parameters,
+    limits={
+        "max_inputs": downloads_detox.MAX_INPUTS,
+        "max_total_input_bytes": downloads_detox.MAX_TOTAL_INPUT_BYTES,
+    },
+)
+
+CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1])
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:
