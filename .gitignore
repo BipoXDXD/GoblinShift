@@ -22,3 +22,6 @@ build/
 
 # Worktrees temporários do Claude Code
 .claude/worktrees/
+
+# Estado local do servidor MCP Serena
+.serena/
