@@ -7,9 +7,27 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from starlette.middleware.sessions import SessionMiddleware
 
-from goblinshift.entrypoints.api import artifacts, health, me, runs, runs_cancel, uploads
+from goblinshift.entrypoints.api import (
+    api_keys,
+    artifacts,
+    auth_login,
+    auth_session,
+    health,
+    me,
+    me_delete,
+    runs,
+    runs_cancel,
+    uploads,
+)
+from goblinshift.entrypoints.api.cookies import (
+    LOGIN_COOKIE,
+    LOGIN_COOKIE_MAX_AGE_S,
+    LOGIN_COOKIE_PATH,
+)
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
+from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
@@ -42,6 +60,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
         docs_url="/docs",
         openapi_url="/openapi.json",
+        # Uma documentação só, sem o redirect OAuth do Swagger, que nada usa: cada rota pública
+        # a mais entra na allowlist da matriz de autorização.
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url=None,
     )
     app.state.settings = settings
     app.state.executor_image = executor_image
@@ -54,9 +76,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.transfer_timeouts = TransferTimeouts()
 
     install_problem_handlers(app)
+    # Cookie de login (ADR 024): só o marcador do estado do Authlib, cujo conteúdo fica em
+    # `login_state`. Middleware ASGI puro, que não toca respostas fora de `/auth`.
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=web_identity.login_cookie_key.decode(),
+        session_cookie=LOGIN_COOKIE,
+        max_age=LOGIN_COOKIE_MAX_AGE_S,
+        path=LOGIN_COOKIE_PATH,
+        same_site="lax",
+        https_only=True,
+    )
+    # Por fora dos demais: os cabeçalhos valem também para as respostas de erro.
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.environment == "production")
+    auth_login.install(app, web_identity)
+
     app.include_router(health.router)
+    app.include_router(auth_login.router)
+    app.include_router(auth_session.router)
     api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
     api.include_router(me.router)
+    api.include_router(me_delete.router)
+    api.include_router(api_keys.router)
     api.include_router(uploads.router)
     api.include_router(artifacts.router)
     api.include_router(runs.router)
