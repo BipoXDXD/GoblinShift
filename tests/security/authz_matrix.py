@@ -2,11 +2,7 @@
 
 Negar por padrão: toda rota exige credencial, salvo as marcadas `PUBLIC`, que formam a allowlist
 explícita. `test_authz_matrix.py` enumera as rotas registradas no app e exige igualdade com as
-entradas sem `pending`: rota nova sem entrada reprova a suíte, e entrada sem rota também.
-
-`pending` diz qual frente da fatia 6 ainda vai registrar a rota. Enquanto houver `pending`, os
-testes de comportamento da rota ficam em `xfail(strict=True)`; a frente que a registra apaga o
-`pending`, e os testes passam a valer de verdade.
+entradas: rota nova sem entrada reprova a suíte, e entrada sem rota também.
 """
 
 from dataclasses import dataclass
@@ -34,8 +30,6 @@ class Rule:
     scope: Scope | None = None
     # Parâmetro do caminho que identifica um recurso com dono: outra conta recebe 404.
     resource_param: str | None = None
-    # Frente da fatia 6 que ainda vai registrar a rota ("A" a "D"); None = registrada.
-    pending: str | None = None
 
     def __post_init__(self) -> None:
         if (self.policy is Policy.SCOPE) != (self.scope is not None):
@@ -67,6 +61,8 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("GET", f"{API}/api-keys"): Rule(Policy.SESSION),
     ("POST", f"{API}/api-keys"): Rule(Policy.RECENT_SESSION),
     ("DELETE", f"{API}/api-keys/{{key_id}}"): Rule(Policy.SESSION, resource_param="key_id"),
+    # Catálogo de receitas.
+    ("GET", f"{API}/catalog"): Rule(Policy.ANY_CREDENTIAL),
     # Arquivos.
     ("POST", f"{API}/uploads"): _scope(Scope.FILES_WRITE),
     ("PUT", f"{API}/uploads/{{upload_id}}/content"): _scope(Scope.FILES_WRITE, "upload_id"),
@@ -90,7 +86,3 @@ def entries(*policies: Policy) -> list[tuple[str, str, Rule]]:
         for (method, path), rule in sorted(MATRIX.items())
         if not policies or rule.policy in policies
     ]
-
-
-def registered_entries() -> set[tuple[str, str]]:
-    return {key for key, rule in MATRIX.items() if rule.pending is None}

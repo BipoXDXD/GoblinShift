@@ -1,8 +1,7 @@
 """Matriz de autorização aplicada às rotas registradas (docs/GoblinShiftPlan.md, 1.6 e 3.6).
 
 Cada teste de acesso confere o status e o código do problem+json, e que o corpo não traz dado
-da conta. Rotas ainda `pending` ficam em `xfail(strict=True)`: quando a frente as registra e os
-testes passam, o xfail estrito reprova até o `pending` sair da matriz.
+da conta.
 """
 
 import re
@@ -22,7 +21,7 @@ from goblinshift.identity import Scope
 from goblinshift.platform.settings import Settings
 from tests.api.support import assert_problem
 from tests.identity.support import ALL_SCOPES, new_key, new_user, prepare_database
-from tests.security.authz_matrix import MATRIX, Policy, Rule, entries, registered_entries
+from tests.security.authz_matrix import MATRIX, Policy, Rule, entries
 
 # HEAD acompanha GET nas rotas do Starlette e não é uma operação à parte.
 _IMPLICIT_METHODS = {"HEAD"}
@@ -50,15 +49,10 @@ def _concrete(path: str) -> str:
 
 
 def _cases(*policies: Policy) -> list[object]:
-    params: list[object] = []
-    for method, path, rule in entries(*policies):
-        marks = (
-            [pytest.mark.xfail(strict=True, reason=f"rota da Frente {rule.pending}")]
-            if rule.pending
-            else []
-        )
-        params.append(pytest.param(method, path, rule, id=f"{method} {path}", marks=marks))
-    return params
+    return [
+        pytest.param(method, path, rule, id=f"{method} {path}")
+        for method, path, rule in entries(*policies)
+    ]
 
 
 # --- Enumeração (sem banco) -------------------------------------------------------------------
@@ -71,9 +65,9 @@ def offline_app() -> FastAPI:
 
 def test_toda_rota_registrada_esta_na_matriz(offline_app: FastAPI) -> None:
     registered = _registered_routes(offline_app)
-    expected = registered_entries()
+    expected = set(MATRIX)
 
-    assert registered - expected == set(), "rota registrada fora da matriz (ou ainda pending)"
+    assert registered - expected == set(), "rota registrada fora da matriz"
     assert expected - registered == set(), "entrada da matriz sem rota registrada"
 
 
