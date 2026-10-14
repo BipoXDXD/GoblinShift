@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from goblinshift.processing.recipe import ItemRejectionCode
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
     CollectionError,
@@ -30,7 +31,7 @@ def ok_item(position: int, *outputs: str, warnings: int = 0) -> dict[str, Any]:
     }
 
 
-def rejected_item(position: int, code: str = "CSV_STRUCTURE_INVALID") -> dict[str, Any]:
+def rejected_item(position: int, code: object = "CSV_STRUCTURE_INVALID") -> dict[str, Any]:
     return {
         "position": position,
         "original_name": f"{position}.csv",
@@ -54,17 +55,28 @@ def write_out(out: Path, items: list[dict[str, Any]], files: dict[str, bytes]) -
     for name, data in files.items():
         (out / name).parent.mkdir(exist_ok=True)
         (out / name).write_bytes(data)
+    write_report(out, items)
+
+
+def summary_of(items: list[dict[str, Any]]) -> dict[str, int]:
+    """O `summary` que o executor calcula dos itens."""
     ok = [item for item in items if item["status"] == "ok"]
+    rejected = [item for item in items if item["status"] == "rejected"]
+    return {
+        "inputs": len(items),
+        "ok": len(ok),
+        "rejected": len(rejected),
+        "duplicates": len(items) - len(ok) - len(rejected),
+        "outputs": sum(len(item["outputs"]) for item in ok),
+    }
+
+
+def write_report(out: Path, items: list[dict[str, Any]], summary: object = None) -> None:
     report = {
         "schema_version": 1,
         "recipe_id": "csv-janitor",
         "recipe_version": 1,
-        "summary": {
-            "inputs": len(items),
-            "ok": len(ok),
-            "rejected": len(items) - len(ok),
-            "outputs": sum(len(item["outputs"]) for item in ok),
-        },
+        "summary": summary_of(items) if summary is None else summary,
         "items": items,
         "warnings": [],
     }
@@ -386,6 +398,128 @@ def test_sem_relatorio_e_recusado(tmp_path: Path) -> None:
 
     with pytest.raises(CollectionError, match=r"report\.json"):
         collect_outputs(out, recipe_id=RECIPE, input_count=0)
+
+
+# --- Código e summary do relatório: dado do sandbox, parse contra o catálogo e os itens --------
+
+
+@pytest.mark.parametrize("code", list(ItemRejectionCode))
+def test_codigo_de_rejeicao_do_catalogo_e_aceito(tmp_path: Path, code: ItemRejectionCode) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv"), rejected_item(1, code)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+    assert collected.report.items[1].code is code
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param("EXECUTOR_UNAVAILABLE", id="codigo-de-execucao"),
+        pytest.param("OUTPUT_LIMIT_EXCEEDED", id="falha-deterministica"),
+        pytest.param("unsupported_format", id="caixa-errada"),
+        pytest.param("UNSUPPORTED_FORMAT ", id="espaco"),
+        pytest.param("<script>alert(1)</script>", id="html"),
+        pytest.param("X" * 100_000, id="enorme"),
+        pytest.param(7, id="numero"),
+        pytest.param(None, id="nulo"),
+    ],
+)
+def test_codigo_de_rejeicao_fora_do_catalogo_e_recusado(tmp_path: Path, code: object) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv"), rejected_item(1, code)], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="code"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+
+def test_summary_sai_dos_itens_conferidos(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    items = [ok_item(0, "a.png", "b.png"), rejected_item(1), duplicate_item(2, 0)]
+    write_out(out, items, {"a.png": b"1", "b.png": b"2"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=3)
+
+    assert collected.report.summary.as_json() == {
+        "inputs": 3,
+        "ok": 1,
+        "rejected": 1,
+        "duplicates": 1,
+        "outputs": 2,
+    }
+
+
+def test_summary_sem_duplicates_do_executor_anterior_a_fatia_5_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    items = [ok_item(0, "a.csv"), rejected_item(1)]
+    write_out(out, items, {"a.csv": b"1"})
+    old = summary_of(items)
+    del old["duplicates"]
+    write_report_again(out, items, old)
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+    assert collected.report.summary.duplicates == 0
+
+
+def write_report_again(out: Path, items: list[dict[str, Any]], summary: object) -> None:
+    (out / "report.json").unlink()
+    write_report(out, items, summary)
+
+
+_ABSENT = object()
+
+
+def _summary_with(**changes: object) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "inputs": 2,
+        "ok": 1,
+        "rejected": 1,
+        "duplicates": 0,
+        "outputs": 1,
+    }
+    summary.update(changes)
+    return {key: value for key, value in summary.items() if value is not _ABSENT}
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        pytest.param(_summary_with(extra=1), id="chave-desconhecida"),
+        pytest.param(_summary_with(inputs=_ABSENT), id="sem-inputs"),
+        pytest.param(_summary_with(outputs=_ABSENT), id="sem-outputs"),
+        pytest.param(_summary_with(ok="1"), id="texto"),
+        pytest.param(_summary_with(ok=True), id="booleano"),
+        pytest.param(_summary_with(ok=1.0), id="fracao"),
+        pytest.param(_summary_with(rejected=-1), id="negativo"),
+        pytest.param(_summary_with(outputs=10**30), id="enorme"),
+        pytest.param(_summary_with(ok=2), id="nao-confere-com-os-itens"),
+        pytest.param(_summary_with(duplicates=1), id="duplicata-inexistente"),
+        pytest.param(_summary_with(nested={"a": 1}), id="objeto-aninhado"),
+        pytest.param([], id="lista"),
+    ],
+)
+def test_summary_fora_do_schema_ou_dos_itens_e_recusado(tmp_path: Path, summary: object) -> None:
+    out = tmp_path / "out"
+    items = [ok_item(0, "a.csv"), rejected_item(1)]
+    write_out(out, items, {"a.csv": b"1"})
+    write_report_again(out, items, summary)
+
+    with pytest.raises(CollectionError, match="summary"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+
+def test_summary_sem_duplicates_com_duplicata_e_recusado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    items = [ok_item(0, "a.png"), duplicate_item(1, 0)]
+    write_out(out, items, {"a.png": b"1"})
+    summary = summary_of(items)
+    del summary["duplicates"]
+    write_report_again(out, items, summary)
+
+    with pytest.raises(CollectionError, match="summary"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
 
 
 # --- Pacote comum (ADR 019): manifest.json e <recipe_id>.zip na raiz, fora do conteúdo ---------
