@@ -18,6 +18,13 @@ SANDBOX_TASKS_LIMIT = 256
 # RLIMIT_FSIZE por arquivo: o dobro do maior arquivo de saída (ZIP de 512 MiB), para caber
 # temporários; o teto da área inteira continua sendo o filesystem de 6 GiB (ADR 005).
 FILE_SIZE_LIMIT_BYTES = 1024**3
+# Log do container (stdout e stderr do executor) com limite próprio, sem depender do daemon.json
+# do host compartilhado. O executor só escreve ali o diagnóstico de falha (uso, integridade,
+# traceback), alguns KiB; 1 MiB num arquivo só basta e, com uma tentativa por vez, é o teto do
+# que uma receita consegue gravar na raiz do host pelo stdout. Com um arquivo só, o driver
+# `local` exige compressão desligada (não há arquivo girado para comprimir).
+LOG_DRIVER = "local"
+LOG_OPTIONS = {"max-size": "1m", "max-file": "1", "compress": "false"}
 # UID sem conta no host, para que nada do executor coincida com um usuário real da VPS.
 EXECUTOR_UID = 61000
 
@@ -61,6 +68,8 @@ def run_options(
         f"--cpus={CPUS}",
         f"--ulimit=fsize={FILE_SIZE_LIMIT_BYTES}",
         "--pull=never",
+        f"--log-driver={LOG_DRIVER}",
+        *(f"--log-opt={key}={value}" for key, value in LOG_OPTIONS.items()),
         f"--mount=type=bind,src={work_dir},dst={WORK_MOUNT}",
         f"--mount=type=bind,src={work_dir / INPUTS_DIR},dst={WORK_MOUNT}/{INPUTS_DIR},readonly",
     ]

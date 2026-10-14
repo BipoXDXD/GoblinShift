@@ -87,6 +87,7 @@ markers = [
     "integration: precisa de Docker (PostgreSQL real via Testcontainers)",
     "executor_image: constrói e roda a imagem do executor (precisa de Docker; runtime em GS_TEST_RUNTIME)",
     "executor_ctl: executor-ctl com Docker real (runtime em GS_TEST_RUNTIME, padrão runc)",
+    "nginx: Nginx real com os templates do repositório (precisa de Docker)",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

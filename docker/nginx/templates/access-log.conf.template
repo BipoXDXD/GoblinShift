@@ -1,0 +1,25 @@
+# Log de acesso sem IP completo nem query string (docs/GoblinShiftPlan.md, 1.8 e 3.7). Fica para
+# o diagnóstico do que não chega ao evento `main` da API: 413 do teto de corpo, 502/504 do upstream.
+# O nome ordena este arquivo antes do default.conf, que usa o formato `privacy` no `access_log`.
+
+# O cliente real só vem do X-Forwarded-For quando quem conecta é o proxy de borda ($from_edge,
+# default.conf); a borda substitui o cabeçalho pelo IP de quem conectou nela.
+map "$from_edge:$http_x_forwarded_for" $client_ip {
+    "~^1:(?<edge_client>.+)$" $edge_client;
+    default                   $remote_addr;
+}
+
+# Truncado como na auditoria: /24 em IPv4, /48 em IPv6. Formato inesperado vira "-", nunca o valor.
+map $client_ip $client_ip_truncated {
+    "~(?<v4_net>\d+\.\d+\.\d+)\.\d+$"                              $v4_net.0;
+    "~*^(?<v6_net>[0-9a-f]{1,4}:[0-9a-f]{1,4}:[0-9a-f]{1,4}):"    $v6_net::;
+    "~*^(?<v6_short>[0-9a-f]{1,4}:[0-9a-f]{1,4}|[0-9a-f]{1,4})::" $v6_short::;
+    "~^::"                                                         ::;
+    default                                                        -;
+}
+
+# Só o caminho ($uri), sem $request, $args nem Referer: a query string pode carregar dados.
+log_format privacy escape=json
+    '{"time":"$time_iso8601","client":"$client_ip_truncated","method":"$request_method",'
+    '"path":"$uri","status":$status,"bytes_sent":$bytes_sent,"request_time":$request_time,'
+    '"upstream_status":"$upstream_status","upstream_response_time":"$upstream_response_time"}';
