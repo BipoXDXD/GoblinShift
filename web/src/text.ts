@@ -60,6 +60,11 @@ export const TEXT = {
     retryAfter: (seconds: number) => `Tente de novo em ${String(seconds)} s.`,
   },
   locale: "pt-BR",
+  theme: {
+    summary: "Tema",
+    legend: "Tema da interface",
+    options: { system: "Sistema", light: "Claro", dark: "Escuro" },
+  },
   home: {
     title: "GoblinShift",
     openWorkbench: (recipe: string) => `Abrir a Bancada da ${recipe}`,
