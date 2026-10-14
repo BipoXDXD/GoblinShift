@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 
 import type { ApiProblem } from "../../api/problem";
 import type { ApiFailure } from "../../api/response";
+import { MAX_RETRY_AFTER_MS } from "../../api/retryAfter";
 import { TEXT } from "../../text";
 
 /** Falha a mostrar: da API, ou `internal` para um defeito da própria interface. */
@@ -16,17 +17,27 @@ export interface FailureDescription {
 
 const PROBLEM_MESSAGES: Record<ApiProblem["code"], string> = TEXT.failure.problems;
 const MS_PER_SECOND = 1_000;
+const MS_PER_MINUTE = 60 * MS_PER_SECOND;
+
+/** Texto da tela para alguns códigos, quando o geral não diz o bastante ali (409 de chaves). */
+export type ProblemMessages = Partial<Record<ApiProblem["code"], string>>;
 
 /**
  * Texto próprio da interface para uma falha. O `title` e o `detail` do problem+json não aparecem:
  * o texto vem do `code`, para a mensagem ser estável, traduzível e nunca expor o que o servidor
  * escreveu para quem integra.
  */
-export function describeFailure(failure: DisplayableFailure): FailureDescription {
+export function describeFailure(
+  failure: DisplayableFailure,
+  messages: ProblemMessages = {},
+): FailureDescription {
   switch (failure.kind) {
     case "problem":
       return {
-        message: withRetryAfter(PROBLEM_MESSAGES[failure.problem.code], failure.retryAfterMs),
+        message: withRetryAfter(
+          messages[failure.problem.code] ?? PROBLEM_MESSAGES[failure.problem.code],
+          failure.retryAfterMs,
+        ),
         requestId: failure.problem.request_id,
       };
     case "unexpected-response":
@@ -40,20 +51,29 @@ export function describeFailure(failure: DisplayableFailure): FailureDescription
   }
 }
 
+/**
+ * Acrescenta a espera pedida. No teto do parse (5 min) o valor real pode ser de horas, como o da
+ * cota diária: a frase seria uma promessa falsa, então fica só o texto do código.
+ */
 function withRetryAfter(message: string, retryAfterMs: number | null): string {
-  if (retryAfterMs === null || retryAfterMs <= 0) {
+  if (retryAfterMs === null || retryAfterMs <= 0 || retryAfterMs >= MAX_RETRY_AFTER_MS) {
     return message;
   }
-  return `${message} ${TEXT.failure.retryAfter(Math.ceil(retryAfterMs / MS_PER_SECOND))}`;
+  const wait =
+    retryAfterMs < MS_PER_MINUTE
+      ? TEXT.failure.retryAfter(Math.ceil(retryAfterMs / MS_PER_SECOND))
+      : TEXT.failure.retryAfterMinutes(Math.ceil(retryAfterMs / MS_PER_MINUTE));
+  return `${message} ${wait}`;
 }
 
 interface ProblemAlertProps {
   readonly failure: DisplayableFailure;
+  readonly messages?: ProblemMessages;
 }
 
 /** Falha mostrada à pessoa, em `role="alert"`, com o código do pedido quando há um. */
-export function ProblemAlert({ failure }: ProblemAlertProps): ReactElement {
-  const { message, requestId } = describeFailure(failure);
+export function ProblemAlert({ failure, messages }: ProblemAlertProps): ReactElement {
+  const { message, requestId } = describeFailure(failure, messages);
   return (
     <div
       role="alert"

@@ -4,6 +4,9 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Os textos legais vêm de docs/legal/ (fonte única, fora de web/); o servidor de dev só serve o
+  // que está na allowlist.
+  server: { fs: { allow: [".", "../docs/legal"] } },
   build: {
     // Sem source map no bundle publicado: o fonte embutido vazaria comentários (ETS item 73).
     sourcemap: false,

@@ -7,7 +7,7 @@ const SERVER_ERROR_MIN = 500;
 /**
  * Política de retry das leituras (`retry` do QueryClient): só falha transitória (rede, timeout,
  * 5xx) tenta de novo. Um 4xx não muda repetindo, e esperar as tentativas atrasaria a resposta
- * certa, como o aviso de login em breve diante do 401.
+ * certa, como o convite para entrar diante do 401.
  */
 export function shouldRetryQuery(failureCount: number, error: Error): boolean {
   return failureCount < MAX_RETRIES && error instanceof ApiError && isTransient(error.failure);

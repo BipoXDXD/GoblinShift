@@ -194,10 +194,14 @@ describe("Histórico", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/indisponível/);
   });
 
-  it("sem login, mostra o aviso de login em breve", async () => {
-    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"));
+  it("sem login, convida a entrar e volta para o Histórico com os filtros", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), "/historico?estado=failed");
 
-    expect(await screen.findByRole("region", { name: "O login chega em breve" })).toBeVisible();
+    const prompt = await screen.findByRole("region", { name: "Entre para continuar" });
+    expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+      "href",
+      "/auth/login/google?return_to=%2Fhistorico%3Festado%3Dfailed",
+    );
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
