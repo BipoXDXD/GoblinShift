@@ -15,6 +15,7 @@ from goblinshift.catalog import (
     VersionStatus,
 )
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
+from goblinshift.processing import downloads_detox, image_forge
 from goblinshift.processing.csv_janitor import (
     CaseMode,
     CaseRule,
@@ -215,3 +216,65 @@ def test_schema_da_variante_fixa_receita_e_versao_e_recusa_campos_extras() -> No
     filter_item = parameters["properties"]["filters"]["items"]
     assert filter_item["additionalProperties"] is False
     assert "$ref" not in json.dumps(schema)
+
+
+# --- Receitas da fatia 5 -------------------------------------------------------------------
+
+
+def test_catalogo_lista_as_tres_receitas_na_versao_1() -> None:
+    keys = {(version.recipe_id, version.version) for version in CATALOG.list_versions()}
+
+    assert keys == {("csv-janitor", 1), ("image-forge", 1), ("downloads-detox", 1)}
+
+
+def test_image_forge_publica_os_limites_de_1_7() -> None:
+    version = CATALOG.get_version("image-forge", 1)
+
+    assert version.status is VersionStatus.CURRENT
+    assert version.limits == {
+        "max_inputs": 100,
+        "max_pixels": 24_000_000,
+        "max_axis_px": 8192,
+        "thumbnail_box_px": 320,
+    }
+
+
+def test_downloads_detox_publica_o_teto_do_lote_abaixo_do_teto_de_saidas() -> None:
+    version = CATALOG.get_version("downloads-detox", 1)
+
+    assert version.status is VersionStatus.CURRENT
+    assert version.limits == {"max_inputs": 100, "max_total_input_bytes": 480 * 1024 * 1024}
+
+
+def test_image_forge_resolve_os_defaults_e_vira_os_params_da_biblioteca() -> None:
+    resolved = CATALOG.resolve("image-forge", 1, {})
+
+    assert resolved == {
+        "jpeg_background": "#FFFFFF",
+        "jpeg_quality": 85,
+        "make_thumbnails": False,
+        "max_height": 1600,
+        "max_width": 1600,
+        "output_format": "preserve",
+    }
+    assert image_forge.params_from_mapping(resolved) == image_forge.Params()
+
+
+def test_downloads_detox_resolve_os_defaults_e_vira_os_params_da_biblioteca() -> None:
+    resolved = CATALOG.resolve("downloads-detox", 1, {})
+
+    assert resolved == {
+        "deduplicate": True,
+        "group_by": "kind",
+        "name_mode": "preserve",
+        "name_prefix": "file",
+    }
+    assert downloads_detox.params_from_mapping(resolved) == downloads_detox.Params()
+
+
+@pytest.mark.parametrize("recipe_id", ["image-forge", "downloads-detox"])
+def test_receita_nova_recusa_campo_desconhecido_no_campo(recipe_id: str) -> None:
+    with pytest.raises(InvalidParametersError) as error:
+        CATALOG.resolve(recipe_id, 1, {"inventado": 1})
+
+    assert [field.location for field in error.value.errors] == ["inventado"]

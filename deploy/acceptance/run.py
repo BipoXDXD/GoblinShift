@@ -21,6 +21,12 @@ mesmas regras da área (`executor_ctl.workarea`), lidas da configuração instal
 conferido à parte; as quatro operações são cobertas pelos testes de integração
 (tests/executor_ctl), que a CI roda sob runsc.
 
+Por serem idênticas a uma tentativa de produção (`<área>/<uuid>` e `gs-exec-<uuid>`) mas sem linha
+no banco, as sondas seriam paradas e removidas pela manutenção no ciclo seguinte (3.4: tentativa
+sem registro é sobra a limpar). Por isso o container `maintenance` do Compose fica parado durante
+as sondas e volta no fim, mesmo se uma sonda quebrar; a volta é conferida e entra no veredito
+(ADR 017).
+
 Usa só a biblioteca padrão e roda no Python do host (3.12 no Ubuntu 24.04).
 """
 
@@ -32,6 +38,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +57,11 @@ WORK_AREA_MIN_USABLE_BYTES = 5.5 * GIB
 STOP_GRACE_S = 10
 APP_PROJECT = "goblinshift"
 APP_SERVICE = "api"
+MAINTENANCE_SERVICE = "maintenance"
+MAINTENANCE_CRITERION = "manutenção religada depois das sondas"
+# Folga para a manutenção terminar o ciclo em curso ao receber SIGTERM: um ciclo pode esperar a
+# parada de um executor (10 s) e consultas de lote com statement_timeout de 30 s.
+MAINTENANCE_STOP_S = 60
 SOCKET_TIMEOUT_S = 10
 PROBE_IMAGE = (
     "python:3.14.8-slim-trixie"
@@ -115,18 +127,82 @@ def main() -> int:
 
     outcomes = [
         check_control_socket(host),
-        *check_identity(run_probe(host, "identity", timeout_s=60)),
-        check_network(run_probe(host, "network", timeout_s=60)),
-        check_disk(run_probe(host, "disk", timeout_s=900)),
-        check_file_size(run_probe(host, "file_size", timeout_s=300)),
-        check_memory(run_probe(host, "memory", timeout_s=180)),
-        check_pids(run_probe(host, "pids", timeout_s=120)),
+        *run_with_maintenance_suspended(lambda: check_probes(host)),
         check_app_without_docker_socket(),
     ]
     for outcome in outcomes:
         verdict = "PASSOU" if outcome.passed else "FALHOU"
         print(f"{verdict}  {outcome.criterion}: {outcome.evidence}")
     return 0 if all(outcome.passed for outcome in outcomes) else 1
+
+
+def check_probes(host: Host) -> list[Outcome]:
+    return [
+        *check_identity(run_probe(host, "identity", timeout_s=60)),
+        check_network(run_probe(host, "network", timeout_s=60)),
+        check_disk(run_probe(host, "disk", timeout_s=900)),
+        check_file_size(run_probe(host, "file_size", timeout_s=300)),
+        check_memory(run_probe(host, "memory", timeout_s=180)),
+        check_pids(run_probe(host, "pids", timeout_s=120)),
+    ]
+
+
+def run_with_maintenance_suspended(
+    probes: Callable[[], list[Outcome]], docker: Callable[..., str] | None = None
+) -> list[Outcome]:
+    """Roda as sondas com a manutenção parada; o último resultado diz se ela voltou ao ar.
+
+    Manutenção que já estava parada fica como estava. Se uma sonda levantar exceção, a manutenção
+    volta antes de a exceção seguir, e uma falha nessa volta é impressa no stderr.
+    """
+    docker = docker or _docker_output
+    containers = _service_ids(docker, MAINTENANCE_SERVICE)
+    if not containers:
+        return [
+            *probes(),
+            Outcome(MAINTENANCE_CRITERION, True, "não estava rodando: deixada como estava"),
+        ]
+    print(
+        f"manutenção parada durante as sondas; se este teste for interrompido à força, "
+        f"religue com: {_restart_command(containers)}\n"
+    )
+    docker("stop", f"--time={MAINTENANCE_STOP_S}", *containers)
+    try:
+        outcomes = probes()
+    except BaseException:
+        restored = _restart_maintenance(docker, containers)
+        if not restored.passed:
+            print(f"FALHOU  {restored.criterion}: {restored.evidence}", file=sys.stderr)
+        raise
+    return [*outcomes, _restart_maintenance(docker, containers)]
+
+
+def _restart_maintenance(docker: Callable[..., str], containers: list[str]) -> Outcome:
+    recovery = f"religue com: {_restart_command(containers)}"
+    try:
+        docker("start", *containers)
+        states = docker(
+            "inspect", "--type=container", "--format={{.State.Running}}", *containers
+        ).split()
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()[-200:]
+        return Outcome(MAINTENANCE_CRITERION, False, f"docker {error.cmd[1]}: {detail}; {recovery}")
+    if states != ["true"] * len(containers):
+        return Outcome(MAINTENANCE_CRITERION, False, f"Running={states}; {recovery}")
+    return Outcome(MAINTENANCE_CRITERION, True, f"container {' '.join(containers)} rodando")
+
+
+def _service_ids(docker: Callable[..., str], service: str) -> list[str]:
+    return docker(
+        "ps",
+        "--quiet",
+        f"--filter=label=com.docker.compose.project={APP_PROJECT}",
+        f"--filter=label=com.docker.compose.service={service}",
+    ).split()
+
+
+def _restart_command(containers: list[str]) -> str:
+    return f"sudo docker start {' '.join(containers)}"
 
 
 def check_control_socket(host: Host) -> Outcome:
@@ -168,6 +244,7 @@ def check_identity(run: ProbeRun) -> list[Outcome]:
     mismatches = _profile_mismatches(config, run.last)
     applied = (
         "rede none, raiz read-only, sem capabilities, no-new-privileges, "
+        f"log {profile.LOG_DRIVER} com teto de {profile.LOG_OPTIONS['max-size']}, "
         f"UID {profile.EXECUTOR_UID}, sem docker.sock; "
         f"/ montado como {run.last.get('root_filesystem')!r}, "
         f"/tmp como {run.last.get('tmp_filesystem')!r}"  # noqa: S108 (texto, não arquivo)
@@ -205,6 +282,9 @@ def _profile_mismatches(config: dict[str, Any], report: dict[str, Any]) -> list[
         for name, limit in expected_ulimits.items()
         if ulimits.get(name) != (limit, limit)
     )
+    expected_log = {"Type": profile.LOG_DRIVER, "Config": profile.LOG_OPTIONS}
+    if config.get("LogConfig") != expected_log:
+        mismatches.append(f"LogConfig={config.get('LogConfig')!r}, esperado {expected_log!r}")
     if "ALL" not in (config.get("CapDrop") or []):
         mismatches.append(f"CapDrop={config.get('CapDrop')!r} sem ALL")
     if "no-new-privileges" not in (config.get("SecurityOpt") or []):
@@ -319,7 +399,7 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     name = profile.container_name(attempt)
     docker = DockerCli()
     area = host.config.work_area
-    _create_attempt_dir(host, attempt)
+    create_attempt_dir(host, attempt)
     try:
         # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
@@ -355,7 +435,7 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     return ProbeRun(state, _json_lines(output), output[-500:], duration_s, timed_out)
 
 
-def _create_attempt_dir(host: Host, attempt: uuid.UUID) -> None:
+def create_attempt_dir(host: Host, attempt: uuid.UUID) -> None:
     """Faz o papel do worker: <area>/<id> e inputs/, com os donos e modos do contrato."""
     work_dir = workarea.attempt_dir(host.config.work_area, attempt)
     inputs = work_dir / profile.INPUTS_DIR
