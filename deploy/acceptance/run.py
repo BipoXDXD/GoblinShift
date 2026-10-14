@@ -1,31 +1,45 @@
 """Teste de aceitação do ambiente do executor (docs/GoblinShiftPlan.md, 3.8; ADRs 004 e 005).
 
 Roda na própria VPS, como root, antes de abrir o serviço e a cada mudança no host (gVisor,
-Docker, kernel ou perfil do executor):
+Docker, kernel, perfil do executor ou executor-ctl), com o worker parado:
 
-    cd /srv/goblinshift/app && sudo python3 -B deploy/acceptance/run.py
+    cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.run
 
-O `-B` evita deixar `__pycache__` do root no checkout, que pertence ao usuário goblinshift.
+O `-B` evita deixar `__pycache__` do root no checkout, que pertence ao usuário goblinshift; o
+`-m` a partir de deploy/ torna importável o pacote do executor-ctl.
 
 Prova, dentro do executor e com os limites de 1.7: container sob runsc com o perfil fixo; sem
 rede; ENOSPC ao encher a área de 6 GiB; RLIMIT_FSIZE por arquivo; morte por falta de memória
-antes de 2 GiB; fork bomb contido em 64 processos; e que a aplicação não alcança o
-/var/run/docker.sock. Sai com 0 só se todos os critérios passarem.
+antes de 2 GiB; fork bomb contido em 64 processos; que a aplicação não alcança o
+/var/run/docker.sock; e que o executor-ctl de produção responde no socket com as permissões do
+contrato. Sai com 0 só se todos os critérios passarem.
+
+As sondas precisam de um comando e de uma montagem a mais (o probe.py), que o protocolo do
+executor-ctl de propósito não aceita. Por isso o teste não passa pelo socket para rodá-las: monta o
+`docker run` com as MESMAS opções do perfil de produção (`executor_ctl.profile.run_options`) e as
+mesmas regras da área (`executor_ctl.workarea`), lidas da configuração instalada. O socket é
+conferido à parte; as quatro operações são cobertas pelos testes de integração
+(tests/executor_ctl), que a CI roda sob runsc.
 
 Usa só a biblioteca padrão e roda no Python do host (3.12 no Ubuntu 24.04).
 """
 
+import grp
 import json
 import os
-import shutil
+import stat
 import subprocess
 import sys
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-import executor_ctl
+from executor_ctl import profile, workarea
+from executor_ctl.client import call
+from executor_ctl.config import DEFAULT_CONFIG_PATH, Config, load_config
+from executor_ctl.docker_cli import DockerCli
 
 GIB = 1024**3
 MIB = 1024**2
@@ -36,6 +50,16 @@ WORK_AREA_MIN_USABLE_BYTES = 5.5 * GIB
 STOP_GRACE_S = 10
 APP_PROJECT = "goblinshift"
 APP_SERVICE = "api"
+SOCKET_TIMEOUT_S = 10
+PROBE_IMAGE = (
+    "python:3.14.8-slim-trixie"
+    "@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170"
+)
+PROBE_SCRIPT = Path(__file__).with_name("probe.py")
+# Dono de <area>/<id> no contrato da fatia 4: o UID do worker, com o grupo gs-exec.
+WORKER_UID = 10001
+ATTEMPT_DIR_MODE = 0o2770
+INPUTS_DIR_MODE = 0o2750
 
 
 @dataclass(frozen=True)
@@ -46,8 +70,28 @@ class Outcome:
 
 
 @dataclass(frozen=True)
+class ExecutorState:
+    """Estado de um container de sonda, como o Docker o relata."""
+
+    running: bool
+    exit_code: int
+    oom_killed: bool
+    # Mensagem do runtime quando o container não terminou por conta própria (vazia se terminou).
+    error: str
+    host_config: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Host:
+    """O que a configuração instalada do executor-ctl diz sobre este host."""
+
+    config: Config
+    group_id: int
+
+
+@dataclass(frozen=True)
 class ProbeRun:
-    state: executor_ctl.ExecutorState
+    state: ExecutorState
     reports: list[dict[str, Any]]
     output_tail: str
     duration_s: float
@@ -65,21 +109,49 @@ def main() -> int:
     print(f"runsc: {_first_line('runsc', '--version')}")
     print(f"Docker: {_first_line('docker', 'version', '--format', '{{.Server.Version}}')}")
     print(f"kernel do host: {os.uname().release}\n")
-    subprocess.run(["docker", "pull", "--quiet", executor_ctl.IMAGE], check=True)
+    config = load_config(DEFAULT_CONFIG_PATH)
+    host = Host(config, grp.getgrnam(config.group).gr_gid)
+    subprocess.run(["docker", "pull", "--quiet", PROBE_IMAGE], check=True)
 
     outcomes = [
-        *check_identity(run_probe("identity", timeout_s=60)),
-        check_network(run_probe("network", timeout_s=60)),
-        check_disk(run_probe("disk", timeout_s=900)),
-        check_file_size(run_probe("file_size", timeout_s=300)),
-        check_memory(run_probe("memory", timeout_s=180)),
-        check_pids(run_probe("pids", timeout_s=120)),
+        check_control_socket(host),
+        *check_identity(run_probe(host, "identity", timeout_s=60)),
+        check_network(run_probe(host, "network", timeout_s=60)),
+        check_disk(run_probe(host, "disk", timeout_s=900)),
+        check_file_size(run_probe(host, "file_size", timeout_s=300)),
+        check_memory(run_probe(host, "memory", timeout_s=180)),
+        check_pids(run_probe(host, "pids", timeout_s=120)),
         check_app_without_docker_socket(),
     ]
     for outcome in outcomes:
         verdict = "PASSOU" if outcome.passed else "FALHOU"
         print(f"{verdict}  {outcome.criterion}: {outcome.evidence}")
     return 0 if all(outcome.passed for outcome in outcomes) else 1
+
+
+def check_control_socket(host: Host) -> Outcome:
+    """O serviço systemd está no ar, com o socket root:gs-exec 0660, e responde ao status."""
+    criterion = "executor-ctl responde no socket"
+    path = host.config.socket
+    try:
+        info = path.lstat()
+        response = call(path, "GET", f"/v1/attempts/{uuid.uuid4()}", timeout_s=SOCKET_TIMEOUT_S)
+    except OSError as error:
+        return Outcome(criterion, False, f"{path}: {type(error).__name__}: {error}")
+    mode = stat.S_IMODE(info.st_mode)
+    permissions_ok = (
+        stat.S_ISSOCK(info.st_mode)
+        and info.st_uid == 0
+        and info.st_gid == host.group_id
+        and mode == 0o660
+    )
+    answered = response.status == 200 and response.body.get("state") == "absent"
+    return Outcome(
+        criterion,
+        permissions_ok and answered,
+        f"dono {info.st_uid}:{info.st_gid} (gs-exec = {host.group_id}), modo {mode:o}; "
+        f"status de tentativa inexistente: HTTP {response.status} {response.body}",
+    )
 
 
 def check_identity(run: ProbeRun) -> list[Outcome]:
@@ -96,27 +168,27 @@ def check_identity(run: ProbeRun) -> list[Outcome]:
     mismatches = _profile_mismatches(config, run.last)
     applied = (
         "rede none, raiz read-only, sem capabilities, no-new-privileges, "
-        f"UID {executor_ctl.EXECUTOR_UID}, sem docker.sock; "
+        f"UID {profile.EXECUTOR_UID}, sem docker.sock; "
         f"/ montado como {run.last.get('root_filesystem')!r}, "
         f"/tmp como {run.last.get('tmp_filesystem')!r}"  # noqa: S108 (texto, não arquivo)
     )
-    profile = Outcome(
+    fixed_profile = Outcome(
         "perfil fixo do executor",
         not mismatches and not run.timed_out,
         "; ".join(mismatches) or applied,
     )
-    return [runtime, profile]
+    return [runtime, fixed_profile]
 
 
 def _profile_mismatches(config: dict[str, Any], report: dict[str, Any]) -> list[str]:
-    memory = executor_ctl.MEMORY_BYTES
+    memory = profile.MEMORY_BYTES
     expected = {
         "NetworkMode": "none",
         "ReadonlyRootfs": True,
-        "PidsLimit": executor_ctl.SANDBOX_TASKS_LIMIT,
+        "PidsLimit": profile.SANDBOX_TASKS_LIMIT,
         "Memory": memory,
         "MemorySwap": memory,
-        "NanoCpus": executor_ctl.CPUS * 1_000_000_000,
+        "NanoCpus": profile.CPUS * 1_000_000_000,
     }
     mismatches = [
         f"{key}={config.get(key)!r}, esperado {value!r}"
@@ -125,8 +197,8 @@ def _profile_mismatches(config: dict[str, Any], report: dict[str, Any]) -> list[
     ]
     ulimits = {u["Name"]: (u["Soft"], u["Hard"]) for u in config.get("Ulimits") or []}
     expected_ulimits = {
-        "fsize": executor_ctl.FILE_SIZE_LIMIT_BYTES,
-        "nproc": executor_ctl.PROCESS_LIMIT,
+        "fsize": profile.FILE_SIZE_LIMIT_BYTES,
+        "nproc": profile.PROCESS_LIMIT,
     }
     mismatches.extend(
         f"ulimit {name}={ulimits.get(name)!r}, esperado {limit}"
@@ -137,7 +209,7 @@ def _profile_mismatches(config: dict[str, Any], report: dict[str, Any]) -> list[
         mismatches.append(f"CapDrop={config.get('CapDrop')!r} sem ALL")
     if "no-new-privileges" not in (config.get("SecurityOpt") or []):
         mismatches.append(f"SecurityOpt={config.get('SecurityOpt')!r} sem no-new-privileges")
-    if report.get("uid") != executor_ctl.EXECUTOR_UID:
+    if report.get("uid") != profile.EXECUTOR_UID:
         mismatches.append(f"UID {report.get('uid')}")
     if report.get("root_write_error") != "EROFS":
         mismatches.append(f"escrita na raiz terminou em {report.get('root_write_error')}")
@@ -181,7 +253,7 @@ def check_file_size(run: ProbeRun) -> Outcome:
     return _judge(
         run,
         "RLIMIT_FSIZE por arquivo",
-        run.last.get("error") == "EFBIG" and written == executor_ctl.FILE_SIZE_LIMIT_BYTES,
+        run.last.get("error") == "EFBIG" and written == profile.FILE_SIZE_LIMIT_BYTES,
         f"{run.last.get('error')} depois de {written / MIB:.0f} MiB num único arquivo",
     )
 
@@ -192,7 +264,7 @@ def check_memory(run: ProbeRun) -> Outcome:
     contained = (
         killed
         and not run.last.get("reached_ceiling", False)
-        and peak_mib * MIB <= executor_ctl.MEMORY_BYTES
+        and peak_mib * MIB <= profile.MEMORY_BYTES
     )
     return _judge(
         run,
@@ -208,7 +280,7 @@ def check_pids(run: ProbeRun) -> Outcome:
     return _judge(
         run,
         "fork bomb contido em 64 processos",
-        run.last.get("error") == "EAGAIN" and forked < executor_ctl.PROCESS_LIMIT,
+        run.last.get("error") == "EAGAIN" and forked < profile.PROCESS_LIMIT,
         f"{forked} processos criados, depois {run.last.get('error')}; "
         f"saída {run.state.exit_code}, erro do runtime {run.state.error!r}",
     )
@@ -242,25 +314,79 @@ def check_app_without_docker_socket() -> Outcome:
     return Outcome(criterion, blocked, evidence or "o socket abriu")
 
 
-def run_probe(probe: str, *, timeout_s: float) -> ProbeRun:
+def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     attempt = uuid.uuid4()
-    _prepare_work_area()
-    started = time.monotonic()
-    executor_ctl.start(attempt, probe)
+    name = profile.container_name(attempt)
+    docker = DockerCli()
+    area = host.config.work_area
+    _create_attempt_dir(host, attempt)
     try:
+        # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
+        prepared = workarea.prepare_for_start(area, attempt, host.group_id)
+        options = profile.run_options(
+            attempt, work_dir=prepared.path, runtime=host.config.runtime, executor_gid=host.group_id
+        )
+        started = time.monotonic()
+        _docker_output(
+            "run",
+            "--detach",
+            *options,
+            "--env=PYTHONDONTWRITEBYTECODE=1",
+            f"--mount=type=bind,src={PROBE_SCRIPT},dst=/opt/gs/probe.py,readonly",
+            PROBE_IMAGE,
+            "python",
+            "/opt/gs/probe.py",
+            probe,
+        )
         timed_out = False
         try:
-            executor_ctl.wait(attempt, timeout_s)
+            subprocess.run(
+                ["docker", "wait", name], check=True, capture_output=True, timeout=timeout_s
+            )
         except subprocess.TimeoutExpired:
             timed_out = True
-            executor_ctl.stop(attempt, STOP_GRACE_S)
+            docker.stop(name, STOP_GRACE_S)
         duration_s = time.monotonic() - started
-        state = executor_ctl.status(attempt)
-        output = executor_ctl.logs(attempt)
+        state = _inspect(name)
+        output = _logs(name)
     finally:
-        executor_ctl.remove(attempt)
-        _clear_work_area()
+        docker.remove(name)
+        workarea.remove_attempt_dir(area, attempt)
     return ProbeRun(state, _json_lines(output), output[-500:], duration_s, timed_out)
+
+
+def _create_attempt_dir(host: Host, attempt: uuid.UUID) -> None:
+    """Faz o papel do worker: <area>/<id> e inputs/, com os donos e modos do contrato."""
+    work_dir = workarea.attempt_dir(host.config.work_area, attempt)
+    inputs = work_dir / profile.INPUTS_DIR
+    for path, mode in ((work_dir, ATTEMPT_DIR_MODE), (inputs, INPUTS_DIR_MODE)):
+        path.mkdir()
+        os.chown(path, WORKER_UID, host.group_id)
+        path.chmod(mode)
+
+
+def _inspect(name: str) -> ExecutorState:
+    [info] = json.loads(_docker_output("inspect", "--type=container", name))
+    state = info["State"]
+    return ExecutorState(
+        running=state["Running"],
+        exit_code=state["ExitCode"],
+        oom_killed=state["OOMKilled"],
+        error=state.get("Error", ""),
+        host_config=info["HostConfig"],
+    )
+
+
+def _logs(name: str) -> str:
+    """Saída do container, com o stderr junto: um traceback da sonda também é evidência."""
+    result = subprocess.run(
+        ["docker", "logs", name],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    return result.stdout
 
 
 def _judge(run: ProbeRun, criterion: str, passed: bool, evidence: str) -> Outcome:
@@ -275,22 +401,6 @@ def _judge(run: ProbeRun, criterion: str, passed: bool, evidence: str) -> Outcom
             f"{run.output_tail!r}",
         )
     return Outcome(criterion, passed, evidence)
-
-
-def _prepare_work_area() -> None:
-    # A raiz do filesystem pertence ao UID do executor, e só a ele.
-    os.chown(executor_ctl.WORK_AREA, executor_ctl.EXECUTOR_UID, executor_ctl.EXECUTOR_UID)
-    executor_ctl.WORK_AREA.chmod(0o700)
-
-
-def _clear_work_area() -> None:
-    for entry in executor_ctl.WORK_AREA.iterdir():
-        if entry.name == "lost+found":
-            continue
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
 
 
 def _json_lines(output: str) -> list[dict[str, Any]]:

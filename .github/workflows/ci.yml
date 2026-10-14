@@ -47,6 +47,47 @@ jobs:
           ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
           git /repo --config /repo/.gitleaks.toml --redact --no-banner
 
+  gvisor:
+    name: Executor sob gVisor
+    needs: [checks]
+    runs-on: ubuntu-24.04
+    env:
+      # Mesma versão da VPS (docs/adr/004-container-gvisor-por-tentativa.md). O repositório do
+      # gVisor publica cada release como uma suíte própria, então a versão fica fixada aqui.
+      GVISOR_SUITE: "20261005"
+      GVISOR_VERSION: "20261005.0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Instalar o runsc (repositório oficial do gVisor, a mesma origem de deploy/gvisor.sh)
+        run: |
+          keyring=/usr/share/keyrings/gvisor-archive-keyring.gpg
+          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update -q
+          sudo apt-get install -yq "runsc=${GVISOR_VERSION}"
+          runsc --version | head -n 1
+      - name: Registrar o runtime runsc no Docker do runner
+        # O runner é efêmero e só roda este job, então reiniciar o Docker aqui não derruba nada.
+        # Na VPS isso nunca se faz: lá o Docker é só recarregado (deploy/gvisor.sh), porque o host
+        # é compartilhado com outro projeto.
+        run: |
+          if ! docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; then
+            sudo runsc install
+          fi
+          sudo systemctl restart docker
+          docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+      - name: Testes do executor-ctl e da imagem do executor sob runsc
+        env:
+          GS_TEST_RUNTIME: runsc
+        # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito: os testes
+        # executor_image sempre existem, então zero testes indica um seletor quebrado.
+        run: uv run pytest -m "executor_ctl or executor_image" -q
+
   image:
     name: Imagem
     needs: [checks, secrets]
@@ -79,9 +120,42 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  executor-image:
+    name: Imagem do executor
+    needs: [checks, secrets]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - id: vars
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/executor.Dockerfile
+          push: true
+          # Mesma tag da imagem da aplicação: o deploy resolve o digest do executor por ela.
+          tags: |
+            ghcr.io/bipoxdxd/goblinshift-executor:${{ steps.vars.outputs.tag }}
+            ghcr.io/bipoxdxd/goblinshift-executor:main
+          # Escopo próprio, para não disputar o cache da imagem da aplicação.
+          cache-from: type=gha,scope=executor
+          cache-to: type=gha,scope=executor,mode=max
+
   deploy:
     name: Deploy na VPS
-    needs: image
+    # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
+    # execuções aceitas sem ter onde rodar.
+    needs: [image, executor-image, gvisor]
     # Só roda depois que a VPS estiver configurada (variáveis do repositório definidas).
     if: vars.VPS_HOST != ''
     runs-on: ubuntu-24.04

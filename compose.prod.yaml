@@ -1,17 +1,44 @@
 # Produção na VPS compartilhada (docs/GoblinShiftPlan.md, 3.8 e ADR 014).
 # O Nginx do GoblinShift entra na rede `edge` no IP reservado a ele, que o trecho do projeto
 # na borda (deploy/edge/conf.d/goblinshift.caddy) usa. Nenhuma porta é publicada pelo projeto.
+#
+# Executor (fatia 4): o worker e a manutenção falam com o executor-ctl do host pelo socket em
+# /run/goblinshift (grupo gs-exec, GID 61001) e preparam a área de trabalho no filesystem de
+# tamanho fixo /srv/goblinshift/exec-work. Nenhum serviço monta o socket do Docker. A imagem do
+# executor (por digest) vem do deploy/release.sh, a mesma para a API, que a fixa na Run.
+x-executor-env: &executor-env
+  GS_RUNNER: executor_ctl
+  GS_EXECUTOR_IMAGE: ${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}
+
+# Sem `create_host_path`: se o executor-ctl ou o filesystem da área não estiverem instalados, o
+# container não sobe, em vez de o Docker criar diretórios vazios no lugar deles.
+x-executor-client: &executor-client
+  group_add: ["61001"]
+  volumes:
+    - type: bind
+      source: /run/goblinshift
+      target: /run/goblinshift
+      bind: {create_host_path: false}
+    - type: bind
+      source: /srv/goblinshift/exec-work
+      target: /var/lib/goblinshift/exec-work
+      bind: {create_host_path: false}
+
 services:
   api:
     environment:
+      <<: *executor-env
       GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
-  # Runner local em produção só com confirmação explícita, até a fatia 4 (ADR 016).
   worker:
+    <<: *executor-client
     environment:
-      GS_ALLOW_LOCAL_RUNNER: "true"
+      <<: *executor-env
+      GS_WORK_ROOT: /var/lib/goblinshift/exec-work
   maintenance:
+    <<: *executor-client
     environment:
-      GS_ALLOW_LOCAL_RUNNER: "true"
+      <<: *executor-env
+      GS_WORK_ROOT: /var/lib/goblinshift/exec-work
   nginx:
     # Sem NET_RAW: um container comprometido na rede edge não forja ARP para assumir o IP da
     # borda, em quem os projetos confiam (ADR 014).

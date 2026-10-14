@@ -5,7 +5,6 @@ Ver docs/GoblinShiftPlan.md, seções 1.6 e 3.2.
 
 from goblinshift.catalog.versions import (
     CATALOG,
-    LOCAL_EXECUTOR_DIGEST,
     Catalog,
     FieldError,
     InvalidParametersError,
@@ -17,7 +16,6 @@ from goblinshift.catalog.versions import (
 
 __all__ = [
     "CATALOG",
-    "LOCAL_EXECUTOR_DIGEST",
     "Catalog",
     "FieldError",
     "InvalidParametersError",

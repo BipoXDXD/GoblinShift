@@ -701,7 +701,7 @@ class Recipe[P](Protocol):
 
 **Demais interfaces:**
 - *Storage* (`files`): `create_exclusive(key, chunks) -> (sha256, size)`, `open(key)`, `stat(key)`, `delete(key)`.
-- *Runner* (`runs`): `start(attempt_id)` idempotente, `status(attempt_id)`, `stop(attempt_id, grace)`, `remove(attempt_id)`. A implementação de produção fala com o `executor-ctl`; a local, em subprocesso, só existe fora de produção e, na VPS, até a fatia 4 e com confirmação explícita ([ADR 016](adr/016-runner-local-na-vps-ate-a-fatia-4.md)).
+- *Runner* (`runs`): `start(attempt_id)` idempotente, `status(attempt_id)`, `stop(attempt_id, grace)`, `remove(attempt_id)`. A implementação de produção fala com o `executor-ctl` e manda no `start` a imagem fixada na Run; a local, em subprocesso, só existe fora de produção (na VPS, valeu até a fatia 4, [ADR 016](adr/016-runner-local-na-vps-ate-a-fatia-4.md), hoje substituído).
 - *Identidade* (`identity`): `authenticate(request) -> Principal(owner_id, scopes, via)`, em que `via` é sessão ou chave; `require_scope` e `require_recent_auth`.
 
 **Abstrações:** as interfaces acima; Strategy pode ser função. Composição/funções puras para filtros, nomes e contagens. Evitar repository genérico, service locator, barramento e classe por endpoint.
@@ -895,6 +895,7 @@ Chaves são enviadas em `Authorization: Bearer`, nunca na URL. API key não é I
 - **Worker confiável:** acessa banco e storage, prepara o diretório da tentativa e coleta os resultados. Não tem acesso ao Docker. Um worker com o socket do Docker teria, na prática, root sobre a VPS, porque quem controla o daemon monta `/` do host num container ("only trusted users should be allowed to control your Docker daemon").
 - **`executor-ctl`:** serviço pequeno do host (systemd, fora do Compose), o único com acesso ao Docker. Expõe a um grupo restrito, por socket Unix, só quatro operações: `start(attempt_id)`, `status(attempt_id)`, `stop(attempt_id, grace)` e `remove(attempt_id)`. Valida o `attempt_id` como UUID, deriva sozinho os caminhos e o nome `gs-exec-{attempt_id}` e usa um perfil fixo de `docker run`: o worker não escolhe imagem, montagens nem opções. `start` é idempotente; se o container já existe, devolve o estado dele.
 - **Executor:** um container novo por tentativa, com imagem fixada por digest, rodando sob gVisor (`--runtime=runsc`, kernel em espaço de usuário), `--network=none`, raiz `--read-only`, `--cap-drop=ALL`, `no-new-privileges`, usuário não-root, `--ulimit nproc` para os processos da receita, `--pids-limit` só como rede de segurança das tarefas do próprio gVisor no host (ADR 015), `--memory` (igual a `--memory-swap`) e `--cpus` com os valores de 1.7. Recebe só as entradas daquela tentativa, montadas somente leitura, e a configuração validada; sem tokens, diretórios pessoais ou credenciais. A API pública não fala com o `executor-ctl`. [D17](GoblinShiftReferencias.md#d-4), [D18](GoblinShiftReferencias.md#d-4).
+  - *Origem do digest:* a CI publica `ghcr.io/bipoxdxd/goblinshift-executor` (de `docker/executor.Dockerfile`) com a mesma tag `sha-<12>` da aplicação; no deploy, `deploy/executor-image.sh` baixa essa tag, lê o digest em `RepoDigests` e o grava na allowlist `/srv/goblinshift/executor/images.json` (novo e anterior), e o `release.sh` o exporta como `GS_EXECUTOR_IMAGE`.
 
 **Disco com limite efetivo.** O Docker só aplica `--storage-opt size` em XFS com `pquota`, e um tmpfs com teto consumiria a RAM do próprio executor. Por isso a área de trabalho (temporários + saídas) é um filesystem ext4 com o tamanho fixado em 1.7, criado como imagem e montado por loop no host em `/srv/goblinshift/exec-work`.
 - Como só existe uma tentativa física por vez, o filesystem inteiro é a cota da tentativa: encher o disco falha com `ENOSPC` dentro do sandbox, sem afetar banco, storage ou sistema.
@@ -902,6 +903,17 @@ Chaves são enviadas em `Authorization: Bearer`, nunca na URL. API key não é I
 - Dentro do container, `RLIMIT_FSIZE` limita o tamanho de cada arquivo.
 
 **Parada.** `stop` envia SIGTERM, espera a carência (até 10 s) e mata o container; `status` confirma o término antes de a execução virar `canceled` ou `failed`. Container e área de trabalho só são removidos depois da coleta, ou do descarte, persistidos no banco.
+
+**Protocolo do `executor-ctl`.** HTTP/1.1 sobre o socket `/run/goblinshift/executor-ctl.sock` (root, grupo `gs-exec`, modo 0660), uma requisição por conexão, corpo JSON de até 1 KiB com `Content-Length` e prazo de leitura de 5 s. O `attempt_id` só vale na forma canônica do UUID (senão `400`); o único dado do cliente é a imagem, uma referência com digest conferida contra `/srv/goblinshift/executor/images.json`, relido a cada `start`. Erros: `{"error": "<código>", "detail": "..."}`.
+
+| Operação | Requisição | Resposta |
+|---|---|---|
+| start | `POST /v1/attempts/{id}/start` `{"image": "<ref>@sha256:<hex>"}` | `200` Status; idempotente pelo nome. `403 image_not_allowed`, `409 work_area_dirty` / `work_dir_missing`, `503 docker_unavailable` |
+| status | `GET /v1/attempts/{id}` | `200` Status |
+| stop | `POST /v1/attempts/{id}/stop` `{"grace_s": 0..10}` | `200` Status após SIGTERM, carência e SIGKILL; ausente ou terminado é sucesso |
+| remove | `DELETE /v1/attempts/{id}` | `204`; apaga container e `<area>/<id>`; repetir é sucesso; `409 still_running` com o container vivo |
+
+Status: `{"state": "absent"|"created"|"running"|"exited", "exit_code", "oom_killed", "started_at", "finished_at"}`. Implementação em `deploy/executor_ctl/` (só biblioteca padrão, Python do host), instalada por `deploy/executor-ctl/install.sh` como `goblinshift-executor-ctl.service`.
 
 A coleta ocorre após encerrar os escritores. Aceitar apenas arquivos regulares na árvore autorizada; rejeitar symlinks, hardlinks, dispositivos e caminhos externos. Limitar bytes e quantidade durante a leitura. Validar conteúdo derivado em contexto isolado quando necessário; relatório do executor também recebe validação de schema. FFmpeg/ffprobe não recebem URLs, shell ou flags livres.
 
@@ -1099,7 +1111,7 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 013 | OpenObserve auto-hospedado como backend de telemetria          | Honeycomb gratuito; Grafana Cloud gratuito; SigNoz                         | Leve, SQL sobre os eventos, dados na VPS e sem custo; Grafana Cloud gratuito guarda só 14 dias e o SigNoz pede 4–8 GB de RAM. Confirmado pela medição da fatia 0 |
 | 014 | Proxy de borda do host, compartilhado pelos projetos, com TLS por domínio | Cada projeto publicar a própria porta; o Nginx do GoblinShift atender também o outro projeto | Só um processo ouve na 80/443; manter a borda fora dos projetos evita que um deploy derrube o outro. Caddy, com TLS automático, um trecho por projeto em `conf.d` e destino por IP reservado (escolhido com o primeiro domínio, 2026-10-13) |
 | 015 | Limite de processos sob gVisor: `--ulimit nproc=64` na receita e `--pids-limit=256` como rede de segurança | Só `--pids-limit` (64 ou calibrado em ~160) | O `--pids-limit` conta as tarefas do gVisor no host (31 ociosas, ~2 por processo) e mata o sandbox; o RLIMIT_NPROC dá `EAGAIN` no 64º processo. Medido na fatia 1 |
-| 016 | Runner local em subprocesso na VPS até a fatia 4, só com confirmação explícita; serviço fechado (chaves do `gs-admin`) | Fatia 3 pronta só localmente                                               | O critério de 3.9 exige `curl` na VPS e o gVisor real só chega na fatia 4. Risco aceito: só o administrador tem chave e a receita é Python puro; removido na fatia 4 |
+| 016 | *Substituído na fatia 4.* Runner local em subprocesso na VPS até a fatia 4, só com confirmação explícita; serviço fechado (chaves do `gs-admin`) | Fatia 3 pronta só localmente                                               | O critério de 3.9 exige `curl` na VPS e o gVisor real só chega na fatia 4. Na fatia 4, produção só aceita o `executor-ctl` e a confirmação `GS_ALLOW_LOCAL_RUNNER` foi removida |
 
 [↑ Sumário](#sumario)
 
