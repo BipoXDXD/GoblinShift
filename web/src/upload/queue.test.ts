@@ -111,11 +111,11 @@ describe("retryOnRateLimit", () => {
     vi.useFakeTimers();
     const attempt = vi
       .fn<() => Promise<string>>()
-      .mockRejectedValueOnce(problemError("RATE_LIMITED", 1_000))
+      .mockRejectedValueOnce(problemError("RATE_LIMITED", 4_000))
       .mockResolvedValueOnce("ok");
 
     const pending = retryOnRateLimit(attempt, { ...policy, random: () => 0.5 });
-    await vi.advanceTimersByTimeAsync(1_049);
+    await vi.advanceTimersByTimeAsync(4_199);
     expect(attempt).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
 
@@ -131,6 +131,24 @@ describe("retryOnRateLimit", () => {
 
     const pending = retryOnRateLimit(attempt, policy);
     await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(pending).resolves.toBe("ok");
+  });
+
+  it.each([
+    ["zero", 0],
+    ["menor que o padrão", 500],
+  ])("não volta antes do intervalo padrão com Retry-After %s", async (_label, retryAfterMs) => {
+    vi.useFakeTimers();
+    const attempt = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(problemError("RATE_LIMITED", retryAfterMs))
+      .mockResolvedValueOnce("ok");
+
+    const pending = retryOnRateLimit(attempt, policy);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(attempt).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
 
     await expect(pending).resolves.toBe("ok");
   });
