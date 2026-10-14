@@ -1,13 +1,14 @@
 """Parâmetros do Image Forge (docs/GoblinShiftPlan.md, 1.2).
 
-`Params` nasce válido. `params_from_mapping` converte o JSON já resolvido pelo catálogo, que traz
-todos os campos com defaults; por isso a recusa de opção de JPEG enviada com saída PNG (1.1:
-"recusar combinações incompatíveis") só pode ser decidida na fronteira que sabe o que o cliente
-mandou de fato, com `reject_inapplicable_options`.
+`Params` nasce válido, inclusive na combinação (1.1: "recusar combinações incompatíveis"): com
+`output_format: png` nenhuma saída é JPEG, então `jpeg_quality` e `jpeg_background` fora do default
+são recusados. A regra compara com o default, e não com "o cliente enviou o campo", porque a forma
+resolvida pelo catálogo sempre traz os defaults: repetir uma execução PNG com os parâmetros
+registrados continua válido.
 """
 
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from enum import StrEnum
 from typing import ClassVar, Self
@@ -19,7 +20,6 @@ MIN_JPEG_QUALITY = 60
 MAX_JPEG_QUALITY = 95
 DEFAULT_JPEG_QUALITY = 85
 MAX_CHANNEL = 255
-JPEG_ONLY_OPTIONS = ("jpeg_quality", "jpeg_background")
 
 
 class InvalidParametersError(ValueError):
@@ -76,6 +76,22 @@ class Params:
         _require_range("max_width", self.max_width, MIN_SIDE, MAX_SIDE)
         _require_range("max_height", self.max_height, MIN_SIDE, MAX_SIDE)
         _require_range("jpeg_quality", self.jpeg_quality, MIN_JPEG_QUALITY, MAX_JPEG_QUALITY)
+        if self.output_format is OutputFormat.PNG:
+            self._require_jpeg_options_at_default()
+
+    def _require_jpeg_options_at_default(self) -> None:
+        changed = [
+            name
+            for name, default in (
+                ("jpeg_quality", DEFAULT_JPEG_QUALITY),
+                ("jpeg_background", WHITE),
+            )
+            if getattr(self, name) != default
+        ]
+        if changed:
+            raise InvalidParametersError(
+                f"{', '.join(changed)} só vale para saídas JPEG; output_format é png"
+            )
 
 
 def params_from_mapping(raw: Mapping[str, object]) -> Params:
@@ -93,20 +109,6 @@ def params_from_mapping(raw: Mapping[str, object]) -> Params:
         ),
         make_thumbnails=_boolean(raw.get("make_thumbnails", False), "make_thumbnails"),
     )
-
-
-def reject_inapplicable_options(output_format: OutputFormat, sent: Collection[str]) -> None:
-    """Recusa opção de JPEG enviada explicitamente quando nenhuma saída pode ser JPEG.
-
-    Com `preserve`, as entradas JPEG continuam saindo JPEG, então as opções se aplicam.
-    """
-    if output_format is not OutputFormat.PNG:
-        return
-    inapplicable = [option for option in JPEG_ONLY_OPTIONS if option in sent]
-    if inapplicable:
-        raise InvalidParametersError(
-            f"{', '.join(inapplicable)} só vale para saídas JPEG; output_format é png"
-        )
 
 
 _KNOWN_OPTIONS = frozenset(field.name for field in fields(Params))
