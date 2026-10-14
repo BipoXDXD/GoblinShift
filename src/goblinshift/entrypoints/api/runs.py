@@ -24,6 +24,7 @@ from goblinshift.entrypoints.api.problems import (
     ProblemCode,
     ProblemDetails,
 )
+from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.states import ArtifactRole
@@ -222,6 +223,12 @@ def create_run(
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None
+    record_run_accepted(
+        accepted.run_id,
+        run_command.recipe_id,
+        run_command.recipe_version,
+        replayed=accepted.replayed,
+    )
     view = _read_run(session, principal.owner_id, accepted.run_id)
     response.headers["Location"] = request.app.url_path_for(
         get_run_route.__name__, run_id=str(accepted.run_id)

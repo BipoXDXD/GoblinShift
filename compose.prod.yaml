@@ -29,6 +29,7 @@ services:
     environment:
       <<: *executor-env
       GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
   worker:
     <<: *executor-client
     environment:
