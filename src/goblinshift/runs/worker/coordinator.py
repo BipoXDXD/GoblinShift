@@ -6,23 +6,28 @@ espera: cada escrita é uma transação curta que começa travando a Run com o t
 o coordenador recebe `LostFencing`, registra e para sem escrever mais nada.
 
 Passos:
-1. `prepare`: copia as entradas do storage para `inputs/`, conferindo SHA-256 e tamanho, e
-   escreve `job.json` com os parâmetros fixados na aceitação.
-2. `start`: confere que ninguém pediu parada, chama `runner.start` e registra `ExecutorStarted`
-   (a partir daqui a tentativa conta como física) e a fase `processing`.
+1. `prepare`: o Runner cria a área vazia; as entradas do storage são copiadas para `inputs/`,
+   conferindo SHA-256 e tamanho, e `job.json` recebe os parâmetros fixados na aceitação.
+2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
+   registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
+   `processing`.
 3. `supervise`: renova o lease a cada terço do prazo, grava o progresso, aplica o prazo vencido
-   e, se a Run foi para `stopping` (cancelamento ou prazo), pede `stop` ao Runner.
-4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3) ou transitória
-   (demais, inclusive o teto de 10 min). A publicação condiciona o `UPDATE` à geração, a
-   `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não afetar a linha, o
-   motivo é relido e os candidatos são descartados.
+   e, se a Run foi para `stopping` (cancelamento ou prazo) ou a tentativa passou do teto de
+   duração, pede `stop` ao Runner. Runner fora do ar não interrompe a espera: o lease segue
+   renovado e a consulta se repete (3.5: execuções aguardam dentro dos prazos).
+4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3, ou memória
+   estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
+   `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
+   afetar a linha, o motivo é relido e os candidatos são descartados.
+5. `remove`: só depois de o desfecho estar no banco. Se o Runner falhar aqui, a área fica para a
+   limpeza da manutenção.
 """
 
 import hashlib
 import json
 import logging
+import os
 import random
-import shutil
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -86,6 +91,10 @@ EXIT_SUCCEEDED = 0
 EXIT_RECIPE_FAILURE = 3
 COPY_CHUNK_BYTES = 1024 * 1024
 FAILURE_MAX_BYTES = 64 * 1024
+# Arquivos que o worker escreve para o executor, que os lê pelo grupo (contrato da fatia 4).
+WORKER_FILE_MODE = 0o640
+# Teto de cada tentativa (1.7, "Duração"); é duração, medida com o relógio monotônico.
+DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
 
@@ -101,6 +110,7 @@ class CoordinatorConfig:
     lease: timedelta
     status_poll: timedelta = timedelta(seconds=0.2)
     stop_grace: timedelta = timedelta(seconds=10)
+    attempt_timeout: timedelta = DEFAULT_ATTEMPT_TIMEOUT
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
     @property
@@ -159,8 +169,10 @@ class Coordinator:
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
         try:
-            self._runner.start(claimed.attempt_id)
+            self._runner.start(claimed.attempt_id, claimed.executor_image)
         except RunnerError as error:
+            # Toda recusa do start é de infraestrutura, inclusive imagem fora da allowlist do
+            # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
             logger.warning("executor não iniciou", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
         self.record_start(claimed)
@@ -174,10 +186,8 @@ class Coordinator:
                 contents = held_input_contents(session, claimed.owner_id, claimed.input_upload_ids)
         except HeldContentMissingError as error:
             raise PreparationError(str(error)) from error
-        work_dir = self._runner.work_dir(claimed.attempt_id)
-        shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir = self._runner.create_work_dir(claimed.attempt_id)
         inputs_dir = work_dir / "inputs"
-        inputs_dir.mkdir(parents=True)
         entries = [
             self._copy_input(content, position, inputs_dir)
             for position, content in enumerate(contents)
@@ -188,7 +198,8 @@ class Coordinator:
             "parameters": claimed.parameters,
             "inputs": entries,
         }
-        (work_dir / "job.json").write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
+        with _create_for_executor(work_dir / "job.json") as target:
+            target.write(json.dumps(job, ensure_ascii=False).encode("utf-8"))
 
     def _copy_input(
         self, content: HeldContent, position: int, inputs_dir: Path
@@ -199,7 +210,7 @@ class Coordinator:
         try:
             with (
                 self._storage.open(content.storage_key) as source,
-                (inputs_dir / name).open("xb") as target,
+                _create_for_executor(inputs_dir / name) as target,
             ):
                 for chunk in _chunks(source):
                     digest.update(chunk)
@@ -241,19 +252,39 @@ class Coordinator:
 
     def supervise(self, claimed: ClaimedAttempt) -> ExecutorStatus:
         """Espera o executor terminar, renovando o lease; pede `stop` se a Run vai parar."""
+        started = time.monotonic()
         last_renew = float("-inf")
         while True:
-            status = self._runner.status(claimed.attempt_id)
-            if not status.is_running:
+            status = self._observe(claimed)
+            if status is not None and not status.is_running:
                 return status
             if time.monotonic() - last_renew >= self._config.renew_every.total_seconds():
                 last_renew = time.monotonic()
                 if self.renew_lease(claimed) is Status.STOPPING:
-                    stopped = self._runner.stop(claimed.attempt_id, self._config.stop_grace)
+                    stopped = self._try_stop(claimed)
                     # Sem confirmação de término não há desfecho: o lease segue renovado.
-                    if not stopped.is_running:
+                    if stopped is not None and not stopped.is_running:
                         return stopped
+            if time.monotonic() - started >= self._config.attempt_timeout.total_seconds():
+                stopped = self._try_stop(claimed)
+                if stopped is not None and not stopped.is_running:
+                    return replace(stopped, timed_out=True)
             time.sleep(self._config.status_poll.total_seconds())
+
+    def _observe(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
+        """Estado do executor; `None` se o Runner não respondeu (a espera continua)."""
+        try:
+            return self._runner.status(claimed.attempt_id)
+        except RunnerError as error:
+            logger.warning("executor sem estado", extra={"fields": _ids(claimed, error)})
+            return None
+
+    def _try_stop(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
+        try:
+            return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
+        except RunnerError as error:
+            logger.warning("executor não parou", extra={"fields": _ids(claimed, error)})
+            return None
 
     def renew_lease(self, claimed: ClaimedAttempt) -> Status:
         """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status."""
@@ -311,6 +342,15 @@ class Coordinator:
     # 4. Desfecho -----------------------------------------------------------------------
 
     def finish(self, claimed: ClaimedAttempt, status: ExecutorStatus) -> Applied:
+        if status.oom_killed:
+            # 1.6: memória estourada é limite de recurso; repetir daria o mesmo.
+            return self._conclude(
+                claimed,
+                lambda _loaded: DeterministicFailure(
+                    claimed.generation, ErrorCode.RESOURCE_LIMIT_EXCEEDED
+                ),
+                attempt_error=ErrorCode.RESOURCE_LIMIT_EXCEEDED,
+            )
         if status.timed_out or status.exit_code not in (EXIT_SUCCEEDED, EXIT_RECIPE_FAILURE):
             return self.fail_transiently(claimed)
         if status.exit_code == EXIT_RECIPE_FAILURE:
@@ -441,15 +481,24 @@ class Coordinator:
         """Sem fencing, a tentativa não é mais desta instância: só o próprio executor é parado.
 
         Nada vai para o banco. O executor tem o nome desta Attempt, que nenhuma tentativa nova
-        reutiliza, então pará-lo nunca atinge o trabalho de quem assumiu.
+        reutiliza, então pará-lo nunca atinge o trabalho de quem assumiu. Se o Runner falhar, a
+        manutenção encontra a área da tentativa encerrada e termina o serviço.
         """
-        status = self._runner.stop(claimed.attempt_id, self._config.stop_grace)
-        if not status.is_running:
-            self._runner.remove(claimed.attempt_id)
+        stopped = self._try_stop(claimed)
+        if stopped is not None and not stopped.is_running:
+            self._try_remove(claimed)
 
     def remove_work(self, claimed: ClaimedAttempt) -> None:
-        if not self._runner.status(claimed.attempt_id).is_running:
+        """Remove executor e área; chamado só depois de o desfecho estar no banco."""
+        status = self._observe(claimed)
+        if status is not None and not status.is_running:
+            self._try_remove(claimed)
+
+    def _try_remove(self, claimed: ClaimedAttempt) -> None:
+        try:
             self._runner.remove(claimed.attempt_id)
+        except RunnerError as error:
+            logger.warning("área de trabalho não removida", extra={"fields": _ids(claimed, error)})
 
     def _conclude(
         self,
@@ -523,6 +572,11 @@ class Coordinator:
         if code not in {c.value for c in DETERMINISTIC_CODES}:
             return None
         return ErrorCode(code)
+
+
+def _create_for_executor(path: Path) -> BinaryIO:
+    """Cria o arquivo novo, legível pelo grupo do executor (o modo não depende do umask)."""
+    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, WORKER_FILE_MODE), "wb")
 
 
 def _deadline_instead(loaded: LoadedRun, refused: Refused) -> Transition:

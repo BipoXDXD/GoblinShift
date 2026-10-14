@@ -213,7 +213,12 @@ def create_run(
         return _validate(run_command)
     try:
         accepted = accept_run(
-            session, principal.owner_id, run_command, idempotency_key, _current_traceparent()
+            session,
+            principal.owner_id,
+            run_command,
+            idempotency_key,
+            _current_traceparent(),
+            executor_image=request.app.state.executor_image,
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None

@@ -12,10 +12,10 @@ import signal
 import threading
 from types import FrameType
 
-from goblinshift.entrypoints.worker import RunnerNotAllowedError, build_runner
+from goblinshift.entrypoints.worker import build_runner
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.platform.telemetry import configure_logging
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.worker.runner import Runner
@@ -31,7 +31,7 @@ def main() -> int:
     settings = Settings()
     try:
         runner = build_runner(settings)
-    except RunnerNotAllowedError as error:
+    except ExecutorConfigError as error:
         logger.error("manutenção não sobe: %s", error)
         return EXIT_CONFIGURATION
     shutdown = threading.Event()
