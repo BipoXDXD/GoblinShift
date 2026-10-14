@@ -1,19 +1,18 @@
 """Google e GitHub falsos, navegador e conferências para os testes do login.
 
-A sessão web é da Frente B. Enquanto `start_session` e companhia forem stubs, `FakeSessions`
-cumpre o contrato delas (`identity/sessions.py`) para o callback poder completar; o teste
-`test_login_completo_com_a_sessao_real` fica em xfail estrito e avisa quando a Frente B chegar.
+A sessão é a real (`identity/sessions.py`): `StoredSessions` lê as linhas de `web_session` que o
+callback gravou, e o token do cookie é conferido contra o hash guardado.
 """
 
 import base64
+import hmac
 import json
-import secrets
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import httpx2 as httpx
 from fastapi import FastAPI
@@ -23,9 +22,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api import auth_login
 from goblinshift.entrypoints.api.app import create_app
-from goblinshift.identity import IssuedSession, Principal, Scope
 from goblinshift.identity.login_state import PostgresLoginStateCache
-from goblinshift.identity.tables import app_user, audit_event
+from goblinshift.identity.tables import app_user, audit_event, web_session
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from tests.identity.fake_providers import GITHUB_CLIENT, GOOGLE_CLIENT, FakeProviders
@@ -78,44 +76,49 @@ def browser(app: FastAPI) -> TestClient:
     return TestClient(app, base_url=BROWSER_ORIGIN, follow_redirects=False)
 
 
-@dataclass
-class FakeSessions:
-    """Cumpre o contrato de `identity.sessions` (Frente B) em memória."""
+@dataclass(frozen=True)
+class StoredSession:
+    """Uma linha de `web_session`, sem o hash exposto ao teste."""
 
-    started: list[IssuedSession] = field(default_factory=list)
-    started_for: list[UUID] = field(default_factory=list)
-    revoked: list[UUID] = field(default_factory=list)
-    by_token: dict[str, Principal] = field(default_factory=dict)
+    session_id: UUID
+    user_id: UUID
+    revoked: bool
+    _secret_hash: bytes = field(repr=False)
 
-    def start_session(
-        self, session: Session, *, user_id: UUID, authenticated_at: datetime, now: datetime
-    ) -> IssuedSession:
-        issued = IssuedSession(
-            session_id=uuid4(),
-            token=secrets.token_urlsafe(32),
-            csrf_token=secrets.token_urlsafe(32),
-            idle_expires_at=now,
-            absolute_expires_at=now,
-        )
-        self.started.append(issued)
-        self.started_for.append(user_id)
-        self.by_token[issued.token] = Principal(
-            owner_id=user_id,
-            scopes=frozenset(Scope),
-            via="session",
-            session_id=issued.session_id,
-            authenticated_at=authenticated_at,
-        )
-        return issued
+    def issued_for(self, token: str) -> bool:
+        """O cookie `token` é o desta sessão (o banco guarda só o SHA-256)."""
+        return hmac.compare_digest(sha256(token.encode("ascii")).digest(), self._secret_hash)
 
-    def authenticate_session(self, session: Session, token: str, now: datetime) -> Principal | None:
-        principal = self.by_token.get(token)
-        if principal is None or principal.session_id in self.revoked:
-            return None
-        return principal
 
-    def revoke_session(self, session: Session, session_id: UUID, now: datetime) -> None:
-        self.revoked.append(session_id)
+@dataclass(frozen=True)
+class StoredSessions:
+    """Sessões que o login gravou no banco, na ordem de criação."""
+
+    factory: sessionmaker[Session]
+
+    @property
+    def started(self) -> list[StoredSession]:
+        with unit_of_work(self.factory) as session:
+            rows = session.execute(
+                select(
+                    web_session.c.id,
+                    web_session.c.user_id,
+                    web_session.c.revoked_at,
+                    web_session.c.secret_hash,
+                ).order_by(web_session.c.created_at, web_session.c.id)
+            ).all()
+        return [
+            StoredSession(row.id, row.user_id, row.revoked_at is not None, bytes(row.secret_hash))
+            for row in rows
+        ]
+
+    @property
+    def started_for(self) -> list[UUID]:
+        return [stored.user_id for stored in self.started]
+
+    @property
+    def revoked(self) -> list[UUID]:
+        return [stored.session_id for stored in self.started if stored.revoked]
 
 
 def start_login(client: TestClient, provider: str, **params: str) -> httpx.Response:
@@ -151,6 +154,11 @@ def cookie_header(response: httpx.Response, name: str) -> str:
     matches = [value for value in set_cookie_headers(response) if value.startswith(f"{name}=")]
     assert len(matches) == 1, set_cookie_headers(response)
     return matches[0]
+
+
+def cookie_value(set_cookie: str) -> str:
+    """Valor de um `Set-Cookie` (`nome=valor; atributos`)."""
+    return set_cookie.split(";", 1)[0].split("=", 1)[1]
 
 
 def login_cookie_payload(value: str) -> dict[str, Any]:

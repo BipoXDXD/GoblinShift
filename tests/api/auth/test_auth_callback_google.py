@@ -19,16 +19,19 @@ from joserfc.jwk import RSAKey
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.identity import csrf_token_matches
 from goblinshift.identity.providers import GOOGLE_ISSUER, GOOGLE_TOKEN_URL
 from goblinshift.identity.tables import app_user, login_state
 from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.settings import WebIdentityConfig
 from tests.api.auth.support import (
-    FakeSessions,
+    StoredSessions,
     accounts,
     assert_login_failed,
     audit_events,
     browser,
     cookie_header,
+    cookie_value,
     login,
     open_signup,
     start_login,
@@ -51,7 +54,7 @@ def count_rows(factory: sessionmaker[Session], table: Any) -> int:
 
 
 def assert_nothing_logged_in(
-    factory: sessionmaker[Session], sessions: FakeSessions, response: httpx.Response
+    factory: sessionmaker[Session], sessions: StoredSessions, response: httpx.Response
 ) -> None:
     assert_login_failed(response)
     assert sessions.started == []
@@ -65,7 +68,7 @@ def assert_nothing_logged_in(
 def test_login_google_cria_a_conta_e_emite_a_sessao(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -85,7 +88,7 @@ def test_login_google_cria_a_conta_e_emite_a_sessao(
 
 
 def test_cookies_de_sessao_e_csrf_tem_os_atributos(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
 
@@ -93,7 +96,7 @@ def test_cookies_de_sessao_e_csrf_tem_os_atributos(
 
     [issued] = sessions.started
     session_cookie = cookie_header(response, "__Host-gs_session")
-    assert session_cookie.startswith(f"__Host-gs_session={issued.token};")
+    assert issued.issued_for(cookie_value(session_cookie))
     lowered = session_cookie.lower()
     assert "httponly" in lowered
     assert "secure" in lowered
@@ -102,7 +105,9 @@ def test_cookies_de_sessao_e_csrf_tem_os_atributos(
     assert "domain=" not in lowered
     assert "max-age" not in lowered
     csrf_cookie = cookie_header(response, "__Host-gs_csrf")
-    assert csrf_cookie.startswith(f"__Host-gs_csrf={issued.csrf_token};")
+    csrf_token = cookie_value(csrf_cookie)
+    web: WebIdentityConfig = login_app.state.web_identity
+    assert csrf_token_matches(web.csrf_key, issued.session_id, csrf_token, csrf_token)
     lowered = csrf_cookie.lower()
     assert "httponly" not in lowered
     assert "secure" in lowered
@@ -113,7 +118,7 @@ def test_cookies_de_sessao_e_csrf_tem_os_atributos(
 def test_callback_apaga_o_estado_e_o_marcador(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -126,22 +131,24 @@ def test_callback_apaga_o_estado_e_o_marcador(
 
 
 def test_login_emite_sessao_nova_e_revoga_a_anterior(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
     login(client, fake, "google")
-    [first] = sessions.started
+    first_token = client.cookies["__Host-gs_session"]
 
     login(client, fake, "google")
 
-    second = sessions.started[1]
-    assert second.token != first.token
-    assert client.cookies["__Host-gs_session"] == second.token
+    first, second = sessions.started
+    second_token = client.cookies["__Host-gs_session"]
+    assert second_token != first_token
+    assert first.issued_for(first_token)
+    assert second.issued_for(second_token)
     assert sessions.revoked == [first.session_id]
 
 
 def test_cookie_de_sessao_desconhecido_nao_atrapalha_o_login(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
     client.cookies.set(
@@ -152,7 +159,7 @@ def test_cookie_de_sessao_desconhecido_nao_atrapalha_o_login(
 
     assert response.status_code == 303
     [issued] = sessions.started
-    assert client.cookies["__Host-gs_session"] == issued.token
+    assert issued.issued_for(client.cookies["__Host-gs_session"])
     assert sessions.revoked == []
 
 
@@ -160,7 +167,10 @@ def test_cookie_de_sessao_desconhecido_nao_atrapalha_o_login(
 
 
 def test_cadastro_fechado_identidade_nova_e_recusada_e_fica_pendente(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, factory: sessionmaker[Session]
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
 ) -> None:
     response = login(client, fake, "google")
 
@@ -175,7 +185,7 @@ def test_conta_bloqueada_pendente_e_erro_do_provedor_respondem_igual(
     db_settings: Any,
     tmp_path: Any,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     login_app: FastAPI,
     factory: sessionmaker[Session],
 ) -> None:
@@ -203,7 +213,10 @@ def test_conta_bloqueada_pendente_e_erro_do_provedor_respondem_igual(
 
 
 def test_callback_sem_state_e_recusado(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, factory: sessionmaker[Session]
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
 ) -> None:
     started = start_login(client, "google")
     callback = urlsplit(fake.consent(started.headers["location"]))
@@ -218,7 +231,7 @@ def test_callback_sem_state_e_recusado(
 def test_callback_com_state_valido_sem_cookie_de_login_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -235,7 +248,7 @@ def test_callback_com_state_valido_sem_cookie_de_login_e_recusado(
 def test_callback_com_state_de_outro_navegador_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -251,7 +264,7 @@ def test_callback_com_state_de_outro_navegador_e_recusado(
 def test_callback_com_state_reusado_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -270,7 +283,10 @@ def test_callback_com_state_reusado_e_recusado(
 
 
 def test_state_do_google_nao_serve_no_callback_do_github(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, factory: sessionmaker[Session]
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
 ) -> None:
     callback = fake.consent(start_login(client, "google").headers["location"])
 
@@ -280,7 +296,10 @@ def test_state_do_google_nao_serve_no_callback_do_github(
 
 
 def test_code_adulterado_e_recusado_pelo_provedor(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, factory: sessionmaker[Session]
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
 ) -> None:
     callback = urlsplit(fake.consent(start_login(client, "google").headers["location"]))
     state = parse_qs(callback.query)["state"][0]
@@ -291,7 +310,10 @@ def test_code_adulterado_e_recusado_pelo_provedor(
 
 
 def test_usuario_que_nega_no_provedor_recebe_o_erro_generico(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, factory: sessionmaker[Session]
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
 ) -> None:
     state = parse_qs(urlsplit(start_login(client, "google").headers["location"]).query)["state"][0]
 
@@ -369,7 +391,7 @@ def _not_a_jwt(claims: dict[str, Any], key: RSAKey) -> str:
 def test_id_token_forjado_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
     factory_fn: Callable[[dict[str, Any], RSAKey], str],
@@ -422,7 +444,7 @@ def _now() -> int:
 def test_id_token_com_claims_errados_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
     patch: dict[str, Any],
@@ -435,7 +457,7 @@ def test_id_token_com_claims_errados_e_recusado(
 
 
 def test_id_token_dentro_da_folga_de_relogio_e_aceito(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
     fake.claims_patch = {"exp": _now() - 30}
@@ -446,7 +468,7 @@ def test_id_token_dentro_da_folga_de_relogio_e_aceito(
 def test_emissor_sem_https_e_aceito_e_normalizado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -460,7 +482,7 @@ def test_emissor_sem_https_e_aceito_e_normalizado(
 def test_resposta_sem_id_token_e_recusada(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -486,7 +508,7 @@ def test_resposta_sem_id_token_e_recusada(
 def test_falha_no_provedor_nao_vaza_excecao(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     failure: httpx.Response,
 ) -> None:
@@ -508,7 +530,7 @@ def test_falha_no_provedor_nao_vaza_excecao(
 def test_provedor_fora_do_ar_responde_o_erro_generico(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     error: Exception,
 ) -> None:
@@ -521,7 +543,7 @@ def test_provedor_fora_do_ar_responde_o_erro_generico(
 def test_canario_em_code_e_state_nunca_aparece_no_log_nem_na_resposta(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     canary = "CANARY-6f0c9a1e-2b7d-4c55-9a43-1d2e3f4a5b6c"
@@ -538,7 +560,7 @@ def test_canario_em_code_e_state_nunca_aparece_no_log_nem_na_resposta(
 def test_tokens_do_provedor_nunca_aparecem_no_log(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     login_app: FastAPI,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -549,7 +571,7 @@ def test_tokens_do_provedor_nunca_aparecem_no_log(
 
     [access_token] = fake.issued_access_tokens
     assert access_token not in caplog.text
-    assert sessions.started[0].token not in server_log(caplog)
+    assert client.cookies["__Host-gs_session"] not in server_log(caplog)
 
 
 # --- Apoio ------------------------------------------------------------------------------------

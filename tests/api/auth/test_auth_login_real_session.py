@@ -1,8 +1,8 @@
-"""Login ponta a ponta com a sessão real da Frente B (sem `FakeSessions`).
+"""Login ponta a ponta com a sessão real da Frente B (sem `StoredSessions`).
 
 Fica em xfail estrito enquanto `start_session` for stub: quando a Frente B chegar, o teste passa,
 o xfail estrito reprova a suíte e quem integrar apaga a marca (e, com ela, a necessidade de
-`FakeSessions` nos outros testes do login).
+`StoredSessions` nos outros testes do login).
 """
 
 from datetime import UTC, datetime
@@ -20,7 +20,6 @@ from tests.identity.fake_providers import FakeProviders
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.xfail(strict=True, reason="start_session ainda é stub da Frente B (500)")
 def test_login_completo_com_a_sessao_real(
     client: TestClient, fake: FakeProviders, factory: sessionmaker[Session], login_app: FastAPI
 ) -> None:
