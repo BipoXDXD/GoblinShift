@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -21,8 +22,8 @@ def offline_client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def app(db_settings: Settings) -> FastAPI:
-    app = create_app(db_settings)
+def app(db_settings: Settings, tmp_path: Path) -> FastAPI:
+    app = create_app(db_settings.model_copy(update={"storage_root": tmp_path / "storage"}))
     add_test_routes(app)
     prepare_database(db_settings, app.state.engine)
     return app
