@@ -87,6 +87,47 @@ jobs:
       - name: Orçamento de peso (JS, CSS, fontes e 3D da abertura, ADR 027)
         run: npm run budget
 
+  e2e:
+    name: Interface no navegador (Playwright)
+    # Em paralelo com o job web, e não depois dele: o build leva segundos e esperar o job inteiro
+    # tiraria o commit stage dos 5 min. A API é falsa, no processo do Playwright, e o build é servido
+    # com os cabeçalhos do snippet de produção do Nginx (web/e2e/server/serve-dist.ts).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Versão do Playwright (chave do cache do navegador)
+        id: playwright
+        run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      - name: Chromium headless e dependências do sistema
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Build
+        run: npm run build
+      - name: Specs (desktop e celular, só Chromium)
+        run: npm run e2e
+      - name: Relatório e traces da falha
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 7
+
   secrets:
     name: Segredos (gitleaks)
     runs-on: ubuntu-24.04
@@ -207,8 +248,9 @@ jobs:
 
   web-image:
     name: Imagem do Nginx com a SPA
-    # O job web garante tipos, lint, testes e build da SPA antes de publicar o que ela gera.
-    needs: [checks, web, secrets]
+    # O job web garante tipos, lint, testes e build da SPA, e o e2e, que ela funciona no navegador
+    # com a CSP de produção, antes de publicar o que ela gera.
+    needs: [checks, web, e2e, secrets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
