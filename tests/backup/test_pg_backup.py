@@ -282,6 +282,10 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
     assert restore_db.scalar("SELECT display_name FROM app_user") == source_db.canary
     assert restore_db.scalar("SELECT count(*) FROM run") == "1"
     assert healthchecks.pings == ["/start", "/"]
+    # O dump vem de fora do runner: quem o restaura não é superusuário.
+    owner = restore_db.scalar("SELECT tableowner FROM pg_tables WHERE tablename = 'app_user'")
+    assert owner != restore_db.user
+    assert restore_db.scalar(f"SELECT rolsuper FROM pg_roles WHERE rolname = '{owner}'") == "f"  # noqa: S608
 
 
 def test_restauracao_de_dump_sem_object_lock_falha(
@@ -369,6 +373,30 @@ def test_erro_do_pg_restore_nao_publica_dados_do_dump(
     assert "CANARY-" not in result.stdout + result.stderr
     assert "COPY" not in result.stdout + result.stderr
     assert healthchecks.pings == ["/start", "/fail"]
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [("RESTORE_PG_ROLE", 'x"; ALTER ROLE test NOSUPERUSER; --'), ("RESTORE_PG_DB", "a b")],
+)
+def test_identificador_fora_do_formato_falha_antes_de_comecar(
+    s3: S3,
+    restore_db: Database,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    known_revisions: str,
+    variable: str,
+    value: str,
+) -> None:
+    env = restore_env(s3, restore_db, age_keys, healthchecks, prefix, known_revisions)
+    env[variable] = value
+
+    result = run_script(RESTORE_SCRIPT, env)
+
+    assert result.returncode != 0
+    assert variable in result.stderr
+    assert healthchecks.pings == []
 
 
 def test_restauracao_sem_dump_falha(

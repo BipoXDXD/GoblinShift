@@ -9,7 +9,9 @@
 #   BACKUP_S3_ENDPOINT, BACKUP_S3_REGION, BACKUP_S3_BUCKET, BACKUP_S3_PREFIX (padrão: pg/)
 #   BACKUP_S3_KEY_ID, BACKUP_S3_SECRET  chave de aplicação só de leitura e listagem
 #   BACKUP_AGE_IDENTITY_FILE    arquivo com a chave privada age, gerada pelo age-keygen
-#   RESTORE_PG_CONTAINER, RESTORE_PG_USER, RESTORE_PG_DB   destino vazio, acessado por docker exec
+#   RESTORE_PG_CONTAINER, RESTORE_PG_USER, RESTORE_PG_DB   destino vazio, acessado por docker exec;
+#                               RESTORE_PG_USER é superusuário e só prepara o destino
+#   RESTORE_PG_ROLE             papel sem superusuário que restaura e confere (padrão: gs_restore)
 #   RESTORE_KNOWN_REVISIONS     revisões do Alembic que o código conhece, separadas por espaço
 #   RESTORE_MAX_AGE_HOURS       idade máxima do dump mais recente (padrão: 26)
 #   RESTORE_MIN_RETENTION_DAYS  retenção mínima do Object Lock em compliance (padrão: 30)
@@ -26,6 +28,10 @@ require_env BACKUP_S3_ENDPOINT BACKUP_S3_REGION BACKUP_S3_BUCKET BACKUP_S3_KEY_I
 prefix="${BACKUP_S3_PREFIX:-pg/}"
 max_age_hours="${RESTORE_MAX_AGE_HOURS:-26}"
 min_retention_days="${RESTORE_MIN_RETENTION_DAYS:-30}"
+restore_role="${RESTORE_PG_ROLE:-gs_restore}"
+# Entram em SQL como identificadores: só o formato simples, sem aspas nem espaço.
+[[ "$restore_role" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "RESTORE_PG_ROLE inválido" >&2; exit 2; }
+[[ "$RESTORE_PG_DB" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "RESTORE_PG_DB inválido" >&2; exit 2; }
 healthcheck="${RESTORE_HEALTHCHECK_URL:-}"
 
 workdir="$(mktemp -d)"
@@ -50,17 +56,35 @@ fail() {
 # O log do Actions é público, e os erros do PostgreSQL citam dados (`CONTEXT: COPY t, line 1:
 # "<linha>"`, `DETAIL: Key (...)=(...)`): o stderr do psql e do pg_restore vai para o $workdir,
 # apagado no fim, e o log recebe só uma mensagem genérica.
-psql_value() {
+# psql_as <papel> <sql>
+psql_as() {
   docker exec "$RESTORE_PG_CONTAINER" psql --no-psqlrc --tuples-only --no-align \
-    --set ON_ERROR_STOP=1 --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" \
-    --command="$1" 2>>"$workdir/psql.log" ||
+    --set ON_ERROR_STOP=1 --username="$1" --dbname="$RESTORE_PG_DB" \
+    --command="$2" 2>>"$workdir/psql.log" ||
     fail "consulta ao banco restaurado falhou (detalhes omitidos)"
 }
 
+# Depois do pg_restore, tudo roda como o papel da restauração: o dump pode trazer views e funções
+# que executariam com os privilégios de quem consulta.
+psql_value() {
+  psql_as "$restore_role" "$1"
+}
+
 # Restaurar por cima de tabelas existentes não provaria nada sobre o dump.
-tables="$(psql_value "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
+tables="$(psql_as "$RESTORE_PG_USER" "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'")"
 require_count tables "$tables"
 ((tables == 0)) || fail "o banco de destino precisa estar vazio (tem $tables tabelas em public)"
+
+# O dump vem de fora do runner (quem controla a VPS escreve no bucket e tem a chave pública age):
+# restaurado por um superusuário, poderia rodar `COPY ... TO PROGRAM` no runner, onde estão a
+# chave privada age e a de leitura. O papel da restauração só é dono do banco de destino.
+psql_as "$RESTORE_PG_USER" "DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$restore_role') THEN
+    CREATE ROLE $restore_role LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+  END IF;
+END \$\$" >/dev/null
+psql_as "$RESTORE_PG_USER" "ALTER DATABASE \"$RESTORE_PG_DB\" OWNER TO $restore_role" >/dev/null
+psql_as "$RESTORE_PG_USER" "ALTER SCHEMA public OWNER TO $restore_role" >/dev/null
 
 # Listagem com até 1000 chaves; a retenção de 30 dias deixa umas 31. Se um dia passar disso,
 # falha em vez de escolher um dump que talvez não seja o mais recente. O dump_check.py escolhe
@@ -82,7 +106,7 @@ age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" --output "$workdir/dump" "$
 
 # Sem dono nem privilégios: o destino efêmero não tem os papéis da produção.
 docker exec --interactive "$RESTORE_PG_CONTAINER" pg_restore --exit-on-error --no-owner \
-  --no-privileges --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" \
+  --no-privileges --username="$restore_role" --dbname="$RESTORE_PG_DB" \
   <"$workdir/dump" 2>"$workdir/pg_restore.log" ||
   fail "pg_restore falhou (detalhes omitidos: podem conter dados da produção)"
 
