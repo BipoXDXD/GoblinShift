@@ -355,14 +355,15 @@ def test_nova_tentativa_entra_depois_de_encerrar_a_anterior(conn: Connection) ->
     criar_tentativa(conn, run_id, 2)
 
 
-def test_terceira_tentativa_fisica_e_recusada(conn: Connection) -> None:
+def test_quinto_claim_e_recusado(conn: Connection) -> None:
+    # Cada claim cria uma tentativa; o quinto vira INFRA_POISON, nunca uma linha nova.
     alice = criar_conta(conn)
     run_id = criar_run(conn, alice)
-    criar_tentativa(conn, run_id, 1, ended_at=AGORA)
-    criar_tentativa(conn, run_id, 2, ended_at=AGORA)
+    for number in range(1, 5):
+        criar_tentativa(conn, run_id, number, ended_at=AGORA)
 
     with barrado_por(conn, "attempt_number_check"):
-        criar_tentativa(conn, run_id, 3)
+        criar_tentativa(conn, run_id, 5)
 
 
 # --- 5. CHECKs --------------------------------------------------------------------------------
