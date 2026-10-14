@@ -1,6 +1,6 @@
 # ADR 016. Runner local em subprocesso na VPS até a fatia 4
 
-- **Estado:** aceito (decisão do usuário, fatia 3, 2026-10-13); provisório, removido na fatia 4
+- **Estado:** Substituído (Superseded) na fatia 4, 2026-10-14: em produção só existe o `Runner` do `executor-ctl` (container gVisor por tentativa, [ADR 004](004-container-gvisor-por-tentativa.md)); o worker e a manutenção recusam subir com `GS_RUNNER=local`, sem confirmação que reabra a porta, e `GS_ALLOW_LOCAL_RUNNER` deixou de existir ([3.9](../GoblinShiftPlan.md#s3-9), fatia 4). Antes: aceito (decisão do usuário, fatia 3, 2026-10-13), provisório
 - **Plano:** [3.2](../GoblinShiftPlan.md#s3-2), [3.6](../GoblinShiftPlan.md#s3-6), [3.9](../GoblinShiftPlan.md#s3-9)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md) (ajustado por este ADR)
 

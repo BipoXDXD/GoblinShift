@@ -95,7 +95,7 @@ Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, o script faz
 GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost
 ```
 
-Até a fatia 4, o worker roda a receita num subprocesso do próprio container, sem gVisor ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md)); em produção isso exige `GS_ALLOW_LOCAL_RUNNER=true`, posto pelo `compose.prod.yaml`.
+Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
 ## Estrutura
 
