@@ -33,7 +33,7 @@ function runScreen(name: string, overrides: RunOverrides, visibleText: string): 
  * `extra` concluídas a mais, um minuto mais antigas cada, para passar de uma página. Devolve
  * quantas semeou.
  */
-function seedRunHistory(api: FakeApi, extra = 0): number {
+export function seedRunHistory(api: FakeApi, extra = 0): number {
   const recent: readonly RunOverrides[] = [
     { status: "running", deadline_at: LATER, recipe_id: "image-forge" },
     { status: "queued", recipe_id: "downloads-detox" },
