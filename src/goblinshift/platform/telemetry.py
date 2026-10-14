@@ -61,6 +61,8 @@ _URL_ATTRIBUTES = ("http.url", "url.full")
 _TARGET_ATTRIBUTES = ("http.target",)
 _QUERY_ATTRIBUTES = ("url.query",)
 _CLIENT_ADDRESS_ATTRIBUTES = ("net.peer.ip", "client.address", "http.client_ip")
+# Header que o cliente escreve como quiser: nenhum header entra no evento (3.7).
+_USER_AGENT_ATTRIBUTES = ("http.user_agent", "user_agent.original")
 
 
 class UserHasher:
@@ -98,10 +100,11 @@ def _start_main_event(span: Span, scope: dict[str, Any]) -> None:
 
 
 def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
-    """Tira a query string e o IP completo que a instrumentação ASGI pôs no span.
+    """Tira a query string, o IP completo e o User-Agent que a instrumentação ASGI pôs no span.
 
-    A query carrega filtros e cursores, que são dados do usuário (3.7). Só sobrescreve os
-    atributos que já existem, para não inventar nomes de outra versão das convenções.
+    A query carrega filtros e cursores, que são dados do usuário, e o User-Agent é texto livre do
+    cliente (3.7). Só sobrescreve os atributos que já existem, para não inventar nomes de outra
+    versão das convenções.
     """
     present = getattr(span, "attributes", None) or {}
     path = str(scope.get("path", ""))
@@ -113,6 +116,7 @@ def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
         (_TARGET_ATTRIBUTES, path),
         (_QUERY_ATTRIBUTES, ""),
         (_CLIENT_ADDRESS_ATTRIBUTES, address),
+        (_USER_AGENT_ATTRIBUTES, ""),
     ):
         for name in names:
             if name in present:
