@@ -1,4 +1,4 @@
-"""Dependências comuns às rotas: Session, relógio, autenticação e escopo.
+"""Dependências comuns às rotas: Session, relógio, autenticação, limite de requisições e escopo.
 
 Ver docs/GoblinShiftPlan.md, 3.2 (Session com `scope="function"`) e 3.6 (chaves de API).
 
@@ -18,20 +18,31 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
+from fastapi.routing import iter_route_contexts
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api.capacity_problems import retry_after
 from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
-from goblinshift.entrypoints.api.wide_event import record_principal
+from goblinshift.entrypoints.api.wide_event import (
+    RateLimitClass,
+    rate_limit_class,
+    record_principal,
+    record_rate_limit,
+)
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     RECENT_AUTH_WINDOW,
+    REQUESTS_PER_MINUTE,
     AuditEventType,
     AuditOutcome,
     Principal,
+    RequestClass,
+    RequestLimitExceededError,
     Scope,
     authenticate_api_key,
     authenticate_session,
+    count_request,
     cross_site_request,
     csrf_token_matches,
     record_audit_event,
@@ -42,6 +53,14 @@ BEARER_SCHEME = "bearer"
 # Métodos que nunca alteram estado (3.6): dispensam o CSRF.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _CHALLENGE = {"WWW-Authenticate": "Bearer"}
+# Classe de rota da telemetria → limite por minuto da conta. Envio e download de conteúdo ficam
+# de fora: valem as transferências simultâneas (1.7).
+_LIMITED_CLASSES: dict[RateLimitClass, RequestClass | None] = {
+    RateLimitClass.READ: RequestClass.READ,
+    RateLimitClass.COMMAND: RequestClass.COMMAND,
+    RateLimitClass.RUN_CREATE: RequestClass.RUN_CREATE,
+    RateLimitClass.TRANSFER: None,
+}
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -82,7 +101,16 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
     a chave não usa cookie e dispensa o CSRF. Mesma resposta para credencial malformada,
     desconhecida, expirada, revogada ou de conta bloqueada: o cliente não aprende qual foi o
     caso, o log do servidor registra.
+
+    Toda requisição autenticada conta no limite por conta e classe de rota (1.7); acima dele,
+    429 `RATE_LIMITED` com `Retry-After`. Fica aqui para nenhuma rota escapar do limite.
     """
+    principal = _identify(request, session, now)
+    _count_request(request, session, principal, now)
+    return principal
+
+
+def _identify(request: Request, session: Session, now: datetime) -> Principal:
     _reject_simultaneous_credentials(request)
     if SESSION_COOKIE in request.cookies:
         principal = _session_from_cookie(request, session, now)
@@ -166,6 +194,37 @@ RecentSessionPrincipal = Annotated[Principal, Depends(require_recent_session)]
 def client_ip(request: Request) -> str | None:
     """IP do cliente, que o uvicorn resolve do `X-Forwarded-For` só vindo da borda confiável."""
     return request.client.host if request.client is not None else None
+
+
+def _count_request(request: Request, session: Session, principal: Principal, now: datetime) -> None:
+    request_class = _LIMITED_CLASSES[rate_limit_class(request.method, _route_template(request))]
+    if request_class is None:
+        return
+    try:
+        with session.begin():
+            count_request(session, principal.owner_id, request_class, now)
+    except RequestLimitExceededError as error:
+        record_rate_limit(limited=True)
+        raise ApiProblem(
+            ProblemCode.RATE_LIMITED,
+            f"A conta atingiu o limite de {REQUESTS_PER_MINUTE[request_class]} requisições por "
+            "minuto desta classe de rota; tente de novo depois do Retry-After.",
+            headers=retry_after(error.retry_after),
+        ) from error
+    record_rate_limit(limited=False)
+
+
+def _route_template(request: Request) -> str:
+    """Template completo da rota, com os prefixos dos roteadores incluídos.
+
+    O `scope["route"]` traz só o trecho do roteador mais interno; o caminho completo vem dos
+    contextos que o FastAPI monta ao incluir os roteadores.
+    """
+    route = request.scope.get("route")
+    for context in iter_route_contexts(request.app.routes):
+        if context.original_route is route and context.path is not None:
+            return context.path
+    raise RuntimeError(f"rota autenticada fora do roteador da aplicação: {request.url.path}")
 
 
 def _reject_simultaneous_credentials(request: Request) -> None:

@@ -21,7 +21,15 @@ from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
 from goblinshift.identity import IssuedKey, Scope, issue_key, request_account_deletion
-from goblinshift.identity.tables import api_key, app_user, audit_event, login_state, web_session
+from goblinshift.identity.rate_limit import RequestClass, count_request
+from goblinshift.identity.tables import (
+    api_key,
+    app_user,
+    audit_event,
+    login_state,
+    request_window,
+    web_session,
+)
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import Status
@@ -47,6 +55,7 @@ OWNED_TABLES: dict[str, tuple[Table, str]] = {
     "artifact": (artifact, "owner_id"),
     "stored_object": (stored_object, "owner_id"),
     "transfer_slot": (transfer_slot, "owner_id"),
+    "request_window": (request_window, "owner_id"),
 }
 
 
@@ -63,8 +72,8 @@ def count_owned(factory: sessionmaker[Session], owner_id: uuid.UUID) -> dict[str
 def full_account(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path, subject: str
 ) -> tuple[uuid.UUID, IssuedKey]:
-    """Conta com execução terminada (entradas, saídas, tentativa), upload incompleto, chave e
-    sessão: tudo o que um uso real deixa no banco e no disco."""
+    """Conta com execução terminada (entradas, saídas, tentativa), upload incompleto, chave,
+    sessão e janela do limite de requisições: tudo o que um uso real deixa no banco e no disco."""
     owner = create_user(factory, subject)
     queue_run(factory, storage, owner)
     coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
@@ -72,6 +81,7 @@ def full_account(
     now = datetime.now(UTC)
     with unit_of_work(factory) as session:
         key = issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=now)
+        count_request(session, owner, RequestClass.READ, now)
         session.execute(
             insert(web_session).values(
                 user_id=owner,
@@ -293,11 +303,16 @@ def test_ciclo_aplica_a_retencao_da_identidade(factory: sessionmaker[Session]) -
             )
         )
 
+        count_request(session, owner, RequestClass.READ, now - timedelta(minutes=3))
+        count_request(session, owner, RequestClass.READ, now)
+
     counts = AccountJobs(factory, clock=lambda: now).run_cycle()
 
     assert counts["login_states_removed"] == 1
     assert counts["web_sessions_removed"] == 1
     assert counts["audit_events_removed"] == 1
+    assert counts["request_windows_removed"] == 1
+    assert counts["request_windows"] == 1
 
 
 def test_exclusao_atrasada_gera_alerta(

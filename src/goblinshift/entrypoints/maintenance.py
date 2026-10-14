@@ -1,10 +1,10 @@
 """Processo `gs-maintenance`: reconciliação e retenção em ciclos (docs/GoblinShiftPlan.md, 3.4).
 
 Um ciclo a cada `GS_MAINTENANCE_INTERVAL_S` (30 s): o de execuções e arquivos (`Maintenance`) e o
-de contas (`AccountJobs`: purga das contas em exclusão e retenção da identidade, 1.8). Cada ciclo
-é uma unidade de trabalho com um evento de log estruturado; a falha de um ciclo é registrada e o
-seguinte tenta de novo. Os lotes usam `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS`
-(30 s, 3.2).
+de contas (`AccountJobs`: purga das contas em exclusão, retenção da identidade, 1.8, e limpeza das
+janelas do limite de requisições, ADR 028). Cada ciclo é uma unidade de trabalho com um evento de
+log estruturado; a falha de um ciclo é registrada e o seguinte tenta de novo. Os lotes usam
+`statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
 SIGTERM e SIGINT terminam o ciclo em andamento e saem.
 """
@@ -25,6 +25,7 @@ from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
+from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import configure_logging
@@ -103,7 +104,8 @@ class AccountJobsConfig:
 
 
 class AccountJobs:
-    """Purga das contas com `DELETE /me` e retenção da identidade, um lote por etapa e ciclo.
+    """Purga das contas com `DELETE /me`, retenção da identidade e limpeza das janelas do limite
+    de requisições, um lote por etapa e ciclo.
 
     A purga de cada conta segue a ordem das FKs: `runs` (Runs terminais), `files` (pede a exclusão
     dos objetos e, quando a retenção normal já os removeu do disco, apaga as linhas) e por fim
@@ -140,6 +142,11 @@ class AccountJobs:
             "accounts_deletion_overdue": self._in_transaction(
                 lambda s: identity_purge.count_overdue_deletions(s, now)
             ),
+            "request_windows_removed": self._in_transaction(
+                lambda s: rate_limit.delete_expired_windows(s, now, batch)
+            ),
+            # Tamanho da tabela do limite de requisições depois da limpeza (ADR 028).
+            "request_windows": self._in_transaction(rate_limit.count_windows),
         }
         if counts["accounts_deletion_overdue"]:
             # Alerta de causa: o prazo de 24 h da exclusão (1.8) está perto de vencer.
