@@ -28,6 +28,8 @@ docker compose up --build     # postgres, migrate, api, worker, maintenance, ngi
 curl http://localhost/readyz
 ```
 
+A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/docs`, `/openapi.json`, `/livez` e `/readyz` vão para a API, e qualquer outra rota cai no `index.html`. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
+
 O OpenObserve fica em `http://127.0.0.1:5080`, com as credenciais do `.env`.
 
 ## Verificações (as mesmas da CI)
@@ -95,7 +97,7 @@ A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais púb
 
 ## Deploy sem queda
 
-O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga (`deploy/rollout-api.sh`). Para conferir localmente, com a pilha de pé:
+O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga (`deploy/rollout-api.sh`). O Nginx, que leva o build da SPA, é recriado a cada versão; enquanto ele volta, a borda repete a conexão (`lb_try_duration` em `deploy/edge/conf.d/goblinshift.caddy`). Para conferir localmente, com a pilha de pé:
 
 ```bash
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
@@ -160,7 +162,7 @@ src/goblinshift/
   identity/          contas e chaves de API
   presets/           presets (próximas fatias)
 migrations/          Alembic (expand/contract)
-docker/              imagem da aplicação, Nginx e OpenTelemetry Collector
+docker/              imagens da aplicação, do executor e do Nginx com a SPA; OpenTelemetry Collector
 deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI e teste de aceitação do ambiente
 web/                 interface React (Vite + TypeScript); src/api é o único ponto que fala com a API
 ```

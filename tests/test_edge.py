@@ -65,3 +65,10 @@ def test_nginx_na_borda_nao_tem_net_raw() -> None:
     # Sem NET_RAW, um container comprometido na rede edge não forja ARP para assumir o IP
     # da borda, em quem os projetos confiam (ADR 014).
     assert "NET_RAW" in _yaml(ROOT / "compose.prod.yaml")["services"]["nginx"]["cap_drop"]
+
+
+def test_borda_repete_a_conexao_enquanto_o_nginx_e_recriado() -> None:
+    # O deploy recria o Nginx a cada versão (imagem com o build da SPA); sem a nova tentativa,
+    # a borda responderia 502 nesse intervalo.
+    texto = _sem_comentarios(EDGE / "conf.d" / "goblinshift.caddy")
+    assert re.search(r"^\s*lb_try_duration \d+s$", texto, re.MULTILINE)
