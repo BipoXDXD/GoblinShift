@@ -14,9 +14,9 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Self, assert_never
 
-# Tentativas físicas por execução, contando a primeira (3.4, "Retentativa").
+# Tentativas físicas (o executor começou a trabalhar) por execução, contando a primeira (3.4).
 MAX_ATTEMPTS = 2
-# Claims por execução; no seguinte ela é tratada como mensagem venenosa (3.4).
+# Claims por execução, cada um com a sua Attempt; o seguinte vira mensagem venenosa (3.4).
 MAX_CLAIMS = 4
 # Prazo para a execução começar, contado da aceitação (1.7, "Fila").
 QUEUE_WINDOW = timedelta(hours=2)
@@ -97,14 +97,17 @@ class RunState:
 
     `stop_reason` é a primeira razão de parada persistida e nunca muda depois de gravada;
     `cancel_requested` registra o pedido mesmo quando outra razão chegou antes.
-    `attempts_used` conta tentativas físicas iniciadas; `claim_count`, claims bem-sucedidos.
+    `claim_count` conta claims, cada um com a sua Attempt; `physical_attempts` conta as
+    Attempts cujo executor começou a trabalhar (`attempt.executor_started_at`), e
+    `executor_started` diz se a Attempt viva já é uma delas.
     """
 
     status: Status
     phase: Phase | None
     generation: int
     claim_count: int
-    attempts_used: int
+    physical_attempts: int
+    executor_started: bool
     eligible_at: datetime
     queue_expires_at: datetime
     deadline_at: datetime | None
@@ -129,7 +132,8 @@ class RunState:
             phase=None,
             generation=0,
             claim_count=0,
-            attempts_used=0,
+            physical_attempts=0,
+            executor_started=False,
             eligible_at=accepted_at,
             queue_expires_at=accepted_at + QUEUE_WINDOW,
             deadline_at=None,
@@ -184,6 +188,31 @@ class DeadlineExceeded:
 
 
 @dataclass(frozen=True)
+class ExecutorStarted:
+    """O executor da tentativa começou a trabalhar: ela passa a contar como física."""
+
+    generation: int
+
+
+@dataclass(frozen=True)
+class LeaseExpired:
+    """O reconciliador achou o lease vencido e confirmou que o executor não roda mais.
+
+    `executor_ran` vem do `executor-ctl`: o container chegou a existir. O jitter é sorteado
+    por quem chama, como em `TransientFailure`.
+    """
+
+    generation: int
+    now: datetime
+    executor_ran: bool
+    jitter: timedelta
+
+    def __post_init__(self) -> None:
+        _require_timezone(self.now)
+        _require_retry_jitter(self.jitter)
+
+
+@dataclass(frozen=True)
 class PhaseReached:
     generation: int
     phase: Phase
@@ -217,10 +246,7 @@ class TransientFailure:
 
     def __post_init__(self) -> None:
         _require_timezone(self.now)
-        if not MIN_RETRY_JITTER <= self.jitter <= MAX_RETRY_JITTER:
-            raise ValueError(
-                f"jitter {self.jitter} fora de [{MIN_RETRY_JITTER}, {MAX_RETRY_JITTER}]"
-            )
+        _require_retry_jitter(self.jitter)
 
 
 @dataclass(frozen=True)
@@ -235,6 +261,8 @@ type Event = (
     | CancelRequested
     | QueueExpired
     | DeadlineExceeded
+    | ExecutorStarted
+    | LeaseExpired
     | PhaseReached
     | Published
     | DeterministicFailure
@@ -321,6 +349,10 @@ def decide_transition(run: RunState, event: Event) -> Transition | Refused:
             return _decide_queue_expiry(run, event.now)
         case DeadlineExceeded():
             return _decide_deadline(run, event.now)
+        case ExecutorStarted():
+            return _decide_executor_start(run, event.generation)
+        case LeaseExpired():
+            return _decide_lease_expiry(run, event)
         case PhaseReached():
             return _decide_phase(run, event)
         case Published():
@@ -348,14 +380,13 @@ def _decide_claim(run: RunState, now: datetime) -> Transition | Refused:
     if run.claim_count >= MAX_CLAIMS:
         return _end_without_executor(run, ErrorCode.INFRA_POISON)
     generation = run.generation + 1
-    number = run.attempts_used + 1
+    number = run.claim_count + 1
     started = replace(
         run,
         status=Status.RUNNING,
         phase=Phase.INSPECTING,
         generation=generation,
-        claim_count=run.claim_count + 1,
-        attempts_used=number,
+        claim_count=number,
         deadline_at=run.deadline_at or now + RUN_DURATION,
     )
     return Transition(started, (StartAttempt(generation=generation, number=number),))
@@ -393,6 +424,30 @@ def _decide_deadline(run: RunState, now: datetime) -> Transition | Refused:
     return _end_without_executor(run, ErrorCode.DEADLINE_EXCEEDED)
 
 
+def _decide_executor_start(run: RunState, generation: int) -> Transition | Refused:
+    if generation != run.generation:
+        return Refused(RefusalReason.STALE_GENERATION)
+    # Em stopping também conta: o executor pode ter começado enquanto a parada era pedida.
+    if not run.has_live_attempt:
+        return Refused(RefusalReason.INVALID_FOR_STATUS)
+    return Transition(_count_as_physical(run), ())
+
+
+def _decide_lease_expiry(run: RunState, event: LeaseExpired) -> Transition | Refused:
+    refusal = _refuse_unless_working(run, event.generation)
+    if refusal is not None:
+        return refusal
+    # Um início já registrado vale mais que a consulta posterior ao executor-ctl.
+    if event.executor_ran or run.executor_started:
+        return _fail_transiently(_count_as_physical(run), event.now, event.jitter)
+    # O executor nunca trabalhou: a Attempt acaba sem gastar tentativa física.
+    if _deadline_passed(run, event.now):
+        return _with_effects_first(
+            _end_without_executor(run, ErrorCode.DEADLINE_EXCEEDED), EndAttempt(run.generation)
+        )
+    return _wait_for_retry(run, event.now, event.jitter)
+
+
 def _decide_phase(run: RunState, event: PhaseReached) -> Transition | Refused:
     refusal = _refuse_unless_working(run, event.generation)
     if refusal is not None:
@@ -414,6 +469,7 @@ def _decide_publication(run: RunState, event: Published) -> Transition | Refused
         run,
         status=status,
         phase=None,
+        executor_started=False,
         error_code=error_code,
         has_published_outputs=True,
     )
@@ -434,7 +490,9 @@ def _decide_deterministic_failure(
     refusal = _refuse_unless_working(run, event.generation)
     if refusal is not None:
         return refusal
-    failed = replace(run, status=Status.FAILED, phase=None, error_code=event.code)
+    failed = replace(
+        run, status=Status.FAILED, phase=None, executor_started=False, error_code=event.code
+    )
     return Transition(failed, _executor_finished_effects(run.generation))
 
 
@@ -442,11 +500,20 @@ def _decide_transient_failure(run: RunState, event: TransientFailure) -> Transit
     refusal = _refuse_unless_working(run, event.generation)
     if refusal is not None:
         return refusal
-    if _deadline_passed(run, event.now):
+    return _fail_transiently(run, event.now, event.jitter)
+
+
+def _fail_transiently(run: RunState, now: datetime, jitter: timedelta) -> Transition:
+    if _deadline_passed(run, now):
         return _request_stop(run, ErrorCode.DEADLINE_EXCEEDED)
-    if run.attempts_used >= MAX_ATTEMPTS:
+    # A tentativa atual já entra na conta se o executor dela começou.
+    if run.physical_attempts >= MAX_ATTEMPTS:
         return _request_stop(run, ErrorCode.EXECUTOR_UNAVAILABLE)
-    waiting = replace(run, phase=Phase.RETRY_WAIT, eligible_at=event.now + event.jitter)
+    return _wait_for_retry(run, now, jitter)
+
+
+def _wait_for_retry(run: RunState, now: datetime, jitter: timedelta) -> Transition:
+    waiting = replace(run, phase=Phase.RETRY_WAIT, eligible_at=now + jitter, executor_started=False)
     return Transition(waiting, (EndAttempt(run.generation),))
 
 
@@ -459,7 +526,7 @@ def _decide_executor_stopped(run: RunState, generation: int) -> Transition | Ref
     if reason is None:
         raise InconsistentRunStateError(f"stopping sem razão de parada: {run}")
     status = Status.CANCELED if reason is ErrorCode.CANCELED else Status.FAILED
-    stopped = replace(run, status=status, error_code=reason)
+    stopped = replace(run, status=status, executor_started=False, error_code=reason)
     return Transition(stopped, _executor_finished_effects(run.generation))
 
 
@@ -472,6 +539,17 @@ def _refuse_unless_working(run: RunState, generation: int) -> Refused | None:
     return None
 
 
+def _count_as_physical(run: RunState) -> RunState:
+    """Idempotente: repetir o aviso de início não conta a mesma tentativa duas vezes."""
+    if run.executor_started:
+        return run
+    return replace(run, executor_started=True, physical_attempts=run.physical_attempts + 1)
+
+
+def _with_effects_first(transition: Transition, *effects: Effect) -> Transition:
+    return replace(transition, effects=(*effects, *transition.effects))
+
+
 def _request_stop(run: RunState, reason: ErrorCode) -> Transition:
     """Executor possivelmente vivo: grava a razão e pede a parada antes de concluir."""
     stopping = replace(run, status=Status.STOPPING, phase=None, stop_reason=reason)
@@ -481,7 +559,14 @@ def _request_stop(run: RunState, reason: ErrorCode) -> Transition:
 def _end_without_executor(run: RunState, reason: ErrorCode) -> Transition:
     """Nenhum executor vivo: a razão de parada já decide o estado terminal."""
     status = Status.CANCELED if reason is ErrorCode.CANCELED else Status.FAILED
-    ended = replace(run, status=status, phase=None, stop_reason=reason, error_code=reason)
+    ended = replace(
+        run,
+        status=status,
+        phase=None,
+        executor_started=False,
+        stop_reason=reason,
+        error_code=reason,
+    )
     return Transition(ended, (ReleaseReservations(),))
 
 
@@ -497,6 +582,11 @@ def _moves_forward(current: Phase | None, target: Phase) -> bool:
     if current not in WORK_PHASES or target not in WORK_PHASES:
         return False
     return WORK_PHASES.index(target) > WORK_PHASES.index(current)
+
+
+def _require_retry_jitter(jitter: timedelta) -> None:
+    if not MIN_RETRY_JITTER <= jitter <= MAX_RETRY_JITTER:
+        raise ValueError(f"jitter {jitter} fora de [{MIN_RETRY_JITTER}, {MAX_RETRY_JITTER}]")
 
 
 def _require_timezone(moment: datetime) -> None:
@@ -516,20 +606,22 @@ def _find_inconsistency(run: RunState) -> str | None:
 def _find_phase_inconsistency(run: RunState) -> str | None:
     if (run.phase is not None) != (run.status is Status.RUNNING):
         return "fase só existe em running"
-    if run.phase is Phase.RETRY_WAIT and run.attempts_used >= MAX_ATTEMPTS:
+    if run.phase is Phase.RETRY_WAIT and run.physical_attempts >= MAX_ATTEMPTS:
         return "retry_wait sem tentativa restante"
+    if run.executor_started and not run.has_live_attempt:
+        return "executor iniciado sem tentativa viva"
     return None
 
 
 def _find_counter_inconsistency(run: RunState) -> str | None:
-    if not 0 <= run.attempts_used <= min(run.claim_count, MAX_ATTEMPTS):
-        return "tentativas fora de [0, min(claims, MAX_ATTEMPTS)]"
+    if not 0 <= run.physical_attempts <= min(run.claim_count, MAX_ATTEMPTS):
+        return "tentativas físicas fora de [0, min(claims, MAX_ATTEMPTS)]"
     if run.claim_count > MAX_CLAIMS:
         return "claims acima do teto"
-    if (run.attempts_used == 0) != (run.deadline_at is None):
-        return "o prazo existe exatamente quando alguma tentativa começou"
-    if run.status is Status.QUEUED and run.attempts_used != 0:
-        return "execução na fila com tentativa"
+    if (run.claim_count == 0) != (run.deadline_at is None):
+        return "o prazo existe exatamente quando houve claim"
+    if run.status is Status.QUEUED and run.claim_count != 0:
+        return "execução na fila com claim"
     return None
 
 

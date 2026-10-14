@@ -14,8 +14,10 @@ from goblinshift.runs.lifecycle import (
     EndAttempt,
     ErrorCode,
     Event,
+    ExecutorStarted,
     ExecutorStopped,
     InconsistentRunStateError,
+    LeaseExpired,
     Phase,
     PhaseReached,
     Published,
@@ -48,21 +50,30 @@ def queued() -> RunState:
     return RunState.queued(ACCEPTED_AT)
 
 
-def running(*, attempts: int = 1, phase: Phase = Phase.PROCESSING) -> RunState:
+def running(
+    *,
+    attempts: int = 1,
+    phase: Phase = Phase.PROCESSING,
+    claims: int | None = None,
+    started: bool = True,
+) -> RunState:
+    """Tentativa viva; `attempts` conta as físicas, inclusive a atual quando `started`."""
+    claim_count = attempts if claims is None else claims
     return replace(
         queued(),
         status=Status.RUNNING,
         phase=phase,
-        generation=attempts,
-        claim_count=attempts,
-        attempts_used=attempts,
+        generation=claim_count,
+        claim_count=claim_count,
+        physical_attempts=attempts,
+        executor_started=started,
         deadline_at=DEADLINE_AT,
     )
 
 
 def retry_waiting(*, claim_count: int = 1, eligible_at: datetime = DURING) -> RunState:
     return replace(
-        running(phase=Phase.RETRY_WAIT),
+        running(phase=Phase.RETRY_WAIT, started=False),
         generation=claim_count,
         claim_count=claim_count,
         eligible_at=eligible_at,
@@ -99,7 +110,8 @@ def test_claim_na_fila_inicia_a_primeira_tentativa_e_fixa_o_prazo() -> None:
 
     run = result.run
     assert (run.status, run.phase) == (Status.RUNNING, Phase.INSPECTING)
-    assert (run.generation, run.claim_count, run.attempts_used) == (1, 1, 1)
+    assert (run.generation, run.claim_count, run.physical_attempts) == (1, 1, 0)
+    assert run.executor_started is False
     assert run.deadline_at == STARTED_AT + timedelta(minutes=30)
     assert result.effects == (StartAttempt(generation=1, number=1),)
 
@@ -130,7 +142,7 @@ def test_cancelamento_na_fila_termina_cancelado_sem_tentativa() -> None:
     run = result.run
     assert (run.status, run.phase, run.error_code) == (Status.CANCELED, None, ErrorCode.CANCELED)
     assert run.cancel_requested is True
-    assert run.attempts_used == 0
+    assert run.claim_count == 0
     assert result.effects == (ReleaseReservations(),)
 
 
@@ -272,7 +284,7 @@ def test_claim_em_retry_wait_inicia_a_segunda_tentativa_sem_mudar_o_prazo() -> N
 
     run = result.run
     assert (run.status, run.phase) == (Status.RUNNING, Phase.INSPECTING)
-    assert (run.generation, run.claim_count, run.attempts_used) == (2, 2, 2)
+    assert (run.generation, run.claim_count, run.physical_attempts) == (2, 2, 1)
     assert run.deadline_at == DEADLINE_AT
     assert result.effects == (StartAttempt(generation=2, number=2),)
 
@@ -422,16 +434,8 @@ def test_termino_confirmado_sem_parada_pedida_e_recusado() -> None:
 # Linha 11: claim com claims = 4 → failed (INFRA_POISON).
 
 
-@pytest.mark.parametrize(
-    "run",
-    [
-        replace(queued(), claim_count=4, generation=4),
-        retry_waiting(claim_count=4),
-    ],
-    ids=["queued", "retry_wait"],
-)
-def test_quinto_claim_termina_failed_com_infra_poison(run: RunState) -> None:
-    result = accepted(run, Claim(DURING))
+def test_quinto_claim_termina_failed_com_infra_poison() -> None:
+    result = accepted(retry_waiting(claim_count=4), Claim(DURING))
 
     assert (result.run.status, result.run.error_code) == (Status.FAILED, ErrorCode.INFRA_POISON)
     assert result.run.claim_count == 4
@@ -442,7 +446,124 @@ def test_quarto_claim_ainda_inicia_tentativa() -> None:
     result = accepted(retry_waiting(claim_count=3), Claim(DURING))
 
     assert result.run.claim_count == 4
-    assert result.effects == (StartAttempt(generation=4, number=2),)
+    assert result.effects == (StartAttempt(generation=4, number=4),)
+
+
+def test_quatro_leases_vencidos_sem_executor_levam_o_quinto_claim_a_infra_poison() -> None:
+    run, now = queued(), STARTED_AT
+    for _ in range(4):
+        run = accepted(run, Claim(now)).run
+        run = accepted(run, LeaseExpired(run.generation, now, False, JITTER)).run
+        now += JITTER
+
+    result = accepted(run, Claim(now))
+
+    assert (result.run.status, result.run.error_code) == (Status.FAILED, ErrorCode.INFRA_POISON)
+    assert (result.run.claim_count, result.run.physical_attempts) == (4, 0)
+    assert result.effects == (ReleaseReservations(),)
+
+
+# Início do executor: só então a tentativa conta como física.
+
+
+def test_inicio_do_executor_conta_a_tentativa_como_fisica() -> None:
+    result = accepted(running(attempts=0, claims=1, started=False), ExecutorStarted(1))
+
+    assert (result.run.physical_attempts, result.run.executor_started) == (1, True)
+    assert result.effects == ()
+
+
+def test_inicio_do_executor_repetido_nao_conta_de_novo() -> None:
+    run = running()
+    assert accepted(run, ExecutorStarted(1)).run == run
+
+
+def test_inicio_do_executor_durante_a_parada_ainda_conta() -> None:
+    run = replace(
+        stopping(ErrorCode.CANCELED, cancel_requested=True),
+        executor_started=False,
+        physical_attempts=0,
+    )
+    assert accepted(run, ExecutorStarted(1)).run.physical_attempts == 1
+
+
+def test_inicio_do_executor_de_geracao_vencida_e_recusado() -> None:
+    run = running(attempts=1, claims=2, started=False)
+    assert refusal(run, ExecutorStarted(1)) is RefusalReason.STALE_GENERATION
+
+
+def test_inicio_do_executor_sem_tentativa_viva_e_recusado() -> None:
+    assert refusal(retry_waiting(), ExecutorStarted(1)) is RefusalReason.INVALID_FOR_STATUS
+
+
+def test_falha_transitoria_antes_do_executor_comecar_nao_gasta_tentativa() -> None:
+    run = running(attempts=1, claims=2, started=False)
+    result = accepted(run, TransientFailure(generation=2, now=DURING, jitter=JITTER))
+
+    assert result.run.phase is Phase.RETRY_WAIT
+    assert result.run.physical_attempts == 1
+
+
+# Lease vencido, com o término confirmado pelo reconciliador.
+
+
+def test_lease_vencido_sem_executor_reagenda_sem_gastar_tentativa() -> None:
+    run = running(attempts=0, claims=1, started=False)
+    result = accepted(run, LeaseExpired(1, DURING, False, JITTER))
+
+    run = result.run
+    assert (run.status, run.phase) == (Status.RUNNING, Phase.RETRY_WAIT)
+    assert (run.claim_count, run.physical_attempts) == (1, 0)
+    assert run.eligible_at == DURING + JITTER
+    assert result.effects == (EndAttempt(1),)
+
+
+def test_lease_vencido_sem_executor_depois_do_prazo_termina_failed() -> None:
+    run = running(attempts=0, claims=1, started=False)
+    result = accepted(run, LeaseExpired(1, AFTER_DEADLINE, False, JITTER))
+
+    assert (result.run.status, result.run.error_code) == (
+        Status.FAILED,
+        ErrorCode.DEADLINE_EXCEEDED,
+    )
+    assert result.effects == (EndAttempt(1), ReleaseReservations())
+
+
+def test_lease_vencido_com_executor_que_rodou_gasta_a_tentativa() -> None:
+    run = running(attempts=0, claims=1, started=False)
+    result = accepted(run, LeaseExpired(1, DURING, True, JITTER))
+
+    assert result.run.phase is Phase.RETRY_WAIT
+    assert result.run.physical_attempts == 1
+
+
+def test_lease_vencido_na_segunda_tentativa_fisica_pede_parada() -> None:
+    run = running(attempts=1, claims=2, started=False)
+    result = accepted(run, LeaseExpired(2, DURING, True, JITTER))
+
+    assert (result.run.status, result.run.stop_reason) == (
+        Status.STOPPING,
+        ErrorCode.EXECUTOR_UNAVAILABLE,
+    )
+    assert result.run.physical_attempts == 2
+    assert result.effects == (RequestStop(2),)
+
+
+def test_lease_vencido_respeita_o_inicio_ja_registrado() -> None:
+    result = accepted(running(attempts=2, claims=2), LeaseExpired(2, DURING, False, JITTER))
+
+    assert result.run.stop_reason is ErrorCode.EXECUTOR_UNAVAILABLE
+    assert result.run.physical_attempts == 2
+
+
+def test_lease_vencido_de_geracao_vencida_e_recusado() -> None:
+    event = LeaseExpired(1, DURING, False, JITTER)
+    assert refusal(running(claims=2), event) is RefusalReason.STALE_GENERATION
+
+
+def test_lease_vencido_com_jitter_fora_da_faixa_nao_existe() -> None:
+    with pytest.raises(ValueError, match="jitter"):
+        LeaseExpired(1, DURING, False, timedelta(seconds=31))
 
 
 # Fases de trabalho e fencing da escrita de fase.
@@ -480,6 +601,8 @@ ALL_EVENTS: list[Event] = [
     CancelRequested(),
     QueueExpired(AFTER_DEADLINE + timedelta(hours=2)),
     DeadlineExceeded(AFTER_DEADLINE),
+    ExecutorStarted(1),
+    LeaseExpired(1, DURING, False, JITTER),
     PhaseReached(1, Phase.FINALIZING),
     Published(1, PublishOutcome.SUCCEEDED, DURING),
     DeterministicFailure(1, ErrorCode.OUTPUT_LIMIT_EXCEEDED),
@@ -506,20 +629,25 @@ INCONSISTENT_SNAPSHOTS = {
     "fase_fora_de_running": (queued(), {"phase": Phase.INSPECTING}, "fase só existe"),
     "retry_wait_sem_tentativa_restante": (
         retry_waiting(),
-        {"attempts_used": 2, "claim_count": 2, "generation": 2},
+        {"physical_attempts": 2, "claim_count": 2, "generation": 2},
         "retry_wait sem tentativa",
     ),
-    "mais_tentativas_que_claims": (queued(), {"attempts_used": 1}, "tentativas fora"),
-    "claims_acima_do_teto": (queued(), {"claim_count": 5, "generation": 5}, "claims acima"),
-    "tentativa_sem_prazo": (
-        queued(),
-        {"attempts_used": 1, "claim_count": 1, "generation": 1},
-        "o prazo existe",
+    "executor_iniciado_sem_tentativa_viva": (
+        retry_waiting(),
+        {"executor_started": True},
+        "executor iniciado",
     ),
-    "fila_com_tentativa": (
+    "mais_tentativas_fisicas_que_claims": (
         queued(),
-        {"attempts_used": 1, "claim_count": 1, "generation": 1, "deadline_at": DEADLINE_AT},
-        "na fila com tentativa",
+        {"physical_attempts": 1},
+        "tentativas físicas fora",
+    ),
+    "claims_acima_do_teto": (queued(), {"claim_count": 5, "generation": 5}, "claims acima"),
+    "claim_sem_prazo": (queued(), {"claim_count": 1, "generation": 1}, "o prazo existe"),
+    "fila_com_claim": (
+        queued(),
+        {"claim_count": 1, "generation": 1, "deadline_at": DEADLINE_AT},
+        "na fila com claim",
     ),
     "razao_de_parada_na_fila": (queued(), {"stop_reason": ErrorCode.CANCELED}, "razão de parada"),
     "stopping_sem_razao": (running(), {"status": Status.STOPPING, "phase": None}, "stopping sem"),

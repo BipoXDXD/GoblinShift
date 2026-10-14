@@ -1,15 +1,15 @@
 """Invariantes de 3.5 sob sequências arbitrárias de eventos (docs/GoblinShiftPlan.md, 3.7).
 
-O modelo conta as tentativas pelos efeitos declarados, sem consultar a lógica testada:
-uma tentativa nasce com `StartAttempt` e morre com `EndAttempt`.
+O modelo conta as tentativas sem consultar a lógica testada: uma Attempt nasce com
+`StartAttempt` e morre com `EndAttempt`, e vira física quando um início de executor da
+geração dela é aceito (`ExecutorStarted` ou `LeaseExpired` com `executor_ran`).
 """
 
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from hypothesis import settings, target
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, rule
+from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from goblinshift.runs.lifecycle import (
     MAX_ATTEMPTS,
@@ -21,7 +21,9 @@ from goblinshift.runs.lifecycle import (
     EndAttempt,
     ErrorCode,
     Event,
+    ExecutorStarted,
     ExecutorStopped,
+    LeaseExpired,
     Phase,
     PhaseReached,
     Published,
@@ -46,11 +48,12 @@ DETERMINISTIC = [
     ErrorCode.RESOURCE_LIMIT_EXCEEDED,
 ]
 
-# Passos curtos (até um minuto) cabem no jitter e deixam a segunda tentativa acontecer
-# dentro do prazo; passos de até uma hora alcançam o prazo da fila (2 h) e o da execução
-# (30 min) em poucos passos.
+# Passos curtos (até um minuto), três vezes mais prováveis, cabem no jitter e deixam
+# retentativas e claims seguidos acontecerem dentro do prazo; os de até uma hora alcançam
+# o prazo da fila (2 h) e o da execução (30 min) em poucos passos.
+short_step = st.integers(min_value=0, max_value=60)
 clock_steps = st.one_of(
-    st.integers(min_value=0, max_value=60), st.integers(min_value=0, max_value=3600)
+    short_step, short_step, short_step, st.integers(min_value=0, max_value=3600)
 ).map(lambda s: timedelta(seconds=s))
 jitters = st.integers(min_value=5, max_value=30).map(lambda s: timedelta(seconds=s))
 # Deslocamento de geração: 0 é o worker atual; os demais imitam um worker atrasado.
@@ -71,12 +74,7 @@ class RunLifecycle(RuleBasedStateMachine):
         self.published = False
         self.first_stop_reason: ErrorCode | None = None
         self.transitions = 0
-
-    @initialize(claims=st.integers(min_value=0, max_value=MAX_CLAIMS))
-    def start_with_previous_claims(self, claims: int) -> None:
-        # Um snapshot lido do banco pode trazer claims anteriores; assim o teto de claims
-        # (INFRA_POISON) também é exercitado, e não só nos testes de exemplo.
-        self.run = replace(self.run, claim_count=claims, generation=claims)
+        self.physical_generations: set[int] = set()
 
     def decide(self, event: Event) -> None:
         before = self.run
@@ -89,6 +87,10 @@ class RunLifecycle(RuleBasedStateMachine):
         # Fencing (3.4): só a tentativa da geração atual escreve.
         stale = getattr(event, "generation", before.generation) != before.generation
         assert not stale, f"geração vencida aceita: {event}"
+        if isinstance(event, ExecutorStarted) or (
+            isinstance(event, LeaseExpired) and event.executor_ran
+        ):
+            self.physical_generations.add(event.generation)
         for effect in result.effects:
             match effect:
                 case StartAttempt():
@@ -104,6 +106,10 @@ class RunLifecycle(RuleBasedStateMachine):
                     self.releases += 1
                 case _:
                     pass
+        if result.run.phase is Phase.RETRY_WAIT and before.phase is not Phase.RETRY_WAIT:
+            # Retentativa só dentro do prazo (3.4).
+            assert before.deadline_at is not None
+            assert self.now <= before.deadline_at
         self.run = result.run
         self.transitions += 1
         if self.first_stop_reason is None:
@@ -152,16 +158,36 @@ class RunLifecycle(RuleBasedStateMachine):
         self.decide(TransientFailure(self.current(offset), self.now, jitter))
 
     @rule(offset=generation_offsets)
+    def start_executor(self, offset: int) -> None:
+        self.decide(ExecutorStarted(self.current(offset)))
+
+    @rule(offset=generation_offsets, executor_ran=st.booleans(), jitter=jitters)
+    def expire_lease(self, offset: int, executor_ran: bool, jitter: timedelta) -> None:
+        self.decide(LeaseExpired(self.current(offset), self.now, executor_ran, jitter))
+
+    @rule(jitter=jitters)
+    def lose_worker_right_after_claim(self, jitter: timedelta) -> None:
+        # Worker morto entre o claim e o pedido do container: o reconciliador acha o lease
+        # vencido e nenhum executor. Juntar os passos torna o quinto claim (INFRA_POISON)
+        # comum nas sequências geradas.
+        self.decide(Claim(self.now))
+        self.decide(LeaseExpired(self.run.generation, self.now, False, jitter))
+        self.now += jitter
+
+    @rule(offset=generation_offsets)
     def confirm_executor_stopped(self, offset: int) -> None:
         self.decide(ExecutorStopped(self.current(offset)))
 
     def teardown(self) -> None:
         # Guia a geração para sequências longas, onde moram retentativa, prazo e parada.
         target(self.transitions, label="transições aceitas")
+        # E para muitos claims, onde mora o teto de claims (INFRA_POISON).
+        target(self.run.claim_count, label="claims")
 
     @invariant()
     def at_most_two_physical_attempts(self) -> None:
-        assert self.started_attempts <= MAX_ATTEMPTS
+        assert len(self.physical_generations) <= MAX_ATTEMPTS
+        assert self.run.physical_attempts == len(self.physical_generations)
 
     @invariant()
     def never_two_live_attempts(self) -> None:
@@ -186,9 +212,10 @@ class RunLifecycle(RuleBasedStateMachine):
         assert self.releases == (1 if self.run.is_terminal else 0)
 
     @invariant()
-    def claims_never_pass_the_ceiling(self) -> None:
-        assert self.run.claim_count <= MAX_CLAIMS
+    def one_attempt_per_claim_and_at_most_four(self) -> None:
+        assert self.run.claim_count == self.started_attempts
+        assert self.started_attempts <= MAX_CLAIMS
 
 
-RunLifecycle.TestCase.settings = settings(max_examples=1000, stateful_step_count=30, deadline=None)
+RunLifecycle.TestCase.settings = settings(max_examples=1000, stateful_step_count=50, deadline=None)
 test_run_lifecycle = RunLifecycle.TestCase
