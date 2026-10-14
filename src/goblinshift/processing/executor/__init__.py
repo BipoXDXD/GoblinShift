@@ -23,6 +23,9 @@ O worker prepara, o executor só lê:
       ]
     }
 
+- `context.json` (opcional, fatia 5, ADR 020): `{"executor_image": "<repo>@sha256:<hex>"}`, a
+  imagem fixada na Run, só para o manifesto. Ausente é a janela de deploy (`null` no manifesto);
+  chaves desconhecidas são ignoradas, ao contrário do `job.json`.
 - `inputs/`: as entradas, conferidas por tamanho e SHA-256 antes de qualquer processamento.
 
 O executor escreve, sempre com criação exclusiva:

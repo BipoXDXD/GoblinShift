@@ -1,5 +1,6 @@
 """Worker de ponta a ponta com PostgreSQL e executor reais (docs/GoblinShiftPlan.md, 3.4 e 3.5)."""
 
+import json
 import threading
 import uuid
 from datetime import timedelta
@@ -14,6 +15,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
+from goblinshift.processing.executor.job import ExecutionContext, read_context
 from goblinshift.runs.acceptance import accept_run
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.store import complete_after_commit
@@ -331,3 +333,18 @@ def test_execucao_aceita_pela_api_e_processada_pelo_worker(
     assert row["status"] == "succeeded"
     assert outputs_of(factory, accepted.run_id)[-1] == ("report.json", "report")
     assert open_run_uses(factory, accepted.run_id) == 0
+
+
+def test_preparacao_grava_o_contexto_com_a_imagem_fixada_na_run(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root)
+    worker = coordinator(factory, storage, runner)
+    claimed = claim(factory, storage)
+
+    worker.prepare(claimed)
+
+    context = runner.work_dir(claimed.attempt_id) / "context.json"
+    assert json.loads(context.read_bytes()) == {"executor_image": LOCAL_EXECUTOR_IMAGE}
+    assert read_context(context) == ExecutionContext(executor_image=claimed.executor_image)
