@@ -72,11 +72,30 @@ class ItemOk:
     details: Mapping[str, DetailValue] = field(default_factory=dict)
 
 
+class ItemRejectionCode(StrEnum):
+    """Códigos de rejeição por item do catálogo de 1.6: lista fechada.
+
+    Cada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro
+    código, porque o relatório vem do sandbox e o código vai para o banco e para a API.
+    """
+
+    UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
+    UNSUPPORTED_BIT_DEPTH = "UNSUPPORTED_BIT_DEPTH"
+    UNSUPPORTED_COLOR_PROFILE = "UNSUPPORTED_COLOR_PROFILE"
+    IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE"
+    CSV_STRUCTURE_INVALID = "CSV_STRUCTURE_INVALID"
+    FIELD_LIMIT_EXCEEDED = "FIELD_LIMIT_EXCEEDED"
+
+
 @dataclass(frozen=True)
 class ItemRejected:
     position: int
-    code: str  # código do catálogo de 1.6
+    code: str  # de `ItemRejectionCode`
     reason: str
+
+    def __post_init__(self) -> None:
+        if self.code not in ItemRejectionCode:
+            raise ValueError(f"{self.code!r} não é código de rejeição do catálogo")
 
 
 @dataclass(frozen=True)
@@ -131,6 +150,12 @@ class InputContractError(ValueError):
     A aceitação já recusa esse comando com 422; chegar à receita é job fora do contrato, um
     defeito de infraestrutura, e não falha determinística do conteúdo.
     """
+
+
+def require_max_inputs(inputs: Sequence[InputFile], max_inputs: int, noun: str) -> None:
+    """Recusa o lote acima do `max_inputs` da versão; `noun` nomeia as entradas na mensagem."""
+    if len(inputs) > max_inputs:
+        raise InputContractError(f"{len(inputs)} {noun}; o limite por execução é {max_inputs}")
 
 
 class OutputRole(StrEnum):

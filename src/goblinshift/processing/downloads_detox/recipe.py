@@ -17,7 +17,6 @@ from goblinshift.processing.downloads_detox.params import Params
 from goblinshift.processing.recipe import (
     DetailValue,
     FailureCode,
-    InputContractError,
     InputFile,
     ItemDuplicate,
     ItemOk,
@@ -28,6 +27,7 @@ from goblinshift.processing.recipe import (
     RecipeFailure,
     Report,
     ReportItem,
+    require_max_inputs,
 )
 
 RECIPE_ID = "downloads-detox"
@@ -65,10 +65,7 @@ class DownloadsDetoxV1:
     def run(
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
-        if len(inputs) > self._max_inputs:
-            raise InputContractError(
-                f"{len(inputs)} arquivos; o limite por execução é {self._max_inputs}"
-            )
+        require_max_inputs(inputs, self._max_inputs, "arquivos")
         decisions = _decide(inputs, params)
         self._require_within_budget(decisions)
         items: list[ReportItem] = []

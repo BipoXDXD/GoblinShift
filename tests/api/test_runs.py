@@ -806,7 +806,11 @@ def test_execucao_aceita_fixa_a_imagem_do_executor_da_configuracao(
 
 def test_api_em_producao_nao_sobe_sem_o_executor_ctl() -> None:
     settings = Settings(
-        environment="production", db_port=1, cursor_secret=SecretStr("s" * 32), runner="local"
+        environment="production",
+        db_port=1,
+        cursor_secret=SecretStr("s" * 32),
+        user_hash_secret=SecretStr("u" * 32),
+        runner="local",
     )
 
     with pytest.raises(ExecutorConfigError, match="GS_RUNNER=executor_ctl"):
@@ -818,6 +822,7 @@ def test_api_em_producao_nao_sobe_sem_a_imagem_do_executor() -> None:
         environment="production",
         db_port=1,
         cursor_secret=SecretStr("s" * 32),
+        user_hash_secret=SecretStr("u" * 32),
         runner="executor_ctl",
     )
 

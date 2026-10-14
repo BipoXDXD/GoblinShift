@@ -1,0 +1,25 @@
+# Backup diário do PostgreSQL para fora da VPS (docs/adr/022-backup-externo.md).
+# Instalado pelo deploy/backup/install.sh; disparado pelo goblinshift-pg-backup.timer.
+[Unit]
+Description=GoblinShift: backup cifrado do PostgreSQL para o armazenamento externo
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# O usuário da aplicação já está no grupo docker (provision.sh) e só precisa do docker exec.
+User=goblinshift
+Group=goblinshift
+Environment=BACKUP_PG_CONTAINER=goblinshift-postgres-1
+EnvironmentFile=/srv/goblinshift/secrets/backup.env
+# O script vem do checkout implantado: muda só pelo mesmo review e pipeline do código.
+ExecStart=/srv/goblinshift/app/deploy/backup/pg-backup.sh
+TimeoutStartSec=1h
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+# `full`, e não `strict`: /run precisa continuar acessível para o socket do Docker.
+ProtectSystem=full

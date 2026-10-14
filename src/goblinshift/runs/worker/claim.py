@@ -21,6 +21,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.runs.lifecycle import Claim, Phase, Refused, Status, decide_transition
 from goblinshift.runs.store import (
     Applied,
+    RunFinishedHook,
     apply_transition,
     complete_after_commit,
     load_run,
@@ -56,7 +57,11 @@ class ClaimedAttempt:
 
 
 def claim_next(
-    factory: sessionmaker[Session], storage: FileStorage, lease: timedelta
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    lease: timedelta,
+    *,
+    on_finished: RunFinishedHook | None = None,
 ) -> ClaimedAttempt | None:
     """Reivindica a próxima execução elegível, ou `None` se a fila está vazia.
 
@@ -70,7 +75,7 @@ def claim_next(
             "execução encerrada no claim",
             extra={"fields": {"run_id": str(outcome.run_id), "error.code": "INFRA_POISON"}},
         )
-        complete_after_commit(factory, storage, outcome)
+        complete_after_commit(factory, storage, outcome, on_finished)
     return None
 
 
