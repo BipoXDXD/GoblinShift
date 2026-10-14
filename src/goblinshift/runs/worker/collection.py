@@ -49,7 +49,12 @@ from goblinshift.processing.packaging import (
 )
 from goblinshift.processing.recipe import ItemRejectionCode, OutputGroup
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
-from goblinshift.runs.worker.package_check import PackageError, verify_manifest, verify_zip
+from goblinshift.runs.worker.package_check import (
+    ManifestInput,
+    PackageError,
+    verify_manifest,
+    verify_zip,
+)
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 _PACKAGE_LIMITS = PackageLimits()
@@ -210,11 +215,30 @@ def collect_outputs(
     manifest_file = _from_bytes(manifest, manifest_data)
     package_file = _digested(package, heartbeat)
     try:
-        verify_manifest(manifest_data, outputs)
+        verify_manifest(manifest_data, outputs, _manifest_inputs(report), recipe_id)
         verify_zip(package.path, [*outputs, manifest_file, report_file], heartbeat)
     except PackageError as error:
         raise CollectionError(str(error)) from error
     return Collected(outputs, report_file, report, manifest_file, package_file)
+
+
+def _manifest_inputs(report: ParsedReport) -> list[ManifestInput]:
+    return [
+        ManifestInput(
+            item.position,
+            _status_of(item),
+            item.outputs,
+            None if item.code is None else item.code.value,
+            item.duplicate_of,
+        )
+        for item in report.items
+    ]
+
+
+def _status_of(item: ReportItem) -> str:
+    if not item.accepted:
+        return _ITEM_REJECTED
+    return _ITEM_OK if item.duplicate_of is None else _ITEM_DUPLICATE
 
 
 def _digested(found: _Found, heartbeat: Callable[[], None]) -> OutputFile:

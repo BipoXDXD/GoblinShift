@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from goblinshift.runs.lifecycle import ErrorCode
+from goblinshift.runs.worker import collection, package_check
 from goblinshift.runs.worker.collection import (
     DEFAULT_LIMITS,
     Collected,
@@ -31,6 +32,7 @@ from tests.runs.collection_support import (
     manifest_for,
     ok_item,
     package_entries,
+    rejected_item,
     rewrite_package,
     write_manifest,
     write_out,
@@ -373,15 +375,6 @@ def _patch_first_entry(path: Path, *, size: int | None = None, flags: int | None
     path.write_bytes(bytes(data))
 
 
-def test_conferencia_do_zip_chama_o_heartbeat_enquanto_le(tmp_path: Path) -> None:
-    out = valid_out(tmp_path)
-    beats: list[None] = []
-
-    collect_outputs(out, recipe_id=RECIPE, input_count=1, heartbeat=lambda: beats.append(None))
-
-    assert len(beats) >= len(FILES) + 2
-
-
 class _ZipFileMustNotOpen:
     """Falha o teste se a coleta entregar o ZIP ao zipfile, que lê o diretório central inteiro."""
 
@@ -563,3 +556,124 @@ def test_manifesto_aninhado_demais_e_recusado_sem_estourar_a_pilha(tmp_path: Pat
 
     with pytest.raises(CollectionError, match="manifesto"):
         collect(out)
+
+
+# --- Manifesto: as entradas e a receita também batem com o relatório e a Run --------------------
+
+
+def _two_items_out(tmp_path: Path) -> Path:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, *NAMES), rejected_item(1)], FILES)
+    write_package(out)
+    return out
+
+
+def _inputs_changed(out: Path, change: str) -> object:
+    manifest = manifest_for(out)
+    inputs: list[Any] = manifest["inputs"]
+    match change:
+        case "status-trocado":
+            inputs[0]["status"] = "rejected"
+        case "codigo-fora-do-catalogo":
+            inputs[1]["code"] = "<b>QUALQUER</b>"
+        case "codigo-diferente-do-relatorio":
+            inputs[1]["code"] = "UNSUPPORTED_FORMAT"
+        case "saidas-diferentes":
+            inputs[0]["outputs"] = ["a.csv"]
+        case "entrada-a-menos":
+            inputs.pop()
+        case "posicao-trocada":
+            inputs[0]["position"], inputs[1]["position"] = 1, 0
+        case "chave-extra-na-entrada":
+            inputs[0]["script"] = "x"
+        case "chave-extra-no-topo":
+            manifest["extra"] = {}
+        case "outra-receita":
+            manifest["recipe"]["id"] = "image-forge"
+        case "receita-com-chave-extra":
+            manifest["recipe"]["url"] = "https://exemplo.invalid"
+    return manifest
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "status-trocado",
+        "codigo-fora-do-catalogo",
+        "codigo-diferente-do-relatorio",
+        "saidas-diferentes",
+        "entrada-a-menos",
+        "posicao-trocada",
+        "chave-extra-na-entrada",
+        "chave-extra-no-topo",
+        "outra-receita",
+        "receita-com-chave-extra",
+    ],
+)
+def test_manifesto_com_entradas_ou_receita_fora_do_relatorio_e_recusado(
+    tmp_path: Path, change: str
+) -> None:
+    out = _two_items_out(tmp_path)
+    rebuild_with_manifest(out, _inputs_changed(out, change))
+
+    with pytest.raises(CollectionError, match="manifesto"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+
+def test_manifesto_com_entradas_coerentes_e_aceito(tmp_path: Path) -> None:
+    out = _two_items_out(tmp_path)
+
+    assert collect_outputs(out, recipe_id=RECIPE, input_count=2).manifest_file is not None
+
+
+def test_nome_com_bytes_utf8_invalidos_e_a_flag_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    entries = package_entries(out)
+    entries[0] = _raw_name_entry("a.csv", b"a\xff.csv", 0x800, FILES["a.csv"])
+    rewrite_package(out, entries)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+# --- Heartbeat: um por bloco lido, em cada leitura longa ------------------------------------------
+
+CHUNK = 2
+
+
+def _chunks(size: int) -> int:
+    return -(-size // CHUNK)
+
+
+@pytest.fixture
+def small_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(collection, "READ_CHUNK_BYTES", CHUNK)
+    monkeypatch.setattr(package_check, "READ_CHUNK_BYTES", CHUNK)
+
+
+@pytest.mark.usefixtures("small_chunks")
+def test_hash_das_saidas_bate_o_heartbeat_a_cada_bloco(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, *NAMES)], FILES)
+    beats: list[None] = []
+
+    collect_outputs(out, recipe_id=RECIPE, input_count=1, heartbeat=lambda: beats.append(None))
+
+    assert len(beats) == sum(_chunks(len(data)) for data in FILES.values())
+
+
+@pytest.mark.usefixtures("small_chunks")
+def test_pacote_bate_o_heartbeat_no_hash_e_em_cada_entrada_do_zip(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    beats: list[None] = []
+    zipped = [
+        *FILES.values(),
+        (out / "manifest.json").read_bytes(),
+        (out / "report.json").read_bytes(),
+    ]
+
+    collect_outputs(out, recipe_id=RECIPE, input_count=1, heartbeat=lambda: beats.append(None))
+
+    hashed = sum(_chunks(len(data)) for data in FILES.values())
+    package = _chunks((out / PACKAGE).stat().st_size)
+    assert len(beats) == hashed + package + sum(_chunks(len(data)) for data in zipped)
