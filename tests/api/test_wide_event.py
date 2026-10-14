@@ -241,7 +241,7 @@ def test_aceitacao_traz_run_receita_e_replay(traced: Traced, tmp_path: Path) -> 
     assert traced.main_event()["idempotency.replayed"] is True
 
 
-# Limite de requisições (1.7; ADR 027)
+# Limite de requisições (1.7; ADR 028)
 
 
 def test_requisicao_atendida_traz_rate_limit_limited_falso(traced: Traced) -> None:

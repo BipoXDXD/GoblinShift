@@ -2,7 +2,7 @@
 
 Um ciclo a cada `GS_MAINTENANCE_INTERVAL_S` (30 s): o de execuções e arquivos (`Maintenance`) e o
 de contas (`AccountJobs`: purga das contas em exclusão, retenção da identidade, 1.8, e limpeza das
-janelas do limite de requisições, ADR 027). Cada ciclo é uma unidade de trabalho com um evento de
+janelas do limite de requisições, ADR 028). Cada ciclo é uma unidade de trabalho com um evento de
 log estruturado; a falha de um ciclo é registrada e o seguinte tenta de novo. Os lotes usam
 `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
@@ -145,7 +145,7 @@ class AccountJobs:
             "request_windows_removed": self._in_transaction(
                 lambda s: rate_limit.delete_expired_windows(s, now, batch)
             ),
-            # Tamanho da tabela do limite de requisições depois da limpeza (ADR 027).
+            # Tamanho da tabela do limite de requisições depois da limpeza (ADR 028).
             "request_windows": self._in_transaction(rate_limit.count_windows),
         }
         if counts["accounts_deletion_overdue"]:

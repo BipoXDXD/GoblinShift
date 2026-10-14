@@ -1,4 +1,4 @@
-"""Limite de requisições por conta e classe de rota (docs/GoblinShiftPlan.md, 1.7; ADR 027).
+"""Limite de requisições por conta e classe de rota (docs/GoblinShiftPlan.md, 1.7; ADR 028).
 
 Janela fixa de um minuto, contada no PostgreSQL por um `INSERT … ON CONFLICT DO UPDATE` condicional:
 vale entre réplicas e nunca passa do limite, nem com requisições simultâneas.

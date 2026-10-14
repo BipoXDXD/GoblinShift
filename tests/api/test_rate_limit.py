@@ -1,4 +1,4 @@
-"""Limite de requisições na borda HTTP: 429 `RATE_LIMITED` com `Retry-After` (1.7; ADR 027).
+"""Limite de requisições na borda HTTP: 429 `RATE_LIMITED` com `Retry-After` (1.7; ADR 028).
 
 Por conta e por classe de rota (leituras 120, comandos 60 e criação de execução 10 por minuto).
 A conta é a da credencial, nunca o IP. Envio e download de conteúdo ficam fora: valem as
