@@ -233,7 +233,7 @@ def test_aceitacao_traz_run_receita_e_replay(traced: Traced, tmp_path: Path) -> 
 # Canário: nada do que o cliente manda como segredo ou dado chega ao span
 
 
-def test_canario_em_credencial_cookie_chave_query_nome_e_parametro_nunca_vai_ao_span(
+def test_canario_em_credencial_cookie_agente_chave_query_nome_e_parametro_nunca_vai_ao_span(
     traced: Traced,
 ) -> None:
     canary = f"CANARY-{uuid.uuid4()}"
@@ -242,7 +242,11 @@ def test_canario_em_credencial_cookie_chave_query_nome_e_parametro_nunca_vai_ao_
 
     traced.client.get(
         f"/api/v1/runs?recipe_id={canary}",
-        headers={"Authorization": f"Bearer {canary}", "Cookie": f"session={canary}"},
+        headers={
+            "Authorization": f"Bearer {canary}",
+            "Cookie": f"session={canary}",
+            "User-Agent": canary,
+        },
     )
     traced.client.get(f"/api/v1/runs?recipe_id={canary}&cursor={canary}", headers=auth)
     traced.client.post(
