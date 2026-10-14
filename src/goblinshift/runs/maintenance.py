@@ -52,6 +52,7 @@ from goblinshift.runs.store import (
     Applied,
     LoadedRun,
     LostFencing,
+    RunFinishedHook,
     apply_transition,
     complete_after_commit,
     load_run,
@@ -88,11 +89,14 @@ class Maintenance:
         storage: FileStorage,
         runner: Runner,
         config: MaintenanceConfig = MaintenanceConfig(),  # noqa: B008 - dataclass imutável
+        *,
+        on_finished: RunFinishedHook | None = None,
     ) -> None:
         self._factory = factory
         self._storage = storage
         self._runner = runner
         self._config = config
+        self._on_finished = on_finished
 
     def run_cycle(self) -> dict[str, int]:
         """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
@@ -361,7 +365,7 @@ class Maintenance:
         except LostFencing:
             return None
         if applied is not None:
-            complete_after_commit(self._factory, self._storage, applied)
+            complete_after_commit(self._factory, self._storage, applied, self._on_finished)
         return applied
 
     def _confirm_stopped(self, session: Session, run_id: uuid.UUID, first: Applied) -> Applied:

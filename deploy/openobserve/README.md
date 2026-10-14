@@ -20,20 +20,20 @@ Todos os nomes começam com `gs-`. O que tem esse prefixo e saiu do catálogo é
 
 **Silêncio.** Depois de notificar, o urgente fica quieto por 60 min e o aviso por 180 min; a fila cheia por 60 min e o disco por 240 min.
 
-### Pendente: o evento de término da Run
+### O evento de término da Run
 
-O SLO de execução lê um evento que o worker **ainda não emite**: até lá, ele fica sem eventos (o relatório mostra "sem eventos elegíveis") e a queima de execução nunca dispara. O contrato que a consulta espera, no span do worker:
+O SLO de execução lê o span `run.finished`, que o worker e a manutenção emitem quando uma Run chega a estado terminal (`goblinshift.runs.finished`): publicação, falha da receita, parada confirmada, `INFRA_POISON` no claim, `QUEUE_EXPIRED` e prazo vencido pela manutenção. A emissão acontece depois do commit e da liberação dos usos, uma vez por Run; se falhar, a Run não é afetada e o log registra `evento de término da execução perdido` com o `run_id`. A Run cancelada ainda na fila termina pela API e não emite o evento (não seria elegível de todo modo). Contrato, conferido por `tests/runs/test_run_finished_event.py` contra a consulta:
 
 | Atributo | Valor |
 |---|---|
-| nome do span | `run.finished` |
+| nome do span | `run.finished` (instantâneo, no momento da emissão) |
 | `main` | `true` |
 | `slo.execution.eligible` | `true` se a Run tem até 10 arquivos e 50 MiB de entrada e não foi cancelada pela pessoa usuária |
 | `error.code` | código do catálogo de 1.6 no estado final, ausente em `succeeded` |
 | `run.duration_ms` | do início da primeira tentativa até o estado terminal; ausente se nunca começou |
 | `run.state` | estado final (`succeeded`, `failed`, `canceled`, …) |
-
-Os demais atributos de "Término da Run" (3.7: número de tentativas, `queue_wait_ms`) entram no mesmo span, mas a consulta não precisa deles.
+| `run.attempts`, `run.queue_wait_ms`, `run.input_count` | claims, espera na fila até o primeiro claim (ausente se nunca começou) e número de entradas |
+| `run_id`, `recipe_id`, `recipe_version`, `user.hash` | identificação, sem PII: a conta só pelo HMAC do `owner_id` |
 
 ### Fora do OpenObserve, por enquanto
 
@@ -95,7 +95,7 @@ cd deploy && uv run python -m openobserve provision --secrets-file ~/.config/gob
 
 A saída lista cada template, destino e alerta criado, atualizado ou removido. Antes de mexer em qualquer alerta, o script valida todas as consultas no OpenObserve; se alguma for recusada, sai com 1 e não altera alertas nem destinos.
 
-Na primeira vez num stream sem as colunas dos SLOs (antes de o worker emitir `run.finished`, por exemplo), o script grava um span-semente, `goblinshift.schema-seed` com `main = false`, que declara as colunas. Ele não conta em nenhum SLO, porque todas as consultas filtram `main = 'true'`; sem ele, o OpenObserve recusaria a consulta em toda avaliação.
+Na primeira vez num stream sem as colunas dos SLOs (antes da primeira Run terminada depois do deploy, por exemplo), o script grava um span-semente, `goblinshift.schema-seed` com `main = false`, que declara as colunas. Ele não conta em nenhum SLO, porque todas as consultas filtram `main = 'true'`; sem ele, o OpenObserve recusaria a consulta em toda avaliação.
 
 Também dá para rodar na própria VPS, sem túnel, como o usuário `goblinshift` (dono de `/srv/goblinshift/secrets`, modo 700), somando o `app.env` (credencial) a um arquivo só com as URLs, também com `chmod 600`:
 
@@ -164,4 +164,4 @@ uv run pytest tests/openobserve -m "not openobserve"   # catálogo, segredos e r
 uv run pytest -m openobserve                           # OpenObserve e Collector reais (Testcontainers)
 ```
 
-Os testes com Docker (também na CI, no job padrão; o cenário do agendador leva cerca de 1,5 min) sobem a mesma imagem do OpenObserve e do Collector do `compose.yaml`, com a configuração real do Collector, e provam: o SLI de cada consulta com valores calculados à mão; os limites da queima (exatamente 4x dispara, logo abaixo não; mínimo de eventos em cada janela; queima que já parou); a fila cheia sustentada; o disco acima de 85% só no ponto de montagem cheio; e, com o agendador de verdade, que a queima e a causa notificam sob erro e que o tráfego normal só produz o heartbeat. Só nos testes o OpenObserve roda com `ZO_SKIP_SSRF_CHECKS`, porque o receptor de webhooks está num IP privado.
+Os testes com Docker (também na CI, no job paralelo "SLOs e alertas (OpenObserve)", fora do orçamento do commit stage; o cenário do agendador leva cerca de 2 min) sobem a mesma imagem do OpenObserve e do Collector do `compose.yaml`, com a configuração real do Collector, e provam: o SLI de cada consulta com valores calculados à mão; os limites da queima (exatamente 4x dispara, logo abaixo não; mínimo de eventos em cada janela; queima que já parou); a fila cheia sustentada; o disco acima de 85% só no ponto de montagem cheio; e, com o agendador de verdade, que a queima e a causa notificam sob erro e que o tráfego normal só produz o heartbeat. Só nos testes o OpenObserve roda com `ZO_SKIP_SSRF_CHECKS`, porque o receptor de webhooks está num IP privado.
