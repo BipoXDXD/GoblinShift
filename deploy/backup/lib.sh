@@ -52,11 +52,16 @@ s3_url() {
 
 # healthcheck_ping <url ou vazio> <sufixo>: "/start", "" (sucesso) ou "/fail".
 # Falhar o ping não muda o resultado: sem o ping de sucesso, o healthchecks.io avisa sozinho.
+# A URL é segredo (quem a tem cala o alerta pingando sucesso) e vai pelo stdin, como a credencial.
 healthcheck_ping() {
   local url="$1" suffix="$2"
   [[ -n "$url" ]] || return 0
-  curl --fail --silent --show-error --max-time 10 --retry 5 --output /dev/null \
-    "${url%/}${suffix}" || echo "aviso: o ping ${suffix:-de sucesso} ao healthchecks falhou" >&2
+  url="${url%/}${suffix}"
+  url="${url//\\/\\\\}"
+  url="${url//\"/\\\"}"
+  printf 'url = "%s"\n' "$url" |
+    curl --config - --fail --silent --show-error --max-time 10 --retry 5 --output /dev/null ||
+    echo "aviso: o ping ${suffix:-de sucesso} ao healthchecks falhou" >&2
 }
 
 # Nome do dump: o instante UTC no nome ordena as chaves na listagem e dá a idade do dump.
