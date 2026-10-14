@@ -28,7 +28,10 @@ from email.utils import parsedate_to_datetime
 # Folga para o relógio do runner, da VPS e do S3 não concordarem.
 CLOCK_SKEW = timedelta(hours=1)
 SECONDS_PER_HOUR = 3600
-NAME = re.compile(r"goblinshift-(?P<instant>\d{8}T\d{6}Z)-[0-9a-f]{32}\.dump\.age")
+# A chave inteira tem de ser `<prefixo><nome>`: ela volta ao bash, vai para a URL do curl e
+# para o log. Só ASCII (`re.ASCII`: `\d` aceitaria dígitos de outros alfabetos), sem `/` extra,
+# `..` ou quebra de linha, que viria de uma referência de caractere na listagem.
+NAME = re.compile(r"goblinshift-(?P<instant>\d{8}T\d{6}Z)-[0-9a-f]{32}\.dump\.age", re.ASCII)
 COMPLIANCE = "COMPLIANCE"
 
 
@@ -75,7 +78,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def latest_dump(listing_xml: str, prefix: str, now: datetime) -> Dump:
     """O dump enviado por último, entre as chaves no formato do pg-backup.sh."""
-    parsed = (_dump(key, sent_at) for key, sent_at in _listed(listing_xml, prefix))
+    parsed = (_dump(key, prefix, sent_at) for key, sent_at in _listed(listing_xml, prefix))
     dumps = [dump for dump in parsed if dump is not None]
     if not dumps:
         raise CheckFailedError(f"nenhum dump em {prefix}")
@@ -106,7 +109,7 @@ def check_retention(head_response: str, minimum: timedelta) -> None:
     mode = (headers.get("x-amz-object-lock-mode") or "").strip().upper()
     if mode != COMPLIANCE:
         raise CheckFailedError(
-            f"retenção ausente: o dump não está sob Object Lock em modo compliance ({mode or '-'})"
+            "retenção ausente: o dump não está sob Object Lock em modo compliance"
         )
     until = _parse_time(headers.get("x-amz-object-lock-retain-until-date"))
     sent_at = _parse_http_date(headers.get("last-modified"))
@@ -140,8 +143,8 @@ def _listed(listing_xml: str, prefix: str) -> list[tuple[str, datetime]]:
     return listed
 
 
-def _dump(key: str, sent_at: datetime) -> Dump | None:
-    match = NAME.fullmatch(key.rsplit("/", 1)[-1])
+def _dump(key: str, prefix: str, sent_at: datetime) -> Dump | None:
+    match = NAME.fullmatch(key.removeprefix(prefix)) if key.startswith(prefix) else None
     if match is None:
         return None
     try:

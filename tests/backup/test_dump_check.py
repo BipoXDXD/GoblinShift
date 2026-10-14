@@ -18,6 +18,8 @@ SCRIPT = ROOT / "deploy" / "backup" / "dump_check.py"
 PREFIX = "pg/"
 SUFFIX = "0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 10, 14, 12, 0, 0, tzinfo=UTC)
+# 20261014 em dígitos arábico-índicos (U+0660 a U+0669).
+ARABIC_INDIC_DATE = "".join(chr(0x0660 + int(digit)) for digit in "20261014")
 
 
 def key(instant: datetime, suffix: str = SUFFIX) -> str:
@@ -148,6 +150,29 @@ def test_chave_fora_do_formato_e_ignorada(name: str) -> None:
 
     assert result.returncode != 0
     assert "nenhum dump" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # O bash usa a chave na URL do curl, que normaliza `..`: leria outro objeto.
+        f"{PREFIX}../outro/goblinshift-20261014T110000Z-{SUFFIX}.dump.age",
+        f"{PREFIX}sub/goblinshift-20261014T110000Z-{SUFFIX}.dump.age",
+        # Quebra de linha por referência de caractere: viraria outra linha da saída, lida pelo
+        # bash e impressa no log do Actions como workflow command.
+        f"{PREFIX}x&#10;::error::forjado&#10;/goblinshift-20261014T110000Z-{SUFFIX}.dump.age",
+        # `\d` do Python aceita dígitos de outros alfabetos; o `[0-9]` do bash, não.
+        f"{PREFIX}goblinshift-{ARABIC_INDIC_DATE}T110000Z-{SUFFIX}.dump.age",
+    ],
+)
+def test_chave_com_caminho_ou_caracteres_extras_e_ignorada(name: str) -> None:
+    body = listing((name, NOW - timedelta(hours=1)))
+
+    result = latest(body)
+
+    assert result.returncode != 0
+    assert "nenhum dump" in result.stderr
+    assert result.stdout == ""
 
 
 def test_listagem_truncada_reprova() -> None:
