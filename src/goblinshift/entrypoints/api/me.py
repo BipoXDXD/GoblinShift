@@ -1,18 +1,19 @@
-"""`GET /api/v1/me`: a conta da credencial, os limites e o consumo das cotas (1.6 e 1.7).
+"""`GET /api/v1/me`: a conta da credencial, os limites, o consumo das cotas e o aceite dos termos
+(1.6, 1.7 e 1.8).
 
 Leitura numa transação só, com o relógio do banco, o mesmo da aceitação: o consumo mostrado é
 o que a próxima aceitação vai contar. Saída por allowlist de campos, só da conta da credencial.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from goblinshift import capacity
-from goblinshift.entrypoints.api.dependencies import CurrentPrincipal, DbSession
+from goblinshift.entrypoints.api.dependencies import CurrentPrincipal, DbSession, terms_version
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from goblinshift.files.limits import (
     MAX_BATCH_BYTES,
@@ -56,6 +57,15 @@ class Usage(BaseModel):
     daily_quota_resets_at: datetime | None
 
 
+class Terms(BaseModel):
+    """A versão vigente e a última aceita; `acceptance_required` bloqueia as demais rotas."""
+
+    current_version: str
+    accepted_version: str | None
+    accepted_at: datetime | None
+    acceptance_required: bool
+
+
 class MeResponse(BaseModel):
     id: UUID
     display_name: str
@@ -63,10 +73,15 @@ class MeResponse(BaseModel):
     via: Literal["session", "api_key"]
     limits: Limits
     usage: Usage
+    terms: Terms
 
 
 @router.get("/me", operation_id="getMe")
-def get_me(principal: CurrentPrincipal, session: DbSession) -> MeResponse:
+def get_me(
+    principal: CurrentPrincipal,
+    session: DbSession,
+    current_version: Annotated[str, Depends(terms_version)],
+) -> MeResponse:
     owner_id = principal.owner_id
     with session.begin():
         account = find_account(session, owner_id)
@@ -99,5 +114,11 @@ def get_me(principal: CurrentPrincipal, session: DbSession) -> MeResponse:
             storage_reserved_bytes=storage.storage_reserved_bytes,
             active_run_id=active,
             daily_quota_resets_at=daily.resets_at(),
+        ),
+        terms=Terms(
+            current_version=current_version,
+            accepted_version=account.accepted_terms.version if account.accepted_terms else None,
+            accepted_at=account.accepted_terms.accepted_at if account.accepted_terms else None,
+            acceptance_required=account.needs_terms_acceptance(current_version),
         ),
     )

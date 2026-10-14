@@ -1,4 +1,5 @@
-"""Dependências comuns às rotas: Session, relógio, autenticação, limite de requisições e escopo.
+"""Dependências comuns às rotas: Session, relógio, autenticação, limite de requisições, aceite dos
+termos e escopo.
 
 Ver docs/GoblinShiftPlan.md, 3.2 (Session com `scope="function"`) e 3.6 (chaves de API).
 
@@ -45,6 +46,7 @@ from goblinshift.identity import (
     count_request,
     cross_site_request,
     csrf_token_matches,
+    find_account,
     record_audit_event,
 )
 from goblinshift.platform.settings import WebIdentityConfig
@@ -61,6 +63,19 @@ _LIMITED_CLASSES: dict[RateLimitClass, RequestClass | None] = {
     RateLimitClass.RUN_CREATE: RequestClass.RUN_CREATE,
     RateLimitClass.TRANSFER: None,
 }
+# Rotas que a conta sem o aceite dos termos vigentes continua usando (ADR 029): ler a própria
+# conta, aceitar os termos e reduzir o próprio acesso (sair de tudo, ver e revogar chaves,
+# excluir a conta). O `POST /auth/logout` não autentica e nunca passa pelo bloqueio.
+_TERMS_EXEMPT_ROUTES = frozenset(
+    {
+        ("GET", "/api/v1/me"),
+        ("POST", "/api/v1/me/terms:accept"),
+        ("DELETE", "/api/v1/me"),
+        ("POST", "/auth/logout-all"),
+        ("GET", "/api/v1/api-keys"),
+        ("DELETE", "/api/v1/api-keys/{key_id}"),
+    }
+)
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -86,6 +101,12 @@ def get_storage(request: Request) -> FileStorage:
 Storage = Annotated[FileStorage, Depends(get_storage)]
 
 
+def terms_version(request: Request) -> str:
+    """Versão vigente dos termos (`CURRENT_TERMS_VERSION`); os testes a trocam no `app.state`."""
+    version: str = request.app.state.terms_version
+    return version
+
+
 def current_time() -> datetime:
     """O relógio da API; os testes o substituem por `app.dependency_overrides`."""
     return datetime.now(UTC)
@@ -103,10 +124,15 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
     caso, o log do servidor registra.
 
     Toda requisição autenticada conta no limite por conta e classe de rota (1.7); acima dele,
-    429 `RATE_LIMITED` com `Retry-After`. Fica aqui para nenhuma rota escapar do limite.
+    429 `RATE_LIMITED` com `Retry-After`. Depois, conta do login sem o aceite dos termos vigentes
+    recebe 403 `TERMS_NOT_ACCEPTED`, salvo nas rotas de `_TERMS_EXEMPT_ROUTES`. Os dois ficam
+    aqui para nenhuma rota escapar deles.
     """
     principal = _identify(request, session, now)
-    _count_request(request, session, principal, now)
+    route = _route_template(request)
+    _count_request(request.method, route, session, principal, now)
+    if (request.method, route) not in _TERMS_EXEMPT_ROUTES:
+        _require_current_terms(session, principal, terms_version(request))
     return principal
 
 
@@ -196,8 +222,10 @@ def client_ip(request: Request) -> str | None:
     return request.client.host if request.client is not None else None
 
 
-def _count_request(request: Request, session: Session, principal: Principal, now: datetime) -> None:
-    request_class = _LIMITED_CLASSES[rate_limit_class(request.method, _route_template(request))]
+def _count_request(
+    method: str, route: str, session: Session, principal: Principal, now: datetime
+) -> None:
+    request_class = _LIMITED_CLASSES[rate_limit_class(method, route)]
     if request_class is None:
         return
     try:
@@ -212,6 +240,19 @@ def _count_request(request: Request, session: Session, principal: Principal, now
             headers=retry_after(error.retry_after),
         ) from error
     record_rate_limit(limited=False)
+
+
+def _require_current_terms(session: Session, principal: Principal, current_version: str) -> None:
+    with session.begin():
+        account = find_account(session, principal.owner_id)
+    if account is None:
+        raise _unauthenticated("A conta da credencial não existe mais.")
+    if account.needs_terms_acceptance(current_version):
+        raise ApiProblem(
+            ProblemCode.TERMS_NOT_ACCEPTED,
+            f"Aceite a versão {current_version} dos termos de uso e do aviso de privacidade "
+            "(POST /api/v1/me/terms:accept) para continuar.",
+        )
 
 
 def _route_template(request: Request) -> str:
