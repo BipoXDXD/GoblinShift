@@ -26,16 +26,20 @@ FAKE_DOCKER_RC = 7
 FAKE_DOCKER = """#!/bin/sh
 for arg in "$@"; do printf '%s\\n' "$arg"; done >"$FAKE_DOCKER_LOG"
 env | grep '^GS_' | sort >"$FAKE_DOCKER_ENV"
+pwd >"$FAKE_DOCKER_CWD"
 exit "${FAKE_DOCKER_RC:-0}"
 """
 
 
-def run(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    args: list[str], env: dict[str, str] | None = None, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
         ["bash", *args],  # noqa: S607
         capture_output=True,
         text=True,
         env=env,
+        cwd=cwd,
         check=False,
         timeout=SCRIPT_TIMEOUT_SECONDS,
     )
@@ -147,9 +151,10 @@ def run_compose(
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         "FAKE_DOCKER_LOG": str(fake_bin / "args.log"),
         "FAKE_DOCKER_ENV": str(fake_bin / "env.log"),
+        "FAKE_DOCKER_CWD": str(fake_bin / "cwd.log"),
         "FAKE_DOCKER_RC": str(docker_rc),
     }
-    return run([str(host_root / "app" / "deploy" / "compose.sh"), *args], env)
+    return run([str(host_root / "app" / "deploy" / "compose.sh"), *args], env, cwd=fake_bin)
 
 
 def docker_args(fake_bin: Path) -> list[str]:
@@ -186,6 +191,16 @@ def test_define_o_ambiente_e_os_diretorios_de_producao(host_root: Path, fake_bin
         f"GS_STORAGE_DATA={host_root}/storage",
         f"GS_TELEMETRY_DATA={host_root}/telemetry/data",
     ]
+
+
+def test_roda_o_compose_no_checkout_seja_qual_for_o_diretorio_de_quem_chama(
+    host_root: Path, fake_bin: Path
+) -> None:
+    # Na VPS, `sudo -u goblinshift` herda o diretório de quem chamou, que esse usuário pode não
+    # conseguir ler; o Compose faz stat no diretório atual e falharia.
+    run_compose(host_root, fake_bin, ["ps"])
+
+    assert (fake_bin / "cwd.log").read_text().strip() == str(host_root / "app")
 
 
 def test_repassa_os_argumentos_do_operador_sem_reinterpretar(
