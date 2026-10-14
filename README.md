@@ -144,6 +144,30 @@ Para cada um dos 6 cenários, o teste emite uma chave de curta duração (só na
 
 Os testes do `executor-ctl` com Docker real usam o runtime de `GS_TEST_RUNTIME` (padrão `runc`); com o gVisor instalado: `GS_TEST_RUNTIME=runsc uv run pytest -m executor_ctl tests/executor_ctl`.
 
+## Backup do PostgreSQL (fora da VPS)
+
+Dump diário cifrado com `age`, enviado ao Backblaze B2 com uma chave só de escrita, e restauração testada todo mês no GitHub Actions ([ADR 022](docs/adr/022-backup-externo.md)). Antes de ligar:
+
+1. Gere o par `age` fora da VPS (`age-keygen -o goblinshift-backup.key`), ponha a chave pública em `deploy/backup/age-recipients.txt` por PR e guarde a privada no gerenciador de senhas e no secret `BACKUP_AGE_IDENTITY`.
+2. No B2 (passo pendente, fora do repositório): bucket privado com **Object Lock ligado e retenção padrão em modo compliance de 30 dias**, mais a regra de ciclo de vida que esconde o arquivo aos 30 dias e apaga 1 dia depois. Uma chave para a VPS só com `writeFiles` (sem `writeFileRetentions`, `writeFileLegalHolds`, `bypassGovernance`, `deleteFiles`, `readFiles` nem `listFiles`) e uma para a restauração com `listFiles`, `readFiles` e `readFileRetentions`, que expõe o modo e o prazo da retenção. Sem o Object Lock, a chave que escreve sobrescreve ou esconde os dumps, e a restauração mensal reprova.
+3. No healthchecks.io: os checks "backup diário" (1 dia, tolerância de 2 h) e "restauração mensal" (31 dias).
+4. Na VPS: `sudo bash deploy/backup/install.sh` cria `/srv/goblinshift/secrets/backup.env` vazio; preencha e rode de novo para ligar o timer. Teste já com `sudo systemctl start goblinshift-pg-backup.service`.
+5. No GitHub (passo pendente, fora do repositório): environment `backup-restore` com **política de branches "só `main`"** (Deployment branches and tags → Selected branches → `main`), para que nenhum outro ref rode com a chave privada, e com os secrets `BACKUP_S3_READ_KEY_ID`, `BACKUP_S3_READ_KEY`, `BACKUP_AGE_IDENTITY` e `RESTORE_HEALTHCHECK_URL`, e as variáveis do repositório `BACKUP_S3_ENDPOINT`, `BACKUP_S3_REGION` e `BACKUP_S3_BUCKET`. Rode o workflow "Restauração testada do backup" à mão uma vez e registre o resultado aqui.
+
+Os testes (`uv run pytest tests/backup`) rodam os scripts reais contra PostgreSQL e S3 locais (SeaweedFS, com o mesmo Object Lock do bucket real) e precisam de `age` e `curl` no PATH.
+
+## SLOs e alertas (OpenObserve)
+
+Os três SLOs de [3.7](docs/GoblinShiftPlan.md#s3-7) (aceitação, execução e download), a queima do orçamento em duas janelas (1 h e 15 min, aviso a 2x e urgente a 4x), os alertas de causa (fila cheia sustentada, disco acima de 85%) e o heartbeat ficam em [`deploy/openobserve/`](deploy/openobserve/README.md): consultas SQL versionadas e um provisionamento idempotente pela API do OpenObserve, pelo túnel SSH. O runbook explica os segredos, as opções de canal e como provocar um alerta de queima e um de causa.
+
+```bash
+ssh -N -L 5080:127.0.0.1:5080 <usuário>@<vps> &   # o OpenObserve só escuta em 127.0.0.1 da VPS
+cd deploy && uv run python -m openobserve provision --secrets-file ~/.config/goblinshift/alertas.env
+cd deploy && uv run python -m openobserve sli --secrets-file ~/.config/goblinshift/alertas.env
+```
+
+Os testes (`uv run pytest -m openobserve`) sobem o OpenObserve e o Collector das versões do Compose e provam cada consulta com spans sintéticos de proporção conhecida e os alertas disparando, ou não, no agendador real.
+
 ## Execução de ponta a ponta
 
 Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, cada script faz upload, execução idempotente, acompanhamento, resultados e download só com `curl`. Cada um roda o mesmo pedido duas vezes e exige o mesmo SHA-256 do ZIP (determinismo, [3.9](docs/GoblinShiftPlan.md#s3-9)):
@@ -172,5 +196,5 @@ src/goblinshift/
   presets/           presets (próximas fatias)
 migrations/          Alembic (expand/contract)
 docker/              imagem da aplicação, Nginx e OpenTelemetry Collector
-deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI e teste de aceitação do ambiente
+deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco, SLOs e alertas e teste de aceitação do ambiente
 ```

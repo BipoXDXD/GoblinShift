@@ -9,10 +9,8 @@ set -euo pipefail
 tag="${1:?uso: release.sh <image-tag>}"
 ROOT=/srv/goblinshift
 cd "$ROOT/app"
-# Segredo do cursor de paginação (3.3): criado uma vez, junto dos outros segredos da aplicação.
-if ! grep -q '^GS_CURSOR_SECRET=' "$ROOT/secrets/app.env"; then
-  echo "GS_CURSOR_SECRET=$(openssl rand -hex 32)" >>"$ROOT/secrets/app.env"
-fi
+# Segredos gerados pela própria aplicação: criados uma vez, nunca trocados.
+deploy/app-secrets.sh "$ROOT/secrets/app.env"
 
 # Imagem do executor do mesmo commit, sempre pelo digest: entra na allowlist do executor-ctl
 # antes de a API nova aceitar execuções com ela. Sem digest resolvido o deploy para aqui.

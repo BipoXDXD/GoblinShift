@@ -91,3 +91,23 @@ def test_processos_nao_sobem_em_producao_com_runner_local(
 
     assert exit_code == 2
     assert "GS_RUNNER=executor_ctl" in caplog.text
+
+
+@pytest.mark.parametrize("process", [worker_main, maintenance_main])
+def test_processos_nao_sobem_em_producao_sem_o_segredo_do_user_hash(
+    process: Callable[[], int],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # O evento de término da Run (3.7) leva o `user.hash`: sem a chave, nada sobe.
+    monkeypatch.setenv("GS_ENVIRONMENT", "production")
+    monkeypatch.setenv("GS_RUNNER", "executor_ctl")
+    monkeypatch.setenv("GS_EXECUTOR_IMAGE", IMAGE)
+    monkeypatch.delenv("GS_USER_HASH_SECRET", raising=False)
+    monkeypatch.setattr("goblinshift.entrypoints.worker.configure_logging", lambda: None)
+    monkeypatch.setattr("goblinshift.entrypoints.maintenance.configure_logging", lambda: None)
+
+    exit_code = process()
+
+    assert exit_code == 2
+    assert "GS_USER_HASH_SECRET" in caplog.text
