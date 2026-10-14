@@ -15,7 +15,7 @@ from goblinshift.platform.settings import Settings
 from tests.api.auth.support import (
     LOGIN_FAILED_LOCATION,
     PUBLIC_ORIGIN,
-    FakeSessions,
+    StoredSessions,
     assert_login_failed,
     authorize_query,
     browser,
@@ -183,7 +183,7 @@ def test_estado_fica_no_servidor_e_o_cookie_leva_so_o_marcador(
 def test_return_to_so_aceita_caminho_local(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     login_app: FastAPI,
     return_to: str,
     expected: str,
@@ -196,14 +196,14 @@ def test_return_to_so_aceita_caminho_local(
 
 
 def test_sem_return_to_volta_para_a_raiz(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
     assert login(client, fake, "github").headers["location"] == "/"
 
 
 def test_return_to_e_de_cada_provedor(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
     google = start_login(client, "google", return_to="/do-google")

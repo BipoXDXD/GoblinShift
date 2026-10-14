@@ -33,7 +33,7 @@ from joserfc.errors import JoseError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
-from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, SESSION_COOKIE
+from goblinshift.entrypoints.api.cookies import SESSION_COOKIE, set_session_cookies
 from goblinshift.entrypoints.api.dependencies import Now
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from goblinshift.identity import (
@@ -245,6 +245,7 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         factory,
         identity,
         web.signup_open,
+        web.csrf_key,
         request.cookies.get(SESSION_COOKIE),
         ip,
         now,
@@ -253,7 +254,7 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         logger.info("login %s recusado: conta %s", name, result.name)
         return _login_failed()
     response = RedirectResponse(return_to, status_code=303)
-    _set_session_cookies(response, result)
+    set_session_cookies(response, result)
     return response
 
 
@@ -264,6 +265,7 @@ def _complete_login(
     factory: sessionmaker[Session],
     identity: ExternalIdentity,
     signup_open: bool,
+    csrf_key: bytes,
     previous_token: str | None,
     ip: str | None,
     now: datetime,
@@ -275,7 +277,9 @@ def _complete_login(
             _record(session, AuditEventType.LOGIN_FAILED, None, ip, AuditOutcome.FAILURE, now)
             return resolved
         _revoke_previous_session(session, previous_token, now)
-        issued = start_session(session, user_id=resolved, authenticated_at=now, now=now)
+        issued = start_session(
+            session, user_id=resolved, authenticated_at=now, now=now, csrf_key=csrf_key
+        )
         _record(session, AuditEventType.LOGIN_SUCCEEDED, resolved, ip, AuditOutcome.SUCCESS, now)
         return issued
 
@@ -348,16 +352,3 @@ def _failure_kind(exc: Exception) -> str:
 
 def _login_failed() -> Response:
     return RedirectResponse(LOGIN_FAILED_LOCATION, status_code=303)
-
-
-def _set_session_cookies(response: Response, issued: IssuedSession) -> None:
-    """Atributos de `cookies.py` (3.6): sessão HttpOnly e Lax; CSRF legível e Strict.
-
-    Sem `Max-Age` nem `Domain`: cookie de sessão do navegador, e o prazo vale no servidor.
-    """
-    response.set_cookie(
-        SESSION_COOKIE, issued.token, path="/", secure=True, httponly=True, samesite="lax"
-    )
-    response.set_cookie(
-        CSRF_COOKIE, issued.csrf_token, path="/", secure=True, httponly=False, samesite="strict"
-    )

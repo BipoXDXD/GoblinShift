@@ -12,7 +12,7 @@ from goblinshift.identity.providers import GITHUB_ISSUER, GITHUB_USER_URL, MAX_G
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import metadata, unit_of_work
 from tests.api.auth.support import (
-    FakeSessions,
+    StoredSessions,
     accounts,
     assert_login_failed,
     audit_events,
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.integration
 def test_login_github_cria_a_conta_pelo_id(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -44,7 +44,7 @@ def test_login_github_cria_a_conta_pelo_id(
 
 
 def test_github_pede_o_usuario_com_o_token_e_o_accept_da_api(
-    client: TestClient, fake: FakeProviders, sessions: FakeSessions, login_app: FastAPI
+    client: TestClient, fake: FakeProviders, sessions: StoredSessions, login_app: FastAPI
 ) -> None:
     open_signup(login_app)
 
@@ -59,7 +59,7 @@ def test_github_pede_o_usuario_com_o_token_e_o_accept_da_api(
 def test_github_identidade_pelo_id_e_nao_pelo_login(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -77,7 +77,7 @@ def test_github_identidade_pelo_id_e_nao_pelo_login(
 def test_mesmo_login_com_outro_id_e_outra_conta(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -93,7 +93,7 @@ def test_mesmo_login_com_outro_id_e_outra_conta(
 def test_google_e_github_com_mesmo_email_criam_duas_contas(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -114,7 +114,7 @@ def test_google_e_github_com_mesmo_email_criam_duas_contas(
 def test_access_token_do_github_nao_e_persistido(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -145,7 +145,7 @@ def test_access_token_do_github_nao_e_persistido(
 def test_github_user_malicioso_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
     body: bytes,
@@ -169,7 +169,7 @@ def test_teto_do_corpo_do_github_cabe_um_usuario_real() -> None:
 def test_github_user_com_erro_e_recusado(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
     status: int,
@@ -186,7 +186,7 @@ def test_github_user_com_erro_e_recusado(
 def test_conta_github_bloqueada_nao_completa_login(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:
@@ -203,7 +203,7 @@ def test_conta_github_bloqueada_nao_completa_login(
 def test_conta_com_exclusao_pedida_nao_completa_login(
     client: TestClient,
     fake: FakeProviders,
-    sessions: FakeSessions,
+    sessions: StoredSessions,
     factory: sessionmaker[Session],
     login_app: FastAPI,
 ) -> None:

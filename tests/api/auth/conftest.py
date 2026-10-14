@@ -1,4 +1,4 @@
-"""Fixtures do login: provedores falsos, sessão da Frente B em memória e um navegador."""
+"""Fixtures do login: provedores falsos, as sessões gravadas e um navegador."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -8,9 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.api import auth_login
 from goblinshift.platform.settings import Settings
-from tests.api.auth.support import FakeSessions, browser, build_login_app, login_settings
+from tests.api.auth.support import StoredSessions, browser, build_login_app, login_settings
 from tests.identity.fake_providers import FakeProviders
 
 
@@ -20,17 +19,17 @@ def fake() -> FakeProviders:
 
 
 @pytest.fixture
-def sessions(monkeypatch: pytest.MonkeyPatch) -> FakeSessions:
-    fake_sessions = FakeSessions()
-    monkeypatch.setattr(auth_login, "start_session", fake_sessions.start_session)
-    monkeypatch.setattr(auth_login, "authenticate_session", fake_sessions.authenticate_session)
-    monkeypatch.setattr(auth_login, "revoke_session", fake_sessions.revoke_session)
-    return fake_sessions
+def sessions(factory: sessionmaker[Session]) -> StoredSessions:
+    return StoredSessions(factory)
 
 
 @pytest.fixture
-def login_app(db_settings: Settings, tmp_path: Path, fake: FakeProviders) -> FastAPI:
-    return build_login_app(login_settings(db_settings, tmp_path), fake)
+def login_app(db_settings: Settings, tmp_path: Path, fake: FakeProviders) -> Iterator[FastAPI]:
+    app = build_login_app(login_settings(db_settings, tmp_path), fake)
+    yield app
+    # O lifespan de cada navegador já descarta o pool; as consultas feitas pelo teste depois que
+    # um navegador fechou abrem outro, que só este dispose fecha.
+    app.state.engine.dispose()
 
 
 @pytest.fixture
