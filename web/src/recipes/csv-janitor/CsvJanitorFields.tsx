@@ -96,7 +96,7 @@ export function CsvJanitorFields({
   );
 
   return (
-    <FieldGroup id="csv-janitor-parametros" legend={T.legend}>
+    <>
       {optionSelect({
         field: "input_delimiter",
         label: T.inputDelimiter,
@@ -150,7 +150,7 @@ export function CsvJanitorFields({
         options: FORMULA_GUARDS,
         labels: T.formulaGuards,
       })}
-    </FieldGroup>
+    </>
   );
 }
 
