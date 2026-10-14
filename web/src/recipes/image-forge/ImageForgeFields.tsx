@@ -1,7 +1,6 @@
 import { useState, type ReactElement } from "react";
 
 import { Field } from "../../components/a11y/Field";
-import { FieldGroup } from "../../components/a11y/FieldGroup";
 import { TEXT } from "../../text";
 import type { RecipeFieldsProps } from "../types";
 import {
@@ -59,7 +58,7 @@ export function ImageForgeFields({
   );
 
   return (
-    <FieldGroup id="image-forge-parametros" legend={T.legend}>
+    <>
       {textField({
         field: "max_width",
         label: T.maxWidth,
@@ -130,6 +129,6 @@ export function ImageForgeFields({
           />
         )}
       </Field>
-    </FieldGroup>
+    </>
   );
 }
