@@ -13,6 +13,8 @@ Esquema do manifesto: `manifest.py`. ZIP determinístico (ordem estável, `date_
 `ZIP_STORED` para formatos já comprimidos): `zip_writer.py`.
 """
 
+import hashlib
+from collections.abc import Sequence
 from pathlib import Path
 
 from goblinshift.processing.packaging.manifest import encode_manifest
@@ -20,19 +22,27 @@ from goblinshift.processing.packaging.spec import (
     MANIFEST_NAME,
     MANIFEST_SCHEMA_VERSION,
     MIB,
+    REPORT_NAME,
     FileDigest,
     Packaged,
     PackageLimits,
     PackageSpec,
 )
-from goblinshift.processing.packaging.zip_writer import compression_for
-from goblinshift.processing.recipe import Report
+from goblinshift.processing.packaging.zip_writer import (
+    COPY_CHUNK_BYTES,
+    ZipSource,
+    compression_for,
+    open_regular,
+    write_zip,
+)
+from goblinshift.processing.recipe import FailureCode, ItemOk, RecipeFailure, Report
 
 __all__ = [
     "DEFAULT_LIMITS",
     "MANIFEST_NAME",
     "MANIFEST_SCHEMA_VERSION",
     "MIB",
+    "REPORT_NAME",
     "FileDigest",
     "PackageLimits",
     "PackageSpec",
@@ -53,7 +63,42 @@ def package(
 
     Pré-condição: out/report.json já existe. Manifesto acima do teto levanta
     `RecipeFailure(REPORT_LIMIT_EXCEEDED)`; ZIP acima do teto,
-    `RecipeFailure(OUTPUT_LIMIT_EXCEEDED)`.
+    `RecipeFailure(OUTPUT_LIMIT_EXCEEDED)`, sem deixar o ZIP incompleto em out/.
+
+    São duas passadas sobre as saídas, porque o manifesto entra no ZIP: primeiro o tamanho e o
+    SHA-256 de cada uma, depois o ZIP com o conteúdo, o manifesto e o relatório.
     """
-    # Assinatura congelada na etapa 0; a implementação é da frente A, e nada a chama antes dela.
-    raise NotImplementedError("package é implementado pela frente A da fatia 5")
+    outputs = [path for item in report.items if isinstance(item, ItemOk) for path in item.outputs]
+    digests = {path: _digest(out_root / path) for path in outputs}
+    manifest = encode_manifest(report, spec, digests)
+    if len(manifest) > limits.manifest_max_bytes:
+        raise RecipeFailure(
+            FailureCode.REPORT_LIMIT_EXCEEDED,
+            f"o manifesto teria {len(manifest)} bytes; o limite é {limits.manifest_max_bytes}",
+        )
+    with (out_root / MANIFEST_NAME).open("xb") as target:
+        target.write(manifest)
+    sources = [ZipSource(name, out_root / name) for name in (*outputs, MANIFEST_NAME, REPORT_NAME)]
+    _write_or_discard(out_root / spec.package_name, sources, limits.package_max_bytes)
+    return Packaged(MANIFEST_NAME, spec.package_name, len(sources))
+
+
+def _digest(path: Path) -> FileDigest:
+    digest = hashlib.sha256()
+    size = 0
+    with open_regular(path) as source:
+        while chunk := source.read(COPY_CHUNK_BYTES):
+            digest.update(chunk)
+            size += len(chunk)
+    return FileDigest(size=size, sha256=digest.hexdigest())
+
+
+def _write_or_discard(target: Path, sources: Sequence[ZipSource], max_bytes: int) -> None:
+    """Um ZIP pela metade nunca fica em out/ com o nome do pacote."""
+    try:
+        write_zip(target, sources, max_bytes)
+    except FileExistsError:
+        raise  # o arquivo é de outra tentativa: não é nosso para apagar
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
