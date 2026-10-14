@@ -78,33 +78,33 @@ export function ReorderableList<T>({
     }
   });
 
-  const move = (from: number, to: number): void => {
+  /** Move o item e devolve o foco a `focusDirection` do item; nada acontece fora da lista. */
+  const move = (from: number, to: number, focusDirection: Direction | null = null): void => {
     const item = items[from];
     if (item === undefined || !isIndexOf(items, to) || from === to) {
       return;
+    }
+    // Só grava o foco pendente quando há render a seguir: senão ele ficaria preso e roubaria o
+    // foco no próximo render, vindo de qualquer outra mudança da página.
+    if (focusDirection !== null) {
+      pendingFocus.current = buttonKey(getKey(item), focusDirection);
     }
     onMove({ from, to });
     setAnnouncement(TEXT.reorder.moved(getName(item), to + 1, items.length));
   };
 
   const moveByButton = (index: number, direction: Direction): void => {
-    const item = items[index];
-    if (item !== undefined) {
-      pendingFocus.current = buttonKey(getKey(item), direction);
-    }
-    move(index, index + STEP[direction]);
+    move(index, index + STEP[direction], direction);
   };
 
   const onShortcut = (index: number, event: KeyboardEvent<HTMLButtonElement>): void => {
     const direction = SHORTCUT_KEYS[event.key];
-    const item = items[index];
-    if (!event.altKey || direction === undefined || item === undefined) {
+    if (!event.altKey || direction === undefined) {
       return;
     }
     event.preventDefault();
     const focused = event.currentTarget.dataset["direction"] === "down" ? "down" : "up";
-    pendingFocus.current = buttonKey(getKey(item), focused);
-    move(index, index + STEP[direction]);
+    move(index, index + STEP[direction], focused);
   };
 
   const dragHandlers = (index: number) => ({

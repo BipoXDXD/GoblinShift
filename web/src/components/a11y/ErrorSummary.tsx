@@ -21,9 +21,12 @@ interface ErrorSummaryProps {
 export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactElement | null {
   const container = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const focusedAttempt = useRef<number | null>(null);
   const hasIssues = issues.length > 0;
   useEffect(() => {
-    if (hasIssues) {
+    // Uma vez por tentativa: erros que somem e voltam enquanto a pessoa edita não puxam o foco.
+    if (hasIssues && focusedAttempt.current !== attempt) {
+      focusedAttempt.current = attempt;
       container.current?.focus();
     }
   }, [attempt, hasIssues]);
