@@ -48,6 +48,7 @@ class Counts:
 class WarningCode(StrEnum):
     ALL_RECORDS_FILTERED = "CSV_ALL_RECORDS_FILTERED"
     FORMULA_CELLS = "CSV_FORMULA_CELLS"
+    FORMULA_HEADER = "CSV_FORMULA_HEADER"
 
 
 @dataclass(frozen=True)
@@ -62,4 +63,6 @@ class TableCleaned:
     counts: Counts
     # Células de saída que uma planilha pode interpretar como fórmula, por coluna de saída.
     formula_cells: Mapping[str, int]
+    # Colunas de saída cujo nome uma planilha pode interpretar como fórmula, sem o prefixo.
+    formula_header: tuple[str, ...]
     warnings: tuple[TableWarning, ...]
