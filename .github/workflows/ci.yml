@@ -153,7 +153,9 @@ jobs:
 
   deploy:
     name: Deploy na VPS
-    needs: [image, executor-image]
+    # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
+    # execuções aceitas sem ter onde rodar.
+    needs: [image, executor-image, gvisor]
     # Só roda depois que a VPS estiver configurada (variáveis do repositório definidas).
     if: vars.VPS_HOST != ''
     runs-on: ubuntu-24.04
