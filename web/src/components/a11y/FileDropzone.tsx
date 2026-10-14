@@ -1,7 +1,9 @@
+import { Upload } from "lucide-react";
 import { useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
 
 import { TEXT } from "../../text";
-import { Field } from "./Field";
+import { buttonClassName } from "../ui/Button";
+import { FieldError } from "./Field";
 
 interface FileDropzoneProps {
   readonly id: string;
@@ -10,13 +12,18 @@ interface FileDropzoneProps {
   readonly error?: string | null;
   /** Valor do atributo `accept` do input, por exemplo `.csv,text/csv`. */
   readonly accept?: string;
+  /** Quantos arquivos já estão na Bancada; o texto ao lado do botão diz isso em pt-BR. */
+  readonly chosenCount: number;
   readonly onFiles: (files: readonly File[]) => void;
 }
 
 /**
- * Escolha de arquivos por um `<input type="file">` real, com label: funciona por teclado, leitor de
- * tela e clique. Soltar arquivos sobre a área é só um atalho a mais. A área é um poço embutido que
- * sobe de elevação enquanto há arquivos sendo arrastados por cima (`data-dragging`, RUI cap. 6).
+ * Escolha de arquivos por um `<input type="file">` real: funciona por teclado, leitor de tela e
+ * clique. O botão e o "nenhum arquivo" nativos vêm no idioma do navegador, então o input fica
+ * visualmente oculto (mas focável) dentro de um label com cara de botão secundário, e um texto
+ * próprio diz quantos arquivos foram escolhidos. Soltar arquivos sobre a área é só um atalho a
+ * mais. A área é um poço embutido que sobe de elevação enquanto há arquivos sendo arrastados por
+ * cima (`data-dragging`, RUI cap. 6).
  */
 export function FileDropzone({
   id,
@@ -24,9 +31,14 @@ export function FileDropzone({
   description,
   error,
   accept,
+  chosenCount,
   onFiles,
 }: FileDropzoneProps): ReactElement {
   const [dragging, setDragging] = useState(false);
+  const descriptionId = description === undefined ? null : `${id}-descricao`;
+  const errorId = error === undefined || error === null || error === "" ? null : `${id}-erro`;
+  const statusId = `${id}-estado`;
+  const describedBy = [descriptionId, errorId, statusId].filter((value) => value !== null);
 
   const onChange = (event: ChangeEvent<HTMLInputElement>): void => {
     const input = event.currentTarget;
@@ -67,22 +79,31 @@ export function FileDropzone({
       }}
       onDrop={onDrop}
     >
-      <Field
-        id={id}
-        label={label}
-        {...(description === undefined ? {} : { description })}
-        {...(error === undefined ? {} : { error })}
-      >
-        {(control) => (
+      {descriptionId !== null && (
+        <p id={descriptionId} className="max-w-prose text-sm leading-relaxed text-fg-muted">
+          {description}
+        </p>
+      )}
+      {errorId !== null && <FieldError id={errorId} message={error ?? ""} />}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`file-picker relative ${buttonClassName({ variant: "secondary" })}`}>
+          <Upload aria-hidden="true" className="size-4" />
+          {label}
           <input
-            {...control}
+            id={id}
             type="file"
             multiple
+            className="sr-only"
+            aria-describedby={describedBy.join(" ")}
+            {...(errorId === null ? {} : { "aria-invalid": true })}
             {...(accept === undefined ? {} : { accept })}
             onChange={onChange}
           />
-        )}
-      </Field>
+        </label>
+        <p id={statusId} className="text-sm text-fg-muted">
+          {TEXT.workbench.filesChosen(chosenCount)}
+        </p>
+      </div>
       {dragging && (
         // Só quem arrasta com o mouse vê a dica; o leitor de tela usa o input.
         <p aria-hidden="true" className="font-semibold text-fg">
