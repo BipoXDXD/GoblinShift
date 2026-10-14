@@ -138,6 +138,9 @@ docker compose --project-directory "$EDGE" -f "$EDGE/compose.yaml" up -d
 note "Sandbox do executor (gVisor)"
 bash "$(dirname "${BASH_SOURCE[0]}")/gvisor.sh"
 
+note "executor-ctl (serviço do host, único com acesso ao Docker)"
+bash "$(dirname "${BASH_SOURCE[0]}")/executor-ctl/install.sh"
+
 note "Atualizações de segurança automáticas"
 dpkg-reconfigure -f noninteractive unattended-upgrades
 
