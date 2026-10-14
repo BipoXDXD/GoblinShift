@@ -523,7 +523,7 @@ Formulários usam estado local; TanStack Query guarda consultas. Sem Redux. Tipo
 - **Download:** sempre por navegação (`<a href>` para a rota de download, com `attachment` do servidor), nunca `fetch` → `blob`, que carregaria até 512 MiB na memória do navegador.
 - **Formulários por receita:** escritos à mão, um por receita, tipados pela união discriminada gerada do OpenAPI; defaults e limites vêm do catálogo em tempo de execução. O CI regenera os tipos e falha se houver diferença (`git diff`).
 
-**Apresentação:** oficina 2D em HTML/CSS, com cartões e goblins discretos; sem canvas/engine. Ações: Executar, Cancelar, Baixar, Salvar preset, Excluir. Sem percentuais ou posição de fila inventados.
+**Apresentação:** oficina 2D em HTML/CSS, com cartões e goblins discretos; sem canvas/engine, exceto a cena 3D da abertura da Oficina, carregada depois do conteúdo e nas condições do [ADR 027](adr/027-3d-na-abertura.md). Ações: Executar, Cancelar, Baixar, Salvar preset, Excluir. Sem percentuais ou posição de fila inventados.
 
 UI com teclado, foco, labels, erros por campo e movimento reduzido. Reordenar entradas por arrasto sempre tem alternativa com botões subir/descer (WCAG 2.2, 2.5.7). Mudanças de estado e de fase são anunciadas em região `aria-live="polite"`, só quando mudam, não a cada polling (4.1.3). Animações dos goblins com mais de 5 s têm controle de pausa (2.2.2). Estado nunca é comunicado só por cor. Preview CSV escapado: 100 registros/64 KiB; imagens apenas derivadas, PDF por mapa de páginas, mídia por miniaturas. Não renderizar uploads brutos inline. [D18](GoblinShiftReferencias.md#d-4), [D19](GoblinShiftReferencias.md#d-4), [D24](GoblinShiftReferencias.md#d-5).
 
