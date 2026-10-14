@@ -7,17 +7,19 @@ da conta.
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.identity import Scope
+from goblinshift.identity.tables import audit_event
 from goblinshift.platform.settings import Settings
 from tests.api.support import assert_problem
 from tests.identity.support import ALL_SCOPES, new_key, new_user, prepare_database
@@ -156,12 +158,14 @@ def test_chave_sem_escopo_403_insufficient_scope(
     client: TestClient, factory: sessionmaker[Session], method: str, path: str, rule: Rule
 ) -> None:
     assert rule.scope is not None
-    issued = new_key(factory, new_user(factory), scopes=ALL_SCOPES - {rule.scope})
+    owner = new_user(factory)
+    issued = new_key(factory, owner, scopes=ALL_SCOPES - {rule.scope})
 
     response = _send(client, method, path, issued.token)
 
     assert_problem(response, 403, "INSUFFICIENT_SCOPE")
     assert _ACCOUNT_NAME not in response.text
+    assert _audit_events(factory, owner) == [("ACCESS_DENIED", "failure")]
 
 
 @pytest.mark.integration
@@ -175,3 +179,13 @@ def test_chave_em_rota_de_sessao_403(
 
     assert_problem(response, 403, "FORBIDDEN")
     assert _ACCOUNT_NAME not in response.text
+
+
+def _audit_events(factory: sessionmaker[Session], owner_id: UUID) -> list[tuple[str, str]]:
+    with factory() as session:
+        rows = session.execute(
+            select(audit_event.c.event_type, audit_event.c.outcome)
+            .where(audit_event.c.user_id == owner_id)
+            .order_by(audit_event.c.id)
+        ).all()
+    return [(row.event_type, row.outcome) for row in rows]
