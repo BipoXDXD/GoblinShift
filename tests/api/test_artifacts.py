@@ -37,6 +37,10 @@ DOWNLOAD_HEADERS = {
     "cross-origin-resource-policy",
     "cache-control",
     "x-request-id",
+    # Do middleware de cabeçalhos da aplicação (3.6), que não toca os de proteção acima.
+    "referrer-policy",
+    "cross-origin-opener-policy",
+    "permissions-policy",
 }
 
 
