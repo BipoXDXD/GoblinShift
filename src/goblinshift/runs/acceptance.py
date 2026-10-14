@@ -10,12 +10,16 @@ entradas e o hash canônico do comando. Numa transação curta, na ordem de lock
 2. Registro de idempotência vigente: mesmo hash → replay; hash diferente → recusa. Nada é escrito.
 3. Capacidade global: `pg_advisory_xact_lock` numa chave constante serializa as aceitações antes
    de contar a fila, para que duas réplicas não vejam 9 aguardando e entrem as duas (contar e
-   inserir sem trava seria write skew). A espera obedece ao `lock_timeout` da conexão.
+   inserir sem trava seria write skew). A espera obedece ao `lock_timeout` da conexão. As cotas
+   diárias da conta (30 execuções e 2 GiB de entrada em 24 h) são contadas sob a mesma trava.
 4. Capacidade da conta: o `INSERT` da Run com `ON CONFLICT DO NOTHING` sobre o índice único
    parcial `run_one_active_per_owner_idx`; sem linha devolvida, já há uma execução ativa.
-5. Uploads (`FOR SHARE`), `run_input` na ordem, usos dos objetos e o registro de idempotência
-   (`ON CONFLICT … DO UPDATE … WHERE expires_at <= now()`, reuso só depois de vencido).
-6. `NOTIFY goblinshift_runs` no mesmo commit: gravar a Run já é enfileirar.
+5. Uploads (`FOR SHARE`), bytes de entrada contra a cota diária, `run_input` na ordem e usos dos
+   objetos.
+6. Reserva do teto de saída no livro-razão (`capacity`, pool da conta e depois o global, por
+   `UPDATE` condicional). Fica por último entre as travas: nada espera com os pools travados.
+7. Registro de idempotência (`ON CONFLICT … DO UPDATE … WHERE expires_at <= now()`, reuso só
+   depois de vencido) e `NOTIFY goblinshift_runs` no mesmo commit: gravar a Run já é enfileirar.
 
 O commit acontece antes de a função devolver; a rota responde 202 só depois dele.
 """
@@ -35,6 +39,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from goblinshift import capacity
 from goblinshift.catalog import (
     CATALOG,
     FieldError,
@@ -46,8 +51,18 @@ from goblinshift.catalog import (
 )
 from goblinshift.files import objects
 from goblinshift.files.states import HolderKind
-from goblinshift.files.uploads import lock_ready_uploads
+from goblinshift.files.uploads import ReadyUpload, lock_ready_uploads
+from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES
+from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES
+from goblinshift.processing.packaging import PackageLimits
 from goblinshift.runs.lifecycle import QUEUE_WINDOW, Status
+from goblinshift.runs.quotas import (
+    MAX_INPUT_BYTES_PER_WINDOW,
+    MAX_RUNS_PER_WINDOW,
+    DailyUsage,
+    daily_usage,
+)
+from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import idempotency_record, run, run_input
 
 # Operação gravada no registro de idempotência; a chave é por conta e por operação (1.6).
@@ -63,6 +78,18 @@ ADVISORY_CLASS_QUEUE = 0x6773_0001
 ADVISORY_CLASS_IDEMPOTENCY = 0x6773_0002
 QUEUE_LOCK_OBJECT = 0
 _ACTIVE_RUN_PREDICATE = "status IN ('queued', 'running', 'stopping')"
+_PACKAGE_LIMITS = PackageLimits()
+# Teto de saída de uma Run (1.7): conteúdo, relatório, manifesto e ZIP. Reservado na aceitação
+# e convertido em reservas dos objetos publicados (ADR 023, D-5); cerca de 1 GiB.
+RUN_OUTPUT_CEILING_BYTES = (
+    DEFAULT_MAX_BYTES
+    + REPORT_MAX_BYTES
+    + _PACKAGE_LIMITS.manifest_max_bytes
+    + _PACKAGE_LIMITS.package_max_bytes
+)
+# Versões que limitam a soma das entradas (o Detox copia cada entrada aceita para a saída).
+_MAX_TOTAL_INPUT_BYTES = "max_total_input_bytes"
+_MIN_RETRY_AFTER = timedelta(seconds=1)
 _CANONICAL_SEPARATORS = (",", ":")
 
 
@@ -99,6 +126,17 @@ class QueueFullError(AcceptanceError):
 
 class ActiveRunLimitError(AcceptanceError):
     """A conta já tem uma execução não terminal (→ 409 `ACTIVE_RUN_LIMIT`)."""
+
+
+class DailyQuotaExceededError(AcceptanceError):
+    """Cota diária de execuções ou de bytes de entrada (→ 429 `QUOTA_EXCEEDED`).
+
+    `retry_after` é o tempo até a Run mais antiga da janela sair dela.
+    """
+
+    def __init__(self, message: str, retry_after: timedelta) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -202,6 +240,9 @@ def accept_run(
     `executor_image` é a imagem do executor deste deploy (`GS_EXECUTOR_IMAGE`), fixada na Run
     para que todas as tentativas usem a mesma, mesmo depois de um deploy novo. Abre e confirma
     a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
+
+    Sem espaço para o teto de saída levanta `capacity.AccountCapacityExceededError` ou
+    `capacity.GlobalCapacityExceededError`, com a transação desfeita.
     """
     key = parse_idempotency_key(idem_key)
     validated = validate_run(command)
@@ -214,8 +255,12 @@ def accept_run(
         if replay is not None:
             return replay
         _lock_global_queue(session)
+        now = db_now(session)
+        usage = daily_usage(session, owner_id, now)
+        _check_run_quota(usage, now)
         run_id = _insert_run(session, owner_id, validated, traceparent, executor_image)
         uploads = lock_ready_uploads(session, owner_id, validated.input_upload_ids)
+        _check_input_bytes(validated.recipe, uploads, usage, now)
         session.execute(
             insert(run_input),
             [
@@ -224,6 +269,14 @@ def accept_run(
             ],
         )
         objects.hold(session, [u.object_id for u in uploads], HolderKind.RUN, run_id)
+        capacity.reserve(
+            session,
+            owner_id=owner_id,
+            holder=capacity.HolderKind.RUN,
+            holder_id=run_id,
+            resource=capacity.Resource.STORAGE_BYTES,
+            amount=RUN_OUTPUT_CEILING_BYTES,
+        )
         expires_at = _record_key(session, owner_id, key, digest, run_id)
         session.execute(select(func.pg_notify(NOTIFY_CHANNEL, "")))
     return Accepted(run_id=run_id, replayed=False, idempotency_expires_at=expires_at)
@@ -287,6 +340,40 @@ def _lock_global_queue(session: Session) -> None:
     ).scalar_one()
     if waiting >= MAX_QUEUED_RUNS:
         raise QueueFullError("fila global cheia")
+
+
+def _check_run_quota(usage: DailyUsage, now: datetime) -> None:
+    if usage.runs >= MAX_RUNS_PER_WINDOW:
+        raise DailyQuotaExceededError(
+            f"a conta já criou {usage.runs} execuções nas últimas 24 h",
+            _until_window_frees(usage, now),
+        )
+
+
+def _check_input_bytes(
+    recipe: RecipeVersion, uploads: Sequence[ReadyUpload], usage: DailyUsage, now: datetime
+) -> None:
+    """Teto da versão e cota diária de entrada; uma execução maior que a cota é inválida."""
+    incoming = sum(u.size_bytes for u in uploads)
+    version_max = recipe.limits.get(_MAX_TOTAL_INPUT_BYTES)
+    if version_max is not None and incoming > version_max:
+        _refuse("input_upload_ids", f"as entradas somam mais de {version_max} bytes")
+    if incoming > MAX_INPUT_BYTES_PER_WINDOW:
+        _refuse(
+            "input_upload_ids",
+            f"as entradas somam mais que a cota diária de {MAX_INPUT_BYTES_PER_WINDOW} bytes",
+        )
+    if usage.input_bytes + incoming > MAX_INPUT_BYTES_PER_WINDOW:
+        raise DailyQuotaExceededError(
+            "a entrada passa da cota diária de bytes", _until_window_frees(usage, now)
+        )
+
+
+def _until_window_frees(usage: DailyUsage, now: datetime) -> timedelta:
+    resets_at = usage.resets_at()
+    if resets_at is None:
+        raise RuntimeError("cota diária esgotada sem execução na janela")
+    return max(resets_at - now, _MIN_RETRY_AFTER)
 
 
 def _insert_run(
