@@ -21,6 +21,7 @@ from sqlalchemy import Connection, Engine, Table, insert, inspect, update
 from sqlalchemy.exc import IntegrityError
 
 # Importar os módulos registra as tabelas no MetaData comum.
+from goblinshift.files.states import ArtifactRole
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import make_engine, metadata
@@ -557,6 +558,36 @@ def test_chave_de_api_que_vence_antes_de_nascer_e_recusada(conn: Connection) -> 
                 expires_at=AGORA,
             )
         )
+
+
+def _inserir_artefato(conn: Connection, role: str) -> None:
+    alice = criar_conta(conn, "alice")
+    objeto = criar_objeto_unico(conn, alice, "outputs/alice/1")
+    conn.execute(
+        insert(artifact).values(
+            owner_id=alice,
+            object_id=objeto,
+            role=role,
+            file_name="images/foto.jpg",
+            expires_at=UMA_HORA_DEPOIS,
+        )
+    )
+
+
+@pytest.mark.parametrize("role", [role.value for role in ArtifactRole])
+def test_todo_papel_do_enum_e_aceito_pelo_banco(conn: Connection, role: str) -> None:
+    # Fatia 5 (migração 0005): manifest e package entram ao lado de output e report.
+    _inserir_artefato(conn, role)
+
+
+@pytest.mark.parametrize("role", ["preview", "outro", "MANIFEST", ""])
+def test_papel_fora_da_lista_e_recusado(conn: Connection, role: str) -> None:
+    with barrado_por(conn, "artifact_role_check"):
+        _inserir_artefato(conn, role)
+
+
+def test_papeis_da_fatia_5_estao_no_enum() -> None:
+    assert [role.value for role in ArtifactRole] == ["output", "report", "manifest", "package"]
 
 
 # --- 6. Uso de objeto -------------------------------------------------------------------------

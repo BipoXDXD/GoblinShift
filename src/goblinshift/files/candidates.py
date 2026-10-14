@@ -26,6 +26,10 @@ class HeldContent:
     storage_key: str
     size_bytes: int
     sha256: bytes
+    object_id: uuid.UUID
+    # `False` depois que o dono excluiu o upload (`delete_requested`): a execução ainda lê o
+    # conteúdo, mas o objeto não pode ganhar referência nova, como um artefato (ADR 020).
+    committed: bool
 
 
 class HeldContentMissingError(Exception):
@@ -95,6 +99,8 @@ def held_input_contents(
             stored_object.c.storage_key,
             stored_object.c.size_bytes,
             stored_object.c.sha256,
+            stored_object.c.id.label("object_id"),
+            stored_object.c.state,
         )
         .join(stored_object, stored_object.c.id == upload.c.object_id)
         .where(
@@ -104,7 +110,15 @@ def held_input_contents(
         )
     ).all()
     by_id = {
-        row.id: HeldContent(row.id, row.original_name, row.storage_key, row.size_bytes, row.sha256)
+        row.id: HeldContent(
+            row.id,
+            row.original_name,
+            row.storage_key,
+            row.size_bytes,
+            row.sha256,
+            row.object_id,
+            committed=row.state == ObjectState.COMMITTED,
+        )
         for row in rows
     }
     missing = [upload_id for upload_id in upload_ids if upload_id not in by_id]

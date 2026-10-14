@@ -107,7 +107,7 @@ artifact = Table(
     Index(None, "object_id"),
     CheckConstraint("octet_length(file_name) BETWEEN 1 AND 240", name="file_name"),
     Index("artifact_expires_at_idx", "expires_at", postgresql_where=text("deleted_at IS NULL")),
-    CheckConstraint("role IN ('output', 'report')", name="role"),
+    CheckConstraint("role IN ('output', 'report', 'manifest', 'package')", name="role"),
 )
 
 object_use = Table(

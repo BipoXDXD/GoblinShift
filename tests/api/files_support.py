@@ -55,7 +55,9 @@ def storage_of(app: FastAPI) -> FileStorage:
     return storage
 
 
-def publish(app: FastAPI, owner: uuid.UUID, content: bytes) -> uuid.UUID:
+def publish(
+    app: FastAPI, owner: uuid.UUID, content: bytes, file_name: str = "saida.csv"
+) -> uuid.UUID:
     """Artefato publicado pelo caminho do worker: candidato, gravação, confirmação, publicação."""
     factory: sessionmaker[Session] = app.state.session_factory
     with unit_of_work(factory) as session:
@@ -66,7 +68,7 @@ def publish(app: FastAPI, owner: uuid.UUID, content: bytes) -> uuid.UUID:
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
         return publish_artifact(
-            session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv"
+            session, owner, candidate.object_id, ArtifactRole.OUTPUT, file_name
         ).id
 
 

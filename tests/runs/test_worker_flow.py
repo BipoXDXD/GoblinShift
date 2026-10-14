@@ -1,5 +1,6 @@
 """Worker de ponta a ponta com PostgreSQL e executor reais (docs/GoblinShiftPlan.md, 3.4 e 3.5)."""
 
+import json
 import threading
 import uuid
 from datetime import timedelta
@@ -14,6 +15,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
+from goblinshift.processing.executor.job import ExecutionContext, read_context
 from goblinshift.runs.acceptance import accept_run
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.store import complete_after_commit
@@ -38,6 +40,8 @@ from tests.runs.worker_support import (
 )
 
 pytestmark = pytest.mark.integration
+
+UTF8_BOM = b"\xef\xbb\xbf"
 
 
 def outputs_of(factory: sessionmaker[Session], run_id: uuid.UUID) -> list[tuple[str, str]]:
@@ -76,8 +80,19 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"], row["error_code"]) == ("succeeded", None, None)
     assert row["finished_at"] is not None
-    assert row["summary"] == {"inputs": 1, "ok": 1, "rejected": 0, "outputs": 1}
-    assert outputs_of(factory, run_id) == [("clientes.csv", "output"), ("report.json", "report")]
+    assert row["summary"] == {
+        "inputs": 1,
+        "ok": 1,
+        "rejected": 0,
+        "duplicates": 0,
+        "outputs": 1,
+    }
+    assert outputs_of(factory, run_id) == [
+        ("clientes.csv", "output"),
+        ("report.json", "report"),
+        ("manifest.json", "manifest"),
+        ("csv-janitor.zip", "package"),
+    ]
     assert input_outcomes(factory, run_id) == [("ok", None)]
     [only] = attempts(factory, run_id)
     assert only["ended_at"] is not None
@@ -91,7 +106,8 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
 def test_artefato_publicado_tem_o_conteudo_limpo_na_chave_da_geracao(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
-    run_id = queue_run(factory, storage, create_user(factory))
+    # Com BOM, a saída limpa difere da entrada: vira candidato da tentativa, não reaproveitamento.
+    run_id = queue_run(factory, storage, create_user(factory), [("clientes.csv", UTF8_BOM + VALID)])
     claimed = claim(factory, storage)
 
     coordinator(factory, storage, local_runner(work_root)).run(claimed)
@@ -119,7 +135,12 @@ def test_tabela_rejeitada_termina_com_avisos(
 
     assert run_row(factory, run_id)["status"] == "succeeded_with_warnings"
     assert input_outcomes(factory, run_id) == [("ok", None), ("rejected", "CSV_STRUCTURE_INVALID")]
-    assert outputs_of(factory, run_id) == [("a.csv", "output"), ("report.json", "report")]
+    assert outputs_of(factory, run_id) == [
+        ("a.csv", "output"),
+        ("report.json", "report"),
+        ("manifest.json", "manifest"),
+        ("csv-janitor.zip", "package"),
+    ]
 
 
 def test_todas_rejeitadas_termina_failed_sem_saidas_validas(
@@ -131,7 +152,11 @@ def test_todas_rejeitadas_termina_failed_sem_saidas_validas(
 
     row = run_row(factory, run_id)
     assert (row["status"], row["error_code"]) == ("failed", "NO_VALID_OUTPUTS")
-    assert outputs_of(factory, run_id) == [("report.json", "report")]
+    assert outputs_of(factory, run_id) == [
+        ("report.json", "report"),
+        ("manifest.json", "manifest"),
+        ("csv-janitor.zip", "package"),
+    ]
     assert input_outcomes(factory, run_id) == [("rejected", "CSV_STRUCTURE_INVALID")]
     assert open_run_uses(factory, run_id) == 0
 
@@ -258,7 +283,9 @@ def test_publicacao_contra_cancelamento_nao_publica_e_descarta_candidatos(
     runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     status = worker.supervise(claimed)
-    collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)
+    collected = collect_outputs(
+        runner.work_dir(claimed.attempt_id) / "out", 1, recipe_id=claimed.recipe_id
+    )
     stored = worker.store_candidates(claimed, collected)
 
     cancel_run(factory, storage, owner, run_id)
@@ -287,7 +314,9 @@ def test_publicacao_depois_do_prazo_termina_failed_pelo_relogio_do_banco(
     runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     worker.supervise(claimed)
-    collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)
+    collected = collect_outputs(
+        runner.work_dir(claimed.attempt_id) / "out", 1, recipe_id=claimed.recipe_id
+    )
     stored = worker.store_candidates(claimed, collected)
 
     with unit_of_work(factory) as session:
@@ -323,5 +352,20 @@ def test_execucao_aceita_pela_api_e_processada_pelo_worker(
 
     row = run_row(factory, accepted.run_id)
     assert row["status"] == "succeeded"
-    assert outputs_of(factory, accepted.run_id)[-1] == ("report.json", "report")
+    assert outputs_of(factory, accepted.run_id)[-1] == ("csv-janitor.zip", "package")
     assert open_run_uses(factory, accepted.run_id) == 0
+
+
+def test_preparacao_grava_o_contexto_com_a_imagem_fixada_na_run(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root)
+    worker = coordinator(factory, storage, runner)
+    claimed = claim(factory, storage)
+
+    worker.prepare(claimed)
+
+    context = runner.work_dir(claimed.attempt_id) / "context.json"
+    assert json.loads(context.read_bytes()) == {"executor_image": LOCAL_EXECUTOR_IMAGE}
+    assert read_context(context) == ExecutionContext(executor_image=claimed.executor_image)
