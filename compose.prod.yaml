@@ -2,6 +2,16 @@
 # O Nginx do GoblinShift entra na rede `edge` no IP reservado a ele, que o trecho do projeto
 # na borda (deploy/edge/conf.d/goblinshift.caddy) usa. Nenhuma porta é publicada pelo projeto.
 services:
+  api:
+    environment:
+      GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+  # Runner local em produção só com confirmação explícita, até a fatia 4 (ADR 016).
+  worker:
+    environment:
+      GS_ALLOW_LOCAL_RUNNER: "true"
+  maintenance:
+    environment:
+      GS_ALLOW_LOCAL_RUNNER: "true"
   nginx:
     # Sem NET_RAW: um container comprometido na rede edge não forja ARP para assumir o IP da
     # borda, em quem os projetos confiam (ADR 014).

@@ -1,11 +1,13 @@
 """Construtores de dados dos testes de `files`, sempre pela API pública do módulo."""
 
 import uuid
+from datetime import timedelta
 
-from sqlalchemy import insert
+from sqlalchemy import func, insert, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
+from goblinshift.files.tables import upload
 from goblinshift.files.uploads import UploadIntent, UploadView, create_intents, receive_content
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
@@ -38,3 +40,16 @@ def ready_upload(
     intent = create_intent(factory, owner_id, size=len(content))
     with factory() as session:
         return receive_content(session, storage, owner_id, intent.id, [content])
+
+
+def pass_expiry_after_deletion(factory: sessionmaker[Session], upload_id: uuid.UUID) -> None:
+    """Simula o tempo passando: o dono excluiu há 2 h e o prazo de retenção venceu há 1 h."""
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == upload_id)
+            .values(
+                deleted_at=func.now() - timedelta(hours=2),
+                expires_at=func.now() - timedelta(hours=1),
+            )
+        )

@@ -140,7 +140,7 @@ Deduplicar por tuplas de valores, após normalizar/filtrar e antes da projeção
 
 Como isso é feito com o módulo `csv` está em [2.3](#s2-3).
 
-**Saídas:** um CSV UTF-8 válido por entrada, sem BOM, com cabeçalho, terminador de linha `\r\n` (RFC 4180) e aspas só quando necessárias, no delimitador configurado; contagens, manifesto e ZIP. Só cabeçalho é válido; filtro que remove tudo gera CSV vazio com aviso.
+**Saídas:** um CSV UTF-8 válido por entrada, sem BOM, com cabeçalho, terminador de linha `\r\n` (RFC 4180) e aspas só quando necessárias, no delimitador configurado; contagens, manifesto e ZIP (na fatia 3, só os CSVs e o `report.json`, sem manifesto nem ZIP; ver 3.6). Só cabeçalho é válido; filtro que remove tudo gera CSV vazio com aviso.
 
 A contagem fecha como `registros lidos = filtrados + duplicados removidos + sobreviventes`, sem contar cabeçalho ou linhas vazias ignoradas. A contagem de registros lógicos não é confundida com linhas físicas.
 
@@ -246,12 +246,14 @@ Login fora da base: `GET /auth/login/{provider}`, `GET /auth/callback/{provider}
 | `400`                 | JSON malformado, chaves duplicadas ou credenciais simultâneas ambíguas.                                                                                                                                                                                              |
 | `401` / `403`         | Credencial ausente/inválida, autenticação recente exigida (`REAUTH_REQUIRED`), escopo insuficiente ou verificação de CSRF recusada (`CSRF_FAILED`).                                                                                                                  |
 | `404`                 | Recurso **da URL** inexistente ou pertencente a outra conta. IDs citados no corpo nunca geram `404`: um `upload_id` inexistente, de outra conta ou expirado em `POST /runs` responde `422` com um único código, `INPUT_NOT_AVAILABLE`, para não permitir enumeração. |
+| `408`                 | Transferência de conteúdo interrompida por tempo (10 minutos no total ou 30 s sem progresso).                                                                                                                                                                        |
 | `409`                 | Requisição idempotente ainda em andamento, estado incompatível ou já existe uma execução não terminal na conta (`ACTIVE_RUN_LIMIT`).                                                                                                                                 |
 | `410`                 | Conteúdo expirado/excluído conhecido do proprietário.                                                                                                                                                                                                                |
 | `412` / `428`         | Revisão de preset desatualizada (`412`, RFC 9110) ou precondição ausente (`428`, RFC 6585).                                                                                                                                                                          |
 | `413` / `415` / `422` | Corpo acima do limite, mídia HTTP incompatível ou comando semanticamente inválido.                                                                                                                                                                                   |
 | `429`                 | Limite técnico da conta, cota diária ou taxa excedida; incluir `Retry-After` quando aplicável.                                                                                                                                                                       |
 | `503`                 | Fila global cheia, capacidade global ou dependência necessária indisponível; incluir `Retry-After`.                                                                                                                                                                  |
+| `500`                 | Falha inesperada; corpo genérico com `request_id`, sem detalhe interno.                                                                                                                                                                                              |
 
 Após `202`, conteúdo ainda pode falhar na execução; não se altera a resposta HTTP retroativamente.
 
@@ -261,18 +263,30 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 |-----------------------------|----------------|----------------------|-------------------------------------------------------------|-------|
 | `JSON_INVALID`              | Requisição     | —                    | Recusado (malformado, chave duplicada, `NaN`, profundidade) | `400` |
 | `IDEMPOTENCY_KEY_INVALID`   | Requisição     | —                    | Recusado                                                    | `400` |
+| `BAD_REQUEST`               | Requisição     | —                    | Recusado (genérico: nada do catálogo se aplica)             | `400` |
+| `AUTHENTICATION_REQUIRED`   | Requisição     | —                    | Credencial ausente ou inválida                              | `401` |
 | `REAUTH_REQUIRED`           | Requisição     | —                    | Refazer login                                               | `401` |
+| `INSUFFICIENT_SCOPE`        | Requisição     | —                    | Recusado (escopo da chave)                                  | `403` |
+| `FORBIDDEN`                 | Requisição     | —                    | Recusado (genérico: acesso negado sem motivo do catálogo)   | `403` |
 | `CSRF_FAILED`               | Requisição     | —                    | Recusado e auditado                                         | `403` |
+| `NOT_FOUND`                 | Requisição     | —                    | Recusado (inexistente ou de outra conta)                    | `404` |
+| `METHOD_NOT_ALLOWED`        | Requisição     | —                    | Recusado, com `Allow`                                       | `405` |
+| `REQUEST_TIMEOUT`           | Requisição     | —                    | Transferência interrompida por tempo                        | `408` |
+| `STATE_CONFLICT`            | Requisição     | —                    | Recusado (estado incompatível)                              | `409` |
 | `IDEMPOTENCY_IN_PROGRESS`   | Requisição     | —                    | Tentar de novo após `Retry-After`                           | `409` |
 | `ACTIVE_RUN_LIMIT`          | Política       | —                    | Recusado                                                    | `409` |
+| `GONE`                      | Requisição     | —                    | Conteúdo expirado ou excluído                               | `410` |
 | `BODY_TOO_LARGE`            | Requisição     | —                    | Recusado                                                    | `413` |
+| `UNSUPPORTED_MEDIA_TYPE`    | Requisição     | —                    | Recusado                                                    | `415` |
 | `VALIDATION_FAILED`         | Requisição     | —                    | Recusado, com `errors` por campo                            | `422` |
 | `IDEMPOTENCY_KEY_REUSED`    | Requisição     | —                    | Recusado                                                    | `422` |
 | `INPUT_NOT_AVAILABLE`       | Requisição     | —                    | Recusado                                                    | `422` |
 | `RECIPE_VERSION_RETIRED`    | Requisição     | —                    | Recusado                                                    | `422` |
 | `QUOTA_EXCEEDED`            | Política       | —                    | Recusado, com `Retry-After`                                 | `429` |
 | `RATE_LIMITED`              | Política       | —                    | Recusado, com `Retry-After`                                 | `429` |
+| `INTERNAL_ERROR`            | Servidor       | —                    | Falha inesperada, sem detalhe interno                       | `500` |
 | `QUEUE_FULL`                | Política       | —                    | Recusado, com `Retry-After`                                 | `503` |
+| `SERVICE_UNAVAILABLE`       | Servidor       | —                    | Dependência indisponível (genérico), com `Retry-After`      | `503` |
 | `UNSUPPORTED_FORMAT`        | Item           | Não                  | Arquivo rejeitado; a execução continua                      | —     |
 | `UNSUPPORTED_BIT_DEPTH`     | Item           | Não                  | Arquivo rejeitado; a execução continua                      | —     |
 | `UNSUPPORTED_COLOR_PROFILE` | Item           | Não                  | Arquivo rejeitado; a execução continua                      | —     |
@@ -288,6 +302,8 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 | `DEADLINE_EXCEEDED`         | Parada         | Não                  | `failed`                                                    | —     |
 | `INFRA_POISON`              | Parada         | Não                  | `failed`                                                    | —     |
 | `CANCELED`                  | Parada         | Não                  | `canceled`                                                  | —     |
+
+Os códigos genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os status da tabela acima que não tinham código próprio. O status de cada `code` sai do catálogo em `entrypoints/api/problems.py`, para que um código nunca apareça com dois status; um erro HTTP do framework com status fora do catálogo sai como `BAD_REQUEST` (4xx) ou `INTERNAL_ERROR` (5xx), com o status do catálogo. A URI de `type` é `https://goblinshift.dev/problems/<code-em-kebab>` (por exemplo, `.../problems/body-too-large`), gerada por `ProblemCode.type_uri` no mesmo arquivo; é um identificador estável, não precisa ser navegável.
 
 No código das receitas, a classe sai do tipo levantado: `ItemRejected(code)` vira rejeição por item no relatório, `RecipeFailure(code)` é falha determinística, e qualquer outra exceção é tratada como infraestrutura (transitória). Só dois lugares traduzem exceções: o handler do FastAPI e o laço do worker.
 
@@ -357,7 +373,7 @@ Limites iniciais configuráveis e publicados no catálogo, não benchmarks. Apli
 | Fila           | A execução precisa começar em até 2 horas após a aceitação (`queue_expires_at`); se não começar, termina `failed` com `QUEUE_EXPIRED` e libera as reservas.                                                                                                                |
 | Duração        | 10 minutos por tentativa e 30 minutos por execução, contados a partir do início da primeira tentativa (`deadline_at`), incluindo retentativa, coleta e publicação.                                                                                                         |
 | Cotas diárias  | Por conta: 30 execuções e 2 GiB de entrada processada a cada 24 horas corridas.                                                                                                                                                                                            |
-| Transferências | 2 uploads e 2 downloads simultâneos por conta; 4 de cada no ambiente. Até 10 minutos por transferência e 30 s sem progresso.                                                                                                                                               |
+| Transferências | 2 uploads e 2 downloads simultâneos por conta; 4 de cada no ambiente. Até 10 minutos por transferência e 30 s sem progresso. O limite vale entre réplicas: a tabela `transfer_slot` guarda as vagas, e cada reserva é serializada por direção com advisory lock de transação. A vaga vence em 11 minutos (10 de transferência e 1 de folga), para não travar a conta se a réplica cair. Sem vaga: `429` `RATE_LIMITED` com `Retry-After`. |
 | Armazenamento  | 4 GiB por conta e 20 GiB no ambiente, incluindo reservas e objetos pendentes de exclusão.                                                                                                                                                                                  |
 | Requisições    | Por classe de rota e por conta: leituras e polling, 120 por minuto; comandos, 60 por minuto; criação de execução, 10 por minuto. O envio e o download de conteúdo são limitados pelas transferências simultâneas, não por minuto. Rotas `/auth/*`: limite por IP no Nginx. |
 | Configurações  | Até 100 presets e 5 chaves de API por conta.                                                                                                                                                                                                                               |
@@ -370,7 +386,7 @@ Reservar capacidade com atualização atômica no banco. Considerar arquivos rec
 
 | Dado                                           | Prazo                                             | Como expira                                       |
 |------------------------------------------------|---------------------------------------------------|---------------------------------------------------|
-| Upload não utilizado                           | 24 horas                                          | Objeto e linha removidos                          |
+| Upload não utilizado                           | 24 horas                                          | Objeto removido; linha mantida com `deleted_at` (a FK de `RunInput` preserva o histórico) |
 | Upload incompleto                              | 1 hora sem atividade                              | Objeto e linha removidos                          |
 | Entradas usadas, saídas, manifesto e relatório | 48 horas após o término                           | Objetos removidos; disponibilidade vira `expired` |
 | Upload reutilizado                             | Enquanto houver execução ativa ou retenção válida | Segue o vínculo mais longo                        |
@@ -605,8 +621,9 @@ Rotas traduzem HTTP; serviços delimitam transações; transformações não dep
 **Contrato de receita.** `(recipe_id, recipe_version)` resolve a implementação num registro simples (`dict` de chave para implementação), sem hierarquia de classes: Template Method não serve, porque Detox e CSV Janitor operam sobre o lote inteiro. A Run fixa digest, parâmetros e limites.
 
 ```python
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -621,9 +638,17 @@ class InputFile:
 
 
 @dataclass(frozen=True)
+class ReportWarning:
+    code: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class ItemOk:
     position: int
-    outputs: Sequence[str]  # nomes lógicos criados em OutputDir
+    outputs: Sequence[str]  # nomes finais criados em OutputDir
+    warnings: Sequence[ReportWarning] = ()
+    counts: Mapping[str, int] = field(default_factory=dict)  # contagens próprias da receita
 
 
 @dataclass(frozen=True)
@@ -634,19 +659,24 @@ class ItemRejected:
 
 
 @dataclass(frozen=True)
-class ReportWarning:
-    code: str
-    detail: str
-
-
-@dataclass(frozen=True)
 class Report:
     items: Sequence[ItemOk | ItemRejected]  # um por InputFile, na ordem
     warnings: Sequence[ReportWarning]
 
 
+class OutputRole(StrEnum):
+    CONTENT = "content"
+    PREVIEW = "preview"
+
+
+@dataclass(frozen=True)
+class OutputFile:
+    name: str  # nome final, com as regras de 3.6 já aplicadas
+    stream: BinaryIO
+
+
 class OutputDir(Protocol):
-    def create(self, logical_name: str, role: str) -> BinaryIO:
+    def create(self, logical_name: str, role: OutputRole, position: int) -> OutputFile:
         """Aplica as regras de nome de 3.6 e os tetos de bytes e quantidade."""
         ...
 
@@ -664,12 +694,14 @@ class Recipe[P](Protocol):
 ```
 
 - Rejeição de um arquivo é um `ItemRejected(position, code, reason)` no relatório; `RecipeFailure(code)` é falha determinística da execução; qualquer outra exceção é infraestrutura (catálogo em [1.6](#s1-6)).
-- Manifesto, relatório e ZIP são feitos por uma função comum, `package(report, out)`, executada no próprio executor depois da receita; nenhuma receita monta ZIP.
+- `create` recebe a `position` da entrada porque a colisão de nomes se resolve com sufixo pelo índice original ([3.6](#s3-6)), e devolve o nome final porque o `ItemOk` cita o que foi criado. `ItemOk` carrega `counts` e `warnings` porque o relatório os informa por arquivo.
+- `NO_VALID_OUTPUTS` não é `RecipeFailure`: o worker o decide na publicação, quando o relatório não tem nenhum `ItemOk`. Um job com mais entradas que o `max_inputs` da versão viola o contrato do executor (código de saída 4, infraestrutura); não há código novo no catálogo.
+- Manifesto, relatório e ZIP são feitos por uma função comum, `package(report, out)`, executada no próprio executor depois da receita; nenhuma receita monta ZIP. Na fatia 3 ainda não existe `package`: o executor só grava o `report.json` ([3.6](#s3-6)).
 - O executor não tem rede: o progresso é escrito em `progress.jsonl` na área de trabalho, e o worker o lê e atualiza `phase` e `progress` com fencing.
 
 **Demais interfaces:**
 - *Storage* (`files`): `create_exclusive(key, chunks) -> (sha256, size)`, `open(key)`, `stat(key)`, `delete(key)`.
-- *Runner* (`runs`): `start(attempt_id)` idempotente, `status(attempt_id)`, `stop(attempt_id, grace)`, `remove(attempt_id)`. A implementação de produção fala com o `executor-ctl`; a local, em subprocesso, só existe fora de produção.
+- *Runner* (`runs`): `start(attempt_id)` idempotente, `status(attempt_id)`, `stop(attempt_id, grace)`, `remove(attempt_id)`. A implementação de produção fala com o `executor-ctl`; a local, em subprocesso, só existe fora de produção e, na VPS, até a fatia 4 e com confirmação explícita ([ADR 016](adr/016-runner-local-na-vps-ate-a-fatia-4.md)).
 - *Identidade* (`identity`): `authenticate(request) -> Principal(owner_id, scopes, via)`, em que `via` é sessão ou chave; `require_scope` e `require_recent_auth`.
 
 **Abstrações:** as interfaces acima; Strategy pode ser função. Composição/funções puras para filtros, nomes e contagens. Evitar repository genérico, service locator, barramento e classe por endpoint.
@@ -694,11 +726,11 @@ class Recipe[P](Protocol):
 | `WebSession`          | Hash do segredo, usuário, criação, `authenticated_at` (login no provedor), `last_seen_at`, expiração absoluta e revogação. O nome evita confusão com a Session do SQLAlchemy.                                                                                                                                                          |
 | `ApiKey`              | Identificador público, hash do segredo, usuário, escopos, expiração e revogação.                                                                                                                                                                                                                                                       |
 | `Preset`              | Proprietário, nome, receita/versão, parâmetros e revisão. Execuções guardam `preset_id` opcional com `ON DELETE SET NULL`, para que excluir um preset não altere o histórico.                                                                                                                                                          |
-| `Upload`              | Proprietário, nome original, `object_id` (FK para `StoredObject`), estado e retenção.                                                                                                                                                                                                                                                  |
+| `Upload`              | Proprietário, nome original, `object_id` (FK para `StoredObject`), estado e retenção. Incompleto expirado perde linha e objeto; pronto expirado ou excluído mantém a linha com `deleted_at`, porque `RunInput` a referencia.                                                                                                           |
 | `Run`                 | Proprietário, receita/versão/digest, parâmetros e limites fixados, estado, fase, `generation`, `claim_count`, `eligible_at`, `queue_expires_at`, `deadline_at`, intenção de cancelamento, razão de parada, `traceparent` da requisição de aceitação, datas e resumo. A própria tabela é a fila.                                        |
 | `RunInput`            | Chave primária `(run_id, position)` e `UNIQUE (run_id, upload_id)`, o que impede no banco a repetição de entradas. O resultado por arquivo (`outcome`, `error_code`) fica em colunas, porque é consultado e filtrado.                                                                                                                  |
-| `Attempt`             | Execução, número, `generation`, nome do container (`gs-exec-{attempt_id}`), `lease_expires_at`, tempos e erro.                                                                                                                                                                                                                         |
-| `Artifact`            | Proprietário, `object_id` (FK para `StoredObject`; o Detox aponta para o mesmo objeto da entrada), papel, disponibilidade e retenção.                                                                                                                                                                                                  |
+| `Attempt`             | Execução, número (1 a 4, um por claim, com `CHECK`), `generation`, nome do container (`gs-exec-{attempt_id}`), `lease_expires_at`, `executor_started_at`, tempos e erro. Só a Attempt com `executor_started_at` conta como tentativa física.                                                                                           |
+| `Artifact`            | Proprietário, `object_id` (FK para `StoredObject`; o Detox aponta para o mesmo objeto da entrada), papel (`output` ou `report`), `file_name` (nome final da saída, usado no download), disponibilidade e retenção.                                                                                                                     |
 | `StoredObject`        | Proprietário, `storage_key` único, SHA-256, bytes (`bigint`), estado (`pending`, `committed`, `delete_requested`, `deleted`, `missing`) e, para candidatos, tentativa e geração. Supertabela comum a `Upload` e `Artifact`: substitui o antigo "objeto ou referência física", que exigiria uma associação polimórfica sem FK possível. |
 | `ObjectUse`           | Objeto, tipo do detentor (`run` ou `download`), ID do detentor, início e fim. A remoção física só acontece quando não há uso aberto.                                                                                                                                                                                                   |
 | `RunOutput`           | Vínculo ordenado entre execução, artefato e nome lógico de saída.                                                                                                                                                                                                                                                                      |
@@ -732,7 +764,7 @@ FOR UPDATE SKIP LOCKED
 LIMIT 1;
 ```
 
-Na mesma transação: incrementar `Run.generation`, criar a `Attempt` com essa geração, o número da tentativa e `lease_expires_at`, passar a Run para `running` e, na primeira tentativa, gravar `deadline_at = now() + 30 min` com o relógio do banco. Um índice único parcial (uma `Attempt` sem `ended_at` por Run) impede duas tentativas simultâneas mesmo diante de um bug. Só depois do commit o worker pede o container ao `executor-ctl` ([3.6](#s3-6)), com o nome determinístico `gs-exec-{attempt_id}`; repetir o pedido adota o container existente em vez de criar outro. [D08](GoblinShiftReferencias.md#d-2), [D09](GoblinShiftReferencias.md#d-2).
+Na mesma transação: incrementar `Run.generation`, criar a `Attempt` com essa geração, o número do claim (1 a 4) e `lease_expires_at`, passar a Run para `running` e, na primeira tentativa, gravar `deadline_at = now() + 30 min` com o relógio do banco. Um índice único parcial (uma `Attempt` sem `ended_at` por Run) impede duas tentativas simultâneas mesmo diante de um bug. Só depois do commit o worker pede o container ao `executor-ctl` ([3.6](#s3-6)), com o nome determinístico `gs-exec-{attempt_id}`; repetir o pedido adota o container existente em vez de criar outro. [D08](GoblinShiftReferencias.md#d-2), [D09](GoblinShiftReferencias.md#d-2).
 
 **Fencing.** A geração é o token que separa a tentativa válida de um worker atrasado. Ela só muda no claim; adotar um container já existente não a altera.
 - Toda escrita do coordenador sobre a execução é condicional, não só a publicação: renovação do lease, fase, progresso, fim da tentativa, erro e liberação de reservas usam `UPDATE … WHERE run_id = :run AND generation = :gen AND status IN (…)`.
@@ -744,9 +776,9 @@ Na mesma transação: incrementar `Run.generation`, criar a `Attempt` com essa g
 
 Saídas anteriores ao commit são candidatos privados. Se o resultado do commit for incerto, reler por identificadores estáveis antes de apagar candidatos ou repetir a publicação. Unicidade e geração impedem publicação lógica duplicada; não prometem que o cálculo físico ocorrerá exatamente uma vez.
 
-**Retentativa.** Até duas tentativas físicas no total para falha transitória, dentro do `deadline_at`. Não há retry em memória nem dentro de biblioteca: o coordenador encerra a tentativa e, numa escrita com fencing, deixa a Run em `running` com `phase=retry_wait` e `eligible_at = now() + 5 a 30 s`, com jitter. A nova tentativa passa pelo claim normal, recebe nova geração e recomeça o lote; não há checkpoint por arquivo. Arquivo inválido, erro determinístico e limite de conteúdo não recebem retry. Não multiplicar retries entre serviço e executor.
+**Retentativa.** Até duas tentativas físicas no total para falha transitória, dentro do `deadline_at`. Só conta como física a `Attempt` que registrou `executor_started_at`, isto é, cujo executor começou a trabalhar. Lease vencido sem executor confirmado reagenda a Run em `retry_wait` pelo mesmo caminho, sem gastar tentativa física. Não há retry em memória nem dentro de biblioteca: o coordenador encerra a tentativa e, numa escrita com fencing, deixa a Run em `running` com `phase=retry_wait` e `eligible_at = now() + 5 a 30 s`, com jitter. A nova tentativa passa pelo claim normal, recebe nova geração e recomeça o lote; não há checkpoint por arquivo. Arquivo inválido, erro determinístico e limite de conteúdo não recebem retry. Não multiplicar retries entre serviço e executor.
 
-**Limite de claims.** `Run.claim_count` é incrementado em cada claim. Uma execução reivindicada 4 vezes sem que nenhuma tentativa termine (leases vencendo seguidamente) é uma mensagem venenosa: termina `failed` com `INFRA_POISON`, em vez de ocupar o único executor para sempre.
+**Limite de claims.** Cada claim cria uma `Attempt` (`number` de 1 a 4, `CHECK` no banco) e incrementa `Run.claim_count`. Como claim sem executor iniciado não gasta tentativa física, o limite é de claims, não de tentativas: o 5º claim é uma mensagem venenosa (leases vencendo seguidamente) e termina `failed` com `INFRA_POISON`, em vez de ocupar o único executor para sempre.
 
 **Reconciliação.** O processo de manutenção roda em lotes, reivindicando linhas com `FOR UPDATE SKIP LOCKED`: tentativa com lease vencido, execução na fila com `queue_expires_at` vencido (termina `failed` com `QUEUE_EXPIRED`), execução com `deadline_at` vencido, candidatos de gerações vencidas e exclusões incompletas. Lease vencido não prova que o executor morreu: antes de liberar uma execução, a manutenção consulta o `executor-ctl` pelo nome do container e só reagenda depois de confirmar que ele terminou ou de pará-lo. As transições feitas pela manutenção usam a geração lida como condição, pela mesma regra de fencing, e a liberação de reservas é idempotente. Apagar é a direção perigosa, então a manutenção tem um limitador (*Release It!*, Governor): no máximo 500 objetos ou 2 GiB removidos por ciclo; acima disso, para e alerta o administrador.
 
@@ -776,14 +808,15 @@ Estados: `queued`, `running`, `stopping`, `succeeded`, `succeeded_with_warnings`
 | `queued`                 | Fila vencida                                                            | `now() > queue_expires_at`                                 | `failed` (`QUEUE_EXPIRED`)                                              | Libera reservas e usos                                                    |
 | `running`                | Publicação                                                              | Geração atual, sem cancelamento, `now() <= deadline_at`    | `succeeded`, `succeeded_with_warnings` ou `failed` (`NO_VALID_OUTPUTS`) | Publica saídas; encerra a Attempt; libera reservas e usos em seguida      |
 | `running`                | Falha determinística                                                    | Executor terminou com `RecipeFailure` ou limite de recurso | `failed` (código da falha)                                              | Encerra a Attempt; descarta candidatos                                    |
-| `running`                | Falha transitória                                                       | Ainda há tentativa e prazo                                 | `running` / `retry_wait`                                                | Encerra a Attempt; `eligible_at` com jitter                               |
+| `running`                | Falha transitória                                                       | Ainda há tentativa física e prazo                          | `running` / `retry_wait`                                                | Encerra a Attempt; `eligible_at` com jitter                               |
+| `running`                | Lease vencido, executor parado                                          | Nenhum início do executor registrado (`executor_started_at` vazio) | `running` / `retry_wait`                                                | Encerra a Attempt sem gastar tentativa física; `eligible_at` com jitter   |
 | `running` / `retry_wait` | Claim                                                                   | `eligible_at` atingido; claims < 4                         | `running` / `inspecting`                                                | `generation` + 1, nova Attempt                                            |
 | `running` / `retry_wait` | Cancelamento ou prazo vencido                                           | Nenhum executor vivo                                       | `canceled` ou `failed` (`DEADLINE_EXCEEDED`)                            | Libera reservas e usos                                                    |
 | `running`                | Cancelamento, prazo vencido ou falha transitória sem tentativa restante | Executor possivelmente vivo                                | `stopping`                                                              | Grava a razão de parada (a primeira vence); pede `stop` ao `executor-ctl` |
 | `stopping`               | Término do executor confirmado                                          | `status` do `executor-ctl` confirma o fim                  | `canceled` ou `failed` (código da razão)                                | Descarta candidatos; libera reservas e usos                               |
-| `queued` ou `retry_wait` | Claim recusado por excesso de claims                                    | claims = 4                                                 | `failed` (`INFRA_POISON`)                                               | Libera reservas e usos                                                    |
+| `running` / `retry_wait` | Claim recusado por excesso de claims                                    | claims = 4                                                 | `failed` (`INFRA_POISON`)                                               | Libera reservas e usos                                                    |
 
-Invariantes, verificadas por testes de máquina de estados com Hypothesis ([3.7](#s3-7)): estado terminal nunca muda; `canceled` nunca tem `RunOutput`; no máximo duas tentativas físicas; nunca duas tentativas vivas ao mesmo tempo; a primeira razão de parada persistida é a que vale. Reprocessamento solicitado pelo cliente cria outra `Run`; histórico e parâmetros aceitos permanecem inalterados.
+Invariantes, verificadas por testes de máquina de estados com Hypothesis ([3.7](#s3-7)): estado terminal nunca muda; `canceled` nunca tem `RunOutput`; no máximo duas tentativas físicas e quatro claims; nunca duas tentativas vivas ao mesmo tempo; a primeira razão de parada persistida é a que vale. Reprocessamento solicitado pelo cliente cria outra `Run`; histórico e parâmetros aceitos permanecem inalterados.
 
 Cancelamento persiste a intenção e impede novos inícios e publicação final. O worker pede a parada ao `executor-ctl`, que concede até 10 segundos e força o encerramento quando necessário. Só confirmar `canceled` depois de verificar que o executor e seus descendentes terminaram. Uma execução ainda na fila pode ser cancelada sem criar tentativa.
 
@@ -814,6 +847,8 @@ O storage é o filesystem da VPS, com criação exclusiva (`O_CREAT | O_EXCL`) f
 **Nomes e pacotes.** Nomes recebidos são dados, nunca caminhos. Rejeitar NUL, controles, separadores e traversal. Nomes de saída utilizam NFC, extensão preservada, até 180 bytes por componente e 240 bytes por caminho. Comparar colisões com `casefold()` aplicado depois da normalização NFC; resolver com sufixo pelo índice original. Reservar `manifest.json` e `report.json`; não permitir overwrite. No ZIP, arquivos já comprimidos (JPEG, PNG, ZIP) vão com `ZIP_STORED`, sem gastar CPU, e texto com `ZIP_DEFLATED`; entradas em ordem estável e `date_time` fixo (1980-01-01) tornam o pacote determinístico para os mesmos dados.
 
 O pacote contém conteúdo e os dois relatórios. O manifesto lista todas as entradas, hashes, bytes, parâmetros, versão/digest, nomes finais, duplicatas, rejeições, avisos e linhagem. Não contém segredos, caminhos reais, links temporários, seu próprio hash nem o hash do ZIP que o contém. Hashes finais dos relatórios e do pacote ficam nos metadados externos. Se o mapa obrigatório não couber no teto, falhar com `REPORT_LIMIT_EXCEEDED`.
+
+**Saídas na fatia 3.** Por decisão do usuário, manifesto e ZIP comuns só entram na fatia 5. Até lá, cada CSV limpo é um `Artifact` de papel `output`, com `file_name` igual ao nome final pelas regras acima, e o `report.json` é um `Artifact` de papel `report`.
 
 **Identidade web.** Dois provedores via Authlib, ambos com Authorization Code, `state`, PKCE S256 e redirect exato por provedor:
 - **Google (OpenID Connect):** escopo `openid` e `nonce`. Validar assinatura, emissor (`https://accounts.google.com` ou `accounts.google.com`), audiência e expiração do ID token pela biblioteca. Identidade: `(issuer, sub)`.
@@ -1015,8 +1050,8 @@ Cada fatia funciona de ponta a ponta, vai para a VPS pelo pipeline e só então 
 - *Pronto quando:* a CLI processa a suíte de fixtures e cada regra de [1.3](#s1-3) tem pelo menos um teste.
 
 **Fatia 3. Fluxo durável de ponta a ponta.**
-- *Entra:* `POST /uploads` em lote, `PUT` de conteúdo com hash e tamanho contados no streaming, `POST /runs` com idempotência e a decodificação JSON protegida, `GET /runs`, resultados e download, erros em problem+json. A fila no PostgreSQL com claim, `Attempt`, geração e fencing, a publicação condicional e o job de retenção. O worker roda a receita por uma interface `Runner` com uma implementação local em subprocesso, permitida só fora de produção. Uma chave de API emitida por CLI do administrador.
-- *Fora:* login, sandbox real, interface.
+- *Entra:* `POST /uploads` em lote, `PUT` de conteúdo com hash e tamanho contados no streaming, `POST /runs` com idempotência e a decodificação JSON protegida, `GET /runs`, resultados e download, erros em problem+json. A fila no PostgreSQL com claim, `Attempt`, geração e fencing, a publicação condicional e o job de retenção. O worker roda a receita por uma interface `Runner` com uma implementação local em subprocesso, permitida na VPS só até a fatia 4 e com confirmação explícita ([ADR 016](adr/016-runner-local-na-vps-ate-a-fatia-4.md)). Uma chave de API emitida por CLI do administrador (`gs-admin`).
+- *Fora:* login, sandbox real, interface e as cotas completas (`CapacityPool`, `ResourceReservation`, cotas diárias), que ficam para a fatia 6 por decisão do usuário. Na fatia 3, a fila global de 10 aguardando é serializada por `pg_advisory_xact_lock` e a execução ativa por conta é garantida pelo índice único parcial `run_one_active_per_owner_idx`.
 - *Pronto quando:* um script com `curl` executa o CSV Janitor de ponta a ponta na VPS, e passam os testes de concorrência com PostgreSQL real: dois workers disputando o mesmo claim, escrita com geração vencida afetando zero linhas, publicação contra cancelamento e contra prazo vencido.
 
 **Fatia 4. Executor real.**
@@ -1024,12 +1059,12 @@ Cada fatia funciona de ponta a ponta, vai para a VPS pelo pipeline e só então 
 - *Pronto quando:* o teste de aceitação continua passando, e os testes de caos passam na VPS: worker morto por SIGKILL e pausado por SIGSTOP além do lease em cada fronteira do protocolo, sem publicação duplicada nem container órfão.
 
 **Fatia 5. Image Forge e Downloads Detox.**
-- *Entra:* as regras de [1.2](#s1-2), com a validação de pixels antes de `load()`, e de [1.4](#s1-4); empacotador, manifesto e regras de nomes comuns às receitas.
+- *Entra:* as regras de [1.2](#s1-2), com a validação de pixels antes de `load()`, e de [1.4](#s1-4); empacotador e manifesto comuns às receitas (as regras de nomes de [3.6](#s3-6) já valem desde a fatia 3).
 - *Inclui:* fotos de celular, com MPO pelo quadro principal e Display P3 convertido para sRGB ([1.2](#s1-2)).
 - *Pronto quando:* passa a suíte de fixtures com MPO, Display P3, PNG de 16 bits, bomba de descompressão, ZIP que na verdade é JAR e nomes em colisão, e o ZIP gerado é determinístico.
 
 **Fatia 6. Identidade e segurança web.**
-- *Entra:* login Google (OIDC) e GitHub (OAuth 2.0), sessão, CSRF, chaves com escopo e autenticação recente, `logout-all`, auditoria, cabeçalhos de [3.6](#s3-6), estado da conta e bloqueio por CLI, cotas diárias e `DELETE /me` ([1.8](#s1-8)).
+- *Entra:* login Google (OIDC) e GitHub (OAuth 2.0), sessão, CSRF, chaves com escopo e autenticação recente, `logout-all`, auditoria, cabeçalhos de [3.6](#s3-6), estado da conta e bloqueio por CLI, cotas completas (`CapacityPool`, `ResourceReservation`, cotas diárias) e `DELETE /me` ([1.8](#s1-8)).
 - *Pronto quando:* passam os testes de segurança de [3.7](#s3-7) e a matriz de autorização (toda rota × dono, outra conta e escopo ausente); registrar uma rota fora da matriz faz o teste falhar.
 
 **Fatia 7. Interface React.**
@@ -1064,6 +1099,7 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 013 | OpenObserve auto-hospedado como backend de telemetria          | Honeycomb gratuito; Grafana Cloud gratuito; SigNoz                         | Leve, SQL sobre os eventos, dados na VPS e sem custo; Grafana Cloud gratuito guarda só 14 dias e o SigNoz pede 4–8 GB de RAM. Confirmado pela medição da fatia 0 |
 | 014 | Proxy de borda do host, compartilhado pelos projetos, com TLS por domínio | Cada projeto publicar a própria porta; o Nginx do GoblinShift atender também o outro projeto | Só um processo ouve na 80/443; manter a borda fora dos projetos evita que um deploy derrube o outro. Caddy, com TLS automático, um trecho por projeto em `conf.d` e destino por IP reservado (escolhido com o primeiro domínio, 2026-10-13) |
 | 015 | Limite de processos sob gVisor: `--ulimit nproc=64` na receita e `--pids-limit=256` como rede de segurança | Só `--pids-limit` (64 ou calibrado em ~160) | O `--pids-limit` conta as tarefas do gVisor no host (31 ociosas, ~2 por processo) e mata o sandbox; o RLIMIT_NPROC dá `EAGAIN` no 64º processo. Medido na fatia 1 |
+| 016 | Runner local em subprocesso na VPS até a fatia 4, só com confirmação explícita; serviço fechado (chaves do `gs-admin`) | Fatia 3 pronta só localmente                                               | O critério de 3.9 exige `curl` na VPS e o gVisor real só chega na fatia 4. Risco aceito: só o administrador tem chave e a receita é Python puro; removido na fatia 4 |
 
 [↑ Sumário](#sumario)
 

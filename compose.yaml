@@ -12,7 +12,7 @@ x-app: &app
     dockerfile: docker/app.Dockerfile
     args:
       GS_SERVICE_VERSION: ${GS_IMAGE_TAG:-dev}
-  environment:
+  environment: &app-env
     GS_ENVIRONMENT: ${GS_ENVIRONMENT:-development}
     GS_DB_HOST: postgres
     GS_DB_PASSWORD_FILE: /run/secrets/db_password
@@ -23,6 +23,11 @@ x-app: &app
     FORWARDED_ALLOW_IPS: 172.30.0.0/24,172.31.0.2
   secrets: [db_password]
   networks: [internal]
+
+# Storage privado (docs/GoblinShiftPlan.md, 3.6): local num volume; na VPS, o filesystem de
+# tamanho fixo /srv/goblinshift/storage (deploy/release.sh).
+x-storage: &storage
+  ${GS_STORAGE_DATA:-storage}:/var/lib/goblinshift/storage
 
 services:
   postgres:
@@ -50,10 +55,25 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Cria a pasta dos objetos com o dono do usuário da aplicação: na VPS o storage é um
+  # filesystem montado pelo root, e a aplicação não roda como root.
+  storage-init:
+    <<: *app
+    user: "0"
+    command: ["install", "-d", "-o", "app", "-g", "app", "-m", "700", "/var/lib/goblinshift/storage/objects"]
+    volumes: [*storage]
+    restart: "no"
+
   api:
     <<: *app
+    environment:
+      <<: *app-env
+      GS_STORAGE_ROOT: /var/lib/goblinshift/storage/objects
+    volumes: [*storage]
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
       otel-collector:
         condition: service_started
@@ -62,6 +82,44 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  # Worker e manutenção (3.4). O Runner local em subprocesso é provisório até a fatia 4 (ADR 016):
+  # o executor roda no próprio container do worker, por isso o `init` que colhe os órfãos.
+  worker:
+    <<: *app
+    command: ["gs-worker"]
+    init: true
+    environment: &worker-env
+      <<: *app-env
+      GS_STORAGE_ROOT: /var/lib/goblinshift/storage/objects
+      GS_WORK_ROOT: /var/lib/goblinshift/work
+      GS_RUNNER: local
+      OTEL_SERVICE_NAME: goblinshift-worker
+    volumes: [*storage, "work:/var/lib/goblinshift/work"]
+    depends_on: &worker-deps
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+    # Mais que o prazo de parada do executor (10 s) para a tentativa em curso encerrar.
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # A manutenção consulta e para executores do Runner local pelo grupo de processos, então
+  # compartilha o namespace de PIDs e a área de trabalho do worker (provisório, ADR 016).
+  maintenance:
+    <<: *app
+    command: ["gs-maintenance"]
+    pid: "service:worker"
+    environment:
+      <<: *worker-env
+      OTEL_SERVICE_NAME: goblinshift-maintenance
+    volumes: [*storage, "work:/var/lib/goblinshift/work"]
+    depends_on:
+      <<: *worker-deps
+      worker:
+        condition: service_started
     restart: unless-stopped
 
   nginx:
@@ -113,6 +171,8 @@ secrets:
 volumes:
   pgdata:
   telemetry:
+  storage:
+  work:
 
 networks:
   internal:

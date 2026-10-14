@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.retention import expire_artifacts
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
@@ -85,6 +86,34 @@ def test_metadados_de_artefato_expirado_continuam_visiveis_ao_dono(
     response = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth)
 
     assert response.json()["availability"] == "expired"
+
+
+def test_artefato_vencido_pela_manutencao_aparece_expirado_e_o_download_responde_410(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    change_artifact(factory, artifact_id, expires_at=func.now() - timedelta(seconds=1))
+    with factory() as session:
+        assert expire_artifacts(session) == 1
+
+    metadata = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth)
+    download = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert metadata.json()["availability"] == "expired"
+    assert_problem(download, 410, "GONE")
+
+
+def test_artefato_excluido_pelo_dono_antes_do_prazo_aparece_excluido(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    change_artifact(factory, artifact_id, deleted_at=func.now())
+
+    metadata = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth)
+
+    assert metadata.json()["availability"] == "deleted"
 
 
 # --- Download ---------------------------------------------------------------------------------
