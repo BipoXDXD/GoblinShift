@@ -13,12 +13,14 @@ from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
+from goblinshift.runs.acceptance import accept_run
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.store import complete_after_commit
 from goblinshift.runs.tables import run, run_input, run_output
 from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.collection import collect_outputs
 from goblinshift.runs.worker.runner import ExecutorPhase
+from tests.runs.support import new_key, ready_inputs, run_command
 from tests.runs.worker_support import (
     INVALID,
     LEASE,
@@ -299,3 +301,19 @@ def test_publicacao_depois_do_prazo_termina_failed_pelo_relogio_do_banco(
     assert (row["status"], row["error_code"]) == ("failed", "DEADLINE_EXCEEDED")
     assert outputs_of(factory, run_id) == []
     assert open_run_uses(factory, run_id) == 0
+
+
+def test_execucao_aceita_pela_api_e_processada_pelo_worker(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    owner = create_user(factory)
+    [upload_id] = ready_inputs(factory, storage, owner)
+    with factory() as session:
+        accepted = accept_run(session, owner, run_command([upload_id]), new_key(), None)
+
+    coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
+
+    row = run_row(factory, accepted.run_id)
+    assert row["status"] == "succeeded"
+    assert outputs_of(factory, accepted.run_id)[-1] == ("report.json", "report")
+    assert open_run_uses(factory, accepted.run_id) == 0
