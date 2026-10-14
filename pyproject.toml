@@ -13,12 +13,14 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
     "opentelemetry-sdk>=1.45.1",
     "psycopg[binary]>=3.3.6",
+    "pydantic>=2.14.1",
     "pydantic-settings>=2.15.0",
     "sqlalchemy>=2.1.4",
     "uvicorn[standard]>=0.54.0",
 ]
 
 [project.scripts]
+gs-admin = "goblinshift.entrypoints.admin_cli:main"
 gs-csv-janitor = "goblinshift.entrypoints.csv_janitor_cli:main"
 
 [build-system]
@@ -97,5 +99,24 @@ forbidden_modules = [
     "goblinshift.identity",
     "goblinshift.presets",
     "goblinshift.runs",
+    "goblinshift.entrypoints",
+]
+
+[[tool.importlinter.contracts]]
+name = "runs.lifecycle é função pura: sem banco, web nem outros módulos do projeto"
+type = "forbidden"
+source_modules = ["goblinshift.runs.lifecycle"]
+forbidden_modules = [
+    "sqlalchemy",
+    "fastapi",
+    "starlette",
+    "httpx",
+    "httpx2",
+    "goblinshift.platform",
+    "goblinshift.catalog",
+    "goblinshift.files",
+    "goblinshift.identity",
+    "goblinshift.presets",
+    "goblinshift.processing",
     "goblinshift.entrypoints",
 ]
