@@ -65,6 +65,8 @@ known-first-party = ["executor_ctl"]
 # O executor-ctl só fala com o Docker pelo CLI, com a lista de argumentos montada no código
 # (perfil fixo) e sem shell; nada vindo do cliente vira opção.
 "deploy/executor_ctl/**" = ["S603", "S607"]
+# Os testes de integração do executor-ctl conferem o Docker pelo mesmo CLI, sem shell.
+"tests/executor_ctl/**" = ["S101", "S603", "S607"]
 
 [tool.mypy]
 strict = true
