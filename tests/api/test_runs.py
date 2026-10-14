@@ -351,6 +351,34 @@ def test_validate_only_resolve_os_parametros_sem_criar_nem_consumir_a_chave(
     assert "idempotency-replayed" not in real.headers
 
 
+@pytest.mark.parametrize("recipe_id", ["image-forge", "downloads-detox"])
+def test_aceita_as_receitas_da_fatia_5_com_os_defaults(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage, recipe_id: str
+) -> None:
+    account = Account(factory)
+    payload = {**body(ready_inputs(factory, storage, account.id)), "recipe_id": recipe_id}
+
+    response = post_run(client, account, payload, str(uuid.uuid4()))
+
+    assert response.status_code == 202, response.text
+    assert response.json()["recipe_id"] == recipe_id
+
+
+def test_detox_recusa_name_prefix_enviado_com_name_mode_preserve(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    payload = {
+        "recipe_id": "downloads-detox",
+        "recipe_version": 1,
+        "parameters": {"name_mode": "preserve", "name_prefix": "doc"},
+    }
+
+    response = post_run(client, account, payload, None, "?validate_only=true")
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+
+
 def test_validate_only_nao_confere_uploads_nem_exige_chave(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -733,8 +761,12 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
 
     operation = spec["paths"][RUNS]["post"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
-    [variant] = schema["allOf"][1]["oneOf"]
-    assert variant["properties"]["recipe_id"] == {"const": "csv-janitor"}
+    variants = schema["allOf"][1]["oneOf"]
+    assert [v["properties"]["recipe_id"]["const"] for v in variants] == [
+        "csv-janitor",
+        "image-forge",
+        "downloads-detox",
+    ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
 
