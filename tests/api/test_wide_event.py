@@ -191,6 +191,13 @@ def test_ip_do_cliente_vai_truncado(traced: Traced) -> None:
     assert addresses == {"203.0.113.0"}
 
 
+def test_consulta_que_falha_entra_na_contagem_e_nao_deixa_inicio_pendente(traced: Traced) -> None:
+    response = traced.client.get("/api/v1/_test/failed-query")
+
+    assert response.json() == {"pending_query_starts": 0}
+    assert traced.main_event()["db.query.count"] == 1
+
+
 def test_sem_spans_de_send_e_receive(traced: Traced) -> None:
     traced.client.post(ECHO, json={"text": "x"})
 

@@ -28,7 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from goblinshift.platform.telemetry import UserHasher
 
 _MS_PER_SECOND = 1000.0
-_QUERY_STARTS_KEY = "goblinshift.query_starts"
+QUERY_STARTS_KEY = "goblinshift.query_starts"
 
 
 class RateLimitClass(StrEnum):
@@ -124,15 +124,26 @@ def count_queries(engine: Engine) -> None:
         if current is None:
             return
         current.query_count += 1
-        conn.info.setdefault(_QUERY_STARTS_KEY, []).append(time.monotonic())
+        conn.info.setdefault(QUERY_STARTS_KEY, []).append(time.monotonic())
 
     @event.listens_for(engine, "after_cursor_execute")
     def _after(conn: Any, *_args: Any) -> None:
         current = _current.get()
-        starts: list[float] = conn.info.get(_QUERY_STARTS_KEY, [])
+        starts: list[float] = conn.info.get(QUERY_STARTS_KEY, [])
         if current is None or not starts:
             return
         current.query_seconds += time.monotonic() - starts.pop()
+
+    @event.listens_for(engine, "handle_error")
+    def _failed(context: Any) -> None:
+        # A conexão volta ao pool com o `info` dela: sem isto, cada consulta que falha deixaria
+        # um início para sempre na lista.
+        conn = context.connection
+        if _current.get() is None or conn is None:
+            return
+        starts: list[float] = conn.info.get(QUERY_STARTS_KEY, [])
+        if starts:
+            starts.pop()
 
 
 class WideEventMiddleware:
