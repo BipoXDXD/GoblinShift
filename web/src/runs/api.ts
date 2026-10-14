@@ -15,7 +15,7 @@ const RUN_STATUSES = [
 ] as const;
 const RUN_PHASES = ["inspecting", "processing", "packaging", "finalizing", "retry_wait"] as const;
 
-const runSchema = z.object({
+export const runSchema = z.object({
   id: z.uuid(),
   recipe_id: z.string(),
   recipe_version: z.number().int(),

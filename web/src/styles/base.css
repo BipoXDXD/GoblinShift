@@ -1,0 +1,194 @@
+/*
+ * Base global (P4): o que vale para todo elemento nativo, para que formulário, foco, progresso e
+ * movimento saiam certos mesmo sem classe. Só tokens; nenhum valor solto.
+ */
+@layer base {
+  html {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  ::selection {
+    background-color: var(--selection-bg);
+    color: var(--selection-fg);
+  }
+
+  a {
+    color: var(--link);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+  }
+
+  /* O sublinhado engrossa no hover e no foco, e nunca some: link acessório também precisa ser
+     reconhecível no toque (RUI cap. 4, com a extensão de acessibilidade). */
+  a:hover,
+  a:focus-visible {
+    text-decoration-thickness: 2px;
+  }
+
+  /* Foco: um anel só, em latão, com 3:1 contra todas as superfícies (contrast.test.ts). */
+  :focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Clique de mouse não mostra anel; teclado, sim. Nunca há outline: none sem esse substituto. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* O título da tela recebe foco por programa a cada troca de rota (FocusHeading), só para o
+     leitor de tela e o Tab partirem dali; não é controle, então não desenha anel (o resumo de
+     erros, que também recebe foco, continua com o anel). */
+  h1[tabindex="-1"]:focus {
+    outline: none;
+  }
+
+  code,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+  }
+
+  /* Controles de texto: embutidos (sombra no topo), borda de 2 px com 3:1 e 44 px de altura. */
+  input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"]),
+  select,
+  textarea {
+    display: block;
+    width: 100%;
+    min-height: --spacing(11);
+    padding: --spacing(2) --spacing(3);
+    border: 2px solid var(--border-ui);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface-sunken);
+    box-shadow: var(--elevation-sunken);
+    color: var(--fg);
+    font: inherit;
+  }
+
+  textarea {
+    min-height: --spacing(24);
+    resize: vertical;
+  }
+
+  [aria-invalid="true"] {
+    border-color: var(--danger-fg);
+  }
+
+  ::placeholder {
+    color: var(--fg-muted);
+  }
+
+  /* Checkbox, radio e range na cor da marca (RUI cap. 8, "Supercharge the defaults"). */
+  input[type="checkbox"],
+  input[type="radio"] {
+    flex: none;
+    width: --spacing(5);
+    height: --spacing(5);
+    accent-color: var(--primary);
+  }
+
+  input[type="range"] {
+    accent-color: var(--primary);
+  }
+
+  /* O <input type="file"> real fica visível; só o botão dele ganha cara de botão secundário. */
+  input[type="file"] {
+    max-width: 100%;
+    color: var(--fg-muted);
+    font: inherit;
+  }
+
+  input[type="file"]::file-selector-button {
+    min-height: --spacing(11);
+    margin-inline-end: --spacing(3);
+    padding: --spacing(2) --spacing(4);
+    border: 2px solid var(--secondary-fg);
+    border-radius: var(--radius-lg);
+    background-color: var(--surface);
+    box-shadow: var(--elevation-1);
+    color: var(--secondary-fg);
+    font: inherit;
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+  }
+
+  fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  legend {
+    padding: 0;
+  }
+
+  summary {
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* Progresso real (bytes do envio, arquivos processados): trilho e preenchimento com 3:1. */
+  progress {
+    display: block;
+    width: 100%;
+    height: --spacing(2);
+    overflow: hidden;
+    border: 0;
+    border-radius: var(--radius-full);
+    background-color: var(--progress-track);
+    appearance: none;
+  }
+
+  progress::-webkit-progress-bar {
+    background-color: var(--progress-track);
+  }
+
+  progress::-webkit-progress-value {
+    background-color: var(--progress-fill);
+  }
+
+  progress::-moz-progress-bar {
+    background-color: var(--progress-fill);
+  }
+
+  /* Movimento reduzido: some toda transição e animação; a mudança de estado continua, sem
+     movimento (WCAG 2.3.3, extensão do RUI). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Cartão inteiro clicável por um link só (o da ação): o ::after do link cobre o cartão, que
+     precisa de position: relative. O anel de foco passa do link para o cartão inteiro. */
+  .card-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+  }
+
+  .card-link:focus-visible {
+    outline: none;
+  }
+
+  .card-link:focus-visible::after {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
