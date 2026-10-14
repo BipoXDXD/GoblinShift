@@ -8,6 +8,7 @@ export const PATHS = {
   home: "/",
   workbench: "/bancada/:recipeId",
   run: "/execucoes/:runId",
+  history: "/historico",
 } as const;
 
 export function workbenchPath(recipeId: RecipeId): string {
