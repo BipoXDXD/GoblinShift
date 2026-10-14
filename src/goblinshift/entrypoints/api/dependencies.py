@@ -89,6 +89,29 @@ def require_scope(scope: Scope) -> Callable[[Principal], Principal]:
     return check_scope
 
 
+def require_session(principal: CurrentPrincipal) -> Principal:
+    """Só sessão web (`/api-keys`, `DELETE /me`, `logout-all`); chave → 403 `FORBIDDEN`.
+
+    Contrato fixado na Fase 0 da fatia 6; o corpo é da Frente B.
+    """
+    raise NotImplementedError("Frente B da fatia 6")
+
+
+SessionPrincipal = Annotated[Principal, Depends(require_session)]
+
+
+def require_recent_session(principal: SessionPrincipal, now: Now) -> Principal:
+    """Sessão com login no provedor há no máximo `RECENT_AUTH_WINDOW` (10 min, fronteira
+    inclusiva); senão 401 `REAUTH_REQUIRED`, auditado.
+
+    Contrato fixado na Fase 0 da fatia 6; o corpo é da Frente B.
+    """
+    raise NotImplementedError("Frente B da fatia 6")
+
+
+RecentSessionPrincipal = Annotated[Principal, Depends(require_recent_session)]
+
+
 def _bearer_token(request: Request) -> str:
     values = request.headers.getlist("authorization")
     if not values:
