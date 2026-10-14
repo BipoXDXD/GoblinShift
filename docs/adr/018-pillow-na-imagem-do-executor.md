@@ -1,6 +1,6 @@
 # ADR 018. Pillow fixado na imagem do executor, instalado do lock por um estágio de build
 
-- **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14), pendente de revisão do usuário no PR da fatia; a medição do pior caso sob gVisor entra aqui na integração
+- **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14) e implementado na fatia 5 (estágio de build, testes da imagem com Image Forge e Detox sob `runsc`); pendente de revisão do usuário no PR da fatia e da medição do pior caso na VPS
 - **Plano:** [1.2](../GoblinShiftPlan.md#s1-2), [1.7](../GoblinShiftPlan.md#s1-7), [2.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 010](010-python-3-14.md)
 
@@ -28,10 +28,11 @@ O Image Forge decodifica, converte e grava JPEG e PNG, com perfis de cor e EXIF.
 - O wheel traz bibliotecas nativas (libjpeg-turbo, zlib, LittleCMS e outras): a superfície cresce. Ela é limitada por `Image.open(formats=("JPEG", "PNG", "MPO"))`, pela validação do cabeçalho antes de `load()` e pelo gVisor ([ADR 004](004-container-gvisor-por-tentativa.md)).
 - Atualizar o Pillow é uma mudança de três lugares conferida por teste (dois pins e o lock) e exige uma imagem nova do executor; Runs já aceitas continuam na imagem fixada nelas.
 - O grupo `executor` não entra no `uv sync` padrão: só o Dockerfile o usa.
-- Pior caso (100 JPEGs de 24 MP com miniaturas, sob gVisor e 1 vCPU) ainda sem medição: se não couber nos 10 min da tentativa, o `max_inputs` da v1 do Image Forge cai antes de a versão ser publicada, e o número medido é registrado aqui.
+- O executor chama `image_forge.inspection.configure_pillow()` uma vez no `main`: `MAX_IMAGE_PIXELS` em 24 MP e `DecompressionBombWarning` como erro, segunda barreira atrás da validação do cabeçalho.
+- Pior caso (100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas, `scripts/measure-image-forge.sh`): referência local de 133 s (Mac, worker com Runner local, sem gVisor nem limite de CPU, 2026-10-14). A medição que vale, sob gVisor e 1 vCPU, é feita na VPS antes do merge da fatia 5. Se não couber nos 10 min da tentativa, o `max_inputs` da v1 do Image Forge cai antes de a versão chegar à `main`, e o número medido é registrado aqui.
 
 ## Como verificar
 
 - `uv run pytest tests/test_dependencies.py`: pins, lock e ambiente na 12.3.0.
 - `uv run lint-imports`: contrato "Só o executor carrega o PIL" mantido.
-- Na imagem do executor (marcador `executor_image`, também sob `runsc` no job `gvisor`): `PIL.__version__ == "12.3.0"` e `pillow` como única distribuição de terceiros.
+- Na imagem do executor (marcador `executor_image`, também sob `runsc` no job `gvisor`): `PIL.__version__ == "12.3.0"`, `pillow` como única distribuição de terceiros, e Image Forge e Downloads Detox processando um work dir real com o mesmo ZIP em duas execuções (`tests/test_executor_image.py`).

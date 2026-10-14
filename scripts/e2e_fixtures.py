@@ -17,10 +17,13 @@ Pillow do `uv.lock` grava o JPEG, o MPO e o PNG RGBA).
 
 import hashlib
 import json
+import random
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from PIL import Image, ImageChops
 
 from tests.downloads_detox import samples
 from tests.image_forge import icc, media
@@ -162,11 +165,65 @@ def downloads_detox() -> Scenario:
     )
 
 
+# Pior caso do Image Forge para a medição na VPS (plano da fatia 5, item 9): o teto de entradas e
+# de pixels da v1, na conversão mais cara (Display P3, orientação 6 e miniatura).
+LOAD_COUNT = 100
+LOAD_SIZE = (6000, 4000)  # 24 000 000 px, exatamente o teto (aceito)
+LOAD_RECIPE = "image-forge-carga"
+# Ruído de um ladrilho fixo sobre um fractal: textura de foto, sem sorteio, com ~4,3 MiB por JPEG,
+# e os 100 cabem no lote de 512 MiB.
+_NOISE_TILE_SIDE = 256
+_NOISE_SEED = 5
+_NOISE_WEIGHT = 0.08
+_LOAD_JPEG_QUALITY = 85
+
+
+def image_forge_load(count: int = LOAD_COUNT, size: tuple[int, int] = LOAD_SIZE) -> Scenario:
+    """`count` cópias da mesma foto pesada; só o tempo importa, o conteúdo pode repetir."""
+    photo = load_photo(size)
+    names = [f"carga-{index:03}.jpg" for index in range(1, count + 1)]
+    fixtures = tuple(
+        Fixture(name, photo, ok(f"images/{name}", f"thumbnails/{name}")) for name in names
+    )
+    entries = [entry for name in names for entry in (f"images/{name}", f"thumbnails/{name}")]
+    return Scenario(
+        recipe_id="image-forge",
+        parameters={"make_thumbnails": True},
+        fixtures=fixtures,
+        status="succeeded",
+        zip_entries=(*entries, "manifest.json", "report.json"),
+    )
+
+
+def load_photo(size: tuple[int, int]) -> bytes:
+    width, height = size
+    fractal = Image.effect_mandelbrot(size, (-2.2, -1.2, 1.0, 1.2), 100)
+    tile_bytes = random.Random(_NOISE_SEED).randbytes(_NOISE_TILE_SIDE**2)  # noqa: S311 - textura
+    tile = Image.frombytes("L", (_NOISE_TILE_SIDE, _NOISE_TILE_SIDE), tile_bytes)
+    noise = Image.new("L", size)
+    for left in range(0, width, _NOISE_TILE_SIDE):
+        for top in range(0, height, _NOISE_TILE_SIDE):
+            noise.paste(tile, (left, top))
+    gradient = Image.linear_gradient("L").resize(size)
+    red = ImageChops.blend(fractal, noise, _NOISE_WEIGHT)
+    green = ImageChops.blend(gradient, noise, _NOISE_WEIGHT)
+    blue = red.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    return media.encoded(
+        Image.merge("RGB", (red, green, blue)),
+        "JPEG",
+        quality=_LOAD_JPEG_QUALITY,
+        icc_profile=icc.rgb_profile(icc.DISPLAY_P3, "Display P3"),
+        exif=media.exif(orientation=EXIF_ORIENTATION_ROTATE_90_CW),
+    )
+
+
 _BUILDERS = {"image-forge": image_forge, "downloads-detox": downloads_detox}
 RECIPES = tuple(_BUILDERS)
 
 
 def build(recipe: str) -> Scenario:
+    if recipe == LOAD_RECIPE:
+        return image_forge_load()
     builder = _BUILDERS.get(recipe)
     if builder is None:
         raise ValueError(f"receita sem fixtures de ponta a ponta: {recipe}; use {list(RECIPES)}")
@@ -209,7 +266,8 @@ def _manifest_input(position: int, fixture: Fixture) -> dict[str, object]:
 
 def main(argv: Sequence[str]) -> int:
     if len(argv) != 2:
-        print(f"uso: python -m scripts.e2e_fixtures {{{'|'.join(RECIPES)}}} <dir>", file=sys.stderr)
+        choices = "|".join((*RECIPES, LOAD_RECIPE))
+        print(f"uso: python -m scripts.e2e_fixtures {{{choices}}} <dir>", file=sys.stderr)
         return 2
     recipe, directory = argv
     try:

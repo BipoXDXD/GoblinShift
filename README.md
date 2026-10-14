@@ -2,7 +2,7 @@
 
 API de processamento de arquivos por receitas — imagens, tabelas CSV e lotes de downloads — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
 
-> Em construção. Fatias 0 (fundação e deploy), 1 (protótipo do sandbox) e 2 (CSV Janitor como biblioteca pura) concluídas; **3 — fluxo durável de ponta a ponta** em revisão. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
+> Em construção. Fatias 0 a 4 (fundação e deploy, sandbox, CSV Janitor, fluxo durável e executor real sob gVisor) concluídas; **5 — Image Forge e Downloads Detox** em revisão. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
 
 ## Documentos
 
@@ -52,6 +52,16 @@ uv run gs-csv-janitor --params params.json --output-dir limpas/ contatos.csv ven
 
 Cada tabela aceita vira `limpas/<nome>.csv` (UTF-8 sem BOM, CRLF, aspas só quando necessárias); o relatório JSON sai na saída padrão, com contagens, avisos de fórmulas e o motivo de cada rejeição. Sai com 0 se todas foram limpas, 1 se alguma foi rejeitada e 2 para configuração ou caminhos inválidos. As fixtures em `tests/csv_janitor/fixtures/` servem de exemplos.
 
+## Receitas
+
+| Receita | Versão | O que faz | Limites próprios |
+|---|---|---|---|
+| `csv-janitor` | 1 | Limpa tabelas CSV ([1.3](docs/GoblinShiftPlan.md#s1-3)) | 5 tabelas de até 8 MiB |
+| `image-forge` | 1 | Redimensiona JPEG e PNG sem ampliar, aplica a orientação EXIF, converte Display P3 para sRGB, usa o quadro principal do MPO, remove metadados e gera miniaturas opcionais em `thumbnails/` ([1.2](docs/GoblinShiftPlan.md#s1-2)) | 100 imagens, 24 MP e 8192 px por eixo, conferidos antes de decodificar |
+| `downloads-detox` | 1 | Classifica por assinatura em `images/`, `tables/`, `text/` e `archives/`, deduplica por SHA-256 e tamanho, renomeia e recusa executáveis, scripts, HTML e SVG ([1.4](docs/GoblinShiftPlan.md#s1-4)) | 100 arquivos, 480 MiB por lote |
+
+Toda execução publica, além do conteúdo, o `report.json`, o `manifest.json` (entradas, hashes, parâmetros, digest da imagem do executor, duplicatas e rejeições) e o ZIP determinístico `<receita>.zip`, montados pelo empacotador comum no executor ([ADR 019](docs/adr/019-layout-de-out-pacote-e-papeis.md)). Uma saída idêntica a uma entrada não ocupa espaço de novo: o artefato aponta para o objeto do upload ([ADR 020](docs/adr/020-detox-reaproveita-o-objeto-da-entrada.md)). A versão de cada receita e os limites efetivos estão no OpenAPI de `POST /runs`.
+
 ## Contas e chaves de API (administrador)
 
 Até o login web da fatia 6, quem usa a API recebe uma chave emitida pela CLI do administrador, que lê as mesmas variáveis `GS_*` da API:
@@ -90,7 +100,7 @@ Sem o arquivo (antes do primeiro deploy) o script para com uma mensagem, em vez 
 
 ## Imagem do executor
 
-Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado: nada de banco, web nem dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
+Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, e o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)): nada de banco, web nem outras dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
 
 No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`, gravada pelo `deploy/release-env.sh` no `release.env` do host.
 
@@ -126,11 +136,15 @@ Os testes do `executor-ctl` com Docker real usam o runtime de `GS_TEST_RUNTIME` 
 
 ## Execução de ponta a ponta
 
-Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, o script faz upload, execução idempotente, acompanhamento, resultados e download do CSV Janitor só com `curl`, e confere a saída byte a byte:
+Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, cada script faz upload, execução idempotente, acompanhamento, resultados e download só com `curl`. Cada um roda o mesmo pedido duas vezes e exige o mesmo SHA-256 do ZIP (determinismo, [3.9](docs/GoblinShiftPlan.md#s3-9)):
 
 ```bash
-GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost
+GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost      # saída limpa byte a byte
+GS_API_KEY=gsk_… ./scripts/e2e-image-forge.sh http://localhost      # P3, orientação, MPO, 16 bits, bomba
+GS_API_KEY=gsk_… ./scripts/e2e-downloads-detox.sh http://localhost  # colisão de nomes, JAR, cópia, HTML
 ```
+
+As fixtures do Image Forge e do Detox saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução, junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 
 Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
@@ -140,7 +154,7 @@ Em desenvolvimento, o worker roda a receita num subprocesso do próprio containe
 src/goblinshift/
   entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin e gs-csv-janitor
   platform/          configuração, banco, telemetria e compatibilidade de schema
-  processing/        receitas e o executor; csv_janitor/ é o CSV Janitor, biblioteca pura
+  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/), empacotador e executor
   runs/              ciclo de vida da execução: aceitação, fila, fencing, worker, manutenção
   files/             storage, uploads, artefatos, usos, transferências e retenção
   catalog/           receitas e versões publicadas, schemas e defaults
