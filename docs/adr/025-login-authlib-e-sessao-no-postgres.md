@@ -16,6 +16,7 @@ A fatia 6 traz o login por Google (OIDC) e GitHub (OAuth 2.0), a sessão web, o 
 - **Sessão server-side** em `web_session` (token opaco de 256 bits, só o hash no banco), no cookie `__Host-gs_session`. Revogação imediata, sem Redis (ADR 003).
 - **`redirect_uri` sempre de `GS_PUBLIC_ORIGIN`**, nunca do header `Host`; a mesma origem é a referência da checagem de `Origin`. Enquanto não há domínio, o código depende só dessa variável, obrigatória e `https` em produção.
 - **CSRF e cabeçalhos com código próprio**: double-submit assinado ligado à sessão mais Fetch Metadata e `Origin` (~40 linhas com `hmac`), e um middleware de cabeçalhos. **Middleware sempre ASGI puro**, nunca `BaseHTTPMiddleware`, que quebra o streaming dos downloads e os contextvars do OpenTelemetry.
+- **HSTS no Nginx, não na API**: o Nginx manda `Strict-Transport-Security` em toda resposta cujo esquema original (`X-Forwarded-Proto` vindo da borda) é `https`; a API não repete o header, para ele não vir dobrado quando o Nginx também servir a SPA. A API só é alcançável pelo Nginx (rede interna do Compose).
 - **Segredos de arquivos** (`*_FILE`, Compose secrets): sem qualquer um deles, a API não sobe em produção.
 
 ## Alternativas descartadas
@@ -37,6 +38,7 @@ A fatia 6 traz o login por Google (OIDC) e GitHub (OAuth 2.0), a sessão web, o 
 
 ## Como verificar
 
+- `tests/test_nginx_hsts.py`: o Nginx real manda um único HSTS nas rotas da API por HTTPS e nenhum por HTTP ou com `X-Forwarded-Proto` de fora da borda; `test_producao_deixa_o_hsts_para_o_nginx` confere que a API não o manda.
 - `tests/test_authlib_version.py`: piso no `pyproject.toml`, no lock e no ambiente, e o `httpx2` como dependência de runtime.
 - `test_id_token_forjado_e_recusado` (`tests/api/auth/test_auth_callback_google.py`): ID token com `alg` `none`, `nonE` ou `HS256` assinado com a chave pública é recusado.
 - `tests/test_settings_secrets.py`: produção sem segredo, sem ID de cliente ou sem origem `https` não sobe.
