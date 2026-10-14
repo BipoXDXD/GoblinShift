@@ -95,6 +95,12 @@ export const TEXT = {
     chooseFiles: "Escolher arquivos",
     chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
     dropHere: "Solte para adicionar.",
+    filesChosen: (count: number) =>
+      count === 0
+        ? "Nenhum arquivo escolhido"
+        : count === 1
+          ? "1 arquivo escolhido"
+          : `${String(count)} arquivos escolhidos`,
     orderLabel: "Ordem de processamento",
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:

@@ -121,6 +121,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
               description={`${TEXT.workbench.chooseFilesHint} ${limitsHint(form)}`}
               {...(recipe.accept === null ? {} : { accept: recipe.accept })}
               error={fieldErrors.get(FILES_FIELD_ID) ?? null}
+              chosenCount={entries.length}
               onFiles={batch.add}
             />
             {entries.length === 0 ? (
