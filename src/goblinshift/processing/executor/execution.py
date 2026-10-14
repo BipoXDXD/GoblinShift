@@ -18,15 +18,23 @@ from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.executor.job import (
     InputIntegrityError,
     JobError,
+    read_context,
     read_job,
     verified_inputs,
 )
 from goblinshift.processing.executor.report_file import write_report
 from goblinshift.processing.output_dir import FileSystemOutputDir
+from goblinshift.processing.packaging import (
+    MANIFEST_NAME,
+    REPORT_NAME,
+    PackageLimits,
+    PackageSpec,
+    package,
+)
 from goblinshift.processing.recipe import InputFile, RecipeFailure, Report
 from goblinshift.processing.registry import RECIPES
 
-REPORT_NAME = "report.json"
+PACKAGE_LIMITS = PackageLimits()
 
 
 class ExitCode(IntEnum):
@@ -40,6 +48,7 @@ class ExitCode(IntEnum):
 class _WorkDir:
     def __init__(self, root: Path) -> None:
         self.job = root / "job.json"
+        self.context = root / "context.json"
         self.inputs = root / "inputs"
         self.out = root / "out"
         self.progress = root / "progress.jsonl"
@@ -72,15 +81,28 @@ def main(argv: Sequence[str]) -> int:
 
 def _execute(work: _WorkDir) -> None:
     job = read_job(work.job)
+    context = read_context(work.context)
     recipe = RECIPES.get((job.recipe_id, job.recipe_version))
     if recipe is None:
         raise JobError(f"receita desconhecida: {job.recipe_id} v{job.recipe_version}")
     inputs = verified_inputs(work.inputs, job.inputs)
+    spec = PackageSpec(
+        recipe_id=job.recipe_id,
+        recipe_version=job.recipe_version,
+        executor_image=context.executor_image,
+        parameters=job.parameters,
+        inputs=inputs,
+    )
     _prepare_empty(work.out)
+    out = FileSystemOutputDir(
+        work.out, reserved_names=(MANIFEST_NAME, REPORT_NAME, spec.package_name)
+    )
     with _ProgressLog(work.progress) as progress:
-        report = recipe.execute(job.parameters, inputs, FileSystemOutputDir(work.out), progress)
+        report = recipe.execute(job.parameters, inputs, out, progress)
     _require_one_item_per_input(report, inputs)
     write_report(work.out / REPORT_NAME, report, job)
+    # A falha do empacotador (teto do manifesto ou do ZIP) é determinística como a da receita.
+    package(report, work.out, spec, PACKAGE_LIMITS)
 
 
 def _prepare_empty(out: Path) -> None:
