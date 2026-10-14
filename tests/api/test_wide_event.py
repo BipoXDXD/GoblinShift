@@ -192,6 +192,13 @@ def test_ip_do_cliente_vai_truncado(traced: Traced) -> None:
     assert addresses == {"203.0.113.0"}
 
 
+def test_consulta_que_falha_entra_na_contagem_e_nao_deixa_inicio_pendente(traced: Traced) -> None:
+    response = traced.client.get("/api/v1/_test/failed-query")
+
+    assert response.json() == {"pending_query_starts": 0}
+    assert traced.main_event()["db.query.count"] == 1
+
+
 def test_sem_spans_de_send_e_receive(traced: Traced) -> None:
     traced.client.post(ECHO, json={"text": "x"})
 
@@ -234,7 +241,7 @@ def test_aceitacao_traz_run_receita_e_replay(traced: Traced, tmp_path: Path) -> 
 # Canário: nada do que o cliente manda como segredo ou dado chega ao span
 
 
-def test_canario_em_credencial_cookie_chave_query_nome_e_parametro_nunca_vai_ao_span(
+def test_canario_em_credencial_cookie_agente_chave_query_nome_e_parametro_nunca_vai_ao_span(
     traced: Traced,
 ) -> None:
     canary = f"CANARY-{uuid.uuid4()}"
@@ -243,7 +250,11 @@ def test_canario_em_credencial_cookie_chave_query_nome_e_parametro_nunca_vai_ao_
 
     traced.client.get(
         f"/api/v1/runs?recipe_id={canary}",
-        headers={"Authorization": f"Bearer {canary}", "Cookie": f"session={canary}"},
+        headers={
+            "Authorization": f"Bearer {canary}",
+            "Cookie": f"session={canary}",
+            "User-Agent": canary,
+        },
     )
     traced.client.get(f"/api/v1/runs?recipe_id={canary}&cursor={canary}", headers=auth)
     traced.client.post(

@@ -15,13 +15,15 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
+from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
+from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import Span
+from opentelemetry.trace import Span, Status, StatusCode
 from sqlalchemy import Engine
 
 from goblinshift.platform.settings import Settings
@@ -61,6 +63,10 @@ _URL_ATTRIBUTES = ("http.url", "url.full")
 _TARGET_ATTRIBUTES = ("http.target",)
 _QUERY_ATTRIBUTES = ("url.query",)
 _CLIENT_ADDRESS_ATTRIBUTES = ("net.peer.ip", "client.address", "http.client_ip")
+_SQLALCHEMY_SCOPE = "opentelemetry.instrumentation.sqlalchemy"
+REDACTED_DATABASE_ERROR = "database error (detail redacted)"
+# Header que o cliente escreve como quiser: nenhum header entra no evento (3.7).
+_USER_AGENT_ATTRIBUTES = ("http.user_agent", "user_agent.original")
 
 
 class UserHasher:
@@ -98,10 +104,11 @@ def _start_main_event(span: Span, scope: dict[str, Any]) -> None:
 
 
 def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
-    """Tira a query string e o IP completo que a instrumentação ASGI pôs no span.
+    """Tira a query string, o IP completo e o User-Agent que a instrumentação ASGI pôs no span.
 
-    A query carrega filtros e cursores, que são dados do usuário (3.7). Só sobrescreve os
-    atributos que já existem, para não inventar nomes de outra versão das convenções.
+    A query carrega filtros e cursores, que são dados do usuário, e o User-Agent é texto livre do
+    cliente (3.7). Só sobrescreve os atributos que já existem, para não inventar nomes de outra
+    versão das convenções.
     """
     present = getattr(span, "attributes", None) or {}
     path = str(scope.get("path", ""))
@@ -113,6 +120,7 @@ def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
         (_TARGET_ATTRIBUTES, path),
         (_QUERY_ATTRIBUTES, ""),
         (_CLIENT_ADDRESS_ATTRIBUTES, address),
+        (_USER_AGENT_ATTRIBUTES, ""),
     ):
         for name in names:
             if name in present:
@@ -125,6 +133,68 @@ def _host_of(scope: dict[str, Any]) -> str:
             return bytes(value).decode("latin-1")
     server = scope.get("server")
     return f"{server[0]}:{server[1]}" if server else ""
+
+
+def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
+    """Processador que exporta os spans; sem `exporter` e sem endpoint OTLP, nenhum.
+
+    `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
+    """
+    inner: SpanProcessor
+    if exporter is not None:
+        inner = SimpleSpanProcessor(exporter)
+    elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        inner = BatchSpanProcessor(OTLPSpanExporter())
+    else:
+        return None
+    return DatabaseErrorRedactingProcessor(inner)
+
+
+class DatabaseErrorRedactingProcessor(SpanProcessor):
+    """Troca a descrição do erro dos spans do SQLAlchemy por um texto fixo antes de exportar.
+
+    A instrumentação grava `str(exceção)` no status, e o PostgreSQL põe valores na mensagem:
+    `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O código do erro
+    da requisição já está no evento amplo (`error.code`) e a consulta, parametrizada, em
+    `db.statement`. O span terminado é imutável, então o processador repassa uma cópia.
+    """
+
+    def __init__(self, inner: SpanProcessor) -> None:
+        self._inner = inner
+
+    def on_start(self, span: SdkSpan, parent_context: Context | None = None) -> None:
+        self._inner.on_start(span, parent_context)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        self._inner.on_end(_without_database_error_detail(span))
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
+def _without_database_error_detail(span: ReadableSpan) -> ReadableSpan:
+    scope = span.instrumentation_scope
+    if scope is None or scope.name != _SQLALCHEMY_SCOPE:
+        return span
+    if span.status.status_code is not StatusCode.ERROR:
+        return span
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=span.attributes,
+        events=span.events,
+        links=span.links,
+        kind=span.kind,
+        status=Status(StatusCode.ERROR, REDACTED_DATABASE_ERROR),
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=scope,
+    )
 
 
 def configure_tracing(
@@ -146,6 +216,8 @@ def configure_tracing(
         # tempos do envio já estão no evento amplo.
         exclude_spans=["receive", "send"],
     )
+    # Hoje não instrumenta nada: a instrumentação declara suporte só até o SQLAlchemy 2.0 e, no
+    # 2.1, desiste com um aviso no log. O processador acima já protege o dia em que ligar.
     SQLAlchemyInstrumentor().instrument(engine=engine, tracer_provider=provider)
 
 
@@ -156,12 +228,8 @@ def make_tracer_provider(
 
     Quem cria o provider chama `shutdown()` ao sair, para exportar o lote pendente.
     """
-    processor: SpanProcessor
-    if exporter is not None:
-        processor = SimpleSpanProcessor(exporter)
-    elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        processor = BatchSpanProcessor(OTLPSpanExporter())
-    else:
+    processor = make_span_processor(exporter)
+    if processor is None:
         return None
     resource = Resource.create(
         {

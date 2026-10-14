@@ -105,7 +105,7 @@ sudo -u goblinshift python3 -B -m openobserve provision \
   --secrets-file /srv/goblinshift/secrets/app.env --secrets-file /srv/goblinshift/secrets/alertas.env
 ```
 
-**Disco e heartbeat.** O alerta de disco e o heartbeat leem `system_filesystem_utilization`, que o Collector produz com as montagens do `compose.prod.yaml`. O provisionamento falha enquanto esse stream não existir: confira que o deploy com o Collector novo já rodou. O `release.sh` só recria o Collector quando o serviço muda no Compose; depois de mudar só o `docker/otel-collector/config.yaml`, rode `docker compose ... restart otel-collector` na VPS.
+**Disco e heartbeat.** O alerta de disco e o heartbeat leem `system_filesystem_utilization`, que o Collector produz com as montagens do `compose.prod.yaml`. O provisionamento falha enquanto esse stream não existir: confira que o deploy com o Collector novo já rodou. O `release.sh` só recria o Collector quando o serviço muda no Compose; depois de mudar só o `docker/otel-collector/config.yaml`, rode `sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh restart otel-collector` na VPS.
 
 ## Relatório do SLI e do orçamento
 
@@ -126,8 +126,8 @@ Antes, confira que o check do heartbeat no healthchecks.io recebeu o primeiro pi
 Com o PostgreSQL parado, a API responde 500 a todo `POST /runs` (a credencial é conferida no banco), e cada resposta é um evento elegível e ruim. São precisos pelo menos 101 na hora e 26 nos 15 min.
 
 ```bash
-cd /srv/goblinshift/app
-compose=(docker compose --env-file /srv/goblinshift/secrets/app.env -f compose.yaml -f compose.prod.yaml)
+# Todo comando do Compose de produção passa pelo deploy/compose.sh (README, "Contas e chaves de API").
+compose=(sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh)
 "${compose[@]}" stop postgres
 # Chave no formato válido, mas inexistente: nada é criado.
 key="gsk_0000000000000000_$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
