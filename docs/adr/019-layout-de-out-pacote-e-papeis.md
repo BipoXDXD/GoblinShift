@@ -1,6 +1,6 @@
 # ADR 019. Layout de `out/` com um nível de grupos, pacote `<recipe_id>.zip` e papéis `manifest` e `package`
 
-- **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14), pendente de revisão do usuário no PR da fatia
+- **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14) e implementado na fatia 5; pendente de revisão do usuário no PR da fatia
 - **Plano:** [1.2](../GoblinShiftPlan.md#s1-2), [1.4](../GoblinShiftPlan.md#s1-4), [1.7](../GoblinShiftPlan.md#s1-7), [3.2](../GoblinShiftPlan.md#s3-2), [3.3](../GoblinShiftPlan.md#s3-3), [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 005](005-area-do-executor-em-filesystem-fixo.md), [ADR 006](006-run-e-publicacao-multiagregado.md)
 

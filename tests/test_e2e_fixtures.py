@@ -290,3 +290,40 @@ def test_conferente_recusa_saida_com_bytes_diferentes_do_upload(tmp_path: Path) 
     )
 
     assert result.returncode != 0
+
+
+# --- Carga do Image Forge (medição na VPS: 100 imagens de 24 MP sob gVisor em 10 min) --------
+
+
+def test_carga_padrao_e_o_pior_caso_de_1_7() -> None:
+    assert e2e_fixtures.LOAD_COUNT == 100
+    width, height = e2e_fixtures.LOAD_SIZE
+    assert width * height == PIXEL_LIMIT
+
+
+def test_carga_reduzida_passa_no_executor_real_e_no_conferente(tmp_path: Path) -> None:
+    fixtures = tmp_path / "fixtures"
+    e2e_fixtures.write(e2e_fixtures.image_forge_load(count=3, size=(60, 40)), fixtures)
+    expected: dict[str, Any] = json.loads((fixtures / "expected.json").read_text())
+
+    out = run_executor(fixtures, expected, tmp_path / "work")
+    result = check(out / "image-forge.zip", fixtures / "expected.json", fixtures)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert expected["status"] == "succeeded"
+    assert expected["zip_entries"] == [
+        "images/carga-001.jpg",
+        "thumbnails/carga-001.jpg",
+        "images/carga-002.jpg",
+        "thumbnails/carga-002.jpg",
+        "images/carga-003.jpg",
+        "thumbnails/carga-003.jpg",
+        "manifest.json",
+        "report.json",
+    ]
+
+
+def test_carga_cabe_no_lote_de_upload(tmp_path: Path) -> None:
+    content = e2e_fixtures.load_photo((6000, 4000))
+
+    assert len(content) * e2e_fixtures.LOAD_COUNT <= 480 * 1024 * 1024
