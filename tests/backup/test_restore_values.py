@@ -2,9 +2,9 @@
 
 O dump vem de fora do runner da restauração: quem controla a VPS tem a chave que escreve no
 bucket e a chave pública age, então consegue enviar um dump forjado. O pg_restore roda esse
-dump como superusuário no PostgreSQL efêmero, e o que o psql devolve volta para o bash. A
-avaliação aritmética do bash (`((x > 0))`) executa substituições como `a[$(comando)]`, e no
-runner estão a chave privada age e a chave de leitura: todo valor do banco passa por
+dump no PostgreSQL efêmero, com um papel sem superusuário, e o que o psql devolve volta para o
+bash. A avaliação aritmética do bash (`((x > 0))`) executa substituições como `a[$(comando)]`,
+e no runner estão a chave privada age e a chave de leitura: todo valor do banco passa por
 `require_count` ou `require_revision` antes de ser usado.
 """
 
