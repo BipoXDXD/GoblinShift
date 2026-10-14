@@ -17,6 +17,8 @@ export interface BuiltFile {
 const KB = 1024;
 const LIMITS_KB = {
   initialJs: 180,
+  /** Por chunk, sem gzip: o custo de parse e compilação cresce com o tamanho cru (divisão por rota). */
+  chunkRaw: 250,
   css: 25,
   latinFonts: 100,
   threeDChunk: 300,
@@ -54,9 +56,22 @@ export function budgetViolations(files: readonly BuiltFile[], indexHtml: string)
     }),
   ];
   for (const file of files) {
-    violations.push(...threeDViolations(file, referenced));
+    violations.push(chunkRawViolation(file), ...threeDViolations(file, referenced));
   }
   return violations.filter((violation) => violation !== null);
+}
+
+/** O chunk do 3D fica de fora: ele tem o teto próprio do ADR 027. */
+function chunkRawViolation(file: BuiltFile): string | null {
+  if (!file.path.endsWith(".js") || file.path.startsWith(THREE_D_PREFIX)) {
+    return null;
+  }
+  return overLimit({
+    what: `Chunk ${file.path}`,
+    bytes: file.bytes,
+    limitKb: LIMITS_KB.chunkRaw,
+    unit: "KB crus",
+  });
 }
 
 function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (string | null)[] {
