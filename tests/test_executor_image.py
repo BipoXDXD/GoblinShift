@@ -28,7 +28,9 @@ from tests.image_forge.icc import DISPLAY_P3, rgb_profile
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "docker" / "executor.Dockerfile"
-IMAGE = "goblinshift-executor:test"
+# Uma tag por checkout: worktrees de branches diferentes rodando a suíte ao mesmo tempo não
+# reconstroem a imagem uns dos outros no meio dos testes.
+IMAGE = f"goblinshift-executor:test-{hashlib.sha256(bytes(ROOT)).hexdigest()[:12]}"
 RUNTIME = os.environ.get("GS_TEST_RUNTIME", "runc")
 EXECUTOR_UID = 61000
 EXECUTOR_GID = 61001
