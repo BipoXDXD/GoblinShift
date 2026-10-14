@@ -38,6 +38,8 @@ uv run lint-imports           # contratos de arquitetura (docs/GoblinShiftPlan.m
 uv run pytest                 # inclui PostgreSQL real via Testcontainers
 ```
 
+Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. A CI roda o gitleaks no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
+
 ## CSV Janitor pela linha de comando
 
 A receita de tabelas ([1.3](docs/GoblinShiftPlan.md#s1-3)) é uma biblioteca pura em `goblinshift.processing.csv_janitor`, só com a biblioteca padrão. A CLI chama a mesma função que o executor vai chamar:
