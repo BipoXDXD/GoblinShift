@@ -380,3 +380,186 @@ def test_conferencia_do_zip_chama_o_heartbeat_enquanto_le(tmp_path: Path) -> Non
     collect_outputs(out, recipe_id=RECIPE, input_count=1, heartbeat=lambda: beats.append(None))
 
     assert len(beats) >= len(FILES) + 2
+
+
+class _ZipFileMustNotOpen:
+    """Falha o teste se a coleta entregar o ZIP ao zipfile, que lê o diretório central inteiro."""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise AssertionError("o zipfile não deveria ter lido este pacote")
+
+
+def test_diretorio_central_com_entradas_demais_e_recusado_antes_do_zipfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = valid_out(tmp_path)
+    many = [entry(f"{i}.txt", b"") for i in range(5000)]
+    rewrite_package(out, [*package_entries(out), *many])
+    monkeypatch.setattr(zipfile, "ZipFile", _ZipFileMustNotOpen)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_diretorio_central_com_nomes_enormes_e_recusado_antes_do_zipfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = valid_out(tmp_path)
+    entries = package_entries(out)
+    info = entries[0][0]
+    info.comment = b"x" * 60_000
+    rewrite_package(out, entries)
+    monkeypatch.setattr(zipfile, "ZipFile", _ZipFileMustNotOpen)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_zip_sem_fim_de_diretorio_central_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = (out / PACKAGE).read_bytes()
+    (out / PACKAGE).write_bytes(data[: data.rindex(b"PK\x05\x06")])
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+# --- Diferença de parser: o ZIP só passa se toda leitura (zipfile, unzip, navegador) o vir igual --
+
+
+class _RawNameInfo(zipfile.ZipInfo):
+    """Entrada cujo nome vai para o arquivo com os bytes e a flag dados, não os do zipfile."""
+
+    raw_name: bytes = b""
+    raw_flags: int = 0
+
+    def _encodeFilenameFlags(self) -> tuple[bytes, int]:  # noqa: N802 - nome do zipfile
+        return self.raw_name, self.raw_flags
+
+
+def _raw_name_entry(
+    name: str, raw: bytes, flags: int, data: bytes
+) -> tuple[zipfile.ZipInfo, bytes]:
+    info = _RawNameInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.raw_name, info.raw_flags = raw, flags
+    return info, data
+
+
+def test_dados_antes_do_primeiro_cabecalho_sao_recusados(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = (out / PACKAGE).read_bytes()
+    (out / PACKAGE).write_bytes(b"MZ conteudo escondido" + data)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_dados_depois_do_fim_do_diretorio_sao_recusados(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    with (out / PACKAGE).open("ab") as target:
+        target.write(b"conteudo escondido depois do EOCD")
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_comentario_do_arquivo_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    (out / PACKAGE).unlink()
+    with zipfile.ZipFile(out / PACKAGE, "w") as archive:
+        archive.comment = b"comentario"
+        for info, data in package_entries(out):
+            archive.writestr(info, data)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+@pytest.mark.parametrize(
+    ("field", "offset", "fmt"),
+    [
+        pytest.param("crc", 14, "<I", id="crc"),
+        pytest.param("tamanho-comprimido", 18, "<I", id="tamanho-comprimido"),
+        pytest.param("tamanho", 22, "<I", id="tamanho"),
+        pytest.param("flags", 6, "<H", id="flags"),
+    ],
+)
+def test_cabecalho_local_diferente_do_diretorio_central_e_recusado(
+    tmp_path: Path, field: str, offset: int, fmt: str
+) -> None:
+    # Quem lê o ZIP em fluxo (pelos cabeçalhos locais) veria outra coisa que o zipfile.
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    (value,) = struct.unpack_from(fmt, data, offset)
+    struct.pack_into(fmt, data, offset, value ^ 0x8 if field == "flags" else value + 1)
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_campo_zip64_so_no_cabecalho_local_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    (out / PACKAGE).unlink()
+    with zipfile.ZipFile(out / PACKAGE, "w") as archive:
+        for info, data in package_entries(out):
+            with archive.open(info, "w", force_zip64=True) as target:
+                target.write(data)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_nome_com_nul_que_o_zipfile_truncaria_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    entries = package_entries(out)
+    entries[0] = _raw_name_entry("a.csv", b"a.csv\0.exe", 0, FILES["a.csv"])
+    rewrite_package(out, entries)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_nome_nao_ascii_em_cp437_sem_a_flag_utf8_e_recusado(tmp_path: Path) -> None:
+    # O zipfile decodifica CP437 e chega ao mesmo nome; outro leitor usaria a página do sistema.
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "café.csv")], {"café.csv": b"1"})
+    write_package(out)
+    entries = package_entries(out)
+    entries[0] = _raw_name_entry("café.csv", "café.csv".encode("cp437"), 0, b"1")
+    rewrite_package(out, entries)
+
+    with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+def test_nome_nao_ascii_em_utf8_com_a_flag_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "café.csv")], {"café.csv": b"1"})
+    write_package(out)
+
+    assert [f.name for f in collect(out).outputs] == ["café.csv"]
+
+
+# --- Esgotamento de recursos: JSON do sandbox com aninhamento sem fim ---------------------------
+
+
+def test_relatorio_aninhado_demais_e_recusado_sem_estourar_a_pilha(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"1"})
+    (out / "report.json").write_bytes(b"[" * 200_000 + b"]" * 200_000)
+
+    with pytest.raises(CollectionError, match="relatório"):
+        collect(out)
+
+
+def test_manifesto_aninhado_demais_e_recusado_sem_estourar_a_pilha(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    (out / "manifest.json").write_bytes(b'{"a":' * 200_000 + b"1" + b"}" * 200_000)
+    rewrite_package(out, package_entries(out))
+
+    with pytest.raises(CollectionError, match="manifesto"):
+        collect(out)

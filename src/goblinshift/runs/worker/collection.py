@@ -362,6 +362,8 @@ def _require_output_name(component: str, name: str) -> None:
         raise CollectionError(f"out/ contém nome longo demais: {name!r}")
     if unicodedata.normalize("NFC", component) != component:
         raise CollectionError(f"out/ contém nome fora de NFC: {name!r}")
+    if "\\" in component:
+        raise CollectionError(f"out/ contém nome com barra invertida: {name!r}")
     if has_unsafe_char(component):
         raise CollectionError(f"out/ contém nome com caractere de controle ou formato: {name!r}")
 

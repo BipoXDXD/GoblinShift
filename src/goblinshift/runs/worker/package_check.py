@@ -14,18 +14,29 @@ não confiável. O pacote só passa se disser exatamente o que out/ tem:
   com o mesmo SHA-256. Nada é descomprimido além do tamanho esperado, que já cabe nos tetos de
   1.7: uma bomba de compressão não passa do primeiro arquivo, minta ou não o cabeçalho.
 
-Esse é o contrato do `zip_writer` do executor; um ZIP de outro formato é executor fora do contrato.
+Antes de o `zipfile` abrir o arquivo, a estrutura é lida à mão e precisa ser a canônica do
+empacotador, para que nenhum leitor (o `zipfile`, um unzip que segue os cabeçalhos locais, o do
+sistema do usuário) veja outra coisa: entradas contíguas desde o byte 0, diretório central logo
+depois delas e o fim do diretório (EOCD) nos últimos 22 bytes, sem comentário, sem ZIP64 e sem
+campos extras; cada cabeçalho local igual à sua entrada do diretório central (flags, método, CRC,
+tamanhos, nome); nome em bytes exatamente UTF-8 do esperado, com a flag UTF-8 só quando não é
+ASCII (o `zipfile` corta o nome no NUL e decodifica CP437 sem a flag). O diretório só é lido se
+tiver a quantidade esperada de entradas e um tamanho compatível com ela: o `zipfile` o carrega
+inteiro na memória, e um ZIP de 512 MiB caberia milhões de entradas.
 """
 
 import hashlib
 import os
 import stat
+import struct
 import zipfile
 import zlib
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
+from goblinshift.processing.output_dir import MAX_PATH_BYTES
 from goblinshift.processing.packaging import MANIFEST_SCHEMA_VERSION, compression_for
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
@@ -33,8 +44,18 @@ READ_CHUNK_BYTES = 1024 * 1024
 # O modo que o empacotador grava em toda entrada: arquivo regular Unix, 0644.
 _REGULAR_FILE_0644 = stat.S_IFREG | 0o644
 _UNIX = 3
-# Bit 0: cifrada; bit 6: cifragem forte. O empacotador não cifra nada.
-_ENCRYPTED_FLAGS = 0x1 | 0x40
+# Única flag que o empacotador grava: nome em UTF-8 (bit 11), só para nome não ASCII. Qualquer
+# outra (cifra, data descriptor, nível de compressão) é estrutura fora do contrato.
+_UTF8_NAME = 0x800
+# Fim do diretório central (EOCD), cabeçalho local e entrada do diretório central (APPNOTE 4.3).
+_END_RECORD = struct.Struct("<4s4H2LH")
+_END_SIGNATURE = b"PK\x05\x06"
+_LOCAL_HEADER = struct.Struct("<4s5H3L2H")
+_LOCAL_SIGNATURE = b"PK\x03\x04"
+_CENTRAL_HEADER = struct.Struct("<4s6H3L5H2L")
+_CENTRAL_SIGNATURE = b"PK\x01\x02"
+# Uma entrada do diretório central: os 46 bytes fixos e o nome, sem extras nem comentário.
+_MAX_CENTRAL_ENTRY_BYTES = _CENTRAL_HEADER.size + MAX_PATH_BYTES
 # O que o zipfile levanta diante de um arquivo malformado (CRC, cabeçalho, fluxo DEFLATE).
 _MALFORMED = (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, EOFError, NotImplementedError)
 
@@ -79,11 +100,105 @@ def verify_zip(path: Path, expected: Sequence[DigestedFile], heartbeat: Callable
     """
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd, "rb") as source:
+        _require_canonical_layout(source, expected)
         try:
             with zipfile.ZipFile(source) as archive:
                 _verify_entries(archive, expected, heartbeat)
         except _MALFORMED as error:
             raise PackageError(f"pacote malformado: {type(error).__name__}") from None
+
+
+@dataclass(frozen=True)
+class _Entry:
+    """Campos de uma entrada que precisam ser iguais no cabeçalho local e no diretório central."""
+
+    flags: int
+    method: int
+    crc: int
+    compressed_size: int
+    size: int
+    name: bytes
+
+
+def _require_canonical_layout(source: BinaryIO, expected: Sequence[DigestedFile]) -> None:
+    size = source.seek(0, os.SEEK_END)
+    directory_at, directory = _central_directory(source, size, len(expected))
+    entries = _central_entries(directory, expected)
+    offset = 0
+    for central, local_at in entries:
+        if local_at != offset:
+            raise PackageError("pacote com dados fora das entradas")
+        offset = local_at + _require_same_local_header(source, local_at, central)
+    if offset != directory_at:
+        raise PackageError("pacote com dados fora das entradas")
+
+
+def _central_directory(source: BinaryIO, size: int, entries: int) -> tuple[int, bytes]:
+    """Posição e bytes do diretório central, com o EOCD nos últimos 22 bytes e sem comentário."""
+    end_at = size - _END_RECORD.size
+    if end_at < 0:
+        raise PackageError("pacote sem fim de diretório central")
+    source.seek(end_at)
+    signature, disk, directory_disk, disk_entries, total, directory_size, directory_at, comment = (
+        _END_RECORD.unpack(source.read(_END_RECORD.size))
+    )
+    if signature != _END_SIGNATURE or comment != 0:
+        raise PackageError("pacote sem fim de diretório central nos últimos bytes")
+    if (disk, directory_disk, disk_entries, total) != (0, 0, entries, entries):
+        raise PackageError(f"pacote com {total} entradas no diretório; eram {entries}")
+    if directory_size > entries * _MAX_CENTRAL_ENTRY_BYTES:
+        raise PackageError(f"pacote com diretório central de {directory_size} bytes")
+    if directory_at + directory_size != end_at:
+        raise PackageError("pacote com dados entre o diretório central e o fim")
+    source.seek(directory_at)
+    return directory_at, source.read(directory_size)
+
+
+def _central_entries(
+    directory: bytes, expected: Sequence[DigestedFile]
+) -> list[tuple[_Entry, int]]:
+    """Cada entrada do diretório central e a posição do seu cabeçalho local."""
+    entries = []
+    at = 0
+    for item in expected:
+        if len(directory) - at < _CENTRAL_HEADER.size:
+            raise PackageError("pacote com diretório central truncado")
+        (signature, _made_by, _version, flags, method, _time, _date, crc, compressed, size,
+         name_length, extra_length, comment_length, _disk, _internal, _external, local_at) = (
+            _CENTRAL_HEADER.unpack_from(directory, at)
+        )  # fmt: skip
+        name_at = at + _CENTRAL_HEADER.size
+        name = directory[name_at : name_at + name_length]
+        if signature != _CENTRAL_SIGNATURE or extra_length or comment_length:
+            raise PackageError("pacote com entrada do diretório central fora do contrato")
+        _require_exact_name(name, flags, item)
+        entries.append((_Entry(flags, method, crc, compressed, size, name), local_at))
+        at = name_at + name_length
+    if at != len(directory):
+        raise PackageError("pacote com dados no diretório central além das entradas")
+    return entries
+
+
+def _require_exact_name(raw: bytes, flags: int, item: DigestedFile) -> None:
+    encoded = item.name.encode()
+    utf8_flag = 0 if item.name.isascii() else _UTF8_NAME
+    if raw != encoded or flags != utf8_flag:
+        raise PackageError(f"pacote com nome ou flags fora do contrato: {item.name!r}")
+
+
+def _require_same_local_header(source: BinaryIO, at: int, central: _Entry) -> int:
+    """Confere o cabeçalho local contra o central; devolve o tamanho da entrada com os dados."""
+    source.seek(at)
+    header = source.read(_LOCAL_HEADER.size)
+    if len(header) != _LOCAL_HEADER.size:
+        raise PackageError("pacote com cabeçalho local truncado")
+    (signature, _version, flags, method, _time, _date, crc, compressed, size, name_length,
+     extra_length) = _LOCAL_HEADER.unpack(header)  # fmt: skip
+    name = source.read(name_length)
+    local = _Entry(flags, method, crc, compressed, size, name)
+    if signature != _LOCAL_SIGNATURE or extra_length or local != central:
+        raise PackageError("pacote com cabeçalho local diferente do diretório central")
+    return _LOCAL_HEADER.size + len(local.name) + local.compressed_size
 
 
 def _verify_entries(
@@ -100,8 +215,6 @@ def _verify_entries(
 def _require_plain_entry(info: zipfile.ZipInfo, item: DigestedFile) -> None:
     if info.create_system != _UNIX or info.external_attr >> 16 != _REGULAR_FILE_0644:
         raise PackageError(f"pacote com entrada que não é arquivo regular 0644: {item.name!r}")
-    if info.flag_bits & _ENCRYPTED_FLAGS:
-        raise PackageError(f"pacote com entrada cifrada: {item.name!r}")
     if info.compress_type != compression_for(item.name):
         raise PackageError(f"pacote com compressão fora do contrato: {item.name!r}")
     stored = info.compress_type == zipfile.ZIP_STORED
