@@ -8,9 +8,8 @@ tentativa em andamento antes de sair, porque o deploy concede um prazo de parada
 tentativa (3.8). Se a plataforma matar o processo antes (SIGKILL), nada se perde: o lease vence,
 e a manutenção encontra o executor pelo nome, confirma o término e reagenda.
 
-Runner: só o local existe até a fatia 4. Em produção ele exige `GS_ALLOW_LOCAL_RUNNER=true`,
-trava provisória registrada até o `executor-ctl` chegar, porque o subprocesso local não tem o
-isolamento do gVisor.
+Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
+o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
 """
 
 import logging
@@ -23,10 +22,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.platform.telemetry import configure_logging
 from goblinshift.runs.worker.claim import QueueListener, claim_next
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
+from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from goblinshift.runs.worker.runner import LocalRunner, Runner
 
 logger = logging.getLogger("goblinshift.worker")
@@ -35,16 +35,12 @@ EXIT_OK = 0
 EXIT_CONFIGURATION = 2
 
 
-class RunnerNotAllowedError(Exception):
-    """A configuração pede um Runner indisponível ou proibido neste ambiente."""
-
-
 def main() -> int:
     configure_logging()
     settings = Settings()
     try:
         runner = build_runner(settings)
-    except RunnerNotAllowedError as error:
+    except ExecutorConfigError as error:
         logger.error("worker não sobe: %s", error)
         return EXIT_CONFIGURATION
     serve(settings, runner, shutdown_on_signals())
@@ -52,11 +48,11 @@ def main() -> int:
 
 
 def build_runner(settings: Settings) -> Runner:
+    """Runner da configuração; `ExecutorConfigError` se ela não serve ao ambiente."""
+    settings.executor_image_for_runs()
     if settings.runner == "executor_ctl":
-        raise RunnerNotAllowedError("o Runner executor_ctl só existe a partir da fatia 4")
-    if settings.environment == "production" and not settings.allow_local_runner:
-        raise RunnerNotAllowedError(
-            "Runner local em produção exige GS_ALLOW_LOCAL_RUNNER=true (provisório até a fatia 4)"
+        return ExecutorCtlRunner(
+            settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id
         )
     return LocalRunner(
         settings.work_root, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
@@ -68,7 +64,10 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     factory = make_session_factory(engine)
     storage = FileStorage(settings.storage_root)
     lease = timedelta(seconds=settings.worker_lease_s)
-    coordinator = Coordinator(factory, storage, runner, CoordinatorConfig(lease=lease))
+    config = CoordinatorConfig(
+        lease=lease, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
+    )
+    coordinator = Coordinator(factory, storage, runner, config)
     try:
         with QueueListener(engine, settings.db_connect_timeout_s) as listener:
             logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})

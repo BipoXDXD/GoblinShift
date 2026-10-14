@@ -701,7 +701,7 @@ class Recipe[P](Protocol):
 
 **Demais interfaces:**
 - *Storage* (`files`): `create_exclusive(key, chunks) -> (sha256, size)`, `open(key)`, `stat(key)`, `delete(key)`.
-- *Runner* (`runs`): `start(attempt_id)` idempotente, `status(attempt_id)`, `stop(attempt_id, grace)`, `remove(attempt_id)`. A implementação de produção fala com o `executor-ctl`; a local, em subprocesso, só existe fora de produção e, na VPS, até a fatia 4 e com confirmação explícita ([ADR 016](adr/016-runner-local-na-vps-ate-a-fatia-4.md)).
+- *Runner* (`runs`): `start(attempt_id)` idempotente, `status(attempt_id)`, `stop(attempt_id, grace)`, `remove(attempt_id)`. A implementação de produção fala com o `executor-ctl` e manda no `start` a imagem fixada na Run; a local, em subprocesso, só existe fora de produção (na VPS, valeu até a fatia 4, [ADR 016](adr/016-runner-local-na-vps-ate-a-fatia-4.md), hoje substituído).
 - *Identidade* (`identity`): `authenticate(request) -> Principal(owner_id, scopes, via)`, em que `via` é sessão ou chave; `require_scope` e `require_recent_auth`.
 
 **Abstrações:** as interfaces acima; Strategy pode ser função. Composição/funções puras para filtros, nomes e contagens. Evitar repository genérico, service locator, barramento e classe por endpoint.
@@ -1100,7 +1100,7 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 013 | OpenObserve auto-hospedado como backend de telemetria          | Honeycomb gratuito; Grafana Cloud gratuito; SigNoz                         | Leve, SQL sobre os eventos, dados na VPS e sem custo; Grafana Cloud gratuito guarda só 14 dias e o SigNoz pede 4–8 GB de RAM. Confirmado pela medição da fatia 0 |
 | 014 | Proxy de borda do host, compartilhado pelos projetos, com TLS por domínio | Cada projeto publicar a própria porta; o Nginx do GoblinShift atender também o outro projeto | Só um processo ouve na 80/443; manter a borda fora dos projetos evita que um deploy derrube o outro. Caddy, com TLS automático, um trecho por projeto em `conf.d` e destino por IP reservado (escolhido com o primeiro domínio, 2026-10-13) |
 | 015 | Limite de processos sob gVisor: `--ulimit nproc=64` na receita e `--pids-limit=256` como rede de segurança | Só `--pids-limit` (64 ou calibrado em ~160) | O `--pids-limit` conta as tarefas do gVisor no host (31 ociosas, ~2 por processo) e mata o sandbox; o RLIMIT_NPROC dá `EAGAIN` no 64º processo. Medido na fatia 1 |
-| 016 | Runner local em subprocesso na VPS até a fatia 4, só com confirmação explícita; serviço fechado (chaves do `gs-admin`) | Fatia 3 pronta só localmente                                               | O critério de 3.9 exige `curl` na VPS e o gVisor real só chega na fatia 4. Risco aceito: só o administrador tem chave e a receita é Python puro; removido na fatia 4 |
+| 016 | *Substituído na fatia 4.* Runner local em subprocesso na VPS até a fatia 4, só com confirmação explícita; serviço fechado (chaves do `gs-admin`) | Fatia 3 pronta só localmente                                               | O critério de 3.9 exige `curl` na VPS e o gVisor real só chega na fatia 4. Na fatia 4, produção só aceita o `executor-ctl` e a confirmação `GS_ALLOW_LOCAL_RUNNER` foi removida |
 
 [↑ Sumário](#sumario)
 

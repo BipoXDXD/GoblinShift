@@ -22,11 +22,12 @@ from goblinshift.files.tables import object_use, upload
 from goblinshift.files.uploads import create_intents, receive_content
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, QUEUE_WINDOW
 from goblinshift.runs.tables import attempt, run, run_input
 from goblinshift.runs.worker.claim import ClaimedAttempt, claim_next
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
-from goblinshift.runs.worker.runner import LocalRunner
+from goblinshift.runs.worker.runner import LocalRunner, Runner
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
@@ -49,6 +50,7 @@ def queue_run(
     storage: FileStorage,
     owner_id: uuid.UUID,
     tables: Sequence[tuple[str, bytes]] = (("clientes.csv", VALID),),
+    executor_image: str = LOCAL_EXECUTOR_IMAGE,
 ) -> uuid.UUID:
     upload_ids = []
     for name, data in tables:
@@ -64,7 +66,7 @@ def queue_run(
                 owner_id=owner_id,
                 recipe_id="csv-janitor",
                 recipe_version=1,
-                executor_digest="local-dev",
+                executor_digest=executor_image,
                 parameters=CATALOG.resolve("csv-janitor", 1, {}),
                 limits=dict(CATALOG.get_version("csv-janitor", 1).limits),
                 queue_expires_at=func.now() + QUEUE_WINDOW,
@@ -96,12 +98,16 @@ def local_runner(work_root: Path, *mode: str) -> LocalRunner:
 
 
 def coordinator(
-    factory: sessionmaker[Session], storage: FileStorage, runner: LocalRunner
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: Runner,
+    attempt_timeout: timedelta = timedelta(minutes=10),
 ) -> Coordinator:
     config = CoordinatorConfig(
         lease=LEASE,
         status_poll=timedelta(seconds=0.05),
         stop_grace=timedelta(seconds=2),
+        attempt_timeout=attempt_timeout,
         jitter=lambda: MIN_RETRY_JITTER,
     )
     return Coordinator(factory, storage, runner, config)
