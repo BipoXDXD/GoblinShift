@@ -276,6 +276,9 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
 
     assert result.returncode == 0, result.stderr
     assert dump_suffix(latest, prefix) not in result.stdout + result.stderr
+    # O log é público: nada de contagens da produção.
+    assert "contas" not in result.stdout
+    assert "execuções" not in result.stdout
     assert restore_db.scalar("SELECT display_name FROM app_user") == source_db.canary
     assert restore_db.scalar("SELECT count(*) FROM run") == "1"
     assert healthchecks.pings == ["/start", "/"]
@@ -327,6 +330,44 @@ def test_restauracao_com_dump_de_data_futura_falha(
 
     assert result.returncode != 0
     assert "futura" in result.stderr
+    assert healthchecks.pings == ["/start", "/fail"]
+
+
+def test_erro_do_pg_restore_nao_publica_dados_do_dump(
+    s3: S3,
+    source_db: SourceDatabase,
+    restore_db: Database,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    known_revisions: str,
+) -> None:
+    """O log do Actions é público, e o erro de um COPY traz a linha que falhou.
+
+    A checagem só falha na restauração, que roda com `search_path` vazio: o `CONTEXT` do erro
+    traz `COPY leak_probe, line 1: "<canário>"`.
+    """
+    source_db.database.scalar(
+        "CREATE FUNCTION public.only_with_search_path(value text) RETURNS boolean"
+        " LANGUAGE plpgsql AS $$ BEGIN"
+        " IF current_setting('search_path') = '' THEN RAISE EXCEPTION 'sem search_path'; END IF;"
+        " RETURN true; END $$;"
+        " CREATE TABLE public.leak_probe (value text CHECK (public.only_with_search_path(value)))"
+    )
+    # O canário é `CANARY-<uuid4>`, gerado pela fixture: nada externo entra no SQL.
+    insert = f"INSERT INTO public.leak_probe VALUES ('{source_db.canary}')"  # noqa: S608
+    source_db.database.scalar(insert)
+    back_up(s3, source_db, age_keys, healthchecks, prefix)
+
+    result = run_script(
+        RESTORE_SCRIPT,
+        restore_env(s3, restore_db, age_keys, healthchecks, prefix, known_revisions),
+    )
+
+    assert result.returncode != 0
+    assert "pg_restore falhou" in result.stderr
+    assert "CANARY-" not in result.stdout + result.stderr
+    assert "COPY" not in result.stdout + result.stderr
     assert healthchecks.pings == ["/start", "/fail"]
 
 

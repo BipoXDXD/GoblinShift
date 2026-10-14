@@ -47,9 +47,14 @@ fail() {
   exit 1
 }
 
+# O log do Actions é público, e os erros do PostgreSQL citam dados (`CONTEXT: COPY t, line 1:
+# "<linha>"`, `DETAIL: Key (...)=(...)`): o stderr do psql e do pg_restore vai para o $workdir,
+# apagado no fim, e o log recebe só uma mensagem genérica.
 psql_value() {
   docker exec "$RESTORE_PG_CONTAINER" psql --no-psqlrc --tuples-only --no-align \
-    --set ON_ERROR_STOP=1 --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" --command="$1"
+    --set ON_ERROR_STOP=1 --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" \
+    --command="$1" 2>>"$workdir/psql.log" ||
+    fail "consulta ao banco restaurado falhou (detalhes omitidos)"
 }
 
 # Restaurar por cima de tabelas existentes não provaria nada sobre o dump.
@@ -77,7 +82,9 @@ age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" --output "$workdir/dump" "$
 
 # Sem dono nem privilégios: o destino efêmero não tem os papéis da produção.
 docker exec --interactive "$RESTORE_PG_CONTAINER" pg_restore --exit-on-error --no-owner \
-  --no-privileges --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" <"$workdir/dump"
+  --no-privileges --username="$RESTORE_PG_USER" --dbname="$RESTORE_PG_DB" \
+  <"$workdir/dump" 2>"$workdir/pg_restore.log" ||
+  fail "pg_restore falhou (detalhes omitidos: podem conter dados da produção)"
 
 revision="$(psql_value "SELECT version_num FROM alembic_version")"
 require_revision revision "$revision"
@@ -89,4 +96,4 @@ require_count accounts "$accounts"
 require_count runs "$runs"
 ((accounts > 0)) || fail "o dump restaurado não tem contas"
 ((runs > 0)) || fail "o dump restaurado não tem execuções"
-echo "restauração conferida: revisão $revision, $accounts contas, $runs execuções, dump de $age_hours h"
+echo "restauração conferida: revisão $revision, dump de $age_hours h"
