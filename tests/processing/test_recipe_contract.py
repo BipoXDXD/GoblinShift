@@ -1,13 +1,22 @@
 """Tipos do contrato entre executor e receitas (3.2) que carregam regra própria."""
 
+from pathlib import Path
+
 import pytest
 
+from goblinshift.processing.csv_janitor.results import RejectionCode as CsvCode
+from goblinshift.processing.downloads_detox.recipe import REJECTION_CODE as DETOX_CODE
+from goblinshift.processing.image_forge.rejection import RejectionCode as ImageCode
 from goblinshift.processing.recipe import (
+    InputContractError,
+    InputFile,
     ItemDuplicate,
     ItemOk,
     ItemRejected,
+    ItemRejectionCode,
     OutputGroup,
     Report,
+    require_max_inputs,
 )
 
 
@@ -64,3 +73,34 @@ def test_grupos_de_saida_sao_a_lista_fechada_do_plano() -> None:
         "text",
         "archives",
     ]
+
+
+# --- Códigos de rejeição por item: lista fechada do catálogo de 1.6 -----------------------------
+
+
+def test_codigos_de_rejeicao_de_cada_receita_estao_no_catalogo() -> None:
+    used = {*CsvCode, *ImageCode, DETOX_CODE}
+
+    assert used <= {code.value for code in ItemRejectionCode}
+
+
+@pytest.mark.parametrize("code", ["EXECUTOR_UNAVAILABLE", "", "csv_structure_invalid"])
+def test_rejeicao_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
+    with pytest.raises(ValueError, match="catálogo"):
+        ItemRejected(position=0, code=code, reason="r")
+
+
+# --- Teto de entradas da versão: job acima dele é infraestrutura, não conteúdo ------------------
+
+
+def _inputs(count: int) -> list[InputFile]:
+    return [InputFile(i, Path(f"{i:04}.bin"), f"{i}.csv", 1, "0" * 64) for i in range(count)]
+
+
+def test_lote_no_teto_de_entradas_passa() -> None:
+    require_max_inputs(_inputs(3), 3, "tabelas")
+
+
+def test_lote_acima_do_teto_de_entradas_e_job_fora_do_contrato() -> None:
+    with pytest.raises(InputContractError, match="4 tabelas; o limite por execução é 3"):
+        require_max_inputs(_inputs(4), 3, "tabelas")

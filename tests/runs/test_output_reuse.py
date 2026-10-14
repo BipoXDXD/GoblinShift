@@ -18,9 +18,10 @@ from goblinshift.files.tables import artifact, stored_object, upload
 from goblinshift.files.uploads import request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.tables import run_input, run_output
+from goblinshift.runs.worker.candidate_writer import StoredCandidate
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import Collected
-from goblinshift.runs.worker.coordinator import Coordinator, StoredCandidate
+from goblinshift.runs.worker.coordinator import Coordinator
 from tests.downloads_detox.samples import png
 from tests.runs.worker_support import (
     attempts,
