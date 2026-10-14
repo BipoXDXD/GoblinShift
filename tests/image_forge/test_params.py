@@ -11,7 +11,6 @@ from goblinshift.processing.image_forge import (
     Params,
     params_from_mapping,
 )
-from goblinshift.processing.image_forge.params import reject_inapplicable_options
 
 
 def test_defaults_de_1_2() -> None:
@@ -116,16 +115,26 @@ def test_params_construido_direto_tambem_nasce_valido() -> None:
         Params(max_width=4097)
 
 
-@pytest.mark.parametrize("option", ["jpeg_quality", "jpeg_background"])
-def test_opcao_de_jpeg_enviada_com_saida_png_e_recusada(option: str) -> None:
-    with pytest.raises(InvalidParametersError, match=option):
-        reject_inapplicable_options(OutputFormat.PNG, {option, "output_format"})
+@pytest.mark.parametrize("option", [{"jpeg_quality": 90}, {"jpeg_background": HexColor(0, 0, 0)}])
+def test_opcao_de_jpeg_diferente_do_default_com_saida_png_e_recusada(
+    option: dict[str, object],
+) -> None:
+    with pytest.raises(InvalidParametersError, match="só vale para saídas JPEG"):
+        Params(output_format=OutputFormat.PNG, **option)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("output_format", [OutputFormat.PRESERVE, OutputFormat.JPEG])
-def test_opcao_de_jpeg_vale_quando_pode_haver_saida_jpeg(output_format: OutputFormat) -> None:
-    reject_inapplicable_options(output_format, {"jpeg_quality", "jpeg_background"})
+@pytest.mark.parametrize("output_format", ["preserve", "jpeg"])
+def test_opcao_de_jpeg_vale_quando_pode_haver_saida_jpeg(output_format: str) -> None:
+    params = params_from_mapping(
+        {"output_format": output_format, "jpeg_quality": 90, "jpeg_background": "#000000"}
+    )
+    assert (params.jpeg_quality, params.jpeg_background) == (90, HexColor(0, 0, 0))
 
 
-def test_saida_png_sem_opcoes_de_jpeg_enviadas_e_aceita() -> None:
-    reject_inapplicable_options(OutputFormat.PNG, {"output_format", "max_width"})
+def test_saida_png_aceita_as_opcoes_de_jpeg_no_default() -> None:
+    # A forma resolvida pelo catálogo sempre traz os defaults: repetir uma execução PNG com os
+    # parâmetros registrados não pode ser recusado.
+    params = params_from_mapping(
+        {"output_format": "png", "jpeg_quality": 85, "jpeg_background": "#ffffff"}
+    )
+    assert params.output_format is OutputFormat.PNG
