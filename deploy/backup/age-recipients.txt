@@ -1,0 +1,10 @@
+# Destinatários age do backup do PostgreSQL (docs/adr/9xx-backup-externo.md).
+#
+# Uma chave pública por linha (age1...). Só a chave pública fica aqui; a privada nunca vai para
+# a VPS nem para o repositório: guarde-a no gerenciador de senhas e no secret
+# BACKUP_AGE_IDENTITY do environment backup-restore do GitHub. Perdeu a chave, perdeu os backups.
+#
+# Gerar o par (fora da VPS):  age-keygen -o goblinshift-backup.key
+# Chave pública:              age-keygen -y goblinshift-backup.key
+#
+# Enquanto não houver chave aqui, o backup falha de propósito (e avisa pelo healthchecks.io).

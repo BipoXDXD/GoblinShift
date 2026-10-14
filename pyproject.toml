@@ -67,6 +67,8 @@ known-first-party = ["executor_ctl"]
 "deploy/executor_ctl/**" = ["S603", "S607"]
 # Os testes de integração do executor-ctl conferem o Docker pelo mesmo CLI, sem shell.
 "tests/executor_ctl/**" = ["S101", "S603", "S607"]
+# Os testes do backup rodam os scripts reais, o curl, o age e o Docker pelo CLI, sem shell.
+"tests/backup/**" = ["S101", "S603", "S607"]
 
 [tool.mypy]
 strict = true
@@ -87,6 +89,7 @@ markers = [
     "integration: precisa de Docker (PostgreSQL real via Testcontainers)",
     "executor_image: constrói e roda a imagem do executor (precisa de Docker; runtime em GS_TEST_RUNTIME)",
     "executor_ctl: executor-ctl com Docker real (runtime em GS_TEST_RUNTIME, padrão runc)",
+    "backup: backup e restauração do PostgreSQL contra S3 local (precisa de Docker, age e curl)",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).
