@@ -58,4 +58,4 @@ docker exec "$BACKUP_PG_CONTAINER" \
 # chunked, por isso o dump passa por um arquivo temporário em vez de ir direto do pipe.
 s3_curl --upload-file "$encrypted" --header "Content-Type: application/octet-stream" \
   --max-time 1800 --output /dev/null "$(s3_url "$key")"
-echo "backup enviado: $key ($(wc -c <"$encrypted" | tr -d ' ') bytes cifrados)"
+echo "backup enviado: dump de $(dump_instant "$key") ($(wc -c <"$encrypted" | tr -d ' ') bytes cifrados)"

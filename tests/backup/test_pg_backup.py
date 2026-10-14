@@ -6,6 +6,7 @@ banco vazio e confere o resultado; o healthchecks.io é um servidor HTTP falso.
 """
 
 import os
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -30,6 +31,8 @@ from tests.backup.conftest import (
 pytestmark = [pytest.mark.integration, pytest.mark.backup]
 
 AGE_HEADER = b"age-encryption.org/v1"
+# Instante UTC do início do dump, que ordena os nomes, e 128 bits aleatórios.
+DUMP_KEY = re.compile(r"goblinshift-\d{8}T\d{6}Z-(?P<suffix>[0-9a-f]{32})\.dump\.age")
 
 
 @pytest.fixture
@@ -99,6 +102,12 @@ def run_script(script: Path, env: dict[str, str]) -> subprocess.CompletedProcess
     )
 
 
+def dump_suffix(key: str, prefix: str) -> str:
+    match = DUMP_KEY.fullmatch(key.removeprefix(prefix))
+    assert match is not None, key
+    return match["suffix"]
+
+
 def back_up(
     s3: S3, source: SourceDatabase, keys: AgeKeys, healthchecks: FakeHealthchecks, prefix: str
 ) -> None:
@@ -122,12 +131,30 @@ def test_backup_envia_o_dump_cifrado_com_a_chave_que_so_escreve(
     assert result.returncode == 0, result.stderr
     keys = s3.keys(prefix)
     assert len(keys) == 1
-    assert keys[0].startswith(f"{prefix}goblinshift-")
-    assert keys[0].endswith("Z.dump.age")
+    assert DUMP_KEY.fullmatch(keys[0].removeprefix(prefix)), keys[0]
     content = s3.get(keys[0])
     assert content.startswith(AGE_HEADER)
     assert source_db.canary.encode() not in content
     assert healthchecks.pings == ["/start", "/"]
+
+
+def test_nome_do_dump_tem_sufixo_aleatorio_que_nao_vai_para_o_journal(
+    s3: S3,
+    source_db: SourceDatabase,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+) -> None:
+    """Com o nome adivinhável, a chave que só escreve sobrescreveria o dump daquele instante."""
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+
+    first = run_script(BACKUP_SCRIPT, env)
+    second = run_script(BACKUP_SCRIPT, env)
+
+    suffixes = {dump_suffix(key, prefix) for key in s3.keys(prefix)}
+    assert len(suffixes) == 2
+    for suffix in suffixes:
+        assert suffix not in first.stdout + first.stderr + second.stdout + second.stderr
 
 
 def test_backup_nao_imprime_o_segredo_do_s3(
@@ -236,8 +263,9 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
     known_revisions: str,
 ) -> None:
     back_up(s3, source_db, age_keys, healthchecks, prefix)
+    (latest,) = s3.keys(prefix)
     # Um dump antigo de outro banco vem antes na ordem: a restauração precisa escolher o novo.
-    old = s3.keys(prefix)[0].replace("goblinshift-2", "goblinshift-1")
+    old = latest.replace("goblinshift-2", "goblinshift-1")
     s3.put(old, Path(__file__))
 
     result = run_script(
@@ -246,6 +274,7 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
     )
 
     assert result.returncode == 0, result.stderr
+    assert dump_suffix(latest, prefix) not in result.stdout + result.stderr
     assert restore_db.scalar("SELECT display_name FROM app_user") == source_db.canary
     assert restore_db.scalar("SELECT count(*) FROM run") == "1"
     assert healthchecks.pings == ["/start", "/"]

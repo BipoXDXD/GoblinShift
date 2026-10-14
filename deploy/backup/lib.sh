@@ -64,9 +64,17 @@ healthcheck_ping() {
     echo "aviso: o ping ${suffix:-de sucesso} ao healthchecks falhou" >&2
 }
 
-# Nome do dump: o instante UTC no nome ordena as chaves na listagem e dá a idade do dump.
+# Nome do dump: o instante UTC ordena as chaves na listagem; os 128 bits aleatórios impedem que
+# a chave que só escreve sobrescreva um dump existente adivinhando o nome dele. O nome inteiro
+# não vai para log nenhum: o journal da VPS e o log público do Actions mostram só o instante.
 # shellcheck disable=SC2034  # usado pelo pg-restore-check.sh, que carrega este arquivo
-DUMP_NAME_PATTERN='goblinshift-[0-9]{8}T[0-9]{6}Z\.dump\.age'
+DUMP_NAME_PATTERN='goblinshift-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}\.dump\.age'
 dump_name() {
-  printf 'goblinshift-%s.dump.age' "$(date -u +%Y%m%dT%H%M%SZ)"
+  printf 'goblinshift-%s-%s.dump.age' "$(date -u +%Y%m%dT%H%M%SZ)" "$(openssl rand -hex 16)"
+}
+
+# dump_instant <chave>: só o instante UTC do nome, o que pode aparecer em log.
+dump_instant() {
+  local name="${1##*/}"
+  printf '%s' "${name:12:16}"
 }
