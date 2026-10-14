@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import ProgrammingError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from goblinshift.entrypoints.api.dependencies import require_scope
 from goblinshift.entrypoints.api.json_command import json_command, read_json_command
+from goblinshift.entrypoints.api.problems import PROBLEMS, ProblemCode
 from goblinshift.identity import Principal, Scope
 
 PROBLEM_KEYS = {"type", "title", "status", "detail", "instance", "code", "request_id"}
@@ -42,6 +44,10 @@ def add_test_routes(app: FastAPI) -> None:
     def items(limit: int) -> dict[str, int]:
         return {"limit": limit}
 
+    @router.get("/http-error/{status}")
+    def http_error(status: int) -> None:
+        raise StarletteHTTPException(status_code=status, headers={"Retry-After": "7"})
+
     @router.get("/boom")
     def boom() -> None:
         raise ProgrammingError("SELECT secret_hash FROM api_key", {}, Exception("conexão caiu"))
@@ -71,6 +77,8 @@ def assert_problem(response: httpx.Response, status: int, code: str) -> dict[str
     assert PROBLEM_KEYS <= body.keys() <= PROBLEM_KEYS | {"errors"}
     assert body["status"] == status
     assert body["code"] == code
+    # Um `code` nunca sai com status diferente do catálogo (1.6).
+    assert PROBLEMS[ProblemCode(code)].status == status
     assert body["type"] == "https://goblinshift.dev/problems/" + code.lower().replace("_", "-")
     assert body["request_id"] == response.headers["x-request-id"]
     UUID(body["request_id"])
