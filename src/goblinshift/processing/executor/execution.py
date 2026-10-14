@@ -23,6 +23,7 @@ from goblinshift.processing.executor.job import (
     verified_inputs,
 )
 from goblinshift.processing.executor.report_file import write_report
+from goblinshift.processing.image_forge.inspection import configure_pillow
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.packaging import (
     MANIFEST_NAME,
@@ -59,6 +60,9 @@ def main(argv: Sequence[str]) -> int:
     # `field_size_limit` é estado global do módulo csv e conta caracteres: ajustado uma vez,
     # como proteção grosseira; os limites em bytes ficam com a biblioteca (2.3).
     csv.field_size_limit(Limits().record_bytes)
+    # Segunda barreira do Image Forge contra bomba de descompressão, também global ao processo;
+    # a receita já recusa a imagem grande antes de decodificar e não depende dela.
+    configure_pillow()
     if len(argv) != 1:
         print("uso: python -m goblinshift.processing.executor <work_dir>", file=sys.stderr)
         return ExitCode.INFRASTRUCTURE

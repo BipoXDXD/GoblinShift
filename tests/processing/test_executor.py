@@ -10,13 +10,16 @@ import hashlib
 import json
 import subprocess
 import sys
+import warnings
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from PIL import Image
 
+from goblinshift.processing import image_forge
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor.recipe import MAX_TABLES
 from goblinshift.processing.executor import execution
@@ -308,6 +311,20 @@ def test_ajusta_o_field_size_limit_do_csv_no_inicio(tmp_path: Path) -> None:
         assert csv.field_size_limit() == Limits().record_bytes
     finally:
         csv.field_size_limit(previous)
+
+
+def test_configura_o_pillow_uma_vez_no_inicio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", None)
+
+    with warnings.catch_warnings():
+        assert main([str(work)]) == ExitCode.SUCCEEDED
+
+        assert image_forge.Limits().max_pixels == Image.MAX_IMAGE_PIXELS
+        with pytest.raises(Image.DecompressionBombWarning):
+            warnings.warn("bomba", Image.DecompressionBombWarning, stacklevel=1)
 
 
 def read_manifest(work: Path) -> dict[str, Any]:
