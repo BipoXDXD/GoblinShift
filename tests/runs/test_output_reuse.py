@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.candidates import attempts_with_loose_candidates
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object, upload
 from goblinshift.files.uploads import request_deletion
@@ -87,6 +88,11 @@ def candidates_of(factory: sessionmaker[Session], attempt_id: uuid.UUID) -> int:
     return count
 
 
+def loose_attempts(factory: sessionmaker[Session]) -> list[uuid.UUID]:
+    with factory() as session:
+        return attempts_with_loose_candidates(session, limit=100)
+
+
 def delete_upload(
     factory: sessionmaker[Session], owner_id: uuid.UUID, upload_id: uuid.UUID
 ) -> None:
@@ -137,6 +143,28 @@ def test_saida_identica_a_entrada_aponta_para_o_objeto_da_entrada_sem_candidato(
     assert artifacts["text/nota.txt"][1] == note_object
     # Só relatório, manifesto e pacote viraram candidatos da tentativa.
     assert candidates_of(factory, claimed.attempt_id) == 3
+
+
+def test_entradas_do_mesmo_tamanho_reaproveitam_cada_uma_o_proprio_objeto(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    first, second = png(1), png(2)
+    assert len(first) == len(second)
+    assert first != second
+    run_id = queue_run(
+        factory,
+        storage,
+        create_user(factory),
+        (("um.png", first), ("dois.png", second)),
+        recipe_id=DETOX,
+    )
+
+    coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
+
+    first_object, second_object = input_objects(factory, run_id)
+    artifacts = published(factory, run_id)
+    assert artifacts["images/um.png"][1] == first_object
+    assert artifacts["images/dois.png"][1] == second_object
 
 
 def test_duplicata_aponta_a_unica_saida_para_o_objeto_da_primeira_ocorrencia(
@@ -206,12 +234,15 @@ def test_entrada_excluida_entre_gravar_e_publicar_vira_retentativa_que_grava_cop
     )
     racing.owner_id, racing.upload_id = owner, upload_id
 
-    racing.run(claim(factory, storage))
+    first_attempt = claim(factory, storage)
+    racing.run(first_attempt)
 
     waiting = run_row(factory, run_id)
     assert (waiting["status"], waiting["phase"]) == ("running", "retry_wait")
     assert attempts(factory, run_id)[0]["error_code"] == "EXECUTOR_UNAVAILABLE"
     assert published(factory, run_id) == {}
+    # A retentativa não descarta na hora: a manutenção coleta os candidatos soltos (fatia 4).
+    assert first_attempt.attempt_id in loose_attempts(factory)
     make_eligible_now(factory, run_id)
     coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
     assert run_row(factory, run_id)["status"] == "succeeded"
