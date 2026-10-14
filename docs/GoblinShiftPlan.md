@@ -267,6 +267,7 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 | `AUTHENTICATION_REQUIRED`   | Requisição     | —                    | Credencial ausente ou inválida                              | `401` |
 | `REAUTH_REQUIRED`           | Requisição     | —                    | Refazer login                                               | `401` |
 | `INSUFFICIENT_SCOPE`        | Requisição     | —                    | Recusado (escopo da chave)                                  | `403` |
+| `FORBIDDEN`                 | Requisição     | —                    | Recusado (genérico: acesso negado sem motivo do catálogo)   | `403` |
 | `CSRF_FAILED`               | Requisição     | —                    | Recusado e auditado                                         | `403` |
 | `NOT_FOUND`                 | Requisição     | —                    | Recusado (inexistente ou de outra conta)                    | `404` |
 | `METHOD_NOT_ALLOWED`        | Requisição     | —                    | Recusado, com `Allow`                                       | `405` |
@@ -285,6 +286,7 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 | `RATE_LIMITED`              | Política       | —                    | Recusado, com `Retry-After`                                 | `429` |
 | `INTERNAL_ERROR`            | Servidor       | —                    | Falha inesperada, sem detalhe interno                       | `500` |
 | `QUEUE_FULL`                | Política       | —                    | Recusado, com `Retry-After`                                 | `503` |
+| `SERVICE_UNAVAILABLE`       | Servidor       | —                    | Dependência indisponível (genérico), com `Retry-After`      | `503` |
 | `UNSUPPORTED_FORMAT`        | Item           | Não                  | Arquivo rejeitado; a execução continua                      | —     |
 | `UNSUPPORTED_BIT_DEPTH`     | Item           | Não                  | Arquivo rejeitado; a execução continua                      | —     |
 | `UNSUPPORTED_COLOR_PROFILE` | Item           | Não                  | Arquivo rejeitado; a execução continua                      | —     |
@@ -301,7 +303,7 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 | `INFRA_POISON`              | Parada         | Não                  | `failed`                                                    | —     |
 | `CANCELED`                  | Parada         | Não                  | `canceled`                                                  | —     |
 
-Os códigos genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`) cobrem os status da tabela acima que não tinham código próprio. O status de cada `code` sai do catálogo em `entrypoints/api/problems.py`, para que um código nunca apareça com dois status. A URI de `type` é `https://goblinshift.dev/problems/<code-em-kebab>` (por exemplo, `.../problems/body-too-large`), gerada por `ProblemCode.type_uri` no mesmo arquivo; é um identificador estável, não precisa ser navegável.
+Os códigos genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os status da tabela acima que não tinham código próprio. O status de cada `code` sai do catálogo em `entrypoints/api/problems.py`, para que um código nunca apareça com dois status; um erro HTTP do framework com status fora do catálogo sai como `BAD_REQUEST` (4xx) ou `INTERNAL_ERROR` (5xx), com o status do catálogo. A URI de `type` é `https://goblinshift.dev/problems/<code-em-kebab>` (por exemplo, `.../problems/body-too-large`), gerada por `ProblemCode.type_uri` no mesmo arquivo; é um identificador estável, não precisa ser navegável.
 
 No código das receitas, a classe sai do tipo levantado: `ItemRejected(code)` vira rejeição por item no relatório, `RecipeFailure(code)` é falha determinística, e qualquer outra exceção é tratada como infraestrutura (transitória). Só dois lugares traduzem exceções: o handler do FastAPI e o laço do worker.
 
