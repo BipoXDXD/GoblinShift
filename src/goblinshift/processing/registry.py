@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
-from goblinshift.processing.csv_janitor import Params, params_from_mapping
-from goblinshift.processing.csv_janitor import recipe as csv_janitor
+from goblinshift.processing import csv_janitor, downloads_detox, image_forge
+from goblinshift.processing.csv_janitor import recipe as csv_janitor_recipe
+from goblinshift.processing.downloads_detox import DownloadsDetoxV1
+from goblinshift.processing.image_forge.recipe import ImageForgeV1
 from goblinshift.processing.recipe import InputFile, OutputDir, Progress, Recipe, Report
 
 type RecipeKey = tuple[str, int]
@@ -42,8 +44,20 @@ class _Bound[P]:
         return self.recipe.run(self.parse_params(raw_params), inputs, out, progress)
 
 
-_CSV_JANITOR_V1: _Bound[Params] = _Bound(params_from_mapping, csv_janitor.CsvJanitorV1())
+_CSV_JANITOR_V1: _Bound[csv_janitor.Params] = _Bound(
+    csv_janitor.params_from_mapping, csv_janitor_recipe.CsvJanitorV1()
+)
+_IMAGE_FORGE_V1: _Bound[image_forge.Params] = _Bound(
+    image_forge.params_from_mapping, ImageForgeV1()
+)
+_DOWNLOADS_DETOX_V1: _Bound[downloads_detox.Params] = _Bound(
+    downloads_detox.params_from_mapping, DownloadsDetoxV1()
+)
 
 RECIPES: Mapping[RecipeKey, RegisteredRecipe] = MappingProxyType(
-    {(csv_janitor.RECIPE_ID, csv_janitor.VERSION): _CSV_JANITOR_V1}
+    {
+        (csv_janitor_recipe.RECIPE_ID, csv_janitor_recipe.VERSION): _CSV_JANITOR_V1,
+        (image_forge.RECIPE_ID, image_forge.VERSION): _IMAGE_FORGE_V1,
+        (downloads_detox.RECIPE_ID, downloads_detox.VERSION): _DOWNLOADS_DETOX_V1,
+    }
 )

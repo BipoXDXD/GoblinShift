@@ -6,7 +6,6 @@ completo volta ao executor, e o worker decide `failed` com `NO_VALID_OUTPUTS` na
 (docs/GoblinShiftPlan.md, 3.5), sem perder o motivo de cada rejeição.
 """
 
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import asdict
 from typing import assert_never
@@ -15,8 +14,8 @@ from goblinshift.processing.csv_janitor.janitor import clean_table
 from goblinshift.processing.csv_janitor.limits import Limits
 from goblinshift.processing.csv_janitor.params import Params
 from goblinshift.processing.csv_janitor.results import TableCleaned, TableRejected
+from goblinshift.processing.names import safe_stem
 from goblinshift.processing.recipe import (
-    InputContractError,
     InputFile,
     ItemOk,
     ItemRejected,
@@ -25,6 +24,7 @@ from goblinshift.processing.recipe import (
     Progress,
     Report,
     ReportWarning,
+    require_max_inputs,
 )
 
 RECIPE_ID = "csv-janitor"
@@ -32,7 +32,6 @@ VERSION = 1
 MAX_TABLES = 5
 OUTPUT_EXTENSION = ".csv"
 FALLBACK_STEM = "tabela"
-_UNSAFE_REPLACEMENT = "_"
 
 
 class CsvJanitorV1:
@@ -43,10 +42,7 @@ class CsvJanitorV1:
     def run(
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
-        if len(inputs) > self._max_tables:
-            raise InputContractError(
-                f"{len(inputs)} tabelas; o limite por execução é {self._max_tables}"
-            )
+        require_max_inputs(inputs, self._max_tables, "tabelas")
         items: list[ItemOk | ItemRejected] = []
         for table in inputs:
             items.append(self._clean_one(table, params, out))
@@ -77,17 +73,5 @@ class CsvJanitorV1:
 
 
 def output_name(original_name: str) -> str:
-    """Radical do nome original, sem caracteres que não cabem num componente, com `.csv`.
-
-    O nome original é dado, nunca caminho: separadores e controles viram `_`, e pontos iniciais
-    saem para a saída não virar arquivo oculto nem `..`.
-    """
-    stem, dot, _ = original_name.rpartition(".")
-    if not dot or not stem:
-        stem = original_name
-    safe = "".join(_UNSAFE_REPLACEMENT if _is_unsafe(char) else char for char in stem)
-    return (safe.lstrip(".") or FALLBACK_STEM) + OUTPUT_EXTENSION
-
-
-def _is_unsafe(char: str) -> bool:
-    return char in ("/", "\\") or unicodedata.category(char) == "Cc"
+    """Radical seguro do nome original (`names.safe_stem`) com `.csv`."""
+    return safe_stem(original_name, FALLBACK_STEM) + OUTPUT_EXTENSION

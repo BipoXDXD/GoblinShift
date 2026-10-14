@@ -9,6 +9,7 @@ nesse momento (`scope="function"`), então o encerramento abre a sua pela factor
 import logging
 from datetime import datetime
 from functools import partial
+from pathlib import PurePosixPath
 from uuid import UUID
 
 from fastapi import APIRouter, Request
@@ -116,7 +117,8 @@ def download_artifact(
     return DownloadResponse(
         file,
         size=ticket.size_bytes,
-        filename=ticket.file_name,
+        # Saídas em grupo guardam o caminho ("images/foto.jpg"); o anexo leva só o nome (ADR 019).
+        filename=PurePosixPath(ticket.file_name).name,
         timeouts=timeouts_of(request),
         on_close=finish,
     )

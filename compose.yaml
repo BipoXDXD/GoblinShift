@@ -5,6 +5,15 @@
 
 name: goblinshift
 
+# Rotação por serviço (docs/GoblinShiftPlan.md, 1.7 e 3.8): até 50 MiB por serviço, dimensionado
+# para cobrir 14 dias no volume previsto. Fica aqui, e não no /etc/docker/daemon.json, porque a
+# VPS é compartilhada e o daemon.json vale para os containers de todos os projetos.
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "5"
+
 x-app: &app
   image: ghcr.io/bipoxdxd/goblinshift:${GS_IMAGE_TAG:-dev}
   build:
@@ -23,6 +32,7 @@ x-app: &app
     FORWARDED_ALLOW_IPS: 172.30.0.0/24,172.31.0.2
   secrets: [db_password]
   networks: [internal]
+  logging: *logging
 
 # Storage privado (docs/GoblinShiftPlan.md, 3.6): local num volume; na VPS, o filesystem de
 # tamanho fixo /srv/goblinshift/storage (deploy/release.sh).
@@ -46,6 +56,7 @@ services:
       retries: 20
     networks: [internal]
     restart: unless-stopped
+    logging: *logging
 
   migrate:
     <<: *app
@@ -127,6 +138,7 @@ services:
         condition: service_healthy
     networks: [internal]
     restart: unless-stopped
+    logging: *logging
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.162.0
@@ -140,6 +152,7 @@ services:
         condition: service_started
     networks: [internal]
     restart: unless-stopped
+    logging: *logging
 
   openobserve:
     image: openobserve/openobserve:v1.0.4
@@ -156,6 +169,7 @@ services:
       - "127.0.0.1:${GS_OPENOBSERVE_PORT:-5080}:5080"
     networks: [internal]
     restart: unless-stopped
+    logging: *logging
 
 secrets:
   db_password:
