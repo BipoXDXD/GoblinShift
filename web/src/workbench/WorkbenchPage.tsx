@@ -3,10 +3,9 @@ import type { ReactElement } from "react";
 import { useParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
-import { ApiError } from "../api/response";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { CATALOG_QUERY_KEY, findCatalogVersion, getCatalog } from "../catalog/api";
-import { ProblemAlert } from "../components/feedback/ProblemAlert";
+import { QueryFailure } from "../components/feedback/QueryFailure";
 import { findRecipe, type RecipeModule } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
@@ -47,15 +46,7 @@ function CatalogGate({ recipe, uploadServices }: CatalogGateProps): ReactElement
     return (
       <div className="flex flex-col gap-8">
         <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
-        {catalog.error === null ? (
-          <p className="text-fg-muted">{TEXT.workbench.loadingCatalog}</p>
-        ) : (
-          <ProblemAlert
-            failure={
-              catalog.error instanceof ApiError ? catalog.error.failure : { kind: "internal" }
-            }
-          />
-        )}
+        <CatalogPending error={catalog.error} />
       </div>
     );
   }
@@ -75,4 +66,13 @@ function CatalogGate({ recipe, uploadServices }: CatalogGateProps): ReactElement
     );
   }
   return <Workbench recipe={recipe} form={form} uploadServices={uploadServices} />;
+}
+
+/** Enquanto não há catálogo: carregando, sem login (aviso, não erro) ou a falha em texto. */
+function CatalogPending({ error }: { readonly error: Error | null }): ReactElement {
+  return error === null ? (
+    <p className="text-fg-muted">{TEXT.workbench.loadingCatalog}</p>
+  ) : (
+    <QueryFailure error={error} />
+  );
 }

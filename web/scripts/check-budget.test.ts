@@ -37,7 +37,38 @@ describe("budgetViolations", () => {
   });
 
   it("chunk carregado depois não conta no JS inicial", () => {
-    expect(budgetViolations([...WITHIN, file("assets/Lazy-x.js", 500 * KB)], INDEX)).toEqual([]);
+    expect(
+      budgetViolations([...WITHIN, file("assets/Lazy-x.js", 200 * KB, 240 * KB)], INDEX),
+    ).toEqual([]);
+  });
+
+  describe("tamanho cru de cada chunk (divisão por rota)", () => {
+    it("chunk de 250 KB crus ainda cabe", () => {
+      expect(
+        budgetViolations([...WITHIN, file("assets/Rota-x.js", 80 * KB, 250 * KB)], INDEX),
+      ).toEqual([]);
+    });
+
+    it("um byte acima de 250 KB crus passa do teto, mesmo fora do carregamento inicial", () => {
+      expect(
+        budgetViolations([...WITHIN, file("assets/Rota-x.js", 80 * KB, 250 * KB + 1)], INDEX),
+      ).toEqual(["Chunk assets/Rota-x.js: 250,0 KB crus passa do teto de 250 KB"]);
+    });
+
+    it("vale também para o chunk de entrada", () => {
+      const files = WITHIN.map((entry) =>
+        entry.path === "assets/index-abc.js" ? file(entry.path, 120 * KB, 251 * KB) : entry,
+      );
+      expect(budgetViolations(files, INDEX)).toEqual([
+        "Chunk assets/index-abc.js: 251,0 KB crus passa do teto de 250 KB",
+      ]);
+    });
+
+    it("o chunk do 3D fica de fora: ele tem o teto próprio do ADR 027", () => {
+      expect(
+        budgetViolations([...WITHIN, file("assets/oficina-3d-x.js", 200 * KB, 700 * KB)], INDEX),
+      ).toEqual([]);
+    });
   });
 
   it("CSS acima do teto", () => {

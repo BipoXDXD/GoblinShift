@@ -3,6 +3,7 @@ import { useId, type ReactElement } from "react";
 import { Link } from "react-router";
 
 import { FocusHeading } from "../components/a11y/FocusHeading";
+import { RecentRuns } from "../history/RecentRuns";
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
@@ -13,8 +14,8 @@ const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
 
 /**
  * Oficina (2.2): a abertura e as receitas. A ação são os cartões, então a tela não tem botão
- * primário. A cena da oficina (P11) e as execuções recentes entram com a arte e com a listagem
- * de GET /runs.
+ * primário; as execuções recentes vêm depois das receitas. A cena da oficina (P11) entra com a
+ * arte.
  */
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
@@ -47,6 +48,8 @@ export function HomePage(): ReactElement {
                 className="card-link inline-flex min-h-11 items-center gap-1 font-semibold"
               >
                 {T.openWorkbench}
+                {/* O espaço fica fora do sr-only: fora do fluxo, o span perde o espaço inicial,
+                    e o nome acessível juntava as palavras ("Bancadada"). */}{" "}
                 <span className="sr-only">{T.openWorkbenchOf(recipe.title)}</span>
                 <ChevronRight aria-hidden="true" className="size-4" />
               </Link>
@@ -54,6 +57,7 @@ export function HomePage(): ReactElement {
           ))}
         </ul>
       </section>
+      <RecentRuns />
     </div>
   );
 }

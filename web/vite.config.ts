@@ -7,6 +7,18 @@ export default defineConfig({
   build: {
     // Sem source map no bundle publicado: o fonte embutido vazaria comentários (ETS item 73).
     sourcemap: false,
+    rolldownOptions: {
+      output: {
+        // O framework muda pouco: em chunks próprios, o cache do navegador sobrevive aos deploys da
+        // interface, e nenhum chunk chega perto do teto de tamanho cru do orçamento.
+        advancedChunks: {
+          groups: [
+            { name: "react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: "router", test: /node_modules[\\/]react-router[\\/]/ },
+          ],
+        },
+      },
+    },
   },
   test: {
     environment: "jsdom",
