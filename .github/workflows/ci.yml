@@ -47,6 +47,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - name: Contrato OpenAPI → tipos gerados em dia
+        # O pytest (job Verificações) garante que openapi/openapi.json acompanha a API; aqui, que
+        # os tipos TypeScript acompanham o openapi.json versionado.
+        run: |
+          npm run generate:api
+          git diff --exit-code -- openapi src/api/schema.d.ts
       - name: Tipos (tsc, separado do build)
         run: npm run typecheck
       - name: ESLint

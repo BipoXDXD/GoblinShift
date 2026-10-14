@@ -22,6 +22,7 @@ dependencies = [
 [project.scripts]
 gs-admin = "goblinshift.entrypoints.admin_cli:main"
 gs-csv-janitor = "goblinshift.entrypoints.csv_janitor_cli:main"
+gs-export-openapi = "goblinshift.entrypoints.openapi_export:main"
 gs-maintenance = "goblinshift.entrypoints.maintenance:main"
 gs-worker = "goblinshift.entrypoints.worker:main"
 

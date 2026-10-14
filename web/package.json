@@ -30,6 +30,7 @@
     "globals": "17.13.0",
     "jsdom": "30.1.2",
     "knip": "6.41.0",
+    "openapi-typescript": "7.13.0",
     "prettier": "3.9.10",
     "tailwindcss": "4.3.3",
     "type-coverage": "2.30.4",
@@ -50,9 +51,15 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "knip": "knip",
-    "type-coverage": "type-coverage -p tsconfig.app.json --strict --at-least 100 --detail"
+    "type-coverage": "type-coverage -p tsconfig.app.json --strict --at-least 100 --detail",
+    "generate:api": "openapi-typescript openapi/openapi.json --output src/api/schema.d.ts"
   },
   "allowScripts": {
     "fsevents": false
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   }
 }
