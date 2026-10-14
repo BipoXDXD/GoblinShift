@@ -242,9 +242,10 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
+        sa.Column("executor_started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error_code", sa.Text(), nullable=True),
-        sa.CheckConstraint("number BETWEEN 1 AND 2", name=op.f("attempt_number_check")),
+        sa.CheckConstraint("number BETWEEN 1 AND 4", name=op.f("attempt_number_check")),
         sa.ForeignKeyConstraint(
             ["run_id"], ["run.id"], name=op.f("attempt_run_id_fkey"), ondelete="CASCADE"
         ),
