@@ -46,6 +46,16 @@ describe("App", () => {
     ]);
   });
 
+  it("o nome acessível do link de cada cartão separa as palavras", async () => {
+    window.history.pushState({}, "", "/");
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("link", { name: "Abrir a Bancada da CSV Janitor" }),
+    ).toHaveAttribute("href", "/bancada/csv-janitor");
+  });
+
   it("mostra página não encontrada para rota desconhecida", () => {
     window.history.pushState({}, "", "/rota-que-nao-existe");
 

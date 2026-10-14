@@ -77,7 +77,7 @@ export const TEXT = {
     recipesHeading: "Receitas",
     openWorkbench: "Abrir a Bancada",
     // Completa o nome acessível do link sem repetir o título do cartão na tela.
-    openWorkbenchOf: (recipe: string) => ` da ${recipe}`,
+    openWorkbenchOf: (recipe: string) => `da ${recipe}`,
     summaries: {
       "csv-janitor":
         "Limpa tabelas CSV: espaços nas pontas, duplicatas, colunas, caixa e filtros, sem adivinhar o significado dos dados.",

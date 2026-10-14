@@ -204,7 +204,8 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
         >
           <Download aria-hidden="true" className="size-6" />
           {T.results.download(artifact.file_name)}
-          <span className="sr-only"> ({T.results.roles[artifact.role]})</span>
+          {/* Espaço fora do sr-only, que fora do fluxo perde o espaço inicial (HomePage). */}{" "}
+          <span className="sr-only">({T.results.roles[artifact.role]})</span>
         </a>
       ))}
       {others.length > 0 && (
