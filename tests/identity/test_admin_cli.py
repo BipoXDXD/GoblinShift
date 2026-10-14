@@ -170,8 +170,8 @@ def storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FileStorage:
 
 
 @pytest.fixture(autouse=True)
-def stand_ins(monkeypatch: pytest.MonkeyPatch, factory: sessionmaker[Session]) -> None:
-    install_domain_stand_ins(monkeypatch, factory)
+def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_domain_stand_ins(monkeypatch)
 
 
 def status_of(factory: sessionmaker[Session], user_id: str) -> str:

@@ -22,7 +22,7 @@ from goblinshift.identity import (
 from goblinshift.identity.accounts import list_accounts, list_pending_accounts
 from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
-from tests.identity.pending_fronts import install_domain_stand_ins
+from tests.identity.pending_fronts import install_domain_stand_ins, is_stub
 from tests.identity.support import new_key, new_user
 
 pytestmark = pytest.mark.integration
@@ -31,8 +31,8 @@ NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
-def stand_ins(monkeypatch: pytest.MonkeyPatch, factory: sessionmaker[Session]) -> None:
-    install_domain_stand_ins(monkeypatch, factory)
+def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_domain_stand_ins(monkeypatch)
 
 
 def new_web_session(factory: sessionmaker[Session], user_id: UUID) -> UUID:
@@ -196,6 +196,11 @@ def test_chave_de_conta_em_exclusao_nao_autentica_mesmo_sem_revogacao(
 
 # --- Login (Frente A) -------------------------------------------------------------------------
 
+# Enquanto `resolve_login` for o stub da Fase 0; com a Frente A, os testes valem de verdade.
+_until_front_a = pytest.mark.xfail(
+    is_stub(resolve_login), raises=NotImplementedError, strict=True, reason="Frente A"
+)
+
 
 def _identity_of(factory: sessionmaker[Session], user_id: UUID) -> ExternalIdentity:
     row = account_row(factory, user_id)
@@ -204,7 +209,7 @@ def _identity_of(factory: sessionmaker[Session], user_id: UUID) -> ExternalIdent
     )
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="resolve_login é da Frente A")
+@_until_front_a
 def test_conta_em_exclusao_nao_loga(factory: sessionmaker[Session]) -> None:
     user_id = new_user(factory)
     with unit_of_work(factory) as session:
@@ -216,7 +221,7 @@ def test_conta_em_exclusao_nao_loga(factory: sessionmaker[Session]) -> None:
     assert outcome is LoginRefused.DELETION_REQUESTED
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="resolve_login é da Frente A")
+@_until_front_a
 def test_conta_bloqueada_nao_completa_login(factory: sessionmaker[Session]) -> None:
     user_id = new_user(factory)
     with unit_of_work(factory) as session:

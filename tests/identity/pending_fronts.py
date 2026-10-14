@@ -1,19 +1,20 @@
-"""Substitutos provisórios das funções das Frentes B e D que a Frente C chama (fatia 6).
+"""Substitutos provisórios das funções das Frentes A, B e D que a Frente C usa (fatia 6).
 
-A Frente C desenvolve em paralelo com B (sessões) e D (capacidade), cujas funções ainda são os
-stubs da Fase 0. Cada substituto só entra se a função real ainda levantar `NotImplementedError`:
-depois do merge da frente dona, a função real roda nos mesmos testes, sem edição, e este arquivo
-pode sair na Fase final.
+A Frente C desenvolve em paralelo com A (login), B (sessões) e D (capacidade), cujas funções ainda
+são os stubs da Fase 0. Cada substituto só entra se a função real ainda for o stub, reconhecido
+pelo código e não por uma chamada (a assinatura das dependências pode mudar na frente dona):
+depois do merge, a função real roda nos mesmos testes, sem edição, e este arquivo sai na Fase
+final.
 """
 
 from collections.abc import Callable
-from datetime import UTC, datetime
-from uuid import UUID, uuid7
+from datetime import datetime
+from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import delete, func, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.capacity.tables import capacity_pool, resource_reservation
@@ -29,54 +30,26 @@ from goblinshift.identity import Principal, sessions
 from goblinshift.identity.sessions import RECENT_AUTH_WINDOW
 from goblinshift.identity.tables import api_key, web_session
 
-_PROBE_TIME = datetime(2026, 1, 1, tzinfo=UTC)
+
+def is_stub(function: Callable[..., object]) -> bool:
+    """O corpo da Fase 0 só levanta `NotImplementedError`; a implementação real não o cita."""
+    return "NotImplementedError" in function.__code__.co_names
 
 
-def install_domain_stand_ins(
-    monkeypatch: pytest.MonkeyPatch, factory: sessionmaker[Session]
-) -> None:
+def install_domain_stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
     """`revoke_all_credentials` (B) e `capacity.purge_owner` (D), se ainda forem stubs."""
-    if _raises_not_implemented(
-        factory, lambda s: sessions.revoke_all_credentials(s, uuid7(), _PROBE_TIME)
-    ):
+    if is_stub(sessions.revoke_all_credentials):
         monkeypatch.setattr(sessions, "revoke_all_credentials", _revoke_all_credentials)
-    if _raises_not_implemented(factory, lambda s: capacity.purge_owner(s, uuid7())):
+    if is_stub(capacity.purge_owner):
         monkeypatch.setattr(capacity, "purge_owner", _purge_capacity)
 
 
 def install_route_stand_ins(app: FastAPI) -> None:
     """`require_session` e `require_recent_session` (B), se ainda forem stubs."""
-    key = Principal(owner_id=uuid7(), scopes=frozenset(), via="api_key")
-    try:
-        require_session(key)
-    except NotImplementedError:
+    if is_stub(require_session):
         app.dependency_overrides[require_session] = _require_session
-    except ApiProblem:
-        pass
-    session = Principal(
-        owner_id=uuid7(),
-        scopes=frozenset(),
-        via="session",
-        session_id=uuid7(),
-        authenticated_at=_PROBE_TIME,
-    )
-    try:
-        require_recent_session(session, _PROBE_TIME)
-    except NotImplementedError:
+    if is_stub(require_recent_session):
         app.dependency_overrides[require_recent_session] = _require_recent_session
-
-
-def _raises_not_implemented(
-    factory: sessionmaker[Session], probe: Callable[[Session], object]
-) -> bool:
-    with factory() as session:
-        try:
-            probe(session)
-        except NotImplementedError:
-            return True
-        finally:
-            session.rollback()
-    return False
 
 
 def _revoke_all_credentials(session: Session, owner_id: UUID, now: datetime) -> None:

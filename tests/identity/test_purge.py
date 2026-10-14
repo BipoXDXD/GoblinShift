@@ -34,8 +34,8 @@ LIMIT = 500
 
 
 @pytest.fixture(autouse=True)
-def stand_ins(monkeypatch: pytest.MonkeyPatch, factory: sessionmaker[Session]) -> None:
-    install_domain_stand_ins(monkeypatch, factory)
+def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_domain_stand_ins(monkeypatch)
 
 
 def insert_web_session(

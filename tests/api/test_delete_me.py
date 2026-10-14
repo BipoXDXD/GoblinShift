@@ -28,10 +28,8 @@ NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
-def sessions(
-    app: FastAPI, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
-) -> FakeSessions:
-    install_domain_stand_ins(monkeypatch, factory)
+def sessions(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> FakeSessions:
+    install_domain_stand_ins(monkeypatch)
     return FakeSessions(app, NOW)
 
 
