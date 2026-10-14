@@ -152,7 +152,7 @@ def test_stopping_com_lease_vencido_para_o_executor_e_confirma(
     worker = coordinator(factory, storage, runner)
     claimed = claim(factory, storage)
     worker.prepare(claimed)
-    runner.start(claimed.attempt_id)
+    runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     # O worker sumiu aqui: ninguém renova o lease nem atende ao cancelamento.
     cancel_run(factory, storage, owner, run_id)

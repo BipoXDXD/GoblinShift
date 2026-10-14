@@ -4,8 +4,9 @@ A interface é a do `executor-ctl` da fatia 4: `start` idempotente pelo nome det
 `status`, `stop` com carência e `remove`. Nada nela diz como o executor roda; o worker só prepara
 a área de trabalho (`work_dir`) e coleta o que o executor deixou em `out/`.
 
-`LocalRunner` roda o executor em subprocesso, sem sandbox. Só existe fora de produção, ou em
-produção com confirmação explícita até a fatia 4 (`GS_ALLOW_LOCAL_RUNNER`).
+Duas implementações: `ExecutorCtlRunner` (produção, container gVisor por tentativa criado pelo
+serviço do host) e `LocalRunner`, que roda o executor em subprocesso, sem sandbox, e só existe
+fora de produção (o processo recusa subir com ele em produção; 3.9, fatia 4).
 
 Como o executor sobrevive ao worker
 -----------------------------------
@@ -43,11 +44,19 @@ from goblinshift.runs.store import container_name
 
 # Teto da carência de `stop` (3.5: "concede até 10 segundos e força o encerramento").
 MAX_STOP_GRACE = timedelta(seconds=10)
+# Layout da área de trabalho (contrato da fatia 4): o executor (outro usuário, mesmo grupo) lê
+# `job.json` e `inputs/` e escreve em `/work` e `out/`; o setgid faz tudo herdar o grupo.
+WORK_DIR_MODE = 0o2770
+INPUTS_DIR_MODE = 0o2750
+OUT_DIR_MODE = 0o2770
+INPUTS_DIR = "inputs"
+OUT_DIR = "out"
 # Depois do SIGKILL, quanto esperar o sistema confirmar que o grupo sumiu.
 KILL_CONFIRM_TIMEOUT_S = 5.0
 # O lançador só grava o grupo e se desdobra; demorar mais que isto é defeito.
 LAUNCH_TIMEOUT_S = 10.0
 _POLL_S = 0.05
+_UUID_CHARS = len(str(uuid.UUID(int=0)))
 
 EXECUTOR_MODULE = "goblinshift.processing.executor"
 SUPERVISOR_MODULE = "goblinshift.runs.worker.local_supervisor"
@@ -69,8 +78,10 @@ class ExecutorStatus:
     phase: ExecutorPhase
     # Código de saída do executor; `None` se ainda roda ou se morreu sem relatá-lo (sinal).
     exit_code: int | None = None
-    # O supervisor encerrou o executor pelo teto de duração da tentativa.
+    # O executor foi encerrado pelo teto de duração da tentativa.
     timed_out: bool = False
+    # O kernel matou o executor por falta de memória (limite do container).
+    oom_killed: bool = False
 
     @property
     def is_running(self) -> bool:
@@ -91,8 +102,16 @@ class Runner(Protocol):
         """Área de trabalho da tentativa, preparada pelo worker antes do `start`."""
         ...
 
-    def start(self, attempt_id: uuid.UUID) -> ExecutorStatus:
-        """Inicia o executor; repetir adota o existente em vez de criar outro."""
+    def create_work_dir(self, attempt_id: uuid.UUID) -> Path:
+        """Cria a área vazia da tentativa (`inputs/` e `out/`) com as permissões do executor."""
+        ...
+
+    def list_work(self) -> list[uuid.UUID]:
+        """Tentativas que ainda têm área de trabalho (para a manutenção limpar as encerradas)."""
+        ...
+
+    def start(self, attempt_id: uuid.UUID, image: str) -> ExecutorStatus:
+        """Inicia o executor com a imagem fixada na Run; repetir adota o existente."""
         ...
 
     def status(self, attempt_id: uuid.UUID) -> ExecutorStatus: ...
@@ -121,7 +140,26 @@ class LocalRunner:
     def work_dir(self, attempt_id: uuid.UUID) -> Path:
         return self._root / container_name(attempt_id)
 
-    def start(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+    def create_work_dir(self, attempt_id: uuid.UUID) -> Path:
+        self._root.mkdir(parents=True, exist_ok=True)
+        work_dir = self.work_dir(attempt_id)
+        create_work_layout(work_dir, group=None)
+        return work_dir
+
+    def list_work(self) -> list[uuid.UUID]:
+        if not self._root.is_dir():
+            return []
+        found = {
+            attempt_id
+            for entry in self._root.iterdir()
+            if (attempt_id := parse_attempt_id(entry.name[-_UUID_CHARS:])) is not None
+            and self.work_dir(attempt_id) == entry
+        }
+        return sorted(found)
+
+    def start(self, attempt_id: uuid.UUID, image: str) -> ExecutorStatus:
+        """Roda o código do próprio repositório: `image` só existe para o contrato do Runner."""
+        del image
         meta = self._meta_dir(attempt_id)
         meta.mkdir(parents=True, exist_ok=True)
         try:
@@ -179,6 +217,28 @@ class LocalRunner:
     def _meta_dir(self, attempt_id: uuid.UUID) -> Path:
         # Fora da área do executor: ele não lê nem adultera o que o supervisor registra.
         return self._root / f"{container_name(attempt_id)}.runner"
+
+
+def create_work_layout(work_dir: Path, *, group: int | None) -> None:
+    """Recria `work_dir` vazio com `inputs/` e `out/`; com `group`, o diretório passa a ele."""
+    shutil.rmtree(work_dir, ignore_errors=True)
+    work_dir.mkdir(mode=0o700)
+    if group is not None:
+        os.chown(work_dir, -1, group)
+    work_dir.chmod(WORK_DIR_MODE)
+    for name, mode in ((INPUTS_DIR, INPUTS_DIR_MODE), (OUT_DIR, OUT_DIR_MODE)):
+        child = work_dir / name
+        child.mkdir(mode=0o700)
+        child.chmod(mode)
+
+
+def parse_attempt_id(name: str) -> uuid.UUID | None:
+    """O nome de uma área de tentativa é o UUID canônico; o resto (`lost+found`) não é."""
+    try:
+        parsed = uuid.UUID(name)
+    except ValueError:
+        return None
+    return parsed if str(parsed) == name else None
 
 
 def _read_pgid(meta: Path) -> int | None:

@@ -47,6 +47,8 @@ class ClaimedAttempt:
     number: int
     recipe_id: str
     recipe_version: int
+    # Imagem do executor fixada na aceitação (`run.executor_digest`), enviada no `start`.
+    executor_image: str
     parameters: dict[str, object]
     # Uploads de entrada, na ordem das posições.
     input_upload_ids: tuple[uuid.UUID, ...]
@@ -87,9 +89,13 @@ def _claim_one(session: Session, lease: timedelta) -> ClaimedAttempt | Applied |
     if applied.started_attempt_id is None:
         return applied
     details = session.execute(
-        select(run.c.recipe_id, run.c.recipe_version, run.c.parameters, run.c.traceparent).where(
-            run.c.id == run_id
-        )
+        select(
+            run.c.recipe_id,
+            run.c.recipe_version,
+            run.c.executor_digest,
+            run.c.parameters,
+            run.c.traceparent,
+        ).where(run.c.id == run_id)
     ).one()
     inputs = session.execute(
         select(run_input.c.upload_id)
@@ -104,6 +110,7 @@ def _claim_one(session: Session, lease: timedelta) -> ClaimedAttempt | Applied |
         number=applied.state.claim_count,
         recipe_id=details.recipe_id,
         recipe_version=details.recipe_version,
+        executor_image=details.executor_digest,
         parameters=dict(details.parameters),
         input_upload_ids=tuple(inputs),
         traceparent=details.traceparent,
