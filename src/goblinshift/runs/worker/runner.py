@@ -254,13 +254,17 @@ def _group_alive(pgid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        # O grupo existe, mas é de outro usuário: para o Runner, ainda está vivo.
+        # O grupo existe, mas é de outro usuário ou (no macOS) só tem zumbis ainda não colhidos
+        # pelo init: para o Runner, ainda está vivo até sumir.
         return True
     return True
 
 
 def _signal_group(pgid: int, signum: signal.Signals) -> None:
-    with contextlib.suppress(ProcessLookupError):
+    # EPERM não é falha da parada: no macOS, o grupo que acabou de morrer responde assim até o
+    # init colher os zumbis, e um grupo de outro usuário não é nosso para sinalizar. Quem decide
+    # o desfecho é a espera seguinte pelo fim do grupo.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pgid, signum)
 
 
