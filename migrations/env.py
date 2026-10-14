@@ -5,6 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 
 # As tabelas de cada módulo se registram no MetaData comum ao serem importadas.
+import goblinshift.capacity.tables
 import goblinshift.files.tables
 import goblinshift.identity.tables
 import goblinshift.runs.tables  # noqa: F401

@@ -10,16 +10,17 @@ from goblinshift.identity import IssuedKey, Scope, create_admin_user, issue_key
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
-from tests.conftest import run_migrations
+from tests.conftest import restore_capacity_seed, run_migrations
 
 ALL_SCOPES = frozenset(Scope)
 
 
 def prepare_database(settings: Settings, engine: Engine) -> None:
-    """Schema no head e tabelas de identidade vazias (com o que depende delas)."""
+    """Schema no head, tabelas de identidade vazias (com o que depende delas) e o pool global."""
     run_migrations(settings, "head")
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE app_user, api_key CASCADE"))
+        conn.execute(text("TRUNCATE app_user, api_key, audit_event, login_state CASCADE"))
+        restore_capacity_seed(conn)
 
 
 def new_user(factory: sessionmaker[Session], *, blocked: bool = False) -> UUID:

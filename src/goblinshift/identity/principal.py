@@ -5,6 +5,7 @@ entrypoints, que decidem a autorização por escopo antes de chamar os serviços
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -27,10 +28,27 @@ class Scope(StrEnum):
 
 @dataclass(frozen=True)
 class Principal:
+    """Credencial já autenticada: sessão web ou chave de API.
+
+    A sessão usa as permissões da conta, isto é, todos os escopos (1.6); a chave, só os seus.
+    `session_id` e `authenticated_at` (login no provedor, base da autenticação recente de 10 min)
+    existem só na sessão.
+    """
+
     owner_id: UUID
     scopes: frozenset[Scope]
-    # Só chaves na fatia 3; a sessão web ("session") chega na fatia 6.
-    via: Literal["api_key"]
+    via: Literal["session", "api_key"]
+    session_id: UUID | None = None
+    authenticated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        has_session_data = self.session_id is not None or self.authenticated_at is not None
+        if self.via == "api_key" and has_session_data:
+            raise ValueError("credencial de chave não tem sessão nem login no provedor")
+        if self.via == "session" and (self.session_id is None or self.authenticated_at is None):
+            raise ValueError("credencial de sessão exige session_id e authenticated_at")
+        if self.authenticated_at is not None and self.authenticated_at.tzinfo is None:
+            raise ValueError("authenticated_at precisa de fuso horário")
 
 
 class InvalidScopesError(ValueError):

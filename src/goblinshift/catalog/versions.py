@@ -140,8 +140,7 @@ IMAGE_FORGE_V1 = RecipeVersion(
 )
 
 # O teto do lote fica abaixo dos 480 MiB de conteúdo de saída (1.7): o Detox copia cada entrada
-# aceita. A aceitação só passa a impô-lo com as cotas (fatia 6); até lá, o excesso falha na
-# receita com OUTPUT_LIMIT_EXCEEDED (ambiguidade A12 do plano da fatia 5).
+# aceita. A aceitação o impõe (`max_total_input_bytes` → 422) antes de reservar o teto de saída.
 DOWNLOADS_DETOX_V1 = RecipeVersion(
     recipe_id=downloads_detox.RECIPE_ID,
     version=downloads_detox.VERSION,
