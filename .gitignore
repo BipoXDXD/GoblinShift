@@ -31,5 +31,8 @@ build/
 # Worktrees temporários do fonte externa
 .fonte externa/worktrees/
 
+# Estado local do servidor MCP Serena
+.serena/
+
 # Banco de exemplos do Hypothesis
 .hypothesis/
