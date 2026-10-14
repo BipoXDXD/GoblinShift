@@ -4,9 +4,17 @@ from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
+
+MIN_SECRET_CHARS = 32
+# Só para desenvolvimento e testes; em produção a ausência do segredo impede a API de subir.
+_DEV_CURSOR_KEY = "goblinshift-dev-only-cursor-key-not-a-secret"
+
+
+class MissingSecretError(RuntimeError):
+    """Segredo obrigatório em produção não configurado."""
 
 
 class Settings(BaseSettings):
@@ -38,6 +46,17 @@ class Settings(BaseSettings):
     # Raiz do storage de objetos (3.6): fora de qualquer raiz pública servida pelo Nginx. O
     # default serve ao desenvolvimento local e é ignorado pelo git.
     storage_root: Path = Path(".storage")
+
+    # Chave HMAC dos cursores da listagem (1.6). Trocá-la invalida os cursores emitidos, o que
+    # só custa ao cliente recomeçar a paginação.
+    cursor_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)
+
+    def cursor_signing_key(self) -> bytes:
+        if self.cursor_secret is not None:
+            return self.cursor_secret.get_secret_value().encode()
+        if self.environment == "production":
+            raise MissingSecretError("GS_CURSOR_SECRET é obrigatório em produção")
+        return _DEV_CURSOR_KEY.encode()
 
     @cached_property
     def database_url(self) -> URL:
