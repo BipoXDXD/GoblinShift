@@ -43,7 +43,7 @@ O gVisor monta um `tmpfs` próprio em `/tmp`, mesmo com a raiz read-only; o que 
 - Como a VPS é compartilhada com outro projeto (ADR 011), o isolamento entre os projetos depende do gVisor, risco aceito.
 - Lease vencido não prova que o executor morreu: a manutenção consulta o `executor-ctl` pelo nome determinístico e só reagenda depois de confirmar o término ou de parar o container.
 - Se o `executor-ctl` cair, não é possível iniciar nem parar containers; as execuções aguardam dentro dos prazos e a manutenção não reagenda nada que não consiga inspecionar.
-- O `Runner` local, em subprocesso, só existe fora de produção; em produção o serviço recusa iniciar com ele.
+- O `Runner` local, em subprocesso, só existe fora de produção; em produção o serviço recusa iniciar com ele. Exceção provisória: na VPS, durante a fatia 3, ele roda com confirmação explícita ([ADR 016](016-runner-local-na-vps-ate-a-fatia-4.md)).
 - A área de trabalho do executor é um filesystem de tamanho fixo (ADR 005).
 
 ## Como verificar
