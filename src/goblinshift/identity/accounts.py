@@ -182,3 +182,58 @@ def _known_scopes(stored: Iterable[str]) -> frozenset[Scope]:
     # não concede nada: falhar fechado.
     known = {scope.value for scope in Scope}
     return frozenset(Scope(name) for name in stored if name in known)
+
+
+# --- Fatia 6: conta e chaves pela sessão web --------------------------------------------------
+# Contrato fixado na Fase 0; os corpos são da Frente C.
+
+# Teto de chaves ativas por conta, garantido com a linha da conta travada (`FOR UPDATE`).
+MAX_ACTIVE_KEYS = 5
+
+
+@dataclass(frozen=True)
+class KeySummary:
+    """Metadados de uma chave para `GET /api-keys`; nunca o hash nem o segredo."""
+
+    id: UUID
+    public_id: str
+    scopes: frozenset[Scope]
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class ActiveKeyLimitError(Exception):
+    """A conta já tem `MAX_ACTIVE_KEYS` chaves ativas: 409 `STATE_CONFLICT`."""
+
+
+def block_account(session: Session, owner_id: UUID, now: datetime) -> bool:
+    """Bloqueia e revoga sessões e chaves; False se a conta não existir. Idempotente."""
+    raise NotImplementedError("Frente C da fatia 6")
+
+
+def unblock_account(session: Session, owner_id: UUID) -> bool:
+    """Libera a conta (inclusive a pendente do cadastro fechado); False se não existir."""
+    raise NotImplementedError("Frente C da fatia 6")
+
+
+def request_account_deletion(session: Session, owner_id: UUID, now: datetime) -> None:
+    """Marca a exclusão e revoga sessões e chaves; repetir mantém o primeiro pedido."""
+    raise NotImplementedError("Frente C da fatia 6")
+
+
+def issue_key_for_session(
+    session: Session, *, owner_id: UUID, scopes: frozenset[Scope], days: int, now: datetime
+) -> IssuedKey:
+    """Emite chave pela sessão web; acima do teto levanta `ActiveKeyLimitError`."""
+    raise NotImplementedError("Frente C da fatia 6")
+
+
+def list_keys(session: Session, owner_id: UUID) -> list[KeySummary]:
+    raise NotImplementedError("Frente C da fatia 6")
+
+
+def revoke_owned_key(session: Session, owner_id: UUID, key_id: UUID, now: datetime) -> bool:
+    """Revoga só chave da própria conta; False (→ 404) para inexistente ou alheia."""
+    raise NotImplementedError("Frente C da fatia 6")

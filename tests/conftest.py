@@ -4,8 +4,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from pydantic import SecretStr
+from sqlalchemy import Connection
+from sqlalchemy.dialects.postgresql import insert
 from testcontainers.community.postgres import PostgresContainer
 
+from goblinshift.capacity import GLOBAL_STORAGE_MAX_BYTES, Resource
+from goblinshift.capacity.tables import capacity_pool
 from goblinshift.platform.settings import Settings
 
 POSTGRES_IMAGE = "postgres:18.6-trixie"
@@ -26,6 +30,19 @@ def db_settings(postgres: PostgresContainer) -> Settings:
         db_user=postgres.username,
         db_password=SecretStr(postgres.password),
         db_name=postgres.dbname,
+    )
+
+
+def restore_capacity_seed(conn: Connection) -> None:
+    """Recoloca o pool global da migração 0006, que `TRUNCATE app_user CASCADE` também apaga."""
+    conn.execute(
+        insert(capacity_pool)
+        .values(
+            scope="global",
+            resource=Resource.STORAGE_BYTES.value,
+            max_amount=GLOBAL_STORAGE_MAX_BYTES,
+        )
+        .on_conflict_do_nothing()
     )
 
 

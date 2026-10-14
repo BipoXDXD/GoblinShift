@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import Settings
-from tests.conftest import run_migrations
+from tests.conftest import restore_capacity_seed, run_migrations
 
 
 @pytest.fixture
@@ -18,6 +18,7 @@ def factory(db_settings: Settings) -> Iterator[sessionmaker[Session]]:
     engine = make_engine(db_settings)
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE app_user, stored_object RESTART IDENTITY CASCADE"))
+        restore_capacity_seed(conn)
     yield make_session_factory(engine)
     engine.dispose()
 
