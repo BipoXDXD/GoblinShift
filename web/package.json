@@ -51,6 +51,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "budget": "node scripts/check-budget.ts",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint . --max-warnings=0",

@@ -43,7 +43,9 @@ uv run pytest                 # inclui PostgreSQL real via Testcontainers
 
 ### Interface web (`web/`)
 
-Requisitos: Node 24 (versão em `web/.nvmrc`). A interface ainda não tem telas: só a base de engenharia (cliente HTTP, upload por XHR e polling), com estilo neutro até as decisões de design.
+Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas), Bancada (arquivos e parâmetros) e Execução (estado e downloads).
+
+Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: musgo, latão, pedra e brasa em OKLCH; papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A cena 3D da abertura tem ponto de montagem e orçamento definidos ([ADR 027](docs/adr/027-3d-na-abertura.md)), mas ainda não existe.
 
 ```bash
 cd web
@@ -55,6 +57,7 @@ npm test                      # Vitest + Testing Library (jsdom)
 npm run knip                  # código e dependências mortos
 npm run type-coverage         # 100% sem any
 npm run build
+npm run budget                # orçamento de peso do build (JS, CSS, fontes e 3D da abertura)
 ```
 
 O contrato da API fica versionado em `web/openapi/openapi.json` e os tipos TypeScript são gerados dele. Depois de mudar uma rota ou um schema da API:

@@ -84,6 +84,8 @@ jobs:
         run: npm run type-coverage
       - name: Build
         run: npm run build
+      - name: Orçamento de peso (JS, CSS, fontes e 3D da abertura, ADR 027)
+        run: npm run budget
 
   secrets:
     name: Segredos (gitleaks)
