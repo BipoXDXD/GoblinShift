@@ -342,8 +342,9 @@ class Coordinator:
     # 4. Desfecho -----------------------------------------------------------------------
 
     def finish(self, claimed: ClaimedAttempt, status: ExecutorStatus) -> Applied:
-        if status.oom_killed:
-            # 1.6: memória estourada é limite de recurso; repetir daria o mesmo.
+        if status.oom_killed or status.timed_out:
+            # 1.6: memória estourada e os 10 min da tentativa são limite de recurso; repetir
+            # daria o mesmo resultado.
             return self._conclude(
                 claimed,
                 lambda _loaded: DeterministicFailure(
@@ -351,7 +352,7 @@ class Coordinator:
                 ),
                 attempt_error=ErrorCode.RESOURCE_LIMIT_EXCEEDED,
             )
-        if status.timed_out or status.exit_code not in (EXIT_SUCCEEDED, EXIT_RECIPE_FAILURE):
+        if status.exit_code not in (EXIT_SUCCEEDED, EXIT_RECIPE_FAILURE):
             return self.fail_transiently(claimed)
         if status.exit_code == EXIT_RECIPE_FAILURE:
             code = self._failure_code(claimed)

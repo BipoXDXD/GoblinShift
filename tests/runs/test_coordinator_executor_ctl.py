@@ -179,7 +179,7 @@ def test_executor_morto_por_memoria_falha_sem_retentativa(
     assert attempts(factory, run_id)[0]["error_code"] == "RESOURCE_LIMIT_EXCEEDED"
 
 
-def test_tentativa_acima_do_teto_e_parada_e_vira_falha_transitoria(
+def test_tentativa_acima_do_teto_e_parada_e_falha_por_limite_de_recurso(
     factory: sessionmaker[Session],
     storage: FileStorage,
     area: Path,
@@ -194,7 +194,8 @@ def test_tentativa_acima_do_teto_e_parada_e_vira_falha_transitoria(
 
     worker.run(claimed)
 
+    # 1.6: os 10 min da tentativa são limite de recurso; repetir daria o mesmo.
     row = run_row(factory, run_id)
-    assert (row["status"], row["phase"]) == ("running", "retry_wait")
-    assert attempts(factory, run_id)[0]["error_code"] == "EXECUTOR_UNAVAILABLE"
+    assert (row["status"], row["error_code"]) == ("failed", "RESOURCE_LIMIT_EXCEEDED")
+    assert attempts(factory, run_id)[0]["error_code"] == "RESOURCE_LIMIT_EXCEEDED"
     assert "stop" in ctl.operations(claimed.attempt_id)
