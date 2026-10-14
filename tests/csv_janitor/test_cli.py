@@ -58,6 +58,7 @@ def test_cli_limpa_a_fixture_aceita(
     assert table["outcome"] == "cleaned"
     assert table["counts"] == expected["counts"]
     assert table["formula_cells"] == expected["formula_cells"]
+    assert table["formula_header"] == expected["formula_header"]
     assert [w["code"] for w in table["warnings"]] == expected["warnings"]
     assert (tmp_path / "input.csv").read_bytes() == (case / "expected.csv").read_bytes()
 

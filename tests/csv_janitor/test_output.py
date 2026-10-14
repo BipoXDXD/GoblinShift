@@ -58,8 +58,28 @@ def test_aviso_de_formula_conta_por_coluna_de_saida_e_avisa_dos_negativos() -> N
     assert "falsos positivos" in result.warnings[0].detail
 
 
-def test_cabecalho_nao_conta_como_celula_de_formula() -> None:
-    assert cleaned("=a\r\n1\r\n").formula_cells == {}
+def test_nome_de_coluna_que_comeca_como_formula_gera_aviso_proprio_e_fica_intacto() -> None:
+    result = cleaned('=HYPERLINK("x"),b\r\n1,2\r\n')
+
+    assert result.formula_header == ('=HYPERLINK("x")',)
+    assert result.formula_cells == {}
+    assert [w.code for w in result.warnings] == [WarningCode.FORMULA_HEADER]
+    assert result.content == b'"=HYPERLINK(""x"")",b\r\n1,2\r\n'
+
+
+def test_tab_prefix_tambem_protege_o_cabecalho() -> None:
+    params = Params(formula_guard=FormulaGuard.TAB_PREFIX)
+
+    assert output("@cmd,b\r\n1,2\r\n", params) == '"\t@cmd",b\r\n1,2\r\n'
+
+
+def test_aviso_do_cabecalho_considera_so_as_colunas_de_saida() -> None:
+    params = Params(output_columns=("b",))
+
+    result = cleaned("=a,b\r\n1,2\r\n", params)
+
+    assert result.formula_header == ()
+    assert result.warnings == ()
 
 
 def test_tab_prefix_poe_o_tab_dentro_de_aspas_so_nas_celulas_suspeitas() -> None:
