@@ -55,8 +55,8 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("GET", "/docs"): Rule(Policy.PUBLIC),
     ("GET", "/openapi.json"): Rule(Policy.PUBLIC),
     # Login (Frente A): o estado do login protege o callback, não uma credencial.
-    ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC, pending="A"),
-    ("GET", "/auth/callback/{provider}"): Rule(Policy.PUBLIC, pending="A"),
+    ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC),
+    ("GET", "/auth/callback/{provider}"): Rule(Policy.PUBLIC),
     # Sem sessão válida também responde 204: o estado final é o mesmo (Frente B).
     ("POST", "/auth/logout"): Rule(Policy.PUBLIC, pending="B"),
     ("POST", "/auth/logout-all"): Rule(Policy.SESSION, pending="B"),
