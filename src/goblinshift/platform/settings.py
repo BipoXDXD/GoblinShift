@@ -17,6 +17,7 @@ LOCAL_EXECUTOR_IMAGE = "local-dev"
 EXECUTOR_GROUP_ID = 61001
 # Só para desenvolvimento e testes; em produção a ausência do segredo impede a API de subir.
 _DEV_CURSOR_KEY = "goblinshift-dev-only-cursor-key-not-a-secret"
+_DEV_USER_HASH_KEY = "goblinshift-dev-only-user-hash-key-not-a-secret"
 
 
 class MissingSecretError(RuntimeError):
@@ -82,12 +83,24 @@ class Settings(BaseSettings):
     # só custa ao cliente recomeçar a paginação.
     cursor_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)
 
+    # Chave HMAC do `user.hash` dos eventos amplos (3.7). Trocá-la só quebra a continuidade do
+    # agrupamento por conta na telemetria, que guarda 30 dias.
+    user_hash_secret: SecretStr | None = Field(default=None, min_length=MIN_SECRET_CHARS)
+
     def cursor_signing_key(self) -> bytes:
-        if self.cursor_secret is not None:
-            return self.cursor_secret.get_secret_value().encode()
+        return self._secret_or_dev_default(self.cursor_secret, "GS_CURSOR_SECRET", _DEV_CURSOR_KEY)
+
+    def user_hash_key(self) -> bytes:
+        return self._secret_or_dev_default(
+            self.user_hash_secret, "GS_USER_HASH_SECRET", _DEV_USER_HASH_KEY
+        )
+
+    def _secret_or_dev_default(self, secret: SecretStr | None, name: str, dev: str) -> bytes:
+        if secret is not None:
+            return secret.get_secret_value().encode()
         if self.environment == "production":
-            raise MissingSecretError("GS_CURSOR_SECRET é obrigatório em produção")
-        return _DEV_CURSOR_KEY.encode()
+            raise MissingSecretError(f"{name} é obrigatório em produção")
+        return dev.encode()
 
     def executor_image_for_runs(self) -> str:
         """Imagem que a Run fixa; recusa a combinação que não serve ao ambiente.
