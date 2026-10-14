@@ -1,8 +1,10 @@
 """Log de acesso do Nginx sem IP completo nem query string (docs/GoblinShiftPlan.md, 1.8 e 3.7).
 
-Sobe o Nginx de verdade, com os templates do repositório, e dois clientes: um no papel do proxy
+Sobe a imagem do Nginx com a SPA (docker/web.Dockerfile), com os templates do repositório, e dois
+clientes: um no papel do proxy
 de borda (o único de quem o X-Forwarded-For vale) e outro fora dela. A API é um Nginx mínimo que
-responde 204, para que nenhuma falha de upstream entre no log de erro.
+responde 204, para que nenhuma falha de upstream entre no log de erro; as requisições vão a
+`/api/`, que o Nginx encaminha a ela, e não à SPA.
 """
 
 import json
@@ -19,7 +21,11 @@ pytestmark = pytest.mark.nginx
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "docker" / "nginx" / "templates"
-COMPOSE = ROOT / "compose.yaml"
+DOCKERFILE = ROOT / "docker" / "web.Dockerfile"
+# Mesma tag do tests/test_nginx_spa.py: o segundo build da suíte sai do cache.
+IMAGE = "goblinshift-web:test"
+BUILD_TIMEOUT_SECONDS = 900
+API = "/api/v1/_log"
 EDGE_IP = "172.31.0.2"
 DOCKER_TIMEOUT_SECONDS = 60
 CANARY_QUERY = f"CANARY-{uuid.uuid4()}"
@@ -32,22 +38,23 @@ API_STUB = (
 )
 
 
-def _docker(*args: str) -> str:
+def _docker(*args: str, timeout: int = DOCKER_TIMEOUT_SECONDS) -> str:
     result = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
         ["docker", *args],  # noqa: S607
         capture_output=True,
         text=True,
         check=True,
-        timeout=DOCKER_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
     return result.stdout
 
 
-def _nginx_image() -> str:
-    for line in COMPOSE.read_text().splitlines():
-        if line.strip().startswith("image: nginx:"):
-            return line.split("image:", 1)[1].strip()
-    raise AssertionError("imagem do Nginx não encontrada em compose.yaml")
+def _build_web_image() -> str:
+    _docker(
+        "build", "--quiet", "--file", str(DOCKERFILE), "--tag", IMAGE, str(ROOT),
+        timeout=BUILD_TIMEOUT_SECONDS,
+    )  # fmt: skip
+    return IMAGE
 
 
 class NginxLogs:
@@ -65,7 +72,7 @@ class NginxLogs:
         self.edge = f"gs-test-edge-{suffix}"
         self.other = f"gs-test-other-{suffix}"
         self.templates = workdir / "templates"
-        self.image = _nginx_image()
+        self.image = _build_web_image()
 
     def start(self) -> None:
         _docker("network", "create", self.network)
@@ -146,15 +153,15 @@ def nginx_logs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Captured]:
     try:
         stack.start()
         # Aquecimento sem canário: as retentativas enquanto o Nginx sobe ficam fora das provas.
-        stack.request(stack.other, "/aquecimento")
+        stack.request(stack.other, f"{API}/aquecimento")
         stack.request(
             stack.edge,
-            f"/borda-v4?q={CANARY_QUERY}&token={CANARY_QUERY}",
+            f"{API}/borda-v4?q={CANARY_QUERY}&token={CANARY_QUERY}",
             f"X-Forwarded-For: {CANARY_IPV4}",
             f"Referer: https://example.com/?q={CANARY_QUERY}",
         )
-        stack.request(stack.edge, "/borda-v6", f"X-Forwarded-For: {CANARY_IPV6}")
-        stack.request(stack.other, "/direto", f"X-Forwarded-For: {SPOOFED_IP}")
+        stack.request(stack.edge, f"{API}/borda-v6", f"X-Forwarded-For: {CANARY_IPV6}")
+        stack.request(stack.other, f"{API}/direto", f"X-Forwarded-For: {SPOOFED_IP}")
         stdout, stderr = stack.logs()
         yield Captured(stdout, stderr, stack.ip(stack.other))
     finally:
@@ -178,23 +185,23 @@ def test_query_string_nao_aparece_em_log_nenhum(nginx_logs: Captured) -> None:
 
 
 def test_ipv4_vindo_da_borda_e_registrado_truncado_em_24(nginx_logs: Captured) -> None:
-    entry = _access_entries(nginx_logs.stdout)["/borda-v4"]
+    entry = _access_entries(nginx_logs.stdout)[f"{API}/borda-v4"]
     assert entry["client"] == "203.0.113.0"
     assert entry["status"] == 204
 
 
 def test_ipv6_vindo_da_borda_e_registrado_truncado_em_48(nginx_logs: Captured) -> None:
-    assert _access_entries(nginx_logs.stdout)["/borda-v6"]["client"] == "2001:db8:abcd::"
+    assert _access_entries(nginx_logs.stdout)[f"{API}/borda-v6"]["client"] == "2001:db8:abcd::"
 
 
 def test_x_forwarded_for_de_fora_da_borda_e_ignorado(nginx_logs: Captured) -> None:
     network_24 = nginx_logs.other_ip.rsplit(".", 1)[0] + ".0"
-    assert _access_entries(nginx_logs.stdout)["/direto"]["client"] == network_24
+    assert _access_entries(nginx_logs.stdout)[f"{API}/direto"]["client"] == network_24
 
 
 def test_log_de_acesso_traz_so_os_campos_de_diagnostico(nginx_logs: Captured) -> None:
     # Sem Referer nem User-Agent: o Referer carrega a query string da página de origem.
-    assert set(_access_entries(nginx_logs.stdout)["/borda-v4"]) == {
+    assert set(_access_entries(nginx_logs.stdout)[f"{API}/borda-v4"]) == {
         "time",
         "client",
         "method",
