@@ -23,7 +23,8 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Scope
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
-from tests.api.files_support import bearer, new_account
+from openobserve.catalog import slo_named
+from tests.api.files_support import bearer, new_account, publish
 from tests.api.support import add_test_routes
 from tests.identity.support import new_key, new_user, prepare_database
 from tests.runs.support import ready_inputs
@@ -305,3 +306,53 @@ def _span_text(span: ReadableSpan) -> str:
         parts.append(event.name)
         parts += [f"{key}={value!r}" for key, value in (event.attributes or {}).items()]
     return "\n".join(parts)
+
+
+# Contrato com os SLOs: as consultas de deploy/openobserve leem estes atributos
+
+
+def _openobserve_columns(event: dict[str, Any]) -> set[str]:
+    """Nomes das colunas no OpenObserve, que troca "." por "_" nos atributos."""
+    return {name.replace(".", "_") for name in event}
+
+
+def test_eventos_de_post_runs_trazem_as_colunas_do_slo_de_aceitacao(
+    traced: Traced, tmp_path: Path
+) -> None:
+    user_id, auth = new_account(traced.factory)
+    inputs = ready_inputs(traced.factory, FileStorage(tmp_path / "storage"), user_id)
+    payload = {
+        "recipe_id": "csv-janitor",
+        "recipe_version": 1,
+        "input_upload_ids": [str(i) for i in inputs],
+        "parameters": {},
+    }
+    traced.clear()
+    accepted = traced.client.post(
+        RUNS, json=payload, headers={**auth, "Idempotency-Key": str(uuid.uuid4())}
+    )
+    accepted_event = traced.main_event()
+    traced.clear()
+    refused = traced.client.post(
+        RUNS, json={"recipe_id": "nao-existe"}, headers={**auth, "Idempotency-Key": "k" * 16}
+    )
+    refused_event = traced.main_event()
+
+    assert (accepted.status_code, refused.status_code) == (202, 422)
+    columns = _openobserve_columns(accepted_event) | _openobserve_columns(refused_event)
+    assert set(slo_named("aceitacao").columns) <= columns
+    assert accepted_event["http.route"] == "/api/v1/runs"
+    assert accepted_event["http.method"] == "POST"
+
+
+def test_evento_de_download_traz_as_colunas_do_slo_de_download(traced: Traced) -> None:
+    owner, auth = new_account(traced.factory)
+    artifact_id = publish(traced.app, owner, b"a,b\n1,2\n")
+    traced.clear()
+
+    response = traced.client.get(f"/api/v1/artifacts/{artifact_id}/download", headers=auth)
+
+    assert response.status_code == 200
+    event = traced.main_event()
+    assert set(slo_named("download").columns) <= _openobserve_columns(event)
+    assert event["http.route"] == "/api/v1/artifacts/{artifact_id}/download"
