@@ -1,2 +1,5 @@
 # Fixtures do CSV Janitor: bytes exatos (CRLF, BOM, Latin-1), sem conversão de fim de linha.
 tests/csv_janitor/fixtures/** -text
+# Contrato exportado da API e tipos gerados dele (fatia 7): não se editam à mão.
+web/openapi/openapi.json linguist-generated
+web/src/api/schema.d.ts linguist-generated

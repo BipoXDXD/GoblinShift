@@ -1,5 +1,6 @@
-# Nginx interno do GoblinShift. Em produção fica atrás do proxy de borda do host, que
-# termina o TLS (ADR 014); por isso o esquema original vem de X-Forwarded-Proto.
+# Nginx interno do GoblinShift: serve o build da SPA e encaminha o backend para a API
+# (docs/GoblinShiftPlan.md, 2.2, 3.6 e 3.8). Em produção fica atrás do proxy de borda do host,
+# que termina o TLS (ADR 014).
 
 # IP real do cliente: só o proxy de borda (IP fixo na rede edge) pode informá-lo. A borda troca
 # o X-Forwarded-For recebido da internet pelo IP de quem conectou, então o valor é um IP só. De
@@ -17,8 +18,8 @@ map "$from_edge:$http_x_forwarded_proto" $forwarded_proto {
     "~^1:(?<edge_proto>https?)$" $edge_proto;
     default                      $scheme;
 }
-# HSTS só quando o navegador chegou por HTTPS (em http://localhost ele prenderia o navegador ao
-# HTTPS). A API não manda o header, para ele não vir dobrado; valor vazio não emite nada.
+# HSTS só quando a borda terminou TLS: enquanto o acesso for por http e IP, não há o que fixar.
+# Valor vazio faz o add_header não emitir o cabeçalho.
 map $forwarded_proto $hsts {
     https   "max-age=63072000; includeSubDomains";
     default "";
@@ -39,36 +40,60 @@ server {
     listen 80 default_server;
     server_name ${GS_DOMAIN};
     server_tokens off;
+    root /usr/share/nginx/html;
     # Substitui o log `main` da imagem, que grava IP completo e query string (access-log.conf).
     access_log /var/log/nginx/access.log privacy;
-    # Herdado por todo `location` sem `add_header` próprio. Um `add_header` num bloco anula os
-    # herdados dele: quem tem o seu repete este (tests/test_nginx_hsts.py vigia).
-    add_header Strict-Transport-Security $hsts always;
 
     set $api http://api:8000;
     # Logo depois do rollout, o cache do resolver ainda pode apontar para o IP de uma API que
     # saiu da rede, e esse IP não recusa a conexão: ela fica pendurada. Na rede interna conectar
     # leva menos de 1 ms, então 1 s basta para desistir e tentar a outra API, sem erro ao cliente.
     proxy_connect_timeout 1s;
+
     proxy_read_timeout 60s;
-    # Herdados por todo `location`, que por isso não declara `proxy_set_header` próprio. Só o IP
-    # real do cliente (já resolvido pelo real_ip), nunca a cadeia recebida: quem não é a borda
-    # não consegue injetar um IP forjado na API.
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header X-Forwarded-Proto $forwarded_proto;
 
     # Teto padrão dos comandos JSON (docs/GoblinShiftPlan.md, 1.7).
     client_max_body_size 64k;
 
+    # SPA: arquivo existente ou o index.html, que o React Router resolve no navegador. Sem
+    # cache: um deploy novo vale na próxima navegação.
     location / {
-        proxy_pass $api;
+        try_files $uri /index.html;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+
+    # Arquivos com hash no nome (build do Vite): mudam de nome a cada mudança de conteúdo. Um
+    # asset ausente é 404, nunca o index.html servido como JavaScript.
+    location /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+
+    # Backend. A CSP da SPA não se aplica: a API define a sua (downloads com sandbox) e a /docs
+    # serve o Swagger UI.
+    location /api/ {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location = /docs {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location = /openapi.json {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    # Sondados de fora pelo monitor de uptime (3.7) e pelo scripts/check-zero-downtime.sh.
+    location = /livez {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location = /readyz {
+        include /etc/nginx/snippets/proxy-api.conf;
     }
 
     location /auth/ {
         limit_req zone=auth burst=10 nodelay;
         error_page 429 = @auth_rate_limited;
-        proxy_pass $api;
+        include /etc/nginx/snippets/proxy-api.conf;
     }
     # Mesmo formato do RATE_LIMITED da API (problem+json). Retry-After: um pedido a cada 6 s.
     location @auth_rate_limited {
@@ -82,7 +107,7 @@ server {
     location ~ ^/api/v1/uploads/[^/]+/content$ {
         client_max_body_size 256m;
         proxy_request_buffering off;
+        include /etc/nginx/snippets/proxy-api.conf;
         proxy_read_timeout 600s;
-        proxy_pass $api;
     }
 }

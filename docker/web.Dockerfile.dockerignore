@@ -1,0 +1,8 @@
+# Contexto da imagem do Nginx (docker/web.Dockerfile): só a SPA e a configuração do Nginx.
+*
+!web/
+!docker/nginx/
+web/node_modules/
+web/dist/
+web/coverage/
+web/*.tsbuildinfo

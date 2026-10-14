@@ -184,7 +184,14 @@ class LocalRunner:
                 stdout=log,
                 stderr=log,
             )
-        exit_code = launcher.wait(timeout=LAUNCH_TIMEOUT_S)
+        try:
+            exit_code = launcher.wait(timeout=LAUNCH_TIMEOUT_S)
+        except subprocess.TimeoutExpired as exc:
+            # O lançador é líder do próprio grupo, onde ficam também o supervisor e o executor se
+            # já tiverem nascido: matar o grupo garante que a falha relatada não deixe nada vivo.
+            _signal_group(launcher.pid, signal.SIGKILL)
+            launcher.wait()
+            raise RunnerError(f"lançador do executor não terminou em {LAUNCH_TIMEOUT_S} s") from exc
         if exit_code != 0:
             raise RunnerError(f"lançador do executor saiu com {exit_code}")
         return self.status(attempt_id)
