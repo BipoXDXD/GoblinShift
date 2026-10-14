@@ -114,6 +114,7 @@ def _clean_file(table: Path, output: Path, params: Params) -> dict[str, object]:
                 "output": str(output),
                 "counts": asdict(cleaned.counts),
                 "formula_cells": dict(cleaned.formula_cells),
+                "formula_header": list(cleaned.formula_header),
                 "warnings": [asdict(warning) for warning in cleaned.warnings],
             }
         case TableRejected() as rejected:
