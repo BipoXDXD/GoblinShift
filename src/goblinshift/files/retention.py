@@ -15,9 +15,10 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import Row, delete, exists, func, or_, select, update
+from sqlalchemy import ColumnElement, Row, delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from goblinshift import capacity
 from goblinshift.files.limits import EXPIRY_BATCH_SIZE, PURGE_MAX_BYTES, PURGE_MAX_OBJECTS
 from goblinshift.files.objects import request_deletion_of_unreferenced, select_purgeable
 from goblinshift.files.states import ObjectState, UploadState
@@ -43,7 +44,7 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
 
     Upload incompleto nunca chegou a uma execução nem tem conteúdo confirmado, então não há
     histórico a preservar. Um escritor ainda transferindo perde a vez na conclusão condicional e
-    apaga o próprio arquivo.
+    apaga o próprio arquivo. A reserva da intenção é liberada na mesma transação.
     """
     with session.begin():
         rows = session.execute(
@@ -58,7 +59,9 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
             .with_for_update(skip_locked=True, of=upload)
         ).all()
         if rows:
-            session.execute(delete(upload).where(upload.c.id.in_([r.id for r in rows])))
+            upload_ids = [r.id for r in rows]
+            session.execute(delete(upload).where(upload.c.id.in_(upload_ids)))
+            capacity.release_many(session, holder=capacity.HolderKind.UPLOAD, holder_ids=upload_ids)
             session.execute(
                 delete(stored_object).where(
                     stored_object.c.id.in_([r.object_id for r in rows]),
@@ -127,17 +130,20 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
     """Remove fisicamente objetos pedidos para exclusão, sem uso nem referência válida.
 
     Limitador de 3.4: no máximo `PURGE_MAX_OBJECTS` objetos ou `PURGE_MAX_BYTES` por ciclo.
-    Busca um candidato a mais para saber se o limite cortou o lote.
+    Busca um candidato a mais para saber se o limite cortou o lote. A reserva de cada objeto
+    removido é liberada na mesma transação que o marca `deleted`.
     """
     with session.begin():
         candidates = session.execute(select_purgeable(limit=PURGE_MAX_OBJECTS + 1)).all()
         chosen = _within_governor(candidates)
         if chosen:
+            object_ids = [c.id for c in chosen]
             session.execute(
                 update(stored_object)
-                .where(stored_object.c.id.in_([c.id for c in chosen]))
+                .where(stored_object.c.id.in_(object_ids))
                 .values(state=ObjectState.DELETED)
             )
+            capacity.release_many(session, holder=capacity.HolderKind.OBJECT, holder_ids=object_ids)
     failed_keys = []
     for candidate in chosen:
         try:
@@ -150,6 +156,38 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
         limit_reached=len(chosen) < len(candidates),
         failed_keys=tuple(failed_keys),
     )
+
+
+def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileReport:
+    """Reconcilia os pools e adota objetos que ocupam espaço sem reserva (plano da fatia 6, 3.3).
+
+    Durante o deploy da 0006, a API anterior cria uploads e o worker anterior publica artefatos
+    sem reserva. Candidatos de uma tentativa ainda sem artefato ficam de fora: a reserva da Run
+    os cobre. Numa transação própria e curta.
+    """
+    with session.begin():
+        orphans = session.execute(
+            select(stored_object.c.id, stored_object.c.owner_id, stored_object.c.size_bytes)
+            .where(
+                stored_object.c.state.in_([ObjectState.COMMITTED, ObjectState.DELETE_REQUESTED]),
+                or_(stored_object.c.attempt_id.is_(None), _published_as_artifact()),
+                ~capacity.has_live_reservation(capacity.HolderKind.OBJECT, stored_object.c.id),
+            )
+            .order_by(stored_object.c.id)
+            .limit(limit)
+        ).all()
+        return capacity.reconcile(
+            session,
+            limit=limit,
+            unreserved=[
+                capacity.Unreserved(o.owner_id, capacity.HolderKind.OBJECT, o.id, o.size_bytes)
+                for o in orphans
+            ],
+        )
+
+
+def _published_as_artifact() -> ColumnElement[bool]:
+    return exists().where(artifact.c.object_id == stored_object.c.id)
 
 
 def _within_governor(

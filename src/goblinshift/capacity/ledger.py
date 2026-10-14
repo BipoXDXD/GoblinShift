@@ -9,7 +9,7 @@ pool da conta pode já ter sido incrementado quando o global recusa.
 
 import uuid
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import NoReturn
@@ -79,21 +79,50 @@ def reserve(
     Um detentor tem no máximo uma reserva viva por recurso: repetir viola o índice único
     parcial (`IntegrityError`), porque é erro de quem chama, não estado a tolerar.
     """
-    _require_non_negative(amount)
+    reserve_many(
+        session,
+        owner_id=owner_id,
+        holder=holder,
+        resource=resource,
+        amounts={holder_id: amount},
+    )
+
+
+def reserve_many(
+    session: Session,
+    *,
+    owner_id: uuid.UUID,
+    holder: HolderKind,
+    resource: Resource,
+    amounts: Mapping[uuid.UUID, int],
+) -> None:
+    """Reserva para vários detentores da mesma conta com um único passo nos pools.
+
+    O lote inteiro cabe ou nada é reservado: a soma vai num só `UPDATE` condicional por pool.
+    """
+    for amount in amounts.values():
+        _require_non_negative(amount)
+    if not amounts:
+        return
+    total = sum(amounts.values())
     ensure_account_pool(session, owner_id, resource)
-    if not _take(session, account_pool(owner_id, resource), amount):
-        raise AccountCapacityExceededError(f"conta {owner_id}: {amount} de {resource}")
-    if not _take(session, global_pool(resource), amount):
+    if not _take(session, account_pool(owner_id, resource), total):
+        raise AccountCapacityExceededError(f"conta {owner_id}: {total} de {resource}")
+    if not _take(session, global_pool(resource), total):
         _require_global_pool(session, resource)
-        raise GlobalCapacityExceededError(f"ambiente: {amount} de {resource}")
+        raise GlobalCapacityExceededError(f"ambiente: {total} de {resource}")
     session.execute(
-        insert(resource_reservation).values(
-            owner_id=owner_id,
-            holder_kind=holder,
-            holder_id=holder_id,
-            resource=resource,
-            amount=amount,
-        )
+        insert(resource_reservation),
+        [
+            {
+                "owner_id": owner_id,
+                "holder_kind": holder,
+                "holder_id": holder_id,
+                "resource": resource,
+                "amount": amount,
+            }
+            for holder_id, amount in amounts.items()
+        ],
     )
 
 

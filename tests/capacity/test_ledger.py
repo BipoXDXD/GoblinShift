@@ -19,12 +19,14 @@ from goblinshift.capacity import (
     purge_owner,
     release,
     release_many,
+    reserve_many,
     transfer,
     usage,
 )
 from goblinshift.capacity.tables import capacity_pool, resource_reservation
 from goblinshift.platform.db import unit_of_work
 from tests.capacity.support import (
+    STORAGE,
     account_reserved,
     create_account_pool,
     global_reserved,
@@ -421,3 +423,56 @@ def test_purge_owner_com_reserva_viva_e_estado_impossivel(
 def test_purge_owner_sem_pool_nao_falha(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         purge_owner(session, new_owner(factory))
+
+
+# --- reserve_many ----------------------------------------------------------------------------
+
+
+def test_reserve_many_reserva_cada_detentor_e_soma_nos_pools(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = new_owner(factory)
+    first, second = uuid.uuid4(), uuid.uuid4()
+
+    with unit_of_work(factory) as session:
+        reserve_many(
+            session,
+            owner_id=owner,
+            holder=HolderKind.UPLOAD,
+            resource=STORAGE,
+            amounts={first: 3, second: 0},
+        )
+
+    assert live_amount(factory, HolderKind.UPLOAD, first) == 3
+    assert live_amount(factory, HolderKind.UPLOAD, second) == 0
+    assert account_reserved(factory, owner) == 3
+    assert global_reserved(factory) == 3
+
+
+def test_reserve_many_acima_do_teto_nao_reserva_nenhum(factory: sessionmaker[Session]) -> None:
+    owner = new_owner(factory)
+    create_account_pool(factory, owner, 10)
+    first, second = uuid.uuid4(), uuid.uuid4()
+
+    with pytest.raises(AccountCapacityExceededError), unit_of_work(factory) as session:
+        reserve_many(
+            session,
+            owner_id=owner,
+            holder=HolderKind.UPLOAD,
+            resource=STORAGE,
+            amounts={first: 6, second: 5},
+        )
+
+    assert live_amount(factory, HolderKind.UPLOAD, first) is None
+    assert account_reserved(factory, owner) == 0
+
+
+def test_reserve_many_com_quantidade_negativa_e_recusado(factory: sessionmaker[Session]) -> None:
+    with pytest.raises(ValueError, match="negativ"), unit_of_work(factory) as session:
+        reserve_many(
+            session,
+            owner_id=new_owner(factory),
+            holder=HolderKind.UPLOAD,
+            resource=STORAGE,
+            amounts={uuid.uuid4(): 5, uuid.uuid4(): -1},
+        )
