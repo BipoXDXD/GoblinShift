@@ -50,6 +50,41 @@ jobs:
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito.
         run: uv run pytest -m openobserve -q
 
+  web:
+    name: Interface web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Contrato OpenAPI → tipos gerados em dia
+        # O pytest (job Verificações) garante que openapi/openapi.json acompanha a API; aqui, que
+        # os tipos TypeScript acompanham o openapi.json versionado.
+        run: |
+          npm run generate:api
+          git diff --exit-code -- openapi src/api/schema.d.ts
+      - name: Tipos (tsc, separado do build)
+        run: npm run typecheck
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier
+        run: npm run format:check
+      - name: Testes (Vitest)
+        run: npm test
+      - name: Código e dependências mortos (knip)
+        run: npm run knip
+      - name: Cobertura de tipos (type-coverage)
+        run: npm run type-coverage
+      - name: Build
+        run: npm run build
+
   secrets:
     name: Segredos (gitleaks)
     runs-on: ubuntu-24.04
@@ -168,11 +203,42 @@ jobs:
           cache-from: type=gha,scope=executor
           cache-to: type=gha,scope=executor,mode=max
 
+  web-image:
+    name: Imagem do Nginx com a SPA
+    # O job web garante tipos, lint, testes e build da SPA antes de publicar o que ela gera.
+    needs: [checks, web, secrets]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - id: vars
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/web.Dockerfile
+          push: true
+          # Mesma tag da imagem da aplicação: o Compose do deploy referencia as duas por ela.
+          tags: |
+            ghcr.io/bipoxdxd/goblinshift-web:${{ steps.vars.outputs.tag }}
+            ghcr.io/bipoxdxd/goblinshift-web:main
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
   deploy:
     name: Deploy na VPS
     # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
     # execuções aceitas sem ter onde rodar.
-    needs: [image, executor-image, gvisor, openobserve]
+    needs: [image, executor-image, web-image, gvisor, openobserve]
     # Só roda depois que a VPS estiver configurada (variáveis do repositório definidas).
     if: vars.VPS_HOST != ''
     runs-on: ubuntu-24.04

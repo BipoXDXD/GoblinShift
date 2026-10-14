@@ -57,10 +57,20 @@ def _sites(path: Path) -> dict[str, list[str]]:
     return sites
 
 
+# Além do proxy, só as diretivas de retry de conexão (lb_try_*) e o fecho do bloco aninhado.
+RETRY_DIRECTIVE = re.compile(r"^(lb_try_duration \d+s|lb_try_interval \d+ms|\})$")
+
+
 @pytest.mark.parametrize("endereco", ["goblinshift.dev", ":80"])
 def test_site_do_goblinshift_vai_so_para_o_ip_reservado(endereco: str) -> None:
-    sites = _sites(EDGE / "conf.d" / "goblinshift.caddy")
-    assert sites[endereco] == ["reverse_proxy 172.31.0.4:80"]
+    proxy, *resto = _sites(EDGE / "conf.d" / "goblinshift.caddy")[endereco]
+    assert proxy.removesuffix(" {") == "reverse_proxy 172.31.0.4:80"
+    assert all(RETRY_DIRECTIVE.match(diretiva) for diretiva in resto), resto
+
+
+@pytest.mark.parametrize("endereco", ["goblinshift.dev", ":80"])
+def test_site_do_goblinshift_repete_a_conexao_enquanto_o_nginx_e_recriado(endereco: str) -> None:
+    assert "lb_try_duration 5s" in _sites(EDGE / "conf.d" / "goblinshift.caddy")[endereco]
 
 
 def test_trecho_do_goblinshift_so_tem_o_dominio_e_o_acesso_pelo_ip() -> None:
@@ -79,3 +89,10 @@ def test_nginx_na_borda_nao_tem_net_raw() -> None:
     # Sem NET_RAW, um container comprometido na rede edge não forja ARP para assumir o IP
     # da borda, em quem os projetos confiam (ADR 014).
     assert "NET_RAW" in _yaml(ROOT / "compose.prod.yaml")["services"]["nginx"]["cap_drop"]
+
+
+def test_borda_repete_a_conexao_enquanto_o_nginx_e_recriado() -> None:
+    # O deploy recria o Nginx a cada versão (imagem com o build da SPA); sem a nova tentativa,
+    # a borda responderia 502 nesse intervalo.
+    texto = _sem_comentarios(EDGE / "conf.d" / "goblinshift.caddy")
+    assert re.search(r"^\s*lb_try_duration \d+s$", texto, re.MULTILINE)

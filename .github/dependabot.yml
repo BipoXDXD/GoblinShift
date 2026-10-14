@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      # @types/x acompanha x na mesma major.minor (ETS item 66): atualizá-los juntos.
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      lint:
+        patterns: ["eslint", "@eslint/*", "typescript-eslint", "eslint-*"]
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
+      tailwind:
+        patterns: ["tailwindcss", "@tailwindcss/*"]
