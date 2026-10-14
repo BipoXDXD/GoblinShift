@@ -27,7 +27,7 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
   ...pairs("secondary-fg", ["bg", "surface", "surface-raised"], TEXT),
   ...pairs("on-primary", ["primary", "primary-hover"], TEXT),
   ...pairs("on-destructive", ["destructive", "destructive-hover"], TEXT),
-  ...pairs("success-fg", ["success-bg"], TEXT),
+  ...pairs("success-fg", ["success-bg", "surface"], TEXT),
   ...pairs("warning-fg", ["warning-bg"], TEXT),
   ...pairs("danger-fg", ["danger-bg", "bg", "surface", "surface-sunken"], TEXT),
   ...pairs("info-fg", ["info-bg"], TEXT),

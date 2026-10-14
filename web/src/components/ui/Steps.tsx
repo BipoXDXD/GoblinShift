@@ -35,7 +35,7 @@ export function Steps({ phase }: { readonly phase: RunPhase }): ReactElement {
             {...(state === "current" ? { "aria-current": "step" } : {})}
           >
             <Icon aria-hidden="true" className="size-4" />
-            {T.phases[step]}
+            {T.steps[step]}
             {state === "done" && <span className="sr-only"> {T.stepDone}</span>}
           </li>
         );

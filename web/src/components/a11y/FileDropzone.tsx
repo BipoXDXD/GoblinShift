@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
 
+import { TEXT } from "../../text";
 import { Field } from "./Field";
 
 interface FileDropzoneProps {
@@ -14,8 +15,8 @@ interface FileDropzoneProps {
 
 /**
  * Escolha de arquivos por um `<input type="file">` real, com label: funciona por teclado, leitor de
- * tela e clique. Soltar arquivos sobre a área é só um atalho a mais. `data-dragging` marca o
- * arrasto em curso para o tema (D9) estilizar.
+ * tela e clique. Soltar arquivos sobre a área é só um atalho a mais. A área é um poço embutido que
+ * sobe de elevação enquanto há arquivos sendo arrastados por cima (`data-dragging`, RUI cap. 6).
  */
 export function FileDropzone({
   id,
@@ -59,6 +60,7 @@ export function FileDropzone({
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       data-dragging={dragging}
+      className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-line bg-surface-sunken p-4 shadow-sunken transition data-[dragging=true]:border-solid data-[dragging=true]:bg-dropzone-active data-[dragging=true]:shadow-3 md:p-6"
       onDragOver={onDragOver}
       onDragLeave={() => {
         setDragging(false);
@@ -81,6 +83,12 @@ export function FileDropzone({
           />
         )}
       </Field>
+      {dragging && (
+        // Só quem arrasta com o mouse vê a dica; o leitor de tela usa o input.
+        <p aria-hidden="true" className="font-semibold text-fg">
+          {TEXT.workbench.dropHere}
+        </p>
+      )}
     </div>
   );
 }

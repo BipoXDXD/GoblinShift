@@ -1,3 +1,4 @@
+import { CircleAlert } from "lucide-react";
 import type { ReactElement } from "react";
 
 import type { ApiProblem } from "../../api/problem";
@@ -54,9 +55,17 @@ interface ProblemAlertProps {
 export function ProblemAlert({ failure }: ProblemAlertProps): ReactElement {
   const { message, requestId } = describeFailure(failure);
   return (
-    <div role="alert">
-      <p>{message}</p>
-      {requestId !== null && <p>{TEXT.failure.requestId(requestId)}</p>}
+    <div
+      role="alert"
+      className="flex gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg"
+    >
+      <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
+      <div className="flex flex-col gap-1">
+        <p className="font-semibold">{message}</p>
+        {requestId !== null && (
+          <p className="font-mono text-sm">{TEXT.failure.requestId(requestId)}</p>
+        )}
+      </div>
     </div>
   );
 }

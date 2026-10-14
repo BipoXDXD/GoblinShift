@@ -1,3 +1,4 @@
+import { ChevronLeft } from "lucide-react";
 import type { ReactElement } from "react";
 import { Link } from "react-router";
 
@@ -7,11 +8,14 @@ import { PATHS } from "./paths";
 
 export function NotFoundPage(): ReactElement {
   return (
-    <main>
+    <div className="flex flex-col gap-4">
       <FocusHeading>{TEXT.notFound.title}</FocusHeading>
       <p>
-        <Link to={PATHS.home}>{TEXT.notFound.backHome}</Link>
+        <Link to={PATHS.home} className="inline-flex min-h-11 items-center gap-1 font-semibold">
+          <ChevronLeft aria-hidden="true" className="size-4" />
+          {TEXT.notFound.backHome}
+        </Link>
       </p>
-    </main>
+    </div>
   );
 }

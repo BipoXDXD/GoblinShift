@@ -37,6 +37,7 @@ export function DownloadsDetoxFields({
   return (
     <FieldGroup id="downloads-detox-parametros" legend={T.legend}>
       <Field
+        layout="inline"
         id={fieldId("deduplicate")}
         label={T.deduplicate}
         description={T.deduplicateHint}
