@@ -975,7 +975,7 @@ Pillow é conferido por dimensões, orientação e transparência; CSV por valor
 
 Consumo de conta perto da cota não é alerta, é informação no painel.
 
-**Backend de telemetria: OpenObserve na VPS.** Um OpenObserve em nó único (`ZO_LOCAL_MODE`, SQLite e disco local) recebe tudo do OpenTelemetry Collector local por OTLP. Os dados não saem da VPS e não há custo. Os SLOs são calculados por alertas agendados com consulta SQL e janela de avaliação própria, e as notificações saem por e-mail ou webhook ([D29](GoblinShiftReferencias.md#d-6)).
+**Backend de telemetria: OpenObserve na VPS.** Um OpenObserve em nó único (`ZO_LOCAL_MODE`, SQLite e disco local) recebe tudo do OpenTelemetry Collector local por OTLP. Os dados não saem da VPS e não há custo. Os SLOs são calculados por alertas agendados com consulta SQL e janela de avaliação própria, e as notificações saem por e-mail ou webhook ([D29](GoblinShiftReferencias.md#d-6)). Consultas, alertas e o provisionamento ficam em `deploy/openobserve/`, com runbook próprio.
 - *Retenção:* configurada explicitamente em 30 dias (por stream ou globalmente), sem depender do padrão da versão instalada, que as fontes não confirmam.
 - *Disco:* filesystem próprio ([3.8](#s3-8)). Com o volume cheio, o OpenObserve para de ingerir e continua respondendo, então "telemetria acima de 85%" entra nos alertas de causa.
 - *Ponto cego:* se a VPS cair, a telemetria cai junto. Um monitor de uptime externo e gratuito consulta `/readyz` e avisa por um canal independente.

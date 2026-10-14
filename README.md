@@ -124,6 +124,18 @@ Dump diário cifrado com `age`, enviado ao Backblaze B2 com uma chave só de esc
 
 Os testes (`uv run pytest tests/backup`) rodam os scripts reais contra PostgreSQL e S3 locais (SeaweedFS) e precisam de `age` e `curl` no PATH.
 
+## SLOs e alertas (OpenObserve)
+
+Os três SLOs de [3.7](docs/GoblinShiftPlan.md#s3-7) (aceitação, execução e download), a queima do orçamento em duas janelas (1 h e 15 min, aviso a 2x e urgente a 4x), os alertas de causa (fila cheia sustentada, disco acima de 85%) e o heartbeat ficam em [`deploy/openobserve/`](deploy/openobserve/README.md): consultas SQL versionadas e um provisionamento idempotente pela API do OpenObserve, pelo túnel SSH. O runbook explica os segredos, as opções de canal e como provocar um alerta de queima e um de causa.
+
+```bash
+ssh -N -L 5080:127.0.0.1:5080 <usuário>@<vps> &   # o OpenObserve só escuta em 127.0.0.1 da VPS
+cd deploy && uv run python -m openobserve provision --secrets-file ~/.config/goblinshift/alertas.env
+cd deploy && uv run python -m openobserve sli --secrets-file ~/.config/goblinshift/alertas.env
+```
+
+Os testes (`uv run pytest -m openobserve`) sobem o OpenObserve e o Collector das versões do Compose e provam cada consulta com spans sintéticos de proporção conhecida e os alertas disparando, ou não, no agendador real.
+
 ## Execução de ponta a ponta
 
 Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, o script faz upload, execução idempotente, acompanhamento, resultados e download do CSV Janitor só com `curl`, e confere a saída byte a byte:
@@ -148,5 +160,5 @@ src/goblinshift/
   presets/           presets (próximas fatias)
 migrations/          Alembic (expand/contract)
 docker/              imagem da aplicação, Nginx e OpenTelemetry Collector
-deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco e teste de aceitação do ambiente
+deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco, SLOs e alertas e teste de aceitação do ambiente
 ```
