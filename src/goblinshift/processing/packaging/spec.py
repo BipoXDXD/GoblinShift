@@ -7,6 +7,8 @@ from goblinshift.processing.recipe import InputFile
 
 MIB = 1024 * 1024
 MANIFEST_NAME = "manifest.json"
+# Escrito pelo executor antes do empacotamento; entra no ZIP logo depois do manifesto.
+REPORT_NAME = "report.json"
 MANIFEST_SCHEMA_VERSION = 1
 
 
