@@ -152,6 +152,12 @@ class InputContractError(ValueError):
     """
 
 
+def require_max_inputs(inputs: Sequence[InputFile], max_inputs: int, noun: str) -> None:
+    """Recusa o lote acima do `max_inputs` da versão; `noun` nomeia as entradas na mensagem."""
+    if len(inputs) > max_inputs:
+        raise InputContractError(f"{len(inputs)} {noun}; o limite por execução é {max_inputs}")
+
+
 class OutputRole(StrEnum):
     CONTENT = "content"
     PREVIEW = "preview"

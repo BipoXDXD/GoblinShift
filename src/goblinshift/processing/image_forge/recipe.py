@@ -23,7 +23,6 @@ from goblinshift.processing.image_forge.rejection import ImageRejected
 from goblinshift.processing.names import safe_stem
 from goblinshift.processing.recipe import (
     DetailValue,
-    InputContractError,
     InputFile,
     ItemOk,
     ItemRejected,
@@ -32,6 +31,7 @@ from goblinshift.processing.recipe import (
     OutputRole,
     Progress,
     Report,
+    require_max_inputs,
 )
 
 FALLBACK_STEM = "imagem"
@@ -47,10 +47,7 @@ class ImageForgeV1:
     def run(
         self, params: Params, inputs: Sequence[InputFile], out: OutputDir, progress: Progress
     ) -> Report:
-        if len(inputs) > self._max_inputs:
-            raise InputContractError(
-                f"{len(inputs)} imagens; o limite por execução é {self._max_inputs}"
-            )
+        require_max_inputs(inputs, self._max_inputs, "imagens")
         items: list[ItemOk | ItemRejected] = []
         for source in inputs:
             items.append(self._forge_one(source, params, out))
