@@ -33,6 +33,35 @@ jobs:
       - name: Testes (inclui PostgreSQL real via Testcontainers)
         run: uv run pytest
 
+  web:
+    name: Interface web
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Tipos (tsc, separado do build)
+        run: npm run typecheck
+      - name: ESLint
+        run: npm run lint
+      - name: Prettier
+        run: npm run format:check
+      - name: Testes (Vitest)
+        run: npm test
+      - name: Código e dependências mortos (knip)
+        run: npm run knip
+      - name: Cobertura de tipos (type-coverage)
+        run: npm run type-coverage
+      - name: Build
+        run: npm run build
+
   secrets:
     name: Segredos (gitleaks)
     runs-on: ubuntu-24.04
