@@ -12,10 +12,10 @@ import signal
 import threading
 from types import FrameType
 
-from goblinshift.entrypoints.worker import build_runner
+from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
-from goblinshift.platform.settings import ExecutorConfigError, Settings
+from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import configure_logging
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.worker.runner import Runner
@@ -31,7 +31,8 @@ def main() -> int:
     settings = Settings()
     try:
         runner = build_runner(settings)
-    except ExecutorConfigError as error:
+        settings.user_hash_key()
+    except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("manutenção não sobe: %s", error)
         return EXIT_CONFIGURATION
     shutdown = threading.Event()
@@ -51,18 +52,21 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
         update={"db_statement_timeout_ms": settings.maintenance_statement_timeout_ms}
     )
     engine = make_engine(batch_settings)
-    maintenance = Maintenance(
-        make_session_factory(engine), FileStorage(settings.storage_root), runner
-    )
-    logger.info("manutenção pronta")
+    factory = make_session_factory(engine)
     try:
-        while not shutdown.is_set():
-            try:
-                maintenance.run_cycle()
-            except Exception:
-                # Fronteira do processo: o ciclo seguinte recomeça do banco, sem estado em memória.
-                logger.exception("ciclo de manutenção falhou")
-            shutdown.wait(settings.maintenance_interval_s)
+        with run_finished_reporter(settings, factory, "goblinshift-maintenance") as finished:
+            maintenance = Maintenance(
+                factory, FileStorage(settings.storage_root), runner, on_finished=finished.report
+            )
+            logger.info("manutenção pronta")
+            while not shutdown.is_set():
+                try:
+                    maintenance.run_cycle()
+                except Exception:
+                    # Fronteira do processo: o ciclo seguinte recomeça do banco, sem estado em
+                    # memória.
+                    logger.exception("ciclo de manutenção falhou")
+                shutdown.wait(settings.maintenance_interval_s)
     finally:
         engine.dispose()
     logger.info("manutenção encerrada")

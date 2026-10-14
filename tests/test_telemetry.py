@@ -1,13 +1,17 @@
 """Peças puras do evento amplo (docs/GoblinShiftPlan.md, 3.7): hash da conta e IP truncado."""
 
+from pathlib import Path
 from uuid import UUID
 
 import pytest
+import yaml
 from pydantic import SecretStr, ValidationError
 
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import UserHasher, truncate_client_address
+
+ROOT = Path(__file__).resolve().parent.parent
 
 OWNER = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -75,3 +79,14 @@ def test_desenvolvimento_e_teste_tem_segredo_padrao_do_user_hash(environment: st
 def test_segredo_do_user_hash_curto_e_recusado() -> None:
     with pytest.raises(ValidationError):
         Settings(environment="production", user_hash_secret=SecretStr("u" * 31))
+
+
+@pytest.mark.parametrize("service", ["api", "worker", "maintenance"])
+def test_producao_passa_o_segredo_do_user_hash_a_quem_emite_eventos(service: str) -> None:
+    # API (evento de requisição), worker e manutenção (término da Run) usam a mesma chave, para
+    # que o mesmo `owner_id` dê o mesmo `user.hash` nos três.
+    compose = yaml.safe_load((ROOT / "compose.prod.yaml").read_text())
+
+    environment = compose["services"][service]["environment"]
+
+    assert environment["GS_USER_HASH_SECRET"].startswith("${GS_USER_HASH_SECRET:?")

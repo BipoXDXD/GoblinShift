@@ -49,6 +49,10 @@ _RETRY_PAUSE_S = 0.05
 
 ACTIVE_STATUSES = frozenset({Status.RUNNING, Status.STOPPING})
 
+# Chamado com o id da Run que acabou de chegar a estado terminal, depois do commit e da
+# liberação dos usos: emite o evento de término (goblinshift.runs.finished, 3.7).
+RunFinishedHook = Callable[[uuid.UUID], None]
+
 
 # O nome segue o vocabulário do protocolo (3.4: fencing), não o sufixo Error.
 class LostFencing(Exception):  # noqa: N818
@@ -291,9 +295,16 @@ def release_run_holds(session: Session, run_id: uuid.UUID, generation: int) -> N
 
 
 def complete_after_commit(
-    factory: sessionmaker[Session], storage: FileStorage, applied: Applied
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    applied: Applied,
+    on_finished: RunFinishedHook | None = None,
 ) -> None:
-    """O que a transição deixou para depois do commit: arquivos descartados e usos."""
+    """O que a transição deixou para depois do commit: arquivos descartados, usos e o evento.
+
+    `release_pending` só vem de transição para estado terminal (`ReleaseReservations`), então é
+    também o sinal de que esta transição terminou a Run e o evento de término sai uma vez.
+    """
     for key in applied.discarded_keys:
         try:
             storage.delete(key)
@@ -305,6 +316,8 @@ def complete_after_commit(
             factory,
             lambda session: release_run_holds(session, applied.run_id, applied.state.generation),
         )
+        if on_finished is not None:
+            on_finished(applied.run_id)
 
 
 def db_now(session: Session) -> datetime:
