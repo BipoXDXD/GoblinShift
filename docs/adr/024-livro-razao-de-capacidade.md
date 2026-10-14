@@ -17,7 +17,7 @@
 - **Operações em lote e erros explícitos** (acréscimos da frente D ao contrato da fase 0): `reserve_many` e `release_many` para o lote de uploads e a retenção; `has_live_reservation` para a reconciliação e a publicação; `ReservationNotFoundError` e `InsufficientReservationError` na `transfer`; `reconcile(unreserved=…)` recebe de `files` os objetos sem reserva (`Unreserved`) e o relatório conta `adoptions_refused` quando a adoção passaria do teto; `DailyUsage.resets_at()` dá o `Retry-After` da cota diária.
 - **Fila global, execução ativa e transferências** (D-4) continuam nos mecanismos atuais (advisory lock com contagem, índice único parcial e `transfer_slot`), já atômicos e testados no caos da fatia 4.
 - **`holder_id` sem FK.** O detentor é polimórfico (`holder_kind`). É a associação polimórfica do SQL Antipatterns, aceita de propósito porque o livro-razão é interno, sem JOIN de negócio, e a manutenção o reconcilia com os objetos reais.
-- **Limites por classe de rota** (120, 60 e 10 por minuto, D-9) ficam para a fatia 8, com o teste de carga; a classe de cada rota já existe na telemetria.
+- **Limites por classe de rota** (120, 60 e 10 por minuto, D-9) ficam para a fatia 8, com o teste de carga; a classe de cada rota já existe na telemetria. Implementados no [ADR 027](027-limite-de-requisicoes-no-postgresql.md).
 
 ## Alternativas descartadas
 
