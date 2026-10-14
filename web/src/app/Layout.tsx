@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { Link, Outlet } from "react-router";
+import { Link, NavLink, Outlet } from "react-router";
 
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
@@ -10,8 +10,8 @@ const T = TEXT.layout;
 const MAIN_ID = "conteudo";
 
 /**
- * Moldura de todas as telas (D8): faixa de acento em latão, barra no topo com a marca e o seletor
- * de tema, e o conteúdo centrado. Histórico e Acesso entram na navegação quando existirem, para a
+ * Moldura de todas as telas (D8): faixa de acento em latão, barra no topo com a marca, o Histórico
+ * e o seletor de tema, e o conteúdo centrado. Acesso entra na navegação com a fatia 6, para a
  * barra não prometer o que ainda não há (RUI cap. 1, "Be a pessimist").
  */
 export function Layout(): ReactElement {
@@ -33,7 +33,17 @@ export function Layout(): ReactElement {
           >
             {T.brand}
           </Link>
-          <ThemeSwitcher />
+          <div className="flex items-center gap-4">
+            <nav aria-label={T.navLabel}>
+              <NavLink
+                to={PATHS.history}
+                className="inline-flex min-h-11 items-center font-semibold aria-[current=page]:text-fg aria-[current=page]:no-underline"
+              >
+                {TEXT.history.navLink}
+              </NavLink>
+            </nav>
+            <ThemeSwitcher />
+          </div>
         </div>
       </header>
       <main id={MAIN_ID} className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12">

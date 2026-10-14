@@ -1,10 +1,9 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { createRoutes } from "../app/routes";
+import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody, RUN_ID } from "../test/fakeApi";
-import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
@@ -34,15 +33,7 @@ function setup(
     [`GET /api/v1/runs/${RUN_ID}`]: run,
     [`GET /api/v1/runs/${RUN_ID}/results`]: results,
   });
-  const { uploader } = fakeUploader({ autoResolve: true });
-  const routes = createRoutes({
-    uploadServices: {
-      client: api.client,
-      uploader,
-      rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-    },
-  });
-  return { ...renderRoutes({ routes, path, client: api.client }), api };
+  return { ...renderRoutes({ routes: appRoutes(api.client), path, client: api.client }), api };
 }
 
 describe("Execução", () => {
