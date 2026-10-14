@@ -52,6 +52,20 @@ uv run gs-csv-janitor --params params.json --output-dir limpas/ contatos.csv ven
 
 Cada tabela aceita vira `limpas/<nome>.csv` (UTF-8 sem BOM, CRLF, aspas só quando necessárias); o relatório JSON sai na saída padrão, com contagens, avisos de fórmulas e o motivo de cada rejeição. Sai com 0 se todas foram limpas, 1 se alguma foi rejeitada e 2 para configuração ou caminhos inválidos. As fixtures em `tests/csv_janitor/fixtures/` servem de exemplos.
 
+## Contas e chaves de API (administrador)
+
+Até o login web da fatia 6, quem usa a API recebe uma chave emitida pela CLI do administrador, que lê as mesmas variáveis `GS_*` da API:
+
+```bash
+uv run gs-admin create-user --display-name "Ana"            # imprime o id da conta
+uv run gs-admin issue-key --user <id> \
+  --scopes files:read,files:write,runs:read,runs:write --days 30 > chave.txt
+uv run gs-admin revoke-key --key <public_id>
+curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
+```
+
+A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
+
 ## Deploy sem queda
 
 O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga (`deploy/rollout-api.sh`). Para conferir localmente, com a pilha de pé:
