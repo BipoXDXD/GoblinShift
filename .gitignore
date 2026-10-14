@@ -36,3 +36,6 @@ build/
 
 # Banco de exemplos do Hypothesis
 .hypothesis/
+
+# Áreas de trabalho do Runner local (GS_WORK_ROOT)
+.work/
