@@ -18,8 +18,13 @@ export function isLoginMissing(failure: ApiFailure): boolean {
  * Aviso de que o login chega em breve, no lugar do erro de sessão. Informativo, sem `role="alert"`
  * e sem cor de perigo: não há nada a corrigir. Vira a tela "Entre para continuar" com a fatia 6.
  */
-export function LoginSoonNotice(): ReactElement {
+export function LoginSoonNotice({
+  headingLevel = 2,
+}: {
+  readonly headingLevel?: 2 | 3;
+}): ReactElement {
   const titleId = useId();
+  const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <section
       aria-labelledby={titleId}
@@ -27,9 +32,9 @@ export function LoginSoonNotice(): ReactElement {
     >
       <LogIn aria-hidden="true" className="mt-1 size-4 flex-none" />
       <div className="flex max-w-prose flex-col gap-1">
-        <h2 id={titleId} className="font-semibold">
+        <Heading id={titleId} className="font-semibold">
           {T.title}
-        </h2>
+        </Heading>
         <p>{T.body}</p>
       </div>
     </section>
