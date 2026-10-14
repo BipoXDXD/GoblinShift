@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.errors import (
     InvalidUploadRequestError,
+    UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
-from goblinshift.files.states import UploadState
+from goblinshift.files.states import Availability, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.files.uploads import (
@@ -234,6 +235,32 @@ def test_tamanho_real_diferente_do_declarado_falha_e_apaga_o_objeto(
     assert files_under(storage) == []
 
 
+def test_conteudo_maior_que_o_declarado_tem_erro_proprio(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=3)
+
+    with pytest.raises(UploadContentTooLargeError) as error, factory() as session:
+        receive_content(session, storage, owner, intent.id, [b"ab", b"cd"])
+
+    assert error.value.expected_size == 3
+    with factory() as session:
+        assert get_upload(session, owner, intent.id).state is UploadState.FAILED
+
+
+def test_conteudo_menor_que_o_declarado_nao_e_erro_de_excesso(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=3)
+
+    with pytest.raises(UploadSizeMismatchError) as error, factory() as session:
+        receive_content(session, storage, owner, intent.id, [b"ab"])
+
+    assert not isinstance(error.value, UploadContentTooLargeError)
+
+
 def test_envio_interrompido_falha_sem_deixar_arquivo(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
@@ -338,6 +365,39 @@ def test_upload_excluido_nao_aceita_conteudo(
     with pytest.raises(UploadGoneError), factory() as session:
         receive_content(session, storage, owner, intent.id, [b"abc"])
     assert files_under(storage) == []
+
+
+def test_upload_novo_esta_disponivel(factory: sessionmaker[Session]) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner)
+
+    with factory() as session:
+        view = get_upload(session, owner, intent.id)
+
+    assert intent.availability is Availability.AVAILABLE
+    assert view.availability is Availability.AVAILABLE
+
+
+def test_upload_vencido_aparece_como_expirado(factory: sessionmaker[Session]) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner)
+    _expire_now(factory, intent.id)
+
+    with factory() as session:
+        assert get_upload(session, owner, intent.id).availability is Availability.EXPIRED
+
+
+def test_upload_excluido_aparece_como_excluido_mesmo_vencido(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, intent.id)
+    _expire_now(factory, intent.id)
+
+    with factory() as session:
+        assert get_upload(session, owner, intent.id).availability is Availability.DELETED
 
 
 # --- Isolamento entre contas ------------------------------------------------------------------

@@ -41,8 +41,9 @@ class ProblemCode(StrEnum):
     """Códigos HTTP do catálogo de 1.6, mais os genéricos que o catálogo não nomeia.
 
     Os genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,
-    `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`) cobrem os
-    status da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de
+    `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`,
+    `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`) cobrem os status da tabela de erros de 1.6
+    que não tinham código próprio. Os códigos de item e de
     execução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com
     quem os produz.
     """
@@ -56,8 +57,11 @@ class ProblemCode(StrEnum):
     CSRF_FAILED = "CSRF_FAILED"
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
+    REQUEST_TIMEOUT = "REQUEST_TIMEOUT"
+    STATE_CONFLICT = "STATE_CONFLICT"
     IDEMPOTENCY_IN_PROGRESS = "IDEMPOTENCY_IN_PROGRESS"
     ACTIVE_RUN_LIMIT = "ACTIVE_RUN_LIMIT"
+    GONE = "GONE"
     BODY_TOO_LARGE = "BODY_TOO_LARGE"
     UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"
     VALIDATION_FAILED = "VALIDATION_FAILED"
@@ -90,8 +94,11 @@ PROBLEMS: Mapping[ProblemCode, ProblemSpec] = {
     ProblemCode.CSRF_FAILED: ProblemSpec(403, "Verificação de CSRF recusada"),
     ProblemCode.NOT_FOUND: ProblemSpec(404, "Recurso não encontrado"),
     ProblemCode.METHOD_NOT_ALLOWED: ProblemSpec(405, "Método não permitido"),
+    ProblemCode.REQUEST_TIMEOUT: ProblemSpec(408, "Transferência interrompida por tempo"),
+    ProblemCode.STATE_CONFLICT: ProblemSpec(409, "Estado incompatível"),
     ProblemCode.IDEMPOTENCY_IN_PROGRESS: ProblemSpec(409, "Requisição idempotente em andamento"),
     ProblemCode.ACTIVE_RUN_LIMIT: ProblemSpec(409, "Já existe uma execução ativa"),
+    ProblemCode.GONE: ProblemSpec(410, "Conteúdo expirado ou excluído"),
     ProblemCode.BODY_TOO_LARGE: ProblemSpec(413, "Corpo grande demais"),
     ProblemCode.UNSUPPORTED_MEDIA_TYPE: ProblemSpec(415, "Tipo de mídia não suportado"),
     ProblemCode.VALIDATION_FAILED: ProblemSpec(422, "Validação falhou"),
@@ -140,11 +147,16 @@ class ProblemDetails(BaseModel):
     errors: list[FieldError] | None = None
 
 
-# Respostas de erro comuns a toda rota autenticada, para o OpenAPI (2.3).
-PROBLEM_RESPONSES: dict[int | str, dict[str, Any]] = {
-    status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
-    for status in (401, 403, 422, 500)
-}
+def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
+    """Respostas problem+json para o OpenAPI da rota (2.3)."""
+    return {
+        status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
+        for status in statuses
+    }
+
+
+# Respostas de erro comuns a toda rota autenticada.
+PROBLEM_RESPONSES = problem_responses(401, 403, 422, 500)
 
 
 # O nome segue o termo "problem" da RFC 9457, que é o que a classe representa.
@@ -152,12 +164,19 @@ class ApiProblem(Exception):  # noqa: N818
     """Erro que uma rota devolve ao cliente; o status sai do catálogo pelo `code`."""
 
     def __init__(
-        self, code: ProblemCode, detail: str, *, headers: Mapping[str, str] | None = None
+        self,
+        code: ProblemCode,
+        detail: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        errors: Sequence[Mapping[str, str]] | None = None,
     ) -> None:
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail
         self.headers: Mapping[str, str] = dict(headers or {})
+        # Erros por campo (`field`, `code`, `message`), como os da validação do Pydantic.
+        self.errors = errors
 
     @property
     def status(self) -> int:
@@ -257,6 +276,7 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse
         instance=request.url.path,
         request_id=request_id_of(request),
         headers=exc.headers,
+        errors=exc.errors,
     )
 
 
