@@ -31,14 +31,9 @@ export GS_EXECUTOR_IMAGE
 # Migração (expand) antes da API nova; a velha continua atendendo com o schema compatível.
 "${compose[@]}" run --rm --no-TTY migrate
 "${compose[@]}" run --rm --no-TTY storage-init
-# O template do Nginx vem do checkout e só é renderizado na partida: renderiza de novo e
-# recarrega sem derrubar conexões. Vem antes do rollout, para que o Nginx já resolva a API
-# pelo DNS quando os containers forem trocados.
-if [[ -n "$("${compose[@]}" ps --quiet nginx)" ]]; then
-  "${compose[@]}" exec -T nginx sh -c \
-    '/docker-entrypoint.d/20-envsubst-on-templates.sh >/dev/null && nginx -t -q && nginx -s reload'
-fi
-# API sem queda (deploy/rollout-api.sh); o resto só é recriado se a configuração mudou.
+# API sem queda (deploy/rollout-api.sh); o resto só é recriado se a configuração mudou. O Nginx
+# (imagem goblinshift-web, com o build da SPA e a configuração) muda a cada tag e é recriado no
+# `up`: a borda repete a conexão enquanto ele volta (lb_try_duration em deploy/edge/conf.d).
 deploy/rollout-api.sh "${compose[@]}"
 "${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180 \
   postgres otel-collector openobserve nginx worker maintenance
