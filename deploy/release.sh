@@ -9,23 +9,18 @@ set -euo pipefail
 tag="${1:?uso: release.sh <image-tag>}"
 ROOT=/srv/goblinshift
 cd "$ROOT/app"
-export GS_IMAGE_TAG="$tag"
-export GS_ENVIRONMENT=production
-export GS_SECRETS_DIR="$ROOT/secrets"
-export GS_PG_DATA="$ROOT/pg/data"
-export GS_TELEMETRY_DATA="$ROOT/telemetry/data"
-export GS_STORAGE_DATA="$ROOT/storage"
 # Segredo do cursor de paginação (3.3): criado uma vez, junto dos outros segredos da aplicação.
 if ! grep -q '^GS_CURSOR_SECRET=' "$ROOT/secrets/app.env"; then
   echo "GS_CURSOR_SECRET=$(openssl rand -hex 32)" >>"$ROOT/secrets/app.env"
 fi
-compose=(docker compose --env-file "$ROOT/secrets/app.env" -f compose.yaml -f compose.prod.yaml)
 
 # Imagem do executor do mesmo commit, sempre pelo digest: entra na allowlist do executor-ctl
-# antes de a API nova aceitar execuções com ela, e vai para o Compose antes do primeiro comando
-# dele, que já interpola a variável. Sem digest resolvido o deploy para aqui.
-GS_EXECUTOR_IMAGE=$(deploy/executor-image.sh "$tag" "$ROOT/executor/images.json")
-export GS_EXECUTOR_IMAGE
+# antes de a API nova aceitar execuções com ela. Sem digest resolvido o deploy para aqui.
+executor_image=$(deploy/executor-image.sh "$tag" "$ROOT/executor/images.json")
+# A versão implantada vai para o host antes do primeiro comando do Compose, que já a interpola; o
+# deploy/compose.sh a lê, e o operador usa o mesmo script nos comandos manuais.
+deploy/release-env.sh "$ROOT/secrets/release.env" "$tag" "$executor_image"
+compose=(deploy/compose.sh)
 
 "${compose[@]}" pull --quiet
 # Migração (expand) antes da API nova; a velha continua atendendo com o schema compatível.
