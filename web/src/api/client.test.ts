@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { createApiClient } from "./client";
 import { ApiError, type ApiFailure } from "./response";
+import { CrossOriginUrlError } from "./sameOrigin";
 
 const NOW_MS = Date.parse("2026-10-14T12:00:00Z");
 const thing = z.object({ id: z.string() });
@@ -153,6 +154,20 @@ describe("createApiClient: cabeçalhos", () => {
 
     expect(sentRequest(fetchMock).headers.has("Idempotency-Key")).toBe(false);
   });
+});
+
+describe("createApiClient: origem", () => {
+  it.each(["https://evil.example/api/v1/coisas", "//evil.example/api/v1/coisas"])(
+    "recusa caminho fora da origem (%s) sem chamar a API nem expor o CSRF",
+    async (path) => {
+      const { client, fetchMock } = setup(jsonResponse({ id: "1" }), "tok");
+
+      await expect(
+        client.request({ method: "POST", path, body: {}, schema: thing }),
+      ).rejects.toBeInstanceOf(CrossOriginUrlError);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("createApiClient: falhas", () => {

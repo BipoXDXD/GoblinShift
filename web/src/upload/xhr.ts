@@ -1,5 +1,6 @@
 import { CSRF_HEADER, type CsrfTokenSource } from "../api/csrf";
 import { API_ACCEPT, ApiError, interpretResponse } from "../api/response";
+import { sameOriginUrl } from "../api/sameOrigin";
 import { receivedContentSchema, type ContentInstructions, type ReceivedContent } from "./api";
 
 /** A parte do XMLHttpRequest que o upload usa; nos testes, um objeto falso. */
@@ -42,7 +43,8 @@ export interface ContentUploader {
  * Envia os bytes de um upload por XMLHttpRequest, o único jeito no navegador de ter progresso do
  * envio (`upload.onprogress`); o fetch não informa bytes enviados.
  *
- * Usa `content.method`, `content.url` e `content.headers` exatamente como a API devolveu. Sem
+ * Usa `content.method`, `content.url` e `content.headers` como a API devolveu, mas recusa
+ * (`CrossOriginUrlError`) uma URL fora da origem da interface, que levaria o CSRF junto. Sem
  * retomada: falha aqui exige uma intenção nova (POST /uploads).
  */
 export function createContentUploader(transport: UploadTransport): ContentUploader {
@@ -57,6 +59,7 @@ function sendContent(
 ): Promise<ReceivedContent> {
   return new Promise((resolve, reject) => {
     signal?.throwIfAborted();
+    const url = sameOriginUrl(content.url, window.location.origin);
     const xhr = transport.createXhr();
     const abort = (): void => {
       xhr.abort();
@@ -64,7 +67,7 @@ function sendContent(
     const settle = (): void => {
       signal?.removeEventListener("abort", abort);
     };
-    xhr.open(content.method, content.url);
+    xhr.open(content.method, url.href);
     for (const [name, value] of Object.entries(content.headers)) {
       xhr.setRequestHeader(name, value);
     }

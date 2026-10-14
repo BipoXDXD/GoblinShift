@@ -8,6 +8,7 @@ import {
   JSON_MEDIA_TYPE,
   type ApiResponse,
 } from "./response";
+import { sameOriginUrl } from "./sameOrigin";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const SAFE_METHODS: ReadonlySet<HttpMethod> = new Set(["GET"]);
@@ -42,7 +43,7 @@ export interface ApiClientOptions {
 /**
  * O único ponto da interface que fala com a API por `fetch` (TS 3).
  *
- * Checa o status, faz o parse do problem+json, valida o corpo de sucesso pelo schema, põe o CSRF
+ * Recusa caminho fora da origem (`CrossOriginUrlError`) antes de montar o pedido. Checa o status, faz o parse do problem+json, valida o corpo de sucesso pelo schema, põe o CSRF
  * nas mutações e corta a chamada no prazo. O cancelamento de quem chamou (`signal`) é propagado
  * como está, para o TanStack Query reconhecê-lo.
  */
@@ -67,6 +68,7 @@ async function sendWithTimeout(
   timeoutMs: number,
 ): Promise<{ response: Response; text: string }> {
   request.signal?.throwIfAborted();
+  const url = sameOriginUrl(request.path, window.location.origin);
   const controller = new AbortController();
   const deadline = { passed: false };
   const timer = setTimeout(() => {
@@ -78,7 +80,7 @@ async function sendWithTimeout(
   };
   request.signal?.addEventListener("abort", forwardAbort, { once: true });
   try {
-    const response = await options.fetch(new URL(request.path, window.location.origin), {
+    const response = await options.fetch(url, {
       method: request.method,
       headers: requestHeaders(options, request),
       body: request.body === undefined ? null : JSON.stringify(request.body),
