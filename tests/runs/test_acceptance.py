@@ -17,7 +17,7 @@ from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE, Settings
 from goblinshift.runs import acceptance
 from goblinshift.runs.acceptance import (
     ADVISORY_CLASS_QUEUE,
@@ -60,7 +60,36 @@ def accept(
     key: str | None = None,
 ) -> Accepted:
     with factory() as session:
-        return accept_run(session, owner_id, command, key or new_key(), TRACEPARENT)
+        return accept_run(
+            session,
+            owner_id,
+            command,
+            key or new_key(),
+            TRACEPARENT,
+            executor_image=LOCAL_EXECUTOR_IMAGE,
+        )
+
+
+def test_a_execucao_fixa_a_imagem_do_executor_recebida(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = new_owner(factory)
+    image = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "d" * 64
+    with factory() as session:
+        accepted = accept_run(
+            session,
+            owner,
+            run_command(ready_inputs(factory, storage, owner)),
+            new_key(),
+            None,
+            executor_image=image,
+        )
+
+    with factory() as session:
+        pinned = session.execute(
+            select(run.c.executor_digest).where(run.c.id == accepted.run_id)
+        ).scalar_one()
+    assert pinned == image
 
 
 def queue_run(
@@ -226,7 +255,7 @@ def test_chave_invalida_e_recusada_antes_de_qualquer_escrita(
     before = count_rows(factory)
 
     with factory() as session, pytest.raises(IdempotencyKeyInvalidError):
-        accept_run(session, owner, command, key, None)
+        accept_run(session, owner, command, key, None, executor_image=LOCAL_EXECUTOR_IMAGE)
 
     assert count_rows(factory) == before
 

@@ -7,7 +7,12 @@ Runner acontecem fora de transação.
 
 Lease vencido não prova que o executor morreu: antes de reagendar, o Runner é consultado pelo
 nome; executor vivo recebe `stop`, e só a confirmação do término libera a decisão. Sem
-confirmação, a execução fica como está (reserva física conservada) até o próximo ciclo.
+confirmação, ou com o Runner fora do ar (`executor-ctl` parado), a execução fica como está
+(reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado.
+
+O executor e a área de trabalho só são removidos depois de a decisão estar no banco. Se a remoção
+falhar, a limpeza das áreas (`sweep_work_areas`) a repete nos ciclos seguintes: o `executor-ctl`
+recusa iniciar com a área suja, então a área de uma tentativa encerrada não pode ficar para trás.
 """
 
 import logging
@@ -55,7 +60,7 @@ from goblinshift.runs.store import (
 )
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.coordinator import TRANSIENT_ATTEMPT_ERROR, random_retry_jitter
-from goblinshift.runs.worker.runner import ExecutorStatus, Runner
+from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,7 @@ class Maintenance:
             "deadlines": self.apply_deadlines(),
             "holds_released": self.release_orphan_holds(),
             "candidates_discarded": self.discard_stale_candidates(),
+            "work_areas_removed": self.sweep_work_areas(),
             **self.apply_retention(),
         }
         fields: dict[str, object] = {"main": True, **counts}
@@ -111,23 +117,51 @@ class Maintenance:
         """Tentativas com lease vencido: confirma o término do executor e decide."""
         reconciled = 0
         for expired in self._expired_attempts():
-            status = self._runner.status(expired.attempt_id)
-            if status.is_running:
-                status = self._runner.stop(expired.attempt_id, self._config.stop_grace)
-            if status.is_running:
-                logger.warning(
-                    "executor não confirmou a parada; execução segue em reconciliação",
-                    extra={"fields": {"run_id": str(expired.run_id)}},
-                )
+            status = self._confirm_ended(expired.attempt_id, expired.run_id)
+            if status is None:
                 continue
             applied = self._decide(
                 expired.run_id,
                 partial(self._lease_event, expired=expired, status=status),
             )
             if applied is not None:
-                self._runner.remove(expired.attempt_id)
+                self._try_remove(expired.attempt_id)
                 reconciled += 1
         return reconciled
+
+    def _confirm_ended(
+        self, attempt_id: uuid.UUID, run_id: uuid.UUID | None
+    ) -> ExecutorStatus | None:
+        """Estado final do executor, parando-o se vivo; `None` se o fim não foi confirmado."""
+        fields = {"attempt_id": str(attempt_id), "run_id": str(run_id) if run_id else None}
+        try:
+            status = self._runner.status(attempt_id)
+            if status.is_running:
+                status = self._runner.stop(attempt_id, self._config.stop_grace)
+        except RunnerError as error:
+            logger.warning(
+                "executor sem inspeção; execução fica para o próximo ciclo",
+                extra={"fields": {**fields, "error": str(error)}},
+            )
+            return None
+        if status.is_running:
+            logger.warning(
+                "executor não confirmou a parada; execução segue em reconciliação",
+                extra={"fields": fields},
+            )
+            return None
+        return status
+
+    def _try_remove(self, attempt_id: uuid.UUID) -> bool:
+        try:
+            self._runner.remove(attempt_id)
+        except RunnerError as error:
+            logger.warning(
+                "área de trabalho não removida; a limpeza tenta de novo",
+                extra={"fields": {"attempt_id": str(attempt_id), "error": str(error)}},
+            )
+            return False
+        return True
 
     def _expired_attempts(self) -> list[_ExpiredAttempt]:
         with self._factory() as session, session.begin():
@@ -222,6 +256,37 @@ class Maintenance:
                 self._storage.delete(key)
             discarded += 1
         return discarded
+
+    # Áreas de trabalho ------------------------------------------------------------------
+
+    def sweep_work_areas(self) -> int:
+        """Remove executor e área de tentativas encerradas (ou sem registro) que ficaram para trás.
+
+        A tentativa viva (`ended_at` nulo) é do worker ou da reconciliação de lease: não é tocada.
+        """
+        try:
+            present = self._runner.list_work()[: self._config.batch_size]
+        except OSError as error:
+            logger.warning("área de trabalho ilegível", extra={"fields": {"error": str(error)}})
+            return 0
+        if not present:
+            return 0
+        with self._factory() as session, session.begin():
+            live = set(
+                session.execute(
+                    select(attempt.c.id).where(
+                        attempt.c.id.in_(present), attempt.c.ended_at.is_(None)
+                    )
+                ).scalars()
+            )
+        removed = 0
+        for attempt_id in present:
+            if attempt_id in live:
+                continue
+            status = self._confirm_ended(attempt_id, run_id=None)
+            if status is not None and self._try_remove(attempt_id):
+                removed += 1
+        return removed
 
     # Retenção --------------------------------------------------------------------------
 

@@ -8,7 +8,6 @@ import pytest
 
 from goblinshift.catalog import (
     CATALOG,
-    LOCAL_EXECUTOR_DIGEST,
     Catalog,
     InvalidParametersError,
     RecipeVersionRetiredError,
@@ -183,11 +182,10 @@ def test_versao_retirada_continua_legivel_mas_nao_resolve() -> None:
         catalog.resolve("csv-janitor", 1, {})
 
 
-def test_versao_atual_publica_limites_efetivos_e_digest() -> None:
+def test_versao_atual_publica_limites_efetivos() -> None:
     version = CATALOG.get_version("csv-janitor", 1)
 
     assert version.status is VersionStatus.CURRENT
-    assert version.executor_digest == LOCAL_EXECUTOR_DIGEST == "local-dev"
     assert version.limits == {
         "max_inputs": 5,
         "table_bytes": 8 * 1024 * 1024,

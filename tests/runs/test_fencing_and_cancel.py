@@ -47,7 +47,7 @@ def test_coordenador_com_geracao_vencida_nao_escreve_nada(
     worker = coordinator(factory, storage, runner)
     claimed = claim(factory, storage)
     worker.prepare(claimed)
-    runner.start(claimed.attempt_id)
+    runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     worker.supervise(claimed)
     collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)

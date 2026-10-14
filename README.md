@@ -76,16 +76,41 @@ O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
 ```
 
+## Imagem do executor
+
+Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado: nada de banco, web nem dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
+
+No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`.
+
+```bash
+uv run pytest -m executor_image                            # constrói a imagem e a roda com runc
+GS_TEST_RUNTIME=runsc uv run pytest -m executor_image      # o mesmo sob gVisor (job gvisor da CI)
+```
+
 ## Teste de aceitação do ambiente (na VPS)
 
 Prova, dentro do executor sob gVisor e com os limites do plano (1.7), que não há rede, que a área de 6 GiB acaba em `ENOSPC`, que memória acima de 2 GiB mata o processo, que um fork bomb para em 64 processos e que a aplicação não alcança o `docker.sock` ([ADRs 004, 005 e 015](docs/adr/)). Roda antes de abrir o serviço e a cada mudança no host:
 
 ```bash
-sudo bash deploy/gvisor.sh                # instala o gVisor (já incluído no provision.sh)
-sudo python3 -B deploy/acceptance/run.py  # sai com 0 só se todos passarem; -B: sem bytecode do root no checkout
+sudo bash deploy/gvisor.sh                 # instala o gVisor (já incluído no provision.sh)
+sudo bash deploy/executor-ctl/install.sh   # instala o executor-ctl (já incluído no provision.sh)
+cd deploy && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passarem; -B: sem bytecode do root
 ```
 
-O `executor-ctl` em `deploy/acceptance/` é o protótipo descartável da fatia 1; a fatia 4 o substitui pelo serviço do host.
+O teste monta o `docker run` das sondas com o perfil de produção do `executor-ctl` (`deploy/executor_ctl/profile.py`) e confere que o serviço responde no socket. Rode com o worker parado: a área de trabalho só admite uma tentativa por vez.
+
+### Teste de caos do worker (na VPS)
+
+Prova o critério de pronto da fatia 4 ([plano, 3.7 e 3.9](docs/GoblinShiftPlan.md#s3-9)): o worker morto por SIGKILL e pausado além do lease em cada fronteira do protocolo (logo depois do claim, com o executor rodando e durante a coleta e publicação), sem publicação duplicada nem container órfão. Roda contra a pilha de produção, com a fila vazia (o teste derruba o worker e recusa começar se houver execução não terminal, container de executor ou área de trabalho suja):
+
+```bash
+cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.chaos   # sai com 0 só se todos passarem
+sudo python3 -B -m acceptance.chaos --scenario sigstop/coleta          # só um cenário (repetível)
+```
+
+Para cada um dos 6 cenários, o teste emite uma chave de curta duração (só na memória, revogada no fim) para uma conta de teste criada pelo `gs-admin` (ou a de `--user <id>`), envia 5 tabelas de ~7,3 MiB e cria a execução; acha a fronteira pelo banco, numa sessão `psql` consultada a cada 20 ms; aplica `docker kill --signal=KILL` (e traz o mesmo container de volta com `docker start`) ou `docker pause` até a manutenção encerrar a tentativa congelada (o freezer do cgroup equivale ao SIGSTOP); e confere o estado `succeeded`, as tentativas e gerações, uma única publicação da geração final, o descarte dos candidatos vencidos, nenhum container `gs-exec-*` nem sobra em `/srv/goblinshift/exec-work`, e o download byte a byte. Leva de 15 a 20 minutos. A lógica pura está em `deploy/acceptance/chaos_rules.py`, testada localmente em `tests/acceptance/`; o script inteiro só roda na VPS.
+
+Os testes do `executor-ctl` com Docker real usam o runtime de `GS_TEST_RUNTIME` (padrão `runc`); com o gVisor instalado: `GS_TEST_RUNTIME=runsc uv run pytest -m executor_ctl tests/executor_ctl`.
 
 ## Execução de ponta a ponta
 
@@ -95,7 +120,7 @@ Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, o script faz
 GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost
 ```
 
-Até a fatia 4, o worker roda a receita num subprocesso do próprio container, sem gVisor ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md)); em produção isso exige `GS_ALLOW_LOCAL_RUNNER=true`, posto pelo `compose.prod.yaml`.
+Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
 ## Estrutura
 
