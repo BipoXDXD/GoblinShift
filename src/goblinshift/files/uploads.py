@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple, NoReturn
 
-from sqlalchemy import Row, func, insert, select, update
+from sqlalchemy import ColumnElement, Row, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
@@ -237,6 +237,19 @@ def lock_ready_uploads(
         for row in rows
     }
     return [by_id[upload_id] for upload_id in upload_ids]
+
+
+def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
+    """Bytes guardados do upload (0 se ainda sem conteúdo), como subconsulta correlacionada.
+
+    Para `runs` somar a entrada processada sem ler as tabelas de `files`.
+    """
+    return (
+        select(func.coalesce(stored_object.c.size_bytes, 0))
+        .join(upload, upload.c.object_id == stored_object.c.id)
+        .where(upload.c.id == upload_id)
+        .scalar_subquery()
+    )
 
 
 def _parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
