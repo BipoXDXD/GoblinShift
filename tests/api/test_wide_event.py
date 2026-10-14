@@ -6,6 +6,7 @@ Os spans saem para um `InMemorySpanExporter`, o mesmo caminho do exportador OTLP
 import json
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.entrypoints.api.wide_event import RateLimitClass, rate_limit_class
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Scope
@@ -34,6 +36,7 @@ pytestmark = pytest.mark.integration
 ECHO = "/api/v1/_test/echo"
 RUNS = "/api/v1/runs"
 CLIENT_ADDRESS = ("203.0.113.77", 51234)
+FROZEN_NOW = datetime(2026, 10, 14, 12, 0, 15, tzinfo=UTC)
 
 
 class Traced:
@@ -236,6 +239,43 @@ def test_aceitacao_traz_run_receita_e_replay(traced: Traced, tmp_path: Path) -> 
 
     assert again.status_code == 202
     assert traced.main_event()["idempotency.replayed"] is True
+
+
+# Limite de requisições (1.7; ADR 027)
+
+
+def test_requisicao_atendida_traz_rate_limit_limited_falso(traced: Traced) -> None:
+    _, auth = new_account(traced.factory)
+    traced.clear()
+
+    traced.client.get("/api/v1/me", headers=auth)
+
+    assert traced.main_event()["rate_limit.limited"] is False
+
+
+def test_requisicao_recusada_pelo_limite_traz_rate_limit_limited_e_o_codigo(
+    traced: Traced,
+) -> None:
+    traced.app.dependency_overrides[current_time] = lambda: FROZEN_NOW
+    _, auth = new_account(traced.factory)
+    headers = {**auth, "Idempotency-Key": str(uuid.uuid4())}
+    for _ in range(10):
+        traced.client.post(f"{RUNS}?validate_only=true", json={}, headers=headers)
+    traced.clear()
+
+    response = traced.client.post(f"{RUNS}?validate_only=true", json={}, headers=headers)
+
+    assert response.status_code == 429
+    event = traced.main_event()
+    assert event["rate_limit.limited"] is True
+    assert event["rate_limit.class"] == "run_create"
+    assert event["error.code"] == "RATE_LIMITED"
+
+
+def test_requisicao_sem_credencial_nao_traz_rate_limit_limited(traced: Traced) -> None:
+    traced.client.get("/api/v1/me")
+
+    assert "rate_limit.limited" not in traced.main_event()
 
 
 # Canário: nada do que o cliente manda como segredo ou dado chega ao span
