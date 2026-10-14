@@ -22,3 +22,6 @@ build/
 
 # Worktrees temporários do Claude Code
 .claude/worktrees/
+
+# Banco de exemplos do Hypothesis
+.hypothesis/
