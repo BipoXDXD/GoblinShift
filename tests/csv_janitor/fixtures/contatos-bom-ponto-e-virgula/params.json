@@ -1,0 +1,21 @@
+{
+  "input_delimiter": ";",
+  "output_delimiter": ",",
+  "trim_columns": [
+    "nome"
+  ],
+  "case_rules": [
+    {
+      "column": "email",
+      "mode": "lower"
+    }
+  ],
+  "deduplicate_by": [
+    "email"
+  ],
+  "output_columns": [
+    "email",
+    "nome",
+    "id"
+  ]
+}
