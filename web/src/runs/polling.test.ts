@@ -44,8 +44,15 @@ describe("nextPollDelayMs: execução em andamento", () => {
     expect(nextPollDelayMs(success("running", null), noJitter)).toBe(2_000);
   });
 
-  it("segue um Retry-After menor que o padrão", () => {
-    expect(nextPollDelayMs(success("running", 1_000), noJitter)).toBe(1_000);
+  it.each([
+    ["menor que o padrão", 1_000],
+    ["zero (também o de uma data passada)", 0],
+  ])("não consulta antes de 2 s com Retry-After %s", (_label, retryAfterMs) => {
+    expect(nextPollDelayMs(success("running", retryAfterMs), noJitter)).toBe(2_000);
+  });
+
+  it("espera um Retry-After no teto de 5 min", () => {
+    expect(nextPollDelayMs(success("running", 300_000), noJitter)).toBe(300_000);
   });
 });
 

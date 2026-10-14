@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, type ApiFailure } from "../api/response";
+import { CrossOriginUrlError } from "../api/sameOrigin";
 import { FakeXhr } from "../test/fakeXhr";
 import { createContentUploader, type UploadProgress } from "./xhr";
 
@@ -26,7 +27,7 @@ const rateLimited = {
   request_id: "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a",
 };
 
-function setup(csrfToken: string | null = null) {
+function setup(csrfToken: string | null = null, url: string = content.url) {
   const xhr = new FakeXhr();
   const uploader = createContentUploader({
     createXhr: () => xhr,
@@ -37,7 +38,7 @@ function setup(csrfToken: string | null = null) {
   const file = new Blob(["abcd"]);
   const start = (signal?: AbortSignal) =>
     uploader.upload({
-      content,
+      content: { ...content, url },
       file,
       onProgress: (event) => progress.push(event),
       ...(signal === undefined ? {} : { signal }),
@@ -63,7 +64,7 @@ describe("upload de conteúdo por XHR: pedido", () => {
     void start();
 
     expect(xhr.method).toBe("PUT");
-    expect(xhr.url).toBe(content.url);
+    expect(xhr.url).toBe(new URL(content.url, window.location.origin).href);
     expect(xhr.requestHeaders.get("Content-Type")).toBe("application/octet-stream");
     expect(xhr.requestHeaders.get("Accept")).toBe("application/json, application/problem+json");
     expect(xhr.body).toBe(file);
@@ -75,6 +76,17 @@ describe("upload de conteúdo por XHR: pedido", () => {
     void start();
 
     expect(xhr.requestHeaders.get("X-CSRF-Token")).toBe("tok");
+  });
+
+  it.each([
+    "https://evil.example/api/v1/uploads/1/content",
+    "//evil.example/api/v1/uploads/1/content",
+  ])("recusa URL de outra origem (%s) sem abrir o envio nem expor o CSRF", async (url) => {
+    const { xhr, start } = setup("tok", url);
+
+    await expect(start()).rejects.toBeInstanceOf(CrossOriginUrlError);
+    expect(xhr.method).toBeNull();
+    expect(xhr.requestHeaders.size).toBe(0);
   });
 
   it("não inventa CSRF sem sessão", () => {
@@ -174,5 +186,88 @@ describe("upload de conteúdo por XHR: cancelamento", () => {
 
     await expect(start(AbortSignal.abort())).rejects.toMatchObject({ name: "AbortError" });
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("upload de conteúdo por XHR: inatividade", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("aborta e rejeita com timeout depois de 45 s sem progresso nem resposta", async () => {
+    vi.useFakeTimers();
+    const { xhr, start } = setup();
+    const pending = failureOf(start());
+
+    await vi.advanceTimersByTimeAsync(44_999);
+    expect(xhr.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(await pending).toEqual({ kind: "timeout" });
+    expect(xhr.aborted).toBe(true);
+  });
+
+  it("reinicia o prazo a cada progresso", async () => {
+    vi.useFakeTimers();
+    const { xhr, start } = setup();
+    const pending = failureOf(start());
+
+    await vi.advanceTimersByTimeAsync(44_000);
+    xhr.progress(1, 4);
+    await vi.advanceTimersByTimeAsync(44_999);
+    expect(xhr.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(await pending).toEqual({ kind: "timeout" });
+  });
+
+  it("conta o prazo também na espera pela confirmação, depois do último byte", async () => {
+    vi.useFakeTimers();
+    const { xhr, start } = setup();
+    const pending = failureOf(start());
+
+    xhr.progress(4, 4);
+    await vi.advanceTimersByTimeAsync(45_000);
+
+    expect(await pending).toEqual({ kind: "timeout" });
+  });
+
+  it("não aborta depois que a resposta chega", async () => {
+    vi.useFakeTimers();
+    const { xhr, start } = setup();
+    const pending = start();
+
+    xhr.respond(200, received, { "Content-Type": "application/json" });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await expect(pending).resolves.toEqual(received);
+    expect(xhr.aborted).toBe(false);
+  });
+
+  it("não aborta depois de uma falha de rede", async () => {
+    vi.useFakeTimers();
+    const { xhr, start } = setup();
+    const pending = failureOf(start());
+
+    xhr.failNetwork();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(await pending).toEqual({ kind: "network" });
+    expect(xhr.aborted).toBe(false);
+  });
+
+  it("cancelamento de quem chamou continua saindo como cancelamento, não como timeout", async () => {
+    vi.useFakeTimers();
+    const { start } = setup();
+    const controller = new AbortController();
+    const rejection = expect(start(controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await rejection;
   });
 });

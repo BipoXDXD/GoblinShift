@@ -42,7 +42,7 @@ export function createLimiter(limit: number): Limiter {
 export interface RateLimitPolicy {
   /** Tentativas no total, contando a primeira. */
   readonly maxAttempts: number;
-  /** Espera quando o 429 vem sem Retry-After. */
+  /** Espera quando o 429 vem sem Retry-After, e a mínima entre tentativas. */
   readonly fallbackDelayMs: number;
   /** Em [0, 1); acrescenta até 10% à espera, para as abas não voltarem juntas. */
   readonly random: () => number;
@@ -52,7 +52,8 @@ export interface RateLimitPolicy {
 const JITTER_FRACTION = 0.1;
 
 /**
- * Repete `attempt` enquanto a API responder RATE_LIMITED, esperando o Retry-After (nunca menos).
+ * Repete `attempt` enquanto a API responder RATE_LIMITED, esperando o Retry-After (nunca menos) e
+ * nunca menos que `fallbackDelayMs`, para um Retry-After 0 não virar repetição em rajada.
  *
  * Outras falhas, inclusive QUOTA_EXCEEDED, voltam na hora: esperar não as resolve.
  */
@@ -78,7 +79,7 @@ function rateLimitDelayMs(error: unknown, policy: RateLimitPolicy): number | nul
   if (problem.code !== "RATE_LIMITED") {
     return null;
   }
-  const baseMs = retryAfterMs ?? policy.fallbackDelayMs;
+  const baseMs = Math.max(retryAfterMs ?? 0, policy.fallbackDelayMs);
   return baseMs + Math.floor(baseMs * JITTER_FRACTION * policy.random());
 }
 

@@ -1,5 +1,6 @@
 import { CSRF_HEADER, type CsrfTokenSource } from "../api/csrf";
 import { API_ACCEPT, ApiError, interpretResponse } from "../api/response";
+import { sameOriginUrl } from "../api/sameOrigin";
 import { receivedContentSchema, type ContentInstructions, type ReceivedContent } from "./api";
 
 /** A parte do XMLHttpRequest que o upload usa; nos testes, um objeto falso. */
@@ -16,6 +17,10 @@ export interface UploadXhr {
   onerror: ((event: ProgressEvent) => void) | null;
   onabort: ((event: ProgressEvent) => void) | null;
 }
+
+// Sem progresso nem resposta por esse tempo, a conexão é dada como morta: sem isso o envio
+// prenderia uma vaga do limitador e o aviso de saída da página para sempre.
+const IDLE_TIMEOUT_MS = 45_000;
 
 /** Progresso real do envio: bytes saindo, depois a espera pela confirmação do servidor. */
 export type UploadProgress =
@@ -42,8 +47,10 @@ export interface ContentUploader {
  * Envia os bytes de um upload por XMLHttpRequest, o único jeito no navegador de ter progresso do
  * envio (`upload.onprogress`); o fetch não informa bytes enviados.
  *
- * Usa `content.method`, `content.url` e `content.headers` exatamente como a API devolveu. Sem
- * retomada: falha aqui exige uma intenção nova (POST /uploads).
+ * Usa `content.method`, `content.url` e `content.headers` como a API devolveu, mas recusa
+ * (`CrossOriginUrlError`) uma URL fora da origem da interface, que levaria o CSRF junto. Sem
+ * retomada: falha aqui exige uma intenção nova (POST /uploads). Aborta com
+ * `ApiError({ kind: "timeout" })` depois de 45 s sem progresso nem resposta.
  */
 export function createContentUploader(transport: UploadTransport): ContentUploader {
   return {
@@ -57,14 +64,25 @@ function sendContent(
 ): Promise<ReceivedContent> {
   return new Promise((resolve, reject) => {
     signal?.throwIfAborted();
+    const url = sameOriginUrl(content.url, window.location.origin);
     const xhr = transport.createXhr();
     const abort = (): void => {
       xhr.abort();
     };
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let idleExpired = false;
+    const rearmIdleTimer = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        idleExpired = true;
+        xhr.abort();
+      }, IDLE_TIMEOUT_MS);
+    };
     const settle = (): void => {
+      clearTimeout(idleTimer);
       signal?.removeEventListener("abort", abort);
     };
-    xhr.open(content.method, content.url);
+    xhr.open(content.method, url.href);
     for (const [name, value] of Object.entries(content.headers)) {
       xhr.setRequestHeader(name, value);
     }
@@ -74,6 +92,7 @@ function sendContent(
       xhr.setRequestHeader(CSRF_HEADER, token);
     }
     xhr.upload.onprogress = (event) => {
+      rearmIdleTimer();
       onProgress(progressOf(event.loaded, file.size));
     };
     xhr.onload = () => {
@@ -95,10 +114,11 @@ function sendContent(
     };
     xhr.onabort = () => {
       settle();
-      reject(abortReason(signal));
+      reject(idleExpired ? new ApiError({ kind: "timeout" }) : abortReason(signal));
     };
     signal?.addEventListener("abort", abort, { once: true });
     xhr.send(file);
+    rearmIdleTimer();
   });
 }
 
