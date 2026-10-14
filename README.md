@@ -86,6 +86,8 @@ O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
 ```
 
+Logs dos containers giram por serviço no próprio Compose (driver `local`, até 50 MiB por serviço; [plano, 1.7](docs/GoblinShiftPlan.md#s1-7)). O `/etc/docker/daemon.json` da VPS é compartilhado com o outro projeto e não é alterado. Os containers do executor (`gs-exec-*`), criados fora do Compose pelo `executor-ctl`, trazem o limite no próprio perfil fixo (`deploy/executor_ctl/profile.py`): driver `local` com um arquivo de 1 MiB, conferido pelo teste de aceitação no `HostConfig.LogConfig`. O log de acesso do Nginx registra o cliente com IP truncado e o caminho sem query string; a API não tem access log, porque o evento `main` já cobre cada requisição.
+
 ### Comandos manuais na VPS
 
 O Compose de produção depende da versão implantada (tag da aplicação e imagem do executor por digest), que o deploy grava em `/srv/goblinshift/secrets/release.env` (atômico, modo 600, ao lado do `app.env`). O `deploy/compose.sh` junta esse arquivo, os segredos, os dois arquivos do Compose e os diretórios de dados do host; o deploy usa o mesmo script. Rode como o usuário `goblinshift`:
