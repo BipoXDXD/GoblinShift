@@ -95,6 +95,30 @@ describe("Execução", () => {
     expect(within(results).getByText(/arquivo processado/)).toBeInTheDocument();
   });
 
+  it("o link do pacote diz o papel do arquivo separado do nome", async () => {
+    setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () =>
+        jsonResponse({
+          ...publishedResults,
+          artifacts: [
+            {
+              artifact_id: ARTIFACT_ID,
+              logical_name: "pacote",
+              role: "package",
+              file_name: "resultado.zip",
+            },
+          ],
+        }),
+    );
+
+    expect(
+      await screen.findByRole("link", {
+        name: "Baixar resultado.zip (pacote com todos os arquivos)",
+      }),
+    ).toHaveAttribute("download", "resultado.zip");
+  });
+
   it("concluída sem arquivos publicados mostra o estado vazio", async () => {
     setup(
       () => jsonResponse(runBody({ status: "succeeded" })),

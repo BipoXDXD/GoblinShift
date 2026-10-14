@@ -95,27 +95,6 @@
     accent-color: var(--primary);
   }
 
-  /* O <input type="file"> real fica visível; só o botão dele ganha cara de botão secundário. */
-  input[type="file"] {
-    max-width: 100%;
-    color: var(--fg-muted);
-    font: inherit;
-  }
-
-  input[type="file"]::file-selector-button {
-    min-height: --spacing(11);
-    margin-inline-end: --spacing(3);
-    padding: --spacing(2) --spacing(4);
-    border: 2px solid var(--secondary-fg);
-    border-radius: var(--radius-lg);
-    background-color: var(--surface);
-    box-shadow: var(--elevation-1);
-    color: var(--secondary-fg);
-    font: inherit;
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
-  }
-
   fieldset {
     min-width: 0;
     margin: 0;
@@ -188,6 +167,14 @@
   }
 
   .card-link:focus-visible::after {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Escolha de arquivos (FileDropzone): o botão visível é o label, no idioma da interface, e o
+     <input type="file"> real fica visualmente oculto dentro dele. O anel de foco do input aparece
+     no label, que é o que a pessoa vê. */
+  .file-picker:has(:focus-visible) {
     outline: 3px solid var(--ring);
     outline-offset: 2px;
   }
