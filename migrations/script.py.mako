@@ -10,6 +10,7 @@ que o código anterior tolera; remoções vão numa migração de um deploy post
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 ${imports if imports else ""}
 revision: str = ${repr(up_revision)}

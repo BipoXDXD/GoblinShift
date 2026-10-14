@@ -4,15 +4,18 @@ from logging.config import fileConfig
 
 from alembic import context
 
-from goblinshift.platform.db import make_engine
+# As tabelas de cada módulo se registram no MetaData comum ao serem importadas.
+import goblinshift.files.tables
+import goblinshift.identity.tables
+import goblinshift.runs.tables  # noqa: F401
+from goblinshift.platform.db import make_engine, metadata
 from goblinshift.platform.settings import Settings
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Ainda não há modelos; a partir da fatia 3 entra o MetaData das tabelas.
-target_metadata = None
+target_metadata = metadata
 
 
 def run_migrations_offline() -> None:
