@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
+gs-admin = "goblinshift.entrypoints.admin_cli:main"
 gs-csv-janitor = "goblinshift.entrypoints.csv_janitor_cli:main"
 
 [build-system]
