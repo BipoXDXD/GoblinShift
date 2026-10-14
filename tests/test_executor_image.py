@@ -155,7 +155,13 @@ def test_executor_processa_um_work_dir_real(image: str, tmp_path: Path) -> None:
 
     assert result.returncode == SUCCEEDED, result.stderr
     report = json.loads((work / "out" / "report.json").read_text(encoding="utf-8"))
-    assert report["summary"] == {"inputs": 2, "ok": 1, "rejected": 1, "outputs": 1}
+    assert report["summary"] == {
+        "inputs": 2,
+        "ok": 1,
+        "rejected": 1,
+        "duplicates": 0,
+        "outputs": 1,
+    }
     assert [item["status"] for item in report["items"]] == ["ok", "rejected"]
     cleaned = (work / "out" / "a.csv").read_text(encoding="utf-8")
     assert list(csv.reader(io.StringIO(cleaned))) == [["nome", "cidade"], ["Ana", "Recife"]]

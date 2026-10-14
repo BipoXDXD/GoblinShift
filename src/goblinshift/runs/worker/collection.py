@@ -1,9 +1,11 @@
 """Coleta do que o executor deixou em `out/` (docs/GoblinShiftPlan.md, 3.6 e 1.7).
 
 O executor é código que processa conteúdo do usuário: o que ele escreve é dado não confiável.
-A coleta só aceita arquivos regulares diretamente em `out/`, sem symlinks nem hardlinks, conta
-quantidade e bytes enquanto lê, e confere o `report.json` contra um schema próprio. Cada arquivo
-de conteúdo precisa estar citado no relatório, e cada citação precisa existir.
+A coleta só aceita arquivos regulares em `out/` ou num único nível de subpasta com nome de
+`OutputGroup` (lista fechada, ADR 018), sem symlinks nem hardlinks, conta quantidade e bytes
+enquanto lê, e confere o `report.json` contra um schema próprio. Cada arquivo de conteúdo precisa
+estar citado no relatório pelo caminho relativo a `out/` ("images/a.jpg"), e cada citação precisa
+existir. A coleta roda depois que o executor terminou: ninguém mais escreve em `out/`.
 
 Duas classes de recusa:
 - `OutputLimitError`: teto de 1.7 estourado, falha determinística (repetir daria o mesmo);
@@ -20,11 +22,14 @@ from pathlib import Path
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
 from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES
+from goblinshift.processing.recipe import OutputGroup
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 
 REPORT_NAME = "report.json"
 _ITEM_OK = "ok"
 _ITEM_REJECTED = "rejected"
+_ITEM_DUPLICATE = "duplicate"
+_GROUPS = frozenset(group.value for group in OutputGroup)
 
 
 class CollectionError(Exception):
@@ -61,6 +66,8 @@ class ReportItem:
     # Código da rejeição (catálogo de 1.6); `None` para item aceito.
     code: str | None
     has_warnings: bool
+    # Só na duplicata do Detox: posição da primeira ocorrência, que é um item aceito com saídas.
+    duplicate_of: int | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +129,7 @@ def parse_report(data: bytes, input_count: int) -> ParsedReport:
     items = tuple(_item(raw_item) for raw_item in _list(document.get("items"), "items"))
     if [item.position for item in items] != list(range(input_count)):
         raise CollectionError(f"relatório deve ter as posições 0..{input_count - 1}, na ordem")
+    _require_duplicates_of_earlier_outputs(items)
     summary = _mapping(document.get("summary"), "summary")
     counts = {key: _int(value, f"summary.{key}") for key, value in summary.items()}
     warnings = _list(document.get("warnings"), "warnings")
@@ -135,34 +143,62 @@ def _scan(out_dir: Path, limits: OutputLimits) -> dict[str, OutputFile]:
         raise CollectionError("out/ ausente") from None
     if not stat.S_ISDIR(info.st_mode):
         raise CollectionError("out/ não é diretório regular")
+    budget = _ContentBudget(limits)
     files: dict[str, OutputFile] = {}
-    content_bytes = 0
     with os.scandir(out_dir) as entries:
         for entry in entries:
-            output = _regular_file(entry)
-            files[output.name] = output
-            if output.name == REPORT_NAME:
+            if entry.is_dir(follow_symlinks=False):
+                files.update(_scan_group(entry, budget))
                 continue
-            content_bytes += output.size
-            # Conferido a cada arquivo: um diretório com milhões de entradas não é lido inteiro.
-            if len(files) - (REPORT_NAME in files) > limits.max_files:
-                raise OutputLimitError(
-                    ErrorCode.OUTPUT_LIMIT_EXCEEDED, f"mais de {limits.max_files} arquivos"
-                )
-            if content_bytes > limits.max_bytes:
-                raise OutputLimitError(
-                    ErrorCode.OUTPUT_LIMIT_EXCEEDED, f"saídas acima de {limits.max_bytes} bytes"
-                )
+            output = _regular_file(entry, entry.name)
+            files[output.name] = output
+            if output.name != REPORT_NAME:
+                budget.spend(output)
     return files
 
 
-def _regular_file(entry: os.DirEntry[str]) -> OutputFile:
+def _scan_group(directory: os.DirEntry[str], budget: _ContentBudget) -> dict[str, OutputFile]:
+    """Um grupo da lista fechada; dentro dele, só arquivos regulares (nenhum segundo nível)."""
+    if directory.name not in _GROUPS:
+        raise CollectionError(f"out/ contém subpasta fora da lista de grupos: {directory.name!r}")
+    files: dict[str, OutputFile] = {}
+    with os.scandir(directory.path) as entries:
+        for entry in entries:
+            output = _regular_file(entry, f"{directory.name}/{entry.name}")
+            files[output.name] = output
+            budget.spend(output)
+    return files
+
+
+class _ContentBudget:
+    """Tetos de conteúdo, conferidos a cada arquivo: um diretório com milhões de entradas não é
+    lido inteiro."""
+
+    def __init__(self, limits: OutputLimits) -> None:
+        self._limits = limits
+        self._files = 0
+        self._bytes = 0
+
+    def spend(self, output: OutputFile) -> None:
+        self._files += 1
+        self._bytes += output.size
+        if self._files > self._limits.max_files:
+            raise OutputLimitError(
+                ErrorCode.OUTPUT_LIMIT_EXCEEDED, f"mais de {self._limits.max_files} arquivos"
+            )
+        if self._bytes > self._limits.max_bytes:
+            raise OutputLimitError(
+                ErrorCode.OUTPUT_LIMIT_EXCEEDED, f"saídas acima de {self._limits.max_bytes} bytes"
+            )
+
+
+def _regular_file(entry: os.DirEntry[str], name: str) -> OutputFile:
     info = entry.stat(follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode):
-        raise CollectionError(f"out/ contém algo que não é arquivo regular: {entry.name!r}")
+        raise CollectionError(f"out/ contém algo que não é arquivo regular: {name!r}")
     if info.st_nlink != 1:
-        raise CollectionError(f"out/ contém hardlink: {entry.name!r}")
-    return OutputFile(entry.name, Path(entry.path), info.st_size)
+        raise CollectionError(f"out/ contém hardlink: {name!r}")
+    return OutputFile(name, Path(entry.path), info.st_size)
 
 
 def _read_no_follow(path: Path, max_bytes: int) -> bytes:
@@ -185,7 +221,22 @@ def _item(raw: object) -> ReportItem:
     if status == _ITEM_REJECTED:
         code = _text(item.get("code"), "item.code")
         return ReportItem(position, False, (), code, False)
+    if status == _ITEM_DUPLICATE:
+        # Aceito, sem saídas e sem aviso: é o comportamento pedido pelo parâmetro do Detox (1.4).
+        duplicate_of = _int(item.get("duplicate_of"), "item.duplicate_of")
+        return ReportItem(position, True, (), None, False, duplicate_of)
     raise CollectionError(f"item com status desconhecido: {status!r}")
+
+
+def _require_duplicates_of_earlier_outputs(items: tuple[ReportItem, ...]) -> None:
+    for item in items:
+        if item.duplicate_of is None:
+            continue
+        original = items[item.duplicate_of] if 0 <= item.duplicate_of < item.position else None
+        if original is None or not original.outputs:
+            raise CollectionError(
+                f"item {item.position}: duplicate_of deve apontar para um item anterior com saídas"
+            )
 
 
 def _mapping(raw: object, where: str) -> dict[str, object]:

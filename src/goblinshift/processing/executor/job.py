@@ -6,6 +6,7 @@ contrato é tratado como defeito de infraestrutura, nunca adivinhado.
 
 import hashlib
 import json
+import os
 import re
 import stat
 from collections.abc import Mapping, Sequence
@@ -16,6 +17,7 @@ from goblinshift.processing.recipe import InputFile
 
 MIB = 1024 * 1024
 JOB_MAX_BYTES = 1 * MIB
+CONTEXT_MAX_BYTES = 64 * 1024
 HASH_CHUNK_BYTES = 1 * MIB
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 _JOB_KEYS = frozenset({"recipe_id", "recipe_version", "parameters", "inputs"})
@@ -55,11 +57,7 @@ def read_job(path: Path) -> Job:
         raise JobError(f"job ilegível: {error}") from error
     if len(data) > JOB_MAX_BYTES:
         raise JobError(f"job passa de {JOB_MAX_BYTES} bytes")
-    try:
-        raw = json.loads(data, object_pairs_hook=_reject_duplicates, parse_constant=_reject)
-    except ValueError as error:
-        raise JobError(f"job não é JSON aceito: {error}") from error
-    job = _object(raw, _JOB_KEYS, "job")
+    job = _object(_parsed(data, "job"), _JOB_KEYS, "job")
     return Job(
         recipe_id=_text(job["recipe_id"], "recipe_id"),
         recipe_version=_integer(job["recipe_version"], "recipe_version"),
@@ -68,9 +66,58 @@ def read_job(path: Path) -> Job:
     )
 
 
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Fatos da execução que não mudam o processamento, só o que o manifesto registra."""
+
+    # Imagem fixada na Run ("<repo>@sha256:<hex>", ou "local-dev" fora de produção). None quando
+    # o worker ainda não escreve o context.json, na janela de deploy (ADR 020).
+    executor_image: str | None
+
+
+def read_context(path: Path) -> ExecutionContext:
+    """Lê o `context.json` opcional ao lado do `job.json` (ADR 020).
+
+    Ausente é a janela de deploy (worker anterior à fatia 5), não erro. Presente, é lido como o
+    job, com uma diferença: chaves desconhecidas são ignoradas (tolerant reader), para um worker
+    mais novo poder acrescentar campos sem derrubar as Runs fixadas numa imagem anterior.
+    """
+    try:
+        # O_NOFOLLOW: o arquivo é do worker, e um symlink ali nunca é seguido.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return ExecutionContext(executor_image=None)
+    except OSError as error:
+        raise JobError(f"context.json ilegível: {error}") from error
+    with os.fdopen(fd, "rb") as source:
+        data = source.read(CONTEXT_MAX_BYTES + 1)
+    if len(data) > CONTEXT_MAX_BYTES:
+        raise JobError(f"context.json passa de {CONTEXT_MAX_BYTES} bytes")
+    context = _object(_parsed(data, "context.json"), None, "context.json")
+    if "executor_image" not in context:
+        raise JobError("context.json sem executor_image")
+    return ExecutionContext(executor_image=_image(context["executor_image"]))
+
+
+def _image(raw: object) -> str | None:
+    if raw is None:
+        return None
+    image = _text(raw, "executor_image")
+    if not image or any(char < " " or char == "\x7f" for char in image):
+        raise JobError("executor_image deve ser texto não vazio, sem caracteres de controle")
+    return image
+
+
 def verified_inputs(inputs_dir: Path, entries: Sequence[InputEntry]) -> list[InputFile]:
     """Confere tipo, tamanho e SHA-256 de cada entrada; adulteração impede a execução inteira."""
     return [_verified(inputs_dir / entry.path, entry) for entry in entries]
+
+
+def _parsed(data: bytes, where: str) -> object:
+    try:
+        return json.loads(data, object_pairs_hook=_reject_duplicates, parse_constant=_reject)
+    except ValueError as error:
+        raise JobError(f"{where} não é JSON aceito: {error}") from error
 
 
 def _entries(raw: object) -> tuple[InputEntry, ...]:

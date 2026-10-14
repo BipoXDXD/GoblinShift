@@ -1,5 +1,6 @@
 """Worker de ponta a ponta com PostgreSQL e executor reais (docs/GoblinShiftPlan.md, 3.4 e 3.5)."""
 
+import json
 import threading
 import uuid
 from datetime import timedelta
@@ -14,6 +15,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
+from goblinshift.processing.executor.job import ExecutionContext, read_context
 from goblinshift.runs.acceptance import accept_run
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.store import complete_after_commit
@@ -76,7 +78,13 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"], row["error_code"]) == ("succeeded", None, None)
     assert row["finished_at"] is not None
-    assert row["summary"] == {"inputs": 1, "ok": 1, "rejected": 0, "outputs": 1}
+    assert row["summary"] == {
+        "inputs": 1,
+        "ok": 1,
+        "rejected": 0,
+        "duplicates": 0,
+        "outputs": 1,
+    }
     assert outputs_of(factory, run_id) == [("clientes.csv", "output"), ("report.json", "report")]
     assert input_outcomes(factory, run_id) == [("ok", None)]
     [only] = attempts(factory, run_id)
@@ -325,3 +333,18 @@ def test_execucao_aceita_pela_api_e_processada_pelo_worker(
     assert row["status"] == "succeeded"
     assert outputs_of(factory, accepted.run_id)[-1] == ("report.json", "report")
     assert open_run_uses(factory, accepted.run_id) == 0
+
+
+def test_preparacao_grava_o_contexto_com_a_imagem_fixada_na_run(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root)
+    worker = coordinator(factory, storage, runner)
+    claimed = claim(factory, storage)
+
+    worker.prepare(claimed)
+
+    context = runner.work_dir(claimed.attempt_id) / "context.json"
+    assert json.loads(context.read_bytes()) == {"executor_image": LOCAL_EXECUTOR_IMAGE}
+    assert read_context(context) == ExecutionContext(executor_image=claimed.executor_image)
