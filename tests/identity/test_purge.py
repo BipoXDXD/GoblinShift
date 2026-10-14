@@ -24,18 +24,12 @@ from goblinshift.identity.purge import (
 )
 from goblinshift.identity.tables import api_key, app_user, audit_event, login_state, web_session
 from goblinshift.platform.db import unit_of_work
-from tests.identity.pending_fronts import install_domain_stand_ins
 from tests.identity.support import new_key, new_user
 
 pytestmark = pytest.mark.integration
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 LIMIT = 500
-
-
-@pytest.fixture(autouse=True)
-def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
-    install_domain_stand_ins(monkeypatch)
 
 
 def insert_web_session(

@@ -29,7 +29,6 @@ from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.files.support import create_intent
-from tests.identity.pending_fronts import install_domain_stand_ins
 from tests.runs.worker_support import claim, coordinator, create_user, local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -49,11 +48,6 @@ OWNED_TABLES: dict[str, tuple[Table, str]] = {
     "stored_object": (stored_object, "owner_id"),
     "transfer_slot": (transfer_slot, "owner_id"),
 }
-
-
-@pytest.fixture(autouse=True)
-def stand_ins(monkeypatch: pytest.MonkeyPatch) -> None:
-    install_domain_stand_ins(monkeypatch)
 
 
 def count_owned(factory: sessionmaker[Session], owner_id: uuid.UUID) -> dict[str, int]:
