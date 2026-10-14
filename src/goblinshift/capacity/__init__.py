@@ -25,6 +25,7 @@ from goblinshift.capacity.ledger import (
     release,
     release_many,
     reserve,
+    reserve_many,
     transfer,
     usage,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "release",
     "release_many",
     "reserve",
+    "reserve_many",
     "transfer",
     "usage",
 ]
