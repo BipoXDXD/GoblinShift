@@ -1,0 +1,223 @@
+import { useMutation } from "@tanstack/react-query";
+import { useId, useState, type ReactElement, type SubmitEvent } from "react";
+import { useNavigate } from "react-router";
+
+import { useApiClient } from "../api/ApiClientContext";
+import { useIdempotencyKey } from "../api/idempotency";
+import { ApiError } from "../api/response";
+import type { RunCommand } from "../api/types";
+import { runPath } from "../app/paths";
+import { ErrorSummary, type FormIssue } from "../components/a11y/ErrorSummary";
+import { FileDropzone } from "../components/a11y/FileDropzone";
+import { FocusHeading } from "../components/a11y/FocusHeading";
+import { LiveRegion } from "../components/a11y/LiveRegion";
+import { moveItem, ReorderableList } from "../components/a11y/ReorderableList";
+import { EmptyState } from "../components/feedback/EmptyState";
+import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
+import type { RecipeModule } from "../recipes/registry";
+import type { RecipeDraft, RecipeId } from "../recipes/types";
+import { createRun } from "../runs/commands";
+import { TEXT } from "../text";
+import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
+import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
+import { UploadEntryView } from "./UploadEntryView";
+
+const FILES_FIELD_ID = "bancada-arquivos";
+
+interface WorkbenchProps {
+  readonly recipe: RecipeModule<RecipeId>;
+  readonly uploadServices: UploadServices;
+}
+
+interface Submission {
+  readonly command: RunCommand;
+  readonly idempotencyKey: string;
+}
+
+/**
+ * Bancada de uma receita (2.2): escolher e enviar arquivos, ordenar as entradas, preencher os
+ * parâmetros e executar. Os erros só aparecem depois da primeira tentativa de executar; a
+ * `Idempotency-Key` acompanha o comando, então repetir o mesmo envio não cria outra execução.
+ */
+export function Workbench({ recipe, uploadServices }: WorkbenchProps): ReactElement {
+  const client = useApiClient();
+  const navigate = useNavigate();
+  const batch = useUploadBatch(uploadServices);
+  const [order, setOrder] = useState<readonly string[]>([]);
+  const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(recipe.initialDraft);
+  const [attempt, setAttempt] = useState(0);
+  const filesHeadingId = useId();
+  const parametersHeadingId = useId();
+
+  const entries = orderEntries(batch.entries, order);
+  const inputs = runInputs(entries);
+  const command = commandFrom(draft, inputs);
+  const intent = command === null ? "" : JSON.stringify(command);
+  const idempotency = useIdempotencyKey(intent);
+  const announcement = useUploadAnnouncement(batch.entries);
+
+  const mutation = useMutation({
+    mutationFn: (submission: Submission) => createRun(client, submission),
+  });
+  const failure = mutation.error === null ? null : failureOf(mutation.error);
+  // Erros por campo do servidor valem para o comando enviado; mudou o comando, eles saem de cena.
+  const submittedIntent =
+    mutation.variables === undefined ? null : JSON.stringify(mutation.variables.command);
+  const serverIssues =
+    failure !== null && submittedIntent === intent ? fieldIssuesOf(failure, recipe) : null;
+
+  const issues = [...(attempt > 0 ? clientIssues(inputs, draft) : []), ...(serverIssues ?? [])];
+  const fieldErrors = new Map(
+    issues.flatMap((issue) => (issue.fieldId === null ? [] : [[issue.fieldId, issue.message]])),
+  );
+
+  const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (mutation.isPending) {
+      return;
+    }
+    setAttempt((current) => current + 1);
+    if (command === null) {
+      return;
+    }
+    mutation.mutate(
+      { command, idempotencyKey: idempotency.key },
+      {
+        onSuccess: (run) => {
+          idempotency.rotate();
+          void navigate(runPath(run.id));
+        },
+      },
+    );
+  };
+
+  return (
+    <main>
+      <FocusHeading>{TEXT.workbench.title(recipe.title)}</FocusHeading>
+      <form noValidate onSubmit={onSubmit}>
+        <ErrorSummary issues={issues} attempt={attempt} />
+        <section aria-labelledby={filesHeadingId}>
+          <h2 id={filesHeadingId}>{TEXT.workbench.filesHeading}</h2>
+          <FileDropzone
+            id={FILES_FIELD_ID}
+            label={TEXT.workbench.chooseFiles}
+            description={TEXT.workbench.chooseFilesHint}
+            accept={recipe.accept}
+            error={fieldErrors.get(FILES_FIELD_ID) ?? null}
+            onFiles={batch.add}
+          />
+          {entries.length === 0 ? (
+            <EmptyState title={TEXT.workbench.noFilesYet} headingLevel={3}>
+              <p>{TEXT.workbench.noFilesYetHint}</p>
+            </EmptyState>
+          ) : (
+            <ReorderableList
+              label={TEXT.workbench.orderLabel}
+              items={entries}
+              getKey={(entry) => entry.localId}
+              getName={(entry) => entry.file.name}
+              renderItem={(entry) => (
+                <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={batch.remove} />
+              )}
+              onMove={(move) => {
+                setOrder(moveItem(entries.map(localIdOf), move));
+              }}
+            />
+          )}
+          <LiveRegion message={announcement} visuallyHidden />
+        </section>
+        <section aria-labelledby={parametersHeadingId}>
+          <h2 id={parametersHeadingId}>{TEXT.workbench.parametersHeading}</h2>
+          <recipe.Fields errors={fieldErrors} onDraftChange={setDraft} />
+        </section>
+        {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
+        <button type="submit" aria-disabled={mutation.isPending}>
+          {TEXT.workbench.run}
+        </button>
+        <LiveRegion
+          message={mutation.isPending ? TEXT.workbench.creatingRun : null}
+          visuallyHidden
+        />
+      </form>
+    </main>
+  );
+}
+
+function commandFrom(draft: RecipeDraft<RecipeId>, inputs: RunInputs): RunCommand | null {
+  if (!draft.ok || !inputs.ok) {
+    return null;
+  }
+  return { ...draft.command, input_upload_ids: [...inputs.uploadIds] };
+}
+
+function clientIssues(inputs: RunInputs, draft: RecipeDraft<RecipeId>): FormIssue[] {
+  return [
+    ...(inputs.ok ? [] : [{ fieldId: FILES_FIELD_ID, message: inputs.message }]),
+    ...(draft.ok ? [] : draft.issues),
+  ];
+}
+
+function failureOf(error: Error): DisplayableFailure {
+  return error instanceof ApiError ? error.failure : { kind: "internal" };
+}
+
+/**
+ * Erros por campo de um VALIDATION_FAILED, com o texto do servidor (já sem eco da entrada); `null`
+ * para as outras falhas, que vão para o alerta com texto próprio.
+ */
+function fieldIssuesOf(
+  failure: DisplayableFailure,
+  recipe: RecipeModule<RecipeId>,
+): FormIssue[] | null {
+  if (failure.kind !== "problem" || failure.problem.code !== "VALIDATION_FAILED") {
+    return null;
+  }
+  const errors = failure.problem.errors ?? [];
+  if (errors.length === 0) {
+    return null;
+  }
+  return errors.map(({ field, message }) => ({
+    fieldId: fieldIdForServerPath(field, recipe),
+    message,
+  }));
+}
+
+function fieldIdForServerPath(field: string, recipe: RecipeModule<RecipeId>): string | null {
+  // O servidor aponta o campo a partir do corpo: `body.parameters.filters.0.value`.
+  const segments = field.split(".");
+  const [root, ...rest] = segments[0] === "body" ? segments.slice(1) : segments;
+  if (root === "parameters") {
+    return recipe.fieldIdFor(rest);
+  }
+  return root === "input_upload_ids" ? FILES_FIELD_ID : null;
+}
+
+function localIdOf(entry: UploadEntry): string {
+  return entry.localId;
+}
+
+type StatusById = ReadonlyMap<string, UploadEntry["state"]["status"]>;
+
+/** Anúncio de envio concluído ou falho, recalculado só quando algum arquivo muda de estado. */
+function useUploadAnnouncement(entries: readonly UploadEntry[]): string | null {
+  const [tracked, setTracked] = useState<{ statuses: StatusById; message: string | null }>({
+    statuses: new Map(),
+    message: null,
+  });
+  const statuses: StatusById = new Map(entries.map((entry) => [entry.localId, entry.state.status]));
+  if (!sameStatuses(tracked.statuses, statuses)) {
+    // Ajuste de estado durante a renderização: o padrão do React para estado derivado de dados.
+    setTracked({
+      statuses,
+      message: uploadAnnouncement(tracked.statuses, entries) ?? tracked.message,
+    });
+  }
+  return tracked.message;
+}
+
+function sameStatuses(previous: StatusById, next: StatusById): boolean {
+  return (
+    previous.size === next.size &&
+    [...next].every(([localId, status]) => previous.get(localId) === status)
+  );
+}
