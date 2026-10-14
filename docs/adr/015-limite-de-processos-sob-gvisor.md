@@ -39,11 +39,11 @@ O UID do executor (61000) não existe no host e só roda uma tentativa por vez, 
 ## Consequências
 
 - O teste de aceitação passa a provar o `EAGAIN` no 64º processo, além de conferir os dois limites no `docker inspect`. Uma versão nova do gVisor que deixe de aplicar o RLIMIT_NPROC reprova o teste antes de chegar à produção.
-- Os dois números ficam num lugar só, o perfil do `executor-ctl` (hoje `deploy/acceptance/executor_ctl.py`; na fatia 4, o serviço real). Se o `nproc` subir, a rede de segurança é recalculada: 31 + 2 × `nproc`, com folga.
+- Os dois números ficam num lugar só, o perfil do `executor-ctl` (`deploy/executor_ctl/profile.py`, desde a fatia 4; antes, o protótipo da fatia 1). Se o `nproc` subir, a rede de segurança é recalculada: 31 + 2 × `nproc`, com folga.
 - Uma receita com muitas threads (FFmpeg, por exemplo) conta threads no mesmo limite de 64; a medição da fatia 4 confirma que as receitas reais cabem.
 - Também medido na fatia 1: o gVisor monta um `tmpfs` próprio em `/tmp`, mesmo com a raiz read-only. O que se escreve ali fica na memória do sandbox e conta nos 2 GiB, sem chegar ao disco do host. A área de trabalho das receitas continua sendo `/work`.
 
 ## Como verificar
 
-- `deploy/acceptance/executor_ctl.py` tem `--ulimit=nproc=64` e `--pids-limit=256` no perfil fixo.
-- Na VPS, `sudo python3 -B deploy/acceptance/run.py` mostra "fork bomb contido em 64 processos" com 63 processos criados e `EAGAIN`, e o perfil fixo sem divergências (`PidsLimit` 256, `ulimit nproc` 64).
+- `deploy/executor_ctl/profile.py` tem `--ulimit=nproc=64` e `--pids-limit=256` no perfil fixo, e `tests/executor_ctl/test_profile.py` afirma a lista inteira de argumentos.
+- Na VPS, `cd deploy && sudo python3 -B -m acceptance.run` mostra "fork bomb contido em 64 processos" com 63 processos criados e `EAGAIN`, e o perfil fixo sem divergências (`PidsLimit` 256, `ulimit nproc` 64).
