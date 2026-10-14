@@ -128,3 +128,18 @@ object_use = Table(
     Index(None, "holder_kind", "holder_id"),
     CheckConstraint("holder_kind IN ('run', 'download')", name="holder_kind"),
 )
+
+# Vagas de transferência simultânea (1.7). Ficam no banco, e não na memória do processo, para
+# que o limite valha entre réplicas da API. Cada linha é uma transferência em andamento.
+transfer_slot = Table(
+    "transfer_slot",
+    metadata,
+    Column("id", Uuid, primary_key=True, server_default=func.uuidv7()),
+    Column("owner_id", Uuid, ForeignKey("app_user.id", ondelete="RESTRICT"), nullable=False),
+    Column("direction", Text, nullable=False),
+    Column("acquired_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # Vencida, a vaga não conta mais e é removida pela próxima reserva da mesma direção.
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Index(None, "owner_id"),
+    CheckConstraint("direction IN ('upload', 'download')", name="direction"),
+)
