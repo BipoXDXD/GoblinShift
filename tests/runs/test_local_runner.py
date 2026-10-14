@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import pytest
 
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
 from goblinshift.runs.worker.runner import ExecutorPhase, LocalRunner, RunnerError
+from tests.runs.fake_executor import IGNORING_TERM
 
 FAKE_EXECUTOR = str(Path(__file__).with_name("fake_executor.py"))
 WAIT_TIMEOUT_S = 15.0
@@ -29,11 +31,15 @@ def fake_runner(
     )
 
 
-def wait_exit(runner: LocalRunner, attempt_id: uuid.UUID) -> None:
+def wait_for(condition: Callable[[], bool]) -> None:
     deadline = time.monotonic() + WAIT_TIMEOUT_S
-    while runner.status(attempt_id).is_running:
-        assert time.monotonic() < deadline, "executor não terminou a tempo"
+    while not condition():
+        assert time.monotonic() < deadline, "condição não chegou a tempo"
         time.sleep(0.05)
+
+
+def wait_exit(runner: LocalRunner, attempt_id: uuid.UUID) -> None:
+    wait_for(lambda: not runner.status(attempt_id).is_running)
 
 
 def test_status_de_tentativa_nunca_iniciada_e_absent(tmp_path: Path) -> None:
@@ -108,7 +114,8 @@ def test_stop_mata_com_sigkill_quem_ignora_sigterm_depois_da_carencia(tmp_path: 
     runner = fake_runner(tmp_path, "ignore-term", "30")
     attempt_id = uuid.uuid7()
     runner.start(attempt_id, LOCAL_EXECUTOR_IMAGE)
-    time.sleep(0.5)  # o executor precisa ter instalado o SIG_IGN antes do SIGTERM
+    executor_log = tmp_path / f"gs-exec-{attempt_id}.runner" / "executor.log"
+    wait_for(lambda: IGNORING_TERM in executor_log.read_text(encoding="utf-8"))
 
     started = time.monotonic()
     status = runner.stop(attempt_id, timedelta(seconds=1))
