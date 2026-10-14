@@ -322,9 +322,9 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     _create_attempt_dir(host, attempt)
     try:
         # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
-        work_dir = workarea.prepare_for_start(area, attempt, host.group_id)
+        prepared = workarea.prepare_for_start(area, attempt, host.group_id)
         options = profile.run_options(
-            attempt, work_dir=work_dir, runtime=host.config.runtime, executor_gid=host.group_id
+            attempt, work_dir=prepared.path, runtime=host.config.runtime, executor_gid=host.group_id
         )
         started = time.monotonic()
         _docker_output(

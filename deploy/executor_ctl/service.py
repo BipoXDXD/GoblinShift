@@ -37,16 +37,18 @@ class ExecutorService:
             existing = self._docker.inspect(name)
             if existing.state != "absent":
                 return existing
-            work_dir = workarea.prepare_for_start(
+            prepared = workarea.prepare_for_start(
                 self._config.work_area, attempt_id, self._executor_gid
             )
             arguments = profile.run_arguments(
                 attempt_id,
                 image,
-                work_dir=work_dir,
+                work_dir=prepared.path,
                 runtime=self._config.runtime,
                 executor_gid=self._executor_gid,
             )
+            # O daemon resolve as montagens pelo caminho: reconfere logo antes (workarea).
+            prepared.confirm_unchanged()
             try:
                 self._docker.run(arguments)
             except ContainerNameConflictError:
