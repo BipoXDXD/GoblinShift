@@ -42,6 +42,7 @@ export function App(): ReactElement {
             random: Math.random,
           },
         },
+        now: Date.now,
       }),
     ),
   );

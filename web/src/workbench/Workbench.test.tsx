@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { createRoutes } from "../app/routes";
+import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler, catalogVersion, withVersion } from "../test/catalog";
 import {
@@ -46,13 +46,7 @@ function renderWorkbench({
     [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()),
   });
   const { uploader, pending } = fakeUploader({ autoResolve });
-  const routes = createRoutes({
-    uploadServices: {
-      client: api.client,
-      uploader,
-      rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-    },
-  });
+  const routes = appRoutes(api.client, uploader);
   const view = renderRoutes({ routes, path: `/bancada/${recipe}`, client: api.client });
   return { ...view, api, pending, user: userEvent.setup() };
 }
@@ -151,15 +145,8 @@ describe("Bancada", () => {
 
   it("receita desconhecida mostra a página não encontrada", async () => {
     const api = fakeApi({});
-    const { uploader } = fakeUploader({ autoResolve: true });
     renderRoutes({
-      routes: createRoutes({
-        uploadServices: {
-          client: api.client,
-          uploader,
-          rateLimit: { maxAttempts: 1, fallbackDelayMs: 0, random: () => 0 },
-        },
-      }),
+      routes: appRoutes(api.client),
       path: "/bancada/receita-que-nao-existe",
       client: api.client,
     });
