@@ -45,21 +45,23 @@ function setup(
 }
 
 describe("Execução", () => {
-  it("abre com o foco no título e mostra o carregamento", () => {
+  it("abre com o foco no título e mostra o carregamento", async () => {
     setup(() => null);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    expect(await screen.findByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
     expect(screen.getByText("Carregando a execução.")).toBeInTheDocument();
   });
 
-  it("id que não é UUID mostra a página não encontrada, sem chamar a API", () => {
+  it("id que não é UUID mostra a página não encontrada, sem chamar a API", async () => {
     const { api } = setup(
       () => null,
       () => null,
       "/execucoes/nao-e-uuid",
     );
 
-    expect(screen.getByRole("heading", { level: 1, name: "Página não encontrada" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Página não encontrada" }),
+    ).toBeVisible();
     expect(api.requests).toHaveLength(0);
   });
 
