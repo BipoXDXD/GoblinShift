@@ -43,6 +43,7 @@ def _production(tmp_path: Path, **overrides: Any) -> Settings:
         "environment": "production",
         "db_port": 1,
         "cursor_secret": SecretStr(SECRET),
+        "user_hash_secret": SecretStr(SECRET),
         "runner": "executor_ctl",
         "executor_image": EXECUTOR_IMAGE,
         "public_origin": ORIGIN,

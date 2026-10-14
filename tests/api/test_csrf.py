@@ -28,8 +28,8 @@ _PATH_PARAM = re.compile(r"\{[a-z_]+\}")
 CANCEL = "/api/v1/runs/{run_id}/cancel"
 MUTATIONS = [
     pytest.param(method, path, id=f"{method} {path}")
-    for method, path, rule in entries()
-    if method in _MUTATING and rule.pending is None
+    for method, path, _rule in entries()
+    if method in _MUTATING
 ]
 
 
