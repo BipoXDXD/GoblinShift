@@ -1,9 +1,17 @@
 # Livros com direitos autorais: nunca entram no repositório público.
 Livros/
 
-# Segredos e configuração local
+# Segredos e configuração local. Exemplos sem valores reais precisam se chamar *.example.
 .secrets/
 .env
+.env.*
+!*.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
 *.img
 
 # Python e ferramentas
@@ -25,3 +33,6 @@ build/
 
 # Estado local do servidor MCP Serena
 .serena/
+
+# Banco de exemplos do Hypothesis
+.hypothesis/

@@ -1,0 +1,9 @@
+{
+  "filters": [
+    {
+      "column": "descricao",
+      "op": "ne",
+      "value": ""
+    }
+  ]
+}
