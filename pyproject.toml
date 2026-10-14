@@ -103,13 +103,16 @@ root_package = "goblinshift"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Camadas: entrypoints → runs → presets → (catalog | files | identity) → (processing | platform)"
+name = "Camadas: entrypoints → runs → presets → (catalog | files | identity) → capacity → (processing | platform)"
 type = "layers"
+# `capacity` (livro-razão de reservas, ADR 023) fica abaixo de `files` e `runs`, que reservam, e
+# acima de `platform`, de onde vem o MetaData.
 layers = [
     "goblinshift.entrypoints",
     "goblinshift.runs",
     "goblinshift.presets",
     "goblinshift.catalog | goblinshift.files | goblinshift.identity",
+    "goblinshift.capacity",
     "goblinshift.processing | goblinshift.platform",
 ]
 
@@ -124,6 +127,7 @@ forbidden_modules = [
     "httpx",
     "httpx2",
     "goblinshift.platform",
+    "goblinshift.capacity",
     "goblinshift.catalog",
     "goblinshift.files",
     "goblinshift.identity",
@@ -143,6 +147,7 @@ forbidden_modules = [
     "httpx",
     "httpx2",
     "goblinshift.platform",
+    "goblinshift.capacity",
     "goblinshift.catalog",
     "goblinshift.files",
     "goblinshift.identity",
@@ -164,6 +169,7 @@ source_modules = [
     "goblinshift.runs",
     "goblinshift.presets",
     "goblinshift.identity",
+    "goblinshift.capacity",
     "goblinshift.platform",
     "goblinshift.entrypoints",
 ]
