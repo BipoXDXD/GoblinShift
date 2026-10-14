@@ -1,2 +1,269 @@
-/* Sem tema: os tokens de cor, tipografia, raio e sombra entram com as decisões de design (D1–D12). */
+/*
+ * Sistema visual do GoblinShift (plano de design web, D1–D13 e seção 7).
+ *
+ * Três camadas:
+ * 1. tons crus em @theme static (musgo, latão, pedra, brasa): só a arte e este arquivo os usam;
+ * 2. papéis semânticos em :root e [data-theme="dark"], com os pares de contraste medidos em
+ *    contrast.test.ts;
+ * 3. @theme inline, que transforma os papéis em utilitários (bg-surface, text-fg-muted, …).
+ * Os componentes usam só a camada 3.
+ */
 @import "tailwindcss";
+
+/* O tema escuro vem do atributo que /theme-init.js grava no <html>, não direto da media query:
+   assim a escolha manual (Sistema, Claro, Escuro) vale para a página inteira. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme static {
+  /* Só os valores do sistema existem: bg-red-500, shadow-md, rounded-xl ou font-bold não geram
+     CSS (RUI cap. 1, "Limit your choices"). */
+  --color-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --radius-*: initial;
+  --font-*: initial;
+  --font-weight-*: initial;
+  --text-*: initial;
+  --animate-*: initial;
+
+  --color-white: oklch(1 0 0);
+
+  /* Musgo: primária. O matiz gira de 125° (claros, rumo ao amarelo) a 148° (escuros). */
+  --color-moss-50: oklch(0.975 0.03 125);
+  --color-moss-100: oklch(0.945 0.05 127);
+  --color-moss-200: oklch(0.895 0.08 130);
+  --color-moss-300: oklch(0.825 0.11 133);
+  --color-moss-400: oklch(0.735 0.13 136);
+  --color-moss-500: oklch(0.645 0.14 138);
+  --color-moss-600: oklch(0.555 0.13 140);
+  --color-moss-700: oklch(0.475 0.115 142);
+  --color-moss-800: oklch(0.405 0.095 144);
+  --color-moss-900: oklch(0.335 0.075 146);
+  --color-moss-950: oklch(0.265 0.055 148);
+
+  /* Latão: acento, foco e aviso. */
+  --color-brass-50: oklch(0.975 0.034 92);
+  --color-brass-100: oklch(0.945 0.06 90);
+  --color-brass-200: oklch(0.895 0.1 87);
+  --color-brass-300: oklch(0.825 0.135 83);
+  --color-brass-400: oklch(0.735 0.153 78);
+  --color-brass-500: oklch(0.645 0.137 73);
+  --color-brass-600: oklch(0.555 0.122 67);
+  --color-brass-700: oklch(0.475 0.109 62);
+  --color-brass-800: oklch(0.405 0.096 58);
+  --color-brass-900: oklch(0.335 0.082 55);
+  --color-brass-950: oklch(0.265 0.065 52);
+
+  /* Pedra: cinzas quentes, croma maior nos extremos. */
+  --color-stone-50: oklch(0.985 0.006 85);
+  --color-stone-100: oklch(0.962 0.009 85);
+  --color-stone-200: oklch(0.922 0.009 85);
+  --color-stone-300: oklch(0.868 0.011 82);
+  --color-stone-400: oklch(0.72 0.012 77);
+  --color-stone-500: oklch(0.575 0.011 73);
+  --color-stone-600: oklch(0.47 0.011 73);
+  --color-stone-700: oklch(0.385 0.013 76);
+  --color-stone-800: oklch(0.295 0.015 63);
+  --color-stone-900: oklch(0.225 0.015 57);
+  --color-stone-950: oklch(0.17 0.013 55);
+
+  /* Brasa: perigo. */
+  --color-ember-50: oklch(0.975 0.012 20);
+  --color-ember-100: oklch(0.945 0.027 20);
+  --color-ember-200: oklch(0.895 0.054 22);
+  --color-ember-300: oklch(0.825 0.097 24);
+  --color-ember-400: oklch(0.735 0.16 25);
+  --color-ember-500: oklch(0.645 0.19 26);
+  --color-ember-600: oklch(0.555 0.2 27);
+  --color-ember-700: oklch(0.475 0.18 27);
+  --color-ember-800: oklch(0.405 0.15 27);
+  --color-ember-900: oklch(0.335 0.11 26);
+  --color-ember-950: oklch(0.265 0.08 25);
+
+  /* Fontes auto-hospedadas (src/styles/fonts.css), nunca de CDN: a CSP só aceita 'self'. */
+  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+
+  /* Dois pesos (RUI cap. 2). */
+  --font-weight-normal: 400;
+  --font-weight-semibold: 600;
+
+  /* Escala de tipo em rem, com line-height inverso ao tamanho (RUI cap. 4). */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.625;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.375;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.25;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 1.25;
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: 1.1;
+  --text-5xl: 3rem;
+  --text-5xl--line-height: 1;
+
+  /* Um raio só (D10); o círculo fica para selo, placa de arte e avatar. */
+  --radius-lg: 0.5rem;
+  --radius-full: calc(infinity * 1px);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root {
+  color-scheme: light;
+
+  --bg: var(--color-stone-50);
+  --surface: var(--color-white);
+  --surface-raised: var(--color-white);
+  --surface-sunken: var(--color-stone-100);
+
+  --fg: var(--color-stone-900);
+  --fg-muted: var(--color-stone-600);
+  --fg-subtle: var(--color-stone-500);
+
+  --border-ui: var(--color-stone-500);
+  --border-soft: var(--color-stone-200);
+
+  --primary: var(--color-moss-700);
+  --primary-hover: var(--color-moss-800);
+  --on-primary: var(--color-white);
+  --secondary-fg: var(--color-moss-800);
+  --link: var(--color-moss-700);
+  --destructive: var(--color-ember-700);
+  --destructive-hover: var(--color-ember-800);
+  --on-destructive: var(--color-white);
+
+  --ring: var(--color-brass-600);
+  --accent-band: var(--color-brass-400);
+
+  --success-bg: var(--color-moss-50);
+  --success-fg: var(--color-moss-800);
+  --warning-bg: var(--color-brass-50);
+  --warning-fg: var(--color-brass-800);
+  --danger-bg: var(--color-ember-50);
+  --danger-fg: var(--color-ember-700);
+  --danger-accent: var(--color-ember-600);
+  --info-bg: var(--color-stone-100);
+  --info-fg: var(--color-stone-700);
+
+  --progress-fill: var(--color-moss-600);
+  --progress-track: var(--color-stone-200);
+  --dropzone-active: var(--color-moss-50);
+  --selection-bg: var(--color-brass-200);
+  --selection-fg: var(--color-brass-900);
+  --hero-band: var(--color-moss-50);
+
+  /* Sombras em duas partes, a luz vem de cima (RUI cap. 6); cor = stone-950 com alfa. */
+  --elevation-1: 0 1px 3px oklch(0.17 0.013 55 / 0.12), 0 1px 2px oklch(0.17 0.013 55 / 0.24);
+  --elevation-2: 0 3px 6px oklch(0.17 0.013 55 / 0.15), 0 2px 4px oklch(0.17 0.013 55 / 0.12);
+  --elevation-3: 0 10px 20px oklch(0.17 0.013 55 / 0.15), 0 3px 6px oklch(0.17 0.013 55 / 0.1);
+  --elevation-4: 0 15px 25px oklch(0.17 0.013 55 / 0.15), 0 5px 10px oklch(0.17 0.013 55 / 0.05);
+  --elevation-5: 0 20px 40px oklch(0.17 0.013 55 / 0.2);
+  --elevation-sunken: inset 0 2px 2px oklch(0.17 0.013 55 / 0.1);
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+}
+
+/* No escuro a sombra some no fundo: a elevação vem da superfície mais clara e de um fio de luz
+   no topo (extensão do RUI cap. 6). */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: var(--color-stone-950);
+  --surface: var(--color-stone-900);
+  --surface-raised: var(--color-stone-800);
+  --surface-sunken: var(--color-stone-950);
+
+  --fg: var(--color-stone-50);
+  --fg-muted: var(--color-stone-400);
+  --fg-subtle: var(--color-stone-500);
+
+  --border-ui: var(--color-stone-500);
+  --border-soft: var(--color-stone-800);
+
+  --primary: var(--color-moss-400);
+  --primary-hover: var(--color-moss-300);
+  --on-primary: var(--color-moss-950);
+  --secondary-fg: var(--color-moss-200);
+  --link: var(--color-moss-300);
+  --destructive: var(--color-ember-400);
+  --destructive-hover: var(--color-ember-300);
+  --on-destructive: var(--color-ember-950);
+
+  --ring: var(--color-brass-300);
+  --accent-band: var(--color-brass-400);
+
+  --success-bg: var(--color-moss-950);
+  --success-fg: var(--color-moss-200);
+  --warning-bg: var(--color-brass-950);
+  --warning-fg: var(--color-brass-200);
+  --danger-bg: var(--color-ember-950);
+  --danger-fg: var(--color-ember-200);
+  --danger-accent: var(--color-ember-400);
+  --info-bg: var(--color-stone-800);
+  --info-fg: var(--color-stone-200);
+
+  --progress-fill: var(--color-moss-400);
+  --progress-track: var(--color-stone-700);
+  --dropzone-active: var(--color-stone-800);
+  --selection-bg: var(--color-brass-800);
+  --selection-fg: var(--color-brass-50);
+  --hero-band: var(--color-stone-900);
+
+  --elevation-1: inset 0 1px 0 oklch(1 0 0 / 0.06);
+  --elevation-2: inset 0 1px 0 oklch(1 0 0 / 0.06);
+  --elevation-3: 0 10px 20px oklch(0 0 0 / 0.5);
+  --elevation-4: 0 15px 25px oklch(0 0 0 / 0.55);
+  --elevation-5: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
+  --elevation-sunken: inset 0 2px 2px oklch(0 0 0 / 0.3);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-line: var(--border-ui);
+  --color-line-soft: var(--border-soft);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-on-primary: var(--on-primary);
+  --color-secondary-fg: var(--secondary-fg);
+  --color-link: var(--link);
+  --color-destructive: var(--destructive);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-on-destructive: var(--on-destructive);
+  --color-ring: var(--ring);
+  --color-accent-band: var(--accent-band);
+  --color-success-bg: var(--success-bg);
+  --color-success-fg: var(--success-fg);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-fg: var(--warning-fg);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-accent: var(--danger-accent);
+  --color-info-bg: var(--info-bg);
+  --color-info-fg: var(--info-fg);
+  --color-dropzone-active: var(--dropzone-active);
+  --color-hero-band: var(--hero-band);
+
+  --shadow-1: var(--elevation-1);
+  --shadow-2: var(--elevation-2);
+  --shadow-3: var(--elevation-3);
+  --shadow-4: var(--elevation-4);
+  --shadow-5: var(--elevation-5);
+  --shadow-sunken: var(--elevation-sunken);
+}

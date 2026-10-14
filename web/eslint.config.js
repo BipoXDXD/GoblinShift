@@ -70,5 +70,11 @@ export default tseslint.config(
     extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },
   },
+  {
+    // Scripts clássicos servidos como estão, fora do bundle (theme-init.js).
+    files: ["public/*.js"],
+    extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
+    languageOptions: { globals: globals.browser, sourceType: "script" },
+  },
   prettier,
 );
