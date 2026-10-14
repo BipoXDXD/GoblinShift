@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp, GripVertical, type LucideIcon } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -38,6 +39,7 @@ const DIRECTION_TEXT: Record<Direction, string> = {
   up: TEXT.reorder.moveUp,
   down: TEXT.reorder.moveDown,
 };
+const DIRECTION_ICON: Record<Direction, LucideIcon> = { up: ArrowUp, down: ArrowDown };
 const SHORTCUT_KEYS: Readonly<Record<string, Direction>> = { ArrowUp: "up", ArrowDown: "down" };
 
 interface ReorderableListProps<T> {
@@ -109,6 +111,8 @@ export function ReorderableList<T>({
 
   const dragHandlers = (index: number) => ({
     draggable: true,
+    // O tema sobe a sombra do item enquanto ele é arrastado (RUI cap. 6).
+    ...(dragged === index ? { "data-dragged": "true" } : {}),
     onDragStart: (event: DragEvent<HTMLLIElement>) => {
       event.dataTransfer.effectAllowed = "move";
       // O Firefox só inicia o arrasto com algum dado no dataTransfer.
@@ -142,15 +146,25 @@ export function ReorderableList<T>({
   };
 
   return (
-    <div>
-      <p id={instructionsId}>{TEXT.reorder.instructions}</p>
-      <ol aria-label={label} aria-describedby={instructionsId}>
+    <div className="flex flex-col gap-3">
+      <p id={instructionsId} className="max-w-prose text-sm leading-relaxed text-fg-muted">
+        {TEXT.reorder.instructions}
+      </p>
+      <ol aria-label={label} aria-describedby={instructionsId} className="flex flex-col gap-3">
         {items.map((item, index) => {
           const key = getKey(item);
           const name = getName(item);
           return (
-            <li key={key} {...dragHandlers(index)}>
-              {renderItem(item)}
+            <li
+              key={key}
+              {...dragHandlers(index)}
+              className="flex items-start gap-3 rounded-lg bg-surface p-3 shadow-1 transition data-[dragged=true]:shadow-3"
+            >
+              <GripVertical
+                aria-hidden="true"
+                className="mt-3 size-4 flex-none cursor-grab text-fg-muted"
+              />
+              <div className="min-w-0 flex-1">{renderItem(item)}</div>
               {(["up", "down"] as const).map((direction) => (
                 <button
                   key={direction}
@@ -167,8 +181,9 @@ export function ReorderableList<T>({
                   onKeyDown={(event) => {
                     onShortcut(index, event);
                   }}
+                  className="inline-flex min-h-11 min-w-11 flex-none cursor-pointer items-center justify-center rounded-lg text-fg-muted hover:bg-surface-sunken hover:text-fg aria-disabled:cursor-not-allowed aria-disabled:text-fg-subtle aria-disabled:hover:bg-transparent"
                 >
-                  {DIRECTION_TEXT[direction]}
+                  <ArrowIcon direction={direction} />
                 </button>
               ))}
             </li>
@@ -178,6 +193,12 @@ export function ReorderableList<T>({
       <LiveRegion message={announcement} visuallyHidden />
     </div>
   );
+}
+
+// Só ícone: o nome acessível (aria-label) diz a ação e o item; as instruções acima dão o texto.
+function ArrowIcon({ direction }: { readonly direction: Direction }): ReactElement {
+  const Icon = DIRECTION_ICON[direction];
+  return <Icon aria-hidden="true" className="size-6" />;
 }
 
 function buttonKey(itemKey: string, direction: Direction): string {

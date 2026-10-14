@@ -222,6 +222,22 @@ describe("ReorderableList", () => {
     expect(order()).toEqual(["b.csv", "c.csv", "a.csv"]);
   });
 
+  it("marca o item arrastado para o tema subir a elevação dele, e desmarca no fim", () => {
+    render(<Harness />);
+    const [first, second] = screen.getAllByRole("listitem");
+    if (first === undefined || second === undefined) {
+      throw new Error("lista sem itens");
+    }
+    const dataTransfer = { setData: () => undefined, effectAllowed: "", dropEffect: "" };
+
+    fireEvent.dragStart(first, { dataTransfer });
+
+    expect(first).toHaveAttribute("data-dragged", "true");
+    expect(second).not.toHaveAttribute("data-dragged");
+    fireEvent.dragEnd(first, { dataTransfer });
+    expect(first).not.toHaveAttribute("data-dragged");
+  });
+
   it("não tem violações do axe", async () => {
     const { container } = render(<Harness />);
 

@@ -1,3 +1,4 @@
+import { CircleAlert } from "lucide-react";
 import { useEffect, useId, useRef, type MouseEvent, type ReactElement } from "react";
 
 import { TEXT } from "../../text";
@@ -34,16 +35,29 @@ export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactEleme
     return null;
   }
   return (
-    <div ref={container} role="alert" aria-labelledby={titleId} tabIndex={-1}>
-      <h2 id={titleId}>{TEXT.errorSummary.title}</h2>
-      <ul>
+    <div
+      ref={container}
+      role="alert"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      className="flex flex-col gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg md:p-6"
+    >
+      <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold">
+        <CircleAlert aria-hidden="true" className="size-6 flex-none" />
+        {TEXT.errorSummary.title}
+      </h2>
+      <ul className="flex list-disc flex-col gap-1 pl-12">
         {issues.map((issue, index) => (
           // Mensagens podem se repetir (duas linhas com o mesmo erro); a posição desempata.
           <li key={`${String(index)}-${issue.message}`}>
             {issue.fieldId === null ? (
               issue.message
             ) : (
-              <a href={`#${issue.fieldId}`} onClick={focusField(issue.fieldId)}>
+              <a
+                href={`#${issue.fieldId}`}
+                className="font-semibold text-danger-fg"
+                onClick={focusField(issue.fieldId)}
+              >
                 {issue.message}
               </a>
             )}

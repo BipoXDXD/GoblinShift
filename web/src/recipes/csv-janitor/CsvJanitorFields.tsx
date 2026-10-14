@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 
 import { Field } from "../../components/a11y/Field";
 import { FieldGroup } from "../../components/a11y/FieldGroup";
+import { Button } from "../../components/ui/Button";
 import { TEXT } from "../../text";
 import type { RecipeFieldsProps } from "../types";
 import {
@@ -169,9 +170,9 @@ function CaseRules({ rows, max, errorOf, onChange }: RowsProps<CaseRuleRow>): Re
       description={T.caseRulesHint}
       error={errorOf(addButtonId("case_rules"))}
     >
-      <ol>
+      <ol className={ROW_LIST}>
         {rows.map((row, index) => (
-          <li key={row.key}>
+          <li key={row.key} className={ROW_ITEM}>
             <ColumnInput
               id={rowFieldId("case_rules", index, "column")}
               row={index + 1}
@@ -233,9 +234,9 @@ function Filters({ rows, max, errorOf, onChange }: RowsProps<FilterRow>): ReactE
       description={T.filtersHint}
       error={errorOf(addButtonId("filters"))}
     >
-      <ol>
+      <ol className={ROW_LIST}>
         {rows.map((row, index) => (
-          <li key={row.key}>
+          <li key={row.key} className={ROW_ITEM}>
             <ColumnInput
               id={rowFieldId("filters", index, "column")}
               row={index + 1}
@@ -368,19 +369,27 @@ interface AddRowButtonProps {
 // aria-disabled em vez de disabled: o botão continua focável e anunciado quando a lista enche.
 function AddRowButton({ id, full, onAdd, children }: AddRowButtonProps): ReactElement {
   return (
-    <button id={id} type="button" aria-disabled={full} onClick={onAdd}>
-      {children}
-    </button>
+    <div>
+      <Button id={id} type="button" variant="secondary" aria-disabled={full} onClick={onAdd}>
+        {children}
+      </Button>
+    </div>
   );
 }
 
 function RemoveRowButton({ row, onRemove }: { row: number; onRemove: () => void }): ReactElement {
   return (
-    <button type="button" onClick={onRemove}>
-      {T.removeRow(row)}
-    </button>
+    <div>
+      <Button type="button" variant="tertiary" onClick={onRemove}>
+        {T.removeRow(row)}
+      </Button>
+    </div>
   );
 }
+
+/** Lista das linhas de uma regra; cada linha é um poço com os campos dela. */
+const ROW_LIST = "flex flex-col gap-4";
+const ROW_ITEM = "flex flex-col gap-4 rounded-lg bg-surface-sunken p-4";
 
 function modeFrom(value: string): CaseRuleRow["mode"] {
   return CASE_MODES.find((mode) => mode === value) ?? "lower";

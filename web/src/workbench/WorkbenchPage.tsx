@@ -6,12 +6,11 @@ import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { CATALOG_QUERY_KEY, findCatalogVersion, getCatalog } from "../catalog/api";
-import { FocusHeading } from "../components/a11y/FocusHeading";
 import { ProblemAlert } from "../components/feedback/ProblemAlert";
 import { findRecipe, type RecipeModule } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
-import { Workbench } from "./Workbench";
+import { Workbench, WorkbenchHeader } from "./Workbench";
 
 interface WorkbenchPageProps {
   readonly uploadServices: UploadServices;
@@ -46,10 +45,10 @@ function CatalogGate({ recipe, uploadServices }: CatalogGateProps): ReactElement
   });
   if (catalog.data === undefined) {
     return (
-      <main>
-        <FocusHeading>{TEXT.workbench.title(recipe.title)}</FocusHeading>
+      <div className="flex flex-col gap-8">
+        <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
         {catalog.error === null ? (
-          <p>{TEXT.workbench.loadingCatalog}</p>
+          <p className="text-fg-muted">{TEXT.workbench.loadingCatalog}</p>
         ) : (
           <ProblemAlert
             failure={
@@ -57,17 +56,22 @@ function CatalogGate({ recipe, uploadServices }: CatalogGateProps): ReactElement
             }
           />
         )}
-      </main>
+      </div>
     );
   }
   const version = findCatalogVersion(catalog.data, recipe.id, recipe.version);
   const form = version === null ? null : recipe.formFor(version);
   if (form === null) {
     return (
-      <main>
-        <FocusHeading>{TEXT.workbench.title(recipe.title)}</FocusHeading>
-        <p role="alert">{TEXT.workbench.recipeUnavailable}</p>
-      </main>
+      <div className="flex flex-col gap-8">
+        <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
+        <p
+          role="alert"
+          className="rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 font-semibold text-danger-fg"
+        >
+          {TEXT.workbench.recipeUnavailable}
+        </p>
+      </div>
     );
   }
   return <Workbench recipe={recipe} form={form} uploadServices={uploadServices} />;

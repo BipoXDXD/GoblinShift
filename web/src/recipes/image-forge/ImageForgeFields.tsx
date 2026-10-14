@@ -113,6 +113,7 @@ export function ImageForgeFields({
         </>
       )}
       <Field
+        layout="inline"
         id={fieldId("make_thumbnails")}
         label={T.makeThumbnails}
         description={T.makeThumbnailsHint(limits.thumbnailBox)}

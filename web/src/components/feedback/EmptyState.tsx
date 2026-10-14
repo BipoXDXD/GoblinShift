@@ -3,13 +3,16 @@ import type { ReactElement, ReactNode } from "react";
 interface EmptyStateProps {
   readonly title: string;
   readonly headingLevel?: 2 | 3;
-  /** Espaço da ilustração; fica vazio até a decisão das ilustrações (D6, D7). */
+  /** Espaço da ilustração; fica vazio até a arte existir (P10 do plano de design). */
   readonly illustration?: ReactNode;
   /** Explicação e, no máximo, uma ação. */
   readonly children?: ReactNode;
 }
 
-/** Estado vazio desenhado, no lugar de uma tela em branco (2.2). */
+/**
+ * Estado vazio desenhado, no lugar de uma tela em branco (2.2). Centralizado porque o texto é
+ * curto, de até três linhas (RUI cap. 4).
+ */
 export function EmptyState({
   title,
   headingLevel = 2,
@@ -18,9 +21,9 @@ export function EmptyState({
 }: EmptyStateProps): ReactElement {
   const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
-    <div>
+    <div className="flex flex-col items-center gap-2 rounded-lg bg-surface px-6 py-8 text-center text-fg-muted shadow-1">
       {illustration}
-      <Heading>{title}</Heading>
+      <Heading className="text-lg font-semibold text-fg">{title}</Heading>
       {children}
     </div>
   );

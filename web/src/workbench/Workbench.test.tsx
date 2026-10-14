@@ -96,8 +96,34 @@ describe("Bancada", () => {
     await setup();
 
     expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toHaveFocus();
-    expect(screen.getByRole("heading", { name: "Nenhum arquivo escolhido" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
+  });
+
+  it("a ordem do Tab segue a leitura nas duas colunas: arquivos, parâmetros, Executar", async () => {
+    const { user } = await setup();
+    const files = screen.getByLabelText("Escolher arquivos");
+    const firstParameter = screen.getByLabelText("Delimitador dos arquivos de entrada");
+    const run = screen.getByRole("button", { name: "Executar" });
+
+    files.focus();
+    await user.tab();
+
+    expect(firstParameter).toHaveFocus();
+    expect(files.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(firstParameter.compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("diz quantos arquivos e quantos bytes a receita aceita", async () => {
+    await setup();
+
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAccessibleDescription(
+      /Até \d+ arquivos por execução/,
+    );
   });
 
   it("receita desconhecida mostra a página não encontrada", () => {

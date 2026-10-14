@@ -9,15 +9,12 @@ describe("Steps", () => {
     const items = screen.getAllByRole("listitem");
 
     expect(items.map((item) => item.textContent)).toEqual([
-      "Inspecionando as entradas (concluída)",
-      "Processando os arquivos (concluída)",
-      "Empacotando os resultados",
-      "Finalizando",
+      "Inspecionar (concluída)",
+      "Processar (concluída)",
+      "Empacotar",
+      "Finalizar",
     ]);
-    expect(screen.getByText("Empacotando os resultados").closest("li")).toHaveAttribute(
-      "aria-current",
-      "step",
-    );
+    expect(screen.getByText("Empacotar").closest("li")).toHaveAttribute("aria-current", "step");
     expect(items.filter((item) => item.hasAttribute("aria-current"))).toHaveLength(1);
   });
 

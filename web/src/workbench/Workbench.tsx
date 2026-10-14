@@ -1,12 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import { useId, useState, type ReactElement, type SubmitEvent } from "react";
-import { useNavigate } from "react-router";
+import { ChevronLeft } from "lucide-react";
+import { Link, useNavigate } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { useIdempotencyKey } from "../api/idempotency";
 import { ApiError } from "../api/response";
 import type { RunCommand } from "../api/types";
-import { runPath } from "../app/paths";
+import { PATHS, runPath } from "../app/paths";
 import { ErrorSummary, type FormIssue } from "../components/a11y/ErrorSummary";
 import { FileDropzone } from "../components/a11y/FileDropzone";
 import { FocusHeading } from "../components/a11y/FocusHeading";
@@ -14,6 +15,9 @@ import { LiveRegion } from "../components/a11y/LiveRegion";
 import { moveItem, ReorderableList } from "../components/a11y/ReorderableList";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { formatBytes } from "../format";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { createRun } from "../runs/commands";
@@ -100,55 +104,98 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
   };
 
   return (
-    <main>
-      <FocusHeading>{TEXT.workbench.title(recipe.title)}</FocusHeading>
-      <form noValidate onSubmit={onSubmit}>
+    <div className="flex flex-col gap-8">
+      <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
+      <form noValidate onSubmit={onSubmit} className="flex flex-col gap-8">
         <ErrorSummary issues={issues} attempt={attempt} />
-        <section aria-labelledby={filesHeadingId}>
-          <h2 id={filesHeadingId}>{TEXT.workbench.filesHeading}</h2>
-          <FileDropzone
-            id={FILES_FIELD_ID}
-            label={TEXT.workbench.chooseFiles}
-            description={TEXT.workbench.chooseFilesHint}
-            {...(recipe.accept === null ? {} : { accept: recipe.accept })}
-            error={fieldErrors.get(FILES_FIELD_ID) ?? null}
-            onFiles={batch.add}
-          />
-          {entries.length === 0 ? (
-            <EmptyState title={TEXT.workbench.noFilesYet} headingLevel={3}>
-              <p>{TEXT.workbench.noFilesYetHint}</p>
-            </EmptyState>
-          ) : (
-            <ReorderableList
-              label={TEXT.workbench.orderLabel}
-              items={entries}
-              getKey={(entry) => entry.localId}
-              getName={(entry) => entry.file.name}
-              renderItem={(entry) => (
-                <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={removeEntry} />
-              )}
-              onMove={(move) => {
-                setOrder(moveItem(entries.map(localIdOf), move));
-              }}
+        {/* Duas colunas a partir de 1024 px (D9): arquivos fluida, parâmetros com largura fixa. A
+            ordem do DOM é a da leitura e a do Tab: arquivos, parâmetros, Executar. */}
+        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+          <section aria-labelledby={filesHeadingId} className="flex min-w-0 flex-1 flex-col gap-4">
+            <h2 id={filesHeadingId} className={SECTION_LABEL}>
+              {TEXT.workbench.filesHeading}
+            </h2>
+            <FileDropzone
+              id={FILES_FIELD_ID}
+              label={TEXT.workbench.chooseFiles}
+              description={`${TEXT.workbench.chooseFilesHint} ${limitsHint(form)}`}
+              {...(recipe.accept === null ? {} : { accept: recipe.accept })}
+              error={fieldErrors.get(FILES_FIELD_ID) ?? null}
+              onFiles={batch.add}
             />
-          )}
-          <LiveRegion message={announcement} visuallyHidden />
-        </section>
-        <section aria-labelledby={parametersHeadingId}>
-          <h2 id={parametersHeadingId}>{TEXT.workbench.parametersHeading}</h2>
-          {form.renderFields({ errors: fieldErrors, onDraftChange: setDraft })}
-        </section>
-        {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
-        <button type="submit" aria-disabled={mutation.isPending}>
-          {TEXT.workbench.run}
-        </button>
+            {entries.length === 0 ? (
+              <EmptyState title={TEXT.workbench.noFilesYet} headingLevel={3}>
+                <p>{TEXT.workbench.noFilesYetHint}</p>
+              </EmptyState>
+            ) : (
+              <ReorderableList
+                label={TEXT.workbench.orderLabel}
+                items={entries}
+                getKey={(entry) => entry.localId}
+                getName={(entry) => entry.file.name}
+                renderItem={(entry) => (
+                  <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={removeEntry} />
+                )}
+                onMove={(move) => {
+                  setOrder(moveItem(entries.map(localIdOf), move));
+                }}
+              />
+            )}
+            <LiveRegion message={announcement} visuallyHidden />
+          </section>
+          <div className="flex flex-col gap-6 lg:w-112 lg:flex-none">
+            <Card as="section" aria-labelledby={parametersHeadingId}>
+              <div className="flex flex-col gap-6">
+                <h2 id={parametersHeadingId} className={SECTION_LABEL}>
+                  {TEXT.workbench.parametersHeading}
+                </h2>
+                {form.renderFields({ errors: fieldErrors, onDraftChange: setDraft })}
+              </div>
+            </Card>
+            {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              fullWidth
+              aria-disabled={mutation.isPending}
+            >
+              {TEXT.workbench.run}
+            </Button>
+          </div>
+        </div>
         <LiveRegion
           message={mutation.isPending ? TEXT.workbench.creatingRun : null}
           visuallyHidden
         />
       </form>
-    </main>
+    </div>
   );
+}
+
+/** Rótulo de seção: pequeno e rebaixado; a hierarquia visual não precisa seguir a do HTML. */
+const SECTION_LABEL = "text-sm font-semibold text-fg-muted";
+
+/** Volta à Oficina e o título da Bancada; também usado enquanto o catálogo carrega. */
+export function WorkbenchHeader({ title }: { readonly title: string }): ReactElement {
+  return (
+    <div className="flex flex-col gap-2">
+      <Link
+        to={PATHS.home}
+        className="inline-flex min-h-11 items-center gap-1 self-start text-sm font-semibold"
+      >
+        <ChevronLeft aria-hidden="true" className="size-4" />
+        {TEXT.workbench.backHome}
+      </Link>
+      <FocusHeading>{title}</FocusHeading>
+    </div>
+  );
+}
+
+function limitsHint({ inputLimits }: RecipeForm): string {
+  const maxTotal =
+    inputLimits.maxTotalBytes === null ? null : formatBytes(inputLimits.maxTotalBytes);
+  return TEXT.workbench.limitsHint(inputLimits.maxInputs, maxTotal);
 }
 
 function commandFrom(draft: RecipeDraft<RecipeId>, inputs: RunInputs): RunCommand | null {

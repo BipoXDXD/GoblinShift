@@ -1,5 +1,6 @@
-// Textos fixos da interface, num lugar só: a voz (D11) e o idioma (D12) ainda não foram decididos, e
-// trocar ou traduzir fica restrito a este arquivo. Os textos são neutros e literais de propósito.
+// Textos fixos da interface, num lugar só (D12: só pt-BR; traduzir fica restrito a este arquivo).
+// Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre os goblins só no vazio, na
+// espera e no sucesso, sempre depois da informação.
 export const TEXT = {
   field: {
     errorPrefix: "Erro: ",
@@ -65,19 +66,43 @@ export const TEXT = {
     legend: "Tema da interface",
     options: { system: "Sistema", light: "Claro", dark: "Escuro" },
   },
-  home: {
-    title: "GoblinShift",
-    openWorkbench: (recipe: string) => `Abrir a Bancada da ${recipe}`,
+  layout: {
+    skipToContent: "Pular para o conteúdo",
+    brand: "GoblinShift",
+    brandLink: "GoblinShift, Oficina",
   },
-  notFound: { title: "Página não encontrada", backHome: "Voltar ao início" },
+  home: {
+    title: "Arquivos em lote, limpos pelos goblins da oficina.",
+    lead: "Escolha uma receita para começar.",
+    recipesHeading: "Receitas",
+    openWorkbench: "Abrir a Bancada",
+    // Completa o nome acessível do link sem repetir o título do cartão na tela.
+    openWorkbenchOf: (recipe: string) => ` da ${recipe}`,
+    summaries: {
+      "csv-janitor":
+        "Limpa tabelas CSV: espaços nas pontas, duplicatas, colunas, caixa e filtros, sem adivinhar o significado dos dados.",
+      "image-forge":
+        "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
+      "downloads-detox":
+        "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
+    },
+  },
+  notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
   workbench: {
     title: (recipe: string) => `Bancada: ${recipe}`,
+    backHome: "Oficina",
     filesHeading: "Arquivos de entrada",
     chooseFiles: "Escolher arquivos",
     chooseFilesHint: "Pode escolher vários de uma vez, ou soltar os arquivos aqui.",
+    dropHere: "Solte para adicionar.",
     orderLabel: "Ordem de processamento",
-    noFilesYet: "Nenhum arquivo escolhido",
-    noFilesYetHint: "Os arquivos aparecem aqui, na ordem em que serão processados.",
+    noFilesYet: "A bancada está vazia",
+    noFilesYetHint:
+      "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e os goblins começam.",
+    limitsHint: (maxInputs: number, maxTotal: string | null) =>
+      maxTotal === null
+        ? `Até ${String(maxInputs)} arquivos por execução.`
+        : `Até ${String(maxInputs)} arquivos por execução, somando no máximo ${maxTotal}.`,
     parametersHeading: "Parâmetros",
     run: "Executar",
     creatingRun: "Criando a execução.",
@@ -132,9 +157,21 @@ export const TEXT = {
     progressValue: (processed: number, total: number) => `${String(processed)} de ${String(total)}`,
     queueAhead: "Execuções à frente na fila",
     stepsLabel: "Etapas da execução",
+    // Rótulos curtos das etapas; a frase da fase atual aparece grande, acima delas.
+    steps: {
+      inspecting: "Inspecionar",
+      processing: "Processar",
+      packaging: "Empacotar",
+      finalizing: "Finalizar",
+    },
     stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
+    backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
+    flavor: {
+      queued: "Os goblins pegam este lote assim que uma bancada vagar.",
+      succeeded: "Pronto! Os goblins terminaram o lote.",
+    },
     statuses: {
       queued: "Na fila",
       running: "Em andamento",
@@ -155,6 +192,7 @@ export const TEXT = {
       heading: "Resultados",
       loading: "Carregando os resultados.",
       download: (fileName: string) => `Baixar ${fileName}`,
+      otherFiles: "Arquivos avulsos",
       roles: {
         output: "arquivo processado",
         report: "relatório",
