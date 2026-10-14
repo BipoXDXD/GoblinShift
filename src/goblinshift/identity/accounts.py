@@ -48,6 +48,7 @@ class Account:
 class IssuedKey:
     """Chave emitida. `token` só existe aqui, para ser exibido uma vez."""
 
+    id: UUID
     public_id: str
     token: str = field(repr=False)
     expires_at: datetime
@@ -105,9 +106,10 @@ def issue_key(
         )
         .returning(api_key.c.id)
     )
-    if session.execute(statement).first() is None:
+    key_id = session.execute(statement).scalar_one_or_none()
+    if key_id is None:
         raise UnknownAccountError(f"conta {owner_id} não existe")
-    return IssuedKey(public_id=key.public_id, token=key.token, expires_at=expires_at)
+    return IssuedKey(id=key_id, public_id=key.public_id, token=key.token, expires_at=expires_at)
 
 
 def revoke_key(session: Session, public_id: str, now: datetime) -> bool:
