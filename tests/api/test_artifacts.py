@@ -142,6 +142,20 @@ def test_download_entrega_o_conteudo_com_os_cabecalhos_de_protecao(
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_download_de_saida_num_grupo_anexa_so_o_ultimo_componente_do_caminho(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"\x89PNG", file_name="images/Foto.png")
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Foto.png\"; filename*=UTF-8''Foto.png"
+    )
+
+
 def test_download_encerra_o_uso_e_devolve_a_vaga(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:

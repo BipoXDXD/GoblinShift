@@ -4,6 +4,22 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
+  # Ocupação dos filesystems de tamanho fixo (3.8), para o alerta de disco acima de 85%
+  # (deploy/openobserve/sql/causa-disco.sql). Na VPS, o compose.prod.yaml monta cada um em
+  # /hostfs/<nome>, só leitura; sem as montagens (desenvolvimento), não sai métrica nenhuma.
+  # Os pontos de montagem do container são as próprias montagens do host, então dispensa
+  # root_path. Virtuais incluídos: não mudam nada na VPS e permitem o tmpfs dos testes.
+  hostmetrics:
+    collection_interval: ${env:GS_HOSTMETRICS_INTERVAL:-60s}
+    scrapers:
+      filesystem:
+        include_virtual_filesystems: true
+        include_mount_points:
+          mount_points: [/hostfs/pg, /hostfs/storage, /hostfs/telemetry]
+          match_type: strict
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
 
 processors:
   batch: {}
@@ -31,5 +47,9 @@ service:
       exporters: [otlphttp/openobserve]
     logs:
       receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/openobserve]
+    metrics:
+      receivers: [hostmetrics]
       processors: [memory_limiter, batch]
       exporters: [otlphttp/openobserve]

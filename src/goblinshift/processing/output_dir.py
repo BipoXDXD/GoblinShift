@@ -1,20 +1,36 @@
 """Diretório de saídas no filesystem (docs/GoblinShiftPlan.md, 3.6 e 1.7).
 
 Regras de nome: NFC, extensão preservada, até 180 bytes por componente, colisão comparada por
-`casefold()` depois do NFC e resolvida com sufixo pelo índice original da entrada, `manifest.json`
-e `report.json` reservados, nunca sobrescrever. Tetos: quantidade de arquivos e bytes somados.
+`casefold()` do caminho completo depois do NFC e resolvida com sufixo pelo índice original da
+entrada, nomes reservados na raiz (`manifest.json`, `report.json` e, passado pelo executor, o
+`<recipe_id>.zip`), nunca sobrescrever. Tetos: quantidade de arquivos e bytes somados entre a raiz
+e todos os grupos.
+
+Grupos (ADR 019): um nível de subpasta, só com os nomes de `OutputGroup`, criado na primeira
+saída do grupo. O caminho mais longo possível (`thumbnails/` + 180 bytes) fica abaixo dos 240
+bytes de 3.6, que é também o teto de `artifact.file_name` no banco.
 """
 
+import contextlib
 import io
 import itertools
+import stat
 import unicodedata
-from collections.abc import Buffer, Iterator
+from collections.abc import Buffer, Iterator, Sequence
 from pathlib import Path
 
-from goblinshift.processing.recipe import FailureCode, OutputFile, OutputRole, RecipeFailure
+from goblinshift.processing.names import has_unsafe_char, split_extension
+from goblinshift.processing.recipe import (
+    FailureCode,
+    OutputFile,
+    OutputGroup,
+    OutputRole,
+    RecipeFailure,
+)
 
 MIB = 1024 * 1024
 MAX_COMPONENT_BYTES = 180
+MAX_PATH_BYTES = 240
 RESERVED_NAMES = ("manifest.json", "report.json")
 DEFAULT_MAX_FILES = 220
 DEFAULT_MAX_BYTES = 480 * MIB
@@ -26,6 +42,10 @@ class InvalidOutputNameError(ValueError):
     """A receita pediu um nome que não pode ser componente de caminho (erro de programação)."""
 
 
+class OutputGroupError(Exception):
+    """A subpasta do grupo já existe e não é um diretório real (symlink ou arquivo)."""
+
+
 class FileSystemOutputDir:
     """Cria saídas num diretório existente e controlado pelo executor."""
 
@@ -33,33 +53,57 @@ class FileSystemOutputDir:
         self,
         root: Path,
         *,
+        reserved_names: Sequence[str] = RESERVED_NAMES,
         max_files: int = DEFAULT_MAX_FILES,
         max_bytes: int = DEFAULT_MAX_BYTES,
     ) -> None:
         self._root = root
         self._max_files = max_files
         self._budget = _ByteBudget(max_bytes)
-        self._taken = {name.casefold() for name in RESERVED_NAMES}
+        self._taken = {name.casefold() for name in reserved_names}
+        self._ready_groups: set[OutputGroup] = set()
         self._created: list[tuple[str, OutputRole]] = []
 
     @property
     def created(self) -> tuple[tuple[str, OutputRole], ...]:
         return tuple(self._created)
 
-    def create(self, logical_name: str, role: OutputRole, position: int) -> OutputFile:
+    def create(
+        self,
+        logical_name: str,
+        role: OutputRole,
+        position: int,
+        group: OutputGroup | None = None,
+    ) -> OutputFile:
         if len(self._created) == self._max_files:
             raise RecipeFailure(
                 FailureCode.OUTPUT_LIMIT_EXCEEDED,
                 f"a execução passaria de {self._max_files} arquivos de saída",
             )
-        name = self._claim_unique(_validated_nfc(logical_name), position)
-        stream = _MeteredWriter(self._root / name, self._budget)
-        self._created.append((name, role))
-        return OutputFile(name, stream)
+        component = _validated_nfc(logical_name)
+        prefix = "" if group is None else f"{self._ensure_group(group)}/"
+        path = self._claim_unique(prefix, component, position)
+        stream = _MeteredWriter(self._root / path, self._budget)
+        self._created.append((path, role))
+        return OutputFile(path, stream)
 
-    def _claim_unique(self, name: str, position: int) -> str:
-        stem, extension = _split_extension(name)
-        candidates = (_fit(stem, suffix, extension) for suffix in _collision_suffixes(position))
+    def _ensure_group(self, group: OutputGroup) -> str:
+        if group not in self._ready_groups:
+            directory = self._root / group.value
+            # O que já existir com o nome do grupo é decidido pelo lstat, que não segue symlink:
+            # a saída nunca é escrita fora de out/.
+            with contextlib.suppress(FileExistsError):
+                directory.mkdir()
+            if not stat.S_ISDIR(directory.lstat().st_mode):
+                raise OutputGroupError(f"{group.value} em out/ não é um diretório real")
+            self._ready_groups.add(group)
+        return group.value
+
+    def _claim_unique(self, prefix: str, name: str, position: int) -> str:
+        stem, extension = split_extension(name)
+        candidates = (
+            prefix + _fit(stem, suffix, extension) for suffix in _collision_suffixes(position)
+        )
         chosen = next(c for c in candidates if c.casefold() not in self._taken)
         self._taken.add(chosen.casefold())
         return chosen
@@ -79,17 +123,9 @@ def _validated_nfc(name: str) -> str:
         raise InvalidOutputNameError(f"nome de saída inválido: {name!r}")
     if any(separator in normalized for separator in _SEPARATORS):
         raise InvalidOutputNameError(f"nome de saída com separador: {name!r}")
-    if any(unicodedata.category(char) == "Cc" for char in normalized):
+    if has_unsafe_char(normalized):
         raise InvalidOutputNameError(f"nome de saída com caractere de controle: {name!r}")
     return normalized
-
-
-def _split_extension(name: str) -> tuple[str, str]:
-    """Separa a extensão no último ponto; um ponto inicial (`.config`) não é extensão."""
-    stem, dot, extension = name.rpartition(".")
-    if not dot or not stem:
-        return name, ""
-    return stem, f".{extension}"
 
 
 def _fit(stem: str, suffix: str, extension: str) -> str:

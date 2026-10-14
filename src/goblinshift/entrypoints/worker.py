@@ -15,15 +15,19 @@ o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
 import logging
 import signal
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from types import FrameType
 
+from opentelemetry.trace import NoOpTracer, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
-from goblinshift.platform.settings import ExecutorConfigError, Settings
-from goblinshift.platform.telemetry import configure_logging
+from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
+from goblinshift.platform.telemetry import UserHasher, configure_logging, make_tracer_provider
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.claim import QueueListener, claim_next
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
@@ -40,7 +44,8 @@ def main() -> int:
     settings = Settings()
     try:
         runner = build_runner(settings)
-    except ExecutorConfigError as error:
+        settings.user_hash_key()
+    except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("worker não sobe: %s", error)
         return EXIT_CONFIGURATION
     serve(settings, runner, shutdown_on_signals())
@@ -67,16 +72,38 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     config = CoordinatorConfig(
         lease=lease, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
     )
-    coordinator = Coordinator(factory, storage, runner, config)
     try:
-        with QueueListener(engine, settings.db_connect_timeout_s) as listener:
+        with (
+            run_finished_reporter(settings, factory, "goblinshift-worker") as finished,
+            QueueListener(engine, settings.db_connect_timeout_s) as listener,
+        ):
+            coordinator = Coordinator(factory, storage, runner, config, on_finished=finished.report)
             logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
             while not shutdown.is_set():
-                if not _work_once(factory, storage, lease, coordinator):
+                if not _work_once(factory, storage, lease, coordinator, finished):
+                    logger.debug("fila vazia; aguardando NOTIFY")
                     listener.wait(settings.worker_poll_interval_s)
     finally:
         engine.dispose()
     logger.info("worker encerrado")
+
+
+@contextmanager
+def run_finished_reporter(
+    settings: Settings, factory: sessionmaker[Session], default_service: str
+) -> Iterator[RunFinishedReporter]:
+    """Emissor do `run.finished` (3.7) do processo; ao sair, exporta o lote pendente.
+
+    Sem endpoint OTLP (desenvolvimento e testes), o evento vai para um tracer que não grava.
+    """
+    hasher = UserHasher(settings.user_hash_key())
+    provider = make_tracer_provider(settings, default_service)
+    tracer: Tracer = provider.get_tracer(__name__) if provider is not None else NoOpTracer()
+    try:
+        yield RunFinishedReporter(factory, hasher, tracer)
+    finally:
+        if provider is not None:
+            provider.shutdown()
 
 
 def _work_once(
@@ -84,10 +111,11 @@ def _work_once(
     storage: FileStorage,
     lease: timedelta,
     coordinator: Coordinator,
+    finished: RunFinishedReporter,
 ) -> bool:
     """Uma volta do laço; `True` se havia trabalho (vale tentar de novo sem esperar)."""
     try:
-        claimed = claim_next(factory, storage, lease)
+        claimed = claim_next(factory, storage, lease, on_finished=finished.report)
         if claimed is None:
             return False
         coordinator.run(claimed)
