@@ -13,6 +13,7 @@ from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
 from goblinshift.runs.acceptance import accept_run
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.store import complete_after_commit
@@ -254,7 +255,7 @@ def test_publicacao_contra_cancelamento_nao_publica_e_descarta_candidatos(
     worker = coordinator(factory, storage, runner)
     claimed = claim(factory, storage)
     worker.prepare(claimed)
-    runner.start(claimed.attempt_id)
+    runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     status = worker.supervise(claimed)
     collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)
@@ -283,7 +284,7 @@ def test_publicacao_depois_do_prazo_termina_failed_pelo_relogio_do_banco(
     worker = coordinator(factory, storage, runner)
     claimed = claim(factory, storage)
     worker.prepare(claimed)
-    runner.start(claimed.attempt_id)
+    runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     worker.supervise(claimed)
     collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)
@@ -309,7 +310,14 @@ def test_execucao_aceita_pela_api_e_processada_pelo_worker(
     owner = create_user(factory)
     [upload_id] = ready_inputs(factory, storage, owner)
     with factory() as session:
-        accepted = accept_run(session, owner, run_command([upload_id]), new_key(), None)
+        accepted = accept_run(
+            session,
+            owner,
+            run_command([upload_id]),
+            new_key(),
+            None,
+            executor_image=LOCAL_EXECUTOR_IMAGE,
+        )
 
     coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
 

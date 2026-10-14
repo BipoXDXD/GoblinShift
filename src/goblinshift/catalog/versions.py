@@ -23,10 +23,6 @@ from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
 
-# O executor real chega na fatia 4 com imagem fixada por digest; até lá, o subprocesso local
-# roda o código do próprio repositório, e a Run registra este valor no lugar do digest.
-LOCAL_EXECUTOR_DIGEST = "local-dev"
-
 
 class VersionStatus(StrEnum):
     CURRENT = "current"
@@ -63,7 +59,6 @@ class RecipeVersion:
     status: VersionStatus
     parameters_model: type[BaseModel]
     limits: Mapping[str, int]
-    executor_digest: str
 
     def resolve(self, raw_params: object) -> dict[str, object]:
         """Parâmetros validados com os defaults da versão, em forma canônica.
@@ -124,7 +119,6 @@ CSV_JANITOR_V1 = RecipeVersion(
     status=VersionStatus.CURRENT,
     parameters_model=CsvJanitorV1Parameters,
     limits={"max_inputs": csv_janitor.MAX_TABLES, **dataclasses.asdict(Limits())},
-    executor_digest=LOCAL_EXECUTOR_DIGEST,
 )
 
 CATALOG = Catalog([CSV_JANITOR_V1])

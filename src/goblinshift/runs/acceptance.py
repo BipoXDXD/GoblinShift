@@ -194,10 +194,14 @@ def accept_run(
     command: RunCommand,
     idem_key: str | None,
     traceparent: str | None,
+    *,
+    executor_image: str,
 ) -> Accepted:
     """Aceita e enfileira a execução, ou devolve a já aceita com a mesma chave (replay).
 
-    Abre e confirma a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
+    `executor_image` é a imagem do executor deste deploy (`GS_EXECUTOR_IMAGE`), fixada na Run
+    para que todas as tentativas usem a mesma, mesmo depois de um deploy novo. Abre e confirma
+    a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
     """
     key = parse_idempotency_key(idem_key)
     validated = validate_run(command)
@@ -210,7 +214,7 @@ def accept_run(
         if replay is not None:
             return replay
         _lock_global_queue(session)
-        run_id = _insert_run(session, owner_id, validated, traceparent)
+        run_id = _insert_run(session, owner_id, validated, traceparent, executor_image)
         uploads = lock_ready_uploads(session, owner_id, validated.input_upload_ids)
         session.execute(
             insert(run_input),
@@ -286,7 +290,11 @@ def _lock_global_queue(session: Session) -> None:
 
 
 def _insert_run(
-    session: Session, owner_id: UUID, validated: ValidatedRun, traceparent: str | None
+    session: Session,
+    owner_id: UUID,
+    validated: ValidatedRun,
+    traceparent: str | None,
+    executor_image: str,
 ) -> UUID:
     recipe = validated.recipe
     run_id: UUID | None = session.execute(
@@ -295,7 +303,7 @@ def _insert_run(
             owner_id=owner_id,
             recipe_id=recipe.recipe_id,
             recipe_version=recipe.version,
-            executor_digest=recipe.executor_digest,
+            executor_digest=executor_image,
             parameters=validated.parameters,
             limits=dict(recipe.limits),
             status=Status.QUEUED,

@@ -10,23 +10,26 @@ import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, update
+from pydantic import SecretStr
+from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import Catalog, VersionStatus
 from goblinshift.catalog.versions import CSV_JANITOR_V1
+from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.identity import Scope
 from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.runs import acceptance
 from goblinshift.runs.acceptance import MAX_QUEUED_RUNS
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run, run_output
 from tests.api.support import assert_problem
-from tests.identity.support import new_key
+from tests.identity.support import new_key, prepare_database
 from tests.runs.support import (
     count_rows,
     insert_finished_run,
@@ -52,6 +55,7 @@ RUN_KEYS = {
     "error",
 }
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
 
 
 class Account:
@@ -733,3 +737,51 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
     assert variant["properties"]["recipe_id"] == {"const": "csv-janitor"}
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
+
+
+# Imagem do executor
+
+
+def test_execucao_aceita_fixa_a_imagem_do_executor_da_configuracao(
+    db_settings: Settings, tmp_path: Path, storage: FileStorage
+) -> None:
+    settings = db_settings.model_copy(
+        update={
+            "storage_root": tmp_path / "storage",
+            "runner": "executor_ctl",
+            "executor_image": EXECUTOR_IMAGE,
+        }
+    )
+    app = create_app(settings)
+    prepare_database(settings, app.state.engine)
+    factory: sessionmaker[Session] = app.state.session_factory
+    account = Account(factory)
+    # O lifespan do cliente descarta o engine na saída: a leitura fica dentro do bloco.
+    with TestClient(app) as client, factory() as session:
+        created = create_run(client, factory, storage, account)
+        pinned = session.execute(
+            select(run.c.executor_digest).where(run.c.id == uuid.UUID(created["id"]))
+        ).scalar_one()
+
+    assert pinned == EXECUTOR_IMAGE
+
+
+def test_api_em_producao_nao_sobe_sem_o_executor_ctl() -> None:
+    settings = Settings(
+        environment="production", db_port=1, cursor_secret=SecretStr("s" * 32), runner="local"
+    )
+
+    with pytest.raises(ExecutorConfigError, match="GS_RUNNER=executor_ctl"):
+        create_app(settings)
+
+
+def test_api_em_producao_nao_sobe_sem_a_imagem_do_executor() -> None:
+    settings = Settings(
+        environment="production",
+        db_port=1,
+        cursor_secret=SecretStr("s" * 32),
+        runner="executor_ctl",
+    )
+
+    with pytest.raises(ExecutorConfigError, match="GS_EXECUTOR_IMAGE"):
+        create_app(settings)
