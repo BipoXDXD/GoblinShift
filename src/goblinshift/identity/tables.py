@@ -1,7 +1,8 @@
 """Tabelas da identidade (docs/GoblinShiftPlan.md, 3.3).
 
 Contas, chaves de API (fatia 3), sessões web, estado transitório do login e auditoria
-(fatia 6, migração 0006) e as janelas do limite de requisições (fatia 8, migração 0007).
+(fatia 6, migração 0006), as janelas do limite de requisições (fatia 8, migração 0007) e o
+evento de aceite dos termos na auditoria (migração 0008).
 """
 
 from sqlalchemy import (
@@ -37,7 +38,7 @@ app_user = Table(
     Column("display_name", Text, nullable=False),
     Column("status", Text, nullable=False, server_default="active"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
-    # Versão e data dos termos aceitos (1.8); o fluxo de aceite chega com a interface (fatia 7).
+    # Última versão dos termos aceita e a data do aceite (1.8; ADR 029, `identity/terms.py`).
     Column("terms_version", Text),
     Column("terms_accepted_at", DateTime(timezone=True)),
     # `DELETE /me`: a conta deixa de autenticar na hora e a manutenção a purga em até 24 h.
@@ -127,7 +128,7 @@ audit_event = Table(
     CheckConstraint(
         "event_type IN ('LOGIN_SUCCEEDED', 'LOGIN_FAILED', 'LOGOUT', 'LOGOUT_ALL', 'KEY_ISSUED', "
         "'KEY_REVOKED', 'REAUTH_REQUIRED', 'CSRF_FAILED', 'ACCESS_DENIED', "
-        "'ACCOUNT_DELETION_REQUESTED', 'ACCOUNT_BLOCKED', 'ACCOUNT_UNBLOCKED')",
+        "'ACCOUNT_DELETION_REQUESTED', 'ACCOUNT_BLOCKED', 'ACCOUNT_UNBLOCKED', 'TERMS_ACCEPTED')",
         name="event_type",
     ),
     CheckConstraint("outcome IN ('success', 'failure')", name="outcome"),
