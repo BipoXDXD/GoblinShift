@@ -51,6 +51,7 @@ def queue_run(
     owner_id: uuid.UUID,
     tables: Sequence[tuple[str, bytes]] = (("clientes.csv", VALID),),
     executor_image: str = LOCAL_EXECUTOR_IMAGE,
+    recipe_id: str = "csv-janitor",
 ) -> uuid.UUID:
     upload_ids = []
     for name, data in tables:
@@ -64,11 +65,11 @@ def queue_run(
             insert(run)
             .values(
                 owner_id=owner_id,
-                recipe_id="csv-janitor",
+                recipe_id=recipe_id,
                 recipe_version=1,
                 executor_digest=executor_image,
-                parameters=CATALOG.resolve("csv-janitor", 1, {}),
-                limits=dict(CATALOG.get_version("csv-janitor", 1).limits),
+                parameters=CATALOG.resolve(recipe_id, 1, {}),
+                limits=dict(CATALOG.get_version(recipe_id, 1).limits),
                 queue_expires_at=func.now() + QUEUE_WINDOW,
             )
             .returning(run.c.id)
@@ -103,14 +104,18 @@ def coordinator(
     runner: Runner,
     attempt_timeout: timedelta = timedelta(minutes=10),
 ) -> Coordinator:
-    config = CoordinatorConfig(
+    return Coordinator(factory, storage, runner, coordinator_config(attempt_timeout))
+
+
+def coordinator_config(attempt_timeout: timedelta = timedelta(minutes=10)) -> CoordinatorConfig:
+    """Prazos curtos para o teste e retentativa sem sorteio."""
+    return CoordinatorConfig(
         lease=LEASE,
         status_poll=timedelta(seconds=0.05),
         stop_grace=timedelta(seconds=2),
         attempt_timeout=attempt_timeout,
         jitter=lambda: MIN_RETRY_JITTER,
     )
-    return Coordinator(factory, storage, runner, config)
 
 
 def claim(factory: sessionmaker[Session], storage: FileStorage) -> ClaimedAttempt:
