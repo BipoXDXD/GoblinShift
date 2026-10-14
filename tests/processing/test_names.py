@@ -3,8 +3,15 @@
 import unicodedata
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from goblinshift.processing.names import MAX_EXTENSION_BYTES, extension_of, safe_stem
+from goblinshift.processing.names import (
+    MAX_EXTENSION_BYTES,
+    extension_of,
+    has_unsafe_char,
+    safe_stem,
+)
 
 FALLBACK = "arquivo"
 
@@ -85,3 +92,49 @@ def test_radical_mais_extensao_reconstroem_um_nome_comum() -> None:
     original = "Foto de Férias.PNG"
 
     assert safe_stem(original, FALLBACK) + extension_of(original) == original
+
+
+# --- Formato invisível (Unicode Cf): trocado por `_`, como os controles ---------------------
+# U+202E (RLO) exibiria "fatura\u202egpj.exe" como "fatura" + "exe.jpg" ao contrário; ZWSP e BOM
+# no meio criam nomes que parecem iguais; os isolates (U+2066 a U+2069) reordenam a exibição.
+
+INVISIBLE_FORMAT = {
+    "rlo": "\u202e",
+    "zwsp": "\u200b",
+    "bom": "\ufeff",
+    "lri": "\u2066",
+    "rli": "\u2067",
+    "fsi": "\u2068",
+    "pdi": "\u2069",
+}
+
+
+@pytest.mark.parametrize("char", INVISIBLE_FORMAT.values(), ids=INVISIBLE_FORMAT.keys())
+def test_formato_invisivel_no_radical_vira_sublinhado(char: str) -> None:
+    assert safe_stem(f"fatura{char}gpj.exe", FALLBACK) == "fatura_gpj"
+
+
+@pytest.mark.parametrize("char", INVISIBLE_FORMAT.values(), ids=INVISIBLE_FORMAT.keys())
+def test_formato_invisivel_na_extensao_vira_sublinhado(char: str) -> None:
+    assert extension_of(f"foto.jp{char}g") == ".jp_g"
+
+
+def test_radical_so_de_formato_invisivel_nao_vira_vazio() -> None:
+    assert safe_stem("\u200b\u200b.txt", FALLBACK) == "__"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("ok.txt", False), ("a\u202eb", True), ("a\x01b", True), ("Relatório", False)],
+)
+def test_has_unsafe_char_cobre_controle_e_formato(text: str, expected: bool) -> None:
+    assert has_unsafe_char(text) is expected
+
+
+@given(st.text())
+def test_radical_e_extensao_nunca_tem_controle_formato_nem_separador(original: str) -> None:
+    pieces = safe_stem(original, FALLBACK) + extension_of(original)
+
+    assert not has_unsafe_char(pieces)
+    assert "/" not in pieces
+    assert "\\" not in pieces

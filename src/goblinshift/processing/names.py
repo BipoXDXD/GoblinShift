@@ -3,6 +3,11 @@
 Comum às receitas que derivam o nome da saída do nome enviado (CSV Janitor, Image Forge e
 Downloads Detox). O `OutputDir` ainda aplica NFC, o teto de 180 bytes e as colisões; aqui só
 se garante que nada do nome original vire separador, controle, arquivo oculto ou `..`.
+
+"Controle" inclui o formato invisível do Unicode (categoria Cf: U+202E, U+200B, U+FEFF no meio,
+os isolates U+2066 a U+2069): ele não aparece na tela, mas reordena ou disfarça o nome exibido
+(`fatura\u202egpj.exe` aparece terminando em `.jpg`). A mesma regra vale onde o nome é recusado
+em vez de trocado (`has_unsafe_char`): `OutputDir`, coleta do worker e `name_prefix` do Detox.
 """
 
 import unicodedata
@@ -11,6 +16,13 @@ import unicodedata
 # extensão gigante impediria o `OutputDir` de encurtar o radical para caber em 180 bytes.
 MAX_EXTENSION_BYTES = 16
 _UNSAFE_REPLACEMENT = "_"
+# Cc: controles (NUL, quebra de linha, DEL); Cf: formato invisível (bidi, largura zero, BOM).
+_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf"})
+
+
+def has_unsafe_char(text: str) -> bool:
+    """Se há controle ou formato invisível: o que um nome de saída nunca pode conter."""
+    return any(unicodedata.category(char) in _UNSAFE_CATEGORIES for char in text)
 
 
 def safe_stem(original_name: str, fallback: str) -> str:
@@ -49,4 +61,4 @@ def _sanitized(text: str) -> str:
 
 
 def _is_unsafe(char: str) -> bool:
-    return char in ("/", "\\") or unicodedata.category(char) == "Cc"
+    return char in ("/", "\\") or has_unsafe_char(char)

@@ -528,6 +528,10 @@ def test_nome_de_180_bytes_e_aceito(tmp_path: Path) -> None:
         "images/" + "a" * 177 + ".jpg",  # 181 bytes no componente
         "images/" + "é" * 89 + ".jpg",  # 182 bytes em UTF-8, 93 caracteres
         "images/linha\nquebrada.jpg",
+        "images/fatura\u202egpj.exe",  # RLO
+        "images/a\u200bb.jpg",  # ZWSP
+        "images/a\ufeffb.jpg",  # BOM no meio
+        "images/a\u2066b\u2069.jpg",  # isolates
         "images/é.jpg",  # fora de NFC
         "a" * 177 + ".csv",
     ],

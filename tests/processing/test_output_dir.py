@@ -116,7 +116,21 @@ def test_sufixo_de_colisao_cabe_nos_180_bytes(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["", ".", "..", "a/b.csv", "a\\b.csv", "a\x00.csv", "a\nb.csv", "a\x7f.csv"]
+    "name",
+    [
+        "",
+        ".",
+        "..",
+        "a/b.csv",
+        "a\\b.csv",
+        "a\x00.csv",
+        "a\nb.csv",
+        "a\x7f.csv",
+        "a\u202eb.csv",  # RLO
+        "a\u200bb.csv",  # ZWSP
+        "a\ufeffb.csv",  # BOM no meio
+        "a\u2069b.csv",  # PDI (isolate)
+    ],
 )
 def test_nome_vazio_com_separador_traversal_ou_controle_e_recusado(
     tmp_path: Path, name: str
