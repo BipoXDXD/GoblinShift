@@ -1,7 +1,7 @@
 """Tabelas da identidade (docs/GoblinShiftPlan.md, 3.3).
 
 Contas, chaves de API (fatia 3), sessões web, estado transitório do login e auditoria
-(fatia 6, migração 0006).
+(fatia 6, migração 0006) e as janelas do limite de requisições (fatia 8, migração 0007).
 """
 
 from sqlalchemy import (
@@ -12,7 +12,9 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     LargeBinary,
+    PrimaryKeyConstraint,
     Table,
     Text,
     UniqueConstraint,
@@ -133,4 +135,20 @@ audit_event = Table(
         "masklen(ip_prefix) = CASE family(ip_prefix) WHEN 4 THEN 24 ELSE 48 END",
         name="ip_prefix",
     ),
+)
+
+# Contador de janela fixa de um minuto por conta e classe de rota (1.7; ADR 027). Dado efêmero:
+# a manutenção apaga as janelas velhas, e a purga da conta as leva junto (CASCADE), sem etapa
+# própria. Sem índice em `window_start`: a tabela guarda só as janelas dos últimos minutos, e a
+# limpeza lê poucas linhas. As classes repetem `RequestClass`; um teste confere.
+request_window = Table(
+    "request_window",
+    metadata,
+    Column("owner_id", Uuid, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False),
+    Column("request_class", Text, nullable=False),
+    Column("window_start", DateTime(timezone=True), nullable=False),
+    Column("request_count", Integer, nullable=False),
+    PrimaryKeyConstraint("owner_id", "request_class", "window_start"),
+    CheckConstraint("request_class IN ('read', 'command', 'run_create')", name="request_class"),
+    CheckConstraint("request_count > 0", name="request_count"),
 )
