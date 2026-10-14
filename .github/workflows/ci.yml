@@ -33,7 +33,22 @@ jobs:
       - name: Contratos de arquitetura (import-linter)
         run: uv run lint-imports
       - name: Testes (inclui PostgreSQL real via Testcontainers)
-        run: uv run pytest
+        # Os do OpenObserve rodam no job próprio, em paralelo, para caber no orçamento do commit
+        # stage (5 min): só o cenário do agendador leva cerca de 2 min.
+        run: uv run pytest -m "not openobserve"
+
+  openobserve:
+    name: SLOs e alertas (OpenObserve)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: OpenObserve e Collector reais via Testcontainers
+        # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito.
+        run: uv run pytest -m openobserve -q
 
   secrets:
     name: Segredos (gitleaks)
@@ -157,7 +172,7 @@ jobs:
     name: Deploy na VPS
     # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
     # execuções aceitas sem ter onde rodar.
-    needs: [image, executor-image, gvisor]
+    needs: [image, executor-image, gvisor, openobserve]
     # Só roda depois que a VPS estiver configurada (variáveis do repositório definidas).
     if: vars.VPS_HOST != ''
     runs-on: ubuntu-24.04
