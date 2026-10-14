@@ -607,11 +607,12 @@ Classificação dos subdomínios ([B13](GoblinShiftReferencias.md#l-4), cap. 1 e
 | `catalog`    | Supporting | Quais receitas e versões existem, schemas, defaults e estado de cada versão                                    | Listar, obter versão, resolver defaults                                                                            | `processing`, `platform`                  |
 | `presets`    | Supporting | Revisões e validação de presets                                                                                | CRUD com revisão                                                                                                   | `catalog`, `platform`                     |
 | `identity`   | Generic    | OIDC/OAuth (Authlib), sessões, CSRF, chaves, escopos, estado da conta                                          | `authenticate(request) -> Principal`, `require_scope`, `require_recent_auth`                                       | `platform`                                |
+| `capacity`   | Supporting | Livro-razão de reservas de armazenamento (`CapacityPool`, `ResourceReservation`), por conta e no ambiente ([ADR 023](adr/023-livro-razao-de-capacidade.md)) | `reserve`, `release`, `transfer`, `usage`, `reconcile`                                                             | `platform`                                |
 | `platform`   | Técnico    | Engine e unidade de trabalho do banco, settings, logging, telemetria                                           | `unit_of_work()`, settings, logger                                                                                 | Nada do projeto                           |
 | Entrypoints  | —          | Tradução de HTTP e CLI e os laços dos processos `api`, `worker`, `maintenance`, `cli`                          | —                                                                                                                  | Todos os módulos acima                    |
 
 O grafo é acíclico. Os módulos recebem `owner_id` do entrypoint, já autenticado, em vez de dependerem de `identity`. `files` não conhece execuções: `runs` registra o uso dos objetos com `hold` na aceitação e o libera com `release` no estado terminal, e a exclusão consulta só esses usos. As regras são verificadas no CI com import-linter ([D28](GoblinShiftReferencias.md#d-6)), como fitness function ([B14](GoblinShiftReferencias.md#l-4), cap. 6 e 11):
-- contrato `layers`: entrypoints → `runs` → `presets` → (`catalog`, `files`, `identity`) → (`processing`, `platform`);
+- contrato `layers`: entrypoints → `runs` → `presets` → (`catalog`, `files`, `identity`) → `capacity` → (`processing`, `platform`);
 - contrato `forbidden`: `processing` não importa `sqlalchemy`, `fastapi`, `starlette`, `authlib`, `httpx` nem outro módulo do projeto (com `include_external_packages = true`);
 - contrato `independence`: `catalog`, `files` e `identity` não importam uns aos outros;
 - um teste confirma que a imagem do executor não consegue importar `sqlalchemy`.
@@ -1121,6 +1122,10 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 019 | `out/` com um nível de grupos de lista fechada; pacote `<recipe_id>.zip`; papéis `manifest` e `package` | `out/` plano com grupo só no ZIP; árvore livre | Mesmo caminho no ZIP e no download, coleta simples e segura |
 | 020 | O Detox copia os bytes para `out/`; o worker reaproveita o objeto da entrada quando hash e tamanho batem | `OutputDir.reference` com campo no relatório; sempre copiar | Contrato do executor intacto, o worker confere o próprio hash e renomear não duplica objetos (1.4) |
 | 021 | Digest da imagem no manifesto por um `context.json` opcional | Chave nova obrigatória no `job.json`; digest só nos metadados | Compatível nas duas direções durante o deploy (*expand/contract*) |
+| 022 | Cadastro fechado até a abertura pública: identidade nova nasce bloqueada e o admin a libera (`gs-admin unblock`) | Allowlist de `(issuer, subject)`; cadastro aberto na fatia 6 | O serviço só abre na fatia 8; reaproveita o estado `blocked` e abrir é trocar `GS_SIGNUP_MODE` |
+| 023 | Livro-razão de capacidade no módulo `capacity`, abaixo de `files` e `runs`; fila e execução ativa ficam nas travas atuais | Livro-razão em `files` ou em `runs`; fila no pool | Reservas de upload e de Run no mesmo livro-razão sem ciclo entre módulos; não trocar mecanismos já testados |
+| 024 | Authlib ≥ 1.6.12 com estado do login no PostgreSQL, sessão server-side, `redirect_uri` de `GS_PUBLIC_ORIGIN`, CSRF e cabeçalhos com código próprio em ASGI puro | `httpx-oauth`; autenticação à mão; sessão em cookie assinado | Não construir autenticação; revogação imediata; o streaming dos downloads não quebra |
+| 025 | Auditoria sem FK para a conta, mantida 90 dias depois do `DELETE /me` | Apagar os eventos com a conta; HMAC no lugar do id | O rastro de abuso não some com a conta; sem `app_user`, o UUID não identifica ninguém |
 
 [↑ Sumário](#sumario)
 
