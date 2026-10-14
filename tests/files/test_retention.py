@@ -174,7 +174,7 @@ def test_artefato_vencido_e_excluido_e_objeto_pedido_para_remocao(
     view = ready_upload(factory, storage, owner)
     with unit_of_work(factory) as session:
         [ready] = lock_ready_uploads(session, owner, [view.id])
-        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT)
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
         request_deletion(session, owner, view.id)
     assert object_of(factory, view.id)[0] == "committed"
     expire_row(factory, artifact, shared.id)
@@ -192,7 +192,7 @@ def test_artefato_vencido_que_divide_objeto_com_upload_valido_preserva_o_objeto(
     view = ready_upload(factory, storage, owner)
     with unit_of_work(factory) as session:
         [ready] = lock_ready_uploads(session, owner, [view.id])
-        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT)
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
     expire_row(factory, artifact, shared.id)
 
     with factory() as session:
@@ -236,7 +236,7 @@ def test_download_em_andamento_segura_a_remocao_do_artefato_excluido(
     view = ready_upload(factory, storage, owner)
     with unit_of_work(factory) as session:
         [ready] = lock_ready_uploads(session, owner, [view.id])
-        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT)
+        shared = publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "saida.csv")
         request_deletion(session, owner, view.id)
     with unit_of_work(factory) as session:
         ticket = open_for_download(session, owner, shared.id)

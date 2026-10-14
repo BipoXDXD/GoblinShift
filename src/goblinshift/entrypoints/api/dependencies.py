@@ -21,6 +21,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
+from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Principal, Scope, authenticate_api_key
 
 BEARER_SCHEME = "bearer"
@@ -40,6 +41,14 @@ def get_session(request: Request) -> Iterator[Session]:
 
 
 DbSession = Annotated[Session, Depends(get_session, scope="function")]
+
+
+def get_storage(request: Request) -> FileStorage:
+    storage: FileStorage = request.app.state.storage
+    return storage
+
+
+Storage = Annotated[FileStorage, Depends(get_storage)]
 
 
 def current_time() -> datetime:
@@ -95,3 +104,8 @@ def _bearer_token(request: Request) -> str:
 
 def _unauthenticated(detail: str) -> ApiProblem:
     return ApiProblem(ProblemCode.AUTHENTICATION_REQUIRED, detail, headers=_CHALLENGE)
+
+
+# Escopos de 1.6 para as rotas de arquivos.
+ReadFiles = Annotated[Principal, Depends(require_scope(Scope.FILES_READ))]
+WriteFiles = Annotated[Principal, Depends(require_scope(Scope.FILES_WRITE))]

@@ -11,9 +11,9 @@ profundidade. Por isso as rotas de comando recebem o corpo por esta dependência
    infinito, e profundidade de no máximo 16 → senão 400 `JSON_INVALID`;
 4. só então o Pydantic valida em modo estrito, com campos extras proibidos pelo modelo (422).
 
-Uso numa rota:
+Uso numa rota, com o schema publicado no OpenAPI por `command_openapi` (3.6):
 
-    @router.post("/coisas")
+    @router.post("/coisas", openapi_extra=command_openapi(NewThing))
     def create(command: Annotated[NewThing, Depends(json_command(NewThing))]) -> ...:
 """
 
@@ -31,6 +31,7 @@ from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 MAX_COMMAND_BYTES = 64 * 1024
 MAX_COMMAND_DEPTH = 16
 JSON_MEDIA_TYPE = "application/json"
+_DEFS_PREFIX = "#/$defs/"
 
 
 class _JsonRejectedError(ValueError):
@@ -53,6 +54,22 @@ def json_command[M: BaseModel](model: type[M]) -> Callable[[Request], Awaitable[
             ) from None
 
     return read_command
+
+
+def command_openapi(model: type[BaseModel]) -> dict[str, Any]:
+    """`openapi_extra` que publica o corpo do comando, que a rota não declara como parâmetro.
+
+    Os modelos aninhados ficam embutidos: o `$ref` para `#/$defs/...` gerado pelo Pydantic
+    resolveria contra a raiz do documento OpenAPI, onde esses `$defs` não existem.
+    """
+    schema = model.model_json_schema()
+    definitions: dict[str, Any] = schema.pop("$defs", {})
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {JSON_MEDIA_TYPE: {"schema": _inline_refs(schema, definitions)}},
+        }
+    }
 
 
 async def read_json_command(request: Request) -> object:
@@ -137,6 +154,17 @@ def _depth(value: object) -> int:
         deepest = max(deepest, level)
         pending.extend((child, level + 1) for child in children)
     return deepest
+
+
+def _inline_refs(node: Any, definitions: dict[str, Any]) -> Any:
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith(_DEFS_PREFIX):
+            return _inline_refs(definitions[ref.removeprefix(_DEFS_PREFIX)], definitions)
+        return {key: _inline_refs(value, definitions) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_inline_refs(item, definitions) for item in node]
+    return node
 
 
 def _too_deep() -> ApiProblem:
