@@ -1,4 +1,4 @@
-# ADR 027. Limite de requisições por conta em janela fixa no PostgreSQL
+# ADR 028. Limite de requisições por conta em janela fixa no PostgreSQL
 
 - **Estado:** aceito na fatia 8 (2026-10-14), decisão D-9 do plano da fatia 6 (tarefa F8-1)
 - **Plano:** [1.7](../GoblinShiftPlan.md#s1-7), [3.7](../GoblinShiftPlan.md#s3-7)

@@ -5,7 +5,7 @@ Revises: 0006
 Create Date: 2026-10-14 21:00:00.000000
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Só uma tabela nova, que o código
-anterior ignora; durante o rollout, a API velha não conta requisições (ADR 027).
+anterior ignora; durante o rollout, a API velha não conta requisições (ADR 028).
 """
 
 from collections.abc import Sequence

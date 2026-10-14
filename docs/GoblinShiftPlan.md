@@ -1127,7 +1127,7 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 024 | Livro-razão de capacidade no módulo `capacity`, abaixo de `files` e `runs`; fila e execução ativa ficam nas travas atuais | Livro-razão em `files` ou em `runs`; fila no pool | Reservas de upload e de Run no mesmo livro-razão sem ciclo entre módulos; não trocar mecanismos já testados |
 | 025 | Authlib ≥ 1.6.12 com estado do login no PostgreSQL, sessão server-side, `redirect_uri` de `GS_PUBLIC_ORIGIN`, CSRF e cabeçalhos com código próprio em ASGI puro | `httpx-oauth`; autenticação à mão; sessão em cookie assinado | Não construir autenticação; revogação imediata; o streaming dos downloads não quebra |
 | 026 | Auditoria sem FK para a conta, mantida 90 dias depois do `DELETE /me` | Apagar os eventos com a conta; HMAC no lugar do id | O rastro de abuso não some com a conta; sem `app_user`, o UUID não identifica ninguém |
-| 027 | Limite de requisições por conta e classe de rota em janela fixa de um minuto no PostgreSQL, com `INSERT … ON CONFLICT DO UPDATE … WHERE` atômico e contado na autenticação | Contador em memória do processo; `limit_req` do Nginx; janela deslizante; Redis | Vale entre réplicas e pela conta, não pelo IP, sem armazenamento novo; nenhuma rota autenticada escapa |
+| 028 | Limite de requisições por conta e classe de rota em janela fixa de um minuto no PostgreSQL, com `INSERT … ON CONFLICT DO UPDATE … WHERE` atômico e contado na autenticação | Contador em memória do processo; `limit_req` do Nginx; janela deslizante; Redis | Vale entre réplicas e pela conta, não pelo IP, sem armazenamento novo; nenhuma rota autenticada escapa |
 
 [↑ Sumário](#sumario)
 

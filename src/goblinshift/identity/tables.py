@@ -137,7 +137,7 @@ audit_event = Table(
     ),
 )
 
-# Contador de janela fixa de um minuto por conta e classe de rota (1.7; ADR 027). Dado efêmero:
+# Contador de janela fixa de um minuto por conta e classe de rota (1.7; ADR 028). Dado efêmero:
 # a manutenção apaga as janelas velhas, e a purga da conta as leva junto (CASCADE), sem etapa
 # própria. Sem índice em `window_start`: a tabela guarda só as janelas dos últimos minutos, e a
 # limpeza lê poucas linhas. As classes repetem `RequestClass`; um teste confere.
