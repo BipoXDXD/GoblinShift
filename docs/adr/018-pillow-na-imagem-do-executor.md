@@ -1,4 +1,4 @@
-# ADR 017. Pillow fixado na imagem do executor, instalado do lock por um estágio de build
+# ADR 018. Pillow fixado na imagem do executor, instalado do lock por um estágio de build
 
 - **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14), pendente de revisão do usuário no PR da fatia; a medição do pior caso sob gVisor entra aqui na integração
 - **Plano:** [1.2](../GoblinShiftPlan.md#s1-2), [1.7](../GoblinShiftPlan.md#s1-7), [2.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-6)

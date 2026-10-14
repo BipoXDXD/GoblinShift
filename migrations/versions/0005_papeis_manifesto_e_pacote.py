@@ -1,4 +1,4 @@
-"""Papéis de artefato `manifest` e `package` (fatia 5, ADR 018).
+"""Papéis de artefato `manifest` e `package` (fatia 5, ADR 019).
 
 Revision ID: 0005
 Revises: 0004

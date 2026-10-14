@@ -1,8 +1,8 @@
-# ADR 019. Downloads Detox: a receita copia os bytes, o worker reaproveita o objeto da entrada
+# ADR 020. Downloads Detox: a receita copia os bytes, o worker reaproveita o objeto da entrada
 
 - **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14), pendente de revisão do usuário no PR da fatia; implementado na integração
 - **Plano:** [1.4](../GoblinShiftPlan.md#s1-4), [3.2](../GoblinShiftPlan.md#s3-2), [3.3](../GoblinShiftPlan.md#s3-3), [3.6](../GoblinShiftPlan.md#s3-6)
-- **Relacionado:** [ADR 007](007-storedobject-e-exclusao-adiada.md), [ADR 018](018-layout-de-out-pacote-e-papeis.md)
+- **Relacionado:** [ADR 007](007-storedobject-e-exclusao-adiada.md), [ADR 019](019-layout-de-out-pacote-e-papeis.md)
 
 ## Contexto
 

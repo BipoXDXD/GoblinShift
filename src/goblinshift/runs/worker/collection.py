@@ -2,7 +2,7 @@
 
 O executor é código que processa conteúdo do usuário: o que ele escreve é dado não confiável.
 A coleta só aceita arquivos regulares em `out/` ou num único nível de subpasta com nome de
-`OutputGroup` (lista fechada, ADR 018), sem symlinks nem hardlinks, conta quantidade e bytes
+`OutputGroup` (lista fechada, ADR 019), sem symlinks nem hardlinks, conta quantidade e bytes
 enquanto lê, e confere o `report.json` contra um schema próprio. Na raiz, `manifest.json` e
 `<recipe_id>.zip` (fatia 5) ficam fora do orçamento de conteúdo, cada um com o seu teto de 1.7, e
 vêm juntos ou não vêm: o executor anterior à fatia 5, fixado em Runs aceitas antes do deploy, não

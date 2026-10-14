@@ -1,5 +1,5 @@
 # Imagem do executor: roda uma tentativa dentro do container gVisor (docs/GoblinShiftPlan.md, 3.6).
-# Só a biblioteca padrão, o Pillow fixado (ADR 017) e o pacote goblinshift.processing; nada de
+# Só a biblioteca padrão, o Pillow fixado (ADR 018) e o pacote goblinshift.processing; nada de
 # banco, web nem outras dependências de terceiros, para que o conteúdo do usuário encontre a menor
 # superfície possível. O executor-ctl só aceita esta imagem pelo digest que o deploy grava na
 # allowlist (deploy/release.sh).
