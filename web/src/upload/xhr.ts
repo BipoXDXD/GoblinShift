@@ -18,6 +18,10 @@ export interface UploadXhr {
   onabort: ((event: ProgressEvent) => void) | null;
 }
 
+// Sem progresso nem resposta por esse tempo, a conexão é dada como morta: sem isso o envio
+// prenderia uma vaga do limitador e o aviso de saída da página para sempre.
+const IDLE_TIMEOUT_MS = 45_000;
+
 /** Progresso real do envio: bytes saindo, depois a espera pela confirmação do servidor. */
 export type UploadProgress =
   { phase: "sending"; loadedBytes: number; totalBytes: number } | { phase: "confirming" };
@@ -45,7 +49,8 @@ export interface ContentUploader {
  *
  * Usa `content.method`, `content.url` e `content.headers` como a API devolveu, mas recusa
  * (`CrossOriginUrlError`) uma URL fora da origem da interface, que levaria o CSRF junto. Sem
- * retomada: falha aqui exige uma intenção nova (POST /uploads).
+ * retomada: falha aqui exige uma intenção nova (POST /uploads). Aborta com
+ * `ApiError({ kind: "timeout" })` depois de 45 s sem progresso nem resposta.
  */
 export function createContentUploader(transport: UploadTransport): ContentUploader {
   return {
@@ -64,7 +69,17 @@ function sendContent(
     const abort = (): void => {
       xhr.abort();
     };
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let idleExpired = false;
+    const rearmIdleTimer = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        idleExpired = true;
+        xhr.abort();
+      }, IDLE_TIMEOUT_MS);
+    };
     const settle = (): void => {
+      clearTimeout(idleTimer);
       signal?.removeEventListener("abort", abort);
     };
     xhr.open(content.method, url.href);
@@ -77,6 +92,7 @@ function sendContent(
       xhr.setRequestHeader(CSRF_HEADER, token);
     }
     xhr.upload.onprogress = (event) => {
+      rearmIdleTimer();
       onProgress(progressOf(event.loaded, file.size));
     };
     xhr.onload = () => {
@@ -98,10 +114,11 @@ function sendContent(
     };
     xhr.onabort = () => {
       settle();
-      reject(abortReason(signal));
+      reject(idleExpired ? new ApiError({ kind: "timeout" }) : abortReason(signal));
     };
     signal?.addEventListener("abort", abort, { once: true });
     xhr.send(file);
+    rearmIdleTimer();
   });
 }
 
