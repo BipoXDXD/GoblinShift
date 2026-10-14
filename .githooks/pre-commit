@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Barra o commit se as mudanças preparadas contêm segredo. A CI também roda o gitleaks, mas só
+# depois que o commit chegou ao GitHub, quando o segredo já é público; este hook age antes.
+#
+# Instalação, uma vez por clone: scripts/install-hooks.sh
+# Usa a mesma imagem e a mesma configuração da CI; sem Docker, cai para um gitleaks instalado.
+# Falso positivo: acrescente uma exceção em .gitleaks.toml. Pular o hook (--no-verify) só com certeza.
+set -euo pipefail
+
+IMAGE=ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+config="$(git rev-parse --show-toplevel)/.gitleaks.toml"
+
+if docker info >/dev/null 2>&1; then
+  scan=(docker run --rm -i -v "$config:/gitleaks.toml:ro" "$IMAGE" stdin --config /gitleaks.toml)
+elif command -v gitleaks >/dev/null; then
+  scan=(gitleaks stdin --config "$config")
+else
+  echo "pre-commit: sem Docker nem gitleaks, não dá para procurar segredos; ligue o Docker" >&2
+  exit 1
+fi
+
+if ! git diff --cached --no-color --no-ext-diff -U0 | "${scan[@]}" --redact --verbose --no-banner --log-level warn; then
+  echo "pre-commit: possível segredo nas mudanças preparadas; commit recusado" >&2
+  exit 1
+fi
