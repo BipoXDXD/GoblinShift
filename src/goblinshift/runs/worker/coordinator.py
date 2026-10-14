@@ -71,6 +71,7 @@ from goblinshift.runs.store import (
     Fence,
     LoadedRun,
     LostFencing,
+    RunFinishedHook,
     apply_transition,
     complete_after_commit,
     lock_fenced,
@@ -142,11 +143,14 @@ class Coordinator:
         storage: FileStorage,
         runner: Runner,
         config: CoordinatorConfig,
+        *,
+        on_finished: RunFinishedHook | None = None,
     ) -> None:
         self._factory = factory
         self._storage = storage
         self._runner = runner
         self._config = config
+        self._on_finished = on_finished
 
     def run(self, claimed: ClaimedAttempt) -> Applied | None:
         """Leva a tentativa até um estado decidido; `None` se o fencing foi perdido."""
@@ -157,7 +161,7 @@ class Coordinator:
             _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
             self._abandon(claimed)
             return None
-        complete_after_commit(self._factory, self._storage, applied)
+        complete_after_commit(self._factory, self._storage, applied, self._on_finished)
         self.remove_work(claimed)
         _log_attempt(claimed, applied.state.status, started, error=applied.state.error_code)
         return applied

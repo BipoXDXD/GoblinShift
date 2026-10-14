@@ -7,24 +7,30 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from opentelemetry.sdk.trace.export import SpanExporter
 
 from goblinshift.entrypoints.api import artifacts, health, me, runs, runs_cancel, uploads
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
+from goblinshift.entrypoints.api.wide_event import WideEventMiddleware, count_queries
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.schema import read_code_revisions
 from goblinshift.platform.settings import Settings
-from goblinshift.platform.telemetry import configure_logging, configure_tracing
+from goblinshift.platform.telemetry import UserHasher, configure_logging, configure_tracing
 
 API_PREFIX = "/api/v1"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, span_exporter: SpanExporter | None = None
+) -> FastAPI:
+    """`span_exporter` substitui o exportador OTLP nos testes do evento amplo."""
     settings = settings or Settings()
-    # Lidos já na subida: em produção, sem o segredo ou sem o executor-ctl e a imagem do
+    # Lidos já na subida: em produção, sem os segredos ou sem o executor-ctl e a imagem do
     # executor, a API não sobe (em vez de falhar no primeiro pedido).
     settings.cursor_signing_key()
+    user_hasher = UserHasher(settings.user_hash_key())
     executor_image = settings.executor_image_for_runs()
     configure_logging()
     engine = make_engine(settings)
@@ -52,6 +58,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.transfer_timeouts = TransferTimeouts()
 
     install_problem_handlers(app)
+    # Depois dos handlers: o último middleware acrescentado fica por fora e vê o 500 deles.
+    app.add_middleware(WideEventMiddleware, hasher=user_hasher)
+    count_queries(engine)
     app.include_router(health.router)
     api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
     api.include_router(me.router)
@@ -61,5 +70,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(runs_cancel.router)
     app.include_router(api)
 
-    configure_tracing(app, engine, settings)
+    configure_tracing(app, engine, settings, span_exporter)
     return app

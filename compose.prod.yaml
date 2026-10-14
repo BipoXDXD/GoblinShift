@@ -29,16 +29,39 @@ services:
     environment:
       <<: *executor-env
       GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+  # O evento de término da Run (3.7) sai do worker e da manutenção com o mesmo `user.hash` da API.
   worker:
     <<: *executor-client
     environment:
       <<: *executor-env
       GS_WORK_ROOT: /var/lib/goblinshift/exec-work
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
   maintenance:
     <<: *executor-client
     environment:
       <<: *executor-env
       GS_WORK_ROOT: /var/lib/goblinshift/exec-work
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+  # Ocupação dos filesystems de tamanho fixo para o alerta de disco acima de 85% (3.7 e
+  # docker/otel-collector/config.yaml). Só leitura: o Collector só precisa do statfs.
+  otel-collector:
+    volumes:
+      - type: bind
+        source: /srv/goblinshift/pg
+        target: /hostfs/pg
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /srv/goblinshift/storage
+        target: /hostfs/storage
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /srv/goblinshift/telemetry
+        target: /hostfs/telemetry
+        read_only: true
+        bind: {create_host_path: false}
   nginx:
     # Sem NET_RAW: um container comprometido na rede edge não forja ARP para assumir o IP da
     # borda, em quem os projetos confiam (ADR 014).
