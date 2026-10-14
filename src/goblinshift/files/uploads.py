@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from goblinshift.files.errors import (
     InputNotAvailableError,
     InvalidUploadRequestError,
+    UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
     UploadSizeMismatchError,
@@ -32,7 +33,7 @@ from goblinshift.files.limits import (
     READY_UPLOAD_TTL,
 )
 from goblinshift.files.objects import request_deletion_of_unreferenced
-from goblinshift.files.states import ObjectState, UploadState
+from goblinshift.files.states import Availability, ObjectState, UploadState
 from goblinshift.files.storage import ContentTooLargeError, FileStorage
 from goblinshift.files.tables import stored_object, upload
 
@@ -61,6 +62,7 @@ class UploadView:
     ready_at: datetime | None
     expires_at: datetime
     deleted_at: datetime | None
+    availability: Availability
 
 
 @dataclass(frozen=True)
@@ -95,7 +97,10 @@ def create_intents(
             for intent, object_id in zip(intents, object_ids, strict=True)
         ],
     ).all()
-    return [_view(row, size_bytes=None, sha256=None) for row in rows]
+    return [
+        _view(row, size_bytes=None, sha256=None, availability=Availability.AVAILABLE)
+        for row in rows
+    ]
 
 
 def receive_content(
@@ -117,7 +122,7 @@ def receive_content(
         sha256, size = storage.create_exclusive(storage_key, chunks, max_bytes=expected_size)
     except ContentTooLargeError:
         _fail(session, storage, owner_id, upload_id, storage_key)
-        raise UploadSizeMismatchError(expected_size) from None
+        raise UploadContentTooLargeError(expected_size) from None
     except Exception:
         _fail(session, storage, owner_id, upload_id, storage_key)
         raise
@@ -137,13 +142,23 @@ def receive_content(
 
 def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> UploadView:
     row = session.execute(
-        select(*upload.c, stored_object.c.size_bytes, stored_object.c.sha256)
+        select(
+            *upload.c,
+            stored_object.c.size_bytes,
+            stored_object.c.sha256,
+            (upload.c.expires_at <= func.now()).label("expired"),
+        )
         .join(stored_object, stored_object.c.id == upload.c.object_id)
         .where(upload.c.id == upload_id, upload.c.owner_id == owner_id)
     ).one_or_none()
     if row is None:
         raise UploadNotFoundError
-    return _view(row, size_bytes=row.size_bytes, sha256=row.sha256)
+    return _view(
+        row,
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        availability=Availability.of(deleted=row.deleted_at is not None, expired=row.expired),
+    )
 
 
 def request_deletion(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> None:
@@ -330,7 +345,11 @@ def _raise_unavailable(session: Session, owner_id: uuid.UUID, upload_id: uuid.UU
 
 
 def _view(
-    row: Row[Any, *tuple[Any, ...]], *, size_bytes: int | None, sha256: bytes | None
+    row: Row[Any, *tuple[Any, ...]],
+    *,
+    size_bytes: int | None,
+    sha256: bytes | None,
+    availability: Availability,
 ) -> UploadView:
     return UploadView(
         id=row.id,
@@ -343,4 +362,5 @@ def _view(
         ready_at=row.ready_at,
         expires_at=row.expires_at,
         deleted_at=row.deleted_at,
+        availability=availability,
     )
