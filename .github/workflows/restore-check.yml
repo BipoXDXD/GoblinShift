@@ -1,0 +1,71 @@
+name: Restauração testada do backup
+
+# Todo mês, fora da VPS: baixa o dump mais recente com a chave só de leitura, decifra com a
+# chave privada age e restaura num PostgreSQL efêmero da mesma versão da produção, conferindo
+# revisão do Alembic, contas, execuções e idade do dump (docs/adr/9xx-backup-externo.md).
+# Falhar aqui falha o job e pinga /fail no check "restauração mensal" do healthchecks.io.
+on:
+  schedule:
+    - cron: "23 10 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-check
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Restaurar o dump mais recente
+    # Só depois de o armazenamento existir (variáveis do repositório definidas).
+    if: vars.BACKUP_S3_BUCKET != ''
+    runs-on: ubuntu-24.04
+    # Environment protegido: só ele guarda a chave privada age e a chave de leitura do bucket.
+    environment: backup-restore
+    timeout-minutes: 30
+    services:
+      postgres:
+        # Mesma imagem do compose.yaml: o pg_restore precisa da mesma major do pg_dump.
+        image: postgres:18.6-trixie
+        env:
+          POSTGRES_USER: restore
+          POSTGRES_DB: restore
+          # Banco descartável, sem porta publicada: acessado só por docker exec no próprio runner.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready -U restore -d restore"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Instalar o age
+        run: sudo apt-get update -q && sudo apt-get install -yq age
+      - name: Revisões do Alembic conhecidas pelo código
+        id: revisions
+        run: |
+          known=$(uv run python -c "from goblinshift.platform.schema import read_code_revisions; print(' '.join(sorted(read_code_revisions('alembic.ini')[1])))")
+          echo "known=$known" >> "$GITHUB_OUTPUT"
+      - name: Restaurar e conferir
+        env:
+          BACKUP_S3_ENDPOINT: ${{ vars.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_REGION: ${{ vars.BACKUP_S3_REGION }}
+          BACKUP_S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
+          BACKUP_S3_KEY_ID: ${{ secrets.BACKUP_S3_READ_KEY_ID }}
+          BACKUP_S3_SECRET: ${{ secrets.BACKUP_S3_READ_KEY }}
+          AGE_IDENTITY: ${{ secrets.BACKUP_AGE_IDENTITY }}
+          RESTORE_PG_CONTAINER: ${{ job.services.postgres.id }}
+          RESTORE_PG_USER: restore
+          RESTORE_PG_DB: restore
+          RESTORE_KNOWN_REVISIONS: ${{ steps.revisions.outputs.known }}
+          RESTORE_HEALTHCHECK_URL: ${{ secrets.RESTORE_HEALTHCHECK_URL }}
+        run: |
+          umask 077
+          identity="$RUNNER_TEMP/age-identity.txt"
+          trap 'rm -f "$identity"' EXIT
+          printf '%s\n' "$AGE_IDENTITY" > "$identity"
+          BACKUP_AGE_IDENTITY_FILE="$identity" bash deploy/backup/pg-restore-check.sh
