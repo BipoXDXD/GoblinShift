@@ -14,10 +14,17 @@ import shutil
 import subprocess
 import sys
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
+from PIL import Image
+
+from goblinshift.catalog import CATALOG
+from tests.downloads_detox import samples
+from tests.image_forge import media
+from tests.image_forge.icc import DISPLAY_P3, rgb_profile
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "docker" / "executor.Dockerfile"
@@ -98,7 +105,13 @@ def run_executor(image: str, work: Path) -> subprocess.CompletedProcess[str]:
     return docker(*fixed_profile(*mounts, image))
 
 
-def make_work_dir(root: Path, tables: Sequence[tuple[str, bytes]]) -> Path:
+def make_work_dir(
+    root: Path,
+    tables: Sequence[tuple[str, bytes]],
+    recipe_id: str = "csv-janitor",
+    parameters: Mapping[str, object] | None = None,
+) -> Path:
+    """Área como o worker a monta, com os parâmetros resolvidos pelo catálogo."""
     work = root / "work"
     inputs = work / "inputs"
     inputs.mkdir(parents=True)
@@ -116,7 +129,12 @@ def make_work_dir(root: Path, tables: Sequence[tuple[str, bytes]]) -> Path:
                 "sha256": hashlib.sha256(data).hexdigest(),
             }
         )
-    job = {"recipe_id": "csv-janitor", "recipe_version": 1, "parameters": {}, "inputs": entries}
+    job = {
+        "recipe_id": recipe_id,
+        "recipe_version": 1,
+        "parameters": CATALOG.resolve(recipe_id, 1, parameters or {}),
+        "inputs": entries,
+    }
     (work / "job.json").write_text(json.dumps(job), encoding="utf-8")
     (work / "job.json").chmod(WORLD_READABLE_FILE)
     inputs.chmod(WORLD_READABLE_DIR)
@@ -256,3 +274,113 @@ def test_diretorio_corrente_nao_entra_no_sys_path(image: str) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "False"
+
+
+# --- Receitas da fatia 5 rodando de verdade na imagem (1.2, 1.4 e 3.9) -----------------------
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    document: dict[str, Any] = json.loads(path.read_bytes())
+    return document
+
+
+def image_forge_batch() -> list[tuple[str, bytes]]:
+    """Foto Display P3 deitada pela orientação 6, PNG de 16 bits e bomba de descompressão."""
+    photo = media.jpeg(
+        media.solid("RGB", (40, 20), (200, 30, 30)),
+        exif=media.exif(orientation=6, with_gps=True),
+        icc_profile=rgb_profile(DISPLAY_P3, "Display P3"),
+    )
+    return [
+        ("foto.jpg", photo),
+        ("profundo.png", media.png_16_bit(4, 4, color_type=2)),
+        ("bomba.png", media.png_bomb(30_000, 30_000)),
+    ]
+
+
+def detox_batch() -> list[tuple[str, bytes]]:
+    """Nomes em colisão, ZIP que é JAR, cópia exata e HTML disfarçado de texto."""
+    return [
+        ("Foto.png", samples.png(1)),
+        ("foto.PNG", samples.png(2)),
+        ("ferramenta.zip", samples.jar()),
+        ("Foto (1).png", samples.png(1)),
+        ("pagina.txt", b"<!DOCTYPE html><html><body>oi</body></html>\n"),
+    ]
+
+
+def run_recipe(
+    image: str, root: Path, batch: list[tuple[str, bytes]], recipe_id: str, **parameters: object
+) -> Path:
+    work = make_work_dir(root, batch, recipe_id, parameters)
+    result = run_executor(image, work)
+    assert result.returncode == SUCCEEDED, result.stderr
+    return work / "out"
+
+
+def package_digest(out: Path, recipe_id: str) -> str:
+    return hashlib.sha256((out / f"{recipe_id}.zip").read_bytes()).hexdigest()
+
+
+def test_image_forge_converte_orienta_e_recusa_na_imagem(image: str, tmp_path: Path) -> None:
+    out = run_recipe(image, tmp_path, image_forge_batch(), "image-forge", make_thumbnails=True)
+
+    report = read_json(out / "report.json")
+    statuses = [(item["status"], item.get("code")) for item in report["items"]]
+    assert statuses == [
+        ("ok", None),
+        ("rejected", "UNSUPPORTED_BIT_DEPTH"),
+        ("rejected", "IMAGE_TOO_LARGE"),
+    ]
+    assert report["items"][0]["details"]["color_profile"] == "display-p3-converted"
+    with Image.open(out / "images" / "foto.jpg") as converted:
+        assert converted.size == (20, 40)
+        assert not converted.getexif()
+        assert "icc_profile" not in converted.info
+    with zipfile.ZipFile(out / "image-forge.zip") as archive:
+        assert archive.namelist() == [
+            "images/foto.jpg",
+            "thumbnails/foto.jpg",
+            "manifest.json",
+            "report.json",
+        ]
+
+
+def test_image_forge_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(
+    image: str, tmp_path: Path
+) -> None:
+    first = run_recipe(image, tmp_path / "1", image_forge_batch(), "image-forge")
+    second = run_recipe(image, tmp_path / "2", image_forge_batch(), "image-forge")
+
+    assert package_digest(first, "image-forge") == package_digest(second, "image-forge")
+
+
+def test_downloads_detox_separa_deduplica_e_recusa_na_imagem(image: str, tmp_path: Path) -> None:
+    out = run_recipe(image, tmp_path, detox_batch(), "downloads-detox")
+
+    manifest = read_json(out / "manifest.json")
+    assert [(entry["status"], entry.get("duplicate_of")) for entry in manifest["inputs"]] == [
+        ("ok", None),
+        ("ok", None),
+        ("ok", None),
+        ("duplicate", 0),
+        ("rejected", None),
+    ]
+    with zipfile.ZipFile(out / "downloads-detox.zip") as archive:
+        assert archive.namelist() == [
+            "images/Foto.png",
+            "images/foto_1.PNG",
+            "archives/ferramenta.zip",
+            "manifest.json",
+            "report.json",
+        ]
+        assert archive.read("archives/ferramenta.zip") == samples.jar()
+
+
+def test_downloads_detox_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(
+    image: str, tmp_path: Path
+) -> None:
+    first = run_recipe(image, tmp_path / "1", detox_batch(), "downloads-detox")
+    second = run_recipe(image, tmp_path / "2", detox_batch(), "downloads-detox")
+
+    assert package_digest(first, "downloads-detox") == package_digest(second, "downloads-detox")
