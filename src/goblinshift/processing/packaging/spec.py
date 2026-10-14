@@ -7,6 +7,8 @@ from goblinshift.processing.recipe import InputFile
 
 MIB = 1024 * 1024
 MANIFEST_NAME = "manifest.json"
+# Escrito pelo executor antes do empacotamento; entra no ZIP logo depois do manifesto.
+REPORT_NAME = "report.json"
 MANIFEST_SCHEMA_VERSION = 1
 
 
@@ -24,7 +26,12 @@ class PackageSpec:
     @property
     def package_name(self) -> str:
         """Nome do ZIP na raiz de out/: "csv-janitor.zip", "image-forge.zip"…"""
-        return f"{self.recipe_id}.zip"
+        return package_name_for(self.recipe_id)
+
+
+def package_name_for(recipe_id: str) -> str:
+    """Única regra do nome do pacote, usada pelo executor e pela coleta do worker (ADR 018)."""
+    return f"{recipe_id}.zip"
 
 
 @dataclass(frozen=True)

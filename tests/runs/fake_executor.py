@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from goblinshift.processing.executor import main as real_executor
+from goblinshift.processing.executor.execution import main as real_executor
 
 
 def run(argv: list[str]) -> int:

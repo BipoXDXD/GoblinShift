@@ -266,7 +266,9 @@ def test_publicacao_contra_cancelamento_nao_publica_e_descarta_candidatos(
     runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     status = worker.supervise(claimed)
-    collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)
+    collected = collect_outputs(
+        runner.work_dir(claimed.attempt_id) / "out", 1, recipe_id=claimed.recipe_id
+    )
     stored = worker.store_candidates(claimed, collected)
 
     cancel_run(factory, storage, owner, run_id)
@@ -295,7 +297,9 @@ def test_publicacao_depois_do_prazo_termina_failed_pelo_relogio_do_banco(
     runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
     worker.supervise(claimed)
-    collected = collect_outputs(runner.work_dir(claimed.attempt_id) / "out", 1)
+    collected = collect_outputs(
+        runner.work_dir(claimed.attempt_id) / "out", 1, recipe_id=claimed.recipe_id
+    )
     stored = worker.store_candidates(claimed, collected)
 
     with unit_of_work(factory) as session:

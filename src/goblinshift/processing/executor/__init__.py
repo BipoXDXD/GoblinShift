@@ -30,7 +30,10 @@ O worker prepara, o executor só lê:
 
 O executor escreve, sempre com criação exclusiva:
 
-- `out/`: criado pelo executor (ou vazio); recebe as saídas da receita e `report.json`.
+- `out/`: criado pelo executor (ou vazio); recebe as saídas da receita, `report.json` e, por
+  último, o pacote comum (fatia 5, ADR 018): `manifest.json` e `<recipe_id>.zip`, gravados por
+  `goblinshift.processing.packaging`. Manifesto acima de 8 MiB sai com `REPORT_LIMIT_EXCEEDED`;
+  ZIP acima de 512 MiB, com `OUTPUT_LIMIT_EXCEEDED` (código 3, como a falha da receita).
 - `progress.jsonl`: uma linha `{"position": n}` por entrada avaliada (aceita ou rejeitada), na
   ordem de conclusão; o worker conta as linhas para `progress.processed`.
 - `failure.json`: só na falha determinística, `{"code": "<código de 1.6>", "detail": "…"}`.
@@ -72,8 +75,8 @@ Códigos de saída do processo (`ExitCode`)
   diferente do job.
 
 Qualquer outro código (o 1 de uma exceção que escapou, morte por sinal) também é infraestrutura.
+
+O pacote não reexporta `main`: o worker importa `report_file` daqui, e `execution` traz o registro
+com todas as receitas (e o PIL do Image Forge), que o worker não precisa carregar. O ponto de
+entrada é `__main__.py`, que importa `execution` diretamente.
 """
-
-from goblinshift.processing.executor.execution import ExitCode, main
-
-__all__ = ["ExitCode", "main"]

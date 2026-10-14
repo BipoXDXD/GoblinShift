@@ -378,7 +378,9 @@ class Coordinator:
         self.reach_phase(claimed, Phase.PACKAGING)
         out_dir = self._runner.work_dir(claimed.attempt_id) / "out"
         try:
-            collected = collect_outputs(out_dir, len(claimed.input_upload_ids))
+            collected = collect_outputs(
+                out_dir, len(claimed.input_upload_ids), recipe_id=claimed.recipe_id
+            )
         except OutputLimitError as limit:
             code = limit.code
             return self._conclude(

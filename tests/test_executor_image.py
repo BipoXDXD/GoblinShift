@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -32,6 +33,7 @@ WORLD_WRITABLE_DIR = 0o777
 WORLD_READABLE_DIR = 0o755
 WORLD_READABLE_FILE = 0o644
 SUCCEEDED = 0
+PILLOW_VERSION = "12.3.0"  # ADR 017; tests/test_dependencies.py confere o mesmo pin no lock
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
@@ -166,6 +168,45 @@ def test_executor_processa_um_work_dir_real(image: str, tmp_path: Path) -> None:
     cleaned = (work / "out" / "a.csv").read_text(encoding="utf-8")
     assert list(csv.reader(io.StringIO(cleaned))) == [["nome", "cidade"], ["Ana", "Recife"]]
     assert (work / "progress.jsonl").read_text(encoding="utf-8").count("\n") == len(report["items"])
+    with zipfile.ZipFile(work / "out" / "csv-janitor.zip") as archive:
+        assert archive.namelist() == ["a.csv", "manifest.json", "report.json"]
+        assert archive.testzip() is None
+    manifest = json.loads((work / "out" / "manifest.json").read_text(encoding="utf-8"))
+    assert [entry["status"] for entry in manifest["inputs"]] == ["ok", "rejected"]
+
+
+def test_pillow_fixado_e_a_versao_do_lock(image: str) -> None:
+    result = run_python(image, "import PIL; print(PIL.__version__)")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == PILLOW_VERSION
+
+
+@pytest.mark.parametrize("feature", ["jpg", "zlib", "littlecms2"])
+def test_pillow_traz_as_bibliotecas_nativas_que_o_image_forge_usa(image: str, feature: str) -> None:
+    result = run_python(image, f"import PIL.features as f; print(f.check({feature!r}))")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "True"
+
+
+def test_pillow_e_a_unica_distribuicao_de_terceiros(image: str) -> None:
+    code = (
+        "import importlib.metadata as m\n"
+        "print('\\n'.join(sorted(d.metadata['Name'].lower() for d in m.distributions())))"
+    )
+
+    result = run_python(image, code)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["pillow"]
+
+
+def test_instaladores_nao_ficam_na_imagem(image: str) -> None:
+    result = run_python(image, "import shutil; print(shutil.which('uv'), shutil.which('pip'))")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["None", "None"]
 
 
 @pytest.mark.skipif(
