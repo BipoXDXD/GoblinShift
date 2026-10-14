@@ -28,9 +28,15 @@ RUN_PARAMETERS: dict[str, Any] = {
 # grandes o bastante para as janelas das fronteiras durarem.
 ROWS_PER_TABLE = 19_000
 NOTE_CHARS = 360
+RECIPE_ID = "csv-janitor"
 REPORT_NAME = "report.json"
 OUTPUT_ROLE = "output"
 REPORT_ROLE = "report"
+# Desde a fatia 5, toda execução publica também o manifesto e o pacote, cada um no seu papel
+# (ADR 019); o nome do pacote é o id da receita.
+MANIFEST_NAME = "manifest.json"
+PACKAGE_NAME = f"{RECIPE_ID}.zip"
+ROLE_BY_NAME = {REPORT_NAME: REPORT_ROLE, MANIFEST_NAME: "manifest", PACKAGE_NAME: "package"}
 # 3.4: até duas tentativas físicas por execução.
 MAX_PHYSICAL_ATTEMPTS = 2
 TERMINAL_STATUSES = frozenset({"succeeded", "succeeded_with_warnings", "canceled", "failed"})
@@ -375,6 +381,11 @@ def _describe_attempt(row: AttemptRow, faulted: uuid.UUID) -> str:
     return f"g{row.generation}{marks}"
 
 
+def expected_publication(output_names: set[str]) -> set[str]:
+    """As saídas da receita mais o relatório, o manifesto e o pacote."""
+    return output_names | set(ROLE_BY_NAME)
+
+
 def judge_publication(
     rows: Sequence[OutputRow], *, final_generation: int, expected: set[str]
 ) -> Verdict:
@@ -386,9 +397,7 @@ def judge_publication(
     if stale:
         problems.append(f"publicação de geração vencida {stale}")
     wrong_role = [
-        row.file_name
-        for row in rows
-        if row.role != (REPORT_ROLE if row.file_name == REPORT_NAME else OUTPUT_ROLE)
+        row.file_name for row in rows if row.role != ROLE_BY_NAME.get(row.file_name, OUTPUT_ROLE)
     ]
     if wrong_role:
         problems.append(f"papel errado em {wrong_role}")

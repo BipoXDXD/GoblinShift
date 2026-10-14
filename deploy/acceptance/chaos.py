@@ -77,7 +77,7 @@ from typing import Any
 
 from acceptance.chaos_rules import (
     OUTPUT_ROLE,
-    REPORT_NAME,
+    RECIPE_ID,
     RUN_PARAMETERS,
     SCENARIOS,
     TERMINAL_STATUSES,
@@ -92,6 +92,7 @@ from acceptance.chaos_rules import (
     Timing,
     Verdict,
     build_table,
+    expected_publication,
     fault_landed,
     gs_admin_command,
     inject_command,
@@ -118,7 +119,6 @@ API_PREFIX = "/api/v1"
 KEY_SCOPES = "files:read,files:write,runs:read,runs:write"
 # A menor validade que o gs-admin aceita; a chave é revogada no fim de qualquer forma.
 KEY_DAYS = 1
-RECIPE_ID = "csv-janitor"
 RECIPE_VERSION = 1
 TABLES_PER_RUN = 5
 
@@ -649,7 +649,7 @@ def _judge_scenario(
     cleanup, stale = _wait_cleanup(ctx, run_id)
     attempts = [parse_attempt(line) for line in ctx.psql.query(ATTEMPTS_SQL, run_id=run_id)]
     outputs = [parse_output(line) for line in ctx.psql.query(OUTPUTS_SQL, run_id=run_id)]
-    expected_names = {table.name for table in tables} | {REPORT_NAME}
+    expected_names = expected_publication({table.name for table in tables})
     downloads = (
         judge_downloads(
             download_outputs(ctx.api, run_id), {table.name: table.expected for table in tables}
