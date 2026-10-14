@@ -64,7 +64,10 @@ def _clean(data: bytes, params: Params, limits: Limits) -> TableCleaned:
     projection = [column[name] for name in output_header]
     output = [_Record(r.position, tuple(r.fields[i] for i in projection)) for r in survivors]
     formula_cells = _count_formula_cells(output_header, output)
+    # O nome da coluna também é uma célula da planilha.
+    formula_header = tuple(name for name in output_header if _looks_like_formula(name))
     if params.formula_guard is FormulaGuard.TAB_PREFIX:
+        output_header = tuple(map(_guard, output_header))
         output = [_Record(r.position, tuple(map(_guard, r.fields))) for r in output]
     counts = Counts(
         records_read=len(records),
@@ -77,7 +80,11 @@ def _clean(data: bytes, params: Params, limits: Limits) -> TableCleaned:
         content=_serialize(output_header, output, params, limits),
         counts=counts,
         formula_cells=formula_cells,
-        warnings=_warnings(counts, formula_cells, params.formula_guard),
+        formula_header=formula_header,
+        warnings=(
+            *_filter_warnings(counts),
+            *_formula_warnings(formula_cells, formula_header, params.formula_guard),
+        ),
     )
 
 
@@ -128,14 +135,18 @@ def _deduplicate(records: list[_Record], key: Sequence[int]) -> list[_Record]:
 
 def _count_formula_cells(header: Sequence[str], records: list[_Record]) -> Mapping[str, int]:
     counts = {
-        name: sum(record.fields[i].startswith(FORMULA_PREFIXES) for record in records)
+        name: sum(_looks_like_formula(record.fields[i]) for record in records)
         for i, name in enumerate(header)
     }
     return {name: count for name, count in counts.items() if count}
 
 
+def _looks_like_formula(value: str) -> bool:
+    return value.startswith(FORMULA_PREFIXES)
+
+
 def _guard(value: str) -> str:
-    return FORMULA_GUARD_PREFIX + value if value.startswith(FORMULA_PREFIXES) else value
+    return FORMULA_GUARD_PREFIX + value if _looks_like_formula(value) else value
 
 
 def _serialize(
@@ -165,29 +176,40 @@ def _encode(fields: Sequence[str], position: str, params: Params, limits: Limits
     return line
 
 
-def _warnings(
-    counts: Counts, formula_cells: Mapping[str, int], guard: FormulaGuard
+def _filter_warnings(counts: Counts) -> tuple[TableWarning, ...]:
+    if not counts.records_read or counts.written:
+        return ()
+    return (
+        TableWarning(
+            WarningCode.ALL_RECORDS_FILTERED,
+            f"os filtros removeram os {counts.records_read} registros; a saída tem só o cabeçalho",
+        ),
+    )
+
+
+def _formula_warnings(
+    formula_cells: Mapping[str, int], formula_header: Sequence[str], guard: FormulaGuard
 ) -> tuple[TableWarning, ...]:
+    treatment = (
+        "receberam o prefixo tab dentro de aspas"
+        if guard is FormulaGuard.TAB_PREFIX
+        else "foram preservados sem alteração"
+    )
     warnings = []
-    if counts.records_read and not counts.written:
+    if formula_header:
         warnings.append(
             TableWarning(
-                WarningCode.ALL_RECORDS_FILTERED,
-                f"os filtros removeram os {counts.records_read} registros; "
-                "a saída tem só o cabeçalho",
+                WarningCode.FORMULA_HEADER,
+                f"nomes de coluna que uma planilha pode interpretar como fórmula "
+                f"({', '.join(map(repr, formula_header))}) {treatment}.",
             )
         )
     if formula_cells:
         per_column = ", ".join(f"{name!r}: {count}" for name, count in formula_cells.items())
-        treatment = (
-            "receberam o prefixo tab dentro de aspas"
-            if guard is FormulaGuard.TAB_PREFIX
-            else "foram preservadas sem alteração"
-        )
         warnings.append(
             TableWarning(
                 WarningCode.FORMULA_CELLS,
-                f"células que uma planilha pode interpretar como fórmula ({per_column}) "
+                f"valores que uma planilha pode interpretar como fórmula ({per_column}) "
                 f"{treatment}. O início com '-' gera muitos falsos positivos (números "
                 "negativos). Um CSV válido não é seguro para qualquer planilha.",
             )
