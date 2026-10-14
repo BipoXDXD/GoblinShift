@@ -67,9 +67,6 @@ class FailureCode(StrEnum):
     NO_VALID_OUTPUTS = "NO_VALID_OUTPUTS"
     OUTPUT_LIMIT_EXCEEDED = "OUTPUT_LIMIT_EXCEEDED"
     REPORT_LIMIT_EXCEEDED = "REPORT_LIMIT_EXCEEDED"
-    # Mais entradas que a receita aceita. A aceitação já recusa esse comando com 422; chegar
-    # aqui é defesa em profundidade, e tentar de novo daria o mesmo resultado.
-    INPUT_LIMIT_EXCEEDED = "INPUT_LIMIT_EXCEEDED"
 
 
 class RecipeFailure(Exception):  # noqa: N818 - nome fixado pelo plano (1.6 e 3.2)
@@ -79,6 +76,14 @@ class RecipeFailure(Exception):  # noqa: N818 - nome fixado pelo plano (1.6 e 3.
         super().__init__(f"{code}: {detail}")
         self.code = code
         self.detail = detail
+
+
+class InputContractError(ValueError):
+    """Entradas fora do que a versão da receita aceita (por exemplo, acima de `max_inputs`).
+
+    A aceitação já recusa esse comando com 422; chegar à receita é job fora do contrato, um
+    defeito de infraestrutura, e não falha determinística do conteúdo.
+    """
 
 
 class OutputRole(StrEnum):

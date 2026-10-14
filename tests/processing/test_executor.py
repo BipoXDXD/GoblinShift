@@ -17,7 +17,9 @@ from typing import Any
 import pytest
 
 from goblinshift.processing.csv_janitor import Limits
-from goblinshift.processing.executor import ExitCode, main
+from goblinshift.processing.csv_janitor.recipe import MAX_TABLES
+from goblinshift.processing.executor import ExitCode, execution, main
+from goblinshift.processing.recipe import FailureCode, RecipeFailure, Report
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
@@ -159,15 +161,34 @@ def test_job_malformado_e_falha_de_infraestrutura(tmp_path: Path) -> None:
     assert not (work / "out").exists()
 
 
-def test_falha_deterministica_grava_o_codigo_em_failure_json(tmp_path: Path) -> None:
-    work = make_work_dir(tmp_path, [(f"t{i}.csv", VALID) for i in range(6)])
+def test_mais_entradas_que_o_limite_da_versao_e_falha_de_infraestrutura(
+    tmp_path: Path,
+) -> None:
+    work = make_work_dir(tmp_path, [(f"t{i}.csv", VALID) for i in range(MAX_TABLES + 1)])
 
     result = run_executor(work)
 
-    assert result.returncode == ExitCode.RECIPE_FAILURE
+    assert result.returncode == ExitCode.INFRASTRUCTURE
+    assert not (work / "failure.json").exists()
+    assert not (work / "out" / "report.json").exists()
+
+
+class FailingRecipe:
+    def execute(self, *_: object) -> Report:
+        raise RecipeFailure(FailureCode.OUTPUT_LIMIT_EXCEEDED, "saídas demais")
+
+
+def test_falha_deterministica_grava_o_codigo_em_failure_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Com os tetos reais de 1.7, provocar uma falha determinística exigiria centenas de MiB.
+    monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): FailingRecipe()})
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+
+    assert main([str(work)]) == ExitCode.RECIPE_FAILURE
+
     failure = json.loads((work / "failure.json").read_text(encoding="utf-8"))
-    assert failure["code"] == "INPUT_LIMIT_EXCEEDED"
-    assert failure["detail"]
+    assert failure == {"code": "OUTPUT_LIMIT_EXCEEDED", "detail": "saídas demais"}
     assert not (work / "out" / "report.json").exists()
 
 
