@@ -2,10 +2,14 @@
 
 import pytest
 
+from goblinshift.processing.csv_janitor.results import RejectionCode as CsvCode
+from goblinshift.processing.downloads_detox.recipe import REJECTION_CODE as DETOX_CODE
+from goblinshift.processing.image_forge.rejection import RejectionCode as ImageCode
 from goblinshift.processing.recipe import (
     ItemDuplicate,
     ItemOk,
     ItemRejected,
+    ItemRejectionCode,
     OutputGroup,
     Report,
 )
@@ -64,3 +68,18 @@ def test_grupos_de_saida_sao_a_lista_fechada_do_plano() -> None:
         "text",
         "archives",
     ]
+
+
+# --- Códigos de rejeição por item: lista fechada do catálogo de 1.6 -----------------------------
+
+
+def test_codigos_de_rejeicao_de_cada_receita_estao_no_catalogo() -> None:
+    used = {*CsvCode, *ImageCode, DETOX_CODE}
+
+    assert used <= {code.value for code in ItemRejectionCode}
+
+
+@pytest.mark.parametrize("code", ["EXECUTOR_UNAVAILABLE", "", "csv_structure_invalid"])
+def test_rejeicao_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
+    with pytest.raises(ValueError, match="catálogo"):
+        ItemRejected(position=0, code=code, reason="r")

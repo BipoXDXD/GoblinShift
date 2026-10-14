@@ -34,7 +34,7 @@ import os
 import random
 import time
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
@@ -552,7 +552,7 @@ class Coordinator:
             lambda loaded: Published(claimed.generation, report.outcome, loaded.now),
             attempt_error=None,
             publish=publish_outputs,
-            summary=dict(report.summary),
+            summary=report.summary.as_json(),
         )
 
     def fail_transiently(self, claimed: ClaimedAttempt) -> Applied:
@@ -600,7 +600,7 @@ class Coordinator:
         *,
         attempt_error: str | None,
         publish: Callable[[Session], None] | None = None,
-        summary: dict[str, object] | None = None,
+        summary: Mapping[str, object] | None = None,
     ) -> Applied:
         """Aplica o desfecho com o executor já terminado, numa transação curta.
 

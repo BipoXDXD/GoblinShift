@@ -10,6 +10,11 @@ empacota. Cada arquivo de conteúdo precisa
 estar citado no relatório pelo caminho relativo a `out/` ("images/a.jpg"), e cada citação precisa
 existir. A coleta roda depois que o executor terminou: ninguém mais escreve em `out/`.
 
+O que do relatório vai para o banco e para a API sai em tipo próprio (parse, don't validate): o
+`code` de cada rejeição, só do catálogo de 1.6 (`ItemRejectionCode`), e o `summary`, só com as
+chaves conhecidas e com os valores que os próprios itens dão. Sem essa conferência, um executor
+comprometido gravaria texto arbitrário em `run_input.error_code` e em `run.summary`.
+
 Duas classes de recusa:
 - `OutputLimitError`: teto de 1.7 estourado, falha determinística (repetir daria o mesmo);
 - `CollectionError`: executor fora do contrato (link, diretório, relatório inválido), tratado
@@ -20,8 +25,7 @@ import json
 import os
 import stat
 import unicodedata
-from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
@@ -38,7 +42,7 @@ from goblinshift.processing.packaging import (
     PackageLimits,
     package_name_for,
 )
-from goblinshift.processing.recipe import OutputGroup
+from goblinshift.processing.recipe import ItemRejectionCode, OutputGroup
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 
 _PACKAGE_LIMITS = PackageLimits()
@@ -46,6 +50,9 @@ _ITEM_OK = "ok"
 _ITEM_REJECTED = "rejected"
 _ITEM_DUPLICATE = "duplicate"
 _GROUPS = frozenset(group.value for group in OutputGroup)
+_SUMMARY_REQUIRED_KEYS = frozenset({"inputs", "ok", "rejected", "outputs"})
+# `duplicates` entrou na fatia 5; o executor anterior, fixado em Runs antigas, não o escreve.
+_SUMMARY_KEYS = _SUMMARY_REQUIRED_KEYS | {"duplicates"}
 
 
 class CollectionError(Exception):
@@ -83,17 +90,43 @@ class ReportItem:
     accepted: bool
     outputs: tuple[str, ...]
     # Código da rejeição (catálogo de 1.6); `None` para item aceito.
-    code: str | None
+    code: ItemRejectionCode | None
     has_warnings: bool
     # Só na duplicata do Detox: posição da primeira ocorrência, que é um item aceito com saídas.
     duplicate_of: int | None = None
 
 
 @dataclass(frozen=True)
+class ReportSummary:
+    """Contagens do relatório, iguais às que os itens dão; vão para `run.summary`."""
+
+    inputs: int
+    ok: int
+    rejected: int
+    duplicates: int
+    outputs: int
+
+    @classmethod
+    def of(cls, items: tuple[ReportItem, ...]) -> ReportSummary:
+        rejected = sum(1 for item in items if not item.accepted)
+        duplicates = sum(1 for item in items if item.duplicate_of is not None)
+        return cls(
+            inputs=len(items),
+            ok=len(items) - rejected - duplicates,
+            rejected=rejected,
+            duplicates=duplicates,
+            outputs=sum(len(item.outputs) for item in items),
+        )
+
+    def as_json(self) -> dict[str, int]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ParsedReport:
     items: tuple[ReportItem, ...]
     has_global_warnings: bool
-    summary: Mapping[str, int]
+    summary: ReportSummary
 
     @property
     def outcome(self) -> PublishOutcome:
@@ -177,10 +210,21 @@ def parse_report(data: bytes, input_count: int) -> ParsedReport:
     if [item.position for item in items] != list(range(input_count)):
         raise CollectionError(f"relatório deve ter as posições 0..{input_count - 1}, na ordem")
     _require_duplicates_of_earlier_outputs(items)
-    summary = _mapping(document.get("summary"), "summary")
-    counts = {key: _int(value, f"summary.{key}") for key, value in summary.items()}
+    summary = _summary(document.get("summary"), items)
     warnings = _list(document.get("warnings"), "warnings")
-    return ParsedReport(items, bool(warnings), counts)
+    return ParsedReport(items, bool(warnings), summary)
+
+
+def _summary(raw: object, items: tuple[ReportItem, ...]) -> ReportSummary:
+    """O `summary` do relatório só passa se disser exatamente o que os itens dizem."""
+    summary = _mapping(raw, "summary")
+    if not _SUMMARY_REQUIRED_KEYS <= summary.keys() <= _SUMMARY_KEYS:
+        raise CollectionError("summary com chaves fora do schema 1")
+    expected = ReportSummary.of(items)
+    reported = {key: _int(value, f"summary.{key}") for key, value in summary.items()}
+    if {"duplicates": 0} | reported != expected.as_json():
+        raise CollectionError("summary não confere com os itens do relatório")
+    return expected
 
 
 def _scan(
@@ -285,13 +329,18 @@ def _item(raw: object) -> ReportItem:
         warnings = _list(item.get("warnings"), "item.warnings")
         return ReportItem(position, True, outputs, None, bool(warnings))
     if status == _ITEM_REJECTED:
-        code = _text(item.get("code"), "item.code")
-        return ReportItem(position, False, (), code, False)
+        return ReportItem(position, False, (), _rejection_code(item.get("code")), False)
     if status == _ITEM_DUPLICATE:
         # Aceito, sem saídas e sem aviso: é o comportamento pedido pelo parâmetro do Detox (1.4).
         duplicate_of = _int(item.get("duplicate_of"), "item.duplicate_of")
         return ReportItem(position, True, (), None, False, duplicate_of)
     raise CollectionError(f"item com status desconhecido: {status!r}")
+
+
+def _rejection_code(raw: object) -> ItemRejectionCode:
+    if not isinstance(raw, str) or raw not in ItemRejectionCode:
+        raise CollectionError("item.code fora do catálogo de rejeições")
+    return ItemRejectionCode(raw)
 
 
 def _require_duplicates_of_earlier_outputs(items: tuple[ReportItem, ...]) -> None:
