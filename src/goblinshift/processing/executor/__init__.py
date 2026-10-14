@@ -55,8 +55,9 @@ Códigos de saída do processo (`ExitCode`)
 -----------------------------------------
 - 0, `SUCCEEDED`: `report.json` escrito, inclusive com rejeições.
 - 3, `RECIPE_FAILURE`: falha determinística; o código está em `failure.json`. Não repetir.
-- 4, `INFRASTRUCTURE`: job fora do contrato, receita desconhecida, `out/` ocupado ou qualquer
-  exceção inesperada (detalhe só no stderr).
+- 4, `INFRASTRUCTURE`: job fora do contrato (inclusive mais entradas que o `max_inputs` da
+  versão), receita desconhecida, `out/` ocupado ou qualquer exceção inesperada (detalhe só no
+  stderr).
 - 5, `INTEGRITY`: entrada ausente, que não é arquivo regular, ou com tamanho ou SHA-256
   diferente do job.
 

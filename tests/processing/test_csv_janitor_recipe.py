@@ -10,11 +10,10 @@ from goblinshift.processing.csv_janitor import Limits, Params
 from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, CsvJanitorV1
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
-    FailureCode,
+    InputContractError,
     InputFile,
     ItemOk,
     ItemRejected,
-    RecipeFailure,
     Report,
 )
 from goblinshift.processing.registry import RECIPES
@@ -171,10 +170,9 @@ def test_seis_tabelas_falham_antes_de_processar_qualquer_uma(work: Workspace) ->
     for index in range(MAX_TABLES + 1):
         work.add(f"t{index}.csv", VALID)
 
-    with pytest.raises(RecipeFailure) as failure:
+    with pytest.raises(InputContractError):
         work.run()
 
-    assert failure.value.code is FailureCode.INPUT_LIMIT_EXCEEDED
     assert work.output_names() == []
     assert work.progress.done == []
 
