@@ -1,8 +1,9 @@
 """Auditoria de eventos de segurança (docs/GoblinShiftPlan.md, 1.8 e 3.6; ADR 026).
 
 Registra login e falha de login, logout e `logout-all`, emissão e revogação de chave,
-`REAUTH_REQUIRED`, `CSRF_FAILED`, negações de autorização, exclusão e bloqueio de conta. Nunca
-nomes de arquivo, conteúdo, tokens ou o IP inteiro: o IP é truncado (/24 em IPv4, /48 em IPv6).
+`REAUTH_REQUIRED`, `CSRF_FAILED`, negações de autorização, exclusão e bloqueio de conta e aceite
+dos termos. Nunca nomes de arquivo, conteúdo, tokens ou o IP inteiro: o IP é truncado (/24 em
+IPv4, /48 em IPv6).
 
 Só eventos de quem tem credencial válida (mais o login, já limitado por IP no Nginx) são
 auditados: um atacante sem credencial cai no 401, e não consegue inundar a tabela.
@@ -23,7 +24,7 @@ IPV6_PREFIX = 48
 
 
 class AuditEventType(StrEnum):
-    """Tipos aceitos pelo CHECK `audit_event_event_type_check` (migração 0006)."""
+    """Tipos aceitos pelo CHECK `audit_event_event_type_check` (migrações 0006 e 0008)."""
 
     LOGIN_SUCCEEDED = "LOGIN_SUCCEEDED"
     LOGIN_FAILED = "LOGIN_FAILED"
@@ -37,6 +38,7 @@ class AuditEventType(StrEnum):
     ACCOUNT_DELETION_REQUESTED = "ACCOUNT_DELETION_REQUESTED"
     ACCOUNT_BLOCKED = "ACCOUNT_BLOCKED"
     ACCOUNT_UNBLOCKED = "ACCOUNT_UNBLOCKED"
+    TERMS_ACCEPTED = "TERMS_ACCEPTED"
 
 
 class AuditOutcome(StrEnum):
