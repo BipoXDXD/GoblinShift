@@ -66,6 +66,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ["e2e/**/*.ts"],
+    languageOptions: { globals: { ...globals.browser, ...globals.node } },
+    rules: {
+      // O `use` dos fixtures do Playwright não é o hook do React; a regra confunde os dois.
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
+  {
     files: ["*.js"],
     extends: [js.configs.recommended, tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },
