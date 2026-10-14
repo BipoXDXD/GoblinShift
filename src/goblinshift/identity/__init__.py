@@ -1,4 +1,5 @@
-"""Login, sessões, CSRF, chaves de API, escopos, estado da conta e auditoria (generic).
+"""Login, sessões, CSRF, chaves de API, escopos, estado da conta, auditoria e limite de
+requisições por conta (generic).
 
 Ver docs/GoblinShiftPlan.md, seções 3.2 e 3.6. O módulo não conhece HTTP: os entrypoints leem
 cookies e headers e chamam estas funções. Exportações fixadas na Fase 0 da fatia 6, para que as
@@ -44,6 +45,12 @@ from goblinshift.identity.keys import (
 )
 from goblinshift.identity.principal import InvalidScopesError, Principal, Scope, parse_scopes
 from goblinshift.identity.purge import purge_owner
+from goblinshift.identity.rate_limit import (
+    REQUESTS_PER_MINUTE,
+    RequestClass,
+    RequestLimitExceededError,
+    count_request,
+)
 from goblinshift.identity.sessions import (
     RECENT_AUTH_WINDOW,
     IssuedSession,
@@ -61,6 +68,7 @@ __all__ = [
     "MAX_ACTIVE_KEYS",
     "MAX_KEY_DAYS",
     "RECENT_AUTH_WINDOW",
+    "REQUESTS_PER_MINUTE",
     "Account",
     "ActiveKeyLimitError",
     "AuditEventType",
@@ -76,11 +84,14 @@ __all__ = [
     "LoginRefused",
     "PresentedKey",
     "Principal",
+    "RequestClass",
+    "RequestLimitExceededError",
     "Scope",
     "UnknownAccountError",
     "authenticate_api_key",
     "authenticate_session",
     "block_account",
+    "count_request",
     "create_admin_user",
     "cross_site_request",
     "csrf_token_matches",
