@@ -1,7 +1,7 @@
 import { ApiError } from "../api/response";
 import type { RunStatus } from "./api";
 
-/** Intervalo de polling de 2.2 quando a resposta não traz Retry-After. */
+/** Intervalo de polling de 2.2 quando a resposta não traz Retry-After, e o mínimo entre consultas. */
 const DEFAULT_POLL_MS = 2_000;
 const MAX_BACKOFF_MS = 30_000;
 const JITTER_FRACTION = 0.1;
@@ -24,14 +24,16 @@ export type PollSnapshot =
 /**
  * Espera até a próxima consulta, ou `false` para parar.
  *
- * Nunca volta antes do Retry-After. Em falha transitória recua exponencialmente (2, 4, 8... até
- * 30 s), com jitter para cima; para no estado terminal e em falha que repetir não resolve.
+ * Nunca volta antes do Retry-After nem de 2 s: um Retry-After 0 (ou de data passada) viraria
+ * `refetchInterval` 0, que o TanStack Query entende como "não consultar mais". Em falha
+ * transitória recua exponencialmente (2, 4, 8... até 30 s), com jitter para cima; para no estado
+ * terminal e em falha que repetir não resolve.
  */
 export function nextPollDelayMs(snapshot: PollSnapshot, random: () => number): number | false {
   if (snapshot.kind === "success") {
     return TERMINAL_STATUSES.has(snapshot.status)
       ? false
-      : (snapshot.retryAfterMs ?? DEFAULT_POLL_MS);
+      : Math.max(snapshot.retryAfterMs ?? 0, DEFAULT_POLL_MS);
   }
   const { error, consecutiveFailures } = snapshot;
   if (!(error instanceof ApiError) || isPermanent(error)) {
