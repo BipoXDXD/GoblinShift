@@ -1,0 +1,12 @@
+{
+  "outcome": "cleaned",
+  "counts": {
+    "records_read": 3,
+    "filtered_out": 0,
+    "duplicates_removed": 1,
+    "written": 2,
+    "blank_lines_ignored": 1
+  },
+  "formula_cells": {},
+  "warnings": []
+}
