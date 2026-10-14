@@ -1,0 +1,7 @@
+# Enquanto o GoblinShift não tiver domínio, o acesso pelo IP (http) vai para ele. O destino é
+# o IP reservado ao Nginx do GoblinShift na rede edge (compose.prod.yaml, ADR 014), e não um
+# alias: um segundo container com o mesmo alias dividiria o tráfego em silêncio. Com o projeto
+# parado, a borda sobe e responde 502.
+:80 {
+	reverse_proxy 172.31.0.4:80
+}
