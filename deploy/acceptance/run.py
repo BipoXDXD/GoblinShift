@@ -244,6 +244,7 @@ def check_identity(run: ProbeRun) -> list[Outcome]:
     mismatches = _profile_mismatches(config, run.last)
     applied = (
         "rede none, raiz read-only, sem capabilities, no-new-privileges, "
+        f"log {profile.LOG_DRIVER} com teto de {profile.LOG_OPTIONS['max-size']}, "
         f"UID {profile.EXECUTOR_UID}, sem docker.sock; "
         f"/ montado como {run.last.get('root_filesystem')!r}, "
         f"/tmp como {run.last.get('tmp_filesystem')!r}"  # noqa: S108 (texto, não arquivo)
@@ -281,6 +282,9 @@ def _profile_mismatches(config: dict[str, Any], report: dict[str, Any]) -> list[
         for name, limit in expected_ulimits.items()
         if ulimits.get(name) != (limit, limit)
     )
+    expected_log = {"Type": profile.LOG_DRIVER, "Config": profile.LOG_OPTIONS}
+    if config.get("LogConfig") != expected_log:
+        mismatches.append(f"LogConfig={config.get('LogConfig')!r}, esperado {expected_log!r}")
     if "ALL" not in (config.get("CapDrop") or []):
         mismatches.append(f"CapDrop={config.get('CapDrop')!r} sem ALL")
     if "no-new-privileges" not in (config.get("SecurityOpt") or []):
