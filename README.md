@@ -14,7 +14,7 @@ API de processamento de arquivos por receitas — imagens, tabelas CSV e lotes d
 
 ## Stack
 
-Python 3.14 · FastAPI · PostgreSQL 18 (também como fila) · SQLAlchemy 2 · Alembic · OpenTelemetry + OpenObserve · Docker Compose + Nginx · executor isolado com gVisor (a partir da fatia 1).
+Python 3.14 · FastAPI · PostgreSQL 18 (também como fila) · SQLAlchemy 2 · Alembic · OpenTelemetry + OpenObserve · Docker Compose + Nginx · executor isolado com gVisor (a partir da fatia 1). Interface: React 19 · TypeScript 6 · Vite 8 · TanStack Query · Zod · Vitest (fatia 7).
 
 ## Desenvolvimento local
 
@@ -38,6 +38,31 @@ uv run mypy                   # modo estrito
 uv run lint-imports           # contratos de arquitetura (docs/GoblinShiftPlan.md, 3.2)
 uv run pytest                 # inclui PostgreSQL real via Testcontainers
 ```
+
+### Interface web (`web/`)
+
+Requisitos: Node 24 (versão em `web/.nvmrc`). A interface ainda não tem telas: só a base de engenharia (cliente HTTP, upload por XHR e polling), com estilo neutro até as decisões de design.
+
+```bash
+cd web
+npm ci
+npm run typecheck             # tsc -b, separado do build (o Vite só transpila)
+npm run lint                  # ESLint: typescript-eslint strict type-checked, jsx-a11y, react-hooks
+npm run format:check          # Prettier
+npm test                      # Vitest + Testing Library (jsdom)
+npm run knip                  # código e dependências mortos
+npm run type-coverage         # 100% sem any
+npm run build
+```
+
+O contrato da API fica versionado em `web/openapi/openapi.json` e os tipos TypeScript são gerados dele. Depois de mudar uma rota ou um schema da API:
+
+```bash
+uv run gs-export-openapi              # na raiz: regrava web/openapi/openapi.json
+(cd web && npm run generate:api)      # regenera web/src/api/schema.d.ts
+```
+
+O pytest falha se o `openapi.json` não acompanhar a API, e o job "Interface web" do CI falha se os tipos não acompanharem o `openapi.json`.
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
@@ -126,7 +151,7 @@ Em desenvolvimento, o worker roda a receita num subprocesso do próprio containe
 
 ```text
 src/goblinshift/
-  entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin e gs-csv-janitor
+  entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin, gs-csv-janitor e gs-export-openapi
   platform/          configuração, banco, telemetria e compatibilidade de schema
   processing/        receitas e o executor; csv_janitor/ é o CSV Janitor, biblioteca pura
   runs/              ciclo de vida da execução: aceitação, fila, fencing, worker, manutenção
@@ -137,4 +162,5 @@ src/goblinshift/
 migrations/          Alembic (expand/contract)
 docker/              imagem da aplicação, Nginx e OpenTelemetry Collector
 deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI e teste de aceitação do ambiente
+web/                 interface React (Vite + TypeScript); src/api é o único ponto que fala com a API
 ```
