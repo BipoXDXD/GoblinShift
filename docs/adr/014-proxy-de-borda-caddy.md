@@ -1,12 +1,12 @@
 # ADR 014. Proxy de borda do host em Caddy, compartilhado pelos projetos
 
-- **Estado:** aceito (2026-10-13)
+- **Estado:** aceito (2026-10-13); domínio do GoblinShift acrescentado em 2026-10-14
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8)
 - **Relacionado:** [ADR 011](011-vps-kvm2-compartilhada.md); no outro projeto, a spec `2026-10-13-vps-compartilhada` do StillOn
 
 ## Contexto
 
-A VPS é compartilhada com outro projeto do mesmo dono, o StillOn ([ADR 011](011-vps-kvm2-compartilhada.md)), e só um processo pode ouvir nas portas 80 e 443. A borda foi instalada em `/srv/edge` com Nginx, só na porta 80 e sem TLS, deixando a tecnologia do TLS para quando houvesse o primeiro domínio. O primeiro domínio chegou: `stillon.tech`, do outro projeto. Cada projeto entra na rede Docker compartilhada `edge` com o seu ponto de entrada, e os projetos confiam nos cabeçalhos `X-Forwarded-*` só quando vêm do IP fixo da borda.
+A VPS é compartilhada com outro projeto do mesmo dono, o StillOn ([ADR 011](011-vps-kvm2-compartilhada.md)), e só um processo pode ouvir nas portas 80 e 443. A borda foi instalada em `/srv/edge` com Nginx, só na porta 80 e sem TLS, deixando a tecnologia do TLS para quando houvesse o primeiro domínio. O primeiro domínio chegou: `stillon.tech`, do outro projeto. O do GoblinShift, `goblinshift.dev`, veio depois (2026-10-14), no mesmo IP da VPS e com CAA só para o Let's Encrypt. Cada projeto entra na rede Docker compartilhada `edge` com o seu ponto de entrada, e os projetos confiam nos cabeçalhos `X-Forwarded-*` só quando vêm do IP fixo da borda.
 
 ## Decisão
 
@@ -20,7 +20,8 @@ A borda é um Caddy (`caddy:2` por digest) em `/srv/edge`, infraestrutura do hos
 | Protocolos | HTTP/1.1 e HTTP/2; a 443/udp (HTTP/3) não é publicada |
 | Configuração | `Caddyfile` só com opções globais e `import /etc/caddy/conf.d/*.caddy`; cada projeto entrega `conf.d/<projeto>.caddy` e nunca sobrescreve o de outro |
 | Destino | o trecho de cada projeto aponta para o IP reservado dele, nunca para um alias |
-| Acesso pelo IP | `:80` vai para o GoblinShift enquanto ele não tiver domínio |
+| Domínios | `stillon.tech` no trecho do StillOn; `goblinshift.dev` no do GoblinShift, com TLS e redirect http → https automáticos |
+| Acesso pelo IP | `:80` (http) ainda vai para o GoblinShift, temporário: sai quando a aceitação e os monitores usarem o domínio |
 
 IP, e não alias, porque um segundo container com o mesmo alias dividiria o tráfego em silêncio (logins do outro projeto poderiam chegar a ele); com o mesmo IP, o Docker recusa. Mudar o contrato é decisão do dono nos dois repositórios.
 
@@ -43,5 +44,5 @@ IP, e não alias, porque um segundo container com o mesmo alias dividiria o trá
 
 ## Como verificar
 
-- `tests/test_edge.py` trava o contrato: imagem por digest, só 80 e 443/tcp, IP fixo da borda e faixa dinâmica, nenhum `trusted_proxies`, `import` dos trechos, o trecho do GoblinShift no IP reservado, o Nginx sem alias e sem `NET_RAW`.
-- Na VPS: `cd /srv/edge && sudo docker compose exec proxy caddy validate --config /etc/caddy/Caddyfile` e, do lado de fora, `curl -sSI http://<IP da VPS>/` sem `Server: nginx`.
+- `tests/test_edge.py` trava o contrato: imagem por digest, só 80 e 443/tcp, IP fixo da borda e faixa dinâmica, nenhum `trusted_proxies`, `import` dos trechos, o trecho do GoblinShift só com `goblinshift.dev` e `:80`, ambos no IP reservado, o Nginx sem alias e sem `NET_RAW`.
+- Na VPS: `cd /srv/edge && sudo docker compose exec proxy caddy validate --config /etc/caddy/Caddyfile` e, do lado de fora, `curl -sS -o /dev/null -w '%{http_code} %{ssl_verify_result}\n' https://goblinshift.dev/livez` (`200 0`) e `curl -sSI http://goblinshift.dev/livez` (308 para https).

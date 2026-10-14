@@ -80,6 +80,8 @@ A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais púb
 
 ## Deploy sem queda
 
+Em produção, o GoblinShift responde em `https://goblinshift.dev`. O TLS e o redirect http → https ficam no proxy de borda do host, um Caddy compartilhado com o outro projeto da VPS ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)); o trecho do GoblinShift é `deploy/edge/conf.d/goblinshift.caddy`. O deploy não toca na borda: mudar esse trecho é instalá-lo à mão em `/srv/edge/conf.d/`, com `caddy validate` antes e `caddy reload`, sem reiniciar o container.
+
 O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga (`deploy/rollout-api.sh`). Para conferir localmente, com a pilha de pé:
 
 ```bash
