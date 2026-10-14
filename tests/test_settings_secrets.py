@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 
 from goblinshift.entrypoints.api.app import create_app
@@ -205,3 +206,14 @@ def test_segredos_nao_aparecem_no_repr(tmp_path: Path) -> None:
 
     for secret in ("segredo-google", "segredo-github", "c" * 64, "l" * 64):
         assert secret not in text
+
+
+def test_producao_deixa_o_hsts_para_o_nginx(tmp_path: Path) -> None:
+    """O Nginx já manda o HSTS; a API repetir o header daria dois valores na resposta."""
+    client = TestClient(create_app(_production(tmp_path)))
+
+    response = client.get("/livez")
+
+    assert response.status_code == 200
+    assert "strict-transport-security" not in response.headers
+    assert response.headers["x-content-type-options"] == "nosniff"

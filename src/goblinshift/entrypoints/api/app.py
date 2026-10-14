@@ -94,8 +94,9 @@ def create_app(
         same_site="lax",
         https_only=True,
     )
-    # Por fora da sessão de login: os cabeçalhos valem também para as respostas de erro.
-    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.environment == "production")
+    # Por fora da sessão de login: os cabeçalhos valem também para as respostas de erro. O HSTS
+    # fica só no Nginx, que o manda em toda resposta do domínio, inclusive as da SPA.
+    app.add_middleware(SecurityHeadersMiddleware, hsts=False)
     # Depois dos handlers e dos demais middlewares: o último acrescentado fica por fora e vê o
     # status final, inclusive o 500 dos handlers.
     app.add_middleware(WideEventMiddleware, hasher=user_hasher)
