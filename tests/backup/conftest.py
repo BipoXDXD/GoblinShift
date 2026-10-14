@@ -5,6 +5,8 @@ identidades que imitam as chaves de aplicação do B2: a da VPS só escreve, a d
 lê e lista, e a de administração cria o bucket e confere o que foi gravado.
 """
 
+import base64
+import hashlib
 import json
 import shutil
 import subprocess
@@ -41,6 +43,13 @@ SEAWEEDFS_IMAGE = (
 S3_PORT = 8333
 S3_REGION = "us-east-1"
 BUCKET = "gs-backups"
+# Bucket sem Object Lock, para provar que a restauração recusa dump que pode ser sobrescrito.
+UNLOCKED_BUCKET = "gs-backups-unlocked"
+OBJECT_LOCK_30_DAYS = (
+    "<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule>"
+    "<DefaultRetention><Mode>COMPLIANCE</Mode><Days>30</Days></DefaultRetention>"
+    "</Rule></ObjectLockConfiguration>"
+)
 S3_READY_TIMEOUT_S = 60.0
 S3_READY_POLL_S = 0.5
 HTTP_OK = 200
@@ -140,21 +149,46 @@ def s3() -> Iterator[S3]:
         host = container.get_container_host_ip()
         endpoint = f"http://{host}:{container.get_exposed_port(S3_PORT)}"
         storage = S3(endpoint)
-        _create_bucket_when_ready(storage)
+        _create_buckets_when_ready(storage)
         yield storage
 
 
-def _create_bucket_when_ready(storage: S3) -> None:
+def _create_buckets_when_ready(storage: S3) -> None:
+    """O bucket dos testes imita o da produção: Object Lock em compliance por 30 dias."""
     deadline = time.monotonic() + S3_READY_TIMEOUT_S
+    lock = "x-amz-bucket-object-lock-enabled: true"
     while True:
         try:
-            if storage.status(ADMIN, "-X", "PUT", "-o", "/dev/null", storage.url()) == HTTP_OK:
-                return
+            created = storage.status(
+                ADMIN, "-X", "PUT", "-H", lock, "-o", "/dev/null", storage.url()
+            )
+            if created == HTTP_OK:
+                break
         except subprocess.CalledProcessError:
             pass  # O gateway ainda não aceita conexões.
         if time.monotonic() > deadline:
             raise TimeoutError("o S3 do SeaweedFS não ficou pronto")
         time.sleep(S3_READY_POLL_S)
+    # O S3 exige Content-MD5 na configuração do Object Lock; é checagem de integridade.
+    digest = hashlib.md5(OBJECT_LOCK_30_DAYS.encode(), usedforsecurity=False).digest()
+    md5 = base64.b64encode(digest).decode()
+    assert (
+        storage.status(
+            ADMIN,
+            "-X",
+            "PUT",
+            "-H",
+            f"Content-MD5: {md5}",
+            "--data-binary",
+            OBJECT_LOCK_30_DAYS,
+            "-o",
+            "/dev/null",
+            f"{storage.url()}?object-lock",
+        )
+        == HTTP_OK
+    )
+    unlocked = f"{storage.endpoint}/{UNLOCKED_BUCKET}/"
+    assert storage.status(ADMIN, "-X", "PUT", "-o", "/dev/null", unlocked) == HTTP_OK
 
 
 @dataclass

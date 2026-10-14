@@ -67,8 +67,7 @@ healthcheck_ping() {
 # Nome do dump: o instante UTC ordena as chaves na listagem; os 128 bits aleatórios impedem que
 # a chave que só escreve sobrescreva um dump existente adivinhando o nome dele. O nome inteiro
 # não vai para log nenhum: o journal da VPS e o log público do Actions mostram só o instante.
-# shellcheck disable=SC2034  # usado pelo pg-restore-check.sh, que carrega este arquivo
-DUMP_NAME_PATTERN='goblinshift-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}\.dump\.age'
+# O formato é conferido na restauração pelo dump_check.py.
 dump_name() {
   printf 'goblinshift-%s-%s.dump.age' "$(date -u +%Y%m%dT%H%M%SZ)" "$(openssl rand -hex 16)"
 }

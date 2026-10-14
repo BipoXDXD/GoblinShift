@@ -12,6 +12,7 @@
 #   RESTORE_PG_CONTAINER, RESTORE_PG_USER, RESTORE_PG_DB   destino vazio, acessado por docker exec
 #   RESTORE_KNOWN_REVISIONS     revisões do Alembic que o código conhece, separadas por espaço
 #   RESTORE_MAX_AGE_HOURS       idade máxima do dump mais recente (padrão: 26)
+#   RESTORE_MIN_RETENTION_DAYS  retenção mínima do Object Lock em compliance (padrão: 30)
 #   RESTORE_HEALTHCHECK_URL     URL de ping do check "restauração mensal" (opcional)
 set -euo pipefail
 
@@ -24,6 +25,7 @@ require_env BACKUP_S3_ENDPOINT BACKUP_S3_REGION BACKUP_S3_BUCKET BACKUP_S3_KEY_I
   RESTORE_KNOWN_REVISIONS
 prefix="${BACKUP_S3_PREFIX:-pg/}"
 max_age_hours="${RESTORE_MAX_AGE_HOURS:-26}"
+min_retention_days="${RESTORE_MIN_RETENTION_DAYS:-30}"
 healthcheck="${RESTORE_HEALTHCHECK_URL:-}"
 
 workdir="$(mktemp -d)"
@@ -56,22 +58,19 @@ require_count tables "$tables"
 ((tables == 0)) || fail "o banco de destino precisa estar vazio (tem $tables tabelas em public)"
 
 # Listagem com até 1000 chaves; a retenção de 30 dias deixa umas 31. Se um dia passar disso,
-# falha em vez de escolher um dump que talvez não seja o mais recente.
-listing="$(s3_curl --max-time 60 "${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}?list-type=2&prefix=${prefix}")"
-[[ "$listing" != *"<IsTruncated>true</IsTruncated>"* ]] || fail "listagem truncada em ${prefix}"
-latest="$(grep -oE "<Key>${prefix}${DUMP_NAME_PATTERN}</Key>" <<<"$listing" |
-  sed -e 's/<Key>//' -e 's/<\/Key>//' | sort | tail -n 1 || true)"
-[[ -n "$latest" ]] || fail "nenhum dump em ${prefix}"
-echo "dump mais recente: $(dump_instant "$latest")"
+# falha em vez de escolher um dump que talvez não seja o mais recente. O dump_check.py escolhe
+# pelo instante de envio que o S3 grava, não pelo nome, e recusa datas futuras.
+s3_curl --max-time 60 --output "$workdir/listing.xml" \
+  "${BACKUP_S3_ENDPOINT%/}/${BACKUP_S3_BUCKET}?list-type=2&prefix=${prefix}"
+python3 -I "$here/dump_check.py" latest --prefix "$prefix" --max-age-hours "$max_age_hours" \
+  <"$workdir/listing.xml" >"$workdir/latest.txt"
+{ read -r latest && read -r age_hours; } <"$workdir/latest.txt"
+require_count age_hours "$age_hours"
+echo "dump mais recente: $(dump_instant "$latest"), enviado há $age_hours h"
 
-# Idade pelo instante UTC do nome; python3 porque o `date` do GNU e o do BSD não leem datas igual.
-age_hours="$(python3 -c '
-import sys
-from datetime import UTC, datetime
-stamp = datetime.strptime(sys.argv[1], "%Y%m%dT%H%M%SZ")
-print(int((datetime.now(UTC) - stamp.replace(tzinfo=UTC)).total_seconds() // 3600))
-' "$(dump_instant "$latest")")"
-((age_hours < max_age_hours)) || fail "o dump mais recente tem $age_hours horas (máximo: $max_age_hours)"
+# Imutável por 30 dias: sem o Object Lock em compliance, a chave da VPS sobrescreveria o dump.
+s3_curl --head --max-time 60 --output "$workdir/head.txt" "$(s3_url "$latest")"
+python3 -I "$here/dump_check.py" retention --min-days "$min_retention_days" <"$workdir/head.txt"
 
 s3_curl --max-time 1800 --output "$workdir/dump.age" "$(s3_url "$latest")"
 age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" --output "$workdir/dump" "$workdir/dump.age"

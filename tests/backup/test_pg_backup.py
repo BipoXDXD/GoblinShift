@@ -20,6 +20,7 @@ from tests.backup.conftest import (
     RESTORE_SCRIPT,
     S3,
     S3_REGION,
+    UNLOCKED_BUCKET,
     WRITER,
     AgeKeys,
     Credentials,
@@ -278,6 +279,55 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
     assert restore_db.scalar("SELECT display_name FROM app_user") == source_db.canary
     assert restore_db.scalar("SELECT count(*) FROM run") == "1"
     assert healthchecks.pings == ["/start", "/"]
+
+
+def test_restauracao_de_dump_sem_object_lock_falha(
+    s3: S3,
+    source_db: SourceDatabase,
+    restore_db: Database,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    known_revisions: str,
+) -> None:
+    """Sem retenção em compliance, a chave que só escreve sobrescreveria o dump."""
+    backup = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    backup["BACKUP_S3_BUCKET"] = UNLOCKED_BUCKET
+    assert run_script(BACKUP_SCRIPT, backup).returncode == 0
+    healthchecks.pings.clear()
+    env = restore_env(s3, restore_db, age_keys, healthchecks, prefix, known_revisions)
+    env["BACKUP_S3_BUCKET"] = UNLOCKED_BUCKET
+
+    result = run_script(RESTORE_SCRIPT, env)
+
+    assert result.returncode != 0
+    assert "retenção" in result.stderr
+    assert restore_db.scalar("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'") == "0"
+    assert healthchecks.pings == ["/start", "/fail"]
+
+
+def test_restauracao_com_dump_de_data_futura_falha(
+    s3: S3,
+    source_db: SourceDatabase,
+    restore_db: Database,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    known_revisions: str,
+) -> None:
+    """Um nome no futuro venceria qualquer dump real pela ordem dos nomes, para sempre."""
+    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    (latest,) = s3.keys(prefix)
+    s3.put(latest.replace("goblinshift-2026", "goblinshift-2099"), Path(__file__))
+
+    result = run_script(
+        RESTORE_SCRIPT,
+        restore_env(s3, restore_db, age_keys, healthchecks, prefix, known_revisions),
+    )
+
+    assert result.returncode != 0
+    assert "futura" in result.stderr
+    assert healthchecks.pings == ["/start", "/fail"]
 
 
 def test_restauracao_sem_dump_falha(
