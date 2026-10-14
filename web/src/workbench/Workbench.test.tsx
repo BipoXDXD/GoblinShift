@@ -119,6 +119,15 @@ describe("Bancada", () => {
     );
   });
 
+  it("diz quantos arquivos estão escolhidos, em pt-BR", async () => {
+    const { user } = await setup();
+    expect(screen.getByText("Nenhum arquivo escolhido")).toBeVisible();
+
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+
+    expect(await screen.findByText("2 arquivos escolhidos")).toBeVisible();
+  });
+
   it("diz quantos arquivos e quantos bytes a receita aceita", async () => {
     await setup();
 
