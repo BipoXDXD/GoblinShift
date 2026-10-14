@@ -47,8 +47,6 @@ class ExecutorService:
                 runtime=self._config.runtime,
                 executor_gid=self._executor_gid,
             )
-            # O daemon resolve as montagens pelo caminho: reconfere logo antes (workarea).
-            prepared.confirm_unchanged()
             try:
                 self._docker.run(arguments)
             except ContainerNameConflictError:

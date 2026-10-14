@@ -87,9 +87,10 @@ fi
 
 note "Área de trabalho ${WORK_AREA}"
 if mountpoint -q "$WORK_AREA"; then
-  # O worker cria <area>/<id> pelo grupo; setgid deixa tudo lá dentro no grupo gs-exec.
+  # O worker cria <area>/<id> pelo grupo; setgid deixa tudo lá dentro no grupo gs-exec, e o
+  # sticky impede o worker de renomear o <id> que o start passou ao root (workarea.py).
   chown root:"$GROUP" "$WORK_AREA"
-  chmod 2770 "$WORK_AREA"
+  chmod 3770 "$WORK_AREA"
 else
   echo "   $WORK_AREA não está montada; o serviço não sobe sem ela (provision.sh a cria)."
 fi

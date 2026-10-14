@@ -3,6 +3,8 @@
 import os
 import shutil
 import stat
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -169,14 +171,75 @@ def test_out_ausente_e_criado_gravavel_pelo_grupo(area: Path) -> None:
     assert stat.S_IMODE(mode) & 0o2070 == 0o2070
 
 
-def test_diretorio_da_tentativa_fica_gravavel_pelo_grupo(area: Path) -> None:
+def owner_group_mode(path: Path) -> tuple[int, int, int]:
+    info = path.lstat()
+    return info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)
+
+
+def test_start_passa_a_tentativa_ao_ctl_com_os_modos_do_contrato(area: Path) -> None:
+    # Em produção o ctl é root: depois disto o worker não troca <id>, inputs/ nem out/.
     work_dir = make_attempt_dir(area)
+    (work_dir / "inputs" / "0.csv").write_text("a,b\n")
+    (work_dir / "inputs" / "0.csv").chmod(0o660)
     work_dir.chmod(0o700)
+    ctl, group = os.geteuid(), os.getgid()
 
-    workarea.prepare_for_start(area, ATTEMPT, os.getgid())
+    workarea.prepare_for_start(area, ATTEMPT, group)
 
-    assert stat.S_IMODE(work_dir.stat().st_mode) == 0o2770
-    assert work_dir.stat().st_gid == os.getgid()
+    assert owner_group_mode(work_dir) == (ctl, group, 0o3770)
+    assert owner_group_mode(work_dir / "inputs") == (ctl, group, 0o2750)
+    assert owner_group_mode(work_dir / "inputs" / "0.csv") == (ctl, group, 0o640)
+    assert owner_group_mode(work_dir / "out") == (ctl, group, 0o2770)
+
+
+@pytest.mark.parametrize("kind", ["symlink", "diretorio"])
+def test_entrada_de_inputs_que_nao_e_arquivo_regular_e_recusada(
+    area: Path, tmp_path: Path, kind: str
+) -> None:
+    work_dir = make_attempt_dir(area)
+    target = tmp_path / "alvo.txt"
+    target.write_text("de fora")
+    target.chmod(0o600)
+    entry = work_dir / "inputs" / "0.csv"
+    if kind == "symlink":
+        entry.symlink_to(target)
+    else:
+        entry.mkdir()
+
+    with pytest.raises(WorkDirMissingError):
+        workarea.prepare_for_start(area, ATTEMPT, os.getgid())
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+WORKER_UID = 10001
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or os.geteuid() != 0,
+    reason="trocar de UID exige root no Linux (roda na VPS ou num runner com sudo)",
+)
+@pytest.mark.parametrize("entry", [".", "inputs", "out"])
+def test_worker_nao_renomeia_nada_da_tentativa_depois_do_start(area: Path, entry: str) -> None:
+    group = os.getgid()
+    area.chmod(0o3770)
+    work_dir = make_attempt_dir(area)
+    for path in (work_dir, work_dir / "inputs", work_dir / "job.json"):
+        os.chown(path, WORKER_UID, group)
+    workarea.prepare_for_start(area, ATTEMPT, group)
+    source = work_dir / entry if entry != "." else work_dir
+
+    attempt = subprocess.run(
+        ["/bin/mv", str(source), str(source.parent / "trocado")],
+        user=WORKER_UID,
+        group=group,
+        extra_groups=[group],
+        capture_output=True,
+        check=False,
+    )
+
+    assert attempt.returncode != 0
+    assert source.is_dir() and not source.is_symlink()
 
 
 def test_remove_apaga_o_diretorio_inteiro(area: Path) -> None:
