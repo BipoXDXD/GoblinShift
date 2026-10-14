@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import UUID, uuid7
 
 import pytest
@@ -9,10 +10,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
-from goblinshift.identity import Scope, authenticate_api_key
-from goblinshift.identity.tables import api_key
+from goblinshift.files.storage import FileStorage
+from goblinshift.identity import Scope, authenticate_api_key, block_account
+from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
+from goblinshift.runs.lifecycle import Status
+from goblinshift.runs.tables import run as run_table
+from tests.identity.pending_fronts import install_domain_stand_ins
+from tests.identity.support import new_user
+from tests.runs.worker_support import queue_run
 
 pytestmark = pytest.mark.integration
 
@@ -149,3 +156,142 @@ def test_id_de_conta_que_nao_e_uuid_e_recusado_pelo_argparse(
         main(["issue-key", "--user", "ana", "--scopes", "files:read"])
 
     assert raised.value.code == EXIT_USAGE
+
+
+# --- Fatia 6: bloqueio, liberação e listagem ---------------------------------------------------
+
+
+@pytest.fixture
+def storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FileStorage:
+    """O bloqueio cancela a execução ativa, que pode apagar saídas descartadas do disco."""
+    root = tmp_path / "storage"
+    monkeypatch.setenv("GS_STORAGE_ROOT", str(root))
+    return FileStorage(root)
+
+
+@pytest.fixture(autouse=True)
+def stand_ins(monkeypatch: pytest.MonkeyPatch, factory: sessionmaker[Session]) -> None:
+    install_domain_stand_ins(monkeypatch, factory)
+
+
+def status_of(factory: sessionmaker[Session], user_id: str) -> str:
+    with factory() as session:
+        status: str = session.execute(
+            select(app_user.c.status).where(app_user.c.id == UUID(user_id))
+        ).scalar_one()
+    return status
+
+
+def audited(factory: sessionmaker[Session], user_id: str) -> list[str]:
+    with factory() as session:
+        return list(
+            session.execute(
+                select(audit_event.c.event_type)
+                .where(audit_event.c.user_id == UUID(user_id))
+                .order_by(audit_event.c.id)
+            ).scalars()
+        )
+
+
+def test_block_bloqueia_revoga_chaves_e_cancela_a_execucao(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    _, token, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, out, err = run(capsys, "block", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    assert out == ""
+    assert user_id in err
+    assert status_of(factory, user_id) == "blocked"
+    with unit_of_work(factory) as session:
+        assert authenticate_api_key(session, token.strip(), datetime.now(UTC)) is None
+        run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
+        assert run_status.scalar_one() == Status.CANCELED
+    assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
+
+
+def test_block_repetido_completa_o_que_faltou(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A primeira chamada caiu entre as duas transações: conta bloqueada, execução na fila.
+    user_id = create_user(capsys)
+    run_id = queue_run(factory, storage, UUID(user_id))
+    with unit_of_work(factory) as session:
+        block_account(session, UUID(user_id), datetime.now(UTC))
+
+    exit_code, _, _ = run(capsys, "block", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    with factory() as session:
+        status = session.execute(
+            select(run_table.c.status).where(run_table.c.id == run_id)
+        ).scalar_one()
+    assert status == Status.CANCELED
+
+
+def test_block_de_conta_inexistente_sai_como_nao_encontrada(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    exit_code, out, _ = run(capsys, "block", "--user", str(uuid7()))
+
+    assert exit_code == EXIT_NOT_FOUND
+    assert out == ""
+
+
+def test_unblock_libera_a_conta(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    run(capsys, "block", "--user", user_id)
+
+    exit_code, _, err = run(capsys, "unblock", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    assert user_id in err
+    assert status_of(factory, user_id) == "active"
+    assert audited(factory, user_id) == ["ACCOUNT_BLOCKED", "ACCOUNT_UNBLOCKED"]
+
+
+def test_unblock_de_conta_inexistente_sai_como_nao_encontrada(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code, _, _ = run(capsys, "unblock", "--user", str(uuid7()))
+
+    assert exit_code == EXIT_NOT_FOUND
+
+
+def test_list_users_imprime_id_emissor_estado_e_criacao_sem_sujeito(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+    with factory() as session:
+        row = session.execute(select(app_user).where(app_user.c.id == UUID(user_id))).one()
+
+    exit_code, out, _ = run(capsys, "list-users")
+
+    assert exit_code == EXIT_OK
+    [line] = out.splitlines()
+    assert line.split("\t") == [user_id, row.issuer, "active", row.created_at.isoformat()]
+    assert row.subject not in out
+
+
+def test_list_users_pending_mostra_so_as_pendentes(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    create_user(capsys)
+    pending = str(new_user(factory, blocked=True))
+
+    exit_code, out, _ = run(capsys, "list-users", "--pending")
+
+    assert exit_code == EXIT_OK
+    assert [line.split("\t")[0] for line in out.splitlines()] == [pending]
+
+
+def test_list_users_sem_contas_nao_imprime_nada(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code, out, _ = run(capsys, "list-users")
+
+    assert exit_code == EXIT_OK
+    assert out == ""
