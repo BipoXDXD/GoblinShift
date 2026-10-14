@@ -153,6 +153,18 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "chave de API: o aviso de login em breve vira alerta",
+    spec: ["api-key.spec.ts", "-g", "login chega em breve"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `new MutationObserver(() => {
+          document.querySelector("section[aria-labelledby]")?.setAttribute("role", "alert");
+        }).observe(document, { childList: true, subtree: true });`,
+      );
+    },
+  },
+  {
     name: "chave de API: canário embutido no bundle",
     spec: ["api-key.spec.ts", "-g", "não aparece"],
     env: { GS_E2E_API_KEY: PLANTED_KEY },

@@ -27,6 +27,18 @@ const runCommandSchema = z.object({
   input_upload_ids: z.array(z.string()),
 });
 
+// GET /runs: os parâmetros que a interface manda, com os limites da spec (1 a 100 por página).
+const runListQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    recipe_id: z.string().max(64).optional(),
+    status: z.string().optional(),
+    created_from: z.iso.datetime({ offset: true }).optional(),
+    cursor: z.string().max(1024).optional(),
+  })
+  .strict();
+type RunListQuery = z.infer<typeof runListQuerySchema>;
+
 /** O que a API falsa guarda de cada POST /runs aceito. */
 export type RunCommand = z.infer<typeof runCommandSchema>;
 
@@ -123,6 +135,8 @@ class FakeState {
       await this.receiveContent(route, request, id);
     } else if (method === "POST" && path === "/runs") {
       await this.createRun(route, request);
+    } else if (method === "GET" && path === "/runs") {
+      await this.listRuns(route, request);
     } else if (method === "GET" && resource === "runs" && id && segments.length === 2) {
       await this.pollRun(route, id);
     } else if (method === "GET" && resource === "runs" && id && action === "results") {
@@ -204,6 +218,35 @@ class FakeState {
     await fulfillJson(route, accepted, { status: 202 });
   }
 
+  /**
+   * As execuções da conta, das mais novas para as mais antigas, com keyset por (created_at, id)
+   * como a API real. O cursor guarda o fim da página e os filtros: cursor de outros filtros, ou
+   * ilegível, recebe 400, que é o que a interface trata como cursor vencido.
+   */
+  private async listRuns(route: Route, request: Request): Promise<void> {
+    const parsed = runListQuerySchema.safeParse(
+      Object.fromEntries(new URL(request.url()).searchParams),
+    );
+    const cursor = parsed.success ? readCursor(parsed.data) : undefined;
+    if (!parsed.success || cursor === null) {
+      await fulfillProblem(route, "BAD_REQUEST", { status: 400 });
+      return;
+    }
+    const query = parsed.data;
+    const matching = [...this.runs.values()]
+      .map((stored) => stored.run)
+      .filter((run) => matchesFilters(run, query))
+      .sort(newestFirst)
+      .filter((run) => cursor === undefined || newestFirst(run, cursor) > 0);
+    const data = matching.slice(0, query.limit);
+    const last = data.at(-1);
+    const next_cursor =
+      matching.length > query.limit && last !== undefined ? writeCursor(last, query) : null;
+    await fulfillJson(route, { data, next_cursor } satisfies Schemas["RunListResponse"], {
+      status: 200,
+    });
+  }
+
   /** Fila → em andamento → concluída: uma transição por consulta, como um worker rápido. */
   private async pollRun(route: Route, id: string): Promise<void> {
     const stored = this.runs.get(id);
@@ -264,6 +307,47 @@ class FakeState {
 
 function isReceived(upload: StoredUpload | undefined): boolean {
   return upload !== undefined && upload.content !== null;
+}
+
+function matchesFilters(run: Run, query: RunListQuery): boolean {
+  return (
+    (query.recipe_id === undefined || run.recipe_id === query.recipe_id) &&
+    (query.status === undefined || run.status === query.status) &&
+    (query.created_from === undefined ||
+      Date.parse(run.created_at) >= Date.parse(query.created_from))
+  );
+}
+
+/** Ordem do GET /runs: created_at decrescente, e o id desempata. */
+function newestFirst(a: Pick<Run, "created_at" | "id">, b: Pick<Run, "created_at" | "id">): number {
+  const byDate = Date.parse(b.created_at) - Date.parse(a.created_at);
+  return byDate !== 0 ? byDate : b.id.localeCompare(a.id);
+}
+
+const cursorSchema = z.object({ created_at: z.string(), id: z.string(), filters: z.string() });
+
+function filtersKey({ recipe_id, status, created_from }: RunListQuery): string {
+  return JSON.stringify([recipe_id ?? null, status ?? null, created_from ?? null]);
+}
+
+function writeCursor(run: Run, query: RunListQuery): string {
+  const cursor = { created_at: run.created_at, id: run.id, filters: filtersKey(query) };
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+/** Sem cursor → undefined; cursor ilegível ou de outros filtros → null. */
+function readCursor(query: RunListQuery): Pick<Run, "created_at" | "id"> | null | undefined {
+  if (query.cursor === undefined) {
+    return undefined;
+  }
+  try {
+    const decoded: unknown = JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8"));
+    const cursor = cursorSchema.parse(decoded);
+    return cursor.filters === filtersKey(query) ? cursor : null;
+  } catch {
+    // Cursor forjado ou truncado: a API real também responde 400, sem detalhar.
+    return null;
+  }
 }
 
 function runBody(id: string, recipeId: string): Run {
