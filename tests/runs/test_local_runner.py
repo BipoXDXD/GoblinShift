@@ -1,6 +1,9 @@
 """Runner local: start idempotente pelo nome, status entre processos, parada do grupo e teto."""
 
+import os
+import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import timedelta
@@ -13,6 +16,9 @@ from goblinshift.runs.worker.runner import ExecutorPhase, LocalRunner, RunnerErr
 
 FAKE_EXECUTOR = str(Path(__file__).with_name("fake_executor.py"))
 WAIT_TIMEOUT_S = 15.0
+# Quanto o "init" do teste leva para colher o zumbi: bem depois do primeiro sinal do `stop`, bem
+# antes de a carência e a confirmação do SIGKILL se esgotarem.
+REAP_AFTER_S = 1.0
 
 
 def fake_runner(
@@ -63,6 +69,26 @@ def test_start_repetido_adota_o_executor_existente(tmp_path: Path) -> None:
     assert status.is_running
     assert (tmp_path / f"gs-exec-{attempt_id}.runner" / "pgid").read_text() == pgid_before
     runner.stop(attempt_id, timedelta(seconds=0))
+
+
+def test_stop_de_grupo_que_so_tem_zumbis_espera_a_colheita_sem_falhar(tmp_path: Path) -> None:
+    # Morto pelo SIGTERM, o grupo do executor fica só com zumbis até o init colhê-los. Nessa
+    # janela o macOS responde EPERM a qualquer killpg, inclusive ao SIGKILL do fim da carência.
+    runner = fake_runner(tmp_path, "exit", "0")
+    attempt_id = uuid.uuid7()
+    zombie = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    os.waitid(os.P_PID, zombie.pid, os.WEXITED | os.WNOWAIT)  # saiu, ainda sem ser colhido
+    meta = tmp_path / f"gs-exec-{attempt_id}.runner"
+    meta.mkdir()
+    (meta / "pgid").write_text(str(zombie.pid), encoding="ascii")
+    init = threading.Timer(REAP_AFTER_S, zombie.wait)
+    init.start()
+    try:
+        status = runner.stop(attempt_id, timedelta(seconds=2))
+    finally:
+        init.join()
+
+    assert status.phase is ExecutorPhase.EXITED
 
 
 def test_outro_runner_enxerga_o_executor_pelo_nome(tmp_path: Path) -> None:
