@@ -24,6 +24,9 @@ __pycache__/
 dist/
 build/
 
+# Storage local de objetos em desenvolvimento (GS_STORAGE_ROOT)
+.storage/
+
 # IDE
 .idea/
 .vscode/
