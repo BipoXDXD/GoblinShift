@@ -395,7 +395,7 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     name = profile.container_name(attempt)
     docker = DockerCli()
     area = host.config.work_area
-    _create_attempt_dir(host, attempt)
+    create_attempt_dir(host, attempt)
     try:
         # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
@@ -431,7 +431,7 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     return ProbeRun(state, _json_lines(output), output[-500:], duration_s, timed_out)
 
 
-def _create_attempt_dir(host: Host, attempt: uuid.UUID) -> None:
+def create_attempt_dir(host: Host, attempt: uuid.UUID) -> None:
     """Faz o papel do worker: <area>/<id> e inputs/, com os donos e modos do contrato."""
     work_dir = workarea.attempt_dir(host.config.work_area, attempt)
     inputs = work_dir / profile.INPUTS_DIR
