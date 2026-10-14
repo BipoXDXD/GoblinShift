@@ -100,6 +100,32 @@ sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin cre
 
 Sem o arquivo (antes do primeiro deploy) o script para com uma mensagem, em vez de o Compose cair na imagem `dev`. Se um deploy falhar no meio, o arquivo guarda a versão daquela tentativa, que é a configuração aplicada por último ao projeto Compose.
 
+### Segredos do login
+
+O login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração do `app.env` e os segredos de arquivos em `/srv/goblinshift/secrets/` (diretório `700`, dono `goblinshift`). Os arquivos ficam com modo `644` dentro desse diretório, como o `db_password`, porque o container lê com o UID da aplicação; com `600` a API não sobe. Só o container `api` recebe esses valores, montados em `/run/secrets/<nome>` (`compose.prod.yaml`).
+
+| Nome | Onde | Quem grava |
+|---|---|---|
+| `GS_PUBLIC_ORIGIN` (`https://goblinshift.dev`), `GS_GOOGLE_CLIENT_ID`, `GS_GITHUB_CLIENT_ID` | `app.env` | operador; os IDs não são segredo |
+| `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | `app.env` | operador |
+| `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
+| `csrf_secret`, `login_cookie_secret` | arquivo | `deploy/app-secrets.sh` (`openssl rand -hex 32`), uma vez, nunca trocados por ele |
+
+Sem uma das variáveis, o Compose recusa o arquivo antes de qualquer comando; sem um dos arquivos, ou com ele ilegível pela API, o `deploy/app-secrets.sh` para o deploy com o nome do que falta. Nos dois casos isso acontece antes do `migrate`, sem mexer no banco. Se ainda assim a API subir sem um segredo, ela sai na partida com um erro que nomeia a variável.
+
+```bash
+sudo -u goblinshift -i
+cd /srv/goblinshift/secrets
+read -rs GOOGLE && printf '%s' "$GOOGLE" > google_client_secret && unset GOOGLE   # cole e Enter (não ecoa)
+read -rs GH && printf '%s' "$GH" > github_client_secret && unset GH
+chmod 644 google_client_secret github_client_secret
+```
+
+Rotação:
+- *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo, reimplantar (re-run do job de deploy) e só então revogar o antigo;
+- `csrf_secret`: apagar o arquivo e reimplantar (o deploy gera outro). Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
+- `login_cookie_secret`: apagar o arquivo e reimplantar. Só derruba os logins em andamento.
+
 ## Imagem do executor
 
 Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, e o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)): nada de banco, web nem outras dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
