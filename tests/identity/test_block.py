@@ -223,7 +223,9 @@ def test_conta_em_exclusao_nao_loga(factory: sessionmaker[Session]) -> None:
 
 @_until_front_a
 def test_conta_bloqueada_nao_completa_login(factory: sessionmaker[Session]) -> None:
+    # Já teve sessão: bloqueio por abuso, e não a conta pendente do cadastro fechado (ADR 022).
     user_id = new_user(factory)
+    new_web_session(factory, user_id)
     with unit_of_work(factory) as session:
         block_account(session, user_id, NOW)
 
