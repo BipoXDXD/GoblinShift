@@ -8,7 +8,8 @@ profundidade. Por isso as rotas de comando recebem o corpo por esta dependência
 2. o corpo é lido por `request.stream()`, contando bytes, e passa de 64 KiB → 413, sem
    confiar em `Content-Length`;
 3. UTF-8 estrito, sem chave duplicada, sem `NaN`/`Infinity` nem número que estoura para
-   infinito, e profundidade de no máximo 16 → senão 400 `JSON_INVALID`;
+   infinito, sem NUL (`\u0000`) em texto, que o PostgreSQL não guarda em `text` nem em `jsonb`,
+   e profundidade de no máximo 16 → senão 400 `JSON_INVALID`;
 4. só então o Pydantic valida em modo estrito, com campos extras proibidos pelo modelo (422).
 
 Uso numa rota, com o schema publicado no OpenAPI por `command_openapi` (3.6):
@@ -109,6 +110,10 @@ def decode_json_command(body: bytes) -> object:
         raise _too_deep() from None
     if _depth(value) > MAX_COMMAND_DEPTH:
         raise _too_deep()
+    if _has_nul(value):
+        raise ApiProblem(
+            ProblemCode.JSON_INVALID, "O JSON tem o caractere NUL (\\u0000), que não é aceito."
+        )
     return value
 
 
@@ -154,6 +159,17 @@ def _depth(value: object) -> int:
         deepest = max(deepest, level)
         pending.extend((child, level + 1) for child in children)
     return deepest
+
+
+def _has_nul(value: object) -> bool:
+    """NUL em algum texto ou chave; só depois do teto de profundidade, que limita a pilha."""
+    if isinstance(value, str):
+        return "\0" in value
+    if isinstance(value, dict):
+        return any(_has_nul(key) or _has_nul(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_has_nul(item) for item in value)
+    return False
 
 
 def _inline_refs(node: Any, definitions: dict[str, Any]) -> Any:

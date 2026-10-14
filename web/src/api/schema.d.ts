@@ -714,7 +714,10 @@ export interface operations {
                     items: {
                         /** Name */
                         name: string;
-                        /** Size */
+                        /**
+                         * Size
+                         * @description Bytes; o lote soma até 512 MiB.
+                         */
                         size: number;
                     }[];
                 };
@@ -1327,7 +1330,8 @@ export interface operations {
                 validate_only?: boolean;
             };
             header?: {
-                "Idempotency-Key"?: string | null;
+                /** @description Obrigatória, exceto com validate_only. */
+                "Idempotency-Key"?: string;
             };
             path?: never;
             cookie?: never;

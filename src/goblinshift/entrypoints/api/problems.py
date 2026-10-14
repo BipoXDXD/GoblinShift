@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Match
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from goblinshift.entrypoints.api.wide_event import record_error
@@ -142,6 +143,8 @@ _HTTP_DETAILS: Mapping[ProblemCode, str] = {
 }
 _FORWARDED_HEADERS = ("Allow", "Retry-After", "WWW-Authenticate")
 _SERVER_ERROR_MIN = 500
+# Candidatos do Allow de um 405, em ordem alfabética.
+_HTTP_METHODS = ("DELETE", "GET", "HEAD", "PATCH", "POST", "PUT")
 
 
 class FieldError(BaseModel):
@@ -316,12 +319,32 @@ async def _handle_http_exception(request: Request, exc: StarletteHTTPException) 
         for name, value in (exc.headers or {}).items()
         if name.title() in _FORWARDED_HEADERS
     }
+    if code is ProblemCode.METHOD_NOT_ALLOWED:
+        headers["Allow"] = _allowed_methods(request)
     return problem_response(
         code=code,
         detail=detail,
         instance=request.url.path,
         request_id=request_id_of(request),
         headers=headers,
+    )
+
+
+def _allowed_methods(request: Request) -> str:
+    """Métodos que alguma rota aceita neste caminho.
+
+    O Starlette põe no Allow só os da primeira rota que casa com o caminho, e o FastAPI registra
+    uma rota por método: `GET` e `POST /runs` são duas, e o Allow omitia um deles. Os roteadores
+    incluídos do FastAPI não expõem as rotas por API pública, então cada método é perguntado ao
+    roteador pelo `matches`, que é público.
+    """
+    return ", ".join(
+        method
+        for method in _HTTP_METHODS
+        if any(
+            route.matches({**request.scope, "method": method})[0] is Match.FULL
+            for route in request.app.router.routes
+        )
     )
 
 

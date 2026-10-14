@@ -14,7 +14,7 @@ from uuid import UUID
 import anyio
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
@@ -40,9 +40,17 @@ from goblinshift.files.errors import (
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
+from goblinshift.files.limits import (
+    MAX_BATCH_BYTES,
+    MAX_BATCH_FILES,
+    MAX_FILE_BYTES,
+    MAX_NAME_CHARS,
+    MIB,
+)
 from goblinshift.files.states import Availability, TransferDirection, UploadState
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
 from goblinshift.files.uploads import (
+    UPLOAD_NAME_PATTERN,
     UploadView,
     create_intents,
     get_upload,
@@ -59,14 +67,20 @@ _API_FIELD_NAMES = {"expected_size": "size"}
 class UploadItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str
-    size: int
+    # O padrão só é publicado: quem o aplica é `files.uploads`, que distingue separador de controle
+    # na mensagem de erro e também recusa "." e "..".
+    name: str = Field(
+        min_length=1, max_length=MAX_NAME_CHARS, json_schema_extra={"pattern": UPLOAD_NAME_PATTERN}
+    )
+    size: int = Field(
+        ge=0, le=MAX_FILE_BYTES, description=f"Bytes; o lote soma até {MAX_BATCH_BYTES // MIB} MiB."
+    )
 
 
 class CreateUploads(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    items: list[UploadItem]
+    items: list[UploadItem] = Field(min_length=1, max_length=MAX_BATCH_FILES)
 
 
 class ContentInstructions(BaseModel):

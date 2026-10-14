@@ -149,11 +149,17 @@
                       "properties": {
                         "name": {
                           "type": "string",
+                          "maxLength": 255,
+                          "minLength": 1,
+                          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*$",
                           "title": "Name"
                         },
                         "size": {
                           "type": "integer",
-                          "title": "Size"
+                          "maximum": 33554432.0,
+                          "minimum": 0.0,
+                          "title": "Size",
+                          "description": "Bytes; o lote soma até 512 MiB."
                         }
                       },
                       "additionalProperties": false,
@@ -165,6 +171,8 @@
                       "title": "UploadItem"
                     },
                     "type": "array",
+                    "maxItems": 100,
+                    "minItems": 1,
                     "title": "Items"
                   }
                 },
@@ -824,16 +832,10 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": false,
+            "description": "Obrigatória, exceto com validate_only.",
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
             }
           }
         ],
@@ -1288,7 +1290,8 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 64
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                 },
                 {
                   "type": "null"

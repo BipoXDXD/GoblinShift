@@ -99,6 +99,23 @@ def test_chave_duplicada_responde_400(offline_client: TestClient, body: bytes) -
     assert "repetidas" in body_json["detail"]
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b'{"text": "a\\u0000b"}', id="valor"),
+        pytest.param(b'{"x": [{"a\\u0000": 1}]}', id="chave-aninhada"),
+        pytest.param(b'{"x": ["ok", ["\\u0000"]]}', id="lista-aninhada"),
+    ],
+)
+def test_nul_em_texto_responde_400(offline_client: TestClient, body: bytes) -> None:
+    # Achado do Schemathesis: o PostgreSQL não guarda NUL em text nem em jsonb, e um nome de coluna
+    # com \u0000 nos parâmetros de POST /runs virava 500 ao gravar a Run.
+    response = offline_client.post(RAW, content=body, headers=JSON_HEADERS)
+
+    body_json = assert_problem(response, 400, "JSON_INVALID")
+    assert "NUL" in body_json["detail"]
+
+
 @pytest.mark.parametrize("literal", [b"NaN", b"Infinity", b"-Infinity", b"1e400", b"-1e400"])
 def test_numero_nao_finito_responde_400(offline_client: TestClient, literal: bytes) -> None:
     response = offline_client.post(RAW, content=b'{"x": ' + literal + b"}", headers=JSON_HEADERS)
