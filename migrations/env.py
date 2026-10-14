@@ -13,7 +13,9 @@ from goblinshift.platform.settings import Settings
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Sem desligar os loggers já criados: no mesmo processo (testes, CLI), o padrão do
+    # fileConfig silenciaria para sempre os logs da aplicação importados antes da migração.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = metadata
 
