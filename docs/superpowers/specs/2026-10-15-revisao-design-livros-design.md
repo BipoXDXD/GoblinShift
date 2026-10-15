@@ -39,10 +39,11 @@ Ficam como estão, por decisão anterior ou desta rodada:
 
 - **Pátina:** rampa nova `--color-patina-50…950`, em OKLCH, com matiz perto de 175° (verde-azulado de cobre oxidado). O croma é ajustado para não competir com o musgo.
 - **Papéis de sucesso:** `--success-bg`, `--success-fg` e o acento de sucesso, quando houver, passam a usar a pátina nos dois temas.
+- **Progresso:** `--progress-fill` também usa a pátina (600 no claro, 400 no escuro), porque a barra mostra estado e não é clicável. O trilho continua em pedra, com 3:1 contra o preenchimento.
 - **Musgo:** só para elemento interativo (botão primário, link, controle selecionado). Nenhum selo ou texto estático usa musgo. (PUI: cor primária reservada para o que é clicável.)
 - **Latão:** continua como acento, foco e aviso. Ele aparece pouco como acento, e todo aviso vem com ícone e texto.
 - **Selos de estado** (concluída, falhou, na fila, cancelada): sempre ícone mais texto, nunca só cor (WCAG 1.4.1).
-- **Testes:** os pares novos entram no `contrast.test.ts`, com 4,5:1 para texto e 3:1 para ícone e borda, medidos nos dois temas. Um teste de classes recusa `moss` em componente de status.
+- **Testes:** os pares novos entram no `contrast.test.ts`, com 4,5:1 para texto e 3:1 para ícone e borda, medidos nos dois temas. Um teste de classes recusa `moss` em componente de status, e o `contrast.test.ts` recusa papel de estado (`success-*`, `progress-fill`) apontando para `--color-moss-*`.
 
 ### 2. Elevação: 3 níveis mais a rebaixada
 
@@ -54,7 +55,7 @@ Ficam como estão, por decisão anterior ou desta rodada:
   O `--elevation-sunken` fica para campos e poços.
 - **Composição:** cada sombra tem duas partes, como no RUI cap. 6: uma grande e suave, outra pequena e escura. A parte pequena some no nível do diálogo.
 - **Cartões:** ficam só com sombra, sem borda.
-- **Tema escuro:** a elevação vem da superfície mais clara (`--surface-1/2/3`), com sombra mínima.
+- **Tema escuro:** a elevação vem da superfície mais clara, com sombra mínima. Bastam os dois tokens que já existiam: `--surface` (stone-900) para o cartão e `--surface-raised` (stone-800) para o que flutua sobre ele. A escala `--surface-1/2/3` cogitada no rascunho não foi criada, porque não havia terceiro nível de superfície para pintar.
 - **Testes:** o teste de classes aceita só `shadow-card`, `shadow-float`, `shadow-dialog` e `shadow-sunken`.
 
 ### 3. Espaço
