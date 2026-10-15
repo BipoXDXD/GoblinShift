@@ -1,13 +1,14 @@
 """Log de acesso do Nginx sem IP completo nem query string (docs/GoblinShiftPlan.md, 1.8 e 3.7).
 
 Sobe a imagem do Nginx com a SPA (docker/web.Dockerfile), com os templates do repositório, e dois
-clientes: um no papel do proxy
-de borda (o único de quem o X-Forwarded-For vale) e outro fora dela. A API é um Nginx mínimo que
-responde 204, para que nenhuma falha de upstream entre no log de erro; as requisições vão a
-`/api/`, que o Nginx encaminha a ela, e não à SPA.
+clientes: um no papel do proxy de borda (o único de quem o X-Forwarded-For vale) e outro fora
+dela. A API é um Nginx mínimo que responde 204 (ou 404 e o eco do X-Forwarded-For, nos caminhos
+dos outros testes do Nginx), para que nenhuma falha de upstream entre no log de erro. As
+requisições vão a `/api/`, que o Nginx encaminha a ela, e não à SPA.
 """
 
 import json
+import shlex
 import subprocess
 import uuid
 from collections.abc import Iterator
@@ -32,8 +33,13 @@ CANARY_QUERY = f"CANARY-{uuid.uuid4()}"
 CANARY_IPV4 = "203.0.113.77"
 CANARY_IPV6 = "2001:db8:abcd:12::77"
 SPOOFED_IP = "198.51.100.23"
+# A API falsa ecoa o X-Forwarded-For que recebeu (prova do IP real) e tem um caminho que dá 404.
+API_ECHO = "/api/v1/_eco"
 API_STUB = (
-    "printf 'server { listen 8000; return 204; }' > /etc/nginx/conf.d/default.conf"
+    "printf 'server { listen 8000;"
+    f' location = {API_ECHO} {{ return 200 "$http_x_forwarded_for"; }}'
+    " location /api/v1/runs/ { return 404; }"
+    " location / { return 204; } }' > /etc/nginx/conf.d/default.conf"
     " && exec nginx -g 'daemon off;'"
 )
 
@@ -115,6 +121,21 @@ class NginxLogs:
             *header_args, f"http://nginx{path}",
         )  # fmt: skip
 
+    def fetch(self, client: str, path: str, *headers: str) -> Response:
+        """Um pedido de `client` ao Nginx, sem falhar em 4xx: status, cabeçalhos e corpo."""
+        return self.fetch_many(client, path, 1, *headers)[-1]
+
+    def fetch_many(self, client: str, path: str, count: int, *headers: str) -> list[Response]:
+        """`count` pedidos seguidos num só `docker exec`, para caberem no mesmo segundo."""
+        header_args = " ".join(f"-H {shlex.quote(header)}" for header in headers)
+        url = shlex.quote(f"http://nginx{path}")
+        loop = (
+            f"for i in $(seq {count}); do curl -sS -i {header_args} {url};"
+            f" printf '{RESPONSE_SEPARATOR}'; done"
+        )
+        dump = _docker("exec", client, "sh", "-c", loop)
+        return [Response.parse(raw) for raw in dump.split(RESPONSE_SEPARATOR)[:count]]
+
     def logs(self) -> tuple[str, str]:
         result = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
             ["docker", "logs", self.nginx],  # noqa: S607
@@ -138,6 +159,30 @@ class NginxLogs:
             check=False,
             timeout=DOCKER_TIMEOUT_SECONDS,
         )
+
+
+RESPONSE_SEPARATOR = "\n--gs-test-fim-da-resposta--\n"
+
+
+@dataclass(frozen=True)
+class Response:
+    status: int
+    headers: list[tuple[str, str]]
+    body: str
+
+    @classmethod
+    def parse(cls, raw: str) -> Response:
+        # O `text=True` do subprocess já trocou os `\r\n` do HTTP por `\n`.
+        head, _, body = raw.lstrip().partition("\n\n")
+        status_line, *header_lines = head.splitlines()
+        headers = []
+        for line in header_lines:
+            name, _, value = line.partition(":")
+            headers.append((name.strip().lower(), value.strip()))
+        return cls(int(status_line.split()[1]), headers, body)
+
+    def header_values(self, name: str) -> list[str]:
+        return [value for header, value in self.headers if header == name.lower()]
 
 
 @dataclass(frozen=True)
