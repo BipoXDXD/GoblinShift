@@ -348,15 +348,100 @@ describe("Bancada", () => {
     });
 
     act(() => {
-      pending[0]?.reject(new Error("falhou"));
+      pending[1]?.reject(new Error("falhou"));
     });
 
-    expect(await screen.findByRole("button", { name: "Enviar de novo a.csv" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
-    expect(screen.getByRole("list", { name: "Ordem de processamento" })).not.toHaveTextContent(
-      "a.csv",
-    );
+    expect(await screen.findByRole("button", { name: "Enviar de novo b.csv" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remover b.csv" }));
+    const dialog = screen.getByRole("dialog", { name: "Remover b.csv?" });
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Remover" }));
+
+    const list = screen.getByRole("list", { name: "Ordem de processamento" });
+    expect(list).not.toHaveTextContent("b.csv");
+    expect(list).toHaveTextContent("a.csv");
     expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+  });
+
+  it("cancelar a remoção mantém o arquivo", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("list", { name: "Ordem de processamento" })).toHaveTextContent("a.csv");
+    expect(screen.getByRole("button", { name: "Remover a.csv" })).toHaveFocus();
+  });
+
+  it("remover durante o envio aborta o envio sem deixar erro", async () => {
+    const { user, pending } = await setup({ autoResolve: false });
+    await chooseFiles(user, ["a.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(screen.queryByText("a.csv")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("o segundo clique em Remover, com o diálogo já fechado, não tira outro arquivo", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv", "c.csv"]);
+    await waitUntilSent(3);
+
+    await user.click(screen.getByRole("button", { name: "Remover b.csv" }));
+    const confirm = screen.getByRole("button", { name: "Remover" });
+    await user.dblClick(confirm);
+
+    const list = screen.getByRole("list", { name: "Ordem de processamento" });
+    expect(list).not.toHaveTextContent("b.csv");
+    expect(list).toHaveTextContent("a.csv");
+    expect(list).toHaveTextContent("c.csv");
+  });
+
+  it("com 2 arquivos ou mais, Remover todos pede confirmação com a contagem", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Remover todos" }));
+    const dialog = screen.getByRole("dialog", { name: "Remover os 2 arquivos?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remover todos" }));
+
+    expect(screen.queryByRole("list", { name: "Ordem de processamento" })).toBeNull();
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+  });
+
+  it("a contagem do Remover todos não muda com o diálogo aberto", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv", "c.csv"]);
+    await waitUntilSent(3);
+
+    await user.click(screen.getByRole("button", { name: "Remover todos" }));
+
+    expect(screen.getByRole("dialog", { name: "Remover os 3 arquivos?" })).toBeVisible();
+    // A lista muda por baixo do diálogo (o dublê do jsdom não deixa a página inerte): o título
+    // promete o que foi visto ao abrir, não o estado de agora.
+    await chooseFiles(user, ["d.csv"]);
+    await waitUntilSent(4);
+
+    expect(screen.getByRole("dialog", { name: "Remover os 3 arquivos?" })).toBeVisible();
+  });
+
+  it("com 1 arquivo, não há Remover todos", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(screen.queryByRole("button", { name: "Remover todos" })).toBeNull();
   });
 
   it("não tem violações do axe com arquivos e erros na tela", async () => {
