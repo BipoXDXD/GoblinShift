@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useId, useState, type ReactElement, type SubmitEvent } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement, type SubmitEvent } from "react";
 import { ChevronLeft } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 
@@ -59,6 +59,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
   const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
   const [attempt, setAttempt] = useState(0);
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
+  const focusFilesAfterRemoval = useRef(false);
   const filesHeadingId = useId();
   const parametersHeadingId = useId();
 
@@ -100,14 +101,21 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
     if (pendingRemoval.kind === "one") {
       batch.remove(pendingRemoval.localId);
     } else {
-      entries.forEach((entry) => {
-        batch.remove(entry.localId);
-      });
+      batch.removeAll();
     }
+    focusFilesAfterRemoval.current = true;
     setPendingRemoval(null);
-    // O botão Remover some com o item: o foco volta à escolha de arquivos, e não ao body.
-    document.getElementById(FILES_FIELD_ID)?.focus();
   };
+
+  // O botão Remover some com o item: o foco vai para a escolha de arquivos, e não para o body. Só
+  // depois de o diálogo fechar (o efeito do filho roda antes deste), porque com o modal aberto o
+  // resto da página está inerte e o focus() não pega.
+  useEffect(() => {
+    if (pendingRemoval === null && focusFilesAfterRemoval.current) {
+      focusFilesAfterRemoval.current = false;
+      document.getElementById(FILES_FIELD_ID)?.focus();
+    }
+  }, [pendingRemoval]);
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -159,18 +167,35 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
                 <p>{TEXT.workbench.noFilesYetHint}</p>
               </EmptyState>
             ) : (
-              <ReorderableList
-                label={TEXT.workbench.orderLabel}
-                items={entries}
-                getKey={(entry) => entry.localId}
-                getName={(entry) => entry.file.name}
-                renderItem={(entry) => (
-                  <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={askRemoval} />
+              <>
+                <ReorderableList
+                  label={TEXT.workbench.orderLabel}
+                  items={entries}
+                  getKey={(entry) => entry.localId}
+                  getName={(entry) => entry.file.name}
+                  renderItem={(entry) => (
+                    <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={askRemoval} />
+                  )}
+                  onMove={(move) => {
+                    setOrder(moveItem(entries.map(localIdOf), move));
+                  }}
+                />
+                {entries.length >= 2 && (
+                  // O Button não aceita className: o wrapper evita que ele estique na coluna.
+                  <div className="self-start">
+                    <Button
+                      type="button"
+                      variant="tertiary"
+                      onClick={() => {
+                        // A contagem fica guardada na abertura (Foco da revisão, item 3).
+                        setPendingRemoval({ kind: "all", count: entries.length });
+                      }}
+                    >
+                      {TEXT.workbench.removal.removeAll}
+                    </Button>
+                  </div>
                 )}
-                onMove={(move) => {
-                  setOrder(moveItem(entries.map(localIdOf), move));
-                }}
-              />
+              </>
             )}
             <LiveRegion message={announcement} visuallyHidden />
           </section>
