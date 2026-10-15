@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { safeReturnTo, signInHref } from "./signIn";
+import { loginRefFrom, safeReturnTo, signInHref } from "./signIn";
+
+const REF = "0b8f3c2e-5d4a-4f1b-9c7e-2a6d8e0f1b3c";
 
 describe("safeReturnTo", () => {
   it.each([
@@ -47,5 +49,28 @@ describe("signInHref", () => {
     expect(signInHref("github", { returnTo: "/acesso", reauth: true })).toBe(
       "/auth/login/github?return_to=%2Facesso&reauth=1",
     );
+  });
+});
+
+describe("loginRefFrom", () => {
+  it("lê o código de referência do fragmento", () => {
+    expect(loginRefFrom(`#ref=${REF}`)).toBe(REF);
+  });
+
+  it.each([
+    ["vazio", ""],
+    ["só o #", "#"],
+    ["sem valor", "#ref="],
+    ["outro nome", `#codigo=${REF}`],
+    ["maiúsculas", `#ref=${REF.toUpperCase()}`],
+    ["sobra no fim", `#ref=${REF}x`],
+    ["sobra no começo", `#ref=x${REF}`],
+    ["texto injetado", "#ref=Sua%20conta%20foi%20bloqueada"],
+    ["HTML", "#ref=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E"],
+    ["sem hifens", `#ref=${REF.replaceAll("-", "")}`],
+    ["controle", `#ref=${REF}%00`],
+    ["repetido", `#ref=${REF}&ref=${REF}`],
+  ])("%s não vale como código", (_name, hash) => {
+    expect(loginRefFrom(hash)).toBeNull();
   });
 });
