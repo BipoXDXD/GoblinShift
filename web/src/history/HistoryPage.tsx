@@ -185,7 +185,7 @@ function FiltersForm({ filters, onApply }: FiltersFormProps): ReactElement {
     onApply(draft);
   };
   return (
-    <details open={hasActiveFilters(filters)} className="rounded-lg bg-surface p-4 shadow-1">
+    <details open={hasActiveFilters(filters)} className="rounded-lg bg-surface p-4 shadow-card">
       <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold">
         {T.filters}
       </summary>

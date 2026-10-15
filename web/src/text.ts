@@ -77,6 +77,16 @@ export const TEXT = {
     aiArt: "Ilustrações geradas com IA e editadas.",
     creditsLink: "Créditos",
   },
+  notice: {
+    // O tipo escrito acompanha a cor da faixa: o aviso nunca depende só dela (WCAG 1.4.1).
+    kinds: {
+      incident: "Incidente de segurança",
+      shutdown: "Encerramento do serviço",
+      "terms-change": "Mudança nos termos",
+    },
+    regionLabel: (kind: string) => `Aviso: ${kind.toLowerCase()}`,
+    dismiss: "Fechar",
+  },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",
     lead: "Escolha uma receita para começar.",
@@ -150,6 +160,16 @@ export const TEXT = {
       remove: "Remover",
       announceReady: (name: string) => `${name} enviado.`,
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
+    },
+    removal: {
+      titleOne: (name: string) => `Remover ${name}?`,
+      bodyOne: "O arquivo sai do lote. Para usá-lo de novo, escolha-o outra vez.",
+      titleAll: (count: number) => `Remover os ${String(count)} arquivos?`,
+      bodyAll: "Todos os arquivos saem do lote. Para usá-los de novo, escolha-os outra vez.",
+      confirm: "Remover",
+      confirmAll: "Remover todos",
+      cancel: "Cancelar",
+      removeAll: "Remover todos",
     },
     serverFieldErrors: {
       missing: "Campo obrigatório.",

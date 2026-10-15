@@ -56,6 +56,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:notice-e2e": "GS_NOTICE_FILE=e2e/fixtures/notice.json vite build --outDir dist-notice",
     "budget": "node scripts/check-budget.ts",
     "provenance": "node scripts/check-provenance.ts",
     "preview": "vite preview",
@@ -66,6 +67,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test -c e2e",
+    "e2e:notice": "E2E_NOTICE=1 E2E_DIST_DIR=dist-notice playwright test -c e2e",
     "e2e:sabotage": "node e2e/sabotage.ts",
     "coverage": "vitest run --coverage",
     "knip": "knip",
