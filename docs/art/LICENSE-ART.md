@@ -19,14 +19,14 @@ Cadeia de cada uma (detalhe no `PROVENANCE.json`):
 3. Modelo 3D no fonte externa fonte externa Gen-2.5 a partir da imagem do passo 2.
 4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
 
-## O que ficou de fora, e por quê
+## Jade e Fagulha: origem não comprovada
 
-Duas das sete goblins aprovadas **não vão ao site** enquanto a origem não for resolvida:
+Duas das sete goblins aprovadas têm origem que não podemos comprovar:
 
 - **Jade** (fonte externa `3c7aa397`): deriva do modelo `cab576c8`, que é idêntico, byte a byte, ao 3D gerado a partir de `referencias-usuario/ref2-jeans.png`, uma imagem de terceiros trazida como referência.
 - **Fagulha** (fonte externa `0d84776f`): deriva do modelo `f37f6132`, gerado direto no site do fonte externa. Não há registro da imagem de entrada, então a origem não pode ser verificada.
 
-O `check-provenance` recusa qualquer arquivo cuja cadeia passe por esses modelos.
+Se aparecem no site, é por decisão do dono do serviço, que assumiu o risco em 2026-10-15; o registro dessa decisão fica no `PROVENANCE.json`. **Jade e Fagulha ficam fora da licença CC BY 4.0 abaixo**, em todos os arquivos que derivam desses modelos: não licenciamos o que talvez não seja nosso. Quem tiver direito sobre a imagem de origem e quiser a retirada pode escrever para abuso@goblinshift.dev (Termos de Uso, item 9).
 
 ## Termos que sustentam a publicação (lidos em 2026-10-15)
 
@@ -46,4 +46,8 @@ O `check-provenance` recusa qualquer arquivo cuja cadeia passe por esses modelos
 
 O US Copyright Office (relatório *estudo de direitos autorais registrado externamente*, 29 de janeiro de 2025) conclui que prompt sozinho não faz de ninguém autor. A saída bruta do fonte externa, da fonte externa e dos modelos de imagem pode não ser protegível, e este repositório não afirma autoria exclusiva sobre ela.
 
-A **contribuição humana** (seleção, renders, enquadramento, recorte, otimização dos modelos e os scripts de `scripts/arte/`) fica sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). O código do site segue a licença do repositório.
+A **contribuição humana** (seleção, renders, enquadramento, recorte e otimização dos modelos) fica sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), **exceto Jade e Fagulha** (seção anterior), sem garantia de que a saída de produção editorial seja protegível por direito autoral. Crédito sugerido: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0".
+
+O nome GoblinShift, o logotipo e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.
+
+O código, inclusive os scripts de `scripts/arte/`, segue a [Apache License 2.0](../../LICENSE) do repositório. Essa licença não cobre `web/src/assets/art/`, `docs/art/` nem os modelos 3D (arquivo [`NOTICE`](../../NOTICE)). Os Termos de Uso dizem o mesmo no item 9.
