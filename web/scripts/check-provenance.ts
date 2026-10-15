@@ -1,6 +1,7 @@
 // Proveniência da arte do site (ADR 030): todo arquivo de src/assets/art/ tem entrada no
 // PROVENANCE.json com o sha256 certo, a cadeia de gerações até a ferramenta resolve, cada geração
-// cita um direito registrado e nada deriva de uma goblin excluída por vir de imagem de terceiros.
+// cita um direito registrado, nada deriva de uma goblin excluída e geração de origem de terceiros
+// (ou não verificável) só passa com decisão registrada em `exceptions`: quem, quando e por quê.
 // Roda no job `web` do CI: `node scripts/check-provenance.ts` sai com 1 se algo falhar.
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -19,6 +20,15 @@ const generationSchema = z.object({
   inputs: z.array(z.string()),
   rights: z.string().optional(),
   generation_id: z.string().optional(),
+  /** Por que a origem é de terceiros ou não verificável; ausente quando é nossa. */
+  third_party: z.string().optional(),
+});
+
+const exceptionSchema = z.object({
+  generation: z.string(),
+  decided_by: z.string().min(1),
+  decided_at: z.iso.date(),
+  reason: z.string().min(1),
 });
 
 const provenanceSchema = z.object({
@@ -26,6 +36,7 @@ const provenanceSchema = z.object({
   rights: z.array(z.object({ id: z.string() })),
   generations: z.record(z.string(), generationSchema),
   excluded: z.array(z.object({ name: z.string(), rodin: z.string(), reason: z.string() })),
+  exceptions: z.array(exceptionSchema).default([]),
   assets: z.array(z.object({ file: z.string(), sha256: z.string(), derived_from: z.string() })),
 });
 
@@ -64,6 +75,7 @@ export function provenanceViolations(files: readonly ArtFile[], document: unknow
 /** Percorre a cadeia de gerações a partir de `start`, uma vez por geração. */
 function chainViolations(provenance: Provenance, start: string): string[] {
   const rightIds = new Set(provenance.rights.map((right) => right.id));
+  const decided = new Set(provenance.exceptions.map((exception) => exception.generation));
   const violations: string[] = [];
   const seen = new Set<string>();
   const pending = [start];
@@ -79,6 +91,11 @@ function chainViolations(provenance: Provenance, start: string): string[] {
     }
     if (generation.rights !== undefined && !rightIds.has(generation.rights)) {
       violations.push(`${id} cita o direito ${generation.rights}, que não está em rights`);
+    }
+    if (generation.third_party !== undefined && !decided.has(id)) {
+      violations.push(
+        `deriva de ${id} (${generation.third_party}) sem decisão registrada em exceptions`,
+      );
     }
     const excluded = provenance.excluded.find((entry) => generation.generation_id === entry.rodin);
     if (excluded !== undefined) {
