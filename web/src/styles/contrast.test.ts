@@ -80,15 +80,39 @@ describe("tons crus", () => {
 describe("papéis de cor", () => {
   // Musgo é a cor do que se clica (PUI): sucesso tem matiz próprio, a pátina.
   it.each(THEMES)("sucesso usa pátina no tema $name", ({ selector }) => {
-    const block = declarationsBlock(css, selector);
+    const block = declarationLines(css, `${selector} {`).join("\n");
     expect(block).toMatch(/--success-bg:\s*var\(--color-patina-\d+\)/);
     expect(block).toMatch(/--success-fg:\s*var\(--color-patina-\d+\)/);
   });
+
+  it.each(THEMES)(
+    "o fundo escurecido do diálogo tem papel próprio no tema $name",
+    ({ selector }) => {
+      expect(semanticColors(css, selector).get("overlay")).toBeDefined();
+    },
+  );
 });
 
-function declarationsBlock(source: string, selector: string): string {
-  const start = source.indexOf(`${selector} {`);
-  return source.slice(start, source.indexOf("}", start));
+describe("fallback do tema escuro", () => {
+  // Sem theme-init.js (bloqueado, falha de rede) não há data-theme, e o sistema escuro precisa
+  // do mesmo bloco: as duas cópias não podem divergir.
+  it("repete o bloco escuro, declaração por declaração", () => {
+    const fallback = declarationLines(css, ":root:not([data-theme]) {");
+    expect(fallback.length).toBeGreaterThan(20);
+    expect(fallback).toEqual(declarationLines(css, '[data-theme="dark"] {'));
+  });
+});
+
+function declarationLines(source: string, opening: string): string[] {
+  const start = source.indexOf(opening);
+  if (start === -1) {
+    throw new Error(`tokens.css não tem o bloco ${opening}`);
+  }
+  const body = source.slice(start + opening.length, source.indexOf("}", start));
+  return body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("--") || line.startsWith("color-scheme"));
 }
 
 function colorOf(colors: ReadonlyMap<string, string>, token: string): string {
