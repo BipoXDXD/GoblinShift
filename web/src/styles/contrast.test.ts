@@ -69,13 +69,27 @@ describe("tons crus", () => {
     expect(displayable(value)).toBe(true);
   });
 
-  it("existem as quatro famílias da paleta, com 11 tons cada", () => {
-    const families = ["moss", "brass", "stone", "ember"].map(
+  it("existem as cinco famílias da paleta, com 11 tons cada", () => {
+    const families = ["moss", "brass", "stone", "ember", "patina"].map(
       (family) => [...rawColors(css).keys()].filter((name) => name.startsWith(`${family}-`)).length,
     );
-    expect(families).toEqual([11, 11, 11, 11]);
+    expect(families).toEqual([11, 11, 11, 11, 11]);
   });
 });
+
+describe("papéis de cor", () => {
+  // Musgo é a cor do que se clica (PUI): sucesso tem matiz próprio, a pátina.
+  it.each(THEMES)("sucesso usa pátina no tema $name", ({ selector }) => {
+    const block = declarationsBlock(css, selector);
+    expect(block).toMatch(/--success-bg:\s*var\(--color-patina-\d+\)/);
+    expect(block).toMatch(/--success-fg:\s*var\(--color-patina-\d+\)/);
+  });
+});
+
+function declarationsBlock(source: string, selector: string): string {
+  const start = source.indexOf(`${selector} {`);
+  return source.slice(start, source.indexOf("}", start));
+}
 
 function colorOf(colors: ReadonlyMap<string, string>, token: string): string {
   const value = colors.get(token);
