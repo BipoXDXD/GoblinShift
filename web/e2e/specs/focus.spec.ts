@@ -62,10 +62,13 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Pular para o conteúdo",
     "GoblinShift, Oficina",
     "Histórico",
+    "Acesso",
     "Tema Sistema",
     "Abrir a Bancada da CSV Janitor",
     "Abrir a Bancada da Image Forge",
     "Abrir a Bancada da Downloads Detox",
+    // O rodapé vem depois de todo o conteúdo.
+    "Créditos",
   ]);
 });
 
@@ -95,7 +98,11 @@ test("Bancada: arquivos → lista → parâmetros → Executar, e o foco segue o
   const positions = order.map((name) => names.indexOf(name));
   expect(positions, `paradas: ${names.join(" | ")}`).not.toContain(-1);
   expect(positions).toEqual([...positions].sort((a, b) => a - b));
-  expect(names.at(-1), "Executar é a última parada").toBe("Executar");
+  // Executar fecha o conteúdo; depois dele, só o link do rodapé.
+  expect(names.slice(-2), "Executar é a última parada do conteúdo").toEqual([
+    "Executar",
+    "Créditos",
+  ]);
 
   // Mover por teclado: o foco fica no botão do item movido, agora na posição 1.
   await page.getByRole("button", { name: `Mover para cima ${second.name}` }).focus();

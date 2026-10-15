@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { useApiClient } from "../api/ApiClientContext";
 import { PATHS } from "../app/paths";
 import { EmptyState } from "../components/feedback/EmptyState";
-import { QueryFailure } from "../components/feedback/QueryFailure";
+import { FailureNotice } from "../components/feedback/FailureNotice";
 import { buttonClassName } from "../components/ui/Button";
 import type { Run } from "../runs/api";
 import { TEXT } from "../text";
@@ -44,7 +44,7 @@ function RecentBody({ data, error }: RecentBodyProps): ReactElement {
     return error === null ? (
       <p className="text-fg-muted">{T.loading}</p>
     ) : (
-      <QueryFailure error={error} headingLevel={3} />
+      <FailureNotice error={error} headingLevel={3} />
     );
   }
   if (data.length === 0) {

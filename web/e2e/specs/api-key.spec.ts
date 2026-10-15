@@ -44,7 +44,7 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   expect(credentialsFromPage, "pedidos com Authorization montado pelo bundle").toEqual([]);
 });
 
-test("sem a chave do processo de teste, a API recusa e a Bancada avisa que o login chega em breve", async ({
+test("sem a chave do processo de teste, a API recusa e a Bancada convida a entrar", async ({
   browser,
 }) => {
   test.skip(E2E.artifactsDir === null, "a API falsa só existe no modo local");
@@ -60,8 +60,13 @@ test("sem a chave do processo de teste, a API recusa e a Bancada avisa que o log
   });
   await page.goto("/bancada/csv-janitor");
 
-  // Sem login, o 401 é o estado normal até a fatia 6: aviso informativo, não erro de sessão.
-  await expect(page.getByRole("heading", { name: "O login chega em breve" })).toBeVisible();
+  // Sem login, o 401 é o estado normal: convite para entrar, não erro de sessão.
+  const prompt = page.getByRole("region", { name: "Entre para continuar" });
+  await expect(prompt).toBeVisible();
+  await expect(prompt.getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+    "href",
+    "/auth/login/google?return_to=%2Fbancada%2Fcsv-janitor",
+  );
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("Sua sessão terminou.", { exact: false })).toHaveCount(0);
   // 401 não é falha transitória: a leitura não se repete (api/queryRetry.ts).

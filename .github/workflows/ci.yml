@@ -112,8 +112,10 @@ jobs:
         run: npm run type-coverage
       - name: Build
         run: npm run build
-      - name: Orçamento de peso (JS, CSS, fontes e 3D da abertura, ADR 027)
+      - name: Orçamento de peso (JS, CSS, fontes, goblins e 3D da abertura, ADR 027 e 030)
         run: npm run budget
+      - name: Proveniência da arte (ADR 030)
+        run: npm run provenance
 
   e2e:
     name: Interface no navegador (Playwright)

@@ -92,7 +92,15 @@ describe("Bancada", () => {
 
     await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
+    // Rotação estável pela receita: a CSV Janitor cai sempre na Jade.
+    expect(screen.getByRole("img", { name: /^Jade, / })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
+  });
+
+  it("outra receita pode cair na outra goblin do vazio, e sempre na mesma", async () => {
+    await setup({ recipe: "image-forge" });
+
+    expect(screen.getByRole("img", { name: /^Lua, / })).toBeInTheDocument();
   });
 
   it("a ordem do Tab segue a leitura nas duas colunas: arquivos, parâmetros, Executar", async () => {
@@ -368,21 +376,39 @@ describe("Bancada", () => {
     expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
   });
 
-  it("sem login, o 401 do catálogo vira o aviso de login em breve, sem erro nem formulário", async () => {
+  it("sem login, o 401 do catálogo vira o convite para entrar, sem erro nem formulário", async () => {
     renderWorkbench({ catalog: () => problemResponse(401, "AUTHENTICATION_REQUIRED") });
 
-    const notice = await screen.findByRole("region", { name: "O login chega em breve" });
-    expect(notice).toHaveTextContent(/chave de API/);
+    const notice = await screen.findByRole("region", { name: "Entre para continuar" });
+    expect(within(notice).getByRole("link", { name: "Entrar com GitHub" })).toHaveAttribute(
+      "href",
+      "/auth/login/github?return_to=%2Fbancada%2Fcsv-janitor",
+    );
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Bancada: CSV Janitor" })).toBeVisible();
   });
 
-  it("outro 401 que não é falta de login continua como erro", async () => {
+  it("login antigo demais pede para entrar de novo, com reauth", async () => {
     renderWorkbench({ catalog: () => problemResponse(401, "REAUTH_REQUIRED") });
 
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "O login chega em breve" })).toBeNull();
+    const notice = await screen.findByRole("region", { name: "Entre de novo para confirmar" });
+    expect(within(notice).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+      "href",
+      "/auth/login/google?return_to=%2Fbancada%2Fcsv-janitor&reauth=1",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sem o aceite dos termos, leva ao aceite e volta para a Bancada", async () => {
+    renderWorkbench({ catalog: () => problemResponse(403, "TERMS_NOT_ACCEPTED") });
+
+    const notice = await screen.findByRole("region", { name: "Aceite os termos para continuar" });
+    expect(within(notice).getByRole("link", { name: "Ler e aceitar os termos" })).toHaveAttribute(
+      "href",
+      "/termos/aceitar?volta=%2Fbancada%2Fcsv-janitor",
+    );
+    expect(screen.queryByLabelText("Escolher arquivos")).toBeNull();
   });
 
   it("falha do catálogo aparece com texto próprio e sem formulário", async () => {

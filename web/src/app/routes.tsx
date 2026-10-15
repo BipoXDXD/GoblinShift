@@ -7,14 +7,14 @@ import { PATHS } from "./paths";
 
 export interface AppServices {
   readonly uploadServices: UploadServices;
-  /** Relógio em ms (Date.now no navegador): o período do Histórico conta a partir dele. */
+  /** Relógio em ms (Date.now no navegador): o período do Histórico e a validade das chaves. */
   readonly now: () => number;
 }
 
 /**
  * Cada tela é um chunk próprio (`lazy`), baixado só quando a rota abre: o JS inicial fica com o
  * React, o router e a moldura. A 404 fica no chunk de entrada porque a Bancada também a usa e
- * ela é pequena. Acesso entra com a fatia 6, que o sustenta.
+ * ela é pequena. Os textos legais ficam cada um no chunk da sua rota.
  */
 export function createRoutes({ uploadServices, now }: AppServices): RouteObject[] {
   return [
@@ -43,6 +43,55 @@ export function createRoutes({ uploadServices, now }: AppServices): RouteObject[
           lazy: async () => {
             const { HistoryPage } = await import("../history/HistoryPage");
             return { element: <HistoryPage now={now} /> };
+          },
+        },
+        {
+          path: PATHS.signIn,
+          lazy: async () => {
+            const { SignInPage } = await import("../account/SignInPage");
+            return { Component: SignInPage };
+          },
+        },
+        {
+          path: PATHS.access,
+          lazy: async () => {
+            const { AccessPage } = await import("../account/AccessPage");
+            return { element: <AccessPage now={now} /> };
+          },
+        },
+        {
+          path: PATHS.accountDeleted,
+          lazy: async () => {
+            const { AccountDeletedPage } = await import("../account/AccountDeletedPage");
+            return { Component: AccountDeletedPage };
+          },
+        },
+        {
+          path: PATHS.acceptTerms,
+          lazy: async () => {
+            const { AcceptTermsPage } = await import("../terms/AcceptTermsPage");
+            return { Component: AcceptTermsPage };
+          },
+        },
+        {
+          path: PATHS.terms,
+          lazy: async () => {
+            const { TermsPage } = await import("../legal/TermsPage");
+            return { Component: TermsPage };
+          },
+        },
+        {
+          path: PATHS.privacy,
+          lazy: async () => {
+            const { PrivacyPage } = await import("../legal/PrivacyPage");
+            return { Component: PrivacyPage };
+          },
+        },
+        {
+          path: PATHS.credits,
+          lazy: async () => {
+            const { CreditsPage } = await import("../legal/CreditsPage");
+            return { Component: CreditsPage };
           },
         },
         {

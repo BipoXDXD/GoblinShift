@@ -44,7 +44,8 @@ READY_TIMEOUT_SECONDS = 30
 READY_POLL_SECONDS = 0.2
 
 SPA_CSP = (
-    "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' blob: data:; "
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob:; "
+    "img-src 'self' blob: data:; "
     "style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
     "form-action 'self'"
 )

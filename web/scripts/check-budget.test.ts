@@ -107,16 +107,41 @@ describe("budgetViolations", () => {
       );
     });
 
-    it("cada GLB até 500 KB e a imagem estática até 90 KB", () => {
-      const files = [
+    it("cada GLB até 2048 KB (ADR 030) e a imagem estática até 90 KB", () => {
+      const within = [
         ...WITHIN,
-        file("assets/goblins-x.glb", 450 * KB, 501 * KB),
+        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 2048 * KB),
+        file("assets/oficina-3d-rubia-640w-x.avif", 90 * KB),
+      ];
+      expect(budgetViolations(within, INDEX)).toEqual([]);
+
+      const over = [
+        ...WITHIN,
+        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 2048 * KB + 1),
         file("assets/oficina-3d-poster-x.avif", 91 * KB),
       ];
-      expect(budgetViolations(files, INDEX)).toEqual([
-        "Modelo 3D (assets/goblins-x.glb): 501,0 KB passa do teto de 500 KB",
+      expect(budgetViolations(over, INDEX)).toEqual([
+        "Modelo 3D (assets/oficina-3d-rubia-x.glb): 2048,0 KB passa do teto de 2048 KB",
         "Imagem estática do 3D (assets/oficina-3d-poster-x.avif): 91,0 KB passa do teto de 90 KB",
       ]);
+    });
+  });
+
+  describe("ilustrações dos estados (ADR 030)", () => {
+    it("cada AVIF ou WebP fora do 3D até 20 KB", () => {
+      expect(
+        budgetViolations(
+          [
+            ...WITHIN,
+            file("assets/lua-256w-x.avif", 20 * KB),
+            file("assets/lua-256w-x.webp", 20 * KB),
+          ],
+          INDEX,
+        ),
+      ).toEqual([]);
+      expect(
+        budgetViolations([...WITHIN, file("assets/ada-256w-x.webp", 20 * KB + 1)], INDEX),
+      ).toEqual(["Ilustração (assets/ada-256w-x.webp): 20,0 KB passa do teto de 20 KB"]);
     });
   });
 });

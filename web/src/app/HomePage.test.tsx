@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
-import { fakeApi, jsonResponse, problemResponse, runBody } from "../test/fakeApi";
+import { fakeApi, jsonResponse, problemResponse, runBody, screenRequests } from "../test/fakeApi";
 import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = () => Response | null;
@@ -26,7 +26,9 @@ describe("Oficina: execuções recentes", () => {
 
     const section = await recentSection();
     expect(await within(section).findAllByRole("listitem")).toHaveLength(5);
-    expect(api.requests.map((request) => new URL(request.url).search)).toEqual(["?limit=5"]);
+    expect(screenRequests(api.requests).map((request) => new URL(request.url).search)).toEqual([
+      "?limit=5",
+    ]);
     expect(within(section).getByRole("link", { name: "Ver o histórico completo" })).toHaveAttribute(
       "href",
       "/historico",
@@ -41,6 +43,10 @@ describe("Oficina: execuções recentes", () => {
       await within(section).findByRole("heading", { name: "Nenhuma execução ainda" }),
     ).toBeVisible();
     expect(section).toHaveTextContent("Escolha uma receita acima para começar.");
+    // Uma goblin por tela: na Oficina é a Rúbia da abertura; o vazio da lista fica só em texto.
+    expect(screen.getAllByRole("img").map((img) => img.getAttribute("alt"))).toEqual([
+      expect.stringMatching(/^Rúbia, /),
+    ]);
   });
 
   it("sem login, o aviso fica dentro da seção, com título de nível 3", async () => {
@@ -48,7 +54,7 @@ describe("Oficina: execuções recentes", () => {
 
     const section = await recentSection();
     expect(
-      await within(section).findByRole("heading", { level: 3, name: "O login chega em breve" }),
+      await within(section).findByRole("heading", { level: 3, name: "Entre para continuar" }),
     ).toBeVisible();
   });
 
