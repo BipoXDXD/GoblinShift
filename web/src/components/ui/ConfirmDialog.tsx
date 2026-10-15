@@ -59,7 +59,7 @@ export function ConfirmDialog({
       aria-labelledby={titleId}
       aria-describedby={bodyId}
       onClose={onCancel}
-      className="m-auto w-full max-w-md rounded-lg bg-surface-raised p-6 text-fg shadow-5"
+      className="m-auto w-full max-w-md rounded-lg bg-surface-raised p-6 text-fg shadow-dialog"
     >
       <div className="flex flex-col gap-4">
         <h2 id={titleId} className="font-display text-xl font-semibold">
