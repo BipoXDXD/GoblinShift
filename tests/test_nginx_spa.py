@@ -3,8 +3,10 @@
 
 Os testes de contrato leem os arquivos; os de integração constroem `docker/web.Dockerfile` e
 sobem a imagem numa rede de teste com a mesma faixa da rede `edge` da VPS (ADR 014): o Nginx no
-IP reservado a ele (.4), um cliente no IP da borda (.2), outro fora dela (.10) e uma API falsa
-com o alias `api`, que devolve em JSON o que recebeu. Sem Docker, os de integração são pulados.
+IP reservado a ele (.4) e uma API falsa com o alias `api`, que devolve em JSON o que recebeu. Sem
+Docker, os de integração são pulados. O IP real e o limite de `/auth`
+(tests/test_nginx_auth_limit.py) e o HSTS (tests/test_nginx_hsts.py), que dependem de quem é a
+borda, têm testes próprios.
 """
 
 import json
@@ -35,9 +37,7 @@ PYTHON_IMAGE = (
 EDGE_SUBNET = "172.31.0.0/24"
 # Faixa dinâmica fora dos IPs fixos, como na rede edge (deploy/edge/compose.yaml).
 EDGE_DYNAMIC_RANGE = "172.31.0.128/25"
-EDGE_PROXY_IP = "172.31.0.2"
 NGINX_IP = "172.31.0.4"
-OUTSIDER_IP = "172.31.0.10"
 BUILD_TIMEOUT_SECONDS = 900
 RUN_TIMEOUT_SECONDS = 60
 READY_TIMEOUT_SECONDS = 30
@@ -49,10 +49,6 @@ SPA_CSP = (
     "form-action 'self'"
 )
 IMMUTABLE = "public, max-age=31536000, immutable"
-HSTS = "max-age=63072000; includeSubDomains"
-# limit_req de /auth/* (3.8): 10 por minuto com rajada de 10, ou seja, 11 seguidas passam.
-AUTH_ALLOWED_IN_A_ROW = 11
-AUTH_RETRY_AFTER_SECONDS = "6"
 
 
 def _yaml(path: Path) -> Any:
@@ -182,8 +178,6 @@ class Response:
 @dataclass(frozen=True)
 class Stack:
     base_url: str
-    edge_client: str
-    outsider_client: str
 
     def get(self, path: str, *, method: str = "GET", data: bytes | None = None) -> Response:
         request = urllib.request.Request(self.base_url + path, data=data, method=method)  # noqa: S310
@@ -193,31 +187,6 @@ class Stack:
         except urllib.error.HTTPError as error:
             with error:
                 return Response(error.code, _lower(error.headers), error.read())
-
-    def curl(self, client: str, path: str, *headers: str) -> Response:
-        """Faz a requisição de dentro da rede, a partir do IP de `client`."""
-        args = ["exec", client, "curl", "-s", "-D", "-", "--max-time", "10"]
-        for header in headers:
-            args += ["-H", header]
-        raw = docker_ok(*args, f"http://{NGINX_IP}{path}")
-        # Saída em modo texto: o subprocess já converteu os CRLF do HTTP em \n.
-        head, _, body = raw.partition("\n\n")
-        status_line, *header_lines = head.split("\n")
-        parsed = {}
-        for line in header_lines:
-            name, _, value = line.partition(":")
-            parsed[name.strip().lower()] = value.strip()
-        return Response(int(status_line.split()[1]), parsed, body.encode())
-
-    def statuses(self, client: str, path: str, count: int, *headers: str) -> list[int]:
-        """`count` requisições seguidas, num laço dentro do cliente, para caber na rajada."""
-        header_args = " ".join(f"-H '{header}'" for header in headers)
-        script = (
-            f"for i in $(seq {count}); do "
-            f"curl -s -o /dev/null -w '%{{http_code}}\\n' {header_args} http://{NGINX_IP}{path}; "
-            "done"
-        )
-        return [int(code) for code in docker_ok("exec", client, "sh", "-c", script).split()]
 
 
 def _lower(headers: Any) -> dict[str, str]:
@@ -238,8 +207,8 @@ def stack() -> Iterator[Stack]:
     )  # fmt: skip
     suffix = uuid.uuid4().hex[:8]
     network = f"gs-nginx-test-{suffix}"
-    names = [f"gs-nginx-test-{role}-{suffix}" for role in ("api", "nginx", "edge", "outsider")]
-    api, nginx, edge, outsider = names
+    names = [f"gs-nginx-test-{role}-{suffix}" for role in ("api", "nginx")]
+    api, nginx = names
     docker_ok("network", "create", "--subnet", EDGE_SUBNET, "--ip-range", EDGE_DYNAMIC_RANGE,
               network)  # fmt: skip
     try:
@@ -248,10 +217,8 @@ def stack() -> Iterator[Stack]:
                   PYTHON_IMAGE, "python", "-c", FAKE_API)  # fmt: skip
         docker_ok(*common, nginx, "--network", network, "--ip", NGINX_IP,
                   "--publish", "127.0.0.1::80", IMAGE)  # fmt: skip
-        for name, ip in ((edge, EDGE_PROXY_IP), (outsider, OUTSIDER_IP)):
-            docker_ok(*common, name, "--network", network, "--ip", ip, IMAGE, "sleep", "infinity")
         port = docker_ok("port", nginx, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
-        current = Stack(f"http://127.0.0.1:{port}", edge, outsider)
+        current = Stack(f"http://127.0.0.1:{port}")
         _wait_until_ready(current)
         yield current
     finally:
@@ -373,69 +340,3 @@ class TestApi:
         response = stack.get("/api/v1/runs", method="POST", data=b"x" * 100_000)
 
         assert response.status == 413
-
-
-class TestBorda:
-    pytestmark = pytestmark_integration
-
-    def test_api_recebe_o_ip_do_cliente_informado_pela_borda(self, stack: Stack) -> None:
-        response = stack.curl(stack.edge_client, "/api/v1/me", "X-Forwarded-For: 203.0.113.7")
-
-        assert response.json()["x_forwarded_for"] == "203.0.113.7"
-
-    def test_ip_informado_por_quem_nao_e_a_borda_e_ignorado(self, stack: Stack) -> None:
-        response = stack.curl(stack.outsider_client, "/api/v1/me", "X-Forwarded-For: 203.0.113.7")
-
-        assert response.json()["x_forwarded_for"] == OUTSIDER_IP
-
-    def test_hsts_so_quando_a_borda_terminou_tls(self, stack: Stack) -> None:
-        via_tls = stack.curl(stack.edge_client, "/", "X-Forwarded-Proto: https")
-        forged = stack.curl(stack.outsider_client, "/", "X-Forwarded-Proto: https")
-
-        assert via_tls.headers["strict-transport-security"] == HSTS
-        assert "strict-transport-security" not in forged.headers
-        assert "strict-transport-security" not in stack.get("/").headers
-
-    def test_limite_de_auth_vale_por_cliente_real(self, stack: Stack) -> None:
-        first = stack.statuses(
-            stack.edge_client, "/auth/login/google", AUTH_ALLOWED_IN_A_ROW + 2,
-            "X-Forwarded-For: 198.51.100.1",
-        )  # fmt: skip
-        other_client = stack.statuses(
-            stack.edge_client, "/auth/login/google", 1, "X-Forwarded-For: 198.51.100.2"
-        )
-
-        assert first == [200] * AUTH_ALLOWED_IN_A_ROW + [429, 429]
-        assert other_client == [200]
-
-    def test_quem_nao_e_a_borda_nao_escapa_do_limite_trocando_o_ip_informado(
-        self, stack: Stack
-    ) -> None:
-        stack.statuses(
-            stack.outsider_client, "/auth/login/google", AUTH_ALLOWED_IN_A_ROW,
-            "X-Forwarded-For: 192.0.2.1",
-        )  # fmt: skip
-        spoofed = stack.statuses(
-            stack.outsider_client, "/auth/login/google", 1, "X-Forwarded-For: 192.0.2.2"
-        )
-
-        assert spoofed == [429]
-
-    def test_429_de_auth_e_problem_json_com_retry_after(self, stack: Stack) -> None:
-        header = "X-Forwarded-For: 198.51.100.9"
-        stack.statuses(stack.edge_client, "/auth/x", AUTH_ALLOWED_IN_A_ROW, header)
-        response = stack.curl(stack.edge_client, "/auth/x", header)
-
-        assert response.status == 429
-        assert response.headers["retry-after"] == AUTH_RETRY_AFTER_SECONDS
-        assert response.headers["content-type"] == "application/problem+json"
-        assert response.json()["code"] == "RATE_LIMITED"
-        assert response.json()["status"] == 429
-
-    def test_limite_de_auth_nao_afeta_a_api(self, stack: Stack) -> None:
-        codes = stack.statuses(
-            stack.edge_client, "/api/v1/me", AUTH_ALLOWED_IN_A_ROW + 5,
-            "X-Forwarded-For: 198.51.100.20",
-        )  # fmt: skip
-
-        assert set(codes) == {200}

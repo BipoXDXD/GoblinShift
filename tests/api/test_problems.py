@@ -45,6 +45,24 @@ def test_metodo_nao_permitido_responde_405_com_allow(offline_client: TestClient)
     assert response.headers["allow"] == "GET"
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "allowed"),
+    [
+        # Achados do Schemathesis: o Allow listava só os métodos da primeira rota do caminho.
+        ("OPTIONS", "/api/v1/runs", {"GET", "POST"}),
+        ("PATCH", f"/api/v1/uploads/{'0' * 8}-0000-4000-8000-{'0' * 12}", {"DELETE", "GET"}),
+    ],
+    ids=["runs", "upload"],
+)
+def test_405_lista_no_allow_os_metodos_de_todas_as_rotas_do_caminho(
+    offline_client: TestClient, method: str, path: str, allowed: set[str]
+) -> None:
+    response = offline_client.request(method, path)
+
+    assert_problem(response, 405, "METHOD_NOT_ALLOWED")
+    assert set(response.headers["allow"].split(", ")) == allowed
+
+
 def test_parametro_invalido_responde_422_com_erros_por_campo(
     offline_client: TestClient,
 ) -> None:

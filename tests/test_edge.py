@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,10 +49,33 @@ def test_borda_importa_um_trecho_por_projeto() -> None:
     assert "protocols h1 h2" in texto
 
 
-def test_acesso_pelo_ip_vai_para_o_ip_reservado_do_goblinshift() -> None:
-    texto = _sem_comentarios(EDGE / "conf.d" / "goblinshift.caddy")
-    assert re.search(r"^:80 \{", texto, re.MULTILINE)
-    assert "reverse_proxy 172.31.0.4:80" in texto
+def _sites(path: Path) -> dict[str, list[str]]:
+    # Endereço de cada bloco de site de topo -> diretivas de dentro (sem chaves aninhadas).
+    sites: dict[str, list[str]] = {}
+    for match in re.finditer(r"^(\S[^{\n]*?)\s*\{\n(.*?)^\}", _sem_comentarios(path), re.M | re.S):
+        sites[match.group(1)] = [d.strip() for d in match.group(2).splitlines() if d.strip()]
+    return sites
+
+
+# Além do proxy, só as diretivas de retry de conexão (lb_try_*) e o fecho do bloco aninhado.
+RETRY_DIRECTIVE = re.compile(r"^(lb_try_duration \d+s|lb_try_interval \d+ms|\})$")
+
+
+@pytest.mark.parametrize("endereco", ["goblinshift.dev", ":80"])
+def test_site_do_goblinshift_vai_so_para_o_ip_reservado(endereco: str) -> None:
+    proxy, *resto = _sites(EDGE / "conf.d" / "goblinshift.caddy")[endereco]
+    assert proxy.removesuffix(" {") == "reverse_proxy 172.31.0.4:80"
+    assert all(RETRY_DIRECTIVE.match(diretiva) for diretiva in resto), resto
+
+
+@pytest.mark.parametrize("endereco", ["goblinshift.dev", ":80"])
+def test_site_do_goblinshift_repete_a_conexao_enquanto_o_nginx_e_recriado(endereco: str) -> None:
+    assert "lb_try_duration 5s" in _sites(EDGE / "conf.d" / "goblinshift.caddy")[endereco]
+
+
+def test_trecho_do_goblinshift_so_tem_o_dominio_e_o_acesso_pelo_ip() -> None:
+    # Outro host aqui roubaria o tráfego de outro projeto da borda (ADR 014).
+    assert sorted(_sites(EDGE / "conf.d" / "goblinshift.caddy")) == [":80", "goblinshift.dev"]
 
 
 def test_nginx_na_borda_tem_ip_reservado_e_sem_alias() -> None:

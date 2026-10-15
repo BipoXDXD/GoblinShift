@@ -25,7 +25,8 @@ map $forwarded_proto $hsts {
     default "";
 }
 
-# /auth/* (3.8): 10 por minuto por cliente real, com rajada de 10 para o vai e volta do login.
+# /auth/* (3.8): cada início de login grava uma linha em `login_state` sem autenticação. 10 por
+# minuto por cliente real, com rajada de 10 para o vai e volta do login.
 limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
 limit_req_status 429;
 

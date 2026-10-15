@@ -272,6 +272,13 @@ def _read_secret(name: str, path: Path) -> str:
         value = path.read_text().strip()
     except FileNotFoundError as error:
         raise MissingSecretError(f"{name} aponta para um arquivo que não existe") from error
+    except PermissionError as error:
+        # No host o arquivo fica com 644 num diretório 700: o container lê com outro UID.
+        raise MissingSecretError(
+            f"{name} aponta para um arquivo que a API não pode ler (no host, use modo 644)"
+        ) from error
+    except IsADirectoryError as error:
+        raise MissingSecretError(f"{name} aponta para um diretório, não um arquivo") from error
     if not value:
         raise MissingSecretError(f"{name} aponta para um arquivo vazio")
     return value

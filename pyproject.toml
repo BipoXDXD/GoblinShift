@@ -38,6 +38,10 @@ build-backend = "uv_build"
 # Única dependência de terceiros da imagem do executor (ADR 018): o Dockerfile instala só este
 # grupo, a partir do lock. O pin repete o de [project.dependencies]; um teste confere os dois.
 executor = ["pillow==12.3.0"]
+# Teste de contrato (scripts/contract-test.sh, job "Contrato" do CI). Fora do `dev` para não
+# pesar na sincronização dos outros jobs; versão exata porque cada release muda as heurísticas e
+# um CI vermelho tem de vir de mudança na API, não do fuzzer.
+contract = ["schemathesis==4.31.0"]
 dev = [
     "hypothesis>=6.169.0",
     "import-linter>=2.15",
@@ -88,9 +92,23 @@ files = ["src", "tests", "migrations", "deploy", "scripts"]
 module = ["testcontainers.*"]
 ignore_missing_imports = true
 
+# O Schemathesis só existe no grupo `contract` (job "Contrato"); o mypy roda no ambiente `dev`.
+# Pulá-lo sempre dá o mesmo resultado com ou sem o grupo instalado. O adaptador que o importa é
+# fino e roda no próprio job; as regras que ele aplica (scripts/contract_rules.py) são tipadas.
+[[tool.mypy.overrides]]
+module = ["schemathesis", "schemathesis.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["scripts.contract_hooks"]
+disallow_untyped_decorators = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# O Schemathesis (grupo `contract`) registra um plugin do pytest ao ser instalado no mesmo
+# ambiente; a suíte não o usa, e sem ele ela roda igual com ou sem o grupo.
+addopts = "-ra --strict-markers -p no:schemathesis"
 # O executor-ctl é um pacote do host em deploy/, fora de src/ (roda no Python do sistema).
 pythonpath = ["deploy"]
 # Aviso é erro: uma depreciação nova reprova a suíte em vez de passar despercebida.

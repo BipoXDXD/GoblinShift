@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from opentelemetry import propagate
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -25,10 +25,9 @@ from goblinshift.entrypoints.api.capacity_problems import (
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
 from goblinshift.entrypoints.api.problems import (
-    PROBLEM_MEDIA_TYPE,
     ApiProblem,
     ProblemCode,
-    ProblemDetails,
+    problem_responses,
 )
 from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
@@ -37,6 +36,7 @@ from goblinshift.files.states import ArtifactRole
 from goblinshift.identity import Principal, Scope
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.acceptance import (
+    IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
     ActiveRunLimitError,
     DailyQuotaExceededError,
@@ -47,6 +47,7 @@ from goblinshift.runs.acceptance import (
     QueueFullError,
     RunCommand,
     accept_run,
+    parse_idempotency_key,
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
@@ -72,7 +73,10 @@ IN_PROGRESS_RETRY_AFTER_SECONDS = 1
 # Uma execução ocupa o executor por minutos (1.7); tentar antes disso só gasta a cota.
 QUEUE_FULL_RETRY_AFTER_SECONDS = 60
 MAX_RECIPE_ID_CHARS = 64
+# Formato dos ids do catálogo (`csv-janitor`): o filtro da listagem só aceita ids nesse formato.
+_RECIPE_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 MAX_CURSOR_CHARS = 1024
+_IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 _REPLAYED_HEADER = "Idempotency-Replayed"
 _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.NO_VALID_OUTPUTS: "Nenhuma entrada produziu saída válida.",
@@ -154,10 +158,7 @@ class RunResultsResponse(BaseModel):
 
 
 def _problem(*statuses: int) -> dict[int | str, dict[str, Any]]:
-    return {
-        status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
-        for status in statuses
-    }
+    return problem_responses(*statuses)
 
 
 def _create_run_openapi() -> dict[str, Any]:
@@ -185,7 +186,15 @@ def _create_run_openapi() -> dict[str, Any]:
         },
     }
     schema = {"allOf": [common, {"oneOf": variants}], "unevaluatedProperties": False}
+    idempotency_key = {
+        "name": _IDEMPOTENCY_KEY_HEADER,
+        "in": "header",
+        "required": False,
+        "description": "Obrigatória, exceto com validate_only.",
+        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
+    }
     return {
+        "parameters": [idempotency_key],
         "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
     }
 
@@ -208,7 +217,6 @@ def create_run(
     request: Request,
     response: Response,
     validate_only: bool = False,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> AcceptedRunResponse | ValidatedRunResponse:
     run_command = RunCommand(
         recipe_id=command.recipe_id,
@@ -216,9 +224,12 @@ def create_run(
         input_upload_ids=tuple(command.input_upload_ids),
         parameters=command.parameters,
     )
+    # Lida à mão e publicada em `_create_run_openapi`: declarada como `str | None` na assinatura,
+    # sairia na spec como `anyOf [string, null]`, e o cliente gerado mandaria o texto "null".
+    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
     if validate_only:
         response.status_code = 200
-        return _validate(run_command)
+        return _validate(run_command, idempotency_key)
     try:
         accepted = accept_run(
             session,
@@ -258,7 +269,9 @@ def list_runs_route(
     session: DbSession,
     request: Request,
     now: Now,
-    recipe_id: Annotated[str | None, Query(max_length=MAX_RECIPE_ID_CHARS)] = None,
+    recipe_id: Annotated[
+        str | None, Query(max_length=MAX_RECIPE_ID_CHARS, pattern=_RECIPE_ID_PATTERN)
+    ] = None,
     status: Status | None = None,
     created_from: AwareDatetime | None = None,
     created_to: AwareDatetime | None = None,
@@ -330,8 +343,11 @@ def get_results_route(
     )
 
 
-def _validate(command: RunCommand) -> ValidatedRunResponse:
+def _validate(command: RunCommand, idempotency_key: str | None) -> ValidatedRunResponse:
+    """Sem chave é permitido; enviada, a chave tem de estar no formato publicado."""
     try:
+        if idempotency_key is not None:
+            parse_idempotency_key(idempotency_key)
         validated = validate_run(command)
     except _REFUSALS as error:
         raise _refusal_problem(error) from None
