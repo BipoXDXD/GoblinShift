@@ -146,6 +146,16 @@ export const TEXT = {
       announceReady: (name: string) => `${name} enviado.`,
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
     },
+    removal: {
+      titleOne: (name: string) => `Remover ${name}?`,
+      bodyOne: "O arquivo sai do lote. Para usá-lo de novo, escolha-o outra vez.",
+      titleAll: (count: number) => `Remover os ${String(count)} arquivos?`,
+      bodyAll: "Todos os arquivos saem do lote. Para usá-los de novo, escolha-os outra vez.",
+      confirm: "Remover",
+      confirmAll: "Remover todos",
+      cancel: "Cancelar",
+      removeAll: "Remover todos",
+    },
     serverFieldErrors: {
       missing: "Campo obrigatório.",
       string_too_short: "Preencha este campo.",

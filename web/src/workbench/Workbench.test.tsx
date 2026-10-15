@@ -346,10 +346,55 @@ describe("Bancada", () => {
 
     expect(await screen.findByRole("button", { name: "Enviar de novo a.csv" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    const dialog = screen.getByRole("dialog", { name: "Remover a.csv?" });
+    expect(within(dialog).getByRole("button", { name: "Cancelar" })).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Remover" }));
+
     expect(screen.getByRole("list", { name: "Ordem de processamento" })).not.toHaveTextContent(
       "a.csv",
     );
     expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+  });
+
+  it("cancelar a remoção mantém o arquivo", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("list", { name: "Ordem de processamento" })).toHaveTextContent("a.csv");
+    expect(screen.getByRole("button", { name: "Remover a.csv" })).toHaveFocus();
+  });
+
+  it("remover durante o envio aborta o envio sem deixar erro", async () => {
+    const { user, pending } = await setup({ autoResolve: false });
+    await chooseFiles(user, ["a.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(screen.queryByText("a.csv")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("confirmar duas vezes remove só o arquivo escolhido", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    const confirm = screen.getByRole("button", { name: "Remover" });
+    await user.dblClick(confirm);
+
+    const list = screen.getByRole("list", { name: "Ordem de processamento" });
+    expect(list).not.toHaveTextContent("a.csv");
+    expect(list).toHaveTextContent("b.csv");
   });
 
   it("não tem violações do axe com arquivos e erros na tela", async () => {
