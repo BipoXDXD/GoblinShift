@@ -32,7 +32,8 @@ const RAW_COLOR =
   /(?<=^|[\s"'`:])(?:bg|text|border|outline|ring|fill|stroke|shadow|accent|decoration|divide|caret)-(?:moss|brass|stone|ember|patina|white)(?:-[0-9]+)?\b/g;
 /** Três níveis de elevação mais a rebaixada (spec 2026-10-15, decisão 2). */
 const ALLOWED_SHADOWS = new Set(["card", "float", "dialog", "sunken", "none"]);
-const SHADOW_UTILITY = /(?<=^|[\s"'`:])shadow-([a-z0-9]+)(?=$|[\s"'`])/g;
+/** O nível vai até o fim da classe, para que opacidade (`/20`) e variável (`(--x)`) não escapem. */
+const SHADOW_UTILITY = /(?<=^|[\s"'`:])shadow-([^\s"'`]+)/g;
 /** Camadas com nome (CSSD 6.4.3); o <dialog> modal usa a top layer e não precisa de z-index. */
 const Z_LAYERS = new Set(["--z-menu", "--z-skip"]);
 const Z_UTILITY = /(?<=^|[\s"'`:])-?z-(\d+|\(([^)]*)\))(?=$|[\s"'`])/g;
@@ -91,6 +92,8 @@ describe("styleViolations", () => {
     ["text-patina-800", "tom cru em componente (use o papel semântico): text-patina-800"],
     ["shadow-3", "sombra fora dos níveis: shadow-3"],
     ["hover:shadow-md", "sombra fora dos níveis: shadow-md"],
+    ["shadow-lg/20", "sombra fora dos níveis: shadow-lg/20"],
+    ["shadow-(--x)", "sombra fora dos níveis: shadow-(--x)"],
     ["z-10", "z-index fora das camadas: z-10"],
     ["focus:z-(--qualquer)", "z-index fora das camadas: z-(--qualquer)"],
     ["min-h-screen", "altura de janela em vh: min-h-screen"],
