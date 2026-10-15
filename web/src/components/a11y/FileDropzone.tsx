@@ -72,7 +72,7 @@ export function FileDropzone({
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       data-dragging={dragging}
-      className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-line bg-surface-sunken p-4 shadow-sunken transition data-[dragging=true]:border-solid data-[dragging=true]:bg-dropzone-active data-[dragging=true]:shadow-3 md:p-6"
+      className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-line bg-surface-sunken p-4 shadow-sunken transition data-[dragging=true]:border-solid data-[dragging=true]:bg-dropzone-active data-[dragging=true]:shadow-float md:p-6"
       onDragOver={onDragOver}
       onDragLeave={() => {
         setDragging(false);
