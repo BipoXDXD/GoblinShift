@@ -397,6 +397,29 @@ describe("Bancada", () => {
     expect(list).toHaveTextContent("b.csv");
   });
 
+  it("com 2 arquivos ou mais, Remover todos pede confirmação com a contagem", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Remover todos" }));
+    const dialog = screen.getByRole("dialog", { name: "Remover os 2 arquivos?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remover todos" }));
+
+    expect(screen.queryByRole("list", { name: "Ordem de processamento" })).toBeNull();
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+  });
+
+  it("com 1 arquivo, não há Remover todos", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    expect(screen.queryByRole("button", { name: "Remover todos" })).toBeNull();
+  });
+
   it("não tem violações do axe com arquivos e erros na tela", async () => {
     const { user, container } = await setup();
     await chooseFiles(user, ["a.csv"]);
