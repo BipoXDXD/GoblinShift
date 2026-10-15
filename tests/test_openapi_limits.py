@@ -75,3 +75,15 @@ def test_idempotency_key_publica_o_formato_aceito_sem_null() -> None:
     # Header ausente é "sem chave"; `null` faria o cliente gerado enviar o texto "null".
     assert parameter["required"] is False
     assert parameter["schema"] == {"type": "string", "pattern": "^[A-Za-z0-9_-]{16,64}$"}
+
+
+def test_rotas_autenticadas_publicam_429_com_retry_after() -> None:
+    for path, operations in SPEC["paths"].items():
+        if not path.startswith("/api/v1/"):
+            continue
+        for operation in operations.values():
+            response = operation["responses"]["429"]
+            assert "application/problem+json" in response["content"]
+            retry = response["headers"]["Retry-After"]
+            assert retry["required"] is True
+            assert retry["schema"] == {"type": "string", "pattern": "^[0-9]+$"}

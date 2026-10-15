@@ -56,7 +56,9 @@ trap cleanup EXIT
 
 uv run alembic upgrade head
 
-uv run uvicorn goblinshift.entrypoints.api.app:create_app --factory \
+# Fábrica de teste isolada: orçamento alto de requisições para o fuzzer chegar às validações;
+# autenticação, cotas e contador continuam reais. A imagem de produção não inclui scripts/.
+uv run uvicorn scripts.contract_server:create_app --factory \
   --host 127.0.0.1 --port "$PORT" --no-access-log >"$WORK/api.log" 2>&1 &
 api_pid=$!
 for _ in $(seq 1 60); do
