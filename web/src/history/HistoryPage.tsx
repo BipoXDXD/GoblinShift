@@ -156,7 +156,10 @@ function EmptyResults({ filtered }: { readonly filtered: boolean }): ReactElemen
     );
   }
   return (
-    <EmptyState title={T.empty} illustration={<GoblinIllustration state="vazio" />}>
+    <EmptyState
+      title={T.empty}
+      illustration={<GoblinIllustration state="vazio" rotationKey="historico" />}
+    >
       <p>{T.emptyHint}</p>
       <Link to={PATHS.home} className="inline-flex min-h-11 items-center font-semibold">
         {T.goToWorkshop}

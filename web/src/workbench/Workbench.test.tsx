@@ -92,8 +92,15 @@ describe("Bancada", () => {
 
     await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Lua, / })).toBeInTheDocument();
+    // Rotação estável pela receita: a CSV Janitor cai sempre na Jade.
+    expect(screen.getByRole("img", { name: /^Jade, / })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
+  });
+
+  it("outra receita pode cair na outra goblin do vazio, e sempre na mesma", async () => {
+    await setup({ recipe: "image-forge" });
+
+    expect(screen.getByRole("img", { name: /^Lua, / })).toBeInTheDocument();
   });
 
   it("a ordem do Tab segue a leitura nas duas colunas: arquivos, parâmetros, Executar", async () => {

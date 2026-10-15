@@ -12,7 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import RowMapping, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
@@ -127,6 +127,51 @@ def lease_expired(factory: sessionmaker[Session]) -> bool:
     return expired
 
 
+def lease_diagnosis(factory: sessionmaker[Session], run_id: uuid.UUID) -> str:
+    """O que a manutenção viu, para a falha rara do teste do SIGKILL se explicar sozinha.
+
+    Hipótese (plano da fatia 8, 5.3-1): o kill caiu numa renovação do lease e o Postgres ainda
+    segurava a transação do worker. Isso apareceria como sessão com `xact_start` antigo, Run
+    travada ou lease renovado depois de `now()`.
+    """
+    with factory() as session:
+        now = session.execute(select(func.now())).scalar_one()
+        sessions = session.execute(
+            text(
+                "SELECT pid, application_name, state, xact_start, wait_event_type, wait_event"
+                " FROM pg_stat_activity"
+                " WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                " ORDER BY pid"
+            )
+        ).all()
+        rows = session.execute(
+            select(
+                attempt.c.id,
+                attempt.c.generation,
+                attempt.c.lease_expires_at,
+                attempt.c.executor_started_at,
+                attempt.c.ended_at,
+                attempt.c.error_code,
+            )
+            .where(attempt.c.run_id == run_id)
+            .order_by(attempt.c.number)
+        ).all()
+    run_state = run_row(factory, run_id)
+    lines = [
+        f"now() = {now}",
+        "run: status={status} phase={phase} generation={generation}".format(**run_state),
+        *(f"attempt: {_fields(row._mapping)}" for row in rows),
+        *(f"pg_stat_activity: {_fields(row._mapping)}" for row in sessions),
+    ]
+    if not sessions:
+        lines.append("pg_stat_activity: nenhuma outra sessão no banco")
+    return "\n".join(lines)
+
+
+def _fields(row: RowMapping) -> str:
+    return " ".join(f"{name}={value}" for name, value in row.items())
+
+
 def test_notify_acorda_o_worker_antes_do_polling(
     factory: sessionmaker[Session],
     db_settings: Settings,
@@ -174,11 +219,15 @@ def test_worker_morto_por_sigkill_e_assumido_pela_manutencao(
     runner = local_runner(work_root)
     survived = runner.status(orphan["id"]).is_running
     wait_until(lambda: lease_expired(factory))
+    seen_by_cycle = lease_diagnosis(factory, run_id)
 
     counts = janitor(factory, storage, work_root).run_cycle()
 
     assert survived, "o executor deveria sobreviver ao worker, como um container"
-    assert counts["leases_reconciled"] == 1
+    assert counts["leases_reconciled"] == 1, (
+        f"ciclo: {counts}\nantes do ciclo:\n{seen_by_cycle}\n"
+        f"depois do ciclo:\n{lease_diagnosis(factory, run_id)}"
+    )
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"]) == ("running", "retry_wait")
     [ended] = attempts(factory, run_id)

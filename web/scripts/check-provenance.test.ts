@@ -100,6 +100,58 @@ describe("provenanceViolations", () => {
     );
   });
 
+  describe("origem de terceiros ou não verificável", () => {
+    const thirdParty = {
+      "lua-ref": { tool: "fonte externa (site)", inputs: [], third_party: "imagem de terceiros" },
+      "lua-2d": { tool: "fonte externa", inputs: ["lua-ref"] },
+      "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["lua-2d"], rights: "fonte externa" },
+    };
+    const NO_DECISION =
+      "goblins/lua-128w.avif: deriva de lua-ref (imagem de terceiros) sem decisão registrada em exceptions";
+
+    it("sem decisão registrada, recusa", () => {
+      expect(provenanceViolations(FILES, doc({ generations: thirdParty }))).toContain(NO_DECISION);
+    });
+
+    it("com decisão registrada (quem, quando, por quê), aceita", () => {
+      const accepted = doc({
+        generations: thirdParty,
+        exceptions: [
+          {
+            generation: "lua-ref",
+            decided_by: "usuário",
+            decided_at: "2026-10-15",
+            reason: "assume o risco",
+          },
+        ],
+      });
+
+      expect(provenanceViolations(FILES, accepted)).toEqual([]);
+    });
+
+    it("decisão sem data ou sem motivo não vale", () => {
+      const incomplete = doc({
+        generations: thirdParty,
+        exceptions: [{ generation: "lua-ref", decided_by: "usuário", decided_at: "", reason: "" }],
+      });
+
+      expect(provenanceViolations(FILES, incomplete)).toEqual([
+        "PROVENANCE.json fora do formato esperado",
+      ]);
+    });
+
+    it("decisão sobre outra geração não abre exceção para esta", () => {
+      const other = doc({
+        generations: thirdParty,
+        exceptions: [
+          { generation: "outra", decided_by: "usuário", decided_at: "2026-10-15", reason: "x" },
+        ],
+      });
+
+      expect(provenanceViolations(FILES, other)).toContain(NO_DECISION);
+    });
+  });
+
   it("documento fora do formato é um erro só, sem seguir adiante", () => {
     expect(provenanceViolations(FILES, { schema: 2 })).toEqual([
       "PROVENANCE.json fora do formato esperado",
