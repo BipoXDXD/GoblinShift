@@ -48,6 +48,9 @@ const THEMES = [
 
 const css = readTokensCss();
 
+/** success-bg, success-fg e progress-fill. */
+const STATE_ROLE_COUNT = 3;
+
 describe.each(THEMES)("tema $name", ({ name, selector }) => {
   const colors = semanticColors(css, selector);
 
@@ -84,6 +87,18 @@ describe("papéis de cor", () => {
     expect(block).toMatch(/--success-bg:\s*var\(--color-patina-\d+\)/);
     expect(block).toMatch(/--success-fg:\s*var\(--color-patina-\d+\)/);
   });
+
+  // Progresso e sucesso são estado, não ação: no musgo pareceriam clicáveis.
+  it.each([...THEMES.map(({ selector }) => selector), ":root:not([data-theme])"])(
+    "nenhum papel de estado aponta para o musgo em %s",
+    (selector) => {
+      const stateRoles = declarationLines(css, `${selector} {`).filter((line) =>
+        /^--(?:success-[a-z]+|progress-fill):/.test(line),
+      );
+      expect(stateRoles.length).toBeGreaterThanOrEqual(STATE_ROLE_COUNT);
+      expect(stateRoles.filter((line) => line.includes("--color-moss-"))).toEqual([]);
+    },
+  );
 
   it.each(THEMES)(
     "o fundo escurecido do diálogo tem papel próprio no tema $name",
