@@ -10,7 +10,7 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
 
 ## 1. Controlador e contato
 
-- **Controlador:** [[A DEFINIR: nome completo do controlador, pessoa física, e cidade/UF]].
+- **Controlador:** Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR).
 - **Canal para assuntos de privacidade e exercício de direitos:** privacidade@goblinshift.dev.
 - **Encarregado (DPO):** [[A DEFINIR: nome e contato do encarregado, ou a declaração de
   dispensa.]]
@@ -265,4 +265,4 @@ texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](htt
 | Versão | Data | Resumo |
 |---|---|---|
 | `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
-| `v2-rascunho` | 2026-10-15 | Domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |
+| `v2-rascunho` | 2026-10-15 | Identificação do controlador; domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |

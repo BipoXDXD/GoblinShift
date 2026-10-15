@@ -64,3 +64,26 @@ def test_os_dois_textos_tem_a_mesma_vigencia() -> None:
     terms, privacy = (path.read_text(encoding="utf-8") for path in TEXTS)
 
     assert header_field(terms, "Vigência") == header_field(privacy, "Vigência")
+
+
+CONTROLLER = "Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR)"
+PRIVACY_CHANNEL = "privacidade@goblinshift.dev"
+# CPF com ou sem pontuação: o controlador publica nome e cidade, nunca documento.
+CPF = r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"
+
+
+@pytest.mark.parametrize("path", TEXTS, ids=lambda path: path.name)
+def test_identifica_o_controlador_com_nome_cidade_e_canal(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    section = text.split("\n## 2.", 1)[0]
+
+    assert CONTROLLER in section
+    assert PRIVACY_CHANNEL in section
+    assert "nome completo do controlador" not in text
+
+
+@pytest.mark.parametrize("path", TEXTS, ids=lambda path: path.name)
+def test_nao_publica_cpf(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert re.search(CPF, text) is None

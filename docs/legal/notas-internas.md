@@ -33,14 +33,15 @@ Texto que abria o arquivo público até sair do build:
 **Decide o dono do serviço:** nenhuma pendência; as decisões de 2026-10-15 estão em
 "Decisões aplicadas", no fim deste arquivo.
 
-**Dados do dono do serviço:**
-
-- **J-16**, identificação de quem oferece o serviço (item 1). Decidido em 2026-10-15: o
-  controlador é o dono do serviço, pessoa física. Falta só o nome completo e a cidade/UF; a
-  marcação está numa linha só para a troca ser de uma linha. O advogado confere o que mais
-  precisa ser publicado (CPF, endereço).
-
 **Exige advogado(a):**
+
+- **J-16**, identificação do controlador (itens 1 dos dois textos). Preenchido em 2026-10-15:
+  Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR), com o canal
+  `privacidade@goblinshift.dev`, sem CPF nem endereço. Pergunta ao advogado: "Sou pessoa física,
+  sem CNPJ, e opero gratuitamente um serviço aberto que trata dados pessoais de terceiros. Nome
+  completo, cidade/UF e e-mail bastam para identificar o controlador perante a LGPD e o CDC, ou
+  preciso publicar CPF ou endereço? Posso usar endereço comercial ou caixa postal? Vale abrir um
+  MEI antes de abrir o cadastro?"
 - **J-18**, idade mínima e contas de menores (item 2).
 - **J-20**, procedimento para abuso sexual infantil e conteúdo ilegal grave: autoridades,
   preservação, prazos e a expiração de 48 h (item 7). Este procedimento não é escrito por IA.
@@ -53,7 +54,6 @@ redação original, na ordem do arquivo.
 
 | Seção | Marcação original |
 |---|---|
-| 1. Quem oferece o serviço | [[A DEFINIR (J-16): nome completo do controlador, pessoa física, e cidade/UF]] |
 | 2. Aceite destes termos | [[A DEFINIR (J-18): idade mínima para usar o serviço e o que fazer com contas de menores. Google e GitHub têm idade mínima própria, mas o GoblinShift não recebe a data de nascimento e não tem como verificar idade.]] |
 | 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-20) com orientação jurídica: quais autoridades e canais (por exemplo, Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a preservação com a expiração automática de 48 horas; o plano registra que esse procedimento exige orientação jurídica e não pode ser escrito por IA]] |
 | 13. Lei aplicável e foro | [[A DEFINIR (J-21): foro. Nota para a revisão: em relação de consumo, o consumidor pode demandar no foro do próprio domicílio (CDC, art. 101, I).]] |
@@ -127,12 +127,10 @@ Texto que abria o arquivo público até sair do build:
   `abuso@` e `privacidade@` (encaminhamento da Hostinger, Cloudflare Email Routing, ImprovMX, e a
   caixa de destino) e onde ele fica. Se for fora do Brasil, entra no item 7 junto com o J-19.
 
-**Dados do dono do serviço:**
-
-- **J-16**, identificação do controlador (item 1). Decidido em 2026-10-15: pessoa física, o
-  próprio dono. Falta o nome completo e a cidade/UF.
-
 **Exige advogado(a):**
+
+- **J-16**, se nome, cidade/UF e e-mail bastam para identificar o controlador (item 1); a
+  pergunta completa está nas pendências dos Termos, acima.
 - **J-17**, encarregado ou declaração de dispensa como agente de pequeno porte (item 1).
 - **J-18**, idade mínima e LGPD art. 14, sem como verificar idade (item 11).
 - **J-19**, transferência internacional: localização do GitHub Actions e mecanismo do art. 33
@@ -159,7 +157,6 @@ redação original, na ordem do arquivo.
 
 | Seção | Marcação original |
 |---|---|
-| 1. Controlador e contato | [[A DEFINIR (J-16): nome completo do controlador, pessoa física, e cidade/UF]] |
 | 1. Controlador e contato | [[A DEFINIR (J-17): nome e contato do encarregado, ou a declaração de dispensa. Nota para a revisão: a ANPD dispensa agentes de tratamento de pequeno porte de indicar encarregado, mas exige um canal de comunicação com o titular; confirmar o enquadramento e a redação.]] |
 | 4. Para que usamos e com que base legal | [[A DEFINIR (J-22) na revisão: ou exercício regular de direitos (inciso VI)]] |
 | 4. Para que usamos e com que base legal | [[A DEFINIR (J-23) na revisão: registrar a avaliação de legítimo interesse]] |
@@ -281,7 +278,7 @@ saíram dos textos públicos, que passaram à versão `v2-rascunho`.
 | J-13 | Opção B: marca reservada; a parte humana da arte sob CC BY 4.0, sem garantia sobre a saída de IA, com Jade e Fagulha fora da concessão. Os scripts de `scripts/arte/` passaram da CC BY 4.0 para a Apache-2.0, como o resto do código | Termos 9; `docs/art/LICENSE-ART.md` |
 | J-14 | Opção A: 15 dias de antecedência para mudança relevante; tabela "Histórico de versões" no fim de cada texto, mais o link do Git | Termos 12; Aviso 12; fim dos dois textos |
 | J-15 | Aviso destacado no site, em até 3 dias úteis, "porque não temos o seu e-mail" | Aviso 10 |
-| J-16 (parcial) | Controlador é o dono, pessoa física; o nome e a cidade/UF ainda faltam | Termos 1; Aviso 1 |
+| J-16 | Controlador: Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR), canal `privacidade@goblinshift.dev`; sem CPF nem endereço. Fica a pergunta ao advogado sobre se isso basta | Termos 1; Aviso 1 |
 | J-19 (parcial) | Região do B2: Estados Unidos (US East). O mecanismo do art. 33 continua com o advogado | Aviso 6 |
 
 Lacunas fora das marcações, resolvidas no mesmo dia:
