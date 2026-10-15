@@ -87,7 +87,7 @@ def list_api_keys(principal: SessionPrincipal, session: DbSession) -> ApiKeyList
     operation_id="createApiKey",
     status_code=201,
     openapi_extra=command_openapi(CreateApiKey),
-    responses=problem_responses(409),
+    responses=problem_responses(400, 409, 413, 415),
 )
 def create_api_key(
     principal: RecentSessionPrincipal,

@@ -5,6 +5,9 @@ aparece no deploy, e não no primeiro login. Fora de produção, as chaves do se
 de desenvolvimento, e o provedor sem cliente configurado fica desligado.
 """
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,7 @@ from goblinshift.platform.settings import (
 SECRET = "s" * 32
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 ORIGIN = "https://goblinshift.dev"
+BOOT_TIMEOUT_SECONDS = 60
 
 SECRET_FILES = (
     "google_client_secret_file",
@@ -94,6 +98,61 @@ def test_arquivo_de_segredo_vazio_nao_sobe(tmp_path: Path, missing: str) -> None
 
     with pytest.raises(MissingSecretError, match=f"GS_{missing.upper()}"):
         _production(tmp_path, **{missing: empty}).web_identity()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lê qualquer arquivo")
+@pytest.mark.parametrize("missing", SECRET_FILES)
+def test_arquivo_de_segredo_ilegivel_nao_sobe_e_diz_qual(tmp_path: Path, missing: str) -> None:
+    """No host o arquivo precisa de modo 644: com 600 o UID da API não o lê (README)."""
+    unreadable = _secret_file(tmp_path, "ilegivel", "s" * 64)
+    unreadable.chmod(0)
+
+    with pytest.raises(MissingSecretError, match=f"GS_{missing.upper()}.*644"):
+        _production(tmp_path, **{missing: unreadable}).web_identity()
+
+
+@pytest.mark.parametrize("missing", SECRET_FILES)
+def test_caminho_de_segredo_que_e_diretorio_nao_sobe(tmp_path: Path, missing: str) -> None:
+    directory = tmp_path / "diretorio"
+    directory.mkdir()
+
+    with pytest.raises(MissingSecretError, match=f"GS_{missing.upper()}"):
+        _production(tmp_path, **{missing: directory}).web_identity()
+
+
+def test_boot_real_sem_segredo_sai_com_erro_que_nomeia_a_variavel(tmp_path: Path) -> None:
+    """O mesmo comando da imagem: o processo termina, e a última linha diz o que falta."""
+    settings = _production(tmp_path, github_client_secret_file=tmp_path / "nao-existe")
+    env = {
+        "PATH": os.environ["PATH"],
+        "GS_ENVIRONMENT": "production",
+        "GS_CURSOR_SECRET": SECRET,
+        "GS_USER_HASH_SECRET": SECRET,
+        "GS_RUNNER": "executor_ctl",
+        "GS_EXECUTOR_IMAGE": EXECUTOR_IMAGE,
+        "GS_PUBLIC_ORIGIN": ORIGIN,
+        "GS_GOOGLE_CLIENT_ID": "id-google",
+        "GS_GITHUB_CLIENT_ID": "id-github",
+        "GS_GOOGLE_CLIENT_SECRET_FILE": str(settings.google_client_secret_file),
+        "GS_GITHUB_CLIENT_SECRET_FILE": str(settings.github_client_secret_file),
+        "GS_CSRF_SECRET_FILE": str(settings.csrf_secret_file),
+        "GS_LOGIN_COOKIE_SECRET_FILE": str(settings.login_cookie_secret_file),
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "uvicorn", "goblinshift.entrypoints.api.app:create_app",
+         "--factory", "--host", "127.0.0.1", "--port", "0"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=BOOT_TIMEOUT_SECONDS,
+    )  # fmt: skip
+
+    assert result.returncode != 0
+    last_line = result.stderr.strip().splitlines()[-1]
+    assert last_line.startswith("goblinshift.platform.settings.MissingSecretError:")
+    assert "GS_GITHUB_CLIENT_SECRET_FILE" in last_line
 
 
 @pytest.mark.parametrize("key_file", ["csrf_secret_file", "login_cookie_secret_file"])

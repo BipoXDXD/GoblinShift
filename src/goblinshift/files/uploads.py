@@ -6,7 +6,7 @@ Prazos usam o relógio do banco (`now()`), o mesmo para API, worker e manutenç�
 """
 
 import logging
-import unicodedata
+import re
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -43,9 +43,16 @@ logger = logging.getLogger(__name__)
 
 _UPLOAD_KEY_PREFIX = "uploads"
 _NAME_SEPARATORS = frozenset("/\\")
-# Controles (Cc), separadores de linha/parágrafo (Zl, Zp) e surrogates soltos (Cs), que o
-# PostgreSQL nem aceitaria em UTF-8.
-_FORBIDDEN_NAME_CATEGORIES = frozenset({"Cc", "Zl", "Zp", "Cs"})
+# Controles (Cc) e separadores de linha/parágrafo (Zl, Zp), em faixas escritas à mão porque o JSON
+# Schema (ECMA-262) não tem `\p{...}`; um teste confere que elas cobrem exatamente essas categorias.
+_CONTROL_CHARS = r"\x00-\x1f\x7f-\x9f\u2028\u2029"
+# Mais os surrogates soltos (Cs), que o PostgreSQL nem aceitaria em UTF-8.
+_FORBIDDEN_NAME_CHAR = re.compile(rf"[{_CONTROL_CHARS}\ud800-\udfff]")
+# Publicado no contrato (`pattern` de `items[].name`); vale em Python e em ECMA-262. Fora dele
+# ficam o comprimento, com minLength/maxLength próprios; os nomes "." e "..", que exigiriam
+# lookahead; e os surrogates soltos, cuja faixa num conjunto negado o gerador do Schemathesis
+# 4.31 interpreta errado (gera caracteres que o padrão recusa). Todos seguem recusados aqui.
+UPLOAD_NAME_PATTERN = rf"^[^/\\{_CONTROL_CHARS}]*$"
 
 
 class UploadIntent(NamedTuple):
@@ -277,7 +284,7 @@ def _name_problem(name: str) -> str | None:
         return "não pode ser '.' nem '..'"
     if any(char in _NAME_SEPARATORS for char in name):
         return "não pode conter separadores de caminho"
-    if any(unicodedata.category(char) in _FORBIDDEN_NAME_CATEGORIES for char in name):
+    if _FORBIDDEN_NAME_CHAR.search(name):
         return "não pode conter caracteres de controle"
     return None
 

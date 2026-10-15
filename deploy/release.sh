@@ -9,7 +9,8 @@ set -euo pipefail
 tag="${1:?uso: release.sh <image-tag>}"
 ROOT=/srv/goblinshift
 cd "$ROOT/app"
-# Segredos gerados pela própria aplicação: criados uma vez, nunca trocados.
+# Segredos gerados pela própria aplicação (criados uma vez, nunca trocados) e os gravados pelo
+# operador conferidos: sem um deles o deploy para aqui, antes do `migrate`.
 deploy/app-secrets.sh "$ROOT/secrets/app.env"
 
 # Imagem do executor do mesmo commit, sempre pelo digest: entra na allowlist do executor-ctl
