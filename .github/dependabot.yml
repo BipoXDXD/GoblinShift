@@ -4,6 +4,11 @@ updates:
     directory: /web
     schedule:
       interval: weekly
+    ignore:
+      # @types/node acompanha a major do Node em web/.nvmrc (hoje 24); a major sobe junto com o
+      # runtime, à mão, senão os tipos prometem APIs que o Node da CI e da imagem não têm.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # @types/x acompanha x na mesma major.minor (ETS item 66): atualizá-los juntos.
       react:
