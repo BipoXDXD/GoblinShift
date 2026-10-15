@@ -11,22 +11,26 @@ As goblins do site são **ilustrações e modelos 3D gerados com processamento e
 | Ada | Estado carregando | `417f7fe0` |
 | Nyx | Estado de erro | `19a1ddba` |
 | Ferrugem | Estado de sucesso | `ec3a728c` |
+| Jade | Estado vazio, em rotação com a Lua | `3c7aa397` |
+| Fagulha | Estado carregando, em rotação com a Ada | `0d84776f` |
 
-Cadeia de cada uma (detalhe no `PROVENANCE.json`):
+Cadeia da Rúbia, da Lua, da Ada, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
 
 1. Conceito 2D **só por texto** no fonte externa (ByteDance), pela API da fonte externa.
 2. Versão frontal e versão semi-realista por image-to-image (fonte externa e fonte externa, do Google, pela fonte externa), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do fonte externa.
 3. Modelo 3D no fonte externa fonte externa Gen-2.5 a partir da imagem do passo 2.
 4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
 
-## Jade e Fagulha: origem não comprovada
+## Jade e Fagulha: publicadas por decisão do usuário
 
-Duas das sete goblins aprovadas têm origem que não podemos comprovar:
+A Jade e a Fagulha seguem outra cadeia: um modelo gerado pelo usuário direto no site do fonte externa, um render nosso dele, uma versão semi-realista no fonte externa (pela fonte externa) e o modelo final no fonte externa. A origem do primeiro passo não é nossa:
 
 - **Jade** (fonte externa `3c7aa397`): deriva do modelo `cab576c8`, que é idêntico, byte a byte, ao 3D gerado a partir de `referencias-usuario/ref2-jeans.png`, uma imagem de terceiros trazida como referência.
 - **Fagulha** (fonte externa `0d84776f`): deriva do modelo `f37f6132`, gerado direto no site do fonte externa. Não há registro da imagem de entrada, então a origem não pode ser verificada.
 
-Se aparecem no site, é por decisão do dono do serviço, que assumiu o risco em 2026-10-15; o registro dessa decisão fica no `PROVENANCE.json`. **Jade e Fagulha ficam fora da licença CC BY 4.0 abaixo**, em todos os arquivos que derivam desses modelos: não licenciamos o que talvez não seja nosso. Quem tiver direito sobre a imagem de origem e quiser a retirada pode escrever para abuso@goblinshift.dev (Termos de Uso, item 9).
+**Decisão do usuário, em 2026-10-15:** ele assume o risco de publicar a Jade e libera a Fagulha. A decisão está em `exceptions` no `PROVENANCE.json` (quem, quando e por quê), e o `check-provenance` recusa qualquer outra geração de origem de terceiros que não tenha decisão registrada. Se o autor da imagem de referência pedir, a Jade sai do site: basta tirá-la do `elenco.tsv` e da rotação do estado vazio. O pedido de retirada chega por abuso@goblinshift.dev (Termos de Uso, item 9).
+
+**Jade e Fagulha ficam fora da licença CC BY 4.0 abaixo**, em todos os arquivos que derivam desses modelos: não licenciamos o que talvez não seja nosso.
 
 ## Termos que sustentam a publicação (lidos em 2026-10-15)
 

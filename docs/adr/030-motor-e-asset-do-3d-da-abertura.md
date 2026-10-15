@@ -1,6 +1,6 @@
 # ADR 030. Motor, modelo e arte da cena 3D da abertura e das goblins nos estados
 
-- **Estado:** Aceito (2026-10-15). Substitui em parte o [ADR 027](027-3d-na-abertura.md): a condição 5 (teto do GLB) e a condição 6 (CSP). As condições 1 a 4 do 027 continuam valendo.
+- **Estado:** Aceito (2026-10-15); atualizado no mesmo dia com a entrada da Jade e da Fagulha por decisão do usuário (item 10). Substitui em parte o [ADR 027](027-3d-na-abertura.md): a condição 5 (teto do GLB) e a condição 6 (CSP). As condições 1 a 4 do 027 continuam valendo.
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Apresentação, "sem canvas/engine"), [3.6](../GoblinShiftPlan.md#s3-6) (CSP da SPA)
 - **Relacionado:** [ADR 027](027-3d-na-abertura.md); `docs/art/LICENSE-ART.md`; `web/src/assets/art/PROVENANCE.json`
 
@@ -42,18 +42,22 @@ Texturas de 2048 px custam +350 KB sem diferença na tela (a cena aparece com no
 5. **Imagem estática** (placeholder e fallback): render da Rúbia em 4:5, no mesmo modo dos renders aprovados (`render_glb.py` padrão: EEVEE com tom AgX; o `--realista` usa tom Standard e também deixava a pele amarelada), AVIF e WebP de 192, 384 e 640 px (36 KB o maior AVIF), `fetchpriority="high"` porque é o provável LCP. Com erro de chunk, de GLB, de WebGL ou perda de contexto, ela fica.
 6. **CSP: `'wasm-unsafe-eval'` em `script-src` e `blob:` em `connect-src`, nada mais.** O `'wasm-unsafe-eval'` deixa compilar WebAssembly (o decoder Meshopt) e não libera `eval` nem `new Function` de JS; o WASM só pode vir de script da própria origem, porque `script-src` continua `'self'`. O `blob:` vem do `GLTFLoader`, que lê as texturas embutidas no GLB com `fetch()` de uma URL `blob:` criada pela própria página (o 027 supunha que elas passassem por `img-src`, o que só vale no Safari anterior ao 17 e no Firefox anterior ao 98, em que o three usa `<img>`). Uma URL `blob:` só existe se um script da própria origem a criou, então a abertura não dá acesso a outra origem. A alternativa sem mudar a CSP era trocar o carregador de texturas do `GLTFLoader` por um campo interno, comportamento não documentado do three. Nenhum domínio de terceiro entra na CSP. O usuário aprovou o `'wasm-unsafe-eval'` em 2026-10-15, em troca do modelo limpo de 1,87 MB.
 7. **Tetos no CI** (`web/scripts/check-budget.ts`): GLB até **2048 KB** (era 500 KB no 027; a Rúbia mede 1911 KB), chunk do 3D até 300 KB gzip e fora do `index.html`, imagem estática até 90 KB, e cada ilustração de estado até 20 KB. Total da abertura com o 3D: ~2,1 MB (chunk 162 KB gzip + GLB 1911 KB + imagem 36 KB), dentro da meta de 2 a 3 MB.
-8. **Goblins nos estados**, como imagens 2D (render no Blender de cada GLB bruto, `scripts/arte/gerar-imagens.sh`), AVIF e WebP em 1× e 2× de uma caixa de 128 × 160 px, com texto alternativo que diz quem é a goblin (o estado já está no texto ao lado). Uma goblin fixa por estado, para a pessoa associar a personagem à situação:
+8. **Goblins nos estados**, como imagens 2D (render no Blender de cada GLB bruto, `scripts/arte/gerar-imagens.sh`), AVIF e WebP em 1× e 2× de uma caixa de 128 × 160 px, com texto alternativo que diz quem é a goblin (o estado já está no texto ao lado). Cada estado tem as suas goblins, para a pessoa associar a personagem à situação:
 
-   | Estado | Goblin | Onde aparece |
+   | Estado | Goblins | Onde aparece |
    |---|---|---|
-   | Vazio | Lua (calma, sininho) | Bancada sem arquivos; Histórico vazio |
-   | Carregando | Ada (inventora, ferramentas) | Execução na fila, em andamento ou cancelando |
+   | Vazio | Lua (calma, sininho) e Jade (casual, de jeans) | Bancada sem arquivos; Histórico vazio |
+   | Carregando | Ada (inventora, ferramentas) e Fagulha (couro e luvas de oficina) | Execução na fila, em andamento ou cancelando |
    | Erro | Nyx (sombria) | Execução que falhou; página não encontrada |
    | Sucesso | Ferrugem (a mais expansiva) | Execução concluída, com ou sem avisos |
 
-   No máximo uma goblin por tela: na Oficina é a Rúbia, e o vazio das execuções recentes fica só em texto. Alertas de formulário e de leitura (`role="alert"`) não ganham goblin. São quatro goblins para quatro estados, então não há rotação; se a Fagulha ou a Jade forem liberadas (abaixo), entram por rotação estável sobre o id do recurso, sem sortear a cada render.
-9. **Proveniência travada no CI** (`web/scripts/check-provenance.ts`): todo arquivo de `web/src/assets/art/` tem entrada no `PROVENANCE.json`, com sha256 conferido, a cadeia de gerações até a ferramenta resolvida e um direito registrado; nada pode derivar de uma goblin excluída.
-10. **Direitos e exclusões.** Os termos do fonte externa fonte externa e da fonte externa permitem publicar as saídas num site público nos planos pagos, e o usuário é assinante dos dois, além de ter saldo pago na API da fonte externa (informado em 2026-10-15); com isso, a dúvida sobre a carteira da API contar como "Paid User" deixa de importar (detalhe e links em `docs/art/LICENSE-ART.md`). Das sete aprovadas, duas **não vão ao site**: a **Jade** (`3c7aa397`) deriva do modelo `cab576c8`, que é byte a byte o 3D gerado da `referencias-usuario/ref2-jeans.png`, imagem de terceiros; a **Fagulha** (`0d84776f`) deriva do `f37f6132`, gerado direto no site do fonte externa sem registro da imagem de entrada. As cinco publicadas (Rúbia, Ferrugem, Ada, Nyx e Lua) partem só de texto no fonte externa e de renders nossos.
+   No máximo uma goblin por tela: na Oficina é a Rúbia, e o vazio das execuções recentes fica só em texto. Alertas de formulário e de leitura (`role="alert"`) não ganham goblin. São seis goblins para quatro estados: onde há duas, a escolha é uma **rotação estável** (FNV-1a de 32 bits sobre uma chave da situação, módulo o número de goblins do estado). A chave é o id da execução, a receita da Bancada ou um nome fixo da tela (Histórico, 404). A mesma situação mostra sempre a mesma goblin, sem trocar a cada render nem a cada polling, e situações diferentes se espalham entre as duas.
+9. **Proveniência travada no CI** (`web/scripts/check-provenance.ts`): todo arquivo de `web/src/assets/art/` tem entrada no `PROVENANCE.json`, com sha256 conferido, a cadeia de gerações até a ferramenta resolvida e um direito registrado; nada pode derivar de uma goblin excluída, e geração de origem de terceiros ou não verificável (`third_party`) só passa com uma decisão em `exceptions` que diga quem decidiu, quando e por quê.
+10. **Direitos e exclusões.** Os termos do fonte externa fonte externa e da fonte externa permitem publicar as saídas num site público nos planos pagos, e o usuário é assinante dos dois, além de ter saldo pago na API da fonte externa (informado em 2026-10-15); com isso, a dúvida sobre a carteira da API contar como "Paid User" deixa de importar (detalhe e links em `docs/art/LICENSE-ART.md`). As cinco primeiras publicadas (Rúbia, Ferrugem, Ada, Nyx e Lua) partem só de texto no fonte externa e de renders nossos. As outras duas entram **por decisão do usuário em 2026-10-15**, registrada em `exceptions` no `PROVENANCE.json`:
+    - a **Jade** (`3c7aa397`) deriva do modelo `cab576c8`, que é byte a byte o 3D gerado da `referencias-usuario/ref2-jeans.png`, imagem de terceiros; o usuário assume o risco de publicá-la;
+    - a **Fagulha** (`0d84776f`) deriva do `f37f6132`, gerado direto no site do fonte externa sem registro da imagem de entrada; o usuário a libera mesmo sem a proveniência verificável.
+
+    A primeira versão deste ADR as deixava fora do site; essa parte foi substituída pela decisão acima.
 
 ## Consequências
 
