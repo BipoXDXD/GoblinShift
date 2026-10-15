@@ -77,6 +77,16 @@ export const TEXT = {
     editorialNote: "Ilustrações geradas com processamento externo e editadas.",
     creditsLink: "Créditos",
   },
+  notice: {
+    // O tipo escrito acompanha a cor da faixa: o aviso nunca depende só dela (WCAG 1.4.1).
+    kinds: {
+      incident: "Incidente de segurança",
+      shutdown: "Encerramento do serviço",
+      "terms-change": "Mudança nos termos",
+    },
+    regionLabel: (kind: string) => `Aviso: ${kind.toLowerCase()}`,
+    dismiss: "Fechar",
+  },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",
     lead: "Escolha uma receita para começar.",

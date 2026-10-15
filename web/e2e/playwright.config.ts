@@ -1,11 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { E2E, LOCAL_PORT } from "./support/env";
+import { E2E, LOCAL_PORT, NOTICE_BUILD } from "./support/env";
+
+// O build com aviso (npm run e2e:notice) roda a spec do aviso e, com a faixa em toda tela, as de
+// layout shift e de contraste; o build normal não tem aviso e pula a spec dele.
+const NOTICE_SPECS = /(notice|layout-shift|contrast)\.spec\.ts$/;
+const NOTICE_SPEC = /notice\.spec\.ts$/;
 
 // Desktop e celular (~400 px, D8), só Chromium: Firefox fica para o job manual contra a VPS,
 // fora do orçamento do commit stage (plano de fechamento da fatia 7, 4.1).
 export default defineConfig({
   testDir: "specs",
+  ...(NOTICE_BUILD ? { testMatch: NOTICE_SPECS } : { testIgnore: NOTICE_SPEC }),
   outputDir: "../test-results",
   fullyParallel: true,
   forbidOnly: !!process.env["CI"],

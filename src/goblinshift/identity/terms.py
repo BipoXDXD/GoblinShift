@@ -16,8 +16,9 @@ from sqlalchemy.orm import Session
 from goblinshift.identity.accounts import UnknownAccountError
 from goblinshift.identity.tables import app_user
 
-# "rascunho" até a revisão jurídica e o domínio definitivo (plano da fatia 8, A1 e F8-5).
-CURRENT_TERMS_VERSION = "v1-rascunho"
+# "rascunho" até a revisão jurídica (plano da fatia 8, F8-5). É a versão declarada no cabeçalho e
+# na última linha do histórico dos dois textos de docs/legal (tests/test_legal_texts.py).
+CURRENT_TERMS_VERSION = "v2-rascunho"
 
 
 @dataclass(frozen=True)

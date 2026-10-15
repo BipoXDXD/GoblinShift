@@ -4,6 +4,8 @@ import { Link, Navigate, NavLink, Outlet, useLocation, useSearchParams } from "r
 
 import { LOGIN_ERROR_PARAM, safeReturnTo } from "../account/signIn";
 import { isSignedOut, useMe } from "../account/useMe";
+import type { SiteNotice } from "../notice/notice";
+import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { acceptTermsPath, PATHS, signInPath } from "./paths";
@@ -29,12 +31,22 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.accountDeleted,
 ]);
 
+/** O id do aviso fechado fica no armazenamento do navegador (ADR 031). */
+const browserStorage = (): Storage => window.localStorage;
+
+interface LayoutProps {
+  /** Relógio em ms das rotas; decide se o aviso global está na janela. */
+  readonly now: () => number;
+  readonly notice: SiteNotice | null;
+}
+
 /**
  * Moldura de todas as telas (D8): faixa de acento em latão, barra no topo com a marca, o Histórico,
- * o Acesso (ou Entrar, sem sessão) e o seletor de tema, e o conteúdo centrado. Conta que ainda não
- * aceitou os termos vigentes vai para o aceite antes de qualquer outra tela.
+ * o Acesso (ou Entrar, sem sessão) e o seletor de tema, o aviso global, quando há, e o conteúdo
+ * centrado. Conta que ainda não aceitou os termos vigentes vai para o aceite antes de qualquer outra
+ * tela.
  */
-export function Layout(): ReactElement {
+export function Layout({ now, notice }: LayoutProps): ReactElement {
   return (
     <div className="flex min-h-svh flex-col">
       <a
@@ -66,6 +78,8 @@ export function Layout(): ReactElement {
           </div>
         </div>
       </header>
+      {/* Vem do bundle, não da rede: sai na primeira pintura, sem empurrar o conteúdo (CLS). */}
+      <SiteNoticeBanner notice={notice} now={now} storage={browserStorage} />
       {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
           tela carrega e cresce. */}
       <main

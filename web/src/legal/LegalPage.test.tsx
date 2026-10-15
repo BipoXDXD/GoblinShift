@@ -96,3 +96,20 @@ describe("links entre os textos", () => {
     }
   });
 });
+
+describe("links para fora da interface", () => {
+  it.each([
+    "https://goblinshift.dev/.well-known/security.txt",
+    "https://github.com/BipoXDXD/GoblinShift/blob/main/LICENSE",
+    "https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md",
+  ])("os Termos levam a %s", async (href) => {
+    setup("/termos");
+    await expectHeadingFocused("Termos de Uso do GoblinShift");
+
+    const links = within(screen.getByRole("article")).getAllByRole("link", { name: href });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", href);
+    }
+  });
+});

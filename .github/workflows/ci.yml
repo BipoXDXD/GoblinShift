@@ -148,6 +148,12 @@ jobs:
         run: npm run build
       - name: Specs (desktop e celular, só Chromium)
         run: npm run e2e
+      # Segundo build, com o aviso de e2e/fixtures/notice.json (ADR 031): a faixa em toda tela,
+      # sem layout shift e com contraste. O notice.json do repositório começa sem aviso.
+      - name: Build com o aviso global
+        run: npm run build:notice-e2e
+      - name: Specs com o aviso global
+        run: npm run e2e:notice
       - name: Relatório e traces da falha
         if: failure()
         uses: actions/upload-artifact@v7

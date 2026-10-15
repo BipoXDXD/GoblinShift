@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
@@ -5,8 +7,20 @@ import { configDefaults, defineConfig } from "vitest/config";
 import { FONT_PRELOAD } from "./scripts/check-budget";
 import { preloadFonts } from "./scripts/vite-preload-fonts";
 
+/**
+ * Só para o build do E2E com aviso (npm run build:notice-e2e): troca o `notice.json` do
+ * repositório pelo arquivo indicado, sem editar o fonte. Sem a variável, vale o do repositório.
+ */
+const noticeFile = process.env["GS_NOTICE_FILE"];
+
 export default defineConfig({
   plugins: [react(), tailwindcss(), preloadFonts(FONT_PRELOAD)],
+  resolve: {
+    alias:
+      noticeFile === undefined || noticeFile === ""
+        ? []
+        : [{ find: /^\.\/notice\.json$/, replacement: resolve(noticeFile) }],
+  },
   // Os textos legais vêm de docs/legal/ (fonte única, fora de web/); o servidor de dev só serve o
   // que está na allowlist.
   server: { fs: { allow: [".", "../docs/legal"] } },
