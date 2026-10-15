@@ -58,6 +58,24 @@ stat -c '%U:%G %a' /etc/passwd
     assert "root:root 644" in result.stdout
 
 
+def test_symlink_no_checkout_nao_copia_arquivo_que_so_o_root_le() -> None:
+    # Ataque do achado symlink-following-read: o root copia as units do checkout do goblinshift.
+    result = run_as_root(
+        """
+(umask 077; echo 'CANARY-so-do-root' >/root/segredo)
+as_app ln -sf /root/segredo /srv/goblinshift/app/deploy/backup/goblinshift-pg-backup.timer
+"""
+        + f"""
+rc=0; {INSTALL} || rc=$?
+echo "rc=$rc"
+grep -q CANARY /etc/systemd/system/goblinshift-pg-backup.timer 2>/dev/null && echo VAZOU || true
+"""
+    )
+
+    assert "VAZOU" not in result.stdout
+    assert "recusado" in result.stderr
+
+
 def test_instalador_passa_no_shellcheck() -> None:
     shellcheck = shutil.which("shellcheck")
     if shellcheck is None:
