@@ -30,31 +30,17 @@ Texto que abria o arquivo público até sair do build:
 > levantamento da fatia 8. Nenhuma delas depende de código: os pontos que se resolviam lendo a
 > implementação já foram preenchidos.
 
-**Decide o dono do serviço** (o advogado só confere a redação):
+**Decide o dono do serviço:** nenhuma pendência; as decisões de 2026-10-15 estão em
+"Decisões aplicadas", no fim deste arquivo.
 
-- **J-4**, versão e vigência (topo). Sugestão: `v1` e a data da publicação, com a versão gravada
-  em `terms_version`.
-- **J-5**, domínio definitivo (topo). Depende da compra do domínio.
-- **J-6**, e-mails de contato e de denúncia (itens 1 e 7). Sugestão: `contato@` e `abuso@` no
-  domínio, apontando para a mesma caixa.
-- **J-7**, política de divulgação de vulnerabilidades (item 6). Sugestão: `SECURITY.md` e
-  `/.well-known/security.txt`, com o e-mail de J-6.
-- **J-8**, outras condutas proibidas (item 6). Sugestão: mineração, uso como CDN ou hospedagem
-  de arquivos, automação fora da API documentada, várias contas para contornar cotas.
-- **J-9**, prazo de resposta às denúncias (item 7). Sugestão: 72 h para a triagem; conteúdo
-  ilegal grave, na hora.
-- **J-10**, aviso prévio ou recurso no bloqueio (item 8). Sugestão: recurso por e-mail depois do
-  bloqueio, sem aviso prévio em casos de segurança.
-- **J-11**, aviso prévio no encerramento do serviço (item 8). Sugestão: 30 dias de aviso no site.
-- **J-12**, licença do código; o repositório ainda não tem `LICENSE` (item 9). Opções: MIT,
-  Apache-2.0 ou AGPL-3.0.
-- **J-13**, marca e ilustrações (item 9). Depende das licenças dos geradores dos assets.
-- **J-14**, antecedência de aviso de mudança e onde fica o histórico (item 12). Sugestão: 15 dias
-  e `docs/legal/` no Git.
+**Dados do dono do serviço:**
+
+- **J-16**, identificação de quem oferece o serviço (item 1). Decidido em 2026-10-15: o
+  controlador é o dono do serviço, pessoa física. Falta só o nome completo e a cidade/UF; a
+  marcação está numa linha só para a troca ser de uma linha. O advogado confere o que mais
+  precisa ser publicado (CPF, endereço).
 
 **Exige advogado(a):**
-
-- **J-16**, identificação de quem oferece o serviço (item 1).
 - **J-18**, idade mínima e contas de menores (item 2).
 - **J-20**, procedimento para abuso sexual infantil e conteúdo ilegal grave: autoridades,
   preservação, prazos e a expiração de 48 h (item 7). Este procedimento não é escrito por processamento externo.
@@ -67,22 +53,9 @@ redação original, na ordem do arquivo.
 
 | Seção | Marcação original |
 |---|---|
-| Topo (versão, vigência e endereço) | [[A DEFINIR (J-4): número da versão, gravado como `terms_version` no aceite]] |
-| Topo (versão, vigência e endereço) | [[A DEFINIR (J-4): data de publicação]] |
-| Topo (versão, vigência e endereço) | [[A DEFINIR (J-5): domínio definitivo]] |
-| 1. Quem oferece o serviço | [[A DEFINIR (J-16): nome completo ou razão social do controlador, CPF ou CNPJ, e endereço]] |
-| 1. Quem oferece o serviço | [[A DEFINIR (J-6): e-mail de contato]] |
+| 1. Quem oferece o serviço | [[A DEFINIR (J-16): nome completo do controlador, pessoa física, e cidade/UF]] |
 | 2. Aceite destes termos | [[A DEFINIR (J-18): idade mínima para usar o serviço e o que fazer com contas de menores. Google e GitHub têm idade mínima própria, mas o GoblinShift não recebe a data de nascimento e não tem como verificar idade.]] |
-| 6. Uso aceitável | [[A DEFINIR (J-7): haverá política de divulgação responsável de vulnerabilidades? Se sim, indicar o canal e a referência aqui]] |
-| 6. Uso aceitável | [[A DEFINIR (J-8): outras condutas proibidas que o dono queira listar.]] |
 | 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-20) com orientação jurídica: quais autoridades e canais (por exemplo, Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a preservação com a expiração automática de 48 horas; o plano registra que esse procedimento exige orientação jurídica e não pode ser escrito por processamento externo]] |
-| 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-6): e-mail de denúncias]] |
-| 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-9): prazo de resposta às denúncias.]] |
-| 8. Suspensão e encerramento | [[A DEFINIR (J-10): haverá aviso prévio ou canal de recurso para o bloqueio, salvo nos casos do item 7?]] |
-| 8. Suspensão e encerramento | [[A DEFINIR (J-11): aviso prévio mínimo em caso de encerramento.]] |
-| 9. Conteúdo e propriedade | [[A DEFINIR (J-12): licença do código-fonte; o repositório ainda não tem arquivo de licença]] |
-| 9. Conteúdo e propriedade | [[A DEFINIR (J-13): condições de uso da marca e das ilustrações]] |
-| 12. Mudanças nestes Termos | [[A DEFINIR (J-14): antecedência mínima de aviso para mudanças relevantes e onde o histórico de versões fica publicado.]] |
 | 13. Lei aplicável e foro | [[A DEFINIR (J-21): foro. Nota para a revisão: em relação de consumo, o consumidor pode demandar no foro do próprio domicílio (CDC, art. 101, I).]] |
 
 ### Notas para a revisão
@@ -121,7 +94,11 @@ abertura pública e ainda depende de fatia não concluída (indicada entre parê
 | Canal de contato para denúncias | Plano 1.8 (Abuso e custo); ADR 012 |
 | `DELETE /me`: login recente; revoga, cancela e remove em até 24 h; backups expiram em até 30 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups) (fatia 6, não implementado) |
 | Remoção de metadados não é anonimização | Plano 1.2 (Image Forge, perfis de cor e metadados) |
-| Repositório sem arquivo de licença | Raiz de `origin/main` em 2026-10-14 (não há `LICENSE`) |
+| Código sob Apache-2.0; a licença não cobre a arte nem os modelos 3D | `LICENSE`, `NOTICE`, `pyproject.toml` (`license`), `web/package.json` (`license`) |
+| Arte sob CC BY 4.0 na parte humana, exceto Jade e Fagulha | `docs/art/LICENSE-ART.md` |
+| Sem processamento externo no processamento; ilustrações do site geradas com processamento externo | Plano, introdução da seção 1; `docs/art/LICENSE-ART.md`; página `/creditos` (`web/src/legal/CreditsPage.tsx`) |
+| "Código da tela de login" para o recurso contra bloqueio | Branch `login-recusado-ref` (a tela de login recusado mostra uma referência do pedido para citar no e-mail) |
+| Canal da política de divulgação em `/.well-known/security.txt` | Branch `politica-seguranca` (`SECURITY.md` e `web/public/.well-known/security.txt`) |
 
 ## Aviso de Privacidade
 
@@ -144,29 +121,29 @@ Texto que abria o arquivo público até sair do build:
 > levantamento da fatia 8. Nenhuma delas depende de código: os pontos que se resolviam lendo a
 > implementação já foram preenchidos.
 
-**Decide o dono do serviço** (o advogado só confere a redação):
+**Decide o dono do serviço:**
 
-- **J-4**, versão e vigência (topo). Sugestão: `v1` e a data da publicação; a versão é o valor
-  gravado em `terms_version` no aceite.
-- **J-5**, domínio definitivo (topo). Depende da compra do domínio.
-- **J-6**, e-mail do canal de privacidade (itens 1 e 8). Sugestão: `privacidade@<domínio>`.
-- **J-14**, onde fica o histórico de versões (item 12). Sugestão: `docs/legal/` no Git, com link
-  nas páginas.
-- **J-15**, como avisar os titulares num incidente, já que não temos e-mail (item 10). Sugestão:
-  banner no site e aviso na conta no login seguinte; o advogado confere se basta perante a ANPD.
+- **Provedor de e-mail** (item 6): qual serviço recebe e guarda as mensagens de `contato@`,
+  `abuso@` e `privacidade@` (encaminhamento da Hostinger, Cloudflare Email Routing, ImprovMX, e a
+  caixa de destino) e onde ele fica. Se for fora do Brasil, entra no item 7 junto com o J-19.
+
+**Dados do dono do serviço:**
+
+- **J-16**, identificação do controlador (item 1). Decidido em 2026-10-15: pessoa física, o
+  próprio dono. Falta o nome completo e a cidade/UF.
 
 **Exige advogado(a):**
-
-- **J-16**, identificação do controlador: pessoa física ou CNPJ, e o que precisa ser publicado
-  (item 1).
 - **J-17**, encarregado ou declaração de dispensa como agente de pequeno porte (item 1).
 - **J-18**, idade mínima e LGPD art. 14, sem como verificar idade (item 11).
-- **J-19**, transferência internacional: localização do GitHub Actions, região do B2 e mecanismo
-  do art. 33 (itens 6 e 7). Responder antes de criar a conta B2, porque a região é fixa por conta.
+- **J-19**, transferência internacional: localização do GitHub Actions e mecanismo do art. 33
+  (itens 6 e 7). A região do B2 foi decidida em 2026-10-15: Estados Unidos (US East).
 - **J-22**, base legal do registro do aceite: execução de contrato ou exercício regular de
   direitos (item 4).
 - **J-23 a J-25**, avaliações de legítimo interesse (LIA) da auditoria e do antiabuso, da
   telemetria e do backup (item 4).
+- **Base legal das mensagens por e-mail** (item 4, linha nova de 2026-10-15, sem id no
+  levantamento): proposta para levar, obrigação legal (inciso II) nos pedidos de titulares e
+  legítimo interesse (inciso IX) no contato geral e nas denúncias.
 - **J-26**, manter o identificador do provedor depois de bloqueio seguido de exclusão, e por
   quanto tempo (item 5). Proposta técnica para levar: guardar só um HMAC de `issuer` + `subject`,
   por prazo fixo.
@@ -182,26 +159,20 @@ redação original, na ordem do arquivo.
 
 | Seção | Marcação original |
 |---|---|
-| Topo (versão, vigência e endereço) | [[A DEFINIR (J-4): número da versão]] |
-| Topo (versão, vigência e endereço) | [[A DEFINIR (J-4): data de publicação]] |
-| Topo (versão, vigência e endereço) | [[A DEFINIR (J-5): domínio definitivo]] |
-| 1. Controlador e contato | [[A DEFINIR (J-16): nome completo ou razão social, CPF ou CNPJ, endereço]] |
-| 1. Controlador e contato | [[A DEFINIR (J-6): e-mail]] |
+| 1. Controlador e contato | [[A DEFINIR (J-16): nome completo do controlador, pessoa física, e cidade/UF]] |
 | 1. Controlador e contato | [[A DEFINIR (J-17): nome e contato do encarregado, ou a declaração de dispensa. Nota para a revisão: a ANPD dispensa agentes de tratamento de pequeno porte de indicar encarregado, mas exige um canal de comunicação com o titular; confirmar o enquadramento e a redação.]] |
 | 4. Para que usamos e com que base legal | [[A DEFINIR (J-22) na revisão: ou exercício regular de direitos (inciso VI)]] |
 | 4. Para que usamos e com que base legal | [[A DEFINIR (J-23) na revisão: registrar a avaliação de legítimo interesse]] |
 | 4. Para que usamos e com que base legal | [[A DEFINIR (J-24) na revisão]] |
 | 4. Para que usamos e com que base legal | [[A DEFINIR (J-25) na revisão]] |
+| 4. Para que usamos e com que base legal | [[A DEFINIR: base legal]] (mensagens por e-mail, item 3.6; sem id) |
 | 5. Por quanto tempo guardamos | [[A DEFINIR (J-26): se a conta for bloqueada e depois excluída, o identificador do provedor é mantido para que o bloqueio continue valendo? Por quanto tempo? O plano diz que o bloqueio "impede novos logins da mesma identidade", mas não diz o que acontece depois de `DELETE /me`.]] |
 | 6. Com quem compartilhamos | [[A DEFINIR (J-19): confirmar localização e mencionar como transferência internacional]] |
-| 6. Com quem compartilhamos | [[A DEFINIR (J-19): confirmar a região do bucket]] |
+| 6. Com quem compartilhamos | [[A DEFINIR: provedor e local]] (provedor de e-mail; sem id) |
 | 7. Transferência internacional | [[A DEFINIR (J-19) com a revisão jurídica: mecanismo de transferência do art. 33 da LGPD (por exemplo, cláusulas-padrão contratuais aprovadas pela ANPD, ou outro) para o Backblaze e para o GitHub Actions.]] |
 | 8. Seus direitos e como exercê-los | [[A DEFINIR (J-27) na revisão: o que fazer se uma restauração trouxer de volta uma conta excluída]] |
-| 8. Seus direitos e como exercê-los | [[A DEFINIR (J-6): e-mail]] |
 | 8. Seus direitos e como exercê-los | [[A DEFINIR (J-28): procedimento de verificação de identidade e prazo de resposta; nota para a revisão: art. 19 da LGPD.]] |
-| 10. Segurança | [[A DEFINIR (J-15): como os titulares serão avisados, já que não temos e-mail; por exemplo, aviso na própria conta e no site]] |
 | 11. Crianças e adolescentes | [[A DEFINIR (J-18): idade mínima e tratamento de dados de crianças e adolescentes (LGPD, art. 14). O serviço não coleta idade.]] |
-| 12. Mudanças neste aviso | [[A DEFINIR (J-14): onde fica o histórico de versões.]] |
 
 ### Notas para a revisão
 
@@ -250,7 +221,10 @@ parênteses). Caminhos sem branch indicada estão na `main` (conferida em `6c1c4
 | Arquivos sem backup | Plano 3.8 (Backups) |
 | Hostinger, KVM 2, Campinas (SP) | Plano 3.8 (Servidor); ADR 011 |
 | Backup: dump diário, cifrado com `age` antes do envio, chave só de escrita, 30 dias por ciclo de vida do bucket, chave privada fora da VPS | `docs/adr/022-backup-externo.md`, `deploy/backup/pg-backup.sh`, `deploy/backup/goblinshift-pg-backup.timer`; plano 3.8; plano 7-8, 2.2 |
-| Backblaze B2 nos EUA | Plano 7-8, 2.2 (B2 recomendado; datacenters nos EUA ou UE); ADR 022 (alvo B2). A região é configuração (`BACKUP_S3_REGION`), fora do repositório |
+| Backblaze B2 nos EUA | Decisão do dono em 2026-10-15: região US East. Plano 7-8, 2.2; ADR 022 (alvo B2). A região é configuração (`BACKUP_S3_REGION`), fora do repositório |
+| Eventos de segurança guardados 90 dias depois de `DELETE /me` | ADR 026, Consequências; `tests/test_schema_fatia_6.py` (apagar a conta mantém os eventos) |
+| Mensagens por e-mail guardadas 12 meses depois do fim da conversa | Decisão do dono em 2026-10-15 (documento de decisões jurídicas, J-6) |
+| Aviso de incidente no site | Decisão do dono em 2026-10-15 (J-15); o aviso global do site está na branch `aviso-global` |
 | Restauração mensal decifrada em runner do GitHub Actions | `.github/workflows/restore-check.yml` (`runs-on: ubuntu-24.04`, `cron: "23 10 1 * *"`, serviço `postgres` efêmero) |
 | healthchecks.io recebe só pings | ADR 022, Decisão 4 |
 | Exclusão adiada de arquivos | Plano 1.1 (Exclusão) e 3.6 (Exclusão sempre adiada) |
@@ -286,3 +260,41 @@ Todas as três encontradas no primeiro rascunho estão resolvidas na `main` (con
 Fica fora deste aviso, como nota operacional: o `deploy/edge/compose.yaml` (infraestrutura
 compartilhada) não declara rotação própria de logs. O Caddy da borda não grava log de acesso,
 então isso não muda o que o aviso declara.
+
+## Decisões aplicadas em 2026-10-15
+
+Tomadas pelo dono do serviço sobre o documento de decisões jurídicas de 2026-10-15
+(`planos/juridico-decisoes-2026-10-15.md`, fora do repositório). As marcações correspondentes
+saíram dos textos públicos, que passaram à versão `v2-rascunho`.
+
+| Id | Decisão | Onde |
+|---|---|---|
+| J-4 | Versão `v2-rascunho`, vigência 2026-10-15. Continua "rascunho" até a revisão jurídica; `CURRENT_TERMS_VERSION` subiu junto, e toda conta aceita de novo (ADR 029) | Topo dos dois textos; `src/goblinshift/identity/terms.py` |
+| J-5 | Domínio `https://goblinshift.dev` | Topo dos dois textos |
+| J-6 | Três aliases: `contato@`, `abuso@` e `privacidade@goblinshift.dev`. O dono cria os aliases e testa envio e resposta antes da abertura | Termos 1, 7, 8 e 9; Aviso 1, 3.6 e 8 |
+| J-7 | Autorização para testar falhas comunicadas de boa-fé pelo canal de `https://goblinshift.dev/.well-known/security.txt`. O advogado confere a redação da autorização, sem bloquear | Termos 6, item 7 |
+| J-8 | Opção B: um item só, sobre emprestar, vender ou publicar chaves de API e revender o serviço | Termos 6, item 9 |
+| J-9 | Opção B: primeira resposta em até 3 dias úteis; abuso sexual infantil com prioridade | Termos 7 |
+| J-10 | Opção A: sem aviso prévio (não há e-mail); recurso por `contato@` citando o código da tela de login e o provedor | Termos 8 |
+| J-11 | Opção A: 30 dias de aviso no site antes do fim do serviço, salvo segurança, ordem legal ou caso fortuito | Termos 8 |
+| J-12 | Apache-2.0; a licença não cobre `web/src/assets/art/`, `docs/art/` nem os modelos 3D (`NOTICE`) | Termos 9; `LICENSE`; `NOTICE` |
+| J-13 | Opção B: marca reservada; a parte humana da arte sob CC BY 4.0, sem garantia sobre a saída de processamento externo, com Jade e Fagulha fora da concessão. Os scripts de `scripts/arte/` passaram da CC BY 4.0 para a Apache-2.0, como o resto do código | Termos 9; `docs/art/LICENSE-ART.md` |
+| J-14 | Opção A: 15 dias de antecedência para mudança relevante; tabela "Histórico de versões" no fim de cada texto, mais o link do Git | Termos 12; Aviso 12; fim dos dois textos |
+| J-15 | Aviso destacado no site, em até 3 dias úteis, "porque não temos o seu e-mail" | Aviso 10 |
+| J-16 (parcial) | Controlador é o dono, pessoa física; o nome e a cidade/UF ainda faltam | Termos 1; Aviso 1 |
+| J-19 (parcial) | Região do B2: Estados Unidos (US East). O mecanismo do art. 33 continua com o advogado | Aviso 6 |
+
+Lacunas fora das marcações, resolvidas no mesmo dia:
+
+- **Auditoria depois da exclusão** (ADR 026): o Aviso diz, nos itens 5 e 8, que os eventos de
+  segurança ficam 90 dias depois de `DELETE /me`.
+- **Dados enviados por e-mail**: item 3.6 novo do Aviso, retenção de 12 meses depois do fim da
+  conversa (item 5), e os resumos dos itens 2 e 3.5 deixam de dizer que nenhum e-mail chega.
+  Ficaram pendentes a base legal (item 4) e o provedor de e-mail (item 6).
+- **processamento externo no site**: o item 3 dos Termos diz que nenhum arquivo do usuário vai a serviço de processamento externo e que
+  as ilustrações do site foram geradas com processamento externo, com link para `/creditos`.
+- **Notificação e retirada** de material do site que viole direito de alguém: Termos 9, por
+  `abuso@`.
+
+Nesta troca de versão, a antecedência de 15 dias do J-14 não se aplicou: o cadastro está
+fechado, as únicas contas são do dono, e o texto continua rascunho.

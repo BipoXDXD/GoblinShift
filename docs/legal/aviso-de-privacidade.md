@@ -1,8 +1,8 @@
 # Aviso de Privacidade do GoblinShift
 
-- **Versão:** [[A DEFINIR: número da versão]]
-- **Vigência:** [[A DEFINIR: data de publicação]]
-- **Endereço do serviço:** [[A DEFINIR: domínio definitivo]]
+- **Versão:** v2-rascunho
+- **Vigência:** 2026-10-15
+- **Endereço do serviço:** https://goblinshift.dev
 
 Este aviso explica quais dados pessoais o GoblinShift trata, para quê, com base em quê, com quem
 e por quanto tempo, e como você exerce seus direitos, conforme a Lei Geral de Proteção de Dados
@@ -10,14 +10,15 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
 
 ## 1. Controlador e contato
 
-- **Controlador:** [[A DEFINIR: nome completo ou razão social, CPF ou CNPJ, endereço]].
-- **Canal para assuntos de privacidade e exercício de direitos:** [[A DEFINIR: e-mail]].
+- **Controlador:** [[A DEFINIR: nome completo do controlador, pessoa física, e cidade/UF]].
+- **Canal para assuntos de privacidade e exercício de direitos:** privacidade@goblinshift.dev.
 - **Encarregado (DPO):** [[A DEFINIR: nome e contato do encarregado, ou a declaração de
   dispensa.]]
 
 ## 2. Resumo
 
-- Você entra com Google ou GitHub. **Não temos senha sua** e **não coletamos seu e-mail**.
+- Você entra com Google ou GitHub. **Não temos senha sua** e **não coletamos seu e-mail** na
+  conta; só o recebemos se você nos escrever (item 3.6).
 - Da sua conta, guardamos só o identificador que o provedor nos dá e, no GitHub, o seu nome de
   usuário público.
 - Seus arquivos e resultados são **privados** e **apagados em até 48 horas** depois de cada
@@ -95,10 +96,19 @@ Quanto aos dados de terceiros que você enviar, veja o item 6 dos Termos de Uso.
 ### 3.5. O que **não** coletamos
 
 - Senha: o login é sempre feito no Google ou no GitHub.
-- E-mail, telefone, data de nascimento, documento ou endereço.
+- E-mail, telefone, data de nascimento, documento ou endereço; o e-mail só chega se você nos
+  escrever (item 3.6).
 - Dados de pagamento: o serviço é gratuito.
 - Cookies de publicidade, de analytics ou de terceiros; o site não carrega scripts de terceiros.
 - Conteúdo, nomes de arquivo e parâmetros em telemetria.
+
+### 3.6. Dados que você nos envia por e-mail
+
+Se você escrever para um dos nossos endereços (contato@, abuso@ ou privacidade@goblinshift.dev),
+recebemos o seu endereço de e-mail, o que você escrever e o que anexar. Usamos esses dados só
+para responder e tratar o seu pedido, e não os juntamos à sua conta: como não guardamos e-mail
+na conta, não temos como ligar uma mensagem a uma conta, a não ser pelo que você mesmo
+informar. Guardamos a conversa por 12 meses depois do fim dela.
 
 ## 4. Para que usamos e com que base legal
 
@@ -111,6 +121,7 @@ Quanto aos dados de terceiros que você enviar, veja o item 6 dos Termos de Uso.
 | Proteger o serviço e as contas: auditoria de segurança, investigação de abuso, bloqueio | Eventos de segurança com IP truncado, estado da conta | Legítimo interesse (inciso IX), na segurança do próprio serviço e dos usuários [[A DEFINIR: registrar a avaliação de legítimo interesse]] |
 | Medir disponibilidade, diagnosticar falhas e alertar | Telemetria pseudonimizada, logs técnicos | Legítimo interesse (inciso IX) [[A DEFINIR]] |
 | Recuperar o banco de dados em caso de desastre | Cópia cifrada do banco (item 7) | Legítimo interesse (inciso IX) [[A DEFINIR]] |
+| Responder a quem nos escreve: contato, denúncias e pedidos sobre dados pessoais | Endereço de e-mail, mensagem e anexos (item 3.6) | [[A DEFINIR: base legal]] |
 | Atender denúncias, ordens e obrigações legais | O que for estritamente necessário ao caso | Cumprimento de obrigação legal (inciso II) e exercício regular de direitos (inciso VI) |
 
 Não usamos seus dados para publicidade, para traçar perfil, para treinar inteligência
@@ -129,11 +140,12 @@ de taxa são regras fixas e públicas, aplicadas igualmente a todas as contas.
 | Presets | Até você excluir o preset ou a conta | Registro apagado |
 | Estado transitório do login | 10 minutos | Apagado |
 | Sessões encerradas (expiradas ou revogadas) | 7 dias após o fim | Registro apagado |
-| Eventos de segurança (auditoria) | 90 dias | Registros apagados |
+| Eventos de segurança (auditoria) | 90 dias, inclusive depois da exclusão da conta | Registros apagados |
 | Registros de idempotência (proteção contra pedido repetido) | 24 horas | Registro apagado |
 | Telemetria | 30 dias | Expiração automática no servidor de telemetria |
 | Logs técnicos dos serviços | Até 50 MiB por serviço (5 arquivos de 10 MiB), o que cobre cerca de 14 dias no volume previsto; com pouco tráfego, uma linha pode durar mais. Os logs também somem sempre que o serviço é recriado, o que acontece a cada atualização | Rotação por tamanho |
 | Backup cifrado do banco de dados | 30 dias | Expiração automática no provedor do backup |
+| Mensagens que você nos envia por e-mail (item 3.6) | 12 meses depois do fim da conversa | Mensagens apagadas da caixa de e-mail |
 | Dados da conta | Enquanto a conta existir | Exclusão da conta (item 8) |
 
 Os prazos acima são aplicados por rotinas automáticas de manutenção. Arquivos não têm backup:
@@ -153,7 +165,8 @@ apenas no necessário para a sua função.
 | **Google** | Provedor de login (se você entra com Google) | O Google sabe que você entrou no GoblinShift; nos devolve o identificador `sub` | Conforme a política do Google |
 | **GitHub** | Provedor de login (se você entra com GitHub) | O GitHub sabe que você entrou no GoblinShift; nos devolve o `id` e o nome de usuário públicos | Conforme a política do GitHub |
 | **GitHub (Actions)** | Teste mensal de restauração do backup | Uma vez por mês, a cópia mais recente do banco é decifrada e restaurada num servidor temporário do GitHub Actions, para provar que o backup funciona; o servidor é descartado ao fim | Infraestrutura do GitHub, fora do controle de localização do GoblinShift [[A DEFINIR: confirmar localização e mencionar como transferência internacional]] |
-| **Backblaze (B2)** | Armazenamento do backup do banco de dados | Cópia diária do banco, **cifrada antes de sair do servidor**; o Backblaze não tem a chave para decifrá-la | Estados Unidos [[A DEFINIR: confirmar a região do bucket]] |
+| **Backblaze (B2)** | Armazenamento do backup do banco de dados | Cópia diária do banco, **cifrada antes de sair do servidor**; o Backblaze não tem a chave para decifrá-la | Estados Unidos |
+| **Provedor de e-mail** | Recebe e guarda as mensagens enviadas aos nossos endereços | O que você nos escrever (item 3.6) | [[A DEFINIR: provedor e local]] |
 
 A telemetria fica no próprio servidor, sem envio a terceiros. O serviço de monitoramento do
 backup (healthchecks.io) recebe só um sinal de "backup feito" ou "falhou", sem dados pessoais.
@@ -196,10 +209,10 @@ A LGPD (art. 18) garante a você, entre outros, o direito de:
 | Acesso | A área da conta (`GET /me`), o histórico de execuções e a lista de presets mostram o que a conta guarda, incluindo o consumo |
 | Portabilidade | Baixe os resultados e relatórios das execuções enquanto estiverem disponíveis; presets e histórico podem ser lidos pela API em JSON |
 | Eliminação de arquivos | Excluir um arquivo ou resultado o torna indisponível na hora; a remoção física acontece assim que nenhuma execução ou download em andamento o estiver usando |
-| Eliminação da conta | Excluir a conta (`DELETE /me`, exige login recente) revoga sessões e chaves, cancela a execução em andamento e remove arquivos, resultados, presets e histórico **em até 24 horas**. Cópias no backup do banco deixam de existir quando o backup expira, **em até 30 dias**; até lá elas só seriam usadas para recuperar o banco num desastre [[A DEFINIR: o que fazer se uma restauração trouxer de volta uma conta excluída]] |
+| Eliminação da conta | Excluir a conta (`DELETE /me`, exige login recente) revoga sessões e chaves, cancela a execução em andamento e remove arquivos, resultados, presets e histórico **em até 24 horas**. Os eventos de segurança (item 3.2) continuam guardados por até 90 dias depois da exclusão, com o identificador interno da conta e o IP truncado, para proteger o serviço. Cópias no backup do banco deixam de existir quando o backup expira, **em até 30 dias**; até lá elas só seriam usadas para recuperar o banco num desastre [[A DEFINIR: o que fazer se uma restauração trouxer de volta uma conta excluída]] |
 | Encerrar acessos | "Sair de todas as sessões" revoga todas as sessões e chaves da conta |
 
-**Pelo canal de privacidade** ([[A DEFINIR: e-mail]]), para os demais pedidos, como correção,
+**Pelo canal de privacidade** (privacidade@goblinshift.dev), para os demais pedidos, como correção,
 oposição ou informações sobre compartilhamento. Como não temos seu e-mail, poderemos pedir que
 você comprove o controle da conta (por exemplo, fazendo login e informando um código exibido na
 conta) antes de atender. [[A DEFINIR: procedimento de verificação de identidade e prazo de
@@ -229,9 +242,9 @@ Entre as medidas adotadas: conexão sempre cifrada (HTTPS); arquivos privados, s
 públicos, com acesso conferido a cada pedido; processamento num contêiner descartável e isolado,
 sem rede e sem credenciais; segredos de sessões e chaves guardados só como hash; backup cifrado;
 banco de dados sem porta exposta à internet. Nenhuma medida é absoluta. Em caso de incidente de
-segurança que possa gerar risco ou dano relevante, comunicaremos a ANPD e os titulares
-afetados, na forma da lei [[A DEFINIR: como os titulares serão avisados, já que não temos
-e-mail; por exemplo, aviso na própria conta e no site]].
+segurança que possa gerar risco ou dano relevante, comunicaremos a ANPD e os titulares afetados
+em até 3 dias úteis do conhecimento do incidente, por aviso destacado no site, porque não temos
+o seu e-mail.
 
 ## 11. Crianças e adolescentes
 
@@ -241,4 +254,15 @@ serviço não coleta idade.]]
 ## 12. Mudanças neste aviso
 
 Cada versão tem número e data. Quando o aviso mudar de versão, pediremos novo aceite no login
-seguinte. [[A DEFINIR: onde fica o histórico de versões.]]
+seguinte.
+
+Mudanças relevantes são avisadas no site com pelo menos 15 dias de antecedência, salvo se a lei
+ou a segurança do serviço exigirem algo mais rápido. O histórico das versões está no fim deste
+texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal).
+
+## Histórico de versões
+
+| Versão | Data | Resumo |
+|---|---|---|
+| `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
+| `v2-rascunho` | 2026-10-15 | Domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |
