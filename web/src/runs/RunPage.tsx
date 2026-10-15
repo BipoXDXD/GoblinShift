@@ -146,7 +146,7 @@ function RunDetails({ run }: { readonly run: Run }): ReactElement {
         </div>
         {/* Depois do texto: o leitor de tela ouve o estado antes da goblin, e no celular ela fica
             embaixo, sem empurrar o estado para fora da primeira dobra. */}
-        {goblin !== null && <GoblinIllustration state={goblin} />}
+        {goblin !== null && <GoblinIllustration state={goblin} rotationKey={run.id} />}
       </div>
     </Card>
   );

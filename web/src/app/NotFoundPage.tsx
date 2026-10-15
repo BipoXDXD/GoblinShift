@@ -11,7 +11,7 @@ export function NotFoundPage(): ReactElement {
   return (
     <div className="flex flex-col gap-4">
       <FocusHeading>{TEXT.notFound.title}</FocusHeading>
-      <GoblinIllustration state="erro" />
+      <GoblinIllustration state="erro" rotationKey="pagina-nao-encontrada" />
       <p>
         <Link to={PATHS.home} className="inline-flex min-h-11 items-center gap-1 font-semibold">
           <ChevronLeft aria-hidden="true" className="size-4" />
