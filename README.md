@@ -194,6 +194,19 @@ cd deploy && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passare
 
 O teste monta o `docker run` das sondas com o perfil de produção do `executor-ctl` (`deploy/executor_ctl/profile.py`) e confere que o serviço responde no socket. Rode com o worker parado: a área de trabalho só admite uma tentativa por vez. O próprio teste para o container `maintenance` durante as sondas e o religa no fim, porque a manutenção removeria a sonda como tentativa sem registro ([ADR 017](docs/adr/017-aceitacao-suspende-a-manutencao.md)); se o teste for morto à força, ele já terá impresso o `docker start` que religa a manutenção.
 
+### Aceitação diária, agendada
+
+O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por dia, às 07:30 UTC com até 30 min de sorteio, e pinga o check "aceitação diária" do healthchecks.io (`/start`, sucesso ou `/fail`; tabela dos monitores em [`deploy/openobserve/README.md`](deploy/openobserve/README.md#monitores-externos)). O `deploy/acceptance/scheduled.sh` para o worker durante o teste e o religa no fim, também quando a aceitação reprova; se o worker não voltar, o resultado é `/fail` e o log traz o `docker start` que o religa. Nesses 10 a 30 minutos (ADR 017) as execuções esperam na fila.
+
+```bash
+sudo bash deploy/acceptance/install.sh       # cria /srv/goblinshift/secrets/acceptance.env vazio (root, 600)
+sudoedit /srv/goblinshift/secrets/acceptance.env   # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>
+sudo bash deploy/acceptance/install.sh       # com a URL preenchida, liga o timer
+sudo systemctl start goblinshift-acceptance.service   # roda já; resultado em journalctl -u goblinshift-acceptance
+```
+
+Não rode o teste de caos nem o do Image Forge no horário do timer: os três usam a mesma área de trabalho.
+
 ### Pior caso do Image Forge (na VPS, antes de publicar uma versão)
 
 Mede 100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas numa tentativa com o perfil de produção (gVisor, 1 vCPU, 2 GiB), sem passar pela API: constrói a imagem do executor do checkout, gera as fotos dentro dela e roda a tentativa na área de trabalho real, com a manutenção parada como nas sondas ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)). Rode com o worker parado:

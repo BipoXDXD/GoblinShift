@@ -1,0 +1,21 @@
+# Teste de aceitação do ambiente do executor, agendado (fatia 8, F8-9; README, "Teste de
+# aceitação do ambiente"). Instalado pelo deploy/acceptance/install.sh; disparado pelo
+# goblinshift-acceptance.timer.
+[Unit]
+Description=GoblinShift: teste de aceitação do ambiente do executor
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Sem User=: o teste exige root (monta as sondas com o perfil do executor-ctl e lê a área de
+# trabalho de todos os donos).
+EnvironmentFile=/srv/goblinshift/secrets/acceptance.env
+# O script vem do checkout implantado: muda só pelo mesmo review e pipeline do código.
+ExecStart=/srv/goblinshift/app/deploy/acceptance/scheduled.sh
+# As sondas somam até ~27 min no pior caso (disco 15 min, as outras 12 min) mais o pull da imagem.
+TimeoutStartSec=1h
+Nice=10
+PrivateTmp=yes
+ProtectHome=yes
