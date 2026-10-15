@@ -16,12 +16,13 @@ test("remover um, cancelar e remover todos", async ({ page }) => {
   await expect(page.locator("html")).not.toHaveCSS("overflow", "hidden");
   expect(await bancada.order()).toEqual(CSV_FILES.map((file) => file.name));
 
-  await bancada.removeFile(CSV_FILES[0].name);
-  expect(await bancada.order()).toEqual([CSV_FILES[1].name]);
+  // O segundo, não o primeiro: remover pela posição errada apagaria o primeiro e passaria.
+  await bancada.removeFile(CSV_FILES[1].name);
+  expect(await bancada.order()).toEqual([CSV_FILES[0].name]);
   // O botão Remover some com o item; o foco vai para a escolha de arquivos, não para o body.
   await expect(page.getByLabel("Escolher arquivos")).toBeFocused();
 
-  await bancada.addFiles([CSV_FILES[0]]);
+  await bancada.addFiles([CSV_FILES[1]]);
   await bancada.removeAll();
   await expect(page.getByRole("list", { name: "Ordem de processamento" })).toBeHidden();
   await expect(page.getByLabel("Escolher arquivos")).toBeFocused();
