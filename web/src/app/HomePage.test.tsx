@@ -43,6 +43,10 @@ describe("Oficina: execuções recentes", () => {
       await within(section).findByRole("heading", { name: "Nenhuma execução ainda" }),
     ).toBeVisible();
     expect(section).toHaveTextContent("Escolha uma receita acima para começar.");
+    // Uma goblin por tela: na Oficina é a Rúbia da abertura; o vazio da lista fica só em texto.
+    expect(screen.getAllByRole("img").map((img) => img.getAttribute("alt"))).toEqual([
+      expect.stringMatching(/^Rúbia, /),
+    ]);
   });
 
   it("sem login, o aviso fica dentro da seção, com título de nível 3", async () => {

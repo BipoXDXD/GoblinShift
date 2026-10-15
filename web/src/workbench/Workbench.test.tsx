@@ -92,6 +92,7 @@ describe("Bancada", () => {
 
     await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^Lua, / })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
   });
 

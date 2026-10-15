@@ -10,6 +10,9 @@ export default defineConfig({
   build: {
     // Sem source map no bundle publicado: o fonte embutido vazaria comentários (ETS item 73).
     sourcemap: false,
+    // O chunk do 3D da abertura (three.js, ~615 KB crus) passa do aviso padrão de 500 KB de
+    // propósito; quem manda no peso é o check-budget, com os tetos do ADR 027 e 030.
+    chunkSizeWarningLimit: 650,
     rolldownOptions: {
       output: {
         // O framework muda pouco: em chunks próprios, o cache do navegador sobrevive aos deploys da
