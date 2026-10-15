@@ -2,15 +2,10 @@
 # o diagnóstico do que não chega ao evento `main` da API: 413 do teto de corpo, 502/504 do upstream.
 # O nome ordena este arquivo antes do default.conf, que usa o formato `privacy` no `access_log`.
 
-# O cliente real só vem do X-Forwarded-For quando quem conecta é o proxy de borda ($from_edge,
-# default.conf); a borda substitui o cabeçalho pelo IP de quem conectou nela.
-map "$from_edge:$http_x_forwarded_for" $client_ip {
-    "~^1:(?<edge_client>.+)$" $edge_client;
-    default                   $remote_addr;
-}
-
-# Truncado como na auditoria: /24 em IPv4, /48 em IPv6. Formato inesperado vira "-", nunca o valor.
-map $client_ip $client_ip_truncated {
+# $remote_addr já é o cliente real: o real_ip (default.conf) só aceita o X-Forwarded-For vindo do
+# proxy de borda. Truncado como na auditoria: /24 em IPv4, /48 em IPv6. Formato inesperado vira
+# "-", nunca o valor.
+map $remote_addr $client_ip_truncated {
     "~(?<v4_net>\d+\.\d+\.\d+)\.\d+$"                              $v4_net.0;
     "~*^(?<v6_net>[0-9a-f]{1,4}:[0-9a-f]{1,4}:[0-9a-f]{1,4}):"    $v6_net::;
     "~*^(?<v6_short>[0-9a-f]{1,4}:[0-9a-f]{1,4}|[0-9a-f]{1,4})::" $v6_short::;

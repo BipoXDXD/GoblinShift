@@ -32,7 +32,60 @@ export interface paths {
         get: operations["getMe"];
         put?: never;
         post?: never;
+        /** Delete Me */
+        delete: operations["deleteMe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/terms:accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Current Terms */
+        post: operations["acceptTerms"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Api Keys */
+        get: operations["listApiKeys"];
+        put?: never;
+        /** Create Api Key */
+        post: operations["createApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/api-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Api Key */
+        delete: operations["revokeApiKey"];
         options?: never;
         head?: never;
         patch?: never;
@@ -236,6 +289,47 @@ export interface components {
              */
             idempotency_expires_at: string;
         };
+        /** AcceptedTermsResponse */
+        AcceptedTermsResponse: {
+            /** Version */
+            version: string;
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+        };
+        /** ApiKeyList */
+        ApiKeyList: {
+            /** Data */
+            data: components["schemas"]["ApiKeyResponse"][];
+        };
+        /** ApiKeyResponse */
+        ApiKeyResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Public Id */
+            public_id: string;
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
         /** ArtifactDetails */
         ArtifactDetails: {
             /**
@@ -301,6 +395,25 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** CreatedApiKey */
+        CreatedApiKey: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Public Id */
+            public_id: string;
+            /** Token */
+            token: string;
+            /** Scopes */
+            scopes: components["schemas"]["Scope"][];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
         /** CreatedUpload */
         CreatedUpload: {
             /**
@@ -334,6 +447,27 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** Limits */
+        Limits: {
+            /** Runs Per 24H */
+            runs_per_24h: number;
+            /** Input Bytes Per 24H */
+            input_bytes_per_24h: number;
+            /** Storage Bytes */
+            storage_bytes: number;
+            /** Active Runs */
+            active_runs: number;
+            /** File Bytes */
+            file_bytes: number;
+            /** Batch Files */
+            batch_files: number;
+            /** Batch Bytes */
+            batch_bytes: number;
+            /** Concurrent Uploads */
+            concurrent_uploads: number;
+            /** Concurrent Downloads */
+            concurrent_downloads: number;
+        };
         /** MeResponse */
         MeResponse: {
             /**
@@ -345,6 +479,14 @@ export interface components {
             display_name: string;
             /** Scopes */
             scopes: components["schemas"]["Scope"][];
+            /**
+             * Via
+             * @enum {string}
+             */
+            via: "session" | "api_key";
+            limits: components["schemas"]["Limits"];
+            usage: components["schemas"]["Usage"];
+            terms: components["schemas"]["Terms"];
         };
         /**
          * Phase
@@ -364,7 +506,7 @@ export interface components {
          *     quem os produz.
          * @enum {string}
          */
-        ProblemCode: "BAD_REQUEST" | "JSON_INVALID" | "IDEMPOTENCY_KEY_INVALID" | "AUTHENTICATION_REQUIRED" | "REAUTH_REQUIRED" | "INSUFFICIENT_SCOPE" | "FORBIDDEN" | "CSRF_FAILED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "REQUEST_TIMEOUT" | "STATE_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "ACTIVE_RUN_LIMIT" | "GONE" | "BODY_TOO_LARGE" | "UNSUPPORTED_MEDIA_TYPE" | "VALIDATION_FAILED" | "IDEMPOTENCY_KEY_REUSED" | "INPUT_NOT_AVAILABLE" | "RECIPE_VERSION_RETIRED" | "QUOTA_EXCEEDED" | "RATE_LIMITED" | "INTERNAL_ERROR" | "QUEUE_FULL" | "SERVICE_UNAVAILABLE";
+        ProblemCode: "BAD_REQUEST" | "JSON_INVALID" | "IDEMPOTENCY_KEY_INVALID" | "AUTHENTICATION_REQUIRED" | "REAUTH_REQUIRED" | "INSUFFICIENT_SCOPE" | "FORBIDDEN" | "CSRF_FAILED" | "TERMS_NOT_ACCEPTED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "REQUEST_TIMEOUT" | "STATE_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "ACTIVE_RUN_LIMIT" | "GONE" | "BODY_TOO_LARGE" | "UNSUPPORTED_MEDIA_TYPE" | "VALIDATION_FAILED" | "IDEMPOTENCY_KEY_REUSED" | "INPUT_NOT_AVAILABLE" | "RECIPE_VERSION_RETIRED" | "QUOTA_EXCEEDED" | "RATE_LIMITED" | "INTERNAL_ERROR" | "QUEUE_FULL" | "SERVICE_UNAVAILABLE";
         /**
          * ProblemDetails
          * @description Schema publicado no OpenAPI; as respostas são montadas por `problem_response`.
@@ -513,6 +655,20 @@ export interface components {
          * @enum {string}
          */
         Status: "queued" | "running" | "stopping" | "succeeded" | "succeeded_with_warnings" | "canceled" | "failed";
+        /**
+         * Terms
+         * @description A versão vigente e a última aceita; `acceptance_required` bloqueia as demais rotas.
+         */
+        Terms: {
+            /** Current Version */
+            current_version: string;
+            /** Accepted Version */
+            accepted_version: string | null;
+            /** Accepted At */
+            accepted_at: string | null;
+            /** Acceptance Required */
+            acceptance_required: boolean;
+        };
         /** UploadDetails */
         UploadDetails: {
             /**
@@ -546,6 +702,19 @@ export interface components {
          * @enum {string}
          */
         UploadState: "created" | "receiving" | "ready" | "failed";
+        /** Usage */
+        Usage: {
+            /** Runs Last 24H */
+            runs_last_24h: number;
+            /** Input Bytes Last 24H */
+            input_bytes_last_24h: number;
+            /** Storage Reserved Bytes */
+            storage_reserved_bytes: number;
+            /** Active Run Id */
+            active_run_id: string | null;
+            /** Daily Quota Resets At */
+            daily_quota_resets_at: string | null;
+        };
         /** ValidatedRunResponse */
         ValidatedRunResponse: {
             /** Recipe Id */
@@ -700,6 +869,355 @@ export interface operations {
             };
         };
     };
+    deleteMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    acceptTerms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Version */
+                    version: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedTermsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listApiKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    createApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Scopes */
+                    scopes: ("files:read" | "files:write" | "runs:read" | "runs:write")[];
+                    /**
+                     * Days
+                     * @default 30
+                     */
+                    days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedApiKey"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revokeApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     createUploads: {
         parameters: {
             query?: never;
@@ -793,8 +1311,28 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1540,6 +2078,16 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
