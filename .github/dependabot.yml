@@ -12,8 +12,9 @@ updates:
       # O TypeScript 7.0 não exporta a API de compilador (ts.createProgram, ts.factory), e
       # typescript-eslint, type-coverage e openapi-typescript dependem dela. Reavaliar quando o
       # 7.1 sair com a API nova e o typescript-eslint aceitar TS >= 7 no peer (issue 10940 deles).
+      # Só a faixa 7.0 fica de fora: o próprio Dependabot propõe o 7.1 quando ele sair.
       - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
+        versions: [">=7.0.0, <7.1.0"]
     groups:
       # @types/x acompanha x na mesma major.minor (ETS item 66): atualizá-los juntos.
       react:
