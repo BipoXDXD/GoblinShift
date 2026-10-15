@@ -75,6 +75,28 @@ describe("Layout: termos pendentes", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
   });
 
+  it("conta que aceitou a versão anterior volta ao aceite quando a versão sobe", async () => {
+    const { router } = setup(
+      () =>
+        jsonResponse(
+          meBody({
+            terms: {
+              current_version: "v2-rascunho",
+              accepted_version: "v1-rascunho",
+              accepted_at: "2026-10-14T12:00:00Z",
+              acceptance_required: true,
+            },
+          }),
+        ),
+      "/historico",
+    );
+
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico");
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+  });
+
   it.each(["/termos", "/privacidade", "/acesso", "/entrar"])(
     "%s continua aberta para ler, sair ou excluir a conta",
     async (path) => {
