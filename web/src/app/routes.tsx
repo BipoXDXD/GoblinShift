@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
 
+import type { SiteNotice } from "../notice/notice";
 import type { UploadServices } from "../upload/useUploadBatch";
 import { Layout } from "./Layout";
 import { NotFoundPage } from "./NotFoundPage";
@@ -9,6 +10,8 @@ export interface AppServices {
   readonly uploadServices: UploadServices;
   /** Relógio em ms (Date.now no navegador): o período do Histórico e a validade das chaves. */
   readonly now: () => number;
+  /** Aviso global deste build (ADR 031), ou `null`. */
+  readonly notice: SiteNotice | null;
 }
 
 /**
@@ -16,10 +19,10 @@ export interface AppServices {
  * React, o router e a moldura. A 404 fica no chunk de entrada porque a Bancada também a usa e
  * ela é pequena. Os textos legais ficam cada um no chunk da sua rota.
  */
-export function createRoutes({ uploadServices, now }: AppServices): RouteObject[] {
+export function createRoutes({ uploadServices, now, notice }: AppServices): RouteObject[] {
   return [
     {
-      element: <Layout />,
+      element: <Layout now={now} notice={notice} />,
       // Na primeira carga o router espera o chunk da tela antes de pintar; é um pedido curto, e
       // um indicador ali piscaria. Sem este componente o React Router avisa no console.
       HydrateFallback: EmptyFallback,
@@ -85,6 +88,13 @@ export function createRoutes({ uploadServices, now }: AppServices): RouteObject[
           lazy: async () => {
             const { PrivacyPage } = await import("../legal/PrivacyPage");
             return { Component: PrivacyPage };
+          },
+        },
+        {
+          path: PATHS.credits,
+          lazy: async () => {
+            const { CreditsPage } = await import("../legal/CreditsPage");
+            return { Component: CreditsPage };
           },
         },
         {

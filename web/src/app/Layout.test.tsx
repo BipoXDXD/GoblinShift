@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import type { SiteNotice } from "../notice/notice";
 import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
@@ -9,12 +10,16 @@ import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 type MeHandler = () => Response | null;
 
-function setup(me: MeHandler, path = "/") {
+function setup(me: MeHandler, path = "/", notice: SiteNotice | null = null) {
   const api = fakeApi({
     "GET /api/v1/me": me,
     "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
   });
-  const view = renderRoutes({ routes: appRoutes(api.client), path, client: api.client });
+  const view = renderRoutes({
+    routes: appRoutes(api.client, { notice }),
+    path,
+    client: api.client,
+  });
   return { ...view, api };
 }
 
@@ -70,6 +75,28 @@ describe("Layout: termos pendentes", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
   });
 
+  it("conta que aceitou a versão anterior volta ao aceite quando a versão sobe", async () => {
+    const { router } = setup(
+      () =>
+        jsonResponse(
+          meBody({
+            terms: {
+              current_version: "v2-rascunho",
+              accepted_version: "v1-rascunho",
+              accepted_at: "2026-10-14T12:00:00Z",
+              acceptance_required: true,
+            },
+          }),
+        ),
+      "/historico",
+    );
+
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico");
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+  });
+
   it.each(["/termos", "/privacidade", "/acesso", "/entrar"])(
     "%s continua aberta para ler, sair ou excluir a conta",
     async (path) => {
@@ -113,6 +140,57 @@ describe("Layout: login recusado", () => {
       "/?login_error=failed",
     );
     await within(await nav()).findByRole("link", { name: "Entrar" });
+
+    expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("Layout: aviso global", () => {
+  /** Na janela do relógio fixo dos testes (14/10/2026 12:00 UTC). */
+  const INCIDENT: SiteNotice = {
+    id: "incidente-2026-10",
+    kind: "incident",
+    title: "Incidente de segurança em andamento",
+    body: "Detalhes no aviso de privacidade.",
+    link: { href: "/privacidade", label: "Ler o aviso" },
+    fromMs: Date.parse("2026-10-14T00:00:00Z"),
+    untilMs: null,
+  };
+
+  it.each([
+    ["com sessão", () => jsonResponse(meBody())],
+    ["sem sessão", () => problemResponse(401, "AUTHENTICATION_REQUIRED")],
+  ])("%s, aparece entre a barra e o conteúdo", async (_case, me) => {
+    setup(me, "/historico", INCIDENT);
+    await nav();
+
+    const notice = screen.getByRole("region", { name: "Aviso: incidente de segurança" });
+    const header = screen.getByRole("banner");
+    const main = screen.getByRole("main");
+    expect(header.compareDocumentPosition(notice)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(notice.compareDocumentPosition(main)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("fora da janela do relógio das rotas, não aparece", async () => {
+    setup(() => jsonResponse(meBody()), "/historico", {
+      ...INCIDENT,
+      fromMs: Date.parse("2026-10-14T12:00:00.001Z"),
+    });
+    await nav();
+
+    expect(screen.queryByRole("region", { name: /^Aviso/ })).toBeNull();
+  });
+
+  it("sem aviso no build, não aparece", async () => {
+    setup(() => jsonResponse(meBody()), "/historico");
+    await nav();
+
+    expect(screen.queryByRole("region", { name: /^Aviso/ })).toBeNull();
+  });
+
+  it("não tem violações do axe com o aviso na moldura", async () => {
+    const { container } = setup(() => jsonResponse(meBody()), "/historico", INCIDENT);
+    await screen.findByRole("heading", { level: 1, name: "Histórico" });
 
     expect(await axeViolations(container)).toEqual([]);
   });

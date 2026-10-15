@@ -1,6 +1,6 @@
 # ADR 027. Cena 3D na abertura da Oficina, carregada depois do conteúdo
 
-- **Estado:** Aceito (fatia 7, 2026-10-14).
+- **Estado:** Aceito (fatia 7, 2026-10-14). As condições 5 (teto do GLB) e 6 (CSP) foram substituídas pelo [ADR 030](030-motor-e-asset-do-3d-da-abertura.md), que também escolhe o motor (three.js, no lugar do `<model-viewer>`) e o modelo.
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Apresentação), [3.6](../GoblinShiftPlan.md#s3-6) (CSP da SPA)
 - **Relacionado:** plano de design web da fatia 7 (D14, P8)
 

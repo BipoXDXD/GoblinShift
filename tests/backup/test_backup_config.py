@@ -123,3 +123,16 @@ def restore_env_of(job: dict[str, Any]) -> dict[str, str]:
 def test_repositorio_nunca_traz_chave_privada_age() -> None:
     for path in BACKUP_DIR.iterdir():
         assert "AGE-SECRET-KEY-" not in path.read_text(), path
+
+
+# Chave pública age: "age1" + 58 caracteres do alfabeto bech32 (32 bytes X25519 + checksum).
+AGE_RECIPIENT = re.compile(r"age1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}")
+
+
+def test_destinatarios_versionados_trazem_uma_chave_publica_age_valida() -> None:
+    """Sem destinatário o backup falha de propósito; com um inválido, o age falharia na VPS."""
+    lines = (BACKUP_DIR / "age-recipients.txt").read_text().splitlines()
+    recipients = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+    assert len(recipients) == 1
+    assert AGE_RECIPIENT.fullmatch(recipients[0])
