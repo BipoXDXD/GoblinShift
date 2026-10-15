@@ -172,7 +172,7 @@
   --info-bg: var(--color-stone-100);
   --info-fg: var(--color-stone-700);
 
-  --progress-fill: var(--color-moss-600);
+  --progress-fill: var(--color-patina-600);
   --progress-track: var(--color-stone-200);
   --dropzone-active: var(--color-moss-50);
   --selection-bg: var(--color-brass-200);
@@ -234,7 +234,7 @@
   --info-bg: var(--color-stone-800);
   --info-fg: var(--color-stone-200);
 
-  --progress-fill: var(--color-moss-400);
+  --progress-fill: var(--color-patina-400);
   --progress-track: var(--color-stone-700);
   --dropzone-active: var(--color-stone-800);
   --selection-bg: var(--color-brass-800);
@@ -288,7 +288,7 @@
     --info-bg: var(--color-stone-800);
     --info-fg: var(--color-stone-200);
 
-    --progress-fill: var(--color-moss-400);
+    --progress-fill: var(--color-patina-400);
     --progress-track: var(--color-stone-700);
     --dropzone-active: var(--color-stone-800);
     --selection-bg: var(--color-brass-800);
