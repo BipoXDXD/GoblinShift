@@ -263,11 +263,12 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
     prefix: str,
     known_revisions: str,
 ) -> None:
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
-    (latest,) = s3.keys(prefix)
-    # Um dump antigo de outro banco vem antes na ordem: a restauração precisa escolher o novo.
-    old = latest.replace("goblinshift-2", "goblinshift-1")
+    # Um dump de outro banco, enviado antes do backup: a restauração escolhe pelo envio (o
+    # LastModified do S3), então ele precisa chegar primeiro. Enviado depois, venceria por direito.
+    old = f"{prefix}goblinshift-20200101T000000Z-{'0' * 32}.dump.age"
     s3.put(old, Path(__file__))
+    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    (latest,) = set(s3.keys(prefix)) - {old}
 
     result = run_script(
         RESTORE_SCRIPT,
