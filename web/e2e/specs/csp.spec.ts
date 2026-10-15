@@ -48,7 +48,8 @@ async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
 test("o documento e os assets chegam com a CSP do snippet de produção", async ({ page }) => {
   const csp = productionCsp();
   // A política proíbe o que o build não precisa; se o snippet afrouxar, esta spec vira inútil.
-  expect(csp).not.toMatch(/unsafe-inline|unsafe-eval|\*/);
+  // 'wasm-unsafe-eval' é permitido (decoder Meshopt do GLB, ADR 030): só compila WASM, não JS.
+  expect(csp).not.toMatch(/unsafe-inline|(?<!wasm-)unsafe-eval|\*/);
 
   const assetCsps = new Map<string, string | undefined>();
   page.on("response", (response) => {

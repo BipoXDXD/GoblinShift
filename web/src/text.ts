@@ -74,6 +74,8 @@ export const TEXT = {
     skipToContent: "Pular para o conteúdo",
     brand: "GoblinShift",
     brandLink: "GoblinShift, Oficina",
+    editorialNote: "Ilustrações geradas com processamento externo e editadas.",
+    creditsLink: "Créditos",
   },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",
@@ -92,6 +94,19 @@ export const TEXT = {
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
+  // Texto alternativo das goblins (ADR 030): diz quem é e como é; o estado já está no texto ao lado.
+  art: {
+    hero: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
+    goblins: {
+      lua: { name: "Lua", alt: "Lua, goblin de cabelo preto, com um sininho dourado no pescoço." },
+      ada: { name: "Ada", alt: "Ada, goblin inventora, de óculos e jaqueta de couro." },
+      nyx: { name: "Nyx", alt: "Nyx, goblin de cabelo preto com pontas rosa e vestido preto." },
+      ferrugem: {
+        name: "Ferrugem",
+        alt: "Ferrugem, goblin de cabelo laranja volumoso e roupa de couro preto.",
+      },
+    },
+  },
   workbench: {
     title: (recipe: string) => `Bancada: ${recipe}`,
     backHome: "Oficina",
@@ -473,6 +488,17 @@ export const TEXT = {
     requiredTitle: "Aceite os termos para continuar",
     requiredBody: "Os termos de uso mudaram. Leia e aceite a versão nova para continuar.",
     goToAccept: "Ler e aceitar os termos",
+  },
+  credits: {
+    title: "Créditos",
+    artHeading: "As goblins",
+    art: [
+      "As goblins da oficina foram geradas com processamento externo e editadas à mão. Os conceitos em 2D saíram da fonte externa (com os modelos fonte externa e fonte externa), os modelos 3D do fonte externa fonte externa, e os renders, recortes e a otimização da cena 3D foram feitos no Blender e no glTF Transform.",
+      "A saída bruta de processamento externo pode não ser protegível por direito autoral; a parte humana (seleção, renders, edição e os scripts) fica sob a licença CC BY 4.0.",
+    ],
+    fontsHeading: "Fontes",
+    fonts:
+      "Bricolage Grotesque e Atkinson Hyperlegible, auto-hospedadas, sob a SIL Open Font License 1.1.",
   },
   legal: {
     termsTitle: "Termos de Uso",
