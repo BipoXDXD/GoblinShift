@@ -35,10 +35,10 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
  */
 export function Layout(): ReactElement {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-svh flex-col">
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-3 focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-20"
+        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip)"
       >
         {T.skipToContent}
       </a>
