@@ -42,7 +42,7 @@ from goblinshift.identity import (
     AuditOutcome,
     ExternalIdentity,
     IssuedSession,
-    LoginRefused,
+    LoginRefusal,
     authenticate_session,
     record_audit_event,
     resolve_login,
@@ -246,8 +246,8 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         ip,
         now,
     )
-    if isinstance(result, LoginRefused):
-        logger.info("login %s recusado: conta %s", name, result.name)
+    if isinstance(result, LoginRefusal):
+        logger.info("login %s recusado: conta %s", name, result.reason.name)
         return _login_failed()
     response = RedirectResponse(return_to, status_code=303)
     set_session_cookies(response, result)
@@ -265,11 +265,11 @@ def _complete_login(
     previous_token: str | None,
     ip: str | None,
     now: datetime,
-) -> IssuedSession | LoginRefused:
+) -> IssuedSession | LoginRefusal:
     """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada)."""
     with unit_of_work(factory) as session:
         resolved = resolve_login(session, identity, signup_open=signup_open, now=now)
-        if isinstance(resolved, LoginRefused):
+        if isinstance(resolved, LoginRefusal):
             _record(session, AuditEventType.LOGIN_FAILED, None, ip, AuditOutcome.FAILURE, now)
             return resolved
         _revoke_previous_session(session, previous_token, now)

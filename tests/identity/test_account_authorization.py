@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.identity import (
     ExternalIdentity,
     InvalidScopesError,
+    LoginRefusal,
     LoginRefused,
     Scope,
     UnknownAccountError,
@@ -244,7 +245,9 @@ def test_login_durante_o_bloqueio_e_recusado(factory: sessionmaker[Session]) -> 
     attempt.join(LOCK_WAIT_DEADLINE_S)
 
     assert not attempt.is_alive()
-    assert result[0] in {LoginRefused.BLOCKED, LoginRefused.PENDING_APPROVAL}
+    refusal = result[0]
+    assert isinstance(refusal, LoginRefusal)
+    assert refusal.reason in {LoginRefused.BLOCKED, LoginRefused.PENDING_APPROVAL}
 
 
 # --- (e) revogação sem dono só na CLI do administrador ----------------------------------------
