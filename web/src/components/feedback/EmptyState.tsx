@@ -21,7 +21,7 @@ export function EmptyState({
 }: EmptyStateProps): ReactElement {
   const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg bg-surface px-6 py-8 text-center text-fg-muted shadow-1">
+    <div className="flex flex-col items-center gap-2 rounded-lg bg-surface px-6 py-8 text-center text-fg-muted shadow-card">
       {illustration}
       <Heading className="text-lg font-semibold text-fg">{title}</Heading>
       {children}
