@@ -77,6 +77,15 @@ describe("tons crus", () => {
   });
 });
 
+describe("papéis de cor", () => {
+  it.each(THEMES)(
+    "o fundo escurecido do diálogo tem papel próprio no tema $name",
+    ({ selector }) => {
+      expect(semanticColors(css, selector).get("overlay")).toBeDefined();
+    },
+  );
+});
+
 function colorOf(colors: ReadonlyMap<string, string>, token: string): string {
   const value = colors.get(token);
   if (value === undefined || parse(value) === undefined) {
