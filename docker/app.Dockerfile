@@ -10,6 +10,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
+# license-files do pyproject.toml: o build do projeto recusa metadados sem eles.
+COPY LICENSE NOTICE ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
