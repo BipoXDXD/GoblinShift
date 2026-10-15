@@ -1,10 +1,11 @@
 // Chunk da cena 3D da abertura (ADR 027 e 030). O nome do arquivo vira o nome do chunk, e o
 // check-budget reconhece o prefixo `assets/oficina-3d`: não renomeie sem mudar os dois.
 import {
+  AgXToneMapping,
   Box3,
+  DirectionalLight,
   Group,
   Mesh,
-  NeutralToneMapping,
   PerspectiveCamera,
   PMREMGenerator,
   Scene,
@@ -34,6 +35,15 @@ const REST_RADIANS = -0.35;
 const DRAG_RADIANS_PER_PX = 0.01;
 const MAX_PIXEL_RATIO = 2;
 const ENVIRONMENT_BLUR = 0.04;
+/*
+ * Cor da pele: a textura do Rodin é verde-amarelada clara (média ~#bebd7e). O verde-oliva que o
+ * usuário aprovou vem do render do Blender, com tom AgX, um sol forte e ambiente cinza escuro.
+ * Com tom Neutral e só o ambiente claro do RoomEnvironment, a pele saía amarelada (ADR 030).
+ * Estes valores reproduzem a média de pele do render aprovado (rgb 126,123,90) com o AgX.
+ */
+const TONE_EXPOSURE = 0.4;
+const KEY_LIGHT_INTENSITY = 2.5;
+const ENVIRONMENT_INTENSITY = 0.25;
 
 export async function mountScene(host: HTMLElement, options: MountOptions): Promise<SceneHandle> {
   // O decoder Meshopt é WASM embutido neste chunk: nada vem de CDN e não há Worker (ADR 030).
@@ -46,13 +56,19 @@ export async function mountScene(host: HTMLElement, options: MountOptions): Prom
     failIfMajorPerformanceCaveat: true,
   });
   renderer.outputColorSpace = SRGBColorSpace;
-  renderer.toneMapping = NeutralToneMapping;
+  renderer.toneMapping = AgXToneMapping;
+  renderer.toneMappingExposure = TONE_EXPOSURE;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
   renderer.domElement.className = "block size-full";
 
   const scene = new Scene();
   const environment = new PMREMGenerator(renderer);
   scene.environment = environment.fromScene(new RoomEnvironment(), ENVIRONMENT_BLUR).texture;
+  scene.environmentIntensity = ENVIRONMENT_INTENSITY;
+  const keyLight = new DirectionalLight(0xffffff, KEY_LIGHT_INTENSITY);
+  // Luz de cima à esquerda, na frente, como o sol do render aprovado.
+  keyLight.position.set(-1, 2, 2);
+  scene.add(keyLight);
   environment.dispose();
 
   const turntable = new Group();
