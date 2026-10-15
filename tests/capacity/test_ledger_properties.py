@@ -60,7 +60,9 @@ def ledger_machine(factory: sessionmaker[Session]) -> type[RuleBasedStateMachine
         def __init__(self) -> None:
             super().__init__()
             self.owners = reset_database(factory)
-            # Reservas vivas no modelo: detentor → (conta, quantidade).
+            # Reservas vivas no modelo: detentor → (conta, quantidade). As escolhas seguem a ordem
+            # de inserção, nunca `sorted`: o id do detentor é uuid4, e ordenar por ele faria o
+            # replay do Hypothesis escolher outro detentor (FlakyStrategyDefinition).
             self.live: dict[Holder, tuple[uuid.UUID, int]] = {}
             self.released: list[Holder] = []
 
@@ -99,7 +101,7 @@ def ledger_machine(factory: sessionmaker[Session]) -> type[RuleBasedStateMachine
         def release_live(self, data: st.DataObject) -> None:
             if not self.live:
                 return
-            holder = data.draw(st.sampled_from(sorted(self.live)))
+            holder = data.draw(st.sampled_from(list(self.live)))
             with unit_of_work(factory) as session:
                 released = release(session, holder=holder[0], holder_id=holder[1])
             assert released == self.live.pop(holder)[1]
@@ -119,9 +121,9 @@ def ledger_machine(factory: sessionmaker[Session]) -> type[RuleBasedStateMachine
         ) -> None:
             if not self.live:
                 return
-            source = data.draw(st.sampled_from(sorted(self.live)))
+            source = data.draw(st.sampled_from(list(self.live)))
             owner, available = self.live[source]
-            same_owner = sorted(h for h, (o, _) in self.live.items() if o == owner and h != source)
+            same_owner = [h for h, (o, _) in self.live.items() if o == owner and h != source]
             if to_existing and same_owner:
                 target = data.draw(st.sampled_from(same_owner))
             else:
