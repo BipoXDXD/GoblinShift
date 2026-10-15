@@ -85,3 +85,37 @@ for (const { stored, system, expected } of [
     await expect(html(page)).toHaveAttribute("data-first-frame-background", finalBackground);
   });
 }
+
+test("sem theme-init.js, o sistema escuro ainda pinta a página no escuro", async ({ page }) => {
+  // O bundle também grava o data-theme quando monta (useTheme): bloqueá-lo congela o intervalo
+  // antes dele, que é o que a pessoa vê quando o theme-init.js não chega.
+  await page.route(/\.js(\?.*)?$/, (route) => route.abort());
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  await expect(html(page)).not.toHaveAttribute("data-theme", /.+/);
+  const background = await html(page).evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  const darkBackground = await page.evaluate(() => {
+    document.documentElement.dataset["theme"] = "dark";
+    const color = getComputedStyle(document.documentElement).backgroundColor;
+    delete document.documentElement.dataset["theme"];
+    return color;
+  });
+  expect(background).toBe(darkBackground);
+});
+
+test("a escolha Claro vence o fallback num sistema escuro", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  await chooseTheme(page, "Claro");
+  const background = await html(page).evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  await page.emulateMedia({ colorScheme: "light" });
+  await chooseTheme(page, "Sistema");
+  const lightBackground = await html(page).evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  expect(background).toBe(lightBackground);
+});
