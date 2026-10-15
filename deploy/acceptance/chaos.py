@@ -4,7 +4,7 @@ Roda na própria VPS, como root, com a pilha de produção de pé e a fila vazia
 
     cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.chaos
 
-Opções: `--base-url` (padrão http://localhost), `--user <id>` para reaproveitar uma conta de
+Opções: `--base-url` (padrão https://goblinshift.dev), `--user <id>` para reaproveitar uma conta de
 teste em vez de criar outra, e `--scenario <falha>/<fronteira>` (repetível) para rodar só parte.
 
 Para cada fronteira do protocolo, cada falha do worker, e depois a recuperação:
@@ -114,7 +114,9 @@ from executor_ctl.config import DEFAULT_CONFIG_PATH, load_config
 from executor_ctl.profile import ATTEMPT_LABEL, container_name
 
 COMPOSE_PROJECT = "goblinshift"
-DEFAULT_BASE_URL = "http://localhost"
+# Pelo domínio, com TLS: a borda não leva o acesso pelo IP ao GoblinShift (ADR 014), e a chave
+# do teste não trafega em texto claro.
+DEFAULT_BASE_URL = "https://goblinshift.dev"
 API_PREFIX = "/api/v1"
 KEY_SCOPES = "files:read,files:write,runs:read,runs:write"
 # A menor validade que o gs-admin aceita; a chave é revogada no fim de qualquer forma.

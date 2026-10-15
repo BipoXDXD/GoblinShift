@@ -16,13 +16,13 @@ const BASE =
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-primary text-on-primary shadow-1 hover:bg-primary-hover active:shadow-none aria-disabled:bg-surface-sunken aria-disabled:text-fg-subtle aria-disabled:shadow-none",
+    "bg-primary text-on-primary shadow-card hover:bg-primary-hover active:shadow-none aria-disabled:bg-surface-sunken aria-disabled:text-fg-subtle aria-disabled:shadow-none",
   secondary:
-    "border-2 border-secondary-fg bg-surface text-secondary-fg shadow-1 hover:bg-surface-sunken active:shadow-none aria-disabled:border-line aria-disabled:text-fg-subtle aria-disabled:shadow-none",
+    "border-2 border-secondary-fg bg-surface text-secondary-fg shadow-card hover:bg-surface-sunken active:shadow-none aria-disabled:border-line aria-disabled:text-fg-subtle aria-disabled:shadow-none",
   tertiary:
     "text-link underline underline-offset-4 hover:decoration-2 aria-disabled:text-fg-subtle",
   destructive:
-    "bg-destructive text-on-destructive shadow-1 hover:bg-destructive-hover active:shadow-none aria-disabled:bg-surface-sunken aria-disabled:text-fg-subtle aria-disabled:shadow-none",
+    "bg-destructive text-on-destructive shadow-card hover:bg-destructive-hover active:shadow-none aria-disabled:bg-surface-sunken aria-disabled:text-fg-subtle aria-disabled:shadow-none",
 };
 
 // Padding por tamanho, feito à mão (RUI cap. 3): 16 px de fonte com 8 × 16 dá 44 px de altura.

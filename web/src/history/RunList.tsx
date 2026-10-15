@@ -29,7 +29,7 @@ function RunRow({ run }: { readonly run: Run }): ReactElement {
   // Receita que saiu do registro da interface ainda aparece, pelo id que a API devolve.
   const title = findRecipe(run.recipe_id)?.title ?? run.recipe_id;
   return (
-    <li className="relative flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface p-4 shadow-1 transition hover:shadow-2">
+    <li className="relative flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface p-4 shadow-card transition hover:shadow-float">
       <div className="flex flex-col gap-1">
         <Link to={runPath(run.id)} className="card-link font-semibold">
           {title}
