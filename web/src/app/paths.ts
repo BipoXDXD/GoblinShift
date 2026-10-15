@@ -13,6 +13,7 @@ export const PATHS = {
   access: "/acesso",
   terms: "/termos",
   privacy: "/privacidade",
+  credits: "/creditos",
   acceptTerms: "/termos/aceitar",
   accountDeleted: "/conta-excluida",
 } as const;

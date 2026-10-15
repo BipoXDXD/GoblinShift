@@ -8,6 +8,7 @@ import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { workbenchPath } from "../app/paths";
+import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
@@ -30,6 +31,16 @@ const runIdSchema = z.uuid();
 const SUCCEEDED: ReadonlySet<RunStatus> = new Set(["succeeded", "succeeded_with_warnings"]);
 /** Estados em que a fase atual diz algo: há trabalho em curso. */
 const WORKING: ReadonlySet<RunStatus> = new Set(["running", "stopping"]);
+/** Goblin de cada estado; a cancelada fica sem, porque não é espera, sucesso nem erro. */
+const GOBLIN_OF_STATUS: Readonly<Record<RunStatus, GoblinState | null>> = {
+  queued: "carregando",
+  running: "carregando",
+  stopping: "carregando",
+  succeeded: "sucesso",
+  succeeded_with_warnings: "sucesso",
+  failed: "erro",
+  canceled: null,
+};
 
 /** Rota de uma execução: o id da URL só vira consulta se for um UUID. */
 export function RunPage(): ReactElement {
@@ -87,49 +98,55 @@ function RunDetails({ run }: { readonly run: Run }): ReactElement {
   const recipe = findRecipe(run.recipe_id);
   const { phase, processed, total } = run.progress;
   const flavor = flavorOf(run.status);
+  const goblin = GOBLIN_OF_STATUS[run.status];
   return (
     <Card>
-      <div className="flex flex-col gap-6">
-        <dl className="flex flex-wrap items-center justify-between gap-3">
-          <Detail label={T.status} hiddenLabel>
-            <StatusBadge status={run.status} />
-          </Detail>
-          <Detail label={T.recipe} hiddenLabel>
-            <span className="text-fg-muted">{recipe?.title ?? run.recipe_id}</span>
-          </Detail>
-        </dl>
-        {flavor !== null && <p className="text-fg-muted">{flavor}</p>}
-        {phase !== null && (
-          <dl>
-            <Detail label={T.phase} hiddenLabel>
-              <span className="text-lg font-semibold text-fg">{T.phases[phase]}</span>
+      <div className="flex flex-col gap-6 md:flex-row md:items-start">
+        <div className="flex flex-1 flex-col gap-6">
+          <dl className="flex flex-wrap items-center justify-between gap-3">
+            <Detail label={T.status} hiddenLabel>
+              <StatusBadge status={run.status} />
+            </Detail>
+            <Detail label={T.recipe} hiddenLabel>
+              <span className="text-fg-muted">{recipe?.title ?? run.recipe_id}</span>
             </Detail>
           </dl>
-        )}
-        {phase !== null && WORKING.has(run.status) && <Steps phase={phase} />}
-        <dl className="flex flex-col gap-6">
-          {total > 0 && (
-            <Detail label={T.progress}>
-              <span className="flex flex-col gap-2">
-                <span className="tabular-nums">{T.progressValue(processed, total)}</span>
-                <progress aria-label={T.progress} value={processed} max={total} />
-              </span>
-            </Detail>
+          {flavor !== null && <p className="text-fg-muted">{flavor}</p>}
+          {phase !== null && (
+            <dl>
+              <Detail label={T.phase} hiddenLabel>
+                <span className="text-lg font-semibold text-fg">{T.phases[phase]}</span>
+              </Detail>
+            </dl>
           )}
-          {run.status === "queued" && (
-            <Detail label={T.queueAhead}>
-              <span className="tabular-nums">{run.queue_ahead}</span>
+          {phase !== null && WORKING.has(run.status) && <Steps phase={phase} />}
+          <dl className="flex flex-col gap-6">
+            {total > 0 && (
+              <Detail label={T.progress}>
+                <span className="flex flex-col gap-2">
+                  <span className="tabular-nums">{T.progressValue(processed, total)}</span>
+                  <progress aria-label={T.progress} value={processed} max={total} />
+                </span>
+              </Detail>
+            )}
+            {run.status === "queued" && (
+              <Detail label={T.queueAhead}>
+                <span className="tabular-nums">{run.queue_ahead}</span>
+              </Detail>
+            )}
+            {run.error !== null && (
+              <Detail label={T.failureReason}>
+                <span className="font-semibold text-danger-fg">{run.error.message}</span>
+              </Detail>
+            )}
+            <Detail label={T.attempt}>
+              <span className="tabular-nums">{run.attempt}</span>
             </Detail>
-          )}
-          {run.error !== null && (
-            <Detail label={T.failureReason}>
-              <span className="font-semibold text-danger-fg">{run.error.message}</span>
-            </Detail>
-          )}
-          <Detail label={T.attempt}>
-            <span className="tabular-nums">{run.attempt}</span>
-          </Detail>
-        </dl>
+          </dl>
+        </div>
+        {/* Depois do texto: o leitor de tela ouve o estado antes da goblin, e no celular ela fica
+            embaixo, sem empurrar o estado para fora da primeira dobra. */}
+        {goblin !== null && <GoblinIllustration state={goblin} />}
       </div>
     </Card>
   );
