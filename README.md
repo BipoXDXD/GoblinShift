@@ -41,6 +41,8 @@ uv run lint-imports           # contratos de arquitetura (docs/GoblinShiftPlan.m
 uv run pytest                 # inclui PostgreSQL real via Testcontainers
 ```
 
+Depois de mexer no worker, na manutenção ou no Runner, `./scripts/stress-runs.sh [suítes]` roda N suítes `tests/runs` em paralelo (padrão: 5), a carga em que os testes do worker como processo já falharam; sai com 1 e aponta o log de cada suíte vermelha.
+
 ### Interface web (`web/`)
 
 Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas), Bancada (arquivos e parâmetros) e Execução (estado e downloads).
