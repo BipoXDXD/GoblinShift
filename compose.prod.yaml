@@ -30,6 +30,23 @@ services:
       <<: *executor-env
       GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
       GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+      # Login web (fatia 6, 3.6), só na API. Sem uma destas, o Compose recusa o arquivo antes de
+      # qualquer comando, e o deploy para antes do `migrate`, sem mexer no banco.
+      GS_PUBLIC_ORIGIN: ${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}
+      GS_GOOGLE_CLIENT_ID: ${GS_GOOGLE_CLIENT_ID:?defina em secrets/app.env (console do Google)}
+      GS_GITHUB_CLIENT_ID: ${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}
+      # Fechado até a abertura pública (ADR 023).
+      GS_SIGNUP_MODE: ${GS_SIGNUP_MODE:-closed}
+      GS_GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
+      GS_GITHUB_CLIENT_SECRET_FILE: /run/secrets/github_client_secret
+      GS_CSRF_SECRET_FILE: /run/secrets/csrf_secret
+      GS_LOGIN_COOKIE_SECRET_FILE: /run/secrets/login_cookie_secret
+    # Somados ao db_password da base (o Compose funde as listas pelo nome).
+    secrets:
+      - google_client_secret
+      - github_client_secret
+      - csrf_secret
+      - login_cookie_secret
   # O evento de término da Run (3.7) sai do worker e da manutenção com o mesmo `user.hash` da API.
   worker:
     <<: *executor-client
@@ -72,6 +89,19 @@ services:
         # IP, e não alias: com o mesmo alias, outro container dividiria o tráfego em
         # silêncio; com o mesmo IP, o Docker recusa.
         ipv4_address: 172.31.0.4
+
+# Arquivos em /srv/goblinshift/secrets (diretório 700), modo 644 como o db_password: a API lê com
+# o próprio UID. Os client secrets são gravados pelo operador; as chaves do servidor, geradas pelo
+# deploy/app-secrets.sh (README, "Segredos do login").
+secrets:
+  google_client_secret:
+    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/google_client_secret
+  github_client_secret:
+    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/github_client_secret
+  csrf_secret:
+    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/csrf_secret
+  login_cookie_secret:
+    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/login_cookie_secret
 
 networks:
   edge:

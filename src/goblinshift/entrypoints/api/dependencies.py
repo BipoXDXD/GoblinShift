@@ -1,4 +1,5 @@
-"""Dependências comuns às rotas: Session, relógio, autenticação e escopo.
+"""Dependências comuns às rotas: Session, relógio, autenticação, limite de requisições, aceite dos
+termos e escopo.
 
 Ver docs/GoblinShiftPlan.md, 3.2 (Session com `scope="function"`) e 3.6 (chaves de API).
 
@@ -18,15 +19,63 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, Request
+from fastapi.routing import iter_route_contexts
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api.capacity_problems import retry_after
+from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
-from goblinshift.entrypoints.api.wide_event import record_principal
+from goblinshift.entrypoints.api.wide_event import (
+    RateLimitClass,
+    rate_limit_class,
+    record_principal,
+    record_rate_limit,
+)
 from goblinshift.files.storage import FileStorage
-from goblinshift.identity import Principal, Scope, authenticate_api_key
+from goblinshift.identity import (
+    RECENT_AUTH_WINDOW,
+    REQUESTS_PER_MINUTE,
+    AuditEventType,
+    AuditOutcome,
+    Principal,
+    RequestClass,
+    RequestLimitExceededError,
+    Scope,
+    authenticate_api_key,
+    authenticate_session,
+    count_request,
+    cross_site_request,
+    csrf_token_matches,
+    find_account,
+    record_audit_event,
+)
+from goblinshift.platform.settings import WebIdentityConfig
 
 BEARER_SCHEME = "bearer"
+# Métodos que nunca alteram estado (3.6): dispensam o CSRF.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _CHALLENGE = {"WWW-Authenticate": "Bearer"}
+# Classe de rota da telemetria → limite por minuto da conta. Envio e download de conteúdo ficam
+# de fora: valem as transferências simultâneas (1.7).
+_LIMITED_CLASSES: dict[RateLimitClass, RequestClass | None] = {
+    RateLimitClass.READ: RequestClass.READ,
+    RateLimitClass.COMMAND: RequestClass.COMMAND,
+    RateLimitClass.RUN_CREATE: RequestClass.RUN_CREATE,
+    RateLimitClass.TRANSFER: None,
+}
+# Rotas que a conta sem o aceite dos termos vigentes continua usando (ADR 029): ler a própria
+# conta, aceitar os termos e reduzir o próprio acesso (sair de tudo, ver e revogar chaves,
+# excluir a conta). O `POST /auth/logout` não autentica e nunca passa pelo bloqueio.
+_TERMS_EXEMPT_ROUTES = frozenset(
+    {
+        ("GET", "/api/v1/me"),
+        ("POST", "/api/v1/me/terms:accept"),
+        ("DELETE", "/api/v1/me"),
+        ("POST", "/auth/logout-all"),
+        ("GET", "/api/v1/api-keys"),
+        ("DELETE", "/api/v1/api-keys/{key_id}"),
+    }
+)
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -52,6 +101,12 @@ def get_storage(request: Request) -> FileStorage:
 Storage = Annotated[FileStorage, Depends(get_storage)]
 
 
+def terms_version(request: Request) -> str:
+    """Versão vigente dos termos (`CURRENT_TERMS_VERSION`); os testes a trocam no `app.state`."""
+    version: str = request.app.state.terms_version
+    return version
+
+
 def current_time() -> datetime:
     """O relógio da API; os testes o substituem por `app.dependency_overrides`."""
     return datetime.now(UTC)
@@ -61,11 +116,33 @@ Now = Annotated[datetime, Depends(current_time)]
 
 
 def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
-    """`Authorization: Bearer <chave>` → Principal; ausente ou inválida → 401.
+    """Cookie de sessão **ou** `Authorization: Bearer <chave>` → Principal; senão 401.
 
-    Mesma resposta para chave malformada, desconhecida, expirada, revogada ou de conta
-    bloqueada: o cliente não aprende qual foi o caso, o log do servidor registra.
+    Os dois juntos são ambíguos → 400. Mutação por cookie passa pelo CSRF (403 `CSRF_FAILED`);
+    a chave não usa cookie e dispensa o CSRF. Mesma resposta para credencial malformada,
+    desconhecida, expirada, revogada ou de conta bloqueada: o cliente não aprende qual foi o
+    caso, o log do servidor registra.
+
+    Toda requisição autenticada conta no limite por conta e classe de rota (1.7); acima dele,
+    429 `RATE_LIMITED` com `Retry-After`. Depois, conta do login sem o aceite dos termos vigentes
+    recebe 403 `TERMS_NOT_ACCEPTED`, salvo nas rotas de `_TERMS_EXEMPT_ROUTES`. Os dois ficam
+    aqui para nenhuma rota escapar deles.
     """
+    principal = _identify(request, session, now)
+    route = _route_template(request)
+    _count_request(request.method, route, session, principal, now)
+    if (request.method, route) not in _TERMS_EXEMPT_ROUTES:
+        _require_current_terms(session, principal, terms_version(request))
+    return principal
+
+
+def _identify(request: Request, session: Session, now: datetime) -> Principal:
+    _reject_simultaneous_credentials(request)
+    if SESSION_COOKIE in request.cookies:
+        principal = _session_from_cookie(request, session, now)
+        if principal is None:
+            raise _unauthenticated("A sessão expirou ou foi encerrada; entre de novo.")
+        return principal
     token = _bearer_token(request)
     with session.begin():
         principal = authenticate_api_key(session, token, now)
@@ -78,17 +155,179 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
 CurrentPrincipal = Annotated[Principal, Depends(authenticate)]
 
 
-def require_scope(scope: Scope) -> Callable[[Principal], Principal]:
-    """Dependência que autentica e exige `scope`; sem ele → 403 `INSUFFICIENT_SCOPE`."""
+def optional_session(request: Request, session: DbSession, now: Now) -> Principal | None:
+    """Sessão do cookie, ou None sem sessão válida (`POST /auth/logout`).
 
-    def check_scope(principal: CurrentPrincipal) -> Principal:
+    Com sessão válida, a mutação passa pelo CSRF como em `authenticate`: sem isso, outro site
+    derrubaria a sessão do usuário.
+    """
+    _reject_simultaneous_credentials(request)
+    return _session_from_cookie(request, session, now)
+
+
+OptionalSession = Annotated[Principal | None, Depends(optional_session)]
+
+
+def require_scope(scope: Scope) -> Callable[..., Principal]:
+    """Dependência que autentica e exige `scope`; sem ele → 403 `INSUFFICIENT_SCOPE`, auditado."""
+
+    def check_scope(
+        principal: CurrentPrincipal, request: Request, session: DbSession, now: Now
+    ) -> Principal:
         if scope not in principal.scopes:
+            _audit_failure(session, AuditEventType.ACCESS_DENIED, principal, request, now)
             raise ApiProblem(
                 ProblemCode.INSUFFICIENT_SCOPE, f"A chave não tem o escopo {scope.value}."
             )
         return principal
 
     return check_scope
+
+
+def require_session(
+    principal: CurrentPrincipal, request: Request, session: DbSession, now: Now
+) -> Principal:
+    """Só sessão web (`/api-keys`, `DELETE /me`, `logout-all`).
+
+    Chave → 403 `FORBIDDEN`, auditado como negação de autorização.
+    """
+    if principal.via != "session":
+        _audit_failure(session, AuditEventType.ACCESS_DENIED, principal, request, now)
+        raise ApiProblem(ProblemCode.FORBIDDEN, "Esta operação exige a sessão web, não uma chave.")
+    return principal
+
+
+SessionPrincipal = Annotated[Principal, Depends(require_session)]
+
+
+def require_recent_session(
+    principal: SessionPrincipal, request: Request, session: DbSession, now: Now
+) -> Principal:
+    """Sessão com login no provedor há no máximo `RECENT_AUTH_WINDOW` (10 min, fronteira
+    inclusiva); senão 401 `REAUTH_REQUIRED`, auditado.
+    """
+    if principal.authenticated_at is None or now - principal.authenticated_at > RECENT_AUTH_WINDOW:
+        _audit_failure(session, AuditEventType.REAUTH_REQUIRED, principal, request, now)
+        raise ApiProblem(
+            ProblemCode.REAUTH_REQUIRED, "Entre de novo no provedor para concluir esta operação."
+        )
+    return principal
+
+
+RecentSessionPrincipal = Annotated[Principal, Depends(require_recent_session)]
+
+
+def client_ip(request: Request) -> str | None:
+    """IP do cliente, que o uvicorn resolve do `X-Forwarded-For` só vindo da borda confiável."""
+    return request.client.host if request.client is not None else None
+
+
+def _count_request(
+    method: str, route: str, session: Session, principal: Principal, now: datetime
+) -> None:
+    request_class = _LIMITED_CLASSES[rate_limit_class(method, route)]
+    if request_class is None:
+        return
+    try:
+        with session.begin():
+            count_request(session, principal.owner_id, request_class, now)
+    except RequestLimitExceededError as error:
+        record_rate_limit(limited=True)
+        raise ApiProblem(
+            ProblemCode.RATE_LIMITED,
+            f"A conta atingiu o limite de {REQUESTS_PER_MINUTE[request_class]} requisições por "
+            "minuto desta classe de rota; tente de novo depois do Retry-After.",
+            headers=retry_after(error.retry_after),
+        ) from error
+    record_rate_limit(limited=False)
+
+
+def _require_current_terms(session: Session, principal: Principal, current_version: str) -> None:
+    with session.begin():
+        account = find_account(session, principal.owner_id)
+    if account is None:
+        raise _unauthenticated("A conta da credencial não existe mais.")
+    if account.needs_terms_acceptance(current_version):
+        raise ApiProblem(
+            ProblemCode.TERMS_NOT_ACCEPTED,
+            f"Aceite a versão {current_version} dos termos de uso e do aviso de privacidade "
+            "(POST /api/v1/me/terms:accept) para continuar.",
+        )
+
+
+def _route_template(request: Request) -> str:
+    """Template completo da rota, com os prefixos dos roteadores incluídos.
+
+    O `scope["route"]` traz só o trecho do roteador mais interno; o caminho completo vem dos
+    contextos que o FastAPI monta ao incluir os roteadores.
+    """
+    route = request.scope.get("route")
+    for context in iter_route_contexts(request.app.routes):
+        if context.original_route is route and context.path is not None:
+            return context.path
+    raise RuntimeError(f"rota autenticada fora do roteador da aplicação: {request.url.path}")
+
+
+def _reject_simultaneous_credentials(request: Request) -> None:
+    if SESSION_COOKIE in request.cookies and request.headers.getlist("authorization"):
+        raise ApiProblem(
+            ProblemCode.BAD_REQUEST,
+            "Envie a sessão ou a chave de API, não as duas: credenciais simultâneas são ambíguas.",
+        )
+
+
+def _session_from_cookie(request: Request, session: Session, now: datetime) -> Principal | None:
+    token = request.cookies.get(SESSION_COOKIE)
+    if token is None:
+        return None
+    with session.begin():
+        principal = authenticate_session(session, token, now)
+    if principal is not None and request.method not in SAFE_METHODS:
+        _verify_csrf(request, session, principal, now)
+    return principal
+
+
+def _verify_csrf(request: Request, session: Session, principal: Principal, now: datetime) -> None:
+    web_identity: WebIdentityConfig = request.app.state.web_identity
+    if principal.session_id is None:
+        raise RuntimeError("Principal de sessão sem session_id")
+    cross_site = cross_site_request(
+        request.headers.get("sec-fetch-site"),
+        request.headers.get("origin"),
+        web_identity.public_origin,
+    )
+    token_matches = csrf_token_matches(
+        web_identity.csrf_key,
+        principal.session_id,
+        request.cookies.get(CSRF_COOKIE),
+        request.headers.get(CSRF_HEADER),
+    )
+    if cross_site or not token_matches:
+        _audit_failure(session, AuditEventType.CSRF_FAILED, principal, request, now)
+        raise ApiProblem(
+            ProblemCode.CSRF_FAILED,
+            f"Mutação pela sessão exige o header {CSRF_HEADER} com o valor do cookie "
+            f"{CSRF_COOKIE}, enviado pela própria origem.",
+        )
+
+
+def _audit_failure(
+    session: Session,
+    event: AuditEventType,
+    principal: Principal,
+    request: Request,
+    now: datetime,
+) -> None:
+    # Transação própria: a recusa interrompe a requisição, e o evento precisa ficar gravado.
+    with session.begin():
+        record_audit_event(
+            session,
+            event=event,
+            user_id=principal.owner_id,
+            ip=client_ip(request),
+            outcome=AuditOutcome.FAILURE,
+            now=now,
+        )
 
 
 def _bearer_token(request: Request) -> str:

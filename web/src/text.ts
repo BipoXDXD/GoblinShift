@@ -34,6 +34,7 @@ export const TEXT = {
       FORBIDDEN: "Você não tem permissão para esta ação.",
       CSRF_FAILED:
         "A verificação de segurança da sessão falhou. Recarregue a página e tente de novo.",
+      TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos termos de uso.",
       NOT_FOUND: "Não encontramos o que você pediu. Ele pode ter sido removido.",
       METHOD_NOT_ALLOWED: "Esta ação não é aceita aqui.",
       REQUEST_TIMEOUT: "O envio demorou demais e foi interrompido. Tente de novo.",

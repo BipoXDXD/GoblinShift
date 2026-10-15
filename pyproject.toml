@@ -6,7 +6,10 @@ authors = [{ name = "BipoXDXD" }]
 requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
+    "authlib>=1.6.12",
     "fastapi>=0.121",
+    "httpx2>=2.13.1",
+    "itsdangerous>=2.2",
     "opentelemetry-api>=1.45.1",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
     "opentelemetry-instrumentation-fastapi>=0.66b1",
@@ -36,7 +39,6 @@ build-backend = "uv_build"
 # grupo, a partir do lock. O pin repete o de [project.dependencies]; um teste confere os dois.
 executor = ["pillow==12.3.0"]
 dev = [
-    "httpx2>=2.13.1",
     "hypothesis>=6.169.0",
     "import-linter>=2.15",
     "mypy>=2.4.0",
@@ -109,13 +111,16 @@ root_package = "goblinshift"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Camadas: entrypoints → runs → presets → (catalog | files | identity) → (processing | platform)"
+name = "Camadas: entrypoints → runs → presets → (catalog | files | identity) → capacity → (processing | platform)"
 type = "layers"
+# `capacity` (livro-razão de reservas, ADR 024) fica abaixo de `files` e `runs`, que reservam, e
+# acima de `platform`, de onde vem o MetaData.
 layers = [
     "goblinshift.entrypoints",
     "goblinshift.runs",
     "goblinshift.presets",
     "goblinshift.catalog | goblinshift.files | goblinshift.identity",
+    "goblinshift.capacity",
     "goblinshift.processing | goblinshift.platform",
 ]
 
@@ -130,6 +135,7 @@ forbidden_modules = [
     "httpx",
     "httpx2",
     "goblinshift.platform",
+    "goblinshift.capacity",
     "goblinshift.catalog",
     "goblinshift.files",
     "goblinshift.identity",
@@ -149,6 +155,7 @@ forbidden_modules = [
     "httpx",
     "httpx2",
     "goblinshift.platform",
+    "goblinshift.capacity",
     "goblinshift.catalog",
     "goblinshift.files",
     "goblinshift.identity",
@@ -170,6 +177,7 @@ source_modules = [
     "goblinshift.runs",
     "goblinshift.presets",
     "goblinshift.identity",
+    "goblinshift.capacity",
     "goblinshift.platform",
     "goblinshift.entrypoints",
 ]

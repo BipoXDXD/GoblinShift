@@ -96,6 +96,12 @@ def record_error(code: str) -> None:
         current.error_code = code
 
 
+def record_rate_limit(*, limited: bool) -> None:
+    current = _current.get()
+    if current is not None:
+        current.extra["rate_limit.limited"] = limited
+
+
 def record_run_accepted(
     run_id: UUID, recipe_id: str, recipe_version: int, *, replayed: bool
 ) -> None:
