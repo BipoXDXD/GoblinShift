@@ -121,6 +121,7 @@ markers = [
     "nginx: Nginx real com os templates do repositório (precisa de Docker)",
     "backup: backup e restauração do PostgreSQL contra S3 local (precisa de Docker, age e curl)",
     "openobserve: SLOs e alertas contra OpenObserve e Collector reais (precisa de Docker)",
+    "host_installer: instaladores de deploy/ como root num container Debian (precisa de Docker)",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

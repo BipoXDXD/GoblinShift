@@ -201,11 +201,13 @@ O teste monta o `docker run` das sondas com o perfil de produção do `executor-
 O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por dia, às 07:30 UTC com até 30 min de sorteio, e pinga o check "aceitação diária" do healthchecks.io (`/start`, sucesso ou `/fail`; tabela dos monitores em [`deploy/openobserve/README.md`](deploy/openobserve/README.md#monitores-externos)). O `deploy/acceptance/scheduled.sh` para o worker durante o teste e o religa no fim, também quando a aceitação reprova; se o worker não voltar, o resultado é `/fail` e o log traz o `docker start` que o religa. Nesses 10 a 30 minutos (ADR 017) as execuções esperam na fila.
 
 ```bash
-sudo bash deploy/acceptance/install.sh       # cria /srv/goblinshift/secrets/acceptance.env vazio (root, 600)
-sudoedit /srv/goblinshift/secrets/acceptance.env   # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>
+sudo bash deploy/acceptance/install.sh       # copia o código e cria /etc/goblinshift/acceptance.env vazio (root, 600)
+sudoedit /etc/goblinshift/acceptance.env     # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>
 sudo bash deploy/acceptance/install.sh       # com a URL preenchida, liga o timer
 sudo systemctl start goblinshift-acceptance.service   # roda já; resultado em journalctl -u goblinshift-acceptance
 ```
+
+O serviço roda como root, então não executa nada do checkout nem lê nada de `/srv/goblinshift/secrets`, que pertencem ao usuário `goblinshift`: quem controlasse esses caminhos rodaria código como root. O instalador copia `deploy/acceptance`, `deploy/executor_ctl` e `deploy/backup/lib.sh` para `/usr/local/lib/goblinshift` (do root, sem escrita para outros) e recusa diretório de destino que outro usuário grave ou que seja symlink. Por isso uma mudança na aceitação só chega ao timer quando o `install.sh` roda de novo, como no executor-ctl; rode-o a partir de um checkout conferido (`git status` limpo, no commit implantado). A unit tem o sistema de arquivos somente leitura fora da área de trabalho e só as capabilities que as sondas usam (`systemd-analyze security goblinshift-acceptance.service`).
 
 Não rode o teste de caos nem o do Image Forge no horário do timer: os três usam a mesma área de trabalho.
 
