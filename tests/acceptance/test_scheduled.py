@@ -240,10 +240,11 @@ def test_servico_tem_prazo_acima_das_sondas() -> None:
     assert service["TimeoutStartSec"] == "1h"
 
 
-def test_timer_e_diario_com_jitter_e_recupera_execucao_perdida() -> None:
+def test_timer_e_semanal_com_jitter_e_recupera_execucao_perdida() -> None:
+    # Uma vez por semana, no domingo de madrugada: o worker fica parado de 10 a 30 min (ADR 017).
     timer = unit(TIMER)["Timer"]
 
-    assert timer["OnCalendar"] == "*-*-* 07:30:00 UTC"
+    assert timer["OnCalendar"] == "Sun *-*-* 07:30:00 UTC"
     assert timer["RandomizedDelaySec"] == "30min"
     assert timer["Persistent"] == "true"
 
@@ -268,6 +269,16 @@ def test_instalador_exige_o_que_o_script_exige() -> None:
     assert set(required.group(1).split()) == set(match.group(1).split())
 
 
+def test_runbook_tem_o_check_semanal_com_periodo_de_7_dias() -> None:
+    runbook = (ROOT / "deploy" / "openobserve" / "README.md").read_text()
+
+    assert re.search(
+        r"^\| `aceitação semanal` \| healthchecks\.io \| 7 dias / 2 h \|", runbook, re.M
+    )
+    assert "aceitação diária" not in runbook
+    assert "aceitação diária" not in (ROOT / "README.md").read_text()
+
+
 def unit_at(path: Path) -> configparser.ConfigParser:
     parser = configparser.ConfigParser(strict=False, interpolation=None)
     parser.optionxform = str  # type: ignore[assignment,method-assign]
@@ -276,8 +287,8 @@ def unit_at(path: Path) -> configparser.ConfigParser:
 
 
 def _minutes(on_calendar: str) -> int:
-    """Minuto do dia de um `OnCalendar` diário em UTC (`*-*-* HH:MM:SS UTC`)."""
-    match = re.fullmatch(r"\*-\*-\* (\d\d):(\d\d):00 UTC", on_calendar)
+    """Minuto do dia de um `OnCalendar` em UTC (`[Dia ]*-*-* HH:MM:SS UTC`)."""
+    match = re.fullmatch(r"(?:[A-Z][a-z]{2} )?\*-\*-\* (\d\d):(\d\d):00 UTC", on_calendar)
     assert match is not None, on_calendar
     return int(match[1]) * 60 + int(match[2])
 

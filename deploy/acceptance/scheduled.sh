@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Teste de aceitação do ambiente, agendado (docs/GoblinShiftPlan.md, 3.7 e 3.8; fatia 8, F8-9).
 # Roda pelo goblinshift-acceptance.timer, como root, o mesmo `python3 -B -m acceptance.run` do
-# README, e pinga o check "aceitação diária" do healthchecks.io: /start, sucesso ou /fail. Sem o
+# README, e pinga o check "aceitação semanal" do healthchecks.io: /start, sucesso ou /fail. Sem o
 # ping de sucesso no prazo, o próprio healthchecks.io avisa (aceitação reprovada ou que não rodou).
 #
 # O worker fica parado durante o teste: as sondas enchem a área de trabalho, que só admite uma
