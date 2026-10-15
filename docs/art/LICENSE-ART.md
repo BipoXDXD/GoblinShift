@@ -6,7 +6,7 @@ As goblins do site são **ilustrações e modelos 3D gerados com processamento e
 
 | Goblin | Onde | Modelo 3D (fonte externa fonte externa) |
 |---|---|---|
-| Rúbia | Cena 3D da abertura e a imagem estática dela | `e1c79f67` |
+| Rúbia | Cena 3D da abertura e a imagem estática dela | `9f030f3c` (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
 | Lua | Estado vazio | `81ae6621` |
 | Ada | Estado carregando | `417f7fe0` |
 | Nyx | Estado de erro | `19a1ddba` |
