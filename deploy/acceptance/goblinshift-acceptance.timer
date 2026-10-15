@@ -1,0 +1,14 @@
+# Uma vez por dia, perto das 04h30 de Brasília, depois da janela do backup (06:00 a 06:30 UTC).
+[Unit]
+Description=GoblinShift: agenda o teste de aceitação diário do ambiente do executor
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 UTC
+# Espalha o horário para não coincidir sempre com outro job do host compartilhado; o check do
+# healthchecks.io tem 1 dia de período e 2 h de tolerância, folga para os 30 min de sorteio.
+RandomizedDelaySec=30min
+# VPS desligada no horário: roda assim que voltar.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
