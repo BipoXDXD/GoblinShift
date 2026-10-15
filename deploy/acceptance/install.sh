@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instala o teste de aceitação diário como timer do systemd (fatia 8, F8-9).
+# Instala o teste de aceitação semanal como timer do systemd (fatia 8, F8-9).
 # Idempotente e aditivo, como o deploy/backup/install.sh: não sobrescreve a configuração existente
 # e só liga o timer quando ela está completa, porque sem a URL do healthchecks.io uma aceitação
 # reprovada não avisaria ninguém.
@@ -98,8 +98,8 @@ if [[ ! -e "$CONFIG" && ! -L "$CONFIG" ]]; then
     umask 077
     set -o noclobber
     {
-      echo "# Teste de aceitação diário; preencha e rode este instalador de novo."
-      echo "# URL de ping do check \"aceitação diária\" do healthchecks.io (é segredo)."
+      echo "# Teste de aceitação semanal; preencha e rode este instalador de novo."
+      echo "# URL de ping do check \"aceitação semanal\" do healthchecks.io (é segredo)."
       for name in "${REQUIRED[@]}"; do echo "${name}="; done
     } >"$CONFIG"
   )
