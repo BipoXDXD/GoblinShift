@@ -29,7 +29,7 @@ pytestmark = pytest.mark.integration
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 LATER = NOW + timedelta(days=3)
-NEXT_VERSION = "v2-rascunho"
+NEXT_VERSION = "versao-seguinte-de-teste"
 
 
 def external_account(factory: sessionmaker[Session]) -> UUID:
