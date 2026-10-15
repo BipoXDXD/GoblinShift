@@ -33,6 +33,10 @@ const RAW_COLOR =
 /** Três níveis de elevação mais a rebaixada (spec 2026-10-15, decisão 2). */
 const ALLOWED_SHADOWS = new Set(["card", "float", "dialog", "sunken", "none"]);
 const SHADOW_UTILITY = /(?<=^|[\s"'`:])shadow-([a-z0-9]+)(?=$|[\s"'`])/g;
+/** Camadas com nome (CSSD 6.4.3); o <dialog> modal usa a top layer e não precisa de z-index. */
+const Z_LAYERS = new Set(["--z-menu", "--z-skip"]);
+const Z_UTILITY = /(?<=^|[\s"'`:])-?z-(\d+|\(([^)]*)\))(?=$|[\s"'`])/g;
+const SCREEN_HEIGHT = /(?<=^|[\s"'`:])(?:min-|max-)?h-screen(?=$|[\s"'`])/g;
 
 /** Problemas de estilo num arquivo-fonte, cada um com a classe ou o trecho que o causou. */
 function styleViolations(source: string): string[] {
@@ -58,6 +62,14 @@ function styleViolations(source: string): string[] {
       violations.push(`sombra fora dos níveis: ${match}`);
     }
   }
+  for (const [match, , variable] of source.matchAll(Z_UTILITY)) {
+    if (variable === undefined || !Z_LAYERS.has(variable)) {
+      violations.push(`z-index fora das camadas: ${match}`);
+    }
+  }
+  for (const [match] of source.matchAll(SCREEN_HEIGHT)) {
+    violations.push(`altura de janela em vh: ${match} (use svh)`);
+  }
   if (/\boutline-none\b/.test(source)) {
     violations.push("outline-none: o foco visível vem do base.css e não pode sumir");
   }
@@ -79,6 +91,9 @@ describe("styleViolations", () => {
     ["text-patina-800", "tom cru em componente (use o papel semântico): text-patina-800"],
     ["shadow-3", "sombra fora dos níveis: shadow-3"],
     ["hover:shadow-md", "sombra fora dos níveis: shadow-md"],
+    ["z-10", "z-index fora das camadas: z-10"],
+    ["focus:z-(--qualquer)", "z-index fora das camadas: z-(--qualquer)"],
+    ["min-h-screen", "altura de janela em vh: min-h-screen"],
     ["focus:outline-none", "outline-none"],
     ["<div style={{ width: 1 }} />", "style inline"],
   ])("recusa %s", (source, expected) => {
@@ -92,6 +107,7 @@ describe("styleViolations", () => {
     "max-w-3xl w-full h-auto",
     "data-[dragging=true]:shadow-float",
     "shadow-card hover:shadow-float shadow-dialog shadow-sunken active:shadow-none",
+    "z-(--z-menu) focus:z-(--z-skip) min-h-svh",
     "bg-surface text-fg-muted border-line",
     "arquivo-001 csv-janitor-parametros",
   ])("aceita %s", (source) => {

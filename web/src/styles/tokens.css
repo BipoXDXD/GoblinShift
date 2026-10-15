@@ -189,6 +189,10 @@
 
   --duration-fast: 120ms;
   --duration-base: 200ms;
+
+  /* Camadas com nome (CSSD 6.4.3): só as que existem. O <dialog> modal fica na top layer. */
+  --z-menu: 10;
+  --z-skip: 20;
 }
 
 /* No escuro a sombra some no fundo: a elevação vem da superfície mais clara e de um fio de luz
