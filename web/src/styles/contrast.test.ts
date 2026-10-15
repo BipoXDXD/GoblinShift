@@ -86,6 +86,28 @@ describe("papéis de cor", () => {
   );
 });
 
+describe("fallback do tema escuro", () => {
+  // Sem theme-init.js (bloqueado, falha de rede) não há data-theme, e o sistema escuro precisa
+  // do mesmo bloco: as duas cópias não podem divergir.
+  it("repete o bloco escuro, declaração por declaração", () => {
+    const fallback = declarationLines(css, ":root:not([data-theme]) {");
+    expect(fallback.length).toBeGreaterThan(20);
+    expect(fallback).toEqual(declarationLines(css, '[data-theme="dark"] {'));
+  });
+});
+
+function declarationLines(source: string, opening: string): string[] {
+  const start = source.indexOf(opening);
+  if (start === -1) {
+    throw new Error(`tokens.css não tem o bloco ${opening}`);
+  }
+  const body = source.slice(start + opening.length, source.indexOf("}", start));
+  return body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("--") || line.startsWith("color-scheme"));
+}
+
 function colorOf(colors: ReadonlyMap<string, string>, token: string): string {
   const value = colors.get(token);
   if (value === undefined || parse(value) === undefined) {
