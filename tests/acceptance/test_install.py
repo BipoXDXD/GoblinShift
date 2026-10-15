@@ -136,3 +136,41 @@ test -e {PREFIX}/acceptance/scheduled.sh && echo "COPIADO" || true
     assert "rc=0" not in result.stdout
     assert "COPIADO" not in result.stdout
     assert PREFIX in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("plant", "copy"),
+    [
+        (
+            "as_app ln -sf /root/segredo $APP/acceptance/run.py",
+            f"{PREFIX}/acceptance/run.py",
+        ),
+        (
+            "as_app ln -sf /root/segredo $APP/acceptance/goblinshift-acceptance.timer",
+            "/etc/systemd/system/goblinshift-acceptance.timer",
+        ),
+        (
+            "install -m 600 /root/segredo /root/lib.sh"
+            " && as_app rm -rf $APP/backup && as_app ln -s /root $APP/backup",
+            f"{PREFIX}/backup/lib.sh",
+        ),
+    ],
+    ids=["arquivo-do-pacote", "unit", "diretorio-da-lib"],
+)
+def test_symlink_no_checkout_nao_copia_arquivo_que_so_o_root_le(plant: str, copy: str) -> None:
+    # Ataque do achado symlink-following-read: o goblinshift é dono do checkout de onde o root
+    # copia; um symlink ali levaria um arquivo só do root para uma cópia legível por todos.
+    result = run_as_root(
+        FILLED_CONFIG
+        + f"""
+(umask 077; echo 'CANARY-so-do-root' >/root/segredo)
+APP=/srv/goblinshift/app/deploy
+{plant}
+rc=0; {INSTALL} || rc=$?
+echo "rc=$rc"
+grep -q CANARY {copy} 2>/dev/null && echo "VAZOU" || true
+"""
+    )
+
+    assert "VAZOU" not in result.stdout
+    assert "rc=0" not in result.stdout

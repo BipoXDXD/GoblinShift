@@ -8,10 +8,13 @@
 # goblinshift grava (o checkout e /srv/goblinshift/secrets são dele, deploy/provision.sh): o código
 # é copiado do checkout para PREFIX e a configuração mora em /etc/goblinshift. Uma mudança na
 # aceitação só chega ao timer quando este instalador roda de novo, como no executor-ctl.
+# A cópia lê o checkout com os privilégios do goblinshift: um symlink plantado ali não leva para
+# PREFIX nem para as units um arquivo que só o root lê.
 #
 # Uso: sudo bash deploy/acceptance/install.sh
 set -euo pipefail
 
+APP_USER=goblinshift
 DEPLOY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX=/usr/local/lib/goblinshift
 CONFIG_DIR=/etc/goblinshift
@@ -21,6 +24,11 @@ TIMER=goblinshift-acceptance.timer
 REQUIRED=(ACCEPTANCE_HEALTHCHECK_URL)
 [[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
 note() { printf '==> %s\n' "$*"; }
+as_app() { (cd / && runuser -u "$APP_USER" -- "$@"); }
+if ! id "$APP_USER" >/dev/null 2>&1; then
+  echo "usuário $APP_USER não existe; rode o provision.sh antes" >&2
+  exit 1
+fi
 
 # require_root_dir <diretório>: ele e cada ancestral são diretórios de verdade (não symlinks), do
 # root e sem escrita para grupo ou outros. Quem grava num deles troca o que o root executa ou lê.
@@ -41,6 +49,22 @@ require_root_dir() {
   done
 }
 
+# copy_from_checkout <modo> <destino> <arquivo...>: o conteúdo é lido pelo goblinshift, dono do
+# checkout, então um symlink no arquivo ou num diretório do caminho só alcança o que ele já lê. O
+# destino é aberto pelo root, num diretório que só o root grava.
+copy_from_checkout() {
+  local mode="$1" dest="$2" src
+  shift 2
+  for src in "$@"; do
+    if [[ -L "$src" || ! -f "$src" ]]; then
+      echo "recusado: $src não é um arquivo comum (ou é symlink)" >&2
+      exit 1
+    fi
+    as_app cat -- "$src" >"$dest/${src##*/}"
+    chmod "$mode" "$dest/${src##*/}"
+  done
+}
+
 # root_dir <diretório>: cria (root, 755) se faltar e confere com require_root_dir.
 root_dir() {
   require_root_dir "$(dirname "$1")"
@@ -53,11 +77,13 @@ root_dir "$PREFIX"
 install -d -m 755 -o root -g root "$PREFIX/docker-config"
 staging="$(mktemp -d "$PREFIX/.novo.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
-install -d -m 755 "$staging/acceptance" "$staging/executor_ctl" "$staging/backup"
-install -m 644 "$DEPLOY"/acceptance/*.py "$staging/acceptance/"
-install -m 755 "$DEPLOY/acceptance/scheduled.sh" "$staging/acceptance/"
-install -m 644 "$DEPLOY"/executor_ctl/*.py "$staging/executor_ctl/"
-install -m 644 "$DEPLOY/backup/lib.sh" "$staging/backup/"
+install -d -m 755 "$staging/acceptance" "$staging/executor_ctl" "$staging/backup" "$staging/units"
+copy_from_checkout 644 "$staging/acceptance" "$DEPLOY"/acceptance/*.py
+copy_from_checkout 755 "$staging/acceptance" "$DEPLOY/acceptance/scheduled.sh"
+copy_from_checkout 644 "$staging/executor_ctl" "$DEPLOY"/executor_ctl/*.py
+copy_from_checkout 644 "$staging/backup" "$DEPLOY/backup/lib.sh"
+copy_from_checkout 644 "$staging/units" "$DEPLOY/acceptance/goblinshift-acceptance.service" \
+  "$DEPLOY/acceptance/$TIMER"
 for package in acceptance executor_ctl backup; do
   rm -rf "${PREFIX:?}/$package"
   mv "$staging/$package" "$PREFIX/$package"
@@ -89,8 +115,8 @@ chown root:root "$CONFIG"
 chmod 600 "$CONFIG"
 
 note "Units em ${UNIT_DIR}"
-install -m 644 "$DEPLOY/acceptance/goblinshift-acceptance.service" "$DEPLOY/acceptance/$TIMER" \
-  "$UNIT_DIR/"
+require_root_dir "$UNIT_DIR"
+install -m 644 "$staging/units/goblinshift-acceptance.service" "$staging/units/$TIMER" "$UNIT_DIR/"
 systemctl daemon-reload
 
 missing=()

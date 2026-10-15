@@ -7,6 +7,7 @@
 # O backup.env mora em /srv/goblinshift/secrets, que pertence ao usuário da aplicação: tudo o que o
 # instalador faz ali roda com os privilégios dele (as_app), nunca como root. Como root, um symlink
 # plantado no lugar do arquivo levaria a escrita, o chown e o chmod para qualquer arquivo do sistema.
+# Pelo mesmo motivo as units são lidas do checkout, que também é dele, com os privilégios dele.
 #
 # Uso: sudo bash deploy/backup/install.sh
 set -euo pipefail
@@ -27,6 +28,19 @@ create_as_app() {
   # shellcheck disable=SC2016 # o $1 é expandido pelo bash do goblinshift, não por este.
   as_app bash -c 'umask 077 && set -o noclobber && cat >"$1"' _ "$1"
 }
+# copy_from_checkout <destino> <arquivo...>: o conteúdo é lido pelo usuário da aplicação, dono do
+# checkout, então um symlink ali só alcança o que ele já lê; o destino é aberto pelo root.
+copy_from_checkout() {
+  local dest="$1" src
+  shift
+  for src in "$@"; do
+    if [[ -L "$src" || ! -f "$src" ]]; then
+      echo "recusado: $src não é um arquivo comum (ou é symlink)" >&2
+      exit 1
+    fi
+    as_app cat -- "$src" >"$dest/${src##*/}"
+  done
+}
 
 note "Ferramentas (age e curl com SigV4)"
 command -v age >/dev/null || apt-get install -yq age
@@ -45,7 +59,10 @@ else
 fi
 
 note "Units em ${UNIT_DIR}"
-install -m 644 "$SOURCE/goblinshift-pg-backup.service" "$SOURCE/$TIMER" "$UNIT_DIR/"
+units="$(mktemp -d)"
+trap 'rm -rf "$units"' EXIT
+copy_from_checkout "$units" "$SOURCE/goblinshift-pg-backup.service" "$SOURCE/$TIMER"
+install -m 644 "$units/goblinshift-pg-backup.service" "$units/$TIMER" "$UNIT_DIR/"
 systemctl daemon-reload
 
 missing=()
