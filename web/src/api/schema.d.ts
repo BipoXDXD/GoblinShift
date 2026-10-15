@@ -797,6 +797,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -850,6 +862,18 @@ export interface operations {
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -917,6 +941,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -954,6 +990,16 @@ export interface operations {
                     "application/json": components["schemas"]["AcceptedTermsResponse"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unauthorized */
             401: {
                 headers: {
@@ -984,9 +1030,41 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1054,6 +1132,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -1096,6 +1186,16 @@ export interface operations {
                     "application/json": components["schemas"]["CreatedApiKey"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unauthorized */
             401: {
                 headers: {
@@ -1126,9 +1226,41 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1206,6 +1338,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -1232,7 +1376,10 @@ export interface operations {
                     items: {
                         /** Name */
                         name: string;
-                        /** Size */
+                        /**
+                         * Size
+                         * @description Bytes; o lote soma até 512 MiB.
+                         */
                         size: number;
                     }[];
                 };
@@ -1311,6 +1458,8 @@ export interface operations {
             /** @description Too Many Requests */
             429: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1457,6 +1606,8 @@ export interface operations {
             /** @description Too Many Requests */
             429: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1536,6 +1687,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -1599,6 +1762,18 @@ export interface operations {
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1671,6 +1846,18 @@ export interface operations {
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1763,6 +1950,8 @@ export interface operations {
             /** @description Too Many Requests */
             429: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1847,6 +2036,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -1865,7 +2066,8 @@ export interface operations {
                 validate_only?: boolean;
             };
             header?: {
-                "Idempotency-Key"?: string | null;
+                /** @description Obrigatória, exceto com validate_only. */
+                "Idempotency-Key"?: string;
             };
             path?: never;
             cookie?: never;
@@ -2085,6 +2287,8 @@ export interface operations {
             /** @description Too Many Requests */
             429: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2174,6 +2378,18 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal Server Error */
             500: {
                 headers: {
@@ -2239,6 +2455,18 @@ export interface operations {
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2320,6 +2548,18 @@ export interface operations {
             /** @description Unprocessable Content */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
