@@ -8,7 +8,8 @@ import { expect, test } from "../support/test";
 
 // O base.css reduz tudo a 0,01 ms em vez de zero, para os eventos de fim continuarem disparando.
 const REDUCED_MAX_MS = 0.01;
-const THREE_D_REQUEST = /oficina-3d|\.glb(\?|$)/;
+/** O chunk e o modelo; a imagem estática (`oficina-3d-rubia-*.avif`) é pedida de propósito. */
+const THREE_D_REQUEST = /\/assets\/oficina-3d[^/]*\.js$|\.glb(\?|$)/;
 
 interface Motion {
   /** Elementos (e pseudo-elementos) com transição ou animação acima do teto. */

@@ -23,6 +23,7 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.acceptTerms,
   PATHS.terms,
   PATHS.privacy,
+  PATHS.credits,
   PATHS.access,
   PATHS.signIn,
   PATHS.accountDeleted,
@@ -65,10 +66,24 @@ export function Layout(): ReactElement {
           </div>
         </div>
       </header>
-      <main id={MAIN_ID} className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12">
+      {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
+          tela carrega e cresce. */}
+      <main
+        id={MAIN_ID}
+        className="mx-auto min-h-svh w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12"
+      >
         <LoginFailedAlert />
         <TermsGate />
       </main>
+      {/* Aviso de processamento externo discreto em toda tela (docs/art/LICENSE-ART.md); o detalhe fica nos créditos. */}
+      <footer className="border-t border-line-soft">
+        <p className="mx-auto w-full max-w-5xl px-4 py-6 text-sm text-fg-muted md:px-8">
+          {T.editorialNote}{" "}
+          <Link to={PATHS.credits} className="font-semibold">
+            {T.creditsLink}
+          </Link>
+        </p>
+      </footer>
     </div>
   );
 }

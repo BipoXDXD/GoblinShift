@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router";
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { PATHS } from "../app/paths";
+import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
@@ -155,7 +156,7 @@ function EmptyResults({ filtered }: { readonly filtered: boolean }): ReactElemen
     );
   }
   return (
-    <EmptyState title={T.empty}>
+    <EmptyState title={T.empty} illustration={<GoblinIllustration state="vazio" />}>
       <p>{T.emptyHint}</p>
       <Link to={PATHS.home} className="inline-flex min-h-11 items-center font-semibold">
         {T.goToWorkshop}

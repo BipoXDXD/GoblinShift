@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from "react";
 interface EmptyStateProps {
   readonly title: string;
   readonly headingLevel?: 2 | 3;
-  /** Espaço da ilustração; fica vazio até a arte existir (P10 do plano de design). */
+  /** A goblin do vazio (`GoblinIllustration`), onde a tela não tiver outra goblin. */
   readonly illustration?: ReactNode;
   /** Explicação e, no máximo, uma ação. */
   readonly children?: ReactNode;
