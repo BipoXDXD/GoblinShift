@@ -5,7 +5,7 @@ roda dentro da transação de quem a chama, que decide o commit.
 """
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from uuid import UUID, uuid7
@@ -391,6 +391,18 @@ class AccountListing:
 def list_accounts(session: Session) -> list[AccountListing]:
     """Contas das mais novas às mais antigas, até `MAX_LISTED_ACCOUNTS`."""
     return _listings(session, _listing_query())
+
+
+def find_account_by_user_hash(
+    session: Session, user_hash: str, hasher: Callable[[UUID], str]
+) -> UUID | None:
+    """Conta cujo `user.hash` da telemetria (3.7) é `user_hash`; None se nenhuma for.
+
+    O HMAC não se inverte: confere conta por conta. Serve ao roteiro de abuso, rodado à mão
+    sobre as poucas contas de uma VPS (16 bytes por id).
+    """
+    ids = session.execute(select(app_user.c.id)).scalars()
+    return next((owner_id for owner_id in ids if hasher(owner_id) == user_hash), None)
 
 
 def list_pending_accounts(session: Session) -> list[AccountListing]:
