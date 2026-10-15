@@ -10,13 +10,15 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin unblock --user <id>
     gs-admin list-users [--pending]
     gs-admin find-user --user-hash <hash>
+    printf '%s' "$user_hash" | gs-admin find-user --user-hash -
 
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
 `block` bloqueia, revoga sessões e chaves e cancela a execução ativa; repetir completa o que
 faltou. `list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
 identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
-`find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso).
+`find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso);
+com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
 """
 
@@ -64,6 +66,9 @@ EXIT_NOT_FOUND = 1
 EXIT_USAGE = 2
 # HMAC-SHA256 em hexadecimal, como o `UserHasher` escreve nos eventos.
 _USER_HASH = re.compile(r"[0-9a-f]{64}")
+_FROM_STDIN = "-"
+# Um hash com folga para espaços e quebras de linha; o que passar disso é malformado.
+_MAX_STDIN_CHARS = 256
 
 
 @dataclass(frozen=True)
@@ -128,7 +133,9 @@ def _argument_parser() -> argparse.ArgumentParser:
     find_user = commands.add_parser(
         "find-user", help="imprime o id da conta de um user.hash da telemetria"
     )
-    find_user.add_argument("--user-hash", required=True, help="o user.hash de um evento")
+    find_user.add_argument(
+        "--user-hash", required=True, help="o user.hash de um evento, ou - para ler da entrada"
+    )
     find_user.set_defaults(command=_find_user)
     return parser
 
@@ -210,7 +217,7 @@ def _list_users(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _find_user(args: argparse.Namespace, context: _Context) -> int:
-    user_hash = args.user_hash.lower()
+    user_hash = _user_hash_argument(args.user_hash).lower()
     if not _USER_HASH.fullmatch(user_hash):
         return _fail(EXIT_USAGE, "o user.hash tem 64 caracteres hexadecimais")
     hasher = UserHasher(context.settings.user_hash_key())
@@ -220,6 +227,12 @@ def _find_user(args: argparse.Namespace, context: _Context) -> int:
         return _fail(EXIT_NOT_FOUND, "nenhuma conta tem esse user.hash")
     print(owner_id)
     return EXIT_OK
+
+
+def _user_hash_argument(value: str) -> str:
+    if value != _FROM_STDIN:
+        return value
+    return sys.stdin.read(_MAX_STDIN_CHARS).strip()
 
 
 def _listing_line(account: AccountListing) -> str:
