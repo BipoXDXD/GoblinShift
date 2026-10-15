@@ -1,6 +1,8 @@
-# Contexto da imagem do Nginx (docker/web.Dockerfile): só a SPA e a configuração do Nginx.
+# Contexto da imagem do Nginx (docker/web.Dockerfile): a SPA, os textos legais que ela embute e a
+# configuração do Nginx.
 *
 !web/
+!docs/legal/
 !docker/nginx/
 web/node_modules/
 web/dist/

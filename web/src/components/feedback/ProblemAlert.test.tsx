@@ -40,6 +40,44 @@ describe("describeFailure", () => {
     expect(description.message).toMatch(/Tente de novo em 2 s\.$/);
   });
 
+  it.each([
+    [59_000, /Tente de novo em 59 s\.$/],
+    [60_000, /Tente de novo em 1 minuto\.$/],
+    [61_000, /Tente de novo em 2 minutos\.$/],
+    [299_000, /Tente de novo em 5 minutos\.$/],
+  ])("de um minuto em diante, a espera de %i ms sai em minutos", (retryAfterMs, expected) => {
+    const description = describeFailure({
+      kind: "problem",
+      status: 503,
+      problem: problem("SERVICE_UNAVAILABLE", 503),
+      retryAfterMs,
+    });
+
+    expect(description.message).toMatch(expected);
+  });
+
+  it("no teto de 5 min o Retry-After foi cortado, então a espera não é prometida", () => {
+    const description = describeFailure({
+      kind: "problem",
+      status: 429,
+      problem: problem("QUOTA_EXCEEDED", 429),
+      retryAfterMs: 300_000,
+    });
+
+    expect(description.message).toBe(
+      "Você atingiu a cota da conta. Libere espaço ou espere a cota renovar.",
+    );
+  });
+
+  it("usa o texto do contexto no lugar do texto geral do código", () => {
+    const description = describeFailure(
+      { kind: "problem", status: 409, problem: problem("STATE_CONFLICT", 409), retryAfterMs: null },
+      { STATE_CONFLICT: "Texto da tela." },
+    );
+
+    expect(description.message).toBe("Texto da tela.");
+  });
+
   it("guarda o request_id para suporte", () => {
     const description = describeFailure({
       kind: "problem",

@@ -138,6 +138,40 @@
     background-color: var(--progress-fill);
   }
 
+  /* Uso de cota (Acesso): o mesmo trilho do progresso. O número vem sempre em texto ao lado, então
+     a cor do meter nunca é o único sinal (WCAG 1.4.1). */
+  meter {
+    display: block;
+    width: 100%;
+    height: --spacing(2);
+    overflow: hidden;
+    border-radius: var(--radius-full);
+    background: var(--progress-track);
+    appearance: none;
+  }
+
+  meter::-webkit-meter-bar {
+    height: --spacing(2);
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--progress-track);
+  }
+
+  meter::-webkit-meter-optimum-value,
+  meter::-webkit-meter-suboptimum-value,
+  meter::-webkit-meter-even-less-good-value {
+    background: var(--progress-fill);
+  }
+
+  meter::-moz-meter-bar {
+    background: var(--progress-fill);
+  }
+
+  /* Diálogo de confirmação: o fundo escurece para a página recuar (RUI cap. 6, nível 5). */
+  dialog::backdrop {
+    background-color: color-mix(in oklch, var(--color-stone-950) 60%, transparent);
+  }
+
   /* Movimento reduzido: some toda transição e animação; a mudança de estado continua, sem
      movimento (WCAG 2.3.3, extensão do RUI). */
   @media (prefers-reduced-motion: reduce) {
