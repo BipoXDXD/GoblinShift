@@ -71,13 +71,13 @@ Ela não tem teste automático: julgar qual espaço é intra-grupo é subjetivo,
 
 Cada uma com um teste:
 
-1. **Movimento reduzido:** spinner e toda animação ou transição decorativa param com `prefers-reduced-motion: reduce`. Teste: Playwright com `reducedMotion: "reduce"` confere `animation-name: none` (ou uma duração de 0) no spinner.
-2. **Tema escuro sem script:** o fundo da página fica certo mesmo se `theme-init.js` falhar. O `:root` sem `data-theme` cai em `prefers-color-scheme`. Teste: Playwright com o script bloqueado e `colorScheme: "dark"` confere a cor de fundo do `body`.
-3. **Z-index:** escala nomeada (`--z-header`, `--z-float`, `--z-dialog`, `--z-toast`). O teste de classes passa a pegar também `z-(--var)` e recusa z fora da escala.
-4. **Fontes:** `preload` das duas woff2 latin no `index.html`, com `crossorigin`, mantendo `font-display: swap`. Teste: `index.html` contém os dois preloads, e o orçamento continua passando.
-5. **Diálogo aberto:** a rolagem da página fica travada (`overflow: hidden` no `html` enquanto o diálogo estiver aberto, sem salto de layout, via `scrollbar-gutter: stable`). Teste: Vitest confere a classe no abrir e no fechar.
-6. **Altura mínima:** a moldura da página usa `min-h-dvh` no lugar de `min-h-screen`.
-7. **Fundo escurecido do diálogo:** usa `color-mix(in oklch, var(--overlay) 60%, transparent)` em vez de cor com alfa fixo. O papel `--overlay` é criado nos dois temas: pedra-950 no claro, preto no escuro.
+1. **Movimento reduzido:** já está coberto. O reset em `base.css` para o spinner, e `e2e/specs/motion.spec.ts` testa todas as telas. Fica sem mudança.
+2. **Tema escuro sem script:** o fundo da página fica certo mesmo se `theme-init.js` falhar. O bloco escuro se repete sob `@media (prefers-color-scheme: dark) { :root:not([data-theme]) }`, e um teste garante que os dois blocos são idênticos. Teste: Playwright com o script bloqueado e `colorScheme: "dark"` confere a cor de fundo do `html`.
+3. **Z-index:** escala nomeada só com os dois usos que existem, `--z-menu: 10` (menu de tema) e `--z-skip: 20` (pular para o conteúdo), consumida como `z-(--z-menu)`. O diálogo usa a top layer do `<dialog>` e dispensa z-index. O teste de classes recusa `z-<número>` e `z-(--x)` fora da escala.
+4. **Fontes:** `preload` só da woff2 latin da Bricolage (título da primeira tela), injetado no build por um plugin do Vite, porque o nome do arquivo tem hash. O `font-display: swap` continua. Teste: `check-budget` falha se o `dist/index.html` não tiver o preload.
+5. **Diálogo aberto:** `html:has(dialog[open])` ganha `overflow: hidden` e `scrollbar-gutter: stable`, sem salto de layout. Teste: Playwright confere o `overflow` do `html` com o diálogo aberto e fechado.
+6. **Altura mínima:** a moldura usa `min-h-svh` no lugar de `min-h-screen`. É a unidade "small", recomendada pelo CSS in Depth 2.4.1 porque não causa relayout quando a barra de endereço aparece. O teste de classes recusa `h-screen` e `min-h-screen`.
+7. **Fundo escurecido do diálogo:** usa `color-mix(in srgb, var(--overlay) 60%, transparent)`, em sRGB porque o oklch pode desviar o matiz ao misturar com transparente (CSS in Depth 13.1.2), em vez de cor com alfa fixo. O papel `--overlay` é criado nos dois temas: pedra-950 no claro, preto no escuro.
 
 ### 5. Interação
 
@@ -86,20 +86,19 @@ Cada uma com um teste:
    - Quando houver 2 arquivos ou mais, aparece "Remover todos", que pede confirmação com a contagem: "Remover os 12 arquivos?".
    - O diálogo segue a pirâmide do RUI: o botão destrutivo fica em vermelho só dentro da confirmação, o foco inicial vai para "Cancelar" e Esc cancela.
    - Ao confirmar, o foco volta para a escolha de arquivos, como já acontece hoje.
-   - "Remover todos" remove em lote no cliente e no servidor. Se um item falhar, os demais continuam, e a falha aparece por item.
-2. **Executar com erro:** se a validação falhar, o foco vai para um resumo de erros no topo do formulário, com links para cada campo (DI e PUI). O botão continua ativo; o `aria-disabled` só vale durante o envio.
+   - A remoção é só no cliente: aborta o envio em curso e tira o arquivo do lote, como o `remove` atual. O upload órfão expira sozinho no servidor. Por isso "Remover todos" não tem falha parcial.
+2. **Executar com erro:** já está feito. O `ErrorSummary` recebe o foco a cada tentativa com erro, e o botão só fica `aria-disabled` durante o envio. Fica sem mudança.
 
 ## Testes (resumo)
 
 - **Vitest:**
   - contraste da pátina;
   - classes (sombras, z-index e musgo fora de status);
-  - travamento da rolagem;
   - diálogos de remoção (texto, contagem, foco inicial, Esc, foco de retorno);
   - "Remover todos" ausente com 1 arquivo;
-  - resumo de erros recebendo o foco.
+  - igualdade dos blocos do tema escuro.
 - **Playwright:**
-  - movimento reduzido;
+  - travamento da rolagem;
   - tema escuro sem `theme-init.js`;
   - jornada remover 1, remover todos e cancelar;
   - axe sem violações nos dois temas.
@@ -110,9 +109,9 @@ Cada uma com um teste:
 Dois PRs, nesta ordem, depois do #42:
 
 1. **`design-tokens`:** pátina, elevação, z-index e as correções de CSS 1 a 7.
-2. **`design-interacao`:** confirmação de remoção, "Remover todos" e foco no resumo de erros.
+2. **`design-interacao`:** confirmação de remoção e "Remover todos", com o e2e da rolagem travada.
 
 ## Riscos
 
 - **Pátina perto do musgo.** A pátina pode ficar próxima demais do musgo em alguns monitores. Mitigação: diferença de matiz de pelo menos 30° e conferência visual nos dois temas antes do merge.
-- **Remoção em lote parcial.** "Remover todos" com falha parcial deixa a lista num estado misto. Mitigação: resultado por item, sem rollback, e o texto diz quantos foram removidos.
+- **Bloco escuro duplicado.** As duas cópias do bloco escuro podem divergir. Mitigação: o teste de igualdade quebra o build na primeira diferença.
