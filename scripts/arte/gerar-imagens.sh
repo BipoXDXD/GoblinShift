@@ -35,8 +35,10 @@ mkdir -p "$art/goblins" "$art/oficina-3d"
 # ficam no mesmo lugar em todas as goblins).
 render_framed() {
   local glb="$1" png="$2"
+  # Modo padrão do render_glb.py (EEVEE, tom AgX do Blender, um sol): é o dos renders que o
+  # usuário aprovou. O --realista usa tom Standard e deixa a pele verde-amarelada (ADR 030).
   blender -b --factory-startup -P "$render" -- "$glb" "$work/render.png" "$RENDER_PX" \
-    --realista "--yaw=$YAW_DEGREES" >/dev/null 2>&1
+    "--yaw=$YAW_DEGREES" >/dev/null 2>&1
   magick "$work/render.png" -trim +repage "$work/trim.png"
   local w h side_h side_w
   read -r w h < <(magick identify -format '%w %h\n' "$work/trim.png")
