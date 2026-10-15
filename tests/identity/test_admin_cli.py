@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import io
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -379,3 +380,55 @@ def test_find_user_com_hash_malformado_sai_com_erro_de_uso(
 
     assert exit_code == EXIT_USAGE
     assert out == ""
+
+
+# --- `--user-hash -`: o hash pela entrada padrão, fora da linha de comando e do log do sudo ----
+
+
+def run_with_stdin(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, stdin: str
+) -> tuple[int, str, str]:
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+    return run(capsys, "find-user", "--user-hash", "-")
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+@pytest.mark.parametrize(
+    "surround",
+    [
+        pytest.param("{}", id="sem-quebra-de-linha"),
+        pytest.param("{}\n", id="quebra-de-linha"),
+        pytest.param("  {}  \n", id="espacos"),
+        pytest.param("\t{}\r\n", id="tab-e-crlf"),
+    ],
+)
+def test_find_user_le_o_hash_da_entrada_padrao(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, surround: str
+) -> None:
+    wanted = create_user(capsys)
+
+    exit_code, out, _ = run_with_stdin(capsys, monkeypatch, surround.format(user_hash(wanted)))
+
+    assert exit_code == EXIT_OK
+    assert out == f"{wanted}\n"
+
+
+@pytest.mark.parametrize(
+    "stdin",
+    [
+        pytest.param("", id="vazia"),
+        pytest.param("\n", id="so-quebra-de-linha"),
+        pytest.param("a" * 63 + "\n", id="63-caracteres"),
+        pytest.param("a" * 32 + " " + "a" * 32, id="espaco-no-meio"),
+        pytest.param("a" * 64 + "\n" + "b" * 64 + "\n", id="dois-hashes"),
+        pytest.param("g" * 64, id="nao-hexadecimal"),
+    ],
+)
+def test_find_user_com_entrada_padrao_vazia_ou_malformada_sai_com_erro_de_uso(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, stdin: str
+) -> None:
+    exit_code, out, err = run_with_stdin(capsys, monkeypatch, stdin)
+
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+    assert "64 caracteres hexadecimais" in err
