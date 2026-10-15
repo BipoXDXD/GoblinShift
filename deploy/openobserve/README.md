@@ -40,7 +40,7 @@ O SLO de execução lê o span `run.finished`, que o worker e a manutenção emi
 | Causa de 3.7 | Onde fica |
 |---|---|
 | Backup diário que falhou | healthchecks.io (ping do `pg-backup.sh`) |
-| Certificado TLS a menos de 14 dias | monitor de uptime externo (UptimeRobot ou Better Stack) |
+| Certificado TLS a menos de 14 dias | workflow tls-check + healthchecks.io (certificado TLS, 1 dia / 6 h) |
 | Teste de aceitação do ambiente falhando | ainda manual (`deploy/acceptance`); falta agendar e pingar o healthchecks.io |
 | Execução presa em `stopping` por mais de 10 min | falta o evento por ciclo da manutenção |
 | Limitador de exclusões acionado | falta o evento por ciclo da manutenção |
