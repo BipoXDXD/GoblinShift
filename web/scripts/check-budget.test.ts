@@ -4,6 +4,7 @@ import { budgetViolations, type BuiltFile } from "./check-budget";
 
 const KB = 1024;
 const INDEX = `<script src="/theme-init.js"></script>
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/assets/bricolage-grotesque-latin-wght-normal-x.woff2">
 <script type="module" crossorigin src="/assets/index-abc.js"></script>
 <link rel="modulepreload" crossorigin href="/assets/vendor-def.js">
 <link rel="stylesheet" crossorigin href="/assets/index-abc.css">`;
@@ -69,6 +70,13 @@ describe("budgetViolations", () => {
         budgetViolations([...WITHIN, file("assets/oficina-3d-x.js", 200 * KB, 700 * KB)], INDEX),
       ).toEqual([]);
     });
+  });
+
+  it("exige o preload da fonte do título", () => {
+    const withoutPreload = INDEX.replace(/<link rel="preload"[^>]*>\n/, "");
+    expect(budgetViolations(WITHIN, withoutPreload)).toContain(
+      "index.html sem preload da fonte do título (bricolage-grotesque latin)",
+    );
   });
 
   it("CSS acima do teto", () => {

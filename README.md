@@ -117,6 +117,8 @@ uv run gs-admin create-user --display-name "Ana"            # imprime o id da co
 uv run gs-admin issue-key --user <id> \
   --scopes files:read,files:write,runs:read,runs:write --days 30 > chave.txt
 uv run gs-admin revoke-key --key <public_id>
+uv run gs-admin block --user <id>                          # roteiro: docs/runbooks/abuso.md
+uv run gs-admin find-user --user-hash <hash>               # user.hash da telemetria → id da conta (- lê da entrada)
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
