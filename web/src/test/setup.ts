@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
-import { afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 import { installFakeMatchMedia } from "./fakeMatchMedia";
 
@@ -24,6 +24,9 @@ HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement): voi
 beforeEach(() => {
   // O cabeçalho do app tem o seletor de tema, que consulta o sistema; o padrão é tema claro.
   installFakeMatchMedia(false);
+  // O jsdom não tem canvas: sem isto ele loga "Not implemented" e a home tentaria a cena 3D. Com
+  // `null`, o app se comporta como num navegador sem WebGL e fica na imagem estática.
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
 });
 
 afterEach(() => {

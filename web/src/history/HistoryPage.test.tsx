@@ -59,6 +59,7 @@ describe("Histórico", () => {
     setup(() => page([]));
 
     expect(await screen.findByRole("heading", { name: "Nenhuma execução ainda" })).toBeVisible();
+    expect(screen.getByRole("img", { name: /^Lua, / })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Escolher uma receita na Oficina" })).toHaveAttribute(
       "href",
       "/",
