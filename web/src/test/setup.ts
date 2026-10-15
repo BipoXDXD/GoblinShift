@@ -9,14 +9,21 @@ import { installFakeMatchMedia } from "./fakeMatchMedia";
 // falhar.
 configure({ asyncUtilTimeout: 5_000 });
 
-// O jsdom não implementa o `<dialog>` modal. O dublê só abre e fecha, com o evento `close`; o foco
-// preso e o Esc de verdade são do navegador e ficam com o Playwright (e2e/specs/access.spec.ts).
+// O jsdom não implementa o `<dialog>` modal. O dublê abre e fecha, com o evento `close`, e devolve o
+// foco a quem abriu, como o navegador; o foco preso e o Esc de verdade são do navegador e ficam com
+// o Playwright (e2e/specs/access.spec.ts).
+const openers = new WeakMap<HTMLDialogElement, Element | null>();
 HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement): void {
+  openers.set(this, document.activeElement);
   this.setAttribute("open", "");
 };
 HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement): void {
   if (this.hasAttribute("open")) {
     this.removeAttribute("open");
+    const opener = openers.get(this);
+    if (opener instanceof HTMLElement && opener.isConnected) {
+      opener.focus();
+    }
     this.dispatchEvent(new Event("close"));
   }
 };

@@ -31,6 +31,22 @@ export class BancadaPage {
     }
   }
 
+  /** Remove um arquivo pelo nome, confirmando no diálogo. */
+  async removeFile(name: string): Promise<void> {
+    await this.#page.getByRole("button", { name: `Remover ${name}` }).click();
+    const dialog = this.#page.getByRole("dialog", { name: `Remover ${name}?` });
+    await dialog.getByRole("button", { name: "Remover", exact: true }).click();
+    await expect(dialog).toBeHidden();
+  }
+
+  /** Remove todos os arquivos, confirmando no diálogo com a contagem. */
+  async removeAll(): Promise<void> {
+    await this.#page.getByRole("button", { name: "Remover todos" }).click();
+    const dialog = this.#page.getByRole("dialog", { name: /^Remover os \d+ arquivos\?$/ });
+    await dialog.getByRole("button", { name: "Remover todos" }).click();
+    await expect(dialog).toBeHidden();
+  }
+
   /** Nomes dos arquivos na ordem de processamento, como a lista mostra. */
   async order(): Promise<string[]> {
     // Cada item tem um "Mover para cima <nome>": o nome acessível já diz a ordem, sem CSS.

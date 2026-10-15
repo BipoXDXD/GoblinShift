@@ -32,6 +32,9 @@ const LIMITS_KB = {
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */
 const THREE_D_PREFIX = "assets/oficina-3d";
 
+/** A fonte do título da primeira tela: a única com preload (CSSD 12.5); o resto chega por swap. */
+export const FONT_PRELOAD = /bricolage-grotesque-latin-wght-normal-[^/]*\.woff2$/;
+
 /** Cada teto que passou, em texto para o log do CI; lista vazia quando está tudo dentro. */
 export function budgetViolations(files: readonly BuiltFile[], indexHtml: string): string[] {
   const referenced = referencedAssets(indexHtml);
@@ -58,6 +61,9 @@ export function budgetViolations(files: readonly BuiltFile[], indexHtml: string)
       unit: "KB",
     }),
   ];
+  if (!hasFontPreload(indexHtml)) {
+    violations.push("index.html sem preload da fonte do título (bricolage-grotesque latin)");
+  }
   for (const file of files) {
     violations.push(
       chunkRawViolation(file),
@@ -135,6 +141,13 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
 function referencedAssets(indexHtml: string): Set<string> {
   const urls = [...indexHtml.matchAll(/(?:src|href)="\/([^"]+)"/g)].map(([, url]) => url ?? "");
   return new Set(urls);
+}
+
+function hasFontPreload(indexHtml: string): boolean {
+  return [...indexHtml.matchAll(/<link\b[^>]*rel="preload"[^>]*>/g)].some(([tag]) => {
+    const href = /href="\/([^"]+)"/.exec(tag)?.[1];
+    return href !== undefined && FONT_PRELOAD.test(href) && tag.includes("crossorigin");
+  });
 }
 
 function sum(files: readonly BuiltFile[], extension: string, field: "bytes" | "gzipBytes"): number {

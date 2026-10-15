@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useId, useState, type ReactElement, type SubmitEvent } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement, type SubmitEvent } from "react";
 import { ChevronLeft } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 
@@ -18,6 +18,7 @@ import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatBytes } from "../format";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
 import type { RecipeDraft, RecipeId } from "../recipes/types";
@@ -28,6 +29,10 @@ import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./i
 import { UploadEntryView } from "./UploadEntryView";
 
 const FILES_FIELD_ID = "bancada-arquivos";
+
+type PendingRemoval =
+  | { readonly kind: "one"; readonly localId: string; readonly name: string }
+  | { readonly kind: "all"; readonly count: number };
 
 interface WorkbenchProps {
   readonly recipe: RecipeModule;
@@ -53,6 +58,8 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
   const [order, setOrder] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState<RecipeDraft<RecipeId>>(form.initialDraft);
   const [attempt, setAttempt] = useState(0);
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
+  const focusFilesAfterRemoval = useRef(false);
   const filesHeadingId = useId();
   const parametersHeadingId = useId();
 
@@ -78,11 +85,37 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
     issues.flatMap((issue) => (issue.fieldId === null ? [] : [[issue.fieldId, issue.message]])),
   );
 
-  const removeEntry = (localId: string): void => {
-    batch.remove(localId);
-    // O botão Remover some com o item: o foco volta à escolha de arquivos, e não ao body.
-    document.getElementById(FILES_FIELD_ID)?.focus();
+  // Remover pede confirmação (decisão do usuário, 2026-10-15). O alvo é o localId guardado ao
+  // abrir, nunca a posição: confirmar duas vezes não alcança outro arquivo.
+  const askRemoval = (localId: string): void => {
+    const entry = batch.entries.find((candidate) => candidate.localId === localId);
+    if (entry !== undefined) {
+      setPendingRemoval({ kind: "one", localId, name: entry.file.name });
+    }
   };
+
+  const confirmRemoval = (): void => {
+    if (pendingRemoval === null) {
+      return;
+    }
+    if (pendingRemoval.kind === "one") {
+      batch.remove(pendingRemoval.localId);
+    } else {
+      batch.removeAll();
+    }
+    focusFilesAfterRemoval.current = true;
+    setPendingRemoval(null);
+  };
+
+  // O botão Remover some com o item: o foco vai para a escolha de arquivos, e não para o body. Só
+  // depois de o diálogo fechar (o efeito do filho roda antes deste), porque com o modal aberto o
+  // resto da página está inerte e o focus() não pega.
+  useEffect(() => {
+    if (pendingRemoval === null && focusFilesAfterRemoval.current) {
+      focusFilesAfterRemoval.current = false;
+      document.getElementById(FILES_FIELD_ID)?.focus();
+    }
+  }, [pendingRemoval]);
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -129,23 +162,40 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
               <EmptyState
                 title={TEXT.workbench.noFilesYet}
                 headingLevel={3}
-                illustration={<GoblinIllustration state="vazio" />}
+                illustration={<GoblinIllustration state="vazio" rotationKey={recipe.id} />}
               >
                 <p>{TEXT.workbench.noFilesYetHint}</p>
               </EmptyState>
             ) : (
-              <ReorderableList
-                label={TEXT.workbench.orderLabel}
-                items={entries}
-                getKey={(entry) => entry.localId}
-                getName={(entry) => entry.file.name}
-                renderItem={(entry) => (
-                  <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={removeEntry} />
+              <>
+                <ReorderableList
+                  label={TEXT.workbench.orderLabel}
+                  items={entries}
+                  getKey={(entry) => entry.localId}
+                  getName={(entry) => entry.file.name}
+                  renderItem={(entry) => (
+                    <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={askRemoval} />
+                  )}
+                  onMove={(move) => {
+                    setOrder(moveItem(entries.map(localIdOf), move));
+                  }}
+                />
+                {entries.length >= 2 && (
+                  // O Button não aceita className: o wrapper evita que ele estique na coluna.
+                  <div className="self-start">
+                    <Button
+                      type="button"
+                      variant="tertiary"
+                      onClick={() => {
+                        // A contagem fica guardada na abertura (Foco da revisão, item 3).
+                        setPendingRemoval({ kind: "all", count: entries.length });
+                      }}
+                    >
+                      {TEXT.workbench.removal.removeAll}
+                    </Button>
+                  </div>
                 )}
-                onMove={(move) => {
-                  setOrder(moveItem(entries.map(localIdOf), move));
-                }}
-              />
+              </>
             )}
             <LiveRegion message={announcement} visuallyHidden />
           </section>
@@ -174,6 +224,26 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
           message={mutation.isPending ? TEXT.workbench.creatingRun : null}
           visuallyHidden
         />
+        <ConfirmDialog
+          open={pendingRemoval !== null}
+          title={removalTitle(pendingRemoval)}
+          confirmLabel={
+            pendingRemoval?.kind === "all"
+              ? TEXT.workbench.removal.confirmAll
+              : TEXT.workbench.removal.confirm
+          }
+          cancelLabel={TEXT.workbench.removal.cancel}
+          onConfirm={confirmRemoval}
+          onCancel={() => {
+            setPendingRemoval(null);
+          }}
+        >
+          <p>
+            {pendingRemoval?.kind === "all"
+              ? TEXT.workbench.removal.bodyAll
+              : TEXT.workbench.removal.bodyOne}
+          </p>
+        </ConfirmDialog>
       </form>
     </div>
   );
@@ -202,6 +272,15 @@ function limitsHint({ inputLimits }: RecipeForm): string {
   const maxTotal =
     inputLimits.maxTotalBytes === null ? null : formatBytes(inputLimits.maxTotalBytes);
   return TEXT.workbench.limitsHint(inputLimits.maxInputs, maxTotal);
+}
+
+function removalTitle(removal: PendingRemoval | null): string {
+  if (removal === null) {
+    return "";
+  }
+  return removal.kind === "one"
+    ? TEXT.workbench.removal.titleOne(removal.name)
+    : TEXT.workbench.removal.titleAll(removal.count);
 }
 
 function commandFrom(draft: RecipeDraft<RecipeId>, inputs: RunInputs): RunCommand | null {

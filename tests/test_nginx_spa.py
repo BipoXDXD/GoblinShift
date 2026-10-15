@@ -50,6 +50,7 @@ SPA_CSP = (
     "form-action 'self'"
 )
 IMMUTABLE = "public, max-age=31536000, immutable"
+SECURITY_TXT = ROOT / "web" / "public" / ".well-known" / "security.txt"
 
 
 def _yaml(path: Path) -> Any:
@@ -300,6 +301,25 @@ class TestSpa:
         response = stack.get("/qualquer-rota", method="POST", data=b"{}")
 
         assert response.status == 405
+
+
+class TestSecurityTxt:
+    pytestmark = pytestmark_integration
+
+    def test_security_txt_sai_como_texto_e_nao_como_o_index(self, stack: Stack) -> None:
+        response = stack.get("/.well-known/security.txt")
+
+        assert response.status == 200
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert response.body == SECURITY_TXT.read_bytes()
+        assert response.headers["cache-control"] == "no-cache"
+        _assert_spa_security_headers(response)
+
+    def test_outro_arquivo_em_well_known_e_404_e_nao_o_index(self, stack: Stack) -> None:
+        response = stack.get("/.well-known/nao-existe.txt")
+
+        assert response.status == 404
+        assert b'<div id="root">' not in response.body
 
 
 class TestApi:

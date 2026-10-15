@@ -158,7 +158,7 @@ export function ReorderableList<T>({
             <li
               key={key}
               {...dragHandlers(index)}
-              className="flex items-start gap-3 rounded-lg bg-surface p-3 shadow-1 transition data-[dragged=true]:shadow-3"
+              className="flex items-start gap-3 rounded-lg bg-surface p-3 shadow-card transition data-[dragged=true]:shadow-float"
             >
               <GripVertical
                 aria-hidden="true"
