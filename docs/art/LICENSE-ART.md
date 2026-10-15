@@ -34,12 +34,12 @@ O `check-provenance` recusa qualquer arquivo cuja cadeia passe por esses modelos
   - seção 2: a exportação vale "for private or commercial use depending on your subscription plan";
   - seção 5(b): "we will not limit your use of such Output", e a empresa não garante que a saída seja protegível por direito autoral;
   - página de preços: o plano Creator e os acima dão "Unlimited export and any use".
-  - **Base:** conta em plano pago, segundo o dono da conta. Falta guardar um comprovante do plano ativo nas datas das gerações (14 e 15 de outubro de 2026).
+  - **Base:** o usuário é assinante do fonte externa (informado em 2026-10-15), então as gerações caem no plano pago. Um print do plano ativo na conta reforçaria o registro, mas não é condição.
 - **fonte externa** (termos, "Last updated: July 11, 2025"), que gerou as imagens 2D de entrada (elas não estão no site):
   - 5.2.2: "Paid Users generally have all rights" sobre entradas e saídas, e a empresa não treina com elas;
   - 3.2: uso comercial permitido;
   - 3.4: saída de serviço de terceiro (fonte externa e fonte externa) segue os termos do terceiro;
-  - **Lacuna:** os termos não definem "Paid User" nem dizem se a carteira pré-paga da API conta como tal. A confirmação por escrito da fonte externa continua pendente.
+  - **Base:** o usuário é assinante da fonte externa e tem saldo pago na API (informado em 2026-10-15), então é "Paid User" pelos dois caminhos: a assinatura e os créditos de API comprados. Os termos não definem "Paid User", mas uma conta com assinatura ativa se enquadra em qualquer leitura.
 - **Google, fonte externa API** (termos, atualizados em 2026-04-28), por trás do fonte externa: "Google won't claim ownership over that content".
 
 ## Direito autoral e licença
