@@ -146,7 +146,6 @@ def test_post_com_campo_extra_422_e_nada_gravado(
         {"scopes": ["files:read"], "days": 91},
         {"scopes": ["files:read"], "days": "30"},
         {"scopes": ["files:read"], "days": 30.5},
-        {"scopes": ["files:read\u0000"], "days": 30},
     ],
     ids=[
         "escopo-desconhecido",
@@ -158,7 +157,6 @@ def test_post_com_campo_extra_422_e_nada_gravado(
         "91-dias",
         "dias-texto",
         "dias-fracao",
-        "nul",
     ],
 )
 def test_post_invalido_422_e_nada_gravado(
@@ -170,6 +168,18 @@ def test_post_invalido_422_e_nada_gravado(
     response = client.post(KEYS, json=body)
 
     assert_problem(response, 422, "VALIDATION_FAILED")
+    assert key_count(factory, owner) == 0
+
+
+def test_post_com_nul_400_json_invalid_e_nada_gravado(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    response = client.post(KEYS, json={"scopes": ["files:read\u0000"], "days": 30})
+
+    assert_problem(response, 400, "JSON_INVALID")
     assert key_count(factory, owner) == 0
 
 

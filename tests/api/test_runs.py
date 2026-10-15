@@ -14,7 +14,7 @@ from pydantic import SecretStr
 from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.catalog import Catalog, VersionStatus
+from goblinshift.catalog import CATALOG, Catalog, VersionStatus
 from goblinshift.catalog.versions import CSV_JANITOR_V1
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.dependencies import current_time
@@ -389,6 +389,37 @@ def test_validate_only_nao_confere_uploads_nem_exige_chave(
     assert response.status_code == 200, response.text
 
 
+def test_nul_nos_parametros_responde_400_sem_consumir_a_chave(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # Achado do Schemathesis: o PostgreSQL recusa \u0000 em jsonb, e a Run virava 500 ao ser
+    # gravada. A recusa vem antes de qualquer escrita, então a chave segue livre.
+    account = Account(factory)
+    inputs = ready_inputs(factory, storage, account.id)
+    key = str(uuid.uuid4())
+    parameters = {"case_rules": [{"column": "a\u0000b", "mode": "upper"}]}
+
+    response = post_run(client, account, body(inputs, parameters), key)
+
+    assert_problem(response, 400, "JSON_INVALID")
+    assert post_run(client, account, body(inputs), key).status_code == 202
+
+
+@pytest.mark.parametrize(
+    "key", ["curta", "x" * 65, "com espaco-1234567890"], ids=["curta", "longa", "espaco"]
+)
+def test_validate_only_com_chave_fora_do_formato_responde_400(
+    client: TestClient, factory: sessionmaker[Session], key: str
+) -> None:
+    # Achado do Schemathesis: a spec publica o formato da chave, e o validate_only aceitava
+    # qualquer valor. Ausente continua permitida; enviada, tem de estar no formato.
+    account = Account(factory)
+
+    response = post_run(client, account, body([uuid.uuid4()]), key, "?validate_only=true")
+
+    assert_problem(response, 400, "IDEMPOTENCY_KEY_INVALID")
+
+
 def test_validate_only_com_parametro_invalido_responde_422(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -502,6 +533,32 @@ def test_listagem_de_outra_conta_nao_mostra_execucoes_alheias(
 
 
 # GET /runs
+
+
+@pytest.mark.parametrize(
+    "recipe_id", sorted({version.recipe_id for version in CATALOG.list_versions()})
+)
+def test_filtro_aceita_cada_receita_do_catalogo(
+    client: TestClient, factory: sessionmaker[Session], recipe_id: str
+) -> None:
+    account = Account(factory)
+
+    response = client.get(RUNS, params={"recipe_id": recipe_id}, headers=account.headers)
+
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("recipe_id", ["a\x00b", "CSV-Janitor", "csv janitor", "-csv"])
+def test_filtro_por_receita_fora_do_formato_de_id_responde_422(
+    client: TestClient, factory: sessionmaker[Session], recipe_id: str
+) -> None:
+    # Achado do Schemathesis: um NUL no filtro chegava ao PostgreSQL e virava 500.
+    account = Account(factory)
+
+    response = client.get(RUNS, params={"recipe_id": recipe_id}, headers=account.headers)
+
+    body = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [error["field"] for error in body["errors"]] == ["query.recipe_id"]
 
 
 def list_ids(client: TestClient, account: Account, query: str = "") -> tuple[list[str], Any]:
