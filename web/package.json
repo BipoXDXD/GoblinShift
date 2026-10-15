@@ -74,6 +74,9 @@
   "overrides": {
     "openapi-typescript": {
       "typescript": "$typescript"
+    },
+    "eslint-plugin-jsx-a11y": {
+      "eslint": "$eslint"
     }
   }
 }
