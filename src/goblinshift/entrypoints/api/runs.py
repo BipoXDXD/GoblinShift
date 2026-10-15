@@ -25,10 +25,9 @@ from goblinshift.entrypoints.api.capacity_problems import (
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
 from goblinshift.entrypoints.api.problems import (
-    PROBLEM_MEDIA_TYPE,
     ApiProblem,
     ProblemCode,
-    ProblemDetails,
+    problem_responses,
 )
 from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
@@ -159,10 +158,7 @@ class RunResultsResponse(BaseModel):
 
 
 def _problem(*statuses: int) -> dict[int | str, dict[str, Any]]:
-    return {
-        status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
-        for status in statuses
-    }
+    return problem_responses(*statuses)
 
 
 def _create_run_openapi() -> dict[str, Any]:

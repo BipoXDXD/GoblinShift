@@ -170,14 +170,23 @@ class ProblemDetails(BaseModel):
 
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
     """Respostas problem+json para o OpenAPI da rota (2.3)."""
-    return {
+    responses: dict[int | str, dict[str, Any]] = {
         status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
         for status in statuses
     }
+    if 429 in responses:
+        responses[429]["headers"] = {
+            "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": True,
+                "schema": {"type": "string", "pattern": "^[0-9]+$"},
+            }
+        }
+    return responses
 
 
 # Respostas de erro comuns a toda rota autenticada.
-PROBLEM_RESPONSES = problem_responses(401, 403, 422, 500)
+PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500)
 
 
 # O nome segue o termo "problem" da RFC 9457, que é o que a classe representa.

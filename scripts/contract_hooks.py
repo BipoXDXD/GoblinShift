@@ -18,6 +18,14 @@ from scripts.contract_rules import (
 
 
 @schemathesis.hook
+def after_call(_context: Any, _case: Any, response: Any) -> None:
+    # Um orçamento esgotado tornaria o CI verde sem testar a lógica atrás do limitador.
+    body = _json_object(response)
+    if response.status_code == 429 and body is not None and body.get("code") == "RATE_LIMITED":
+        raise RuntimeError("Fuzzer atingiu o limite de requisições; a cobertura ficou bloqueada")
+
+
+@schemathesis.hook
 def map_body(_context: Any, body: Any) -> Any:
     return normalize_integral_floats(body)
 
