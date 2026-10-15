@@ -58,7 +58,7 @@ describe("App", () => {
     ).toHaveAttribute("href", "/bancada/csv-janitor");
   });
 
-  it("sem login, a Bancada mostra o aviso de login em breve sem repetir o pedido", async () => {
+  it("sem login, a Bancada pede para entrar sem repetir o pedido do catálogo", async () => {
     const fetchMock = vi.fn<typeof fetch>(() =>
       Promise.resolve(problemResponse(401, "AUTHENTICATION_REQUIRED")),
     );
@@ -67,10 +67,15 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByRole("region", { name: "O login chega em breve" }),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const prompt = await screen.findByRole("region", { name: "Entre para continuar" });
+    expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+      "href",
+      "/auth/login/google?return_to=%2Fbancada%2Fcsv-janitor",
+    );
+    const catalogCalls = fetchMock.mock.calls.filter(([input]) =>
+      new Request(input).url.endsWith("/api/v1/catalog"),
+    );
+    expect(catalogCalls).toHaveLength(1);
   });
 
   it("mostra página não encontrada para rota desconhecida", () => {

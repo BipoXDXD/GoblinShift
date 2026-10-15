@@ -1,4 +1,4 @@
-// Orçamento de peso do build (plano de design, P8; ADR 027 para o 3D da abertura). Roda depois do
+// Orçamento de peso do build (plano de design, P8; ADR 027 e 030 para o 3D da abertura e as goblins). Roda depois do
 // `vite build` no job `web` do CI: `node scripts/check-budget.ts` sai com 1 se algum teto passar.
 // JS e CSS contam gzip (o que trafega); fontes, imagens e modelos já vêm comprimidos e contam o
 // tamanho do arquivo.
@@ -22,8 +22,11 @@ const LIMITS_KB = {
   css: 25,
   latinFonts: 100,
   threeDChunk: 300,
-  threeDModel: 500,
+  /** ADR 030: a Rúbia em ~120 mil triângulos, com Meshopt e texturas WebP, mede ~1911 KB. */
+  threeDModel: 2048,
   threeDPoster: 90,
+  /** Goblin de um estado, cada arquivo (AVIF ou WebP, 1× ou 2×). */
+  illustration: 20,
 } as const;
 
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */
@@ -56,7 +59,11 @@ export function budgetViolations(files: readonly BuiltFile[], indexHtml: string)
     }),
   ];
   for (const file of files) {
-    violations.push(chunkRawViolation(file), ...threeDViolations(file, referenced));
+    violations.push(
+      chunkRawViolation(file),
+      illustrationViolation(file),
+      ...threeDViolations(file, referenced),
+    );
   }
   return violations.filter((violation) => violation !== null);
 }
@@ -71,6 +78,19 @@ function chunkRawViolation(file: BuiltFile): string | null {
     bytes: file.bytes,
     limitKb: LIMITS_KB.chunkRaw,
     unit: "KB crus",
+  });
+}
+
+/** A imagem estática do 3D fica de fora: ela tem o teto próprio. */
+function illustrationViolation(file: BuiltFile): string | null {
+  if (!/\.(avif|webp)$/.test(file.path) || file.path.startsWith(THREE_D_PREFIX)) {
+    return null;
+  }
+  return overLimit({
+    what: `Ilustração (${file.path})`,
+    bytes: file.bytes,
+    limitKb: LIMITS_KB.illustration,
+    unit: "KB",
   });
 }
 

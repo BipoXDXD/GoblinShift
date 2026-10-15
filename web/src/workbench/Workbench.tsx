@@ -8,6 +8,7 @@ import { useIdempotencyKey } from "../api/idempotency";
 import { ApiError } from "../api/response";
 import type { RunCommand } from "../api/types";
 import { PATHS, runPath } from "../app/paths";
+import { GoblinIllustration } from "../art/GoblinIllustration";
 import { ErrorSummary, type FormIssue } from "../components/a11y/ErrorSummary";
 import { FileDropzone } from "../components/a11y/FileDropzone";
 import { FocusHeading } from "../components/a11y/FocusHeading";
@@ -125,7 +126,11 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
               onFiles={batch.add}
             />
             {entries.length === 0 ? (
-              <EmptyState title={TEXT.workbench.noFilesYet} headingLevel={3}>
+              <EmptyState
+                title={TEXT.workbench.noFilesYet}
+                headingLevel={3}
+                illustration={<GoblinIllustration state="vazio" rotationKey={recipe.id} />}
+              >
                 <p>{TEXT.workbench.noFilesYetHint}</p>
               </EmptyState>
             ) : (

@@ -5,11 +5,12 @@ import { Link, useSearchParams } from "react-router";
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { PATHS } from "../app/paths";
+import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
-import { QueryFailure } from "../components/feedback/QueryFailure";
+import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button, buttonClassName } from "../components/ui/Button";
 import { RECIPE_LIST } from "../recipes/registry";
 import { RUN_STATUSES } from "../runs/api";
@@ -142,7 +143,7 @@ function FirstPagePending({ error }: { readonly error: Error | null }): ReactEle
   return error === null ? (
     <p className="text-fg-muted">{T.loading}</p>
   ) : (
-    <QueryFailure error={error} />
+    <FailureNotice error={error} />
   );
 }
 
@@ -155,7 +156,10 @@ function EmptyResults({ filtered }: { readonly filtered: boolean }): ReactElemen
     );
   }
   return (
-    <EmptyState title={T.empty}>
+    <EmptyState
+      title={T.empty}
+      illustration={<GoblinIllustration state="vazio" rotationKey="historico" />}
+    >
       <p>{T.emptyHint}</p>
       <Link to={PATHS.home} className="inline-flex min-h-11 items-center font-semibold">
         {T.goToWorkshop}

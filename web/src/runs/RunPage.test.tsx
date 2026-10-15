@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
-import { fakeApi, jsonResponse, problemResponse, runBody, RUN_ID } from "../test/fakeApi";
+import {
+  fakeApi,
+  jsonResponse,
+  problemResponse,
+  runBody,
+  RUN_ID,
+  screenRequests,
+} from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
@@ -54,7 +61,8 @@ describe("Execução", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Página não encontrada" }),
     ).toBeVisible();
-    expect(api.requests).toHaveLength(0);
+    expect(screenRequests(api.requests)).toHaveLength(0);
+    expect(screen.getByRole("img", { name: /^Nyx, / })).toBeInTheDocument();
   });
 
   it("mostra estado, fase e progresso em texto", async () => {
@@ -159,6 +167,29 @@ describe("Execução", () => {
     expect(
       await screen.findByRole("link", { name: "Nova execução nesta receita" }),
     ).toHaveAttribute("href", "/bancada/csv-janitor");
+  });
+
+  describe("goblin do estado", () => {
+    it.each([
+      ["queued", /^Ada, /],
+      ["running", /^Ada, /],
+      ["stopping", /^Ada, /],
+      ["succeeded", /^Ferrugem, /],
+      ["succeeded_with_warnings", /^Ferrugem, /],
+      ["failed", /^Nyx, /],
+    ])("%s mostra a goblin do estado", async (status, goblin) => {
+      setup(() => jsonResponse(runBody({ status })));
+
+      expect(await screen.findByRole("img", { name: goblin })).toBeInTheDocument();
+      expect(screen.getAllByRole("img")).toHaveLength(1);
+    });
+
+    it("cancelada não tem goblin: não é espera, sucesso nem erro", async () => {
+      setup(() => jsonResponse(runBody({ status: "canceled" })));
+
+      expect(await screen.findByText("Cancelada")).toBeInTheDocument();
+      expect(screen.queryByRole("img")).toBeNull();
+    });
   });
 
   it("não tem violações do axe", async () => {

@@ -4,9 +4,15 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Os textos legais vêm de docs/legal/ (fonte única, fora de web/); o servidor de dev só serve o
+  // que está na allowlist.
+  server: { fs: { allow: [".", "../docs/legal"] } },
   build: {
     // Sem source map no bundle publicado: o fonte embutido vazaria comentários (ETS item 73).
     sourcemap: false,
+    // O chunk do 3D da abertura (three.js, ~615 KB crus) passa do aviso padrão de 500 KB de
+    // propósito; quem manda no peso é o check-budget, com os tetos do ADR 027 e 030.
+    chunkSizeWarningLimit: 650,
     rolldownOptions: {
       output: {
         // O framework muda pouco: em chunks próprios, o cache do navegador sobrevive aos deploys da
@@ -15,6 +21,10 @@ export default defineConfig({
           groups: [
             { name: "react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
             { name: "router", test: /node_modules[\\/]react-router[\\/]/ },
+            // O z.config({ jitless }) mora no chunk do próprio Zod: ele roda antes de qualquer
+            // chunk que crie schema, seja qual for a divisão. Fora dele, um schema num chunk
+            // compartilhado nascia antes da configuração e o teste de eval violava a CSP.
+            { name: "zod", test: /node_modules[\\/]zod[\\/]|src[\\/]zodJitless\.ts$/ },
           ],
         },
       },
