@@ -9,6 +9,21 @@ import { fakeApi, problemResponse } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
+// Material interno da revisão (pendências, ids do levantamento, notas ao revisor, fontes e as
+// instruções de convenção) mora em docs/legal/notas-internas.md, que nada importa.
+const INTERNAL_MARKERS = [
+  /Pendências/i,
+  /\bJ-\d/,
+  /notas internas/i,
+  /Fontes internas/i,
+  /Nota para a revisão/i,
+  /Divergências entre plano e código/i,
+  /não publicar sem revisão jurídica/i,
+  /Esta seção sai do texto final/i,
+  /Trechos entre/i,
+  /Notas marcadas como/i,
+];
+
 function setup(path: string) {
   // Os textos são públicos: abrem também sem sessão.
   const api = fakeApi({ "GET /api/v1/me": () => problemResponse(401, "AUTHENTICATION_REQUIRED") });
@@ -40,6 +55,23 @@ describe.each([
       .map((heading) => heading.textContent);
     expect(expected.length).toBeGreaterThan(5);
     expect(shown).toEqual(expected);
+  });
+
+  it("o arquivo embutido no build não traz material interno da revisão", () => {
+    for (const marker of INTERNAL_MARKERS) {
+      expect(source).not.toMatch(marker);
+    }
+  });
+
+  it("a página não mostra material interno, mas mantém as marcações a definir", async () => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const shown = screen.getByRole("article").textContent;
+    for (const marker of INTERNAL_MARKERS) {
+      expect(shown).not.toMatch(marker);
+    }
+    expect(shown).toContain("[[A DEFINIR");
   });
 
   it("não tem violações do axe", async () => {
