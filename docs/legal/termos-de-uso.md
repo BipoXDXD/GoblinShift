@@ -6,7 +6,9 @@
 
 ## 1. Quem oferece o serviço
 
-O GoblinShift é oferecido por [[A DEFINIR: nome completo do controlador, pessoa física, e cidade/UF]] ("nós").
+O GoblinShift é oferecido por Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR)
+("nós"), que é o controlador dos dados pessoais tratados no serviço. Canal do controlador:
+privacidade@goblinshift.dev.
 
 Contato geral: contato@goblinshift.dev. Denúncias: abuso@goblinshift.dev.
 Pedidos sobre dados pessoais: privacidade@goblinshift.dev.
@@ -199,4 +201,4 @@ Estes Termos são regidos pelas leis da República Federativa do Brasil.
 | Versão | Data | Resumo |
 |---|---|---|
 | `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
-| `v2-rascunho` | 2026-10-15 | Domínio e e-mails de contato; política de divulgação de vulnerabilidades; proibição de ceder chaves de API; prazo de resposta às denúncias; recurso contra bloqueio; aviso de 30 dias antes do fim do serviço; licença Apache 2.0 do código e CC BY 4.0 da arte; pedido de retirada de material do site; antecedência de 15 dias para mudanças e este histórico |
+| `v2-rascunho` | 2026-10-15 | Identificação de quem oferece o serviço; domínio e e-mails de contato; política de divulgação de vulnerabilidades; proibição de ceder chaves de API; prazo de resposta às denúncias; recurso contra bloqueio; aviso de 30 dias antes do fim do serviço; licença Apache 2.0 do código e CC BY 4.0 da arte; pedido de retirada de material do site; antecedência de 15 dias para mudanças e este histórico |
