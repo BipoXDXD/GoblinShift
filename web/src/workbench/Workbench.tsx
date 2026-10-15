@@ -129,7 +129,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
               <EmptyState
                 title={TEXT.workbench.noFilesYet}
                 headingLevel={3}
-                illustration={<GoblinIllustration state="vazio" />}
+                illustration={<GoblinIllustration state="vazio" rotationKey={recipe.id} />}
               >
                 <p>{TEXT.workbench.noFilesYetHint}</p>
               </EmptyState>
