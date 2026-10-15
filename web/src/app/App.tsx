@@ -7,6 +7,7 @@ import { ApiClientProvider } from "../api/ApiClientContext";
 import { createApiClient } from "../api/client";
 import { readCsrfCookie } from "../api/csrf";
 import { shouldRetryQuery } from "../api/queryRetry";
+import { SITE_NOTICE } from "../notice/siteNotice";
 import { createContentUploader } from "../upload/xhr";
 import { createRoutes } from "./routes";
 
@@ -42,6 +43,7 @@ export function App(): ReactElement {
           },
         },
         now: Date.now,
+        notice: SITE_NOTICE,
       }),
     ),
   );

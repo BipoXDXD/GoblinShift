@@ -37,7 +37,7 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
   // Terciário: só texto grande (18 px ou mais) ou decorativo.
   ...pairs("fg-subtle", ["bg", "surface"], NON_TEXT),
   ...pairs("border-ui", [...SURFACES, "dropzone-active"], NON_TEXT),
-  ...pairs("ring", [...SURFACES, "danger-bg"], NON_TEXT),
+  ...pairs("ring", [...SURFACES, "danger-bg", "warning-bg"], NON_TEXT),
   ...pairs("progress-fill", ["progress-track"], NON_TEXT),
 ];
 

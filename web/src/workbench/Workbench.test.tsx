@@ -46,7 +46,7 @@ function renderWorkbench({
     [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()),
   });
   const { uploader, pending } = fakeUploader({ autoResolve });
-  const routes = appRoutes(api.client, uploader);
+  const routes = appRoutes(api.client, { uploader });
   const view = renderRoutes({ routes, path: `/bancada/${recipe}`, client: api.client });
   return { ...view, api, pending, user: userEvent.setup() };
 }
