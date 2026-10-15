@@ -53,4 +53,6 @@ function sharedArtifactsDir(): string {
 }
 
 export const E2E = readEnv();
+/** Build com o aviso de e2e/fixtures/notice.json (npm run e2e:notice, ADR 031). */
+export const NOTICE_BUILD = process.env["E2E_NOTICE"] === "1";
 export { LOCAL_PORT };
