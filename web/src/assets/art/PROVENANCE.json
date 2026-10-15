@@ -35,13 +35,13 @@
       "id": "rodin-plano-pago",
       "vendor": "hyper3d",
       "basis": ["hyper3d-terms", "hyper3d-pricing"],
-      "status": "termos lidos; plano pago ativo segundo o dono da conta, sem comprovante no repositório"
+      "status": "termos lidos; usuário assinante do Rodin (informado em 2026-10-15)"
     },
     {
       "id": "tripo-api-wallet",
       "vendor": "tripo",
       "basis": ["tripo-terms", "gemini-api-terms"],
-      "status": "termos lidos; 'Paid User' não é definido nos termos, confirmação escrita da Tripo pendente"
+      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)"
     }
   ],
   "generations": {
