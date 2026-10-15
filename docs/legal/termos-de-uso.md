@@ -1,14 +1,17 @@
 # Termos de Uso do GoblinShift
 
-- **Versão:** [[A DEFINIR: número da versão]]
-- **Vigência:** [[A DEFINIR: data de publicação]]
-- **Endereço do serviço:** [[A DEFINIR: domínio definitivo]]
+- **Versão:** v2-rascunho
+- **Vigência:** 2026-10-15
+- **Endereço do serviço:** https://goblinshift.dev
 
 ## 1. Quem oferece o serviço
 
-O GoblinShift é oferecido por [[A DEFINIR: nome completo ou razão social do controlador, CPF ou
-CNPJ, e endereço]] ("nós"). Contato geral, denúncias e pedidos sobre dados pessoais:
-[[A DEFINIR: e-mail de contato]].
+O GoblinShift é oferecido por Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR)
+("nós"), que é o controlador dos dados pessoais tratados no serviço. Canal do controlador:
+privacidade@goblinshift.dev.
+
+Contato geral: contato@goblinshift.dev. Denúncias: abuso@goblinshift.dev.
+Pedidos sobre dados pessoais: privacidade@goblinshift.dev.
 
 O GoblinShift é um projeto de portfólio, gratuito, com código-fonte público. Não há plano pago
 nem cobrança de nenhum tipo.
@@ -34,7 +37,9 @@ manifesto e relatório. O catálogo publicado mostra só as receitas disponívei
 parâmetros e limites em vigor.
 
 O processamento roda num ambiente isolado, sem acesso à rede. Não há inteligência artificial no
-processamento, nem scripts enviados por você.
+processamento, nem scripts enviados por você, e nenhum arquivo seu é enviado a serviço de
+inteligência artificial. As ilustrações do site foram geradas com ajuda de inteligência
+artificial (ver [https://goblinshift.dev/creditos](https://goblinshift.dev/creditos)).
 
 ## 4. Conta e acesso
 
@@ -90,12 +95,13 @@ Você concorda em **não** usar o GoblinShift para:
 6. tentar acessar contas, arquivos ou dados de outras pessoas, ou contornar a autenticação e a
    autorização;
 7. tentar escapar do ambiente isolado de processamento, atacar o servidor ou a rede, ou testar
-   vulnerabilidades sem autorização prévia por escrito
-   [[A DEFINIR: haverá política de divulgação responsável de vulnerabilidades? Se sim, indicar
-   o canal e a referência aqui]];
-8. distribuir malware ou usar o serviço como intermediário de qualquer ataque.
-
-[[A DEFINIR: outras condutas proibidas que o dono queira listar.]]
+   vulnerabilidades sem autorização prévia por escrito. Quem encontrar uma falha e a comunicar
+   de boa-fé pelo canal da nossa política de divulgação
+   ([https://goblinshift.dev/.well-known/security.txt](https://goblinshift.dev/.well-known/security.txt)), sem acessar dados de outras pessoas nem
+   degradar o serviço, tem autorização para testá-la nos limites dessa política;
+8. distribuir malware ou usar o serviço como intermediário de qualquer ataque;
+9. emprestar, vender ou publicar chaves de API, ou oferecer o serviço a terceiros como se fosse
+   seu.
 
 ## 7. Abuso sexual infantil e outros conteúdos ilegais
 
@@ -114,23 +120,28 @@ Para os demais conteúdos ilegais, adotamos as mesmas medidas que forem cabívei
 não faz, nesta versão, varredura automatizada do conteúdo dos arquivos para moderação: a
 contenção de abuso se apoia em limites, privacidade dos arquivos, expiração curta e denúncias.
 
-**Como denunciar:** escreva para [[A DEFINIR: e-mail de denúncias]] com o máximo de informação
-que puder (o que, quando, e qualquer identificador de execução ou de arquivo que você tenha).
-Não anexe nem reenvie conteúdo de abuso sexual infantil: descreva-o.
-[[A DEFINIR: prazo de resposta às denúncias.]]
+**Como denunciar:** escreva para abuso@goblinshift.dev com o máximo de informação que puder (o
+que, quando, e qualquer identificador de execução ou de arquivo que você tenha). Não anexe nem
+reenvie conteúdo de abuso sexual infantil: descreva-o.
+
+Respondemos a denúncias em até 3 dias úteis. Denúncias de abuso sexual infantil têm prioridade
+e são tratadas assim que forem lidas.
 
 ## 8. Suspensão e encerramento
 
 - **Por nós.** Podemos bloquear a conta que violar estes Termos, que puser em risco o serviço
-  ou outros usuários, ou quando a lei exigir. [[A DEFINIR: haverá aviso prévio ou canal de
-  recurso para o bloqueio, salvo nos casos do item 7?]]
+  ou outros usuários, ou quando a lei exigir. Não temos o seu e-mail e por isso não avisamos
+  antes de bloquear. Se você acha que o bloqueio foi um engano, escreva para
+  contato@goblinshift.dev com o código da tela de login e o provedor (Google ou GitHub), e
+  analisamos o caso. Essa regra não vale para o item 7.
 - **Por você.** Você pode excluir sua conta a qualquer momento pela própria conta (operação
   `DELETE /me`, que exige login recente). A exclusão revoga sessões e chaves, cancela a
   execução em andamento e remove arquivos, resultados, presets e histórico em até 24 horas.
   Cópias no backup do banco de dados deixam de existir quando o backup expira, em até 30 dias
   (detalhes no Aviso de Privacidade).
 - **Fim do serviço.** Por ser um projeto de portfólio gratuito, o serviço pode ser alterado,
-  suspenso ou encerrado. [[A DEFINIR: aviso prévio mínimo em caso de encerramento.]]
+  suspenso ou encerrado. Se o serviço for encerrado, avisaremos no site com pelo menos 30 dias
+  de antecedência, salvo por motivo de segurança, ordem legal ou caso fortuito.
 
 ## 9. Conteúdo e propriedade
 
@@ -138,9 +149,18 @@ Não anexe nem reenvie conteúdo de abuso sexual infantil: descreva-o.
   processá-los pelo tempo e para a finalidade necessários para executar as receitas que você
   pedir e entregar os resultados a você.
 - Você declara ter o direito de enviar e processar os arquivos que envia.
-- O código do GoblinShift é público. [[A DEFINIR: licença do código-fonte; o repositório ainda
-  não tem arquivo de licença]]. Nome, marca e ilustrações do GoblinShift
-  [[A DEFINIR: condições de uso da marca e das ilustrações]].
+- O código do GoblinShift é público e licenciado sob a Apache License 2.0
+  ([https://github.com/BipoXDXD/GoblinShift/blob/main/LICENSE](https://github.com/BipoXDXD/GoblinShift/blob/main/LICENSE)). A licença do código não cobre as
+  ilustrações nem os modelos 3D.
+- O nome GoblinShift, o logotipo e os nomes dos personagens não podem ser usados de modo que
+  sugira vínculo ou endosso. As ilustrações e os modelos 3D do site são gerados com ajuda de
+  inteligência artificial e editados por nós; a nossa parte do trabalho está sob CC BY 4.0, sem
+  garantia de que a saída gerada por IA seja protegível por direito autoral. As goblins Jade e
+  Fagulha ficam fora dessa licença. Origem e detalhes em
+  [https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md](https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md).
+- Se você acha que algo publicado no site (ilustração, modelo 3D ou texto) viola um direito
+  seu, escreva para abuso@goblinshift.dev identificando o material e o direito. Analisamos o
+  pedido e retiramos o que for procedente.
 
 ## 10. Ausência de garantias e limitação de responsabilidade
 
@@ -165,10 +185,20 @@ que faz parte destes Termos.
 ## 12. Mudanças nestes Termos
 
 Podemos atualizar estes Termos. Cada versão tem número e data; a mudança de versão pede novo
-aceite no login seguinte. [[A DEFINIR: antecedência mínima de aviso para mudanças relevantes e
-onde o histórico de versões fica publicado.]]
+aceite no login seguinte.
+
+Mudanças relevantes são avisadas no site com pelo menos 15 dias de antecedência, salvo se a lei
+ou a segurança do serviço exigirem algo mais rápido. O histórico das versões está no fim deste
+texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal).
 
 ## 13. Lei aplicável e foro
 
 Estes Termos são regidos pelas leis da República Federativa do Brasil.
 [[A DEFINIR: foro.]]
+
+## Histórico de versões
+
+| Versão | Data | Resumo |
+|---|---|---|
+| `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
+| `v2-rascunho` | 2026-10-15 | Identificação de quem oferece o serviço; domínio e e-mails de contato; política de divulgação de vulnerabilidades; proibição de ceder chaves de API; prazo de resposta às denúncias; recurso contra bloqueio; aviso de 30 dias antes do fim do serviço; licença Apache 2.0 do código e CC BY 4.0 da arte; pedido de retirada de material do site; antecedência de 15 dias para mudanças e este histórico |
