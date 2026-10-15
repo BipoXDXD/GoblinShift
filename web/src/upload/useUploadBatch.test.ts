@@ -271,6 +271,23 @@ describe("useUploadBatch", () => {
     expect(hook.result.current.entries.map((entry) => entry.file.name)).toEqual(["b.csv"]);
   });
 
+  it("removeAll aborta os envios em curso e esvazia o lote", async () => {
+    const { pending, hook } = setup();
+    act(() => {
+      hook.result.current.add([file("a.csv"), file("b.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+
+    act(() => {
+      hook.result.current.removeAll();
+    });
+
+    expect(hook.result.current.entries).toEqual([]);
+    expect(pending.every((upload) => upload.options.signal?.aborted === true)).toBe(true);
+  });
+
   it("pede confirmação para sair da página só enquanto há envio", async () => {
     const { pending, hook } = setup();
     const leave = () => {

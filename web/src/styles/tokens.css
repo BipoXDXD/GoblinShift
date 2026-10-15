@@ -2,7 +2,7 @@
  * Sistema visual do GoblinShift (plano de design web, D1–D13 e seção 7).
  *
  * Três camadas:
- * 1. tons crus em @theme static (musgo, latão, pedra, brasa): só a arte e este arquivo os usam;
+ * 1. tons crus em @theme static (musgo, latão, pedra, brasa, pátina): só a arte e este arquivo os usam;
  * 2. papéis semânticos em :root e [data-theme="dark"], com os pares de contraste medidos em
  *    contrast.test.ts;
  * 3. @theme inline, que transforma os papéis em utilitários (bg-surface, text-fg-muted, …).
@@ -82,6 +82,20 @@
   --color-ember-900: oklch(0.335 0.11 26);
   --color-ember-950: oklch(0.265 0.08 25);
 
+  /* Pátina: sucesso. Verde-azulado de cobre oxidado, matiz fixo em 180° (32° além do musgo
+     mais escuro), para o sucesso não parecer botão (PUI: a primária é só do que se clica). */
+  --color-patina-50: oklch(0.975 0.02 180);
+  --color-patina-100: oklch(0.945 0.035 180);
+  --color-patina-200: oklch(0.895 0.055 180);
+  --color-patina-300: oklch(0.825 0.075 180);
+  --color-patina-400: oklch(0.735 0.09 180);
+  --color-patina-500: oklch(0.645 0.095 180);
+  --color-patina-600: oklch(0.555 0.09 180);
+  --color-patina-700: oklch(0.475 0.08 180);
+  --color-patina-800: oklch(0.405 0.068 180);
+  --color-patina-900: oklch(0.335 0.055 180);
+  --color-patina-950: oklch(0.265 0.042 180);
+
   /* Fontes auto-hospedadas (src/styles/fonts.css), nunca de CDN: a CSP só aceita 'self'. */
   --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
@@ -148,8 +162,8 @@
   --ring: var(--color-brass-600);
   --accent-band: var(--color-brass-400);
 
-  --success-bg: var(--color-moss-50);
-  --success-fg: var(--color-moss-800);
+  --success-bg: var(--color-patina-50);
+  --success-fg: var(--color-patina-800);
   --warning-bg: var(--color-brass-50);
   --warning-fg: var(--color-brass-800);
   --danger-bg: var(--color-ember-50);
@@ -158,23 +172,27 @@
   --info-bg: var(--color-stone-100);
   --info-fg: var(--color-stone-700);
 
-  --progress-fill: var(--color-moss-600);
+  --progress-fill: var(--color-patina-600);
   --progress-track: var(--color-stone-200);
   --dropzone-active: var(--color-moss-50);
   --selection-bg: var(--color-brass-200);
   --selection-fg: var(--color-brass-900);
   --hero-band: var(--color-moss-50);
+  --overlay: var(--color-stone-950);
 
-  /* Sombras em duas partes, a luz vem de cima (RUI cap. 6); cor = stone-950 com alfa. */
-  --elevation-1: 0 1px 3px oklch(0.17 0.013 55 / 0.12), 0 1px 2px oklch(0.17 0.013 55 / 0.24);
-  --elevation-2: 0 3px 6px oklch(0.17 0.013 55 / 0.15), 0 2px 4px oklch(0.17 0.013 55 / 0.12);
-  --elevation-3: 0 10px 20px oklch(0.17 0.013 55 / 0.15), 0 3px 6px oklch(0.17 0.013 55 / 0.1);
-  --elevation-4: 0 15px 25px oklch(0.17 0.013 55 / 0.15), 0 5px 10px oklch(0.17 0.013 55 / 0.05);
-  --elevation-5: 0 20px 40px oklch(0.17 0.013 55 / 0.2);
+  /* Três níveis (spec 2026-10-15): cartão sobre a página, flutuante (menu, popover, arrasto) e
+     diálogo. Duas partes, a luz vem de cima (RUI cap. 6); no diálogo a parte pequena some. */
+  --elevation-card: 0 2px 4px oklch(0.17 0.013 55 / 0.12), 0 1px 2px oklch(0.17 0.013 55 / 0.2);
+  --elevation-float: 0 10px 20px oklch(0.17 0.013 55 / 0.15), 0 3px 6px oklch(0.17 0.013 55 / 0.1);
+  --elevation-dialog: 0 20px 40px oklch(0.17 0.013 55 / 0.2);
   --elevation-sunken: inset 0 2px 2px oklch(0.17 0.013 55 / 0.1);
 
   --duration-fast: 120ms;
   --duration-base: 200ms;
+
+  /* Camadas com nome (CSSD 6.4.3): só as que existem. O <dialog> modal fica na top layer. */
+  --z-menu: 10;
+  --z-skip: 20;
 }
 
 /* No escuro a sombra some no fundo: a elevação vem da superfície mais clara e de um fio de luz
@@ -206,8 +224,8 @@
   --ring: var(--color-brass-300);
   --accent-band: var(--color-brass-400);
 
-  --success-bg: var(--color-moss-950);
-  --success-fg: var(--color-moss-200);
+  --success-bg: var(--color-patina-950);
+  --success-fg: var(--color-patina-200);
   --warning-bg: var(--color-brass-950);
   --warning-fg: var(--color-brass-200);
   --danger-bg: var(--color-ember-950);
@@ -216,19 +234,73 @@
   --info-bg: var(--color-stone-800);
   --info-fg: var(--color-stone-200);
 
-  --progress-fill: var(--color-moss-400);
+  --progress-fill: var(--color-patina-400);
   --progress-track: var(--color-stone-700);
   --dropzone-active: var(--color-stone-800);
   --selection-bg: var(--color-brass-800);
   --selection-fg: var(--color-brass-50);
   --hero-band: var(--color-stone-900);
+  --overlay: oklch(0 0 0);
 
-  --elevation-1: inset 0 1px 0 oklch(1 0 0 / 0.06);
-  --elevation-2: inset 0 1px 0 oklch(1 0 0 / 0.06);
-  --elevation-3: 0 10px 20px oklch(0 0 0 / 0.5);
-  --elevation-4: 0 15px 25px oklch(0 0 0 / 0.55);
-  --elevation-5: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
+  --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
+  --elevation-float: 0 10px 20px oklch(0 0 0 / 0.5);
+  --elevation-dialog: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
   --elevation-sunken: inset 0 2px 2px oklch(0 0 0 / 0.3);
+}
+
+/* Fallback sem theme-init.js: segue o sistema, como a opção Sistema. Cópia exata do bloco acima,
+   garantida por contrast.test.ts ("fallback do tema escuro"); mude os dois juntos. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --bg: var(--color-stone-950);
+    --surface: var(--color-stone-900);
+    --surface-raised: var(--color-stone-800);
+    --surface-sunken: var(--color-stone-950);
+
+    --fg: var(--color-stone-50);
+    --fg-muted: var(--color-stone-400);
+    --fg-subtle: var(--color-stone-500);
+
+    --border-ui: var(--color-stone-500);
+    --border-soft: var(--color-stone-800);
+
+    --primary: var(--color-moss-400);
+    --primary-hover: var(--color-moss-300);
+    --on-primary: var(--color-moss-950);
+    --secondary-fg: var(--color-moss-200);
+    --link: var(--color-moss-300);
+    --destructive: var(--color-ember-400);
+    --destructive-hover: var(--color-ember-300);
+    --on-destructive: var(--color-ember-950);
+
+    --ring: var(--color-brass-300);
+    --accent-band: var(--color-brass-400);
+
+    --success-bg: var(--color-patina-950);
+    --success-fg: var(--color-patina-200);
+    --warning-bg: var(--color-brass-950);
+    --warning-fg: var(--color-brass-200);
+    --danger-bg: var(--color-ember-950);
+    --danger-fg: var(--color-ember-200);
+    --danger-accent: var(--color-ember-400);
+    --info-bg: var(--color-stone-800);
+    --info-fg: var(--color-stone-200);
+
+    --progress-fill: var(--color-patina-400);
+    --progress-track: var(--color-stone-700);
+    --dropzone-active: var(--color-stone-800);
+    --selection-bg: var(--color-brass-800);
+    --selection-fg: var(--color-brass-50);
+    --hero-band: var(--color-stone-900);
+    --overlay: oklch(0 0 0);
+
+    --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
+    --elevation-float: 0 10px 20px oklch(0 0 0 / 0.5);
+    --elevation-dialog: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
+    --elevation-sunken: inset 0 2px 2px oklch(0 0 0 / 0.3);
+  }
 }
 
 @theme inline {
@@ -263,10 +335,8 @@
   --color-dropzone-active: var(--dropzone-active);
   --color-hero-band: var(--hero-band);
 
-  --shadow-1: var(--elevation-1);
-  --shadow-2: var(--elevation-2);
-  --shadow-3: var(--elevation-3);
-  --shadow-4: var(--elevation-4);
-  --shadow-5: var(--elevation-5);
+  --shadow-card: var(--elevation-card);
+  --shadow-float: var(--elevation-float);
+  --shadow-dialog: var(--elevation-dialog);
   --shadow-sunken: var(--elevation-sunken);
 }

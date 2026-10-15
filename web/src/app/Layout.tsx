@@ -36,10 +36,10 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
  */
 export function Layout(): ReactElement {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-svh flex-col">
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-3 focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-20"
+        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip)"
       >
         {T.skipToContent}
       </a>
@@ -66,11 +66,11 @@ export function Layout(): ReactElement {
           </div>
         </div>
       </header>
-      {/* min-h-screen: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
+      {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
           tela carrega e cresce. */}
       <main
         id={MAIN_ID}
-        className="mx-auto min-h-screen w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12"
+        className="mx-auto min-h-svh w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12"
       >
         <LoginFailedAlert />
         <TermsGate />
