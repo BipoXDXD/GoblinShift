@@ -62,13 +62,14 @@ target-version = "py314"
 "deploy/executor_ctl/**" = "py312"
 "deploy/acceptance/**" = "py312"
 "deploy/openobserve/**" = "py312"
+"deploy/tls_check/**" = "py312"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "N", "RUF"]
 
 [tool.ruff.lint.isort]
 # Pacotes do host em deploy/, importados pelos testes via pythonpath.
-known-first-party = ["executor_ctl", "openobserve"]
+known-first-party = ["executor_ctl", "openobserve", "tls_check"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
