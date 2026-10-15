@@ -4,10 +4,18 @@ import adaAvif128 from "../assets/art/goblins/ada-128w.avif";
 import adaWebp128 from "../assets/art/goblins/ada-128w.webp";
 import adaAvif256 from "../assets/art/goblins/ada-256w.avif";
 import adaWebp256 from "../assets/art/goblins/ada-256w.webp";
+import fagulhaAvif128 from "../assets/art/goblins/fagulha-128w.avif";
+import fagulhaWebp128 from "../assets/art/goblins/fagulha-128w.webp";
+import fagulhaAvif256 from "../assets/art/goblins/fagulha-256w.avif";
+import fagulhaWebp256 from "../assets/art/goblins/fagulha-256w.webp";
 import ferrugemAvif128 from "../assets/art/goblins/ferrugem-128w.avif";
 import ferrugemWebp128 from "../assets/art/goblins/ferrugem-128w.webp";
 import ferrugemAvif256 from "../assets/art/goblins/ferrugem-256w.avif";
 import ferrugemWebp256 from "../assets/art/goblins/ferrugem-256w.webp";
+import jadeAvif128 from "../assets/art/goblins/jade-128w.avif";
+import jadeWebp128 from "../assets/art/goblins/jade-128w.webp";
+import jadeAvif256 from "../assets/art/goblins/jade-256w.avif";
+import jadeWebp256 from "../assets/art/goblins/jade-256w.webp";
 import luaAvif128 from "../assets/art/goblins/lua-128w.avif";
 import luaWebp128 from "../assets/art/goblins/lua-128w.webp";
 import luaAvif256 from "../assets/art/goblins/lua-256w.avif";
@@ -52,22 +60,56 @@ const GOBLINS: Readonly<Record<GoblinId, Goblin>> = {
     avif: { x1: ferrugemAvif128, x2: ferrugemAvif256 },
     webp: { x1: ferrugemWebp128, x2: ferrugemWebp256 },
   },
+  jade: {
+    ...TEXT.art.goblins.jade,
+    avif: { x1: jadeAvif128, x2: jadeAvif256 },
+    webp: { x1: jadeWebp128, x2: jadeWebp256 },
+  },
+  fagulha: {
+    ...TEXT.art.goblins.fagulha,
+    avif: { x1: fagulhaAvif128, x2: fagulhaAvif256 },
+    webp: { x1: fagulhaWebp128, x2: fagulhaWebp256 },
+  },
 };
 
 /**
- * Uma goblin fixa por estado, para a pessoa associar a personagem à situação (ADR 030):
- * a Lua, calma, espera no vazio; a Ada, inventora, trabalha enquanto carrega; a Nyx, sombria,
+ * As goblins de cada estado (ADR 030): a Lua e a Jade, tranquilas, esperam no vazio; a Ada e a
+ * Fagulha, de ferramenta e couro de oficina, trabalham enquanto carrega; a Nyx, sombria,
  * acompanha o erro; a Ferrugem, a mais expansiva, comemora o sucesso.
  */
-const GOBLIN_OF_STATE: Readonly<Record<GoblinState, GoblinId>> = {
-  vazio: "lua",
-  carregando: "ada",
-  erro: "nyx",
-  sucesso: "ferrugem",
+const GOBLINS_OF_STATE: Readonly<Record<GoblinState, readonly [GoblinId, ...GoblinId[]]>> = {
+  vazio: ["lua", "jade"],
+  carregando: ["ada", "fagulha"],
+  erro: ["nyx"],
+  sucesso: ["ferrugem"],
 };
 
-export function goblinOf(state: GoblinState): Goblin {
-  return GOBLINS[GOBLIN_OF_STATE[state]];
+export function goblinsOf(state: GoblinState): readonly Goblin[] {
+  return GOBLINS_OF_STATE[state].map((id) => GOBLINS[id]);
+}
+
+/**
+ * Rotação estável: a mesma chave (o id da execução, a receita, a rota) dá sempre a mesma goblin,
+ * então ela não troca a cada render nem a cada polling, e chaves diferentes se espalham entre as
+ * goblins do estado.
+ */
+export function goblinOf(state: GoblinState, rotationKey: string): Goblin {
+  const ids = GOBLINS_OF_STATE[state];
+  const id = ids[stableHash(rotationKey) % ids.length] ?? ids[0];
+  return GOBLINS[id];
+}
+
+const FNV_OFFSET_BASIS = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
+
+/** FNV-1a de 32 bits: barato, determinístico e bem espalhado para chaves curtas. */
+function stableHash(key: string): number {
+  let hash = FNV_OFFSET_BASIS;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, FNV_PRIME) >>> 0;
+  }
+  return hash;
 }
 
 /** Largura e altura exibidas, em px CSS (caixa 4:5; os arquivos têm 1× e 2× disso). */
@@ -78,8 +120,14 @@ const HEIGHT_PX = 160;
  * A goblin de um estado. Reforça o texto e nunca o substitui: o estado continua dito em texto e
  * na região `aria-live` de quem a usa.
  */
-export function GoblinIllustration({ state }: { readonly state: GoblinState }): ReactElement {
-  const goblin = goblinOf(state);
+interface GoblinIllustrationProps {
+  readonly state: GoblinState;
+  /** O que identifica a situação (id da execução, receita, rota): escolhe a goblin do estado. */
+  readonly rotationKey: string;
+}
+
+export function GoblinIllustration({ state, rotationKey }: GoblinIllustrationProps): ReactElement {
+  const goblin = goblinOf(state, rotationKey);
   return (
     <picture className="shrink-0 self-center md:self-start">
       <source type="image/avif" srcSet={`${goblin.avif.x1} 1x, ${goblin.avif.x2} 2x`} />

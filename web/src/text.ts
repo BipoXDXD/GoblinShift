@@ -115,6 +115,11 @@ export const TEXT = {
         name: "Ferrugem",
         alt: "Ferrugem, goblin de cabelo laranja volumoso e roupa de couro preto.",
       },
+      jade: { name: "Jade", alt: "Jade, goblin de cabelo castanho, blusa mostarda e calça jeans." },
+      fagulha: {
+        name: "Fagulha",
+        alt: "Fagulha, goblin ruiva de cabelo cacheado, com espartilho de couro e luvas pretas.",
+      },
     },
   },
   workbench: {
@@ -155,6 +160,16 @@ export const TEXT = {
       remove: "Remover",
       announceReady: (name: string) => `${name} enviado.`,
       announceFailed: (name: string) => `Falha ao enviar ${name}.`,
+    },
+    removal: {
+      titleOne: (name: string) => `Remover ${name}?`,
+      bodyOne: "O arquivo sai do lote. Para usá-lo de novo, escolha-o outra vez.",
+      titleAll: (count: number) => `Remover os ${String(count)} arquivos?`,
+      bodyAll: "Todos os arquivos saem do lote. Para usá-los de novo, escolha-os outra vez.",
+      confirm: "Remover",
+      confirmAll: "Remover todos",
+      cancel: "Cancelar",
+      removeAll: "Remover todos",
     },
     serverFieldErrors: {
       missing: "Campo obrigatório.",
