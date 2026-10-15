@@ -11,22 +11,24 @@ As goblins do site são **ilustrações e modelos 3D gerados com IA e editados**
 | Ada | Estado carregando | [`417f7fe0`](https://hyper3d.ai/workspace/rodin/417f7fe0-23a6-4fec-922a-33fbb3c69032) |
 | Nyx | Estado de erro | [`19a1ddba`](https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9) |
 | Ferrugem | Estado de sucesso | [`ec3a728c`](https://hyper3d.ai/workspace/rodin/ec3a728c-d58f-40f4-a298-a144e6ba668b) |
+| Jade | Estado vazio, em rotação com a Lua | [`3c7aa397`](https://hyper3d.ai/workspace/rodin/3c7aa397-f83d-44ac-bf1b-bd65b0cb8524) |
+| Fagulha | Estado carregando, em rotação com a Ada | [`0d84776f`](https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd) |
 
-Cadeia de cada uma (detalhe no `PROVENANCE.json`):
+Cadeia da Rúbia, da Lua, da Ada, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
 
 1. Conceito 2D **só por texto** no Seedream (ByteDance), pela API da Tripo.
 2. Versão frontal e versão semi-realista por image-to-image (Seedream e Banana Pro, do Google, pela Tripo), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do Rodin.
 3. Modelo 3D no Hyper3D Rodin Gen-2.5 a partir da imagem do passo 2.
 4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
 
-## O que ficou de fora, e por quê
+## Jade e Fagulha: publicadas por decisão do usuário
 
-Duas das sete goblins aprovadas **não vão ao site** enquanto a origem não for resolvida:
+A Jade e a Fagulha seguem outra cadeia: um modelo gerado pelo usuário direto no site do Rodin, um render nosso dele, uma versão semi-realista no Banana Pro (pela Tripo) e o modelo final no Rodin. A origem do primeiro passo não é nossa:
 
 - **Jade** (Rodin `3c7aa397`): deriva do modelo `cab576c8`, que é idêntico, byte a byte, ao 3D gerado a partir de `referencias-usuario/ref2-jeans.png`, uma imagem de terceiros trazida como referência.
 - **Fagulha** (Rodin `0d84776f`): deriva do modelo `f37f6132`, gerado direto no site do Rodin. Não há registro da imagem de entrada, então a origem não pode ser verificada.
 
-O `check-provenance` recusa qualquer arquivo cuja cadeia passe por esses modelos.
+**Decisão do usuário, em 2026-10-15:** ele assume o risco de publicar a Jade e libera a Fagulha. A decisão está em `exceptions` no `PROVENANCE.json` (quem, quando e por quê), e o `check-provenance` recusa qualquer outra geração de origem de terceiros que não tenha decisão registrada. Se o autor da imagem de referência pedir, a Jade sai do site: basta tirá-la do `elenco.tsv` e da rotação do estado vazio.
 
 ## Termos que sustentam a publicação (lidos em 2026-10-15)
 
