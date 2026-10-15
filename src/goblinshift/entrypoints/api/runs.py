@@ -15,7 +15,13 @@ from opentelemetry import propagate
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
 from goblinshift.catalog import CATALOG, RecipeVersionRetiredError, VersionStatus
+from goblinshift.entrypoints.api.capacity_problems import (
+    account_storage_problem,
+    daily_quota_problem,
+    environment_storage_problem,
+)
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
 from goblinshift.entrypoints.api.problems import (
@@ -34,6 +40,7 @@ from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
     ActiveRunLimitError,
+    DailyQuotaExceededError,
     IdempotencyInProgressError,
     IdempotencyKeyInvalidError,
     IdempotencyKeyReusedError,
@@ -203,7 +210,7 @@ def _create_run_openapi() -> dict[str, Any]:
     response_model=AcceptedRunResponse | ValidatedRunResponse,
     responses={
         200: {"model": ValidatedRunResponse, "description": "validate_only: parâmetros resolvidos"},
-        **_problem(400, 409, 413, 415, 503),
+        **_problem(400, 409, 413, 415, 429, 503),
     },
     openapi_extra=_create_run_openapi(),
 )
@@ -238,6 +245,10 @@ def create_run(
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None
+    except AccountCapacityExceededError:
+        raise account_storage_problem(session, principal.owner_id) from None
+    except GlobalCapacityExceededError:
+        raise environment_storage_problem() from None
     record_run_accepted(
         accepted.run_id,
         run_command.recipe_id,
@@ -395,6 +406,8 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
                 "A fila global está cheia; tente de novo mais tarde.",
                 headers={"Retry-After": str(QUEUE_FULL_RETRY_AFTER_SECONDS)},
             )
+        case DailyQuotaExceededError():
+            return daily_quota_problem(error.retry_after)
         case ActiveRunLimitError():
             return ApiProblem(
                 ProblemCode.ACTIVE_RUN_LIMIT, "A conta já tem uma execução não terminal."

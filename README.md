@@ -86,14 +86,6 @@ No modo remoto, as specs que dependem de estado forçado na API falsa (as matriz
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
-## Teste de carga
-
-`deploy/load/run-local.sh` roda os cenários k6 contra o Compose local (nunca contra produção: alvo fora
-da máquina ou da rede privada é recusado). Ele cria contas de teste pelo `gs-admin`, confere os
-limites da fila global e das transferências simultâneas e os SLOs de aceitação, execução e download
-numa jornada de 20 contas, e revoga as chaves ao sair. Os cenários do limite por conta e do `/auth/*`
-esperam a A2 e a fatia 6. Detalhes e números em [deploy/load/README.md](deploy/load/README.md).
-
 ## CSV Janitor pela linha de comando
 
 A receita de tabelas ([1.3](docs/GoblinShiftPlan.md#s1-3)) é uma biblioteca pura em `goblinshift.processing.csv_janitor`, só com a biblioteca padrão. A CLI chama a mesma função que o executor vai chamar:
@@ -117,7 +109,7 @@ Toda execução publica, além do conteúdo, o `report.json`, o `manifest.json` 
 
 ## Contas e chaves de API (administrador)
 
-Até o login web da fatia 6, quem usa a API recebe uma chave emitida pela CLI do administrador, que lê as mesmas variáveis `GS_*` da API:
+O login web (Google ou GitHub) cria a conta no primeiro acesso, e a sessão emite chaves em `POST /api/v1/api-keys`. O administrador também cria contas e emite chaves pela CLI, que lê as mesmas variáveis `GS_*` da API:
 
 ```bash
 uv run gs-admin create-user --display-name "Ana"            # imprime o id da conta
@@ -129,11 +121,9 @@ curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 
 Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …` localmente. Na VPS, todo comando do Compose passa pelo `deploy/compose.sh` (veja abaixo): `sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin …`.
 
-A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
+A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Contas criadas pelo `gs-admin` são do operador e não passam pelo aceite dos termos; as do login web recebem `403 TERMS_NOT_ACCEPTED` até aceitar a versão vigente pela sessão (`POST /api/v1/me/terms:accept`; [ADR 029](docs/adr/029-aceite-versionado-dos-termos.md)). Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
 
 ## Deploy sem queda
-
-Em produção, o GoblinShift responde em `https://goblinshift.dev`. O TLS e o redirect http → https ficam no proxy de borda do host, um Caddy compartilhado com o outro projeto da VPS ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)); o trecho do GoblinShift é `deploy/edge/conf.d/goblinshift.caddy`. O deploy não toca na borda: mudar esse trecho é instalá-lo à mão em `/srv/edge/conf.d/`, com `caddy validate` antes e `caddy reload`, sem reiniciar o container.
 
 O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga (`deploy/rollout-api.sh`). O Nginx, que leva o build da SPA, é recriado a cada versão; enquanto ele volta, a borda repete a conexão (`lb_try_duration` em `deploy/edge/conf.d/goblinshift.caddy`). Para conferir localmente, com a pilha de pé:
 
@@ -154,6 +144,32 @@ sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin cre
 ```
 
 Sem o arquivo (antes do primeiro deploy) o script para com uma mensagem, em vez de o Compose cair na imagem `dev`. Se um deploy falhar no meio, o arquivo guarda a versão daquela tentativa, que é a configuração aplicada por último ao projeto Compose.
+
+### Segredos do login
+
+O login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração do `app.env` e os segredos de arquivos em `/srv/goblinshift/secrets/` (diretório `700`, dono `goblinshift`). Os arquivos ficam com modo `644` dentro desse diretório, como o `db_password`, porque o container lê com o UID da aplicação; com `600` a API não sobe. Só o container `api` recebe esses valores, montados em `/run/secrets/<nome>` (`compose.prod.yaml`).
+
+| Nome | Onde | Quem grava |
+|---|---|---|
+| `GS_PUBLIC_ORIGIN` (`https://goblinshift.dev`), `GS_GOOGLE_CLIENT_ID`, `GS_GITHUB_CLIENT_ID` | `app.env` | operador; os IDs não são segredo |
+| `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | `app.env` | operador |
+| `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
+| `csrf_secret`, `login_cookie_secret` | arquivo | `deploy/app-secrets.sh` (`openssl rand -hex 32`), uma vez, nunca trocados por ele |
+
+Sem uma das variáveis, o Compose recusa o arquivo antes de qualquer comando; sem um dos arquivos, ou com ele ilegível pela API, o `deploy/app-secrets.sh` para o deploy com o nome do que falta. Nos dois casos isso acontece antes do `migrate`, sem mexer no banco. Se ainda assim a API subir sem um segredo, ela sai na partida com um erro que nomeia a variável.
+
+```bash
+sudo -u goblinshift -i
+cd /srv/goblinshift/secrets
+read -rs GOOGLE && printf '%s' "$GOOGLE" > google_client_secret && unset GOOGLE   # cole e Enter (não ecoa)
+read -rs GH && printf '%s' "$GH" > github_client_secret && unset GH
+chmod 644 google_client_secret github_client_secret
+```
+
+Rotação:
+- *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo, reimplantar (re-run do job de deploy) e só então revogar o antigo;
+- `csrf_secret`: apagar o arquivo e reimplantar (o deploy gera outro). Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
+- `login_cookie_secret`: apagar o arquivo e reimplantar. Só derruba os logins em andamento.
 
 ## Imagem do executor
 

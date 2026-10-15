@@ -5,6 +5,7 @@ transferência acontece entre duas delas; as demais funções rodam na transaç�
 Prazos usam o relógio do banco (`now()`), o mesmo para API, worker e manutenção.
 """
 
+import logging
 import re
 import uuid
 from collections.abc import Iterable, Sequence
@@ -12,9 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple, NoReturn
 
-from sqlalchemy import Row, func, insert, select, update
+from sqlalchemy import ColumnElement, Row, func, insert, select, update
 from sqlalchemy.orm import Session
 
+from goblinshift import capacity
 from goblinshift.files.errors import (
     InputNotAvailableError,
     InvalidUploadRequestError,
@@ -36,6 +38,8 @@ from goblinshift.files.objects import request_deletion_of_unreferenced
 from goblinshift.files.states import Availability, ObjectState, UploadState
 from goblinshift.files.storage import ContentTooLargeError, FileStorage
 from goblinshift.files.tables import stored_object, upload
+
+logger = logging.getLogger(__name__)
 
 _UPLOAD_KEY_PREFIX = "uploads"
 _NAME_SEPARATORS = frozenset("/\\")
@@ -84,7 +88,11 @@ class ReadyUpload:
 def create_intents(
     session: Session, owner_id: uuid.UUID, items: Sequence[tuple[str, int]]
 ) -> list[UploadView]:
-    """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente."""
+    """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
+
+    Reserva o tamanho declarado de cada intenção (detentor `upload`), tudo ou nada: acima do teto
+    levanta `AccountCapacityExceededError` ou `GlobalCapacityExceededError`, e quem chama desfaz.
+    """
     intents = _parse_intents(items)
     object_ids = session.execute(
         insert(stored_object).returning(stored_object.c.id, sort_by_parameter_order=True),
@@ -104,6 +112,13 @@ def create_intents(
             for intent, object_id in zip(intents, object_ids, strict=True)
         ],
     ).all()
+    capacity.reserve_many(
+        session,
+        owner_id=owner_id,
+        holder=capacity.HolderKind.UPLOAD,
+        resource=capacity.Resource.STORAGE_BYTES,
+        amounts={row.id: row.expected_size for row in rows},
+    )
     return [
         _view(row, size_bytes=None, sha256=None, availability=Availability.AVAILABLE)
         for row in rows
@@ -231,6 +246,19 @@ def lock_ready_uploads(
     return [by_id[upload_id] for upload_id in upload_ids]
 
 
+def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
+    """Bytes guardados do upload (0 se ainda sem conteúdo), como subconsulta correlacionada.
+
+    Para `runs` somar a entrada processada sem ler as tabelas de `files`.
+    """
+    return (
+        select(func.coalesce(stored_object.c.size_bytes, 0))
+        .join(upload, upload.c.object_id == stored_object.c.id)
+        .where(upload.c.id == upload_id)
+        .scalar_subquery()
+    )
+
+
 def _parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
     if not 1 <= len(items) <= MAX_BATCH_FILES:
         raise InvalidUploadRequestError("items", f"o lote deve ter de 1 a {MAX_BATCH_FILES} itens")
@@ -289,7 +317,10 @@ def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -
 def _complete(
     session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID, sha256: bytes, size: int
 ) -> bool:
-    """`receiving → ready` e objeto `committed`, na mesma transação; `False` se perdeu a vez."""
+    """`receiving → ready` e objeto `committed`, na mesma transação; `False` se perdeu a vez.
+
+    A reserva da intenção passa para o objeto pelo tamanho real, que é o declarado.
+    """
     object_id = session.execute(
         update(upload)
         .where(
@@ -314,7 +345,27 @@ def _complete(
             state=ObjectState.COMMITTED, sha256=sha256, size_bytes=size, committed_at=func.now()
         )
     )
+    _move_reservation_to_object(session, upload_id, object_id, size)
     return True
+
+
+def _move_reservation_to_object(
+    session: Session, upload_id: uuid.UUID, object_id: uuid.UUID, size: int
+) -> None:
+    try:
+        capacity.transfer(
+            session,
+            from_holder=(capacity.HolderKind.UPLOAD, upload_id),
+            to_holder=(capacity.HolderKind.OBJECT, object_id),
+            amount=size,
+        )
+    except capacity.ReservationNotFoundError:
+        # Intenção criada pela API anterior ao deploy da 0006, que não reservava. O upload
+        # segue; a reconciliação da manutenção adota o objeto no ciclo seguinte.
+        logger.warning(
+            "upload sem reserva de capacidade",
+            extra={"fields": {"alert": "upload_without_reservation", "upload_id": str(upload_id)}},
+        )
 
 
 def _fail(
@@ -324,9 +375,12 @@ def _fail(
     upload_id: uuid.UUID,
     storage_key: str,
 ) -> None:
-    """`receiving → failed` e remove o que tiver chegado ao disco; o objeto segue `pending`."""
+    """`receiving → failed`, libera a reserva e remove o que tiver chegado ao disco.
+
+    O objeto segue `pending` até a retenção remover linha e objeto.
+    """
     with session.begin():
-        session.execute(
+        failed = session.execute(
             update(upload)
             .where(
                 upload.c.id == upload_id,
@@ -334,7 +388,10 @@ def _fail(
                 upload.c.state == UploadState.RECEIVING,
             )
             .values(state=UploadState.FAILED)
-        )
+            .returning(upload.c.id)
+        ).scalar_one_or_none()
+        if failed is not None:
+            capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
     storage.delete(storage_key)
 
 

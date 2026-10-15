@@ -59,6 +59,7 @@ class ProblemCode(StrEnum):
     INSUFFICIENT_SCOPE = "INSUFFICIENT_SCOPE"
     FORBIDDEN = "FORBIDDEN"
     CSRF_FAILED = "CSRF_FAILED"
+    TERMS_NOT_ACCEPTED = "TERMS_NOT_ACCEPTED"
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     REQUEST_TIMEOUT = "REQUEST_TIMEOUT"
@@ -98,6 +99,7 @@ PROBLEMS: Mapping[ProblemCode, ProblemSpec] = {
     ProblemCode.INSUFFICIENT_SCOPE: ProblemSpec(403, "Escopo insuficiente"),
     ProblemCode.FORBIDDEN: ProblemSpec(403, "Acesso negado"),
     ProblemCode.CSRF_FAILED: ProblemSpec(403, "Verificação de CSRF recusada"),
+    ProblemCode.TERMS_NOT_ACCEPTED: ProblemSpec(403, "Termos de uso não aceitos"),
     ProblemCode.NOT_FOUND: ProblemSpec(404, "Recurso não encontrado"),
     ProblemCode.METHOD_NOT_ALLOWED: ProblemSpec(405, "Método não permitido"),
     ProblemCode.REQUEST_TIMEOUT: ProblemSpec(408, "Transferência interrompida por tempo"),
