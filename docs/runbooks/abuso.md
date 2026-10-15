@@ -22,9 +22,15 @@ O que chega até você é um destes identificadores. Todos levam ao `owner_id` (
 
 ```bash
 user_hash='<64 caracteres hexadecimais do evento>'
-owner_id="$(gs_admin find-user --user-hash "$user_hash")" && echo "$owner_id"
-# saída 1 com "nenhuma conta tem esse user.hash": a conta já foi purgada (DELETE /me)
+# O hash vai pela entrada padrão (`--user-hash -`), não pela linha de comando: o sudo registra
+# a linha de comando no log do sistema, e o hash ali ligaria a conta à telemetria.
+owner_id="$(printf '%s' "$user_hash" | gs_admin find-user --user-hash -)" && echo "$owner_id"
 ```
+
+Saída 1 com "nenhuma conta tem esse user.hash" tem duas causas:
+
+- a conta já foi purgada (`DELETE /me` do titular); a auditoria dela continua na tabela `audit_event` por 90 dias;
+- o hash veio de outro ambiente (um evento de teste ou de outra instalação) ou o segredo `GS_USER_HASH_SECRET` foi trocado depois do evento: o mesmo id passa a gerar outro hash, e os eventos antigos deixam de ser traduzíveis.
 
 Para descobrir **quais** contas pesam mais, no OpenObserve (túnel e acesso em [`deploy/openobserve/README.md`](../../deploy/openobserve/README.md), "Provisionar pelo túnel SSH"), stream de traces `default`, na última hora:
 
@@ -71,7 +77,7 @@ psql_gs -v id="$owner_id" <<'SQL'
 SELECT id, issuer, status, created_at, deletion_requested_at FROM app_user WHERE id = :'id';
 SELECT id, recipe_id, status, error_code, created_at FROM run
   WHERE owner_id = :'id' ORDER BY created_at DESC LIMIT 50;
-SELECT event_type, outcome, ip, occurred_at FROM audit_event
+SELECT event_type, outcome, ip_prefix, occurred_at FROM audit_event
   WHERE user_id = :'id' ORDER BY occurred_at DESC LIMIT 50;
 SQL
 ```
@@ -89,6 +95,8 @@ gs_admin block --user "$owner_id"
 
 O `block` marca a conta como `blocked`, revoga todas as sessões e chaves, grava `ACCOUNT_BLOCKED` na auditoria e cancela a execução não terminal. Novos logins da mesma identidade (Google ou GitHub) são recusados. Se o comando cair no meio, **rode de novo**: repetir completa o que faltou.
 
+O `owner_id` aparece na linha de comando do `block` e, portanto, no log do sudo. Isso é aceitável: o `owner_id` sozinho não liga a conta à telemetria, porque os eventos só trazem o `user.hash`, e o hash depende do segredo do servidor, que não está no log. Quem lê o log do sudo descobre que uma conta foi bloqueada, mas não quais requisições ela fez. O hash, que faz essa ligação, nunca vai para a linha de comando (passo 1).
+
 ## 4. Conferir
 
 ```bash
@@ -100,14 +108,27 @@ SELECT
   (SELECT COUNT(*) FROM run WHERE owner_id = :'id'
      AND status NOT IN ('succeeded', 'succeeded_with_warnings', 'canceled', 'failed'))
     AS execucoes_ativas;                                             -- 0 | 0 | 0
-SELECT event_type, occurred_at FROM audit_event
+-- bloqueio_us: o horário do bloqueio em microssegundos, para a consulta no OpenObserve abaixo.
+SELECT event_type, occurred_at,
+       (extract(epoch FROM occurred_at) * 1000000)::bigint AS bloqueio_us
+FROM audit_event
   WHERE user_id = :'id' AND event_type = 'ACCOUNT_BLOCKED';          -- uma linha
 SQL
 ```
 
 Uma execução em `running` passa por `stopping` antes de `canceled`: se `execucoes_ativas` for 1, espere um minuto e confira de novo. Se continuar, rode o `block` outra vez.
 
-No OpenObserve, as requisições seguintes com o mesmo `user_hash` saem com `http_status_code = '401'`.
+No OpenObserve, o critério é que o `user_hash` **some** dos eventos: zero linhas com esse hash depois do horário do bloqueio. As requisições recusadas (401) aparecem **sem** `user_hash`, porque o hash só é gravado depois que a credencial autentica, e a credencial de uma conta bloqueada não autentica mais. Stream de traces `default`, com o `bloqueio_us` da consulta acima:
+
+```sql
+SELECT COUNT(*) AS eventos_depois_do_bloqueio
+FROM "default"
+WHERE main = 'true'
+  AND user_hash = '<user.hash do passo 1>'
+  AND _timestamp >= <bloqueio_us>
+```
+
+O resultado esperado é 0. Uma requisição que já tinha autenticado quando o `block` rodou pode aparecer com milissegundos de diferença; se a contagem for maior que zero, repita a consulta com `<bloqueio_us> + 60000000` (um minuto depois): aí ela tem de ser 0. Se não for, alguma credencial ainda autentica: rode o `block` outra vez e confira as contagens do SQL acima.
 
 O teste `tests/api/auth/test_block_end_to_end.py` prova este roteiro contra o PostgreSQL real: sessão e chave respondem 401, a execução fica `canceled`, o login seguinte é recusado, a auditoria registra o bloqueio e nenhuma credencial fica aberta.
 
