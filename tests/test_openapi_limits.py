@@ -87,3 +87,11 @@ def test_rotas_autenticadas_publicam_429_com_retry_after() -> None:
             retry = response["headers"]["Retry-After"]
             assert retry["required"] is True
             assert retry["schema"] == {"type": "string", "pattern": "^[0-9]+$"}
+
+
+def test_comandos_json_publicam_erros_do_decodificador_compartilhado() -> None:
+    for operations in SPEC["paths"].values():
+        for operation in operations.values():
+            content = operation.get("requestBody", {}).get("content", {})
+            if "application/json" in content:
+                assert {"400", "413", "415"} <= operation["responses"].keys()

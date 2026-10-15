@@ -52,7 +52,7 @@ class AcceptedTermsResponse(BaseModel):
     "/me/terms:accept",
     operation_id="acceptTerms",
     openapi_extra=command_openapi(AcceptTerms),
-    responses=problem_responses(409),
+    responses=problem_responses(400, 409, 413, 415),
 )
 def accept_current_terms(
     principal: SessionPrincipal,
