@@ -1,0 +1,48 @@
+# Teste de aceitação do ambiente do executor, agendado (fatia 8, F8-9; README, "Teste de
+# aceitação do ambiente"). Instalado pelo deploy/acceptance/install.sh; disparado pelo
+# goblinshift-acceptance.timer.
+[Unit]
+Description=GoblinShift: teste de aceitação do ambiente do executor
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Sem User=: o teste exige root (monta as sondas com o perfil do executor-ctl e lê a área de
+# trabalho de todos os donos). Por isso o script e a configuração ficam em caminhos que só o root
+# grava, copiados pelo install.sh; nada vem do checkout nem de /srv/goblinshift/secrets, que
+# pertencem ao usuário goblinshift.
+EnvironmentFile=/etc/goblinshift/acceptance.env
+ExecStart=/usr/local/lib/goblinshift/acceptance/scheduled.sh
+# O CLI do Docker não lê o ~/.docker do root (ProtectHome); como no executor-ctl.
+Environment=DOCKER_CONFIG=/usr/local/lib/goblinshift/docker-config
+# As sondas somam até ~27 min no pior caso (disco 15 min, as outras 12 min) mais o pull da imagem.
+TimeoutStartSec=1h
+Nice=10
+UMask=0077
+
+# Hardening: root só para criar <área>/<id> com o dono do worker e ler a área de todos os donos
+# (run.py); CAP_FSETID mantém o setgid do 2770, que o kernel tira de quem não é do grupo gs-exec.
+# O resto passa pelo socket do Docker, que continua acessível com /run somente leitura.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+ProtectSystem=strict
+ReadWritePaths=/srv/goblinshift/exec-work
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+# Sem RestrictSUIDSGID: <área>/<id> é 2770 (setgid do gs-exec, run.py e workarea.py).
+LockPersonality=yes
+# Unix para o Docker e o executor-ctl; Internet para o ping do healthchecks.io; netlink para o
+# getaddrinfo do glibc.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
