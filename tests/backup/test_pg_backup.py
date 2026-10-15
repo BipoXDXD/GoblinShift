@@ -5,8 +5,11 @@ uma chave que só escreve, a restauração baixa com uma chave que só lê, deci
 banco vazio e confere o resultado; o healthchecks.io é um servidor HTTP falso.
 """
 
+import base64
+import hashlib
 import os
 import re
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
@@ -34,6 +37,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.backup]
 AGE_HEADER = b"age-encryption.org/v1"
 # Instante UTC do início do dump, que ordena os nomes, e 128 bits aleatórios.
 DUMP_KEY = re.compile(r"goblinshift-\d{8}T\d{6}Z-(?P<suffix>[0-9a-f]{32})\.dump\.age")
+# Separa as chamadas no registro do curl interceptado.
+CALL_END = "--fim-da-chamada--"
 
 
 @pytest.fixture
@@ -137,6 +142,51 @@ def test_backup_envia_o_dump_cifrado_com_a_chave_que_so_escreve(
     assert content.startswith(AGE_HEADER)
     assert source_db.canary.encode() not in content
     assert healthchecks.pings == ["/start", "/"]
+
+
+def test_put_do_dump_leva_o_content_md5_do_arquivo_cifrado(
+    s3: S3,
+    source_db: SourceDatabase,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    tmp_path: Path,
+) -> None:
+    """O B2 recusa com 400 o PUT sem Content-MD5 num bucket com Object Lock; o SeaweedFS não
+    exige o header, então o teste o lê nos argumentos de um curl que só registra e repassa."""
+    calls = tmp_path / "curl-calls"
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env["PATH"] = f"{recording_curl(tmp_path, calls)}{os.pathsep}{env['PATH']}"
+
+    result = run_script(BACKUP_SCRIPT, env)
+
+    assert result.returncode == 0, result.stderr
+    (key,) = s3.keys(prefix)
+    expected = base64.b64encode(hashlib.md5(s3.get(key), usedforsecurity=False).digest())
+    (upload,) = [args for args in curl_calls(calls) if "--upload-file" in args]
+    assert f"Content-MD5: {expected.decode()}" in upload
+    assert WRITER.secret not in calls.read_text()
+
+
+def recording_curl(tmp_path: Path, calls: Path) -> Path:
+    """Diretório com um `curl` que grava os argumentos de cada chamada e executa o verdadeiro."""
+    real = shutil.which("curl")
+    assert real is not None
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    wrapper = bin_dir / "curl"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        f"{{ printf '%s\\n' \"$@\"; printf '{CALL_END}\\n'; }} >>'{calls}'\n"
+        f"exec '{real}' \"$@\"\n"
+    )
+    wrapper.chmod(0o755)
+    return bin_dir
+
+
+def curl_calls(calls: Path) -> list[list[str]]:
+    text = calls.read_text().removesuffix(f"{CALL_END}\n")
+    return [call.splitlines() for call in text.split(f"{CALL_END}\n")]
 
 
 def test_nome_do_dump_tem_sufixo_aleatorio_que_nao_vai_para_o_journal(
