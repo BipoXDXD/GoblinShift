@@ -167,9 +167,17 @@
     background: var(--progress-fill);
   }
 
-  /* Diálogo de confirmação: o fundo escurece para a página recuar (RUI cap. 6, nível 5). */
+  /* Diálogo de confirmação: o fundo escurece para a página recuar (RUI cap. 6). Mistura em sRGB:
+     em oklch o transparente pode puxar o matiz (CSSD 13.1.2). */
   dialog::backdrop {
-    background-color: color-mix(in oklch, var(--color-stone-950) 60%, transparent);
+    background-color: color-mix(in srgb, var(--overlay) 60%, transparent);
+  }
+
+  /* Com um diálogo aberto a página atrás não rola (CSSD 6.1.2); o gutter evita o salto quando a
+     barra de rolagem some. */
+  html:has(dialog[open]) {
+    overflow: hidden;
+    scrollbar-gutter: stable;
   }
 
   /* Movimento reduzido: some toda transição e animação; a mudança de estado continua, sem

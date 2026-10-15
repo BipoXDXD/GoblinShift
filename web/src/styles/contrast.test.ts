@@ -37,7 +37,7 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
   // Terciário: só texto grande (18 px ou mais) ou decorativo.
   ...pairs("fg-subtle", ["bg", "surface"], NON_TEXT),
   ...pairs("border-ui", [...SURFACES, "dropzone-active"], NON_TEXT),
-  ...pairs("ring", [...SURFACES, "danger-bg"], NON_TEXT),
+  ...pairs("ring", [...SURFACES, "danger-bg", "warning-bg"], NON_TEXT),
   ...pairs("progress-fill", ["progress-track"], NON_TEXT),
 ];
 
@@ -47,6 +47,9 @@ const THEMES = [
 ] as const;
 
 const css = readTokensCss();
+
+/** success-bg, success-fg e progress-fill. */
+const STATE_ROLE_COUNT = 3;
 
 describe.each(THEMES)("tema $name", ({ name, selector }) => {
   const colors = semanticColors(css, selector);
@@ -69,13 +72,63 @@ describe("tons crus", () => {
     expect(displayable(value)).toBe(true);
   });
 
-  it("existem as quatro famílias da paleta, com 11 tons cada", () => {
-    const families = ["moss", "brass", "stone", "ember"].map(
+  it("existem as cinco famílias da paleta, com 11 tons cada", () => {
+    const families = ["moss", "brass", "stone", "ember", "patina"].map(
       (family) => [...rawColors(css).keys()].filter((name) => name.startsWith(`${family}-`)).length,
     );
-    expect(families).toEqual([11, 11, 11, 11]);
+    expect(families).toEqual([11, 11, 11, 11, 11]);
   });
 });
+
+describe("papéis de cor", () => {
+  // Musgo é a cor do que se clica (PUI): sucesso tem matiz próprio, a pátina.
+  it.each(THEMES)("sucesso usa pátina no tema $name", ({ selector }) => {
+    const block = declarationLines(css, `${selector} {`).join("\n");
+    expect(block).toMatch(/--success-bg:\s*var\(--color-patina-\d+\)/);
+    expect(block).toMatch(/--success-fg:\s*var\(--color-patina-\d+\)/);
+  });
+
+  // Progresso e sucesso são estado, não ação: no musgo pareceriam clicáveis.
+  it.each([...THEMES.map(({ selector }) => selector), ":root:not([data-theme])"])(
+    "nenhum papel de estado aponta para o musgo em %s",
+    (selector) => {
+      const stateRoles = declarationLines(css, `${selector} {`).filter((line) =>
+        /^--(?:success-[a-z]+|progress-fill):/.test(line),
+      );
+      expect(stateRoles.length).toBeGreaterThanOrEqual(STATE_ROLE_COUNT);
+      expect(stateRoles.filter((line) => line.includes("--color-moss-"))).toEqual([]);
+    },
+  );
+
+  it.each(THEMES)(
+    "o fundo escurecido do diálogo tem papel próprio no tema $name",
+    ({ selector }) => {
+      expect(semanticColors(css, selector).get("overlay")).toBeDefined();
+    },
+  );
+});
+
+describe("fallback do tema escuro", () => {
+  // Sem theme-init.js (bloqueado, falha de rede) não há data-theme, e o sistema escuro precisa
+  // do mesmo bloco: as duas cópias não podem divergir.
+  it("repete o bloco escuro, declaração por declaração", () => {
+    const fallback = declarationLines(css, ":root:not([data-theme]) {");
+    expect(fallback.length).toBeGreaterThan(20);
+    expect(fallback).toEqual(declarationLines(css, '[data-theme="dark"] {'));
+  });
+});
+
+function declarationLines(source: string, opening: string): string[] {
+  const start = source.indexOf(opening);
+  if (start === -1) {
+    throw new Error(`tokens.css não tem o bloco ${opening}`);
+  }
+  const body = source.slice(start + opening.length, source.indexOf("}", start));
+  return body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("--") || line.startsWith("color-scheme"));
+}
 
 function colorOf(colors: ReadonlyMap<string, string>, token: string): string {
   const value = colors.get(token);

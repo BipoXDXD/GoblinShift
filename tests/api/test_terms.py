@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 ME = "/api/v1/me"
 ACCEPT = "/api/v1/me/terms:accept"
 CATALOG = "/api/v1/catalog"
-NEXT_VERSION = "v2-rascunho"
+NEXT_VERSION = "versao-seguinte-de-teste"
 ACCOUNT_NAME = "Conta Google de teste"
 # Rotas que a conta sem aceite continua usando: ler a própria conta, aceitar, sair, revogar
 # chaves e excluir a conta. Todas as outras recusam.

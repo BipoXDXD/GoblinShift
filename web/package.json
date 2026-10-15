@@ -1,6 +1,7 @@
 {
   "name": "goblinshift-web",
   "private": true,
+  "license": "Apache-2.0",
   "version": "0.0.0",
   "type": "module",
   "engines": {
@@ -15,6 +16,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-router": "8.4.0",
+    "three": "0.186.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -30,6 +32,7 @@
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-react": "6.1.2",
     "@vitest/coverage-v8": "5.0.4",
     "axe-core": "4.14.0",
@@ -53,7 +56,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:notice-e2e": "GS_NOTICE_FILE=e2e/fixtures/notice.json vite build --outDir dist-notice",
     "budget": "node scripts/check-budget.ts",
+    "provenance": "node scripts/check-provenance.ts",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "lint": "eslint . --max-warnings=0",
@@ -62,6 +67,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test -c e2e",
+    "e2e:notice": "E2E_NOTICE=1 E2E_DIST_DIR=dist-notice playwright test -c e2e",
     "e2e:sabotage": "node e2e/sabotage.ts",
     "coverage": "vitest run --coverage",
     "knip": "knip",
