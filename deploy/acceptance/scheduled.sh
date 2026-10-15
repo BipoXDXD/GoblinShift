@@ -9,7 +9,10 @@
 # a aceitação reprova; se não voltar, o resultado é /fail. A manutenção, o próprio run.py
 # suspende e religa (ADR 017).
 #
-# Variável (EnvironmentFile da unit, /srv/goblinshift/secrets/acceptance.env):
+# Roda da cópia que o deploy/acceptance/install.sh faz em /usr/local/lib/goblinshift (do root), nunca
+# do checkout, que pertence ao usuário goblinshift; o lib.sh e o pacote vêm da mesma cópia.
+#
+# Variável (EnvironmentFile da unit, /etc/goblinshift/acceptance.env):
 #   ACCEPTANCE_HEALTHCHECK_URL   URL de ping do check; é segredo e vai pelo stdin do curl
 #
 # Uso: sudo systemctl start goblinshift-acceptance.service
@@ -37,7 +40,8 @@ if ((${#workers[@]})); then
   docker stop --time="$WORKER_STOP_S" "${workers[@]}" >/dev/null || status=$?
 fi
 if ((status == 0)); then
-  (cd "$DEPLOY" && python3 -B -m acceptance.run) || status=$?
+  # -E e -s: sem variáveis PYTHON* nem site do usuário; o pacote vem só do cwd, que é do root.
+  (cd "$DEPLOY" && python3 -E -s -B -m acceptance.run) || status=$?
 fi
 if ((${#workers[@]})); then
   docker start "${workers[@]}" >/dev/null || {

@@ -21,8 +21,10 @@ INSTALLER = ACCEPTANCE_DIR / "install.sh"
 SERVICE = "goblinshift-acceptance.service"
 TIMER = "goblinshift-acceptance.timer"
 BACKUP_TIMER = ROOT / "deploy" / "backup" / "goblinshift-pg-backup.timer"
-APP_CHECKOUT = Path("/srv/goblinshift/app")
-SECRETS_FILE = "/srv/goblinshift/secrets/acceptance.env"
+EXECUTOR_CTL_INSTALLER = ROOT / "deploy" / "executor-ctl" / "install.sh"
+# Só o root grava aqui: o checkout e /srv/goblinshift/secrets pertencem ao goblinshift.
+INSTALLED_SCRIPT = Path("/usr/local/lib/goblinshift/acceptance/scheduled.sh")
+CONFIG_FILE = "/etc/goblinshift/acceptance.env"
 CHECK_URL = "https://hc-ping.com/0b1c2d3e-CANARY-aceitacao"
 WORKER = "w0rk3r"
 SCRIPT_TIMEOUT_S = 30
@@ -105,7 +107,7 @@ def test_sucesso_pinga_start_e_sucesso_com_o_worker_parado_durante_o_teste(fakes
         f"curl {CHECK_URL}/start",
         worker_lookup(),
         f"docker stop --time=30 {WORKER}",
-        "python3 -B -m acceptance.run (em deploy)",
+        "python3 -E -s -B -m acceptance.run (em deploy)",
         f"docker start {WORKER}",
         f"curl {CHECK_URL}",
     ]
@@ -127,7 +129,7 @@ def test_worker_que_nao_rodava_fica_como_estava(fakes: Path) -> None:
     assert calls == [
         f"curl {CHECK_URL}/start",
         worker_lookup(),
-        "python3 -B -m acceptance.run (em deploy)",
+        "python3 -E -s -B -m acceptance.run (em deploy)",
         f"curl {CHECK_URL}",
     ]
 
@@ -182,14 +184,53 @@ def test_scripts_passam_no_shellcheck(script: Path) -> None:
 # --- Units e instalador -----------------------------------------------------------------------
 
 
-def test_servico_roda_como_root_com_o_script_do_checkout_e_a_url_do_arquivo_de_segredo() -> None:
+def test_servico_roda_como_root_so_codigo_e_configuracao_que_so_o_root_grava() -> None:
     service = unit(SERVICE)["Service"]
+    installer = INSTALLER.read_text()
 
     assert "User" not in service, "o teste de aceitação exige root (deploy/acceptance/run.py)"
     assert service["Type"] == "oneshot"
-    assert service["EnvironmentFile"] == SECRETS_FILE
-    assert Path(service["ExecStart"]) == APP_CHECKOUT / SCRIPT.relative_to(ROOT)
+    assert Path(service["ExecStart"]) == INSTALLED_SCRIPT
+    assert f"PREFIX={INSTALLED_SCRIPT.parent.parent}" in installer
+    assert service["EnvironmentFile"] == CONFIG_FILE
+    assert f"CONFIG={CONFIG_FILE}" in installer
+    assert "/srv/goblinshift/app" not in (ACCEPTANCE_DIR / SERVICE).read_text()
     assert "hc-ping" not in (ACCEPTANCE_DIR / SERVICE).read_text()
+
+
+def test_servico_root_so_grava_na_area_de_trabalho() -> None:
+    service = unit(SERVICE)["Service"]
+    work_area = re.search(r"^WORK_AREA=(\S+)$", EXECUTOR_CTL_INSTALLER.read_text(), re.MULTILINE)
+    assert work_area is not None
+
+    assert service["ProtectSystem"] == "strict"
+    assert service["ReadWritePaths"] == work_area[1]
+    assert service["ProtectHome"] == "yes"
+    assert service["PrivateTmp"] == "yes"
+    assert service["NoNewPrivileges"] == "yes"
+
+
+def test_servico_root_so_tem_as_capabilities_das_sondas() -> None:
+    # mkdir + chown/chmod 2770 de <área>/<id> para o UID do worker e leitura da área de todos os
+    # donos (run.py); o Docker é o daemon que faz o resto, pelo socket.
+    service = unit(SERVICE)["Service"]
+
+    assert set(service["CapabilityBoundingSet"].split()) == {
+        "CAP_CHOWN",
+        "CAP_FOWNER",
+        "CAP_FSETID",
+        "CAP_DAC_OVERRIDE",
+        "CAP_DAC_READ_SEARCH",
+    }
+    for directive in (
+        "PrivateDevices",
+        "ProtectKernelTunables",
+        "ProtectKernelModules",
+        "ProtectKernelLogs",
+        "ProtectControlGroups",
+        "LockPersonality",
+    ):
+        assert service[directive] == "yes", directive
 
 
 def test_servico_tem_prazo_acima_das_sondas() -> None:
@@ -225,7 +266,6 @@ def test_instalador_exige_o_que_o_script_exige() -> None:
     assert required is not None
 
     assert set(required.group(1).split()) == set(match.group(1).split())
-    assert f"CONFIG={SECRETS_FILE}" in installer
 
 
 def unit_at(path: Path) -> configparser.ConfigParser:
