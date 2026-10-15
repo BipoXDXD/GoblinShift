@@ -45,7 +45,7 @@ uv run pytest                 # inclui PostgreSQL real via Testcontainers
 
 Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas), Bancada (arquivos e parâmetros) e Execução (estado e downloads).
 
-Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: musgo, latão, pedra e brasa em OKLCH; papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A cena 3D da abertura tem ponto de montagem e orçamento definidos ([ADR 027](docs/adr/027-3d-na-abertura.md)), mas ainda não existe.
+Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: musgo, latão, pedra e brasa em OKLCH; papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A abertura tem a Rúbia em 3D (three.js, carregada depois do conteúdo, só com GPU e sem movimento reduzido, com a imagem estática como fallback) e as outras goblins aparecem nos estados vazio, carregando, erro e sucesso ([ADR 027](docs/adr/027-3d-na-abertura.md) e [ADR 030](docs/adr/030-motor-e-asset-do-3d-da-abertura.md)). A arte é gerada por `scripts/arte/` a partir dos brutos fora do repositório, com proveniência e licença em [`docs/art/LICENSE-ART.md`](docs/art/LICENSE-ART.md), conferidas no CI.
 
 ```bash
 cd web
@@ -79,7 +79,8 @@ A chave de API só existe no processo de teste: cada pedido para `/api/v1/` ganh
 npx playwright install --only-shell chromium   # uma vez
 npm run build && npm run e2e
 npm run e2e:sabotage                           # Devil's Advocate: planta um defeito por spec e exige a falha
-E2E_BASE_URL=http://localhost GS_E2E_API_KEY=... npm run e2e   # contra o Compose ou a VPS, com a API real
+E2E_BASE_URL=http://localhost GS_E2E_API_KEY=... npm run e2e          # contra o Compose, com a API real
+E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   # contra a VPS (só pelo domínio)
 ```
 
 No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado e o CLS da Execução) são puladas. Esse modo ainda não foi exercitado contra a API real.
@@ -211,6 +212,7 @@ Prova o critério de pronto da fatia 4 ([plano, 3.7 e 3.9](docs/GoblinShiftPlan.
 ```bash
 cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.chaos   # sai com 0 só se todos passarem
 sudo python3 -B -m acceptance.chaos --scenario sigstop/coleta          # só um cenário (repetível)
+# --base-url muda a URL da API (padrão https://goblinshift.dev; a borda não atende pelo IP)
 ```
 
 Para cada um dos 6 cenários, o teste emite uma chave de curta duração (só na memória, revogada no fim) para uma conta de teste criada pelo `gs-admin` (ou a de `--user <id>`), envia 5 tabelas de ~7,3 MiB e cria a execução; acha a fronteira pelo banco, numa sessão `psql` consultada a cada 20 ms; aplica `docker kill --signal=KILL` (e traz o mesmo container de volta com `docker start`) ou `docker pause` até a manutenção encerrar a tentativa congelada (o freezer do cgroup equivale ao SIGSTOP); e confere o estado `succeeded`, as tentativas e gerações, uma única publicação da geração final, o descarte dos candidatos vencidos, nenhum container `gs-exec-*` nem sobra em `/srv/goblinshift/exec-work`, e o download byte a byte. Leva de 15 a 20 minutos. A lógica pura está em `deploy/acceptance/chaos_rules.py`, testada localmente em `tests/acceptance/`; o script inteiro só roda na VPS.
@@ -250,6 +252,8 @@ GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost      # saída l
 GS_API_KEY=gsk_… ./scripts/e2e-image-forge.sh http://localhost      # P3, orientação, MPO, 16 bits, bomba
 GS_API_KEY=gsk_… ./scripts/e2e-downloads-detox.sh http://localhost  # colisão de nomes, JAR, cópia, HTML
 ```
+
+Contra a VPS, a URL é `https://goblinshift.dev`: a borda não encaminha o acesso pelo IP ao GoblinShift, para a chave não trafegar em texto claro ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)).
 
 As fixtures do Image Forge e do Detox saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução, junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 

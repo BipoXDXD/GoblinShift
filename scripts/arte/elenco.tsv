@@ -1,0 +1,10 @@
+# Elenco do site (ADR 030): as sete goblins aprovadas. Uma linha por goblin: id, GLB bruto do
+# fonte externa em $ARTE/aprovados-2026-10-15/ e o id da geração no fonte externa. A Jade e a Fagulha entram por
+# decisão do usuário em 2026-10-15 (exceptions no PROVENANCE.json; docs/art/LICENSE-ART.md).
+rubia	a-semirrealista_e1c79f67.glb	e1c79f67-dafb-4f23-89ea-f4324beca492
+ferrugem	b-laranja-couro_ec3a728c.glb	ec3a728c-d58f-40f4-a298-a144e6ba668b
+ada	c-inventora_417f7fe0.glb	417f7fe0-23a6-4fec-922a-33fbb3c69032
+nyx	e-preta-rosa_19a1ddba.glb	19a1ddba-fd13-461e-9136-8f8bea40cfc9
+lua	g-sininho_81ae6621.glb	81ae6621-dbb6-48b0-acb0-04918bfdb393
+fagulha	f-espartilho-realista_0d84776f.glb	0d84776f-e99b-47e8-be42-59d78af0a6dd
+jade	j-jeans-realista_3c7aa397.glb	3c7aa397-f83d-44ac-bf1b-bd65b0cb8524

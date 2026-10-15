@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { RecentRuns } from "../history/RecentRuns";
+import { OficinaHero } from "../oficina3d/OficinaHero";
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
@@ -14,8 +15,8 @@ const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
 
 /**
  * Oficina (2.2): a abertura e as receitas. A ação são os cartões, então a tela não tem botão
- * primário; as execuções recentes vêm depois das receitas. A cena da oficina (P11) entra com a
- * arte.
+ * primário; as execuções recentes vêm depois das receitas. A abertura tem a Rúbia em 3D, que
+ * chega depois do conteúdo (ADR 027 e 030).
  */
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
@@ -26,9 +27,7 @@ export function HomePage(): ReactElement {
           <FocusHeading size="hero">{T.title}</FocusHeading>
           <p className="text-lg text-fg-muted">{T.lead}</p>
         </div>
-        {/* Ponto de montagem da cena 3D da abertura (ADR 027): fica vazio e fora da página até o
-            asset existir; nada essencial pode depender dele. */}
-        <div data-oficina-3d="" hidden />
+        <OficinaHero />
       </section>
       <section aria-labelledby={recipesHeadingId} className="flex flex-col gap-4">
         <h2 id={recipesHeadingId} className="text-sm font-semibold text-fg-muted">
@@ -38,7 +37,7 @@ export function HomePage(): ReactElement {
           {RECIPE_LIST.map((recipe) => (
             <li
               key={recipe.id}
-              className="relative flex flex-col gap-3 rounded-lg bg-surface p-6 shadow-2 transition hover:shadow-3"
+              className="relative flex flex-col gap-3 rounded-lg bg-surface p-6 shadow-card transition hover:shadow-float"
             >
               <h3 className="font-display text-xl font-semibold text-fg">{recipe.title}</h3>
               <p className="flex-1 text-fg-muted">{SUMMARIES[recipe.id]}</p>

@@ -59,6 +59,8 @@ describe("Histórico", () => {
     setup(() => page([]));
 
     expect(await screen.findByRole("heading", { name: "Nenhuma execução ainda" })).toBeVisible();
+    // Rotação estável: o Histórico vazio cai sempre na Jade.
+    expect(screen.getByRole("img", { name: /^Jade, / })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Escolher uma receita na Oficina" })).toHaveAttribute(
       "href",
       "/",

@@ -88,6 +88,13 @@ export function createRoutes({ uploadServices, now }: AppServices): RouteObject[
           },
         },
         {
+          path: PATHS.credits,
+          lazy: async () => {
+            const { CreditsPage } = await import("../legal/CreditsPage");
+            return { Component: CreditsPage };
+          },
+        },
+        {
           path: PATHS.run,
           lazy: async () => {
             const { RunPage } = await import("../runs/RunPage");

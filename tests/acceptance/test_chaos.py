@@ -3,6 +3,7 @@
 import uuid
 
 import pytest
+from acceptance import chaos as chaos_script
 from acceptance import chaos_rules as chaos
 from acceptance.chaos_rules import (
     AttemptRow,
@@ -400,3 +401,9 @@ def test_limpeza_sem_container_e_so_lost_found_passa() -> None:
 )
 def test_container_orfao_ou_area_suja_falha(containers: list[str], entries: list[str]) -> None:
     assert not chaos.judge_cleanup(containers=containers, work_entries=entries).passed
+
+
+def test_caos_fala_com_a_api_pelo_dominio_com_tls() -> None:
+    # A borda não encaminha mais o acesso pelo IP (http) ao GoblinShift (ADR 014), e a chave de
+    # curta duração do teste não pode trafegar em texto claro.
+    assert chaos_script._argument_parser().parse_args([]).base_url == "https://goblinshift.dev"
