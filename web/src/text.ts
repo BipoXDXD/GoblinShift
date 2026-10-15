@@ -74,6 +74,8 @@ export const TEXT = {
     skipToContent: "Pular para o conteúdo",
     brand: "GoblinShift",
     brandLink: "GoblinShift, Oficina",
+    aiArt: "Ilustrações geradas com IA e editadas.",
+    creditsLink: "Créditos",
   },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",
@@ -486,6 +488,17 @@ export const TEXT = {
     requiredTitle: "Aceite os termos para continuar",
     requiredBody: "Os termos de uso mudaram. Leia e aceite a versão nova para continuar.",
     goToAccept: "Ler e aceitar os termos",
+  },
+  credits: {
+    title: "Créditos",
+    artHeading: "As goblins",
+    art: [
+      "As goblins da oficina foram geradas com IA e editadas à mão. Os conceitos em 2D saíram da Tripo (com os modelos Seedream e Banana Pro), os modelos 3D do Hyper3D Rodin, e os renders, recortes e a otimização da cena 3D foram feitos no Blender e no glTF Transform.",
+      "A saída bruta de IA pode não ser protegível por direito autoral; a parte humana (seleção, renders, edição e os scripts) fica sob a licença CC BY 4.0.",
+    ],
+    fontsHeading: "Fontes",
+    fonts:
+      "Bricolage Grotesque e Atkinson Hyperlegible, auto-hospedadas, sob a SIL Open Font License 1.1.",
   },
   legal: {
     termsTitle: "Termos de Uso",

@@ -9,8 +9,11 @@ import { expect, test } from "../support/test";
 
 const HERO = "[data-oficina-3d]";
 const CHUNK_OR_MODEL = /\/assets\/oficina-3d[^/]*\.js$|\.glb(\?|$)/;
-/** Tempo para o chunk, o GLB e o primeiro quadro no Chromium do CI. */
-const SCENE_READY_MS = 15_000;
+/**
+ * Tempo para o chunk, o GLB e o primeiro quadro. O Chromium do CI desenha em software
+ * (SwiftShader): a montagem levou de 5 a 22 s nas medições locais, conforme a carga da máquina.
+ */
+const SCENE_READY_MS = 45_000;
 /** WCAG 2.2.2: movimento automático para sozinho em até 5 s (mais a folga de um quadro). */
 const INTRO_LIMIT_MS = 5_500;
 
@@ -120,6 +123,8 @@ test("WebGL só em software conta como sem WebGL", async ({ page }) => {
 });
 
 test.describe("com GPU", () => {
+  // Montar a cena em software leva mais que o teto padrão de 20 s da suíte.
+  test.slow();
   test.beforeEach(async ({ page }) => {
     await pretendGpu(page);
   });
