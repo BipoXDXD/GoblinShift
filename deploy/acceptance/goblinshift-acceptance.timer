@@ -1,0 +1,16 @@
+# Uma vez por semana, no domingo perto das 04h30 de Brasília, depois da janela do backup
+# (06:00 a 06:30 UTC). Semanal porque o worker fica parado de 10 a 30 min a cada teste (ADR 017).
+[Unit]
+Description=GoblinShift: agenda o teste de aceitação semanal do ambiente do executor
+
+[Timer]
+OnCalendar=Sun *-*-* 07:30:00 UTC
+# Espalha o horário para não coincidir sempre com outro job do host compartilhado; o check do
+# healthchecks.io tem 7 dias de período e 2 h de tolerância, folga para os 30 min de sorteio e a
+# até 1 h de teste.
+RandomizedDelaySec=30min
+# VPS desligada no horário: roda assim que voltar.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
