@@ -1,0 +1,615 @@
+{
+  "schema": 1,
+  "terms": [
+    {
+      "id": "hyper3d-terms",
+      "url": "https://hyper3d.ai/legal/terms",
+      "last_updated": null,
+      "read_at": "2026-10-15",
+      "clauses": "2 (export conforme o plano), 5(b) (não limita o uso da saída), sem garantia de proteção autoral"
+    },
+    {
+      "id": "hyper3d-pricing",
+      "url": "https://hyper3d.ai/pricing",
+      "last_updated": null,
+      "read_at": "2026-10-15",
+      "clauses": "Creator e acima: 'Unlimited export and any use'"
+    },
+    {
+      "id": "tripo-terms",
+      "url": "https://developers.tripo3d.com/en/terms",
+      "last_updated": "2025-07-11",
+      "read_at": "2026-10-15",
+      "clauses": "3.2 (uso comercial), 3.4 (saída de terceiros sob os termos deles), 5.2.2 (Paid Users têm os direitos), 6.4 (créditos de API pré-pagos)"
+    },
+    {
+      "id": "gemini-api-terms",
+      "url": "https://ai.google.dev/gemini-api/terms",
+      "last_updated": "2026-04-28",
+      "read_at": "2026-10-15",
+      "clauses": "'Google won't claim ownership over that content'"
+    }
+  ],
+  "rights": [
+    {
+      "id": "rodin-plano-pago",
+      "vendor": "hyper3d",
+      "basis": ["hyper3d-terms", "hyper3d-pricing"],
+      "status": "termos lidos; usuário assinante do Rodin (informado em 2026-10-15)"
+    },
+    {
+      "id": "tripo-api-wallet",
+      "vendor": "tripo",
+      "basis": ["tripo-terms", "gemini-api-terms"],
+      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)"
+    }
+  ],
+  "generations": {
+    "a-conceito": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "2c56c15e-deeb-4b99-9f2b-3e4b1c8544f0",
+      "inputs": [],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r5-goticas/a-trancas-vermelhas"
+    },
+    "a-frontal": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "eb807d09-a173-47ac-8028-280ddc46491a",
+      "inputs": ["a-conceito"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r6-frontal/a-trancas-vermelhas"
+    },
+    "a-3d-gotica": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "e95f87af-4bdb-45fb-8a06-8a8fd5b92b2e",
+      "url": "https://hyper3d.ai/workspace/rodin/e95f87af-4bdb-45fb-8a06-8a8fd5b92b2e",
+      "inputs": ["a-conceito"],
+      "rights": "rodin-plano-pago"
+    },
+    "a-3d-frontal": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "38a7c889-53d3-41ac-9bff-66f67744fae0",
+      "url": "https://hyper3d.ai/workspace/rodin/38a7c889-53d3-41ac-9bff-66f67744fae0",
+      "inputs": ["a-frontal"],
+      "rights": "rodin-plano-pago"
+    },
+    "a-render-gotica": {
+      "tool": "Blender 5.2 (render_glb.py), render local",
+      "inputs": ["a-3d-gotica"],
+      "local": "referencias-usuario/a-aprovada-3d-frente.png",
+      "note": "apesar da pasta, é render nosso do modelo e95f87af, não referência de terceiros"
+    },
+    "ref-01-frente": {
+      "tool": "Blender 5.2 (render_glb.py), render local",
+      "inputs": ["a-3d-frontal"],
+      "local": "tripo/r9-teste/ref-01-frente-branco.png"
+    },
+    "rubia-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "a16cc6f2-4982-4ca7-ad92-72b0d8c41871",
+      "inputs": ["a-conceito", "a-render-gotica"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r7-realista/a-realista-banana"
+    },
+    "rubia-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "e1c79f67-dafb-4f23-89ea-f4324beca492",
+      "url": "https://hyper3d.ai/workspace/rodin/e1c79f67-dafb-4f23-89ea-f4324beca492",
+      "inputs": ["rubia-2d"],
+      "rights": "rodin-plano-pago"
+    },
+    "b-conceito": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "a57d10f7-d32c-4395-8e02-89edfb1b2ace",
+      "inputs": [],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r5-goticas/b-laranja-couro"
+    },
+    "b-frontal": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "cb7cf4e5-443a-473e-979c-d33922745a9f",
+      "inputs": [],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r6-frontal/b-laranja-couro"
+    },
+    "ferrugem-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "1711dadc-9bb3-4583-b56e-a48c8d3327b5",
+      "inputs": ["b-frontal", "ref-01-frente"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r9-teste/b-laranja-couro"
+    },
+    "ferrugem-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "ec3a728c-d58f-40f4-a298-a144e6ba668b",
+      "url": "https://hyper3d.ai/workspace/rodin/ec3a728c-d58f-40f4-a298-a144e6ba668b",
+      "inputs": ["ferrugem-2d"],
+      "rights": "rodin-plano-pago"
+    },
+    "c-conceito": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "1025c32e-f903-48f1-b0ca-fed54e8e06d8",
+      "inputs": [],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r5-goticas/c-inventora"
+    },
+    "c-frontal": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "3bf88944-5660-46d2-988f-1ca4922a7dc3",
+      "inputs": ["c-conceito"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r6-frontal/c-inventora"
+    },
+    "ada-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "032f6ed0-17ba-4beb-8923-0e0d79eefb79",
+      "inputs": ["c-frontal", "ref-01-frente"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r9-teste/c-inventora"
+    },
+    "ada-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "417f7fe0-23a6-4fec-922a-33fbb3c69032",
+      "url": "https://hyper3d.ai/workspace/rodin/417f7fe0-23a6-4fec-922a-33fbb3c69032",
+      "inputs": ["ada-2d"],
+      "rights": "rodin-plano-pago"
+    },
+    "e-frontal": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "1a0a9bf7-9a99-4565-9b31-928287f0531b",
+      "inputs": [],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r6-frontal/e-preta-rosa"
+    },
+    "nyx-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "2b13f0c5-224b-4a8c-abaa-4e6f6943c5ec",
+      "inputs": ["e-frontal", "ref-01-frente"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r9-teste/e-preta-rosa"
+    },
+    "nyx-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "19a1ddba-fd13-461e-9136-8f8bea40cfc9",
+      "url": "https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9",
+      "inputs": ["nyx-2d"],
+      "rights": "rodin-plano-pago"
+    },
+    "g-frontal": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "seedream_v5",
+      "upstream": "ByteDance Seedream (via Tripo)",
+      "task_id": "29b1c89e-b07b-48fd-8dab-67c1dac7ef80",
+      "inputs": [],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r6-frontal/g-sininho"
+    },
+    "lua-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "373b2218-8e57-4549-a91a-10b11b3a2748",
+      "inputs": ["g-frontal", "ref-01-frente"],
+      "rights": "tripo-api-wallet",
+      "local": "tripo/r9-teste/g-sininho"
+    },
+    "lua-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "81ae6621-dbb6-48b0-acb0-04918bfdb393",
+      "url": "https://hyper3d.ai/workspace/rodin/81ae6621-dbb6-48b0-acb0-04918bfdb393",
+      "inputs": ["lua-2d"],
+      "rights": "rodin-plano-pago"
+    },
+    "rubia-render-ancora": {
+      "tool": "Blender 5.2 (render_glb.py), render local",
+      "inputs": ["rubia-3d"],
+      "local": "rodin/r10-realista/ancoras/a-semirrealista_e1c79f67-frente-branco.png"
+    },
+    "jade-origem": {
+      "tool": "Hyper3D Rodin (site, gerado pelo usuário)",
+      "generation_id": "cab576c8",
+      "inputs": [],
+      "rights": "rodin-plano-pago",
+      "third_party": "gerado da imagem de referência de terceiros referencias-usuario/ref2-jeans.png (mesmo arquivo de rodin/referencias-usuario/ref2-jeans/pbr.glb)",
+      "local": "rodin/r10-realista/origem/cab576c8.glb"
+    },
+    "jade-render-origem": {
+      "tool": "Blender 5.2 (render_glb.py), render local",
+      "inputs": ["jade-origem"],
+      "local": "rodin/r10-realista/cab576c8/origem-frente-branco.png"
+    },
+    "jade-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "5783276f-9228-407d-b368-c795b723b0a5",
+      "inputs": ["jade-render-origem", "rubia-render-ancora"],
+      "rights": "tripo-api-wallet",
+      "local": "rodin/r10-realista/cab576c8/2d-v1"
+    },
+    "jade-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "3c7aa397-f83d-44ac-bf1b-bd65b0cb8524",
+      "url": "https://hyper3d.ai/workspace/rodin/3c7aa397-f83d-44ac-bf1b-bd65b0cb8524",
+      "inputs": ["jade-2d"],
+      "rights": "rodin-plano-pago"
+    },
+    "fagulha-origem": {
+      "tool": "Hyper3D Rodin (site, gerado pelo usuário)",
+      "generation_id": "f37f6132",
+      "inputs": [],
+      "rights": "rodin-plano-pago",
+      "third_party": "entrada não registrada: gerado direto no site do Rodin, proveniência não verificável",
+      "local": "rodin/r10-realista/origem/f37f6132.glb"
+    },
+    "fagulha-render-origem": {
+      "tool": "Blender 5.2 (render_glb.py), render local",
+      "inputs": ["fagulha-origem"],
+      "local": "rodin/r10-realista/f37f6132/origem-frente-branco.png"
+    },
+    "fagulha-2d": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "banana_pro",
+      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "task_id": "58862e7d-2083-4038-893a-0bd4143a7d83",
+      "inputs": ["fagulha-render-origem", "rubia-render-ancora"],
+      "rights": "tripo-api-wallet",
+      "local": "rodin/r10-realista/f37f6132/2d-v1"
+    },
+    "fagulha-3d": {
+      "tool": "Hyper3D Rodin Gen-2.5",
+      "generation_id": "0d84776f-e99b-47e8-be42-59d78af0a6dd",
+      "url": "https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd",
+      "inputs": ["fagulha-2d"],
+      "rights": "rodin-plano-pago"
+    }
+  },
+  "excluded": [],
+  "assets": [
+    {
+      "file": "goblins/ada-128w.avif",
+      "sha256": "121bd90d78e7e3ad6c40067fc3296b8d1a761fd1522ba92083015817ff864a4e",
+      "derived_from": "ada-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ada-128w.webp",
+      "sha256": "7109826eeb0a4f562e0f3f8519d9015eb9f9c9d7d889e44807ec0bb48f7a594e",
+      "derived_from": "ada-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ada-256w.avif",
+      "sha256": "4b0cd3fef3a18457f3886f65e55ba95d3e78fc15c5c6fbf2145835fb6fcf44d9",
+      "derived_from": "ada-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ada-256w.webp",
+      "sha256": "ba26f292c94141e344270a9f9512f22acba3b7ca6afb56042b071a41fb110a05",
+      "derived_from": "ada-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/fagulha-128w.avif",
+      "sha256": "d2e5602d9ad10d34f3e249cd0320d5ea4e74949e8859c70a97679ae6ee52ab17",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/fagulha-128w.webp",
+      "sha256": "c0c146c68687cfcdd352c130bc6ac0870d8c7c621a4244c29736867e52be8838",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/fagulha-256w.avif",
+      "sha256": "4be16b26a58e5926c0985d543eb80ba91eaf448ce28acb8f79b1818c4500c34e",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/fagulha-256w.webp",
+      "sha256": "4e7bf2ad0fa3a4fb1712e279fb56561980f2888a521c08b66707cc180531f2d6",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ferrugem-128w.avif",
+      "sha256": "e0e425dbe9f290b02c00e7a9d91aa9691fe38e990507eb4a17908f29e7af32a9",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ferrugem-128w.webp",
+      "sha256": "73836373859f23134e85850f855ed2db61e7da5571cf65766a051f84d3f6ed70",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ferrugem-256w.avif",
+      "sha256": "24bbe49da8d35984b4bc16061fcae3b5e72ba9c9efc21b781f7087157dc2d6a9",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/ferrugem-256w.webp",
+      "sha256": "6d5ad88237d2991e17160be77376e912f11005be273dbd91cc54c0484f07884a",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/jade-128w.avif",
+      "sha256": "5b668a4618191b1d9abda02d56894e2f02984b54bf56d96462cb5e949eeb8e7d",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/jade-128w.webp",
+      "sha256": "e8c0b5623627e96583d3929d7beff25a3fd55084c85aebe864ed4665c729f087",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/jade-256w.avif",
+      "sha256": "242d8fa334a03fcfc6bc1b15322c965eb7c7982745207db315796355e0010db8",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/jade-256w.webp",
+      "sha256": "2f9b998112785fbeae405c6a68482cb11774170ce64cdbf824ec74802fed237e",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/lua-128w.avif",
+      "sha256": "06f1c8007f2d9d80a91cfb7c30fcf8f32d7ce4598b6b86ae075e660760a1dc7f",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/lua-128w.webp",
+      "sha256": "38253c25f95934fda044763d0bc5f13d21c7b311fe51fd01ba261e19968d56da",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/lua-256w.avif",
+      "sha256": "cd42227b0d8d21701d8354b502f6e1c34ce4ed057831816ddc6a29a132925fd2",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/lua-256w.webp",
+      "sha256": "b845390cfb42d0c5f1e2abf901422a1eaaf48e009a7b7ae0981b02b776ae0793",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/nyx-128w.avif",
+      "sha256": "8993087b636390bb2b27752193a5449439bde6ff6a8626f1470d2d90f669dc91",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/nyx-128w.webp",
+      "sha256": "8492e42d798e85eca6884b6e3136a2ab28114ff63cd0342a1cc6d3ab3efc1a47",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/nyx-256w.avif",
+      "sha256": "8f2ce3d83737309e60c473c43786ca74aaad591702d910a59b4b87b751540a59",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "goblins/nyx-256w.webp",
+      "sha256": "344fe33be3a90bca458d4341c49193e44821beedf986ac836f49d1cbf466045f",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-192w.avif",
+      "sha256": "2cb686219c614aa8a00d55700a4b2bafe1c9169c39f9ec61fb02de481e1bcfbb",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-192w.webp",
+      "sha256": "425f01ca59bd703a40eb07bb72628c6bed956ea50db64fa489d3ef249244b72d",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-384w.avif",
+      "sha256": "291433b22c6e8285f968c54d2e568938f5a4cbddb3d38f38ea548352cb1b000d",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-384w.webp",
+      "sha256": "68979b492b8d6b57a0d58f49cdbc1e88603b2b5d04b87f97786dca3624ec83ca",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-640w.avif",
+      "sha256": "79aa7496abbf3b6d7de225782168b6cc50ea40c7d3978ced8c451ed286017df6",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-640w.webp",
+      "sha256": "ebd21453dfc752159de7750eac7d4775cc38a2365e8259e6a5af1f0c1e15d1dc",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia.glb",
+      "sha256": "3bad816c07b6096f9ed22517d0a2a38d471419c6573aa2dbcea4b57c47ead3f4",
+      "derived_from": "rubia-3d",
+      "human_edits": [
+        "simplificação para ~120 mil triângulos preservando as costuras de UV, texturas de 1024 px em WebP e compressão Meshopt (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    }
+  ],
+  "exceptions": [
+    {
+      "generation": "jade-origem",
+      "decided_by": "usuário (dono do projeto)",
+      "decided_at": "2026-10-15",
+      "reason": "O usuário assume o risco de publicar a Jade, cuja origem é a imagem de referência de terceiros ref2-jeans."
+    },
+    {
+      "generation": "fagulha-origem",
+      "decided_by": "usuário (dono do projeto)",
+      "decided_at": "2026-10-15",
+      "reason": "O usuário libera a Fagulha, cuja proveniência não pode ser verificada (entrada do modelo f37f6132 não registrada)."
+    }
+  ]
+}

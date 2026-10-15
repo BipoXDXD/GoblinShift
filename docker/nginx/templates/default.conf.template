@@ -63,6 +63,16 @@ server {
         include /etc/nginx/snippets/spa-headers.conf;
     }
 
+    # Política de divulgação de vulnerabilidades (RFC 9116, SECURITY.md). Fora do fallback da
+    # SPA: o que não existir em /.well-known/ é 404, nunca o index.html. A RFC pede text/plain
+    # em UTF-8, e o Nginx só declara o charset com a diretiva.
+    location /.well-known/ {
+        try_files $uri =404;
+        charset utf-8;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+
     # Arquivos com hash no nome (build do Vite): mudam de nome a cada mudança de conteúdo. Um
     # asset ausente é 404, nunca o index.html servido como JavaScript.
     location /assets/ {
