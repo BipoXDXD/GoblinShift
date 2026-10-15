@@ -20,7 +20,7 @@ export function ThemeSwitcher(): ReactElement {
         <span className="font-semibold text-fg">{T.options[preference]}</span>
         <ChevronDown aria-hidden="true" className="size-4" />
       </summary>
-      <fieldset className="absolute right-0 z-10 mt-2 w-48 rounded-lg bg-surface-raised p-2 shadow-float">
+      <fieldset className="absolute right-0 z-(--z-menu) mt-2 w-48 rounded-lg bg-surface-raised p-2 shadow-float">
         <legend className="sr-only">{T.legend}</legend>
         {THEME_PREFERENCES.map((option) => (
           <label
