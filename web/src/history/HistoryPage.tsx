@@ -9,7 +9,7 @@ import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
-import { QueryFailure } from "../components/feedback/QueryFailure";
+import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button, buttonClassName } from "../components/ui/Button";
 import { RECIPE_LIST } from "../recipes/registry";
 import { RUN_STATUSES } from "../runs/api";
@@ -142,7 +142,7 @@ function FirstPagePending({ error }: { readonly error: Error | null }): ReactEle
   return error === null ? (
     <p className="text-fg-muted">{T.loading}</p>
   ) : (
-    <QueryFailure error={error} />
+    <FailureNotice error={error} />
   );
 }
 

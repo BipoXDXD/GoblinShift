@@ -9,6 +9,18 @@ import { installFakeMatchMedia } from "./fakeMatchMedia";
 // falhar.
 configure({ asyncUtilTimeout: 5_000 });
 
+// O jsdom não implementa o `<dialog>` modal. O dublê só abre e fecha, com o evento `close`; o foco
+// preso e o Esc de verdade são do navegador e ficam com o Playwright (e2e/specs/access.spec.ts).
+HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement): void {
+  this.setAttribute("open", "");
+};
+HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement): void {
+  if (this.hasAttribute("open")) {
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  }
+};
+
 beforeEach(() => {
   // O cabeçalho do app tem o seletor de tema, que consulta o sistema; o padrão é tema claro.
   installFakeMatchMedia(false);

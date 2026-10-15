@@ -1,7 +1,7 @@
 const DELTA_SECONDS = /^\d+$/;
 const MS_PER_SECOND = 1_000;
 // Acima de 2^31 - 1 ms o setTimeout dispara na hora; 5 min já cobre qualquer pausa real da API.
-const MAX_RETRY_AFTER_MS = 5 * 60 * MS_PER_SECOND;
+export const MAX_RETRY_AFTER_MS = 5 * 60 * MS_PER_SECOND;
 
 /**
  * Espera pedida pelo header `Retry-After` (RFC 9110, 10.2.3), em milissegundos.

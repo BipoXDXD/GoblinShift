@@ -1,7 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router";
 
+import { refreshAccountOn } from "../account/useMe";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import { createApiClient } from "../api/client";
 import { readCsrfCookie } from "../api/csrf";
@@ -16,9 +17,7 @@ const UPLOAD_RATE_LIMIT_FALLBACK_MS = 2_000;
 
 export function App(): ReactElement {
   // Um cliente e um router por montagem: testes e Strict Mode não compartilham cache nem histórico.
-  const [queryClient] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: shouldRetryQuery } } }),
-  );
+  const [queryClient] = useState(createQueryClient);
   const [apiClient] = useState(() =>
     createApiClient({
       fetch: (input, init) => window.fetch(input, init),
@@ -53,4 +52,25 @@ export function App(): ReactElement {
       </QueryClientProvider>
     </ApiClientProvider>
   );
+}
+
+/**
+ * Leituras com o retry só de falha transitória, e o /me relido quando qualquer chamada mostra que a
+ * sessão acabou ou que os termos mudaram (useMe.ts).
+ */
+function createQueryClient(): QueryClient {
+  const client: QueryClient = new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error, query) => {
+        refreshAccountOn(client)(error, query.queryKey);
+      },
+    }),
+    mutationCache: new MutationCache({
+      onError: (error) => {
+        refreshAccountOn(client)(error);
+      },
+    }),
+    defaultOptions: { queries: { retry: shouldRetryQuery } },
+  });
+  return client;
 }

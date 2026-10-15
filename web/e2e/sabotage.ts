@@ -160,13 +160,43 @@ const CASES: readonly Case[] = [
     },
   },
   {
-    name: "chave de API: o aviso de login em breve vira alerta",
-    spec: ["api-key.spec.ts", "-g", "login chega em breve"],
+    name: "chave de API: o convite para entrar vira alerta",
+    spec: ["api-key.spec.ts", "-g", "convida a entrar"],
     plant: (dist) => {
       addScript(
         dist,
         `new MutationObserver(() => {
           document.querySelector("section[aria-labelledby]")?.setAttribute("role", "alert");
+        }).observe(document, { childList: true, subtree: true });`,
+      );
+    },
+  },
+  {
+    name: "CSRF: a mutação sai sem o X-CSRF-Token",
+    spec: ["csrf.spec.ts", "-g", "leva o X-CSRF-Token"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `const original = window.fetch;
+        window.fetch = (input, init = {}) => {
+          const headers = new Headers(init.headers);
+          headers.delete("X-CSRF-Token");
+          return original(input, { ...init, headers });
+        };`,
+      );
+    },
+  },
+  {
+    name: "Acesso: o segredo da chave nova vai para o sessionStorage",
+    spec: ["access.spec.ts", "-g", "aparece uma vez"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `new MutationObserver(() => {
+          const field = document.querySelector("input[readonly]");
+          if (field instanceof HTMLInputElement && field.value !== "") {
+            sessionStorage.setItem("chave", field.value);
+          }
         }).observe(document, { childList: true, subtree: true });`,
       );
     },

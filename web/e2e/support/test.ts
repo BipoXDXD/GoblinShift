@@ -13,14 +13,25 @@ interface Fixtures {
   api: FakeApi | null;
 }
 
-export const test = base.extend<Fixtures>({
+interface Options {
+  /**
+   * `api-key`: a chave do processo de teste vai em todo pedido (padrão, e o único modo contra a
+   * VPS). `none`: o navegador começa sem credencial, para as specs que entram pelo login.
+   */
+  auth: "api-key" | "none";
+}
+
+export const test = base.extend<Fixtures & Options>({
+  auth: ["api-key", { option: true }],
   api: [
-    async ({ context }, use) => {
+    async ({ context, auth }, use) => {
       const fake =
         E2E.artifactsDir === null
           ? null
           : await installFakeApi(context, E2E.apiKey, E2E.artifactsDir);
-      await injectApiKey(context, E2E.apiKey);
+      if (auth === "api-key") {
+        await injectApiKey(context, E2E.apiKey);
+      }
       await use(fake);
       // Pedido que a API falsa não conhece é rota nova na interface sem cobertura aqui.
       expect(fake?.unhandled ?? [], "pedidos sem rota na API falsa").toEqual([]);
