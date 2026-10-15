@@ -38,7 +38,7 @@ export function Layout(): ReactElement {
     <div className="flex min-h-screen flex-col">
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-3 focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-20"
+        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-20"
       >
         {T.skipToContent}
       </a>

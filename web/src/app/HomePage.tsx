@@ -38,7 +38,7 @@ export function HomePage(): ReactElement {
           {RECIPE_LIST.map((recipe) => (
             <li
               key={recipe.id}
-              className="relative flex flex-col gap-3 rounded-lg bg-surface p-6 shadow-2 transition hover:shadow-3"
+              className="relative flex flex-col gap-3 rounded-lg bg-surface p-6 shadow-card transition hover:shadow-float"
             >
               <h3 className="font-display text-xl font-semibold text-fg">{recipe.title}</h3>
               <p className="flex-1 text-fg-muted">{SUMMARIES[recipe.id]}</p>

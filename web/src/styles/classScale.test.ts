@@ -30,6 +30,9 @@ const SPACING_UTILITY =
 const ARBITRARY_VALUE = /([a-z0-9]+)-\[[^\]]*\](:?)/g;
 const RAW_COLOR =
   /(?<=^|[\s"'`:])(?:bg|text|border|outline|ring|fill|stroke|shadow|accent|decoration|divide|caret)-(?:moss|brass|stone|ember|patina|white)(?:-[0-9]+)?\b/g;
+/** Três níveis de elevação mais a rebaixada (spec 2026-10-15, decisão 2). */
+const ALLOWED_SHADOWS = new Set(["card", "float", "dialog", "sunken", "none"]);
+const SHADOW_UTILITY = /(?<=^|[\s"'`:])shadow-([a-z0-9]+)(?=$|[\s"'`])/g;
 
 /** Problemas de estilo num arquivo-fonte, cada um com a classe ou o trecho que o causou. */
 function styleViolations(source: string): string[] {
@@ -50,6 +53,11 @@ function styleViolations(source: string): string[] {
   for (const [match] of source.matchAll(RAW_COLOR)) {
     violations.push(`tom cru em componente (use o papel semântico): ${match}`);
   }
+  for (const [match, level] of source.matchAll(SHADOW_UTILITY)) {
+    if (!ALLOWED_SHADOWS.has(level ?? "")) {
+      violations.push(`sombra fora dos níveis: ${match}`);
+    }
+  }
   if (/\boutline-none\b/.test(source)) {
     violations.push("outline-none: o foco visível vem do base.css e não pode sumir");
   }
@@ -69,6 +77,8 @@ describe("styleViolations", () => {
     ["grid-cols-[1fr_2fr]", "valor arbitrário: cols-[1fr_2fr]"],
     ["bg-moss-700", "tom cru em componente (use o papel semântico): bg-moss-700"],
     ["text-patina-800", "tom cru em componente (use o papel semântico): text-patina-800"],
+    ["shadow-3", "sombra fora dos níveis: shadow-3"],
+    ["hover:shadow-md", "sombra fora dos níveis: shadow-md"],
     ["focus:outline-none", "outline-none"],
     ["<div style={{ width: 1 }} />", "style inline"],
   ])("recusa %s", (source, expected) => {
@@ -80,7 +90,8 @@ describe("styleViolations", () => {
     "p-4 gap-6 mt-12 -mt-8",
     "min-h-11 min-w-11 lg:w-112",
     "max-w-3xl w-full h-auto",
-    "data-[dragging=true]:shadow-3",
+    "data-[dragging=true]:shadow-float",
+    "shadow-card hover:shadow-float shadow-dialog shadow-sunken active:shadow-none",
     "bg-surface text-fg-muted border-line",
     "arquivo-001 csv-janitor-parametros",
   ])("aceita %s", (source) => {

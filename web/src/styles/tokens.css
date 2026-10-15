@@ -180,11 +180,11 @@
   --hero-band: var(--color-moss-50);
 
   /* Sombras em duas partes, a luz vem de cima (RUI cap. 6); cor = stone-950 com alfa. */
-  --elevation-1: 0 1px 3px oklch(0.17 0.013 55 / 0.12), 0 1px 2px oklch(0.17 0.013 55 / 0.24);
-  --elevation-2: 0 3px 6px oklch(0.17 0.013 55 / 0.15), 0 2px 4px oklch(0.17 0.013 55 / 0.12);
-  --elevation-3: 0 10px 20px oklch(0.17 0.013 55 / 0.15), 0 3px 6px oklch(0.17 0.013 55 / 0.1);
-  --elevation-4: 0 15px 25px oklch(0.17 0.013 55 / 0.15), 0 5px 10px oklch(0.17 0.013 55 / 0.05);
-  --elevation-5: 0 20px 40px oklch(0.17 0.013 55 / 0.2);
+  /* Três níveis (spec 2026-10-15): cartão sobre a página, flutuante (menu, popover, arrasto) e
+     diálogo. Duas partes, a luz vem de cima (RUI cap. 6); no diálogo a parte pequena some. */
+  --elevation-card: 0 2px 4px oklch(0.17 0.013 55 / 0.12), 0 1px 2px oklch(0.17 0.013 55 / 0.2);
+  --elevation-float: 0 10px 20px oklch(0.17 0.013 55 / 0.15), 0 3px 6px oklch(0.17 0.013 55 / 0.1);
+  --elevation-dialog: 0 20px 40px oklch(0.17 0.013 55 / 0.2);
   --elevation-sunken: inset 0 2px 2px oklch(0.17 0.013 55 / 0.1);
 
   --duration-fast: 120ms;
@@ -237,11 +237,9 @@
   --selection-fg: var(--color-brass-50);
   --hero-band: var(--color-stone-900);
 
-  --elevation-1: inset 0 1px 0 oklch(1 0 0 / 0.06);
-  --elevation-2: inset 0 1px 0 oklch(1 0 0 / 0.06);
-  --elevation-3: 0 10px 20px oklch(0 0 0 / 0.5);
-  --elevation-4: 0 15px 25px oklch(0 0 0 / 0.55);
-  --elevation-5: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
+  --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
+  --elevation-float: 0 10px 20px oklch(0 0 0 / 0.5);
+  --elevation-dialog: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
   --elevation-sunken: inset 0 2px 2px oklch(0 0 0 / 0.3);
 }
 
@@ -277,10 +275,8 @@
   --color-dropzone-active: var(--dropzone-active);
   --color-hero-band: var(--hero-band);
 
-  --shadow-1: var(--elevation-1);
-  --shadow-2: var(--elevation-2);
-  --shadow-3: var(--elevation-3);
-  --shadow-4: var(--elevation-4);
-  --shadow-5: var(--elevation-5);
+  --shadow-card: var(--elevation-card);
+  --shadow-float: var(--elevation-float);
+  --shadow-dialog: var(--elevation-dialog);
   --shadow-sunken: var(--elevation-sunken);
 }
