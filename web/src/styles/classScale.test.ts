@@ -29,7 +29,7 @@ const SPACING_UTILITY =
   /(?<=^|[\s"'`:])-?((?:p|m)[xytrblse]?|gap(?:-[xy])?|space-[xy]|w|h|size|min-w|min-h|max-w|max-h|inset(?:-[xy])?|top|right|bottom|left|translate-[xy])-([0-9][0-9.]*)(?=$|[\s"'`])/g;
 const ARBITRARY_VALUE = /([a-z0-9]+)-\[[^\]]*\](:?)/g;
 const RAW_COLOR =
-  /(?<=^|[\s"'`:])(?:bg|text|border|outline|ring|fill|stroke|shadow|accent|decoration|divide|caret)-(?:moss|brass|stone|ember|white)(?:-[0-9]+)?\b/g;
+  /(?<=^|[\s"'`:])(?:bg|text|border|outline|ring|fill|stroke|shadow|accent|decoration|divide|caret)-(?:moss|brass|stone|ember|patina|white)(?:-[0-9]+)?\b/g;
 
 /** Problemas de estilo num arquivo-fonte, cada um com a classe ou o trecho que o causou. */
 function styleViolations(source: string): string[] {
@@ -68,6 +68,7 @@ describe("styleViolations", () => {
     ["w-[13px]", "valor arbitrário: w-[13px]"],
     ["grid-cols-[1fr_2fr]", "valor arbitrário: cols-[1fr_2fr]"],
     ["bg-moss-700", "tom cru em componente (use o papel semântico): bg-moss-700"],
+    ["text-patina-800", "tom cru em componente (use o papel semântico): text-patina-800"],
     ["focus:outline-none", "outline-none"],
     ["<div style={{ width: 1 }} />", "style inline"],
   ])("recusa %s", (source, expected) => {

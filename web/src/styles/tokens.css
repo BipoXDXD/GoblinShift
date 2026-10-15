@@ -2,7 +2,7 @@
  * Sistema visual do GoblinShift (plano de design web, D1–D13 e seção 7).
  *
  * Três camadas:
- * 1. tons crus em @theme static (musgo, latão, pedra, brasa): só a arte e este arquivo os usam;
+ * 1. tons crus em @theme static (musgo, latão, pedra, brasa, pátina): só a arte e este arquivo os usam;
  * 2. papéis semânticos em :root e [data-theme="dark"], com os pares de contraste medidos em
  *    contrast.test.ts;
  * 3. @theme inline, que transforma os papéis em utilitários (bg-surface, text-fg-muted, …).
@@ -82,6 +82,20 @@
   --color-ember-900: oklch(0.335 0.11 26);
   --color-ember-950: oklch(0.265 0.08 25);
 
+  /* Pátina: sucesso. Verde-azulado de cobre oxidado, matiz fixo em 180° (32° além do musgo
+     mais escuro), para o sucesso não parecer botão (PUI: a primária é só do que se clica). */
+  --color-patina-50: oklch(0.975 0.02 180);
+  --color-patina-100: oklch(0.945 0.035 180);
+  --color-patina-200: oklch(0.895 0.055 180);
+  --color-patina-300: oklch(0.825 0.075 180);
+  --color-patina-400: oklch(0.735 0.09 180);
+  --color-patina-500: oklch(0.645 0.095 180);
+  --color-patina-600: oklch(0.555 0.09 180);
+  --color-patina-700: oklch(0.475 0.08 180);
+  --color-patina-800: oklch(0.405 0.068 180);
+  --color-patina-900: oklch(0.335 0.055 180);
+  --color-patina-950: oklch(0.265 0.042 180);
+
   /* Fontes auto-hospedadas (src/styles/fonts.css), nunca de CDN: a CSP só aceita 'self'. */
   --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
@@ -148,8 +162,8 @@
   --ring: var(--color-brass-600);
   --accent-band: var(--color-brass-400);
 
-  --success-bg: var(--color-moss-50);
-  --success-fg: var(--color-moss-800);
+  --success-bg: var(--color-patina-50);
+  --success-fg: var(--color-patina-800);
   --warning-bg: var(--color-brass-50);
   --warning-fg: var(--color-brass-800);
   --danger-bg: var(--color-ember-50);
@@ -206,8 +220,8 @@
   --ring: var(--color-brass-300);
   --accent-band: var(--color-brass-400);
 
-  --success-bg: var(--color-moss-950);
-  --success-fg: var(--color-moss-200);
+  --success-bg: var(--color-patina-950);
+  --success-fg: var(--color-patina-200);
   --warning-bg: var(--color-brass-950);
   --warning-fg: var(--color-brass-200);
   --danger-bg: var(--color-ember-950);
