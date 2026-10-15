@@ -233,6 +233,63 @@
   --elevation-sunken: inset 0 2px 2px oklch(0 0 0 / 0.3);
 }
 
+/* Fallback sem theme-init.js: segue o sistema, como a opção Sistema. Cópia exata do bloco acima,
+   garantida por contrast.test.ts ("fallback do tema escuro"); mude os dois juntos. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --bg: var(--color-stone-950);
+    --surface: var(--color-stone-900);
+    --surface-raised: var(--color-stone-800);
+    --surface-sunken: var(--color-stone-950);
+
+    --fg: var(--color-stone-50);
+    --fg-muted: var(--color-stone-400);
+    --fg-subtle: var(--color-stone-500);
+
+    --border-ui: var(--color-stone-500);
+    --border-soft: var(--color-stone-800);
+
+    --primary: var(--color-moss-400);
+    --primary-hover: var(--color-moss-300);
+    --on-primary: var(--color-moss-950);
+    --secondary-fg: var(--color-moss-200);
+    --link: var(--color-moss-300);
+    --destructive: var(--color-ember-400);
+    --destructive-hover: var(--color-ember-300);
+    --on-destructive: var(--color-ember-950);
+
+    --ring: var(--color-brass-300);
+    --accent-band: var(--color-brass-400);
+
+    --success-bg: var(--color-moss-950);
+    --success-fg: var(--color-moss-200);
+    --warning-bg: var(--color-brass-950);
+    --warning-fg: var(--color-brass-200);
+    --danger-bg: var(--color-ember-950);
+    --danger-fg: var(--color-ember-200);
+    --danger-accent: var(--color-ember-400);
+    --info-bg: var(--color-stone-800);
+    --info-fg: var(--color-stone-200);
+
+    --progress-fill: var(--color-moss-400);
+    --progress-track: var(--color-stone-700);
+    --dropzone-active: var(--color-stone-800);
+    --selection-bg: var(--color-brass-800);
+    --selection-fg: var(--color-brass-50);
+    --hero-band: var(--color-stone-900);
+    --overlay: oklch(0 0 0);
+
+    --elevation-1: inset 0 1px 0 oklch(1 0 0 / 0.06);
+    --elevation-2: inset 0 1px 0 oklch(1 0 0 / 0.06);
+    --elevation-3: 0 10px 20px oklch(0 0 0 / 0.5);
+    --elevation-4: 0 15px 25px oklch(0 0 0 / 0.55);
+    --elevation-5: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
+    --elevation-sunken: inset 0 2px 2px oklch(0 0 0 / 0.3);
+  }
+}
+
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
