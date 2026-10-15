@@ -1,5 +1,8 @@
 """CLI do administrador contra o PostgreSQL real (docs/GoblinShiftPlan.md, fatia 3 em 3.9)."""
 
+import hashlib
+import hmac
+import io
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -310,3 +313,122 @@ def test_list_users_sem_contas_nao_imprime_nada(capsys: pytest.CaptureFixture[st
 
     assert exit_code == EXIT_OK
     assert out == ""
+
+
+# --- Roteiro de abuso: do `user.hash` da telemetria à conta ------------------------------------
+
+USER_HASH_SECRET = "segredo-de-teste-do-user-hash-com-32-chars"  # noqa: S105 (valor de teste)
+
+
+def user_hash(user_id: str) -> str:
+    """O `user.hash` dos eventos amplos (3.7): HMAC-SHA256 do UUID em bytes."""
+    return hmac.new(USER_HASH_SECRET.encode(), UUID(user_id).bytes, hashlib.sha256).hexdigest()
+
+
+@pytest.fixture
+def user_hash_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GS_USER_HASH_SECRET", USER_HASH_SECRET)
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+def test_find_user_traduz_o_user_hash_no_id_da_conta(capsys: pytest.CaptureFixture[str]) -> None:
+    create_user(capsys)
+    wanted = create_user(capsys)
+
+    exit_code, out, _ = run(capsys, "find-user", "--user-hash", user_hash(wanted))
+
+    assert exit_code == EXIT_OK
+    assert out == f"{wanted}\n"
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+def test_find_user_aceita_o_hash_em_maiusculas(capsys: pytest.CaptureFixture[str]) -> None:
+    wanted = create_user(capsys)
+
+    exit_code, out, _ = run(capsys, "find-user", "--user-hash", user_hash(wanted).upper())
+
+    assert exit_code == EXIT_OK
+    assert out == f"{wanted}\n"
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+def test_find_user_de_hash_sem_conta_sai_como_nao_encontrada(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    create_user(capsys)
+
+    exit_code, out, err = run(capsys, "find-user", "--user-hash", "0" * 64)
+
+    assert exit_code == EXIT_NOT_FOUND
+    assert out == ""
+    assert "nenhuma conta" in err
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        pytest.param("", id="vazio"),
+        pytest.param("a" * 63, id="63-caracteres"),
+        pytest.param("a" * 65, id="65-caracteres"),
+        pytest.param("g" * 64, id="nao-hexadecimal"),
+    ],
+)
+def test_find_user_com_hash_malformado_sai_com_erro_de_uso(
+    capsys: pytest.CaptureFixture[str], malformed: str
+) -> None:
+    exit_code, out, _ = run(capsys, "find-user", "--user-hash", malformed)
+
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+
+
+# --- `--user-hash -`: o hash pela entrada padrão, fora da linha de comando e do log do sudo ----
+
+
+def run_with_stdin(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, stdin: str
+) -> tuple[int, str, str]:
+    monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+    return run(capsys, "find-user", "--user-hash", "-")
+
+
+@pytest.mark.usefixtures("user_hash_secret")
+@pytest.mark.parametrize(
+    "surround",
+    [
+        pytest.param("{}", id="sem-quebra-de-linha"),
+        pytest.param("{}\n", id="quebra-de-linha"),
+        pytest.param("  {}  \n", id="espacos"),
+        pytest.param("\t{}\r\n", id="tab-e-crlf"),
+    ],
+)
+def test_find_user_le_o_hash_da_entrada_padrao(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, surround: str
+) -> None:
+    wanted = create_user(capsys)
+
+    exit_code, out, _ = run_with_stdin(capsys, monkeypatch, surround.format(user_hash(wanted)))
+
+    assert exit_code == EXIT_OK
+    assert out == f"{wanted}\n"
+
+
+@pytest.mark.parametrize(
+    "stdin",
+    [
+        pytest.param("", id="vazia"),
+        pytest.param("\n", id="so-quebra-de-linha"),
+        pytest.param("a" * 63 + "\n", id="63-caracteres"),
+        pytest.param("a" * 32 + " " + "a" * 32, id="espaco-no-meio"),
+        pytest.param("a" * 64 + "\n" + "b" * 64 + "\n", id="dois-hashes"),
+        pytest.param("g" * 64, id="nao-hexadecimal"),
+    ],
+)
+def test_find_user_com_entrada_padrao_vazia_ou_malformada_sai_com_erro_de_uso(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, stdin: str
+) -> None:
+    exit_code, out, err = run_with_stdin(capsys, monkeypatch, stdin)
+
+    assert exit_code == EXIT_USAGE
+    assert out == ""
+    assert "64 caracteres hexadecimais" in err
