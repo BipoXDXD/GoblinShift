@@ -123,6 +123,9 @@ audit_event = Table(
     # IP truncado: /24 em IPv4 e /48 em IPv6 (3.6).
     Column("ip_prefix", CIDR),
     Column("occurred_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # `X-Request-ID` da requisição que gerou o evento; no login recusado, é o código que a tela
+    # mostra e que a pessoa cita no recurso contra o bloqueio (J-10). Nulo fora de requisição.
+    Column("request_id", Uuid),
     Index(None, "occurred_at"),
     Index(None, "user_id", "occurred_at"),
     CheckConstraint(
