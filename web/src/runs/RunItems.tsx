@@ -114,7 +114,7 @@ function FormulaCells({ summary }: { readonly summary: RunItem["formula_cells"] 
   return (
     <>
       {summary !== null && (
-        <ul aria-label={F.columnsLabel} className="flex flex-col gap-0.5 text-sm tabular-nums">
+        <ul aria-label={F.columnsLabel} className="flex flex-col gap-1 text-sm tabular-nums">
           {summary.columns.map((column, index) => (
             <li key={index}>
               {F.column(shortName(column.name), countedText(column.cells, F.cells))}
