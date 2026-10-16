@@ -358,3 +358,52 @@ def test_limitador_desligado_pelo_administrador_marca_o_lote_inteiro(
     report = sweep_missing_objects(factory(), storage, after=None, limit=50, max_absent_ratio=1.0)
 
     assert (report.marked, report.governor_tripped) == (10, False)
+
+
+def test_ilegiveis_junto_com_ausentes_acionam_o_limitador_sem_marcar(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # 6 ilegíveis diluiriam 2 ausentes em 2/10; sobre os legíveis são 2/4, e o EIO já indica
+    # storage com problema, não arquivo perdido.
+    objects = sorted_objects(factory, storage, 10)
+    for _, key in objects[6:8]:
+        storage.delete(key)
+    mark_mounted(storage)
+    failing = UnreadableStorage(storage, {key for _, key in objects[:6]})
+
+    report = sweep(factory, failing)
+
+    assert (report.unreadable, report.absent, report.marked) == (6, 2, 0)
+    assert report.governor_tripped is True
+    assert report.resume_after is None
+    assert {state_of(factory, object_id) for object_id, _ in objects} == {ObjectState.COMMITTED}
+
+
+def test_um_ilegivel_junto_com_um_ausente_ja_aciona_o_limitador(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    objects = sorted_objects(factory, storage, GOVERNOR_MIN_SAMPLE)
+    storage.delete(objects[1][1])
+    mark_mounted(storage)
+
+    report = sweep(factory, UnreadableStorage(storage, {objects[0][1]}))
+
+    assert (report.unreadable, report.absent, report.marked, report.governor_tripped) == (
+        1,
+        1,
+        0,
+        True,
+    )
+
+
+def test_lote_so_com_ilegiveis_nao_aciona_o_limitador_e_o_cursor_anda(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    objects = sorted_objects(factory, storage, 3)
+    mark_mounted(storage)
+    failing = UnreadableStorage(storage, {key for _, key in objects})
+
+    report = sweep(factory, failing, limit=2)
+
+    assert (report.unreadable, report.marked, report.governor_tripped) == (2, 0, False)
+    assert report.resume_after == objects[1][0]

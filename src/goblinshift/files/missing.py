@@ -126,7 +126,7 @@ def sweep_missing_objects(
     presence = {row.id: _presence(storage, row.storage_key) for row in rows}
     absent = [object_id for object_id, found in presence.items() if found is _Presence.ABSENT]
     unreadable = sum(found is _Presence.UNREADABLE for found in presence.values())
-    if _too_many_absent(len(absent), len(rows), max_absent_ratio):
+    if _too_many_absent(len(absent), unreadable, len(rows), max_absent_ratio):
         return MissingSweep(
             checked=len(rows),
             absent=len(absent),
@@ -151,12 +151,18 @@ def sweep_missing_objects(
     )
 
 
-def _too_many_absent(absent: int, checked: int, max_absent_ratio: float) -> bool:
+def _too_many_absent(absent: int, unreadable: int, checked: int, max_absent_ratio: float) -> bool:
     """Ausentes demais para ser perda de arquivo, e não storage errado.
 
-    Num lote pequeno (o fim de cada volta, ou um ambiente com poucos objetos), a fração não diz
-    muito; ali o sinal é todos os conferidos sumirem de uma vez, a partir de dois.
+    Ilegível junto com ausente aciona sempre: disco devolvendo EIO é storage com problema, e o
+    ausente ao lado dele não prova perda. Daí em diante todo conferido é legível, e os ilegíveis
+    não têm como diluir a fração. Num lote pequeno (o fim de cada volta, ou um ambiente com poucos
+    objetos), a fração não diz muito; ali o sinal é todos sumirem de uma vez, a partir de dois.
     """
+    if absent == 0:
+        return False
+    if unreadable > 0:
+        return True
     if checked < GOVERNOR_MIN_SAMPLE:
         return checked >= _SMALL_LOT_MIN_ALL_ABSENT and absent == checked
     return absent > max_absent_ratio * checked
