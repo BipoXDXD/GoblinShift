@@ -141,4 +141,21 @@ describe("Oficina: presets", () => {
       expect(sent(api.requests, "GET /api/v1/presets")).toHaveLength(2);
     });
   });
+
+  it("If-Match recusado (428) mostra a falha na seção e mantém o preset", async () => {
+    const { user } = setup({
+      [DELETE_ROUTE]: () => problemResponse(428, "PRECONDITION_REQUIRED"),
+    });
+
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Excluir preset" }));
+
+    expect(await within(section).findByRole("alert")).toHaveTextContent(
+      "O pedido foi recusado. Recarregue a página e tente de novo.",
+    );
+    expect(within(section).getByRole("heading", { name: "Clientes do mês" })).toBeVisible();
+  });
 });
