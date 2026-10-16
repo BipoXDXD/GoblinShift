@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from goblinshift.processing.media_mill.tools import TimeBudget, run_tool
+from goblinshift.processing.media_mill.tools import TimeBudget, ToolTimeoutError, run_tool
 from goblinshift.processing.recipe import FailureCode, RecipeFailure
 
 
@@ -62,13 +62,11 @@ def test_arquivo_maior_que_o_teto_mata_o_filho(tmp_path: Path) -> None:
     assert target.stat().st_size <= 256 * 1024 * 1024
 
 
-def test_chamada_que_passa_do_prazo_e_falha_de_recurso(tmp_path: Path) -> None:
-    with pytest.raises(RecipeFailure) as failure:
+def test_chamada_que_passa_do_prazo_e_interrompida(tmp_path: Path) -> None:
+    with pytest.raises(ToolTimeoutError):
         run_tool(
             python("import time; time.sleep(30)"), timeout_s=0.5, scratch=tmp_path, name="slow"
         )
-
-    assert failure.value.code is FailureCode.RESOURCE_LIMIT_EXCEEDED
 
 
 def test_orcamento_limita_o_prazo_ao_que_sobra() -> None:

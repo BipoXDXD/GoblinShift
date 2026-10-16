@@ -34,8 +34,11 @@ from goblinshift.processing.media_mill.rejection import MediaRejected, Rejection
 from goblinshift.processing.media_mill.signature import HEADER_BYTES, detect_container
 from goblinshift.processing.media_mill.tools import (
     DEFAULT_BUDGET_S,
+    Outcome,
     TimeBudget,
     Tools,
+    ToolTimeoutError,
+    budget_exhausted,
     run_tool,
 )
 from goblinshift.processing.names import safe_stem
@@ -58,10 +61,6 @@ AUDIO_BIT_DEPTH = 16
 COPY_CHUNK_BYTES = 1024 * 1024
 # A saída do ffprobe descreve no máximo 16 faixas: alguns KiB. Acima disto, não é vídeo comum.
 PROBE_OUTPUT_MAX_BYTES = 1024 * 1024
-# Teto de cada chamada; todas descontam também do orçamento da execução (TimeBudget).
-PROBE_TIMEOUT_S = 30
-AUDIO_TIMEOUT_S = 180
-THUMBNAIL_TIMEOUT_S = 90
 MS_PER_S = 1000
 # 1.5: uma miniatura em 10% da duração; três em 10%, 50% e 90%.
 THUMBNAIL_POINTS = {
@@ -73,6 +72,22 @@ THUMBNAIL_BEFORE_TARGET = "THUMBNAIL_BEFORE_TARGET"
 _AUDIO_EXTENSIONS = {AudioFormat.WAV: ".wav", AudioFormat.FLAC: ".flac"}
 
 
+@dataclass(frozen=True)
+class CallTimeouts:
+    """Teto de cada chamada (s); todas descontam também do orçamento da execução (TimeBudget).
+
+    Passar do teto da chamada recusa só aquele vídeo (`MEDIA_TOO_LARGE`): um GOP enorme, com um
+    keyframe só em 300 s de 1080p60, faz a busca precisa da miniatura decodificar milhares de
+    quadros. Esgotar o orçamento da execução falha a execução inteira (`RESOURCE_LIMIT_EXCEEDED`).
+    Referência (Mac, 1 CPU, sem gVisor): ~100 quadros 1080p por segundo; com keyframe a cada
+    10 s, cada miniatura decodifica no máximo 600 quadros.
+    """
+
+    probe_s: float = 20
+    audio_s: float = 60
+    thumbnail_s: float = 60
+
+
 class MediaMillV1:
     def __init__(
         self,
@@ -81,7 +96,9 @@ class MediaMillV1:
         tools: Tools | None = None,
         budget_s: float = DEFAULT_BUDGET_S,
         clock: Callable[[], float] = time.monotonic,
+        timeouts: CallTimeouts | None = None,
     ) -> None:
+        self._timeouts = timeouts or CallTimeouts()
         self._limits = limits or Limits()
         self._max_inputs = max_inputs
         self._tools = tools
@@ -99,9 +116,8 @@ class MediaMillV1:
         # trabalho da tentativa (a raiz do container é somente leitura).
         with tempfile.TemporaryDirectory(prefix="media-mill-") as scratch:
             for source in inputs:
-                mill = _Mill(
-                    tools, budget, self._limits, params, Path(scratch, f"{source.position:04}")
-                )
+                work = Path(scratch, f"{source.position:04}")
+                mill = _Mill(_Runner(tools, budget, self._timeouts, work), self._limits, params)
                 items.append(mill.process(source, out))
                 progress.item_done(source.position)
         details: dict[str, DetailValue] = {
@@ -128,17 +144,40 @@ class _Converted:
     thumbnail_box: Box | None = None
 
 
+class _Runner:
+    """Roda as ferramentas de um vídeo no rascunho dele, com o teto da chamada e o orçamento."""
+
+    def __init__(
+        self, tools: Tools, budget: TimeBudget, timeouts: CallTimeouts, work: Path
+    ) -> None:
+        self.tools = tools
+        self.timeouts = timeouts
+        self.work = work
+        self._budget = budget
+
+    def run(self, argv: Sequence[str], *, cap_s: float, name: str) -> Outcome:
+        timeout_s = self._budget.timeout(cap_s)
+        try:
+            return run_tool(argv, timeout_s=timeout_s, scratch=self.work, name=name)
+        except ToolTimeoutError:
+            if timeout_s < cap_s:
+                raise budget_exhausted() from None
+            raise MediaRejected(
+                RejectionCode.MEDIA_TOO_LARGE,
+                f"processar este vídeo passou de {cap_s:g} s numa etapa ({name})",
+            ) from None
+
+
 class _Mill:
     """Um vídeo: inspeção e conversões no rascunho próprio, depois a cópia para `out/`."""
 
-    def __init__(
-        self, tools: Tools, budget: TimeBudget, limits: Limits, params: Params, work: Path
-    ) -> None:
-        self._tools = tools
-        self._budget = budget
+    def __init__(self, runner: _Runner, limits: Limits, params: Params) -> None:
+        self._runner = runner
+        self._tools = runner.tools
+        self._timeouts = runner.timeouts
+        self._work = runner.work
         self._limits = limits
         self._params = params
-        self._work = work
 
     def process(self, source: InputFile, out: OutputDir) -> ItemOk | ItemRejected:
         self._work.mkdir()
@@ -166,11 +205,8 @@ class _Mill:
         return converted
 
     def _inspect(self, source: Source) -> Inspected:
-        outcome = run_tool(
-            probe_argv(self._tools.ffprobe, source),
-            timeout_s=self._budget.timeout(PROBE_TIMEOUT_S),
-            scratch=self._work,
-            name="probe",
+        outcome = self._runner.run(
+            probe_argv(self._tools.ffprobe, source), cap_s=self._timeouts.probe_s, name="probe"
         )
         if not outcome.succeeded:
             raise _damaged("o ffprobe não conseguiu ler o arquivo")
@@ -194,9 +230,7 @@ class _Mill:
             audio_format=self._params.audio_format,
             target=target,
         )
-        outcome = run_tool(
-            argv, timeout_s=self._budget.timeout(AUDIO_TIMEOUT_S), scratch=self._work, name="audio"
-        )
+        outcome = self._runner.run(argv, cap_s=self._timeouts.audio_s, name="audio")
         if not outcome.succeeded or read_log(outcome.log).has_errors or not _non_empty(target):
             raise _damaged("a faixa de áudio está danificada ou truncada")
         return target
@@ -205,10 +239,9 @@ class _Mill:
         label = str(int(point * 100))
         requested_s = float(point) * media.video_duration_s
         at_target = self._work / f"thumbnail-{label}.jpg"
-        outcome = run_tool(
+        outcome = self._runner.run(
             thumbnail_argv(self._tools.ffmpeg, source, at_s=requested_s, box=box, target=at_target),
-            timeout_s=self._budget.timeout(THUMBNAIL_TIMEOUT_S),
-            scratch=self._work,
+            cap_s=self._timeouts.thumbnail_s,
             name=f"thumbnail-{label}",
         )
         log = read_log(outcome.log)
@@ -226,11 +259,8 @@ class _Mill:
         argv = last_frame_before_argv(
             self._tools.ffmpeg, source, until_s=requested_s, box=box, target=target
         )
-        outcome = run_tool(
-            argv,
-            timeout_s=self._budget.timeout(THUMBNAIL_TIMEOUT_S),
-            scratch=self._work,
-            name=f"thumbnail-{label}-before",
+        outcome = self._runner.run(
+            argv, cap_s=self._timeouts.thumbnail_s, name=f"thumbnail-{label}-before"
         )
         log = read_log(outcome.log)
         if (

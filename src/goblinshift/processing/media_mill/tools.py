@@ -6,9 +6,9 @@ Quem monta a linha de comando é `commands`; aqui só se executa, sempre do mesm
   `FFREPORT` (que faria o FFmpeg gravar um relatório onde quisesse) nunca chegam ao filho;
 - `stdin` em `/dev/null` (além do `-nostdin`), `stdout` e `stderr` em arquivos do diretório de
   rascunho, para a memória do executor não crescer com a saída de um arquivo hostil;
-- tempo: cada chamada tem um teto próprio e desconta do orçamento da execução inteira
-  (`TimeBudget`), abaixo dos 10 minutos da tentativa (1.7). Estourar é `RESOURCE_LIMIT_EXCEEDED`,
-  falha determinística, como o catálogo de 1.6 prevê para tempo;
+- tempo: cada chamada tem um prazo, o menor entre o teto dela e o que sobra do orçamento da
+  execução inteira (`TimeBudget`), abaixo dos 10 minutos da tentativa (1.7). Estourar levanta
+  `ToolTimeoutError`; a receita decide se recusa o vídeo ou falha a execução;
 - memória e tamanho de arquivo: `RLIMIT_AS` e `RLIMIT_FSIZE` no filho, abaixo dos 2 GiB do
   container, para um decodificador descontrolado morrer sozinho sem levar o executor junto.
 """
@@ -57,6 +57,10 @@ def _absolute_binary(name: str) -> Path:
     return Path(found).resolve()
 
 
+class ToolTimeoutError(Exception):
+    """A chamada passou do prazo; quem chamou decide se é o vídeo ou a execução que falha."""
+
+
 class TimeBudget:
     """Orçamento de tempo da execução inteira, medido com relógio monotônico."""
 
@@ -68,7 +72,7 @@ class TimeBudget:
         """Prazo da próxima chamada: o teto dela ou o que sobra do orçamento, o menor."""
         remaining = self._deadline - self._clock()
         if remaining <= 0:
-            raise _time_exceeded()
+            raise budget_exhausted()
         return min(cap_s, remaining)
 
 
@@ -102,7 +106,8 @@ def run_tool(argv: Sequence[str], *, timeout_s: float, scratch: Path, name: str)
                 preexec_fn=_limit_child,
             )
         except subprocess.TimeoutExpired:
-            raise _time_exceeded() from None
+            # O `subprocess.run` já matou (SIGKILL) e esperou o filho.
+            raise ToolTimeoutError(f"{name} passou de {timeout_s:.1f} s") from None
     return Outcome(completed.returncode, stdout_path, log_path)
 
 
@@ -116,7 +121,7 @@ def _limit_child() -> None:
         )
 
 
-def _time_exceeded() -> RecipeFailure:
+def budget_exhausted() -> RecipeFailure:
     return RecipeFailure(
         FailureCode.RESOURCE_LIMIT_EXCEEDED,
         "a conversão dos vídeos passou do tempo disponível na tentativa",
