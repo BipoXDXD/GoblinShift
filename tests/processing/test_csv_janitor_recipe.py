@@ -1,6 +1,7 @@
 """Receita csv-janitor v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.1, 1.3 e 1.7)."""
 
 import hashlib
+import shutil
 import unicodedata
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from goblinshift.processing.recipe import (
     InputFile,
     ItemOk,
     ItemRejected,
+    Preview,
     Report,
 )
 from goblinshift.processing.registry import RECIPES
@@ -53,7 +55,8 @@ class Workspace:
         )
 
     def output_names(self) -> list[str]:
-        return sorted(path.name for path in self.out_dir.iterdir())
+        """Saídas de conteúdo na raiz de out/; os previews ficam no grupo próprio."""
+        return sorted(path.name for path in self.out_dir.iterdir() if path.is_file())
 
 
 @pytest.fixture
@@ -78,6 +81,7 @@ def test_tabela_valida_gera_um_csv_limpo_com_contagens(work: Workspace) -> None:
                 "written": 1,
                 "blank_lines_ignored": 0,
             },
+            previews=(Preview("previews/clientes.csv", "clientes.csv"),),
         )
     ]
     assert (work.out_dir / "clientes.csv").read_bytes() == VALID.encode()
@@ -141,8 +145,8 @@ def test_tabela_um_byte_acima_do_tamanho_e_rejeitada(work: Workspace) -> None:
     at_limit = work.run(recipe=CsvJanitorV1(limits=Limits(table_bytes=size)))
 
     assert isinstance(at_limit.items[0], ItemOk)
-    for path in work.out_dir.iterdir():
-        path.unlink()
+    shutil.rmtree(work.out_dir)
+    work.out_dir.mkdir()
     above = work.run(recipe=CsvJanitorV1(limits=Limits(table_bytes=size - 1)))
     assert isinstance(above.items[0], ItemRejected)
 

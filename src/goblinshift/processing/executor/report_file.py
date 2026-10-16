@@ -71,6 +71,7 @@ def _item(item: ReportItem, original_name: str) -> dict[str, object]:
                 "counts": dict(item.counts),
                 "details": dict(item.details),
                 "warnings": _warnings(item.warnings),
+                "previews": [{"path": p.path, "of": p.of} for p in item.previews],
                 "notices": [notice.value for notice in item.notices],
             }
         case ItemRejected():
