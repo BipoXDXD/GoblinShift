@@ -53,6 +53,50 @@ async function pretendGpu(page: Page): Promise<void> {
   });
 }
 
+/** Quanto o relógio dos quadros anda a cada {@link nextFrame}: a 30° por segundo, 30° de giro. */
+const FRAME_STEP_MS = 1_000;
+
+/**
+ * Girando, a cena pede um quadro atrás do outro, e cada um prende a thread principal por segundos
+ * no SwiftShader: o clique e os scripts do Playwright esperavam mais que o actionTimeout entre um
+ * quadro e outro (runs 38866217252 e 38871601000). Com a cena já parada, a spec passa a segurar os
+ * quadros da página: o requestAnimationFrame só enfileira, e cada {@link nextFrame} desenha um com
+ * o relógio adiantado de FRAME_STEP_MS. A thread fica livre entre os quadros, como com GPU.
+ */
+async function holdFrames(page: Page): Promise<void> {
+  await page.evaluate((stepMs: number) => {
+    const queued = new Map<number, FrameRequestCallback>();
+    let nextId = 1;
+    let clock = performance.now();
+    window.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+      const id = nextId;
+      nextId += 1;
+      queued.set(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = (id: number): void => {
+      queued.delete(id);
+    };
+    Object.assign(window, {
+      e2eNextFrame: (): void => {
+        clock += stepMs;
+        const callbacks = [...queued.values()];
+        queued.clear();
+        for (const callback of callbacks) {
+          callback(clock);
+        }
+      },
+    });
+  }, FRAME_STEP_MS);
+}
+
+/** Desenha um quadro segurado por {@link holdFrames}. */
+async function nextFrame(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as unknown as { e2eNextFrame: () => void }).e2eNextFrame();
+  });
+}
+
 async function withoutWebGl(page: Page): Promise<void> {
   await page.addInitScript(() => {
     // O original é chamado com o `this` certo pelo Reflect.apply logo abaixo.
@@ -159,6 +203,11 @@ test("WebGL só em software conta como sem WebGL", async ({ page }) => {
 });
 
 test.describe("com GPU", () => {
+  // O SwiftShader usa todos os núcleos do runner: com o fullyParallel, quatro cenas montando ao
+  // mesmo tempo se estrangulavam até estourar o teto do teste (run 38871601000). Em fila, num
+  // worker só, uma cena por projeto; o modo default, ao contrário do serial, não pula o resto
+  // quando um teste falha.
+  test.describe.configure({ mode: "default" });
   // Montar a cena em software leva mais que o teto padrão de 20 s da suíte.
   test.slow();
   // Cada quadro em software trava a thread principal; sob carga, um clique espera mais que 5 s.
@@ -293,20 +342,20 @@ test.describe("com GPU", () => {
   test("Girar liga e desliga a auto-rotação", async ({ page }) => {
     await page.goto("/");
     await waitSceneStill(page);
+    await holdFrames(page);
     const spin = page.getByRole("button", { name: "Girar" });
     const host = sceneHost(page);
+    const before = await host.getAttribute("data-giro");
 
     await spin.click();
     await expect(spin).toHaveAttribute("aria-pressed", "true");
     await expect(host).toHaveAttribute("data-movimento", "girando");
-    const before = await host.getAttribute("data-giro");
+    // O primeiro quadro do giro marca o tempo; o segundo já anda.
+    await nextFrame(page);
+    await nextFrame(page);
     await expect(host).not.toHaveAttribute("data-giro", before ?? "");
 
-    // Girando, o SwiftShader desenha um quadro atrás do outro e o Chromium não confirma o evento de
-    // mouse do CDP até sobrar um quadro livre: o click real espera mais que o actionTimeout (run
-    // 38866217252). O clique real já foi provado acima, com a cena parada; aqui basta o evento de
-    // clique no botão, que roda entre os quadros como qualquer script da página.
-    await spin.dispatchEvent("click");
+    await spin.click();
     await expect(spin).toHaveAttribute("aria-pressed", "false");
     await expect(host).toHaveAttribute("data-movimento", "parado");
   });
