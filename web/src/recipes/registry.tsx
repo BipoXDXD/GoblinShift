@@ -10,6 +10,9 @@ import { DownloadsDetoxFields } from "./downloads-detox/DownloadsDetoxFields";
 import { downloadsDetoxFieldId, parseDownloadsDetox } from "./downloads-detox/schema";
 import { downloadsDetoxSettings } from "./downloads-detox/settings";
 import { ImageForgeFields } from "./image-forge/ImageForgeFields";
+import { PdfPressFields } from "./pdf-press/PdfPressFields";
+import { parsePdfPress, pdfPressFieldId } from "./pdf-press/schema";
+import { pdfPressSettings } from "./pdf-press/settings";
 import { imageForgeFieldId, parseImageForge } from "./image-forge/schema";
 import { imageForgeSettings } from "./image-forge/settings";
 import type {
@@ -34,6 +37,8 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly title: string;
   /** Atributo `accept` do input de arquivos; `null` aceita qualquer tipo. */
   readonly accept: string | null;
+  /** A ordem das entradas muda o resultado (merge do PDF Press): a lista mostra a posição. */
+  readonly numberedInputs?: true;
   /** `null` quando o catálogo não traz a versão num formato que o formulário conheça. */
   readonly formFor: (version: CatalogVersion) => RecipeForm | null;
   /** Id do controle para um caminho relativo a `parameters`; `null` se não for um campo. */
@@ -60,8 +65,8 @@ function catalogForm<K extends RecipeId, S>({
     return {
       initialDraft: initialDraft(settings),
       inputLimits,
-      renderFields: ({ errors, onDraftChange }) => (
-        <Fields settings={settings} errors={errors} onDraftChange={onDraftChange} />
+      renderFields: ({ errors, onDraftChange, inputs }) => (
+        <Fields settings={settings} errors={errors} onDraftChange={onDraftChange} inputs={inputs} />
       ),
     };
   };
@@ -107,6 +112,20 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       Fields: DownloadsDetoxFields,
     }),
     fieldIdFor: downloadsDetoxFieldId,
+  },
+  "pdf-press": {
+    id: "pdf-press",
+    version: 1,
+    title: TEXT.pdfPress.title,
+    // A assinatura %PDF- é conferida no executor; aqui é só o filtro da janela de arquivos.
+    accept: ".pdf,application/pdf",
+    numberedInputs: true,
+    formFor: catalogForm({
+      settingsOf: pdfPressSettings,
+      initialDraft: (settings) => parsePdfPress(settings.defaults, settings, []),
+      Fields: PdfPressFields,
+    }),
+    fieldIdFor: pdfPressFieldId,
   },
 };
 
