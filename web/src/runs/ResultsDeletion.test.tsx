@@ -247,7 +247,7 @@ describe("Resultados: excluir", () => {
     });
   });
 
-  it("falha do pedido aparece e os downloads continuam", async () => {
+  it("execução que não terminou (409): diz que só dá para excluir depois e os downloads continuam", async () => {
     const { user } = setup({ [DELETE_ROUTE]: () => problemResponse(409, "STATE_CONFLICT") });
 
     const region = await resultsRegion();
