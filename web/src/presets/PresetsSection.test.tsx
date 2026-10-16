@@ -6,6 +6,7 @@ import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
+import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -157,5 +158,33 @@ describe("Oficina: presets", () => {
       "O pedido foi recusado. Recarregue a página e tente de novo.",
     );
     expect(within(section).getByRole("heading", { name: "Clientes do mês" })).toBeVisible();
+  });
+
+  it("com a exclusão em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({ [DELETE_ROUTE]: held.handler });
+    const section = await presetsSection();
+    const remove = await within(section).findByRole("button", {
+      name: "Excluir o preset Clientes do mês",
+    });
+    await user.click(remove);
+    const dialog = screen.getByRole("dialog", { name: "Excluir o preset Clientes do mês?" });
+    await user.click(within(dialog).getByRole("button", { name: "Excluir preset" }));
+    await waitFor(() => {
+      expect(sent(api.requests, DELETE_ROUTE)).toHaveLength(1);
+    });
+
+    expect(escapeIsBlocked(dialog)).toBe(true);
+    forceClose(dialog);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(remove);
+    expect(screen.getByRole("dialog", { name: "Excluir o preset Clientes do mês?" })).toBeVisible();
+    held.answer(problemResponse(503, "SERVICE_UNAVAILABLE"));
+
+    expect(await within(section).findByRole("alert")).toHaveTextContent(
+      "O serviço está indisponível no momento. Tente de novo mais tarde.",
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent(api.requests, DELETE_ROUTE)).toHaveLength(1);
   });
 });
