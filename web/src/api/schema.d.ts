@@ -717,6 +717,11 @@ export interface components {
             active_run_id: string | null;
             /** Daily Quota Resets At */
             daily_quota_resets_at: string | null;
+            /**
+             * Executor Ms Last 24H
+             * @description Tempo de executor das tentativas que começaram nas últimas 24 h (1.8).
+             */
+            executor_ms_last_24h: number;
         };
         /** ValidatedRunResponse */
         ValidatedRunResponse: {
