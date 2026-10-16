@@ -52,7 +52,7 @@ As quatro causas da manutenção leem o span `maintenance.cycle` (`goblinshift.e
 | `maintenance.purge_limit_reached` | `1` se o limitador cortou o expurgo da volta, `0` se não |
 | `maintenance.accounts_deletion_overdue` | contas com `DELETE /me` pedido há 20 h ou mais |
 | `maintenance.storage_global_reserved_bytes`, `maintenance.storage_global_max_bytes` | o pool global do livro-razão (ADR 024) |
-| `maintenance.runs_to_anonymize`, `maintenance.runs_to_delete`, `maintenance.idempotency_records_expired`, `maintenance.uploads_to_anonymize`, `maintenance.uploads_to_delete` | o que a retenção de 1.7 ainda deve: tamanho do acúmulo depois da volta |
+| `maintenance.runs_to_anonymize`, `maintenance.outputs_to_anonymize`, `maintenance.runs_to_delete`, `maintenance.idempotency_records_expired`, `maintenance.uploads_to_anonymize`, `maintenance.uploads_to_delete` | o que a retenção de 1.7 ainda deve: tamanho do acúmulo depois da volta |
 | `maintenance.<etapa>` | o que cada etapa fez na volta (`runs_deleted`, `runs_anonymized`, `file_rows_deleted`, `objects_purged`, `leases_reconciled`, …) |
 | `duration_ms` | duração da volta |
 

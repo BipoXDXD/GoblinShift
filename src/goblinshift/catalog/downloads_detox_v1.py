@@ -5,9 +5,9 @@ chama, para o erro apontar o campo sem duplicar a regra. Dentro da versão 1, sc
 enums nunca mudam (1.6).
 
 A recusa de `name_prefix` enviado com `name_mode: preserve` (A13) mora aqui, porque só o modelo
-sabe o que o cliente enviou de fato (`model_fields_set`); o default continua nos parâmetros
-resolvidos. Por isso parâmetros já resolvidos não devem ser validados de novo por este modelo:
-quem os guarda (presets, por exemplo) guarda o corpo enviado.
+sabe o que o cliente enviou de fato (`model_fields_set`). O default enviado de volta é aceito
+(decisão de 2026-10-16): os parâmetros resolvidos o trazem, e resolvê-los de novo, ao repetir a
+configuração de uma execução, dá o mesmo resultado.
 """
 
 from typing import Annotated, Self
@@ -48,6 +48,12 @@ class DownloadsDetoxV1Parameters(BaseModel):
 
     @model_validator(mode="after")
     def _prefix_only_with_indexed(self) -> Self:
-        if "name_prefix" in self.model_fields_set and self.name_mode is NameMode.PRESERVE:
+        # O default enviado de volta é aceito: os parâmetros resolvidos o trazem, e repetir a
+        # configuração de uma execução (2.2) os reenvia. Só um prefixo diferente indica engano.
+        if (
+            "name_prefix" in self.model_fields_set
+            and self.name_mode is NameMode.PRESERVE
+            and self.name_prefix != DEFAULT_NAME_PREFIX
+        ):
             raise ValueError("name_prefix só se aplica a name_mode indexed")
         return self

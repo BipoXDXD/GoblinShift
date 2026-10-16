@@ -56,3 +56,19 @@ def encode_page_map(
         ],
     }
     return (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
+
+
+def encode_document_preview(path: str, planned: PlannedDocument) -> bytes:
+    """Preview de um documento (ADR 037): o trecho do mapa com as páginas dele, na ordem.
+
+    Até 400 páginas, bem abaixo dos 64 KiB que a coleta aceita para um preview.
+    """
+    document = {
+        "schema_version": PAGE_MAP_SCHEMA_VERSION,
+        "path": path,
+        "pages": [
+            {"input_position": page.position, "page_number": page.page_number}
+            for page in planned.pages
+        ],
+    }
+    return (json.dumps(document, ensure_ascii=False) + "\n").encode()

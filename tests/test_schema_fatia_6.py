@@ -206,7 +206,10 @@ def _evento(**overrides: object) -> dict[str, object]:
 
 @pytest.mark.parametrize("event_type", [event.value for event in AuditEventType])
 def test_todo_tipo_de_evento_do_enum_e_aceito_pelo_banco(conn: Connection, event_type: str) -> None:
-    conn.execute(insert(audit_event).values(**_evento(event_type=event_type)))
+    # O CHECK `audit_event_details_check` exige o detalhe só na mudança de limites (0016).
+    with_details = event_type == AuditEventType.ACCOUNT_LIMITS_CHANGED
+    extra: dict[str, object] = {"details": {"changes": {}}} if with_details else {}
+    conn.execute(insert(audit_event).values(**_evento(event_type=event_type, **extra)))
 
 
 @pytest.mark.parametrize("event_type", ["", "login_succeeded", "OUTRO"])

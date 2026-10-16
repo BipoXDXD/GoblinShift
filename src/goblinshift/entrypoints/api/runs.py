@@ -16,7 +16,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
-from goblinshift.catalog import CATALOG, RecipeVersionRetiredError, VersionStatus
+from goblinshift.catalog import CATALOG, RecipeVersionRetiredError
 from goblinshift.entrypoints.api.capacity_problems import (
     account_storage_problem,
     daily_quota_problem,
@@ -26,6 +26,7 @@ from goblinshift.entrypoints.api.catalog import (
     MAX_RECIPE_ID_CHARS,
     RECIPE_ID_PATTERN,
     deprecation_headers,
+    recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
@@ -37,12 +38,15 @@ from goblinshift.entrypoints.api.problems import (
 from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.limits import MAX_BATCH_FILES
-from goblinshift.files.states import ArtifactRole
+from goblinshift.files.states import ArtifactRole, Availability
 from goblinshift.identity import Principal, Scope
 from goblinshift.platform.settings import Settings
+from goblinshift.presets import PresetNotFoundError, get_preset
+from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
+    Accepted,
     ActiveRunLimitError,
     DailyQuotaExceededError,
     IdempotencyInProgressError,
@@ -52,19 +56,24 @@ from goblinshift.runs.acceptance import (
     QueueFullError,
     RunCommand,
     accept_run,
+    find_replay,
     parse_idempotency_key,
+    preset_run_hash,
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
+from goblinshift.runs.formula_cells import MAX_COLUMN_NAME_CHARS, MAX_COLUMNS, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, Phase, Status
 from goblinshift.runs.queries import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
+    ItemStatus,
     RunFilters,
     RunNotFoundError,
     RunView,
     get_results,
     get_run,
+    get_run_detail,
     list_runs,
 )
 
@@ -134,6 +143,59 @@ class RunResponse(BaseModel):
     queue_expires_at: datetime
     deadline_at: datetime | None
     error: RunErrorBody | None
+    # Parâmetros resolvidos (com defaults), para repetir a configuração; nulos depois de 30 dias.
+    parameters: dict[str, Any] | None
+    # Preset de origem, se houve; nulo também quando o preset foi excluído.
+    preset_id: UUID | None
+    # Vencimento do primeiro resultado ainda disponível; nulo se não há resultado disponível
+    # (antes da publicação, sem saídas, excluídos ou vencidos).
+    results_expire_at: datetime | None
+
+
+class RunSummaryResponse(BaseModel):
+    inputs: int
+    ok: int
+    rejected: int
+    duplicates: int
+    outputs: int
+
+
+class FormulaColumnResponse(BaseModel):
+    # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto. Nulo
+    # quando o cabeçalho é vazio ou só de espaços (a tela dá o rótulo).
+    name: str | None = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
+    cells: int = Field(ge=1)
+
+
+class FormulaCellsResponse(BaseModel):
+    """Contagem por coluna de `CSV_FORMULA_CELLS`: as maiores primeiro, até o teto (1.3)."""
+
+    columns: list[FormulaColumnResponse] = Field(min_length=1, max_length=MAX_COLUMNS)
+    # Colunas com células que parecem fórmula e que ficaram fora de `columns` pelo teto.
+    more_columns: int = Field(ge=0)
+
+
+class RunItemResponse(BaseModel):
+    """Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo."""
+
+    position: int
+    upload_id: UUID
+    # Nome do próprio upload, para a tela não ler upload a upload; nulo depois de 30 dias.
+    original_name: str | None
+    status: ItemStatus
+    error_code: ItemRejectionCode | None
+    warnings: list[ItemWarningCode]
+    # Fatos que não são aviso e não mudam o estado (A2), como a conversão de Display P3.
+    notices: list[ItemNoticeCode]
+    counts: dict[str, int]
+    duplicate_of: int | None
+    # Só com o aviso CSV_FORMULA_CELLS; nulo sem ele e depois de 30 dias, como `counts`.
+    formula_cells: FormulaCellsResponse | None
+
+
+class RunDetailResponse(RunResponse):
+    summary: RunSummaryResponse | None
+    items: list[RunItemResponse]
 
 
 class AcceptedRunResponse(RunResponse):
@@ -152,11 +214,22 @@ class RunListResponse(BaseModel):
     next_cursor: str | None
 
 
+_ANONYMIZED_NAME_NOTE = (
+    " Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como "
+    "`<role>-<artifact_id>`."
+)
+
+
 class ResultReferenceResponse(BaseModel):
     artifact_id: UUID
-    logical_name: str
+    logical_name: str = Field(
+        description="Nome da saída dentro da execução." + _ANONYMIZED_NAME_NOTE
+    )
     role: ArtifactRole
-    file_name: str
+    file_name: str = Field(
+        description="Nome com que o download entrega o arquivo." + _ANONYMIZED_NAME_NOTE
+    )
+    availability: Availability
 
 
 class RunResultsResponse(BaseModel):
@@ -170,16 +243,7 @@ def _problem(*statuses: int) -> dict[int | str, dict[str, Any]]:
 
 
 def _create_run_openapi() -> dict[str, Any]:
-    """Corpo publicado como `allOf` (campos comuns) + `oneOf` das versões aceitas (1.6).
-
-    `unevaluatedProperties: false` fica no nível do `allOf`, o único em que o JSON Schema
-    2020-12 enxerga as propriedades avaliadas pelas duas partes (ver `catalog.versions`).
-    """
-    variants = [
-        version.variant_schema()
-        for version in CATALOG.list_versions()
-        if version.status is not VersionStatus.RETIRED
-    ]
+    """Corpo publicado como as variantes do catálogo, mais a lista de entradas (1.6)."""
     common = {
         "type": "object",
         "properties": {
@@ -193,7 +257,7 @@ def _create_run_openapi() -> dict[str, Any]:
             },
         },
     }
-    schema = {"allOf": [common, {"oneOf": variants}], "unevaluatedProperties": False}
+    schema = recipe_command_schema(common)
     idempotency_key = {
         "name": _IDEMPOTENCY_KEY_HEADER,
         "in": "header",
@@ -240,10 +304,107 @@ def create_run(
         validated = _validate(run_command, idempotency_key)
         _add_deprecation_headers(response, validated.recipe_id, validated.recipe_version)
         return validated
+    return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
+
+
+class NewPresetRun(BaseModel):
+    """Corpo de `POST /presets/{preset_id}/runs`: só as entradas; a configuração vem do preset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_upload_ids: list[UUID] = Field(max_length=MAX_BATCH_FILES)
+
+
+def _preset_run_openapi() -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "properties": {
+            "input_upload_ids": {
+                "description": "Uploads prontos, na ordem de processamento, sem repetição "
+                "(1 a max_inputs da versão do preset).",
+                "type": "array",
+                "items": {"type": "string", "format": "uuid"},
+                "uniqueItems": True,
+                "minItems": 1,
+                "maxItems": MAX_BATCH_FILES,
+            },
+        },
+        "required": ["input_upload_ids"],
+        "additionalProperties": False,
+    }
+    idempotency_key = {
+        "name": _IDEMPOTENCY_KEY_HEADER,
+        "in": "header",
+        "required": True,
+        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
+    }
+    return {
+        "parameters": [idempotency_key],
+        "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
+    }
+
+
+@router.post(
+    "/presets/{preset_id}/runs",
+    status_code=202,
+    operation_id="createRunFromPreset",
+    responses=_problem(400, 404, 409, 413, 415, 429, 503),
+    openapi_extra=_preset_run_openapi(),
+)
+def create_run_from_preset(
+    principal: Annotated[Principal, Depends(require_scope(Scope.RUNS_WRITE))],
+    _reader: Annotated[Principal, Depends(require_scope(Scope.PRESETS_READ))],
+    command: Annotated[NewPresetRun, Depends(json_command(NewPresetRun))],
+    session: DbSession,
+    request: Request,
+    response: Response,
+    preset_id: UUID,
+) -> AcceptedRunResponse:
+    """Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).
+
+    Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
+    A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
+    """
+    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    inputs = tuple(command.input_upload_ids)
+    try:
+        # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
+        # retry repete a Run aceita em vez de virar 422 ou 404.
+        with session.begin():
+            replay = find_replay(
+                session, principal.owner_id, idempotency_key, preset_run_hash(preset_id, inputs)
+            )
+            if replay is None:
+                source = get_preset(session, principal.owner_id, preset_id)
+    except _REFUSALS as error:
+        raise _refusal_problem(error) from None
+    except PresetNotFoundError:
+        raise _preset_not_found() from None
+    if replay is not None:
+        return _respond_accepted(principal.owner_id, replay, session, request, response)
+    run_command = RunCommand(
+        recipe_id=source.recipe_id,
+        recipe_version=source.recipe_version,
+        input_upload_ids=inputs,
+        parameters=source.parameters,
+        preset_id=source.id,
+    )
+    return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
+
+
+def _accept(
+    owner_id: UUID,
+    run_command: RunCommand,
+    idempotency_key: str | None,
+    session: Session,
+    request: Request,
+    response: Response,
+) -> AcceptedRunResponse:
+    """Aceita e monta o `202`: `Location`, replay e `Sunset` da versão usada."""
     try:
         accepted = accept_run(
             session,
-            principal.owner_id,
+            owner_id,
             run_command,
             idempotency_key,
             _current_traceparent(),
@@ -252,17 +413,23 @@ def create_run(
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None
+    except PresetNotFoundError:
+        # Excluído entre a leitura e a aceitação: o mesmo 404 de quem não o encontrou.
+        raise _preset_not_found() from None
     except AccountCapacityExceededError:
-        raise account_storage_problem(session, principal.owner_id) from None
+        raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
+    return _respond_accepted(owner_id, accepted, session, request, response)
+
+
+def _respond_accepted(
+    owner_id: UUID, accepted: Accepted, session: Session, request: Request, response: Response
+) -> AcceptedRunResponse:
+    view = _read_run(session, owner_id, accepted.run_id)
     record_run_accepted(
-        accepted.run_id,
-        run_command.recipe_id,
-        run_command.recipe_version,
-        replayed=accepted.replayed,
+        accepted.run_id, view.recipe_id, view.recipe_version, replayed=accepted.replayed
     )
-    view = _read_run(session, principal.owner_id, accepted.run_id)
     response.headers["Location"] = request.app.url_path_for(
         get_run_route.__name__, run_id=str(accepted.run_id)
     )
@@ -325,11 +492,34 @@ def get_run_route(
     session: DbSession,
     response: Response,
     run_id: UUID,
-) -> RunResponse:
-    view = _read_run(session, principal.owner_id, run_id)
-    if not view.is_terminal:
+) -> RunDetailResponse:
+    try:
+        with session.begin():
+            detail = get_run_detail(session, principal.owner_id, run_id)
+    except RunNotFoundError:
+        raise _run_not_found() from None
+    if not detail.view.is_terminal:
         response.headers["Retry-After"] = str(POLL_RETRY_AFTER_SECONDS)
-    return _run_response(view)
+    summary = detail.summary
+    return RunDetailResponse(
+        **_run_response(detail.view).model_dump(),
+        summary=RunSummaryResponse(**summary) if summary is not None else None,
+        items=[
+            RunItemResponse(
+                position=item.position,
+                upload_id=item.upload_id,
+                original_name=item.original_name,
+                status=item.status,
+                error_code=item.error_code,
+                warnings=list(item.warnings),
+                notices=list(item.notices),
+                counts=item.counts,
+                duplicate_of=item.duplicate_of,
+                formula_cells=_formula_cells(item.formula_cells),
+            )
+            for item in detail.items
+        ],
+    )
 
 
 @router.get(
@@ -354,6 +544,7 @@ def get_results_route(
                 logical_name=ref.logical_name,
                 role=ref.role,
                 file_name=ref.file_name,
+                availability=ref.availability,
             )
             for ref in results.references
         ],
@@ -470,6 +661,19 @@ def _run_not_found() -> ApiProblem:
     return ApiProblem(ProblemCode.NOT_FOUND, "Execução não encontrada.")
 
 
+def _preset_not_found() -> ApiProblem:
+    return ApiProblem(ProblemCode.NOT_FOUND, "Preset não encontrado.")
+
+
+def _formula_cells(summary: FormulaCells | None) -> FormulaCellsResponse | None:
+    if summary is None:
+        return None
+    return FormulaCellsResponse(
+        columns=[FormulaColumnResponse(name=c.name, cells=c.cells) for c in summary.columns],
+        more_columns=summary.more_columns,
+    )
+
+
 def _run_response(view: RunView) -> RunResponse:
     error = None
     if view.error_code is not None:
@@ -487,6 +691,11 @@ def _run_response(view: RunView) -> RunResponse:
         queue_expires_at=_utc(view.queue_expires_at),
         deadline_at=_utc(view.deadline_at) if view.deadline_at is not None else None,
         error=error,
+        parameters=view.parameters,
+        preset_id=view.preset_id,
+        results_expire_at=(
+            _utc(view.results_expire_at) if view.results_expire_at is not None else None
+        ),
     )
 
 

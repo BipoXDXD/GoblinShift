@@ -22,11 +22,18 @@ import {
 type Schemas = components["schemas"];
 type Run = Schemas["RunResponse"];
 type ArtifactReference = Schemas["ResultReferenceResponse"];
+type Preset = Schemas["PresetResponse"];
 
 // O pedido sai do bundle, que monta o corpo pela spec; a API falsa lê só o que usa, e um corpo
 // fora desse formato derruba o teste com o erro do Zod em vez de seguir com lixo.
 const uploadIntentsSchema = z.object({
   items: z.array(z.object({ name: z.string(), size: z.number().int() })),
+});
+const presetDraftSchema = z.object({
+  name: z.string().min(1).max(100),
+  recipe_id: z.string(),
+  recipe_version: z.number().int(),
+  parameters: z.record(z.string(), z.unknown()),
 });
 const runCommandSchema = z.object({
   recipe_id: z.string(),
@@ -51,7 +58,11 @@ type RunListQuery = z.infer<typeof runListQuerySchema>;
 export type RunCommand = z.infer<typeof runCommandSchema>;
 
 /** Execução com os campos que a matriz de estados troca (status, progresso, erro…). */
-export type RunOverrides = Partial<Omit<Run, "id">>;
+type RunDetail = Schemas["RunDetailResponse"];
+type RunDetailParts = Pick<RunDetail, "summary" | "items">;
+
+/** Execução com os campos que a matriz de estados troca (status, progresso, erro, itens…). */
+export type RunOverrides = Partial<Omit<Run, "id"> & RunDetailParts>;
 
 export interface FakeApi {
   /** Corpo de cada POST /runs aceito, na ordem. */
@@ -89,6 +100,8 @@ interface StoredUpload {
 
 interface StoredRun {
   run: Run;
+  /** Resumo e itens da semeada; a criada por POST /runs os deriva das entradas. */
+  readonly detail?: RunDetailParts;
   /** Execução criada por POST /runs anda a cada consulta; a semeada fica parada. */
   readonly advances: boolean;
   readonly inputIds: readonly string[];
@@ -156,6 +169,10 @@ class FakeState {
   readonly uploads = new Map<string, StoredUpload>();
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
+  /** Execução de cada artefato publicado, para a disponibilidade e a exclusão das saídas. */
+  readonly artifactRuns = new Map<string, { runId: string; role: ArtifactReference["role"] }>();
+  readonly runsWithoutOutputs = new Set<string>();
+  readonly presets = new Map<string, Preset>();
   readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
   readonly #artifactsDir: string;
@@ -176,6 +193,8 @@ class FakeState {
       await this.createUploads(route, request);
     } else if (method === "PUT" && resource === "uploads" && action === "content" && id) {
       await this.receiveContent(route, request, id);
+    } else if (resource === "presets" && action === undefined) {
+      await this.handlePreset(route, request, id);
     } else if (method === "DELETE" && resource === "uploads" && id && segments.length === 2) {
       await this.deleteUpload(route, id);
     } else if (method === "POST" && path === "/runs") {
@@ -188,6 +207,10 @@ class FakeState {
       await this.cancelRun(route, id);
     } else if (method === "GET" && resource === "runs" && id && action === "results") {
       await this.results(route, id);
+    } else if (method === "DELETE" && resource === "runs" && id && action === "artifacts") {
+      await this.deleteRunArtifacts(route, id);
+    } else if (method === "GET" && resource === "artifacts" && id && segments.length === 2) {
+      await this.artifactDetails(route, id);
     } else if (method === "GET" && resource === "artifacts" && id && action === "download") {
       // O Chromium cancela download vindo do route.fulfill: segue para o servidor local, que
       // entrega o que publishArtifacts gravou (e2e/server/serve-dist.ts).
@@ -200,8 +223,9 @@ class FakeState {
 
   seedRun(overrides: RunOverrides): string {
     const id = randomUUID();
-    const run = { ...runBody(id, "csv-janitor"), ...overrides };
-    this.runs.set(id, { run, advances: false, inputIds: [] });
+    const { summary = null, items = [], ...runOverrides } = overrides;
+    const run = { ...runBody(id, "csv-janitor"), ...runOverrides };
+    this.runs.set(id, { run, detail: { summary, items }, advances: false, inputIds: [] });
     return id;
   }
 
@@ -247,6 +271,67 @@ class FakeState {
       sha256: createHash("sha256").update(content).digest("hex"),
     };
     await fulfillJson(route, received, { status: 200 });
+  }
+
+  /**
+   * Presets como a API (presets.py): lista por nome, nome único (409), e DELETE só com o `If-Match`
+   * da revisão atual (ausente → 428, vencido → 412).
+   */
+  private async handlePreset(
+    route: Route,
+    request: Request,
+    id: string | undefined,
+  ): Promise<void> {
+    const method = request.method();
+    if (id === undefined) {
+      await (method === "POST" ? this.createPreset(route, request) : this.listPresets(route));
+      return;
+    }
+    const preset = this.presets.get(id);
+    if (preset === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    } else if (method === "DELETE") {
+      await this.deletePreset(route, request, preset);
+    } else {
+      await fulfillJson(route, preset, {
+        status: 200,
+        headers: { ETag: `"${String(preset.revision)}"` },
+      });
+    }
+  }
+
+  private async listPresets(route: Route): Promise<void> {
+    const data = [...this.presets.values()].sort((a, b) => a.name.localeCompare(b.name));
+    await fulfillJson(route, { data } satisfies Schemas["PresetListResponse"], { status: 200 });
+  }
+
+  private async createPreset(route: Route, request: Request): Promise<void> {
+    const draft = presetDraftSchema.parse(request.postDataJSON());
+    if ([...this.presets.values()].some((preset) => preset.name === draft.name)) {
+      await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
+      return;
+    }
+    const preset: Preset = {
+      ...draft,
+      id: randomUUID(),
+      revision: 1,
+      created_at: NOW,
+      updated_at: NOW,
+    };
+    this.presets.set(preset.id, preset);
+    await fulfillJson(route, preset, { status: 201, headers: { ETag: '"1"' } });
+  }
+
+  private async deletePreset(route: Route, request: Request, preset: Preset): Promise<void> {
+    const ifMatch = await request.headerValue("if-match");
+    if (ifMatch === null) {
+      await fulfillProblem(route, "PRECONDITION_REQUIRED", { status: 428 });
+    } else if (ifMatch !== `"${String(preset.revision)}"`) {
+      await fulfillProblem(route, "PRECONDITION_FAILED", { status: 412 });
+    } else {
+      this.presets.delete(preset.id);
+      await route.fulfill({ status: 204 });
+    }
   }
 
   /** Como a API: 202 para o próprio upload (repetir também) e 404 para o que nunca existiu. */
@@ -320,7 +405,38 @@ class FakeState {
     const headers: Record<string, string> = isTerminal(stored.run)
       ? {}
       : { "Retry-After": POLL_RETRY_AFTER_SECONDS };
-    await fulfillJson(route, stored.run, { status: 200, headers });
+    const detail: RunDetail = { ...stored.run, ...(stored.detail ?? derivedDetail(stored)) };
+    await fulfillJson(route, detail, { status: 200, headers });
+  }
+
+  /** Como a API: 404 sem a execução, 409 antes do fim, 202 (também ao repetir) depois. */
+  private async deleteRunArtifacts(route: Route, id: string): Promise<void> {
+    const stored = this.runs.get(id);
+    if (stored === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    } else if (!isTerminal(stored.run)) {
+      await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
+    } else {
+      this.runsWithoutOutputs.add(id);
+      await route.fulfill({ status: 202 });
+    }
+  }
+
+  private async artifactDetails(route: Route, id: string): Promise<void> {
+    const published = this.artifactRuns.get(id);
+    if (published === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    const details: Schemas["ArtifactDetails"] = {
+      id,
+      role: published.role,
+      size: 0,
+      sha256: "0".repeat(64),
+      expires_at: LATER,
+      availability: this.runsWithoutOutputs.has(published.runId) ? "deleted" : "available",
+    };
+    await fulfillJson(route, details, { status: 200 });
   }
 
   /**
@@ -380,12 +496,19 @@ class FakeState {
     ];
     return files.map(({ role, name, body }) => {
       const artifactId = randomUUID();
+      this.artifactRuns.set(artifactId, { runId: stored.run.id, role });
       writeArtifact(this.#artifactsDir, artifactId, {
         fileName: name,
         body,
         contentType: role === "package" ? "application/zip" : "application/octet-stream",
       });
-      return { artifact_id: artifactId, logical_name: name, role, file_name: name };
+      return {
+        artifact_id: artifactId,
+        logical_name: name,
+        role,
+        file_name: name,
+        availability: "available" as const,
+      };
     });
   }
 }
@@ -397,6 +520,31 @@ function mediaMillOutputs({ name }: { readonly name: string }): { name: string; 
     { name: `audio/${stem}.wav`, body: Buffer.from("RIFF") },
     { name: `thumbnails/${stem}-10pct.jpg`, body: THUMBNAIL_JPEG },
   ];
+}
+
+/** Como o worker: itens pendentes enquanto roda; ao concluir, todos ok e o resumo. */
+function derivedDetail({ run, inputIds }: StoredRun): RunDetailParts {
+  if (run.status === "queued") {
+    return { summary: null, items: [] };
+  }
+  const done = isTerminal(run);
+  const items = inputIds.map((uploadId, index) => ({
+    position: index,
+    upload_id: uploadId,
+    original_name: null,
+    status: done ? ("ok" as const) : ("pending" as const),
+    error_code: null,
+    warnings: [],
+    notices: [],
+    counts: {},
+    duplicate_of: null,
+    formula_cells: null,
+  }));
+  const count = inputIds.length;
+  const summary = done
+    ? { inputs: count, ok: count, rejected: 0, duplicates: 0, outputs: count }
+    : null;
+  return { summary, items };
 }
 
 function isReceived(upload: StoredUpload | undefined): boolean {
@@ -457,6 +605,9 @@ function runBody(id: string, recipeId: string): Run {
     queue_expires_at: LATER,
     deadline_at: null,
     error: null,
+    parameters: {},
+    preset_id: null,
+    results_expire_at: null,
   };
 }
 
