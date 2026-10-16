@@ -6,6 +6,7 @@ quem chama; a transferência de bytes acontece fora dela, entre `open_for_downlo
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -18,7 +19,7 @@ from goblinshift.files.errors import (
     ObjectNotAvailableError,
 )
 from goblinshift.files.limits import ARTIFACT_TTL
-from goblinshift.files.objects import hold, release
+from goblinshift.files.objects import hold, release, request_deletion_of_unreferenced
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
 from goblinshift.files.tables import artifact, stored_object
 
@@ -228,3 +229,32 @@ def open_for_download(
 def finish_download(session: Session, ticket: DownloadTicket) -> None:
     """Encerra o uso do download; repetir é no-op."""
     release(session, HolderKind.DOWNLOAD, ticket.holder_id)
+
+
+def request_artifacts_deletion(
+    session: Session, owner_id: uuid.UUID, artifact_ids: Collection[uuid.UUID]
+) -> None:
+    """Torna os artefatos do dono indisponíveis na hora; os já excluídos ficam como estão.
+
+    Ordem de locks de 3.4: Artifact (`FOR UPDATE`, em ordem de ID) → StoredObject. O objeto só
+    vira `delete_requested` se nenhum upload ou outro artefato válido o aponta: a saída do Detox
+    que reaproveita o objeto da entrada (ADR 020) não apaga o original.
+    """
+    rows = session.execute(
+        select(artifact.c.id, artifact.c.object_id)
+        .where(
+            artifact.c.owner_id == owner_id,
+            artifact.c.id.in_(sorted(set(artifact_ids))),
+            artifact.c.deleted_at.is_(None),
+        )
+        .order_by(artifact.c.id)
+        .with_for_update()
+    ).all()
+    if not rows:
+        return
+    session.execute(
+        update(artifact)
+        .where(artifact.c.id.in_([row.id for row in rows]))
+        .values(deleted_at=func.now())
+    )
+    request_deletion_of_unreferenced(session, [row.object_id for row in rows])

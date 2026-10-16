@@ -101,6 +101,7 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("GET", f"{API}/runs/{{run_id}}"): _scope(Scope.RUNS_READ, "run_id"),
     ("GET", f"{API}/runs/{{run_id}}/results"): _scope(Scope.RUNS_READ, "run_id"),
     ("POST", f"{API}/runs/{{run_id}}/cancel"): _scope(Scope.RUNS_WRITE, "run_id"),
+    ("DELETE", f"{API}/runs/{{run_id}}/artifacts"): _scope(Scope.FILES_WRITE, "run_id"),
 }
 
 
