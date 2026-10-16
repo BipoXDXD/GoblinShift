@@ -15,6 +15,7 @@ const resultReferenceSchema = z.object({
   role: z.enum(["output", "report", "manifest", "package", "preview"]),
   file_name: z.string(),
   availability: z.enum(["available", "expired", "deleted"]),
+  source_artifact_id: z.uuid().nullable(),
 });
 
 const runResultsSchema = z.object({
@@ -25,6 +26,7 @@ const runResultsSchema = z.object({
 
 export type AcceptedRun = z.infer<typeof acceptedRunSchema>;
 export type RunResults = z.infer<typeof runResultsSchema>;
+export type ResultReference = RunResults["artifacts"][number];
 
 interface CreateRunRequest {
   readonly command: RunCommand;

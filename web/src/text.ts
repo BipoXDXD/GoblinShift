@@ -261,6 +261,22 @@ export const TEXT = {
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
+      preview: {
+        imageAlt: (fileName: string) => `Pré-visualização de ${fileName}`,
+        loading: "Carregando a pré-visualização.",
+        failed: "Não foi possível carregar a pré-visualização.",
+        gone: "A pré-visualização expirou ou foi excluída.",
+        unavailable: {
+          expired: "Pré-visualização indisponível: o arquivo expirou.",
+          deleted: "Pré-visualização indisponível: o arquivo foi excluído.",
+        },
+        tableCaption: (fileName: string, rows: number) =>
+          `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
+        pagesCaption: (fileName: string, pages: number) =>
+          `Páginas de ${fileName}: ${pages === 1 ? "1 página" : `${String(pages)} páginas`}`,
+        page: (pageNumber: number, inputPosition: number) =>
+          `Página ${String(pageNumber)} do arquivo ${String(inputPosition + 1)}`,
+      },
     },
   },
   recipeFields: {
