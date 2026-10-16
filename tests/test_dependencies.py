@@ -8,8 +8,8 @@ outra. Pillow: ADR 018. pikepdf, com o qpdf que vem dentro da wheel: ADR 035.
 import tomllib
 from pathlib import Path
 
-import PIL
 import pikepdf
+import PIL
 
 ROOT = Path(__file__).resolve().parent.parent
 PILLOW_PIN = "pillow==12.3.0"
