@@ -569,3 +569,105 @@ def test_dezesseis_contagens_sao_aceitas(tmp_path: Path) -> None:
     collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
 
     assert collected.report.items[0].counts == counts
+
+
+# --- Previews: fora do pacote, citados pelo item, com tipo e tamanho conferidos (3.6) -----------
+
+JPEG_PREVIEW = b"\xff\xd8\xff\xe0" + b"0" * 100
+CSV_PREVIEW = b"nome\r\nAna\r\n"
+
+
+def with_preview(path: str, of: str, output: str | None = None) -> dict[str, Any]:
+    item = ok_item(0, output or of)
+    item["previews"] = [{"path": path, "of": of}]
+    return item
+
+
+def test_previews_sao_coletados_a_parte_do_conteudo(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = with_preview("previews/a.jpg", "images/a.png")
+    write_out(out, [item], {"images/a.png": b"png", "previews/a.jpg": JPEG_PREVIEW})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert [f.name for f in collected.outputs] == ["images/a.png"]
+    [preview] = collected.previews
+    assert (preview.file.name, preview.of, preview.file.size) == (
+        "previews/a.jpg",
+        "images/a.png",
+        len(JPEG_PREVIEW),
+    )
+
+
+def test_amostra_csv_e_aceita(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(
+        out,
+        [with_preview("previews/a.csv", "a.csv")],
+        {"a.csv": b"x", "previews/a.csv": CSV_PREVIEW},
+    )
+
+    [preview] = collect_outputs(out, recipe_id=RECIPE, input_count=1).previews
+
+    assert preview.of == "a.csv"
+
+
+def test_relatorio_sem_previews_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"x"})
+
+    assert collect_outputs(out, recipe_id=RECIPE, input_count=1).previews == ()
+
+
+@pytest.mark.parametrize(
+    ("path", "content"),
+    [
+        pytest.param("previews/a.jpg", b"<svg onload=alert(1)>", id="jpg-que-nao-e-jpeg"),
+        pytest.param("previews/a.jpg", b"\xff\xd8\xff" + b"0" * (512 * 1024), id="jpg-grande"),
+        pytest.param("previews/a.csv", b"\xff\xfe", id="csv-fora-de-utf8"),
+        pytest.param("previews/a.csv", b"a\x00b", id="csv-com-nul"),
+        pytest.param("previews/a.csv", b"a" * (64 * 1024 + 1), id="csv-acima-de-64-kib"),
+        pytest.param("previews/a.html", b"<b>x</b>", id="extensao-fora-da-lista"),
+    ],
+)
+def test_preview_fora_do_formato_e_recusado(tmp_path: Path, path: str, content: bytes) -> None:
+    out = tmp_path / "out"
+    write_out(out, [with_preview(path, "a.csv")], {"a.csv": b"x", path: content})
+
+    with pytest.raises(CollectionError, match="preview"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+@pytest.mark.parametrize(
+    ("path", "of"),
+    [
+        pytest.param("images/a.jpg", "a.csv", id="fora-do-grupo"),
+        pytest.param("previews/a.jpg", "b.csv", id="de-saida-de-outro-item"),
+    ],
+)
+def test_preview_mal_citado_e_recusado(tmp_path: Path, path: str, of: str) -> None:
+    out = tmp_path / "out"
+    write_out(out, [with_preview(path, of, "a.csv")], {"a.csv": b"x", path: JPEG_PREVIEW})
+
+    with pytest.raises(CollectionError, match="preview"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_preview_nao_citado_e_recusado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"x", "previews/a.jpg": JPEG_PREVIEW})
+
+    with pytest.raises(CollectionError):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_previews_contam_no_teto_de_arquivos(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(
+        out,
+        [with_preview("previews/a.jpg", "a.csv")],
+        {"a.csv": b"x", "previews/a.jpg": JPEG_PREVIEW},
+    )
+
+    with pytest.raises(OutputLimitError):
+        collect_outputs(out, limits=OutputLimits(max_files=1), recipe_id=RECIPE, input_count=1)

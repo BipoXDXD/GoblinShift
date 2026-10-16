@@ -34,6 +34,8 @@ class StoredCandidate:
     name: str
     role: ArtifactRole
     object_id: uuid.UUID
+    # Só no preview: o nome da saída de conteúdo de que ele deriva.
+    preview_of: str | None = None
 
 
 class CandidateWriter:
@@ -87,8 +89,9 @@ class CandidateWriter:
             index: object_id
             for (index, _output), (object_id, _key) in zip(to_write, reserved, strict=True)
         }
+        sources = _preview_sources(collected)
         return [
-            StoredCandidate(output.name, role, object_ids[index])
+            StoredCandidate(output.name, role, object_ids[index], sources.get(output.name))
             for index, (output, role) in enumerate(files)
         ]
 
@@ -112,14 +115,22 @@ class CandidateWriter:
 
 
 def _files_to_publish(collected: Collected) -> list[tuple[OutputFile, ArtifactRole]]:
-    """Conteúdo na ordem do relatório, depois relatório, manifesto e pacote (ADR 019)."""
+    """Conteúdo na ordem do relatório, previews, relatório, manifesto e pacote (ADR 019).
+
+    O preview vem depois de todo o conteúdo: a publicação precisa do artefato de origem já criado.
+    """
     files = [(output, ArtifactRole.OUTPUT) for output in collected.outputs]
+    files += [(preview.file, ArtifactRole.PREVIEW) for preview in collected.previews]
     files.append((collected.report_file, ArtifactRole.REPORT))
     if collected.manifest_file is not None:
         files.append((collected.manifest_file, ArtifactRole.MANIFEST))
     if collected.package_file is not None:
         files.append((collected.package_file, ArtifactRole.PACKAGE))
     return files
+
+
+def _preview_sources(collected: Collected) -> dict[str, str]:
+    return {preview.file.name: preview.of for preview in collected.previews}
 
 
 def _chunks(source: BinaryIO) -> Iterator[bytes]:

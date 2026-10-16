@@ -111,8 +111,13 @@ def publish_artifact(
     object_id: uuid.UUID,
     role: ArtifactRole,
     file_name: str,
+    *,
+    source_artifact_id: uuid.UUID | None = None,
 ) -> ArtifactView:
     """Cria o artefato sobre um objeto `committed` do dono, com retenção de 48 h (1.7).
+
+    `source_artifact_id` é obrigatório no papel `preview` (a saída de que ele deriva) e proibido
+    nos demais; o banco confere os dois e que a origem é do mesmo dono.
 
     Aceita também o objeto de uma entrada (reaproveitamento do Detox). O `FOR SHARE` impede que
     o expurgo remova o objeto enquanto a referência nova nasce.
@@ -136,6 +141,7 @@ def publish_artifact(
             role=role,
             file_name=file_name,
             expires_at=func.now() + ARTIFACT_TTL,
+            source_artifact_id=source_artifact_id,
         )
         .returning(artifact.c.id, artifact.c.created_at, artifact.c.expires_at)
     ).one()
@@ -224,6 +230,27 @@ def open_for_download(
     return DownloadTicket(
         holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role), file_name
     )
+
+
+def open_preview(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) -> DownloadTicket:
+    """O preview da saída `artifact_id`, com o mesmo controle de uso de `open_for_download`.
+
+    Saída de outra conta, inexistente ou sem preview: `ArtifactNotFoundError`, igual para todos.
+    O próprio preview não tem preview. Preview excluído ou vencido: `ArtifactGoneError`.
+    """
+    preview_id = session.execute(
+        select(artifact.c.id)
+        .where(
+            artifact.c.owner_id == owner_id,
+            artifact.c.source_artifact_id == artifact_id,
+            artifact.c.role == ArtifactRole.PREVIEW,
+        )
+        .order_by(artifact.c.id)
+        .limit(1)
+    ).scalar_one_or_none()
+    if preview_id is None:
+        raise ArtifactNotFoundError
+    return open_for_download(session, owner_id, preview_id)
 
 
 def finish_download(session: Session, ticket: DownloadTicket) -> None:
