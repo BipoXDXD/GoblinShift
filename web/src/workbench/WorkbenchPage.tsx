@@ -140,12 +140,12 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
   if (!sameRecipe) {
     return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
   }
-  if (source.parameters === null) {
-    return { form: fallback, notice: <SourceNotice>{source.goneNotice}</SourceNotice> };
+  if (source.stored.kind === "gone") {
+    return { form: fallback, notice: <SourceNotice>{source.stored.notice}</SourceNotice> };
   }
   const form = recipe.formFor({
     ...version,
-    defaults: { ...version.defaults, ...source.parameters },
+    defaults: { ...version.defaults, ...source.stored.parameters },
   });
   return form === null
     ? { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> }

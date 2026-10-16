@@ -26,8 +26,11 @@ import {
 } from "./filters";
 import { RunHistoryExtras } from "./RunHistoryExtras";
 import { RunList as RunRows } from "./RunList";
+import { useNow } from "./useNow";
 
 const T = TEXT.history;
+/** A disponibilidade dos resultados ("até", "expirados") é refeita a cada minuto. */
+const AVAILABILITY_TICK_MS = 60_000;
 
 interface HistoryPageProps {
   readonly now: () => number;
@@ -43,12 +46,13 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
   // O período conta a partir da abertura da tela: o cursor da API vale só para os mesmos filtros,
   // então o início do período não pode andar enquanto a lista está aberta.
   const [anchorMs] = useState(now);
+  const nowMs = useNow(now, AVAILABILITY_TICK_MS);
   return (
     <div className="flex flex-col gap-8">
       <FocusHeading>{T.title}</FocusHeading>
       <HistoryResults
         query={toRunListQuery(filters, anchorMs)}
-        nowMs={anchorMs}
+        nowMs={nowMs}
         filters={filters}
         onApplyFilters={(next) => {
           setSearchParams(filtersToSearchParams(next));
@@ -60,7 +64,7 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
 
 interface HistoryResultsProps {
   readonly query: RunListQuery;
-  /** Relógio da abertura da tela, para dizer se os resultados ainda valem. */
+  /** Relógio atual (anda com a tela aberta), para dizer se os resultados ainda valem. */
   readonly nowMs: number;
   readonly filters: HistoryFilters;
   readonly onApplyFilters: (filters: HistoryFilters) => void;

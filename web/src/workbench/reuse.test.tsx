@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
 import { catalogHandler } from "../test/catalog";
-import { fakeApi, jsonResponse, problemResponse, runBody, RUN_ID } from "../test/fakeApi";
+import {
+  fakeApi,
+  jsonResponse,
+  problemResponse,
+  runBody,
+  RUN_ID,
+  screenRequests,
+} from "../test/fakeApi";
+import { presetBody, PRESET_ID } from "../test/presets";
 import { renderRoutes } from "../test/renderRoutes";
 
 const PARAMETERS = {
@@ -17,16 +25,14 @@ const PARAMETERS = {
   formula_guard: "tab_prefix",
 };
 
-function setup(run: () => Response) {
+function setup(run: () => Response, path = `/bancada/csv-janitor?execucao=${RUN_ID}`) {
   const api = fakeApi({
     "GET /api/v1/catalog": catalogHandler(),
     [`GET /api/v1/runs/${RUN_ID}`]: run,
+    [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody()),
   });
-  return renderRoutes({
-    routes: appRoutes(api.client),
-    path: `/bancada/csv-janitor?execucao=${RUN_ID}`,
-    client: api.client,
-  });
+  renderRoutes({ routes: appRoutes(api.client), path, client: api.client });
+  return api;
 }
 
 describe("Bancada aberta pela execução (reusar configuração)", () => {
@@ -58,5 +64,18 @@ describe("Bancada aberta pela execução (reusar configuração)", () => {
 
     expect(await screen.findByRole("alert")).toBeVisible();
     expect(screen.getByLabelText("Escolher arquivos")).toBeInTheDocument();
+  });
+
+  it("com ?preset= e ?execucao= juntos, vale o preset e a execução nem é pedida", async () => {
+    const api = setup(
+      () => jsonResponse(runBody({ status: "succeeded", parameters: PARAMETERS })),
+      `/bancada/csv-janitor?execucao=${RUN_ID}&preset=${PRESET_ID}`,
+    );
+
+    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
+    expect(screen.getByLabelText("Colunas sem espaços nas pontas")).toHaveValue("nome");
+    expect(
+      screenRequests(api.requests).filter((request) => request.url.includes("/runs/")),
+    ).toEqual([]);
   });
 });
