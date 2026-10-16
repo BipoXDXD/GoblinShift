@@ -6,25 +6,47 @@ import {
 } from "@tanstack/react-query";
 
 import { useApiClient } from "../api/ApiClientContext";
+import type { ApiClient } from "../api/client";
 import { ApiError } from "../api/response";
 import { getMe, ME_QUERY_KEY, type Me } from "./api";
 
 /** Quanto o GET /me vale no cache: a navegação entre telas não repete o pedido a cada troca. */
 const ME_STALE_MS = 30_000;
 
-/** A conta da sessão (GET /me), compartilhada pelo cabeçalho, pelo Acesso e pelo aceite. */
-export function useMe(): UseQueryResult<Me> {
+/**
+ * A conta da sessão, compartilhada pelo cabeçalho, pela Oficina, pelo Acesso e pelo aceite:
+ * `null` é sem sessão, `undefined` (sem dado) é carregando ou falha.
+ */
+export function useMe(): UseQueryResult<Me | null> {
   const client = useApiClient();
   return useQuery({
     queryKey: ME_QUERY_KEY,
-    queryFn: ({ signal }) => getMe(client, signal),
+    queryFn: ({ signal }) => readAccount(client, signal),
     staleTime: ME_STALE_MS,
   });
 }
 
-/** Sem sessão: o GET /me respondeu 401 AUTHENTICATION_REQUIRED. */
-export function isSignedOut(error: Error | null): boolean {
-  return problemCode(error) === "AUTHENTICATION_REQUIRED";
+/**
+ * A conta pelo GET /me, ou `null` sem sessão. Sem o cookie de sessão nem chama o /me, que só daria
+ * 401; com o cookie de uma sessão que acabou, o 401 AUTHENTICATION_REQUIRED também é `null`.
+ */
+export async function readAccount(client: ApiClient, signal?: AbortSignal): Promise<Me | null> {
+  if (!client.hasSessionCookie()) {
+    return null;
+  }
+  try {
+    return await getMe(client, signal);
+  } catch (error) {
+    if (error instanceof Error && problemCode(error) === "AUTHENTICATION_REQUIRED") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Sem sessão (o /me ainda carregando não conta). */
+export function isSignedOut(account: Me | null | undefined): boolean {
+  return account === null;
 }
 
 /**

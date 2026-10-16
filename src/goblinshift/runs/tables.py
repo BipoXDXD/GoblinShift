@@ -1,6 +1,7 @@
 """Tabelas de execuções (docs/GoblinShiftPlan.md, 3.3 a 3.5). A própria `run` é a fila."""
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     DateTime,
@@ -31,8 +32,9 @@ run = Table(
     Column("recipe_id", Text, nullable=False),
     Column("recipe_version", Integer, nullable=False),
     Column("executor_digest", Text, nullable=False),
-    # Parâmetros com defaults aplicados e limites de 1.7, fixados na aceitação.
-    Column("parameters", JSONB, nullable=False),
+    # Parâmetros com defaults aplicados e limites de 1.7, fixados na aceitação. Os parâmetros são
+    # anulados 30 dias depois do término (1.7, "Retenção"; migração 0010).
+    Column("parameters", JSONB),
     Column("limits", JSONB, nullable=False),
     Column("status", Text, nullable=False, server_default="queued"),
     Column("phase", Text),
@@ -79,6 +81,17 @@ run = Table(
     ),
     CheckConstraint("status <> 'failed' OR error_code IS NOT NULL", name="failed_has_code"),
     CheckConstraint("generation >= 0 AND claim_count >= 0", name="counters"),
+    CheckConstraint(
+        "parameters IS NOT NULL OR finished_at IS NOT NULL", name="parameters_until_finished"
+    ),
+    # Retenção (1.7): Runs terminadas ainda com parâmetros (anulação aos 30 dias) e todas as
+    # terminadas (remoção aos 90).
+    Index(
+        "run_anonymize_idx",
+        "finished_at",
+        postgresql_where=text("parameters IS NOT NULL AND finished_at IS NOT NULL"),
+    ),
+    Index("run_finished_at_idx", "finished_at", postgresql_where=text("finished_at IS NOT NULL")),
 )
 
 run_input = Table(
@@ -163,4 +176,17 @@ idempotency_record = Table(
     Index(None, "owner_id", "run_id"),
     CheckConstraint("idem_key ~ '^[A-Za-z0-9_-]{16,64}$'", name="idem_key"),
     CheckConstraint("octet_length(command_hash) = 32", name="command_hash"),
+)
+
+# Override das cotas diárias de 1.7 por conta (`gs-admin set-limits`); NULL é "sem override", e
+# vale o padrão das settings. CASCADE: é configuração da conta, sem histórico (migração 0011).
+account_quota = Table(
+    "account_quota",
+    metadata,
+    Column("owner_id", Uuid, ForeignKey("app_user.id", ondelete="CASCADE"), primary_key=True),
+    Column("runs_per_24h", Integer),
+    Column("input_bytes_per_24h", BigInteger),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("runs_per_24h > 0", name="runs_per_24h"),
+    CheckConstraint("input_bytes_per_24h > 0", name="input_bytes_per_24h"),
 )
