@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from stat import S_ISREG
 from typing import BinaryIO
 
 # Segmentos só com caracteres seguros e sem começar por ponto: barra `.`, `..`, ocultos e o
@@ -24,6 +25,8 @@ from typing import BinaryIO
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 _MAX_KEY_LENGTH = 512
 _TMP_DIR_NAME = ".tmp"
+# Gravada na raiz pelo `storage-init` (compose.yaml), no filesystem já montado.
+MOUNT_MARKER = ".goblinshift-storage"
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
 
@@ -104,17 +107,20 @@ class FileStorage:
             raise ObjectMissingError(key) from None
         return ObjectStat(size_bytes=info.st_size)
 
-    def has_content(self) -> bool:
-        """A raiz existe e guarda algum objeto (ou temporário).
+    def is_mounted(self) -> bool:
+        """A sentinela de montagem existe na raiz, como arquivo comum.
 
-        Com o filesystem do storage desmontado, a raiz some ou vira o ponto de montagem vazio, e
-        todo objeto pareceria ausente. Quem procura objetos ausentes confere isto antes.
+        Com o filesystem do storage desmontado, a raiz some ou vira o ponto de montagem do disco
+        do sistema, onde o `storage-init` recria a pasta e a aplicação volta a gravar; ter
+        conteúdo não prova nada. A sentinela só é gravada pelo `storage-init` depois de o deploy
+        conferir a montagem (deploy/release.sh), e nenhuma chave pode criá-la, porque nenhum
+        segmento de chave começa por ponto.
         """
         try:
-            with os.scandir(self.root) as entries:
-                return any(True for _ in entries)
+            info = (self.root / MOUNT_MARKER).stat(follow_symlinks=False)
         except FileNotFoundError:
             return False
+        return S_ISREG(info.st_mode)
 
     def delete(self, key: str) -> None:
         """Remove o objeto; remover o que já não existe é sucesso (o estado final é o mesmo)."""

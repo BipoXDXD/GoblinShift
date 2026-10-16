@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.missing import mark_missing
 from goblinshift.files.retention import expire_artifacts
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import artifact, stored_object
@@ -59,6 +60,14 @@ def storage_key_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> st
             .where(artifact.c.id == artifact_id)
         ).scalar_one()
     return key
+
+
+def object_id_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> uuid.UUID:
+    with factory() as session:
+        object_id: uuid.UUID = session.execute(
+            select(artifact.c.object_id).where(artifact.c.id == artifact_id)
+        ).scalar_one()
+    return object_id
 
 
 def object_state_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> str:
@@ -216,20 +225,37 @@ def test_arquivo_sumido_do_disco_responde_410_e_libera_tudo(
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 
-def test_arquivo_sumido_no_download_fica_missing_e_o_proximo_download_tambem_responde_410(
+def test_arquivo_sumido_no_download_nao_grava_missing_pela_requisicao(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Só a varredura da manutenção marca `missing`, com as travas do storage desmontado: uma
+    # requisição não pode liberar reserva nem esconder conteúdo de outro objeto por engano.
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    storage_of(app).delete(storage_key_of(factory, artifact_id))
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    assert object_state_of(factory, artifact_id) == "committed"
+    assert client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth).json()["availability"] == (
+        "available"
+    )
+
+
+def test_artefato_marcado_missing_aparece_missing_e_o_download_responde_410(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     owner, auth = new_account(factory)
     artifact_id = publish(app, owner, b"x")
-    storage_of(app).delete(storage_key_of(factory, artifact_id))
-    client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+    with unit_of_work(factory) as session:
+        mark_missing(session, [object_id_of(factory, artifact_id)])
 
     metadata = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth)
-    again = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+    download = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
 
     assert metadata.json()["availability"] == "missing"
-    assert object_state_of(factory, artifact_id) == "missing"
-    assert_problem(again, 410, "GONE")
+    assert_problem(download, 410, "GONE")
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 

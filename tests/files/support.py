@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy import func, insert, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import MOUNT_MARKER, FileStorage
 from goblinshift.files.tables import upload
 from goblinshift.files.uploads import UploadIntent, UploadView, create_intents, receive_content
 from goblinshift.identity import CURRENT_TERMS_VERSION
@@ -61,3 +61,9 @@ def pass_expiry_after_deletion(factory: sessionmaker[Session], upload_id: uuid.U
                 expires_at=func.now() - timedelta(hours=1),
             )
         )
+
+
+def mark_mounted(storage: FileStorage) -> None:
+    """A sentinela que o `storage-init` grava no filesystem montado (deploy/release.sh)."""
+    storage.root.mkdir(parents=True, exist_ok=True)
+    (storage.root / MOUNT_MARKER).touch()

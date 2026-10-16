@@ -8,6 +8,13 @@ disponibilidade `missing` (respondendo 410 no download).
 Só `committed` vira `missing`: um objeto com exclusão pedida segue pelo expurgo, que já tolera o
 arquivo ausente, e um pendente ainda não tem conteúdo. O arquivo de um objeto confirmado nunca
 some por caminho normal, porque o expurgo troca o estado antes de apagar.
+
+`missing` é final, e a reserva sai na marcação. Sem backup de arquivos, nada no serviço devolve
+um arquivo perdido; o risco é marcar por engano, e é ele que as travas abaixo cobrem. Por isso só
+a varredura da manutenção marca, nunca uma requisição de usuário, e ela só marca com a sentinela
+de montagem presente (`FileStorage.is_mounted`) e com no máximo `max_absent_ratio` do lote
+ausente: muito arquivo sumido de uma vez indica storage errado, não arquivo perdido, e quem
+decide é o administrador.
 """
 
 import uuid
@@ -22,15 +29,23 @@ from goblinshift.files.states import ObjectState
 from goblinshift.files.storage import FileStorage, ObjectMissingError
 from goblinshift.files.tables import stored_object
 
+# Mais da metade do lote ausente de uma vez: storage errado, até o administrador dizer o contrário.
+DEFAULT_MAX_ABSENT_RATIO = 0.5
+# Abaixo disto o lote é pequeno demais para a fração dizer algo sobre o storage.
+GOVERNOR_MIN_SAMPLE = 10
+
 
 @dataclass(frozen=True)
 class MissingSweep:
     checked: int
+    absent: int
     marked: int
     # Último ID do lote, se ele veio cheio; `None` quando a varredura chegou ao fim e recomeça.
     resume_after: uuid.UUID | None
-    # Havia objetos a conferir, mas a raiz do storage estava vazia ou ausente: nada foi marcado.
+    # Havia objetos a conferir, mas a sentinela de montagem não estava lá: nada foi conferido.
     storage_unreachable: bool
+    # Ausentes demais no lote: nada foi marcado, e o mesmo lote volta no ciclo seguinte.
+    governor_tripped: bool
 
 
 def mark_missing(session: Session, object_ids: Collection[uuid.UUID]) -> int:
@@ -63,7 +78,12 @@ def mark_missing(session: Session, object_ids: Collection[uuid.UUID]) -> int:
 
 
 def sweep_missing_objects(
-    session: Session, storage: FileStorage, *, after: uuid.UUID | None, limit: int
+    session: Session,
+    storage: FileStorage,
+    *,
+    after: uuid.UUID | None,
+    limit: int,
+    max_absent_ratio: float,
 ) -> MissingSweep:
     """Confere um lote de objetos `committed`, em ordem de ID a partir de `after`.
 
@@ -79,20 +99,46 @@ def sweep_missing_objects(
             query = query.where(stored_object.c.id > after)
         rows = session.execute(query.order_by(stored_object.c.id).limit(limit)).all()
     if not rows:
-        return MissingSweep(checked=0, marked=0, resume_after=None, storage_unreachable=False)
-    if not storage.has_content():
-        return MissingSweep(checked=0, marked=0, resume_after=after, storage_unreachable=True)
+        return _stopped(after=None, storage_unreachable=False)
+    if not storage.is_mounted():
+        return _stopped(after=after, storage_unreachable=True)
     absent = [row.id for row in rows if not _exists(storage, row.storage_key)]
+    if _too_many_absent(len(absent), len(rows), max_absent_ratio):
+        return MissingSweep(
+            checked=len(rows),
+            absent=len(absent),
+            marked=0,
+            resume_after=after,
+            storage_unreachable=False,
+            governor_tripped=True,
+        )
     marked = 0
     if absent:
         with session.begin():
             marked = mark_missing(session, absent)
     return MissingSweep(
         checked=len(rows),
+        absent=len(absent),
         marked=marked,
         resume_after=rows[-1].id if len(rows) == limit else None,
         storage_unreachable=False,
+        governor_tripped=False,
     )
+
+
+def _stopped(*, after: uuid.UUID | None, storage_unreachable: bool) -> MissingSweep:
+    return MissingSweep(
+        checked=0,
+        absent=0,
+        marked=0,
+        resume_after=after,
+        storage_unreachable=storage_unreachable,
+        governor_tripped=False,
+    )
+
+
+def _too_many_absent(absent: int, checked: int, max_absent_ratio: float) -> bool:
+    return checked >= GOVERNOR_MIN_SAMPLE and absent > max_absent_ratio * checked
 
 
 def _exists(storage: FileStorage, key: str) -> bool:
