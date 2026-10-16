@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.files.candidates import attempts_with_loose_candidates, discard_candidates
 from goblinshift.files.limits import EXPIRY_BATCH_SIZE
-from goblinshift.files.missing import sweep_missing_objects
+from goblinshift.files.missing import DEFAULT_MAX_ABSENT_RATIO, sweep_missing_objects
 from goblinshift.files.objects import holders_with_open_uses
 from goblinshift.files.retention import (
     anonymize_deleted_uploads,
@@ -92,6 +92,9 @@ class MaintenanceConfig:
     retention_batch_size: int = EXPIRY_BATCH_SIZE
     # Objetos `committed` conferidos no disco por ciclo (um `stat` cada), em rodízio pelo ID.
     missing_sweep_batch_size: int = EXPIRY_BATCH_SIZE
+    # Fração do lote ausente acima da qual nada é marcado (files/missing.py); 1.0 desliga o
+    # limitador, para o administrador depois de restaurar de propósito um backup antigo (3.8).
+    missing_max_absent_ratio: float = DEFAULT_MAX_ABSENT_RATIO
     stop_grace: timedelta = timedelta(seconds=10)
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
@@ -359,13 +362,27 @@ class Maintenance:
             self._storage,
             after=self._missing_resume_after,
             limit=self._config.missing_sweep_batch_size,
+            max_absent_ratio=self._config.missing_max_absent_ratio,
         )
         self._missing_resume_after = sweep.resume_after
         if sweep.storage_unreachable:
-            # Filesystem do storage desmontado ou vazio: nada foi marcado, e o administrador olha.
+            # Sem a sentinela de montagem: filesystem do storage desmontado ou trocado.
             logger.warning(
-                "storage sem conteúdo; varredura de ausentes suspensa",
+                "storage sem a sentinela de montagem; varredura de ausentes suspensa",
                 extra={"fields": {"alert": "storage_unreachable"}},
+            )
+        if sweep.governor_tripped:
+            # Ausentes demais num lote: storage errado ou backup antigo restaurado (3.8); o
+            # administrador confere antes de liberar (`missing_max_absent_ratio`).
+            logger.warning(
+                "limitador de ausentes acionado; nada marcado",
+                extra={
+                    "fields": {
+                        "alert": "missing_governor",
+                        "checked": sweep.checked,
+                        "absent": sweep.absent,
+                    }
+                },
             )
         if sweep.marked:
             # Esperado depois de restaurar o banco de um backup (3.8); fora disso, investigar.
@@ -375,8 +392,10 @@ class Maintenance:
             )
         return {
             "objects_missing_checked": sweep.checked,
+            "objects_missing_absent": sweep.absent,
             "objects_marked_missing": sweep.marked,
             "missing_sweep_skipped": int(sweep.storage_unreachable),
+            "missing_governor_tripped": int(sweep.governor_tripped),
         }
 
     def apply_history_retention(self) -> dict[str, int]:

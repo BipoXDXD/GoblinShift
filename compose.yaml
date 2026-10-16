@@ -75,6 +75,18 @@ services:
     volumes: [*storage]
     restart: "no"
 
+  # Sentinela de montagem (files/storage.py, MOUNT_MARKER): sem ela a manutenção não marca objeto
+  # nenhum como `missing`. Fora do `up` (perfil próprio), para um `up` com o filesystem
+  # desmontado não a recriar no disco do sistema: o deploy/release.sh a grava só depois de
+  # conferir a montagem. No desenvolvimento: `docker compose run --rm storage-mark`.
+  storage-mark:
+    <<: *app
+    user: "0"
+    profiles: [storage-mark]
+    command: ["install", "-m", "644", "/dev/null", "/var/lib/goblinshift/storage/objects/.goblinshift-storage"]
+    volumes: [*storage]
+    restart: "no"
+
   api:
     <<: *app
     environment:
@@ -121,6 +133,9 @@ services:
     environment:
       <<: *worker-env
       OTEL_SERVICE_NAME: goblinshift-maintenance
+      # Sem valor: só repassa o da shell, para o administrador desligar o limitador de ausentes
+      # depois de restaurar de propósito um backup antigo (deploy/openobserve/README.md).
+      GS_MISSING_SWEEP_MAX_ABSENT_RATIO:
     volumes: [*storage]
     depends_on: *worker-deps
     restart: unless-stopped
