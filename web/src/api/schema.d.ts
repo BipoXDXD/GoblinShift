@@ -574,6 +574,23 @@ export interface components {
             message: string;
         };
         /**
+         * FormulaCellsResponse
+         * @description Contagem por coluna de `CSV_FORMULA_CELLS`: as maiores primeiro, até o teto (1.3).
+         */
+        FormulaCellsResponse: {
+            /** Columns */
+            columns: components["schemas"]["FormulaColumnResponse"][];
+            /** More Columns */
+            more_columns: number;
+        };
+        /** FormulaColumnResponse */
+        FormulaColumnResponse: {
+            /** Name */
+            name: string | null;
+            /** Cells */
+            cells: number;
+        };
+        /**
          * ItemNoticeCode
          * @description Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
          *     para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API.
@@ -599,7 +616,9 @@ export interface components {
          * @description Códigos de aviso das receitas: lista fechada, como a das rejeições.
          *
          *     O código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do
-         *     arquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui.
+         *     arquivo, fica só no `report.json`. A exceção é a contagem por coluna de `CSV_FORMULA_CELLS`
+         *     (`ReportWarning.columns`): nomes de coluna, nunca valores de célula, vão para a API com teto
+         *     (1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui.
          * @enum {string}
          */
         ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED";
@@ -859,7 +878,7 @@ export interface components {
         };
         /**
          * RunItemResponse
-         * @description Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo.
+         * @description Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo.
          */
         RunItemResponse: {
             /** Position */
@@ -883,6 +902,7 @@ export interface components {
             };
             /** Duplicate Of */
             duplicate_of: number | null;
+            formula_cells: components["schemas"]["FormulaCellsResponse"] | null;
         };
         /** RunListResponse */
         RunListResponse: {

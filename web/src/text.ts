@@ -284,6 +284,16 @@ export const TEXT = {
         CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
         INPUT_NOT_SELECTED: "Nenhuma página deste PDF foi escolhida; ele não entrou no resultado.",
       },
+      formulaCells: {
+        columnsLabel: "Células que parecem fórmulas, por coluna",
+        cellsOf: (cells: string) => `: ${cells}`,
+        unnamedColumn: "coluna sem nome",
+        cells: ["célula", "células"],
+        more: (columns: string) => `e mais ${columns}.`,
+        columns: ["coluna", "colunas"],
+        minusNote:
+          "Valores que começam com “-”, como números negativos, também entram nesta conta; muitos são falsos positivos.",
+      },
       notices: {
         IMAGE_P3_CONVERTED: "A imagem estava em Display P3 e foi convertida para sRGB.",
       },

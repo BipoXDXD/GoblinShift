@@ -55,6 +55,7 @@ from goblinshift.processing.recipe import (
     ItemWarningCode,
     OutputGroup,
 )
+from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.package_check import (
     ManifestInput,
@@ -143,6 +144,8 @@ class ReportItem:
     # (caminho em previews/, saída de conteúdo do próprio item de que deriva)
     previews: tuple[tuple[str, str], ...] = ()
     notices: tuple[ItemNoticeCode, ...] = ()
+    # Contagem por coluna de CSV_FORMULA_CELLS, já com os tetos; `None` sem o aviso ou sem colunas.
+    formula_cells: FormulaCells | None = None
 
     @property
     def has_warnings(self) -> bool:
@@ -490,7 +493,8 @@ def _item(raw: object) -> ReportItem:
     status = item.get("status")
     if status == _ITEM_OK:
         outputs = tuple(_text(name, "item.outputs[]") for name in _list(item.get("outputs"), "o"))
-        warnings = tuple(_warning_code(w) for w in _list(item.get("warnings"), "item.warnings"))
+        raw_warnings = _list(item.get("warnings"), "item.warnings")
+        warnings = tuple(_warning_code(w) for w in raw_warnings)
         counts = _counts(item.get("counts", {}))
         previews = _previews(item.get("previews", []), outputs)
         # Opcional: o executor anterior não escreve notas.
@@ -504,6 +508,7 @@ def _item(raw: object) -> ReportItem:
             counts=counts,
             previews=previews,
             notices=notices,
+            formula_cells=_formula_cells(raw_warnings),
         )
     if status == _ITEM_REJECTED:
         return ReportItem(position, False, (), _rejection_code(item.get("code")))
@@ -538,6 +543,33 @@ def _warning_code(raw: object) -> ItemWarningCode:
     if not isinstance(code, str) or code not in ItemWarningCode:
         raise CollectionError("item.warnings: aviso fora do catálogo de códigos")
     return ItemWarningCode(code)
+
+
+def _formula_cells(warnings: list[object]) -> FormulaCells | None:
+    """As colunas do aviso de fórmula; o executor anterior não as escreve, e isso não é erro."""
+    for warning in warnings:
+        entry = _mapping(warning, "item.warnings[]")
+        if entry.get("code") == ItemWarningCode.CSV_FORMULA_CELLS and "columns" in entry:
+            return FormulaCells.of(_formula_columns(entry["columns"]))
+    return None
+
+
+def _formula_columns(raw: object) -> list[tuple[str, int]]:
+    columns = _list(raw, "item.warnings[].columns")
+    if not columns:
+        raise CollectionError("item.warnings[].columns vazia")
+    parsed = []
+    for column in columns:
+        entry = _mapping(column, "item.warnings[].columns[]")
+        # Vazio é aceito: a coluna de cabeçalho vazio também tem contagem (`FormulaCells.of`).
+        name = entry.get("name")
+        if not isinstance(name, str):
+            raise CollectionError("item.warnings[].columns[].name deve ser texto")
+        cells = _int(entry.get("cells"), "item.warnings[].columns[].cells")
+        if cells < 1:
+            raise CollectionError("item.warnings[].columns[].cells abaixo de 1")
+        parsed.append((name, cells))
+    return parsed
 
 
 def _counts(raw: object) -> dict[str, int]:

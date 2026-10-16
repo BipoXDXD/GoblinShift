@@ -24,6 +24,7 @@ from goblinshift.processing.recipe import (
     ItemWarningCode,
 )
 from goblinshift.runs.cursor import Position, decode_cursor, encode_cursor
+from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import TERMINAL_STATUSES, ErrorCode, Phase, Status
 from goblinshift.runs.tables import attempt, run, run_input, run_output
 
@@ -77,7 +78,7 @@ class ItemStatus(StrEnum):
 
 @dataclass(frozen=True)
 class RunItem:
-    """Desfecho de uma entrada, só com códigos do catálogo e contagens: nada do arquivo."""
+    """Desfecho de uma entrada: códigos do catálogo e contagens, e nenhum valor do arquivo."""
 
     position: int
     upload_id: UUID
@@ -89,6 +90,8 @@ class RunItem:
     notices: tuple[ItemNoticeCode, ...]
     counts: dict[str, int]
     duplicate_of: int | None
+    # Única exceção ao "nada do arquivo": nomes de coluna do aviso de fórmula (1.3; ADR 039).
+    formula_cells: FormulaCells | None
 
 
 @dataclass(frozen=True)
@@ -412,6 +415,7 @@ def _item(row: Any) -> RunItem:
         notices=_codes(ItemNoticeCode, details.get("notices")),
         counts=_counts(details.get("counts")),
         duplicate_of=duplicate_of,
+        formula_cells=FormulaCells.from_json(details.get("formula_cells")),
     )
 
 
