@@ -32,6 +32,7 @@ const results = {
       role: "package",
       file_name: "csv-janitor.zip",
       availability: "available",
+      source_artifact_id: null,
     },
   ],
 };
