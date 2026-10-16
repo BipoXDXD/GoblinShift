@@ -42,11 +42,15 @@ def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
+# Parâmetros que não são ids: um valor da allowlist da própria rota.
+_NAMED_VALUES = {"provider": "google", "name": "swagger-init.js"}
+
+
 def _concrete(path: str) -> str:
     """Troca cada parâmetro do caminho por um valor que passa na validação do tipo."""
 
     def value(match: re.Match[str]) -> str:
-        return "google" if match["name"] == "provider" else str(uuid4())
+        return _NAMED_VALUES.get(match["name"]) or str(uuid4())
 
     return _PATH_PARAM.sub(value, path)
 
@@ -88,6 +92,7 @@ def test_allowlist_publica_e_a_esperada() -> None:
         ("GET", "/livez"),
         ("GET", "/readyz"),
         ("GET", "/docs"),
+        ("GET", "/docs/assets/{name}"),
         ("GET", "/openapi.json"),
         ("GET", "/auth/login/{provider}"),
         ("GET", "/auth/callback/{provider}"),

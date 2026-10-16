@@ -443,6 +443,9 @@ class TestApi:
             "/api/v1/runs?limit=5",
             "/api/v1/rota-que-nao-existe",
             "/auth/login/google",
+            "/docs",
+            "/docs/assets/swagger-init.js",
+            "/openapi.json",
             "/livez",
             "/readyz",
         ],
@@ -454,16 +457,8 @@ class TestApi:
         assert response.json()["served_by"] == "api"
         assert response.json()["path"] == path
 
-    @pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
-    def test_documentacao_da_api_nao_e_encaminhada(self, stack: Stack, path: str) -> None:
-        # Fechada em produção (3.6): sem location própria, cai na SPA como qualquer rota.
-        response = stack.get(path)
-
-        assert b'"served_by"' not in response.body
-        assert response.body == stack.get("/").body
-
     def test_resposta_da_api_nao_recebe_a_csp_da_spa(self, stack: Stack) -> None:
-        # A API define a própria CSP (downloads com sandbox).
+        # A API define a própria CSP (downloads com sandbox; a /docs tem a sua).
         response = stack.get("/api/v1/me")
 
         assert "content-security-policy" not in response.headers

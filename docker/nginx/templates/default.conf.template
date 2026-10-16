@@ -106,9 +106,18 @@ server {
         include /etc/nginx/snippets/spa-headers.conf;
     }
 
-    # Backend. A CSP da SPA não se aplica: a API define a sua (downloads com sandbox). A
-    # documentação da API (/docs, /openapi.json) é fechada em produção e não passa por aqui.
+    # Backend. A CSP da SPA não se aplica: a API define a sua (downloads com sandbox) e a /docs
+    # tem a própria, com o Swagger UI servido pela API, da mesma origem (api_docs.py).
     location /api/ {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location = /docs {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location /docs/assets/ {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location = /openapi.json {
         include /etc/nginx/snippets/proxy-api.conf;
     }
     # Sondados de fora pelo monitor de uptime (3.7) e pelo scripts/check-zero-downtime.sh.

@@ -47,8 +47,8 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-const BACKEND_PREFIXES = ["/api/", "/auth/"];
-const BACKEND_PATHS = new Set(["/livez", "/readyz"]);
+const BACKEND_PREFIXES = ["/api/", "/auth/", "/docs/assets/"];
+const BACKEND_PATHS = new Set(["/docs", "/openapi.json", "/livez", "/readyz"]);
 /** robots.txt e outro .txt ou .xml na raiz: arquivo real ou 404, nunca o index.html. */
 const ROOT_TEXT_FILE = /^\/[^/]+\.(?:txt|xml)$/;
 
