@@ -14,8 +14,9 @@ const acceptedRunSchema = runSchema.extend({
 const resultReferenceSchema = z.object({
   artifact_id: z.uuid(),
   logical_name: z.string(),
-  role: z.enum(["output", "report", "manifest", "package"]),
+  role: z.enum(["output", "report", "manifest", "package", "preview"]),
   file_name: z.string(),
+  availability: z.enum(["available", "expired", "deleted"]),
 });
 
 const runResultsSchema = z.object({
@@ -26,7 +27,7 @@ const runResultsSchema = z.object({
 
 const artifactDetailsSchema = z.object({
   id: z.uuid(),
-  role: z.enum(["output", "report", "manifest", "package"]),
+  role: z.enum(["output", "report", "manifest", "package", "preview"]),
   size: z.number().int(),
   sha256: z.string(),
   expires_at: z.iso.datetime({ offset: true }),

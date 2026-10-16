@@ -31,6 +31,9 @@ export const runSchema = z.object({
   queue_expires_at: z.iso.datetime({ offset: true }),
   deadline_at: z.iso.datetime({ offset: true }).nullable(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  parameters: z.record(z.string(), z.unknown()).nullable(),
+  preset_id: z.uuid().nullable(),
+  results_expire_at: z.iso.datetime({ offset: true }).nullable(),
 });
 
 export type Run = z.infer<typeof runSchema>;

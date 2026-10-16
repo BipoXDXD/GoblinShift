@@ -10,8 +10,8 @@ type Handler = (request: Request) => Response | Promise<Response> | null;
 /**
  * API falsa por `fetch`: cada rota é `"MÉTODO /caminho"` (sem query) e responde pelo handler.
  * Rota sem handler responde 404 problem+json, para o teste falhar alto em vez de esperar. O
- * `GET /me` do cabeçalho tem resposta padrão (sessão com os termos aceitos), que o teste troca
- * passando o próprio handler.
+ * `GET /me` do cabeçalho tem resposta padrão (sessão com os termos aceitos), e o `GET /presets`
+ * da Oficina, lista vazia; o teste troca os dois passando o próprio handler.
  */
 export interface FakeApi {
   readonly client: ApiClient;
@@ -49,8 +49,10 @@ export function fakeApi(
 }
 
 const ME_ROUTE = "GET /api/v1/me";
+// Os presets da Oficina: lista vazia por padrão, para as telas que não tratam deles.
 const DEFAULT_HANDLERS: Readonly<Record<string, Handler>> = {
   [ME_ROUTE]: () => jsonResponse(meBody()),
+  "GET /api/v1/presets": () => jsonResponse({ data: [] }),
 };
 
 /** Os pedidos da tela, sem o `GET /me` que o cabeçalho faz em toda rota. */
@@ -115,6 +117,9 @@ export function runBody(overrides: Record<string, unknown> = {}): Record<string,
     queue_expires_at: "2026-10-14T13:00:00Z",
     deadline_at: null,
     error: null,
+    parameters: {},
+    preset_id: null,
+    results_expire_at: null,
     ...overrides,
   };
 }

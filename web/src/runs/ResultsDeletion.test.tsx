@@ -31,6 +31,7 @@ const results = {
       logical_name: "pacote",
       role: "package",
       file_name: "csv-janitor.zip",
+      availability: "available",
     },
   ],
 };

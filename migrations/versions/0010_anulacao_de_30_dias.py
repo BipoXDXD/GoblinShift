@@ -22,6 +22,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0010"
 down_revision: str | Sequence[str] | None = "0009"
@@ -38,9 +39,7 @@ def upgrade() -> None:
         "upload",
         "original_name IS NOT NULL OR deleted_at IS NOT NULL",
     )
-    op.alter_column(
-        "run", "parameters", existing_type=sa.dialects.postgresql.JSONB(), nullable=True
-    )
+    op.alter_column("run", "parameters", existing_type=postgresql.JSONB(), nullable=True)
     op.create_check_constraint(
         op.f("run_parameters_until_finished_check"),
         "run",
@@ -72,9 +71,7 @@ def downgrade() -> None:
     op.drop_index("run_anonymize_idx", table_name="run")
     op.drop_constraint(op.f("run_parameters_until_finished_check"), "run", type_="check")
     op.execute("UPDATE run SET parameters = '{}'::jsonb WHERE parameters IS NULL")
-    op.alter_column(
-        "run", "parameters", existing_type=sa.dialects.postgresql.JSONB(), nullable=False
-    )
+    op.alter_column("run", "parameters", existing_type=postgresql.JSONB(), nullable=False)
     op.drop_constraint(op.f("upload_name_until_deleted_check"), "upload", type_="check")
     op.execute(
         sa.text("UPDATE upload SET original_name = :name WHERE original_name IS NULL").bindparams(

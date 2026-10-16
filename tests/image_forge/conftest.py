@@ -50,6 +50,13 @@ class Workspace:
         return image
 
     def files(self) -> list[str]:
+        """Saídas de conteúdo; os previews, opcionais, ficam de fora (`previews()`)."""
+        return [name for name in self._all_files() if not name.startswith("previews/")]
+
+    def previews(self) -> list[str]:
+        return [name for name in self._all_files() if name.startswith("previews/")]
+
+    def _all_files(self) -> list[str]:
         return sorted(
             str(path.relative_to(self.out_dir))
             for path in self.out_dir.rglob("*")

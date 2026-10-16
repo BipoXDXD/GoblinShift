@@ -6,14 +6,22 @@ de inexistente. Rodam na transação de quem chama.
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, Row, Select, and_, case, func, select, tuple_
 from sqlalchemy.orm import Session
 
-from goblinshift.files.states import ArtifactRole
-from goblinshift.files.tables import artifact
+from goblinshift.files.states import ArtifactRole, Availability
+from goblinshift.files.tables import artifact, upload
+from goblinshift.processing.recipe import (
+    ITEM_COUNT_NAME,
+    MAX_ITEM_COUNTS,
+    ItemNoticeCode,
+    ItemRejectionCode,
+    ItemWarningCode,
+)
 from goblinshift.runs.cursor import Position, decode_cursor, encode_cursor
 from goblinshift.runs.lifecycle import TERMINAL_STATUSES, ErrorCode, Phase, Status
 from goblinshift.runs.tables import attempt, run, run_input, run_output
@@ -48,10 +56,46 @@ class RunView:
     queue_expires_at: datetime
     deadline_at: datetime | None
     error_code: str | None
+    # Nulos depois da retenção de 30 dias (1.7).
+    parameters: dict[str, Any] | None
+    preset_id: UUID | None
+    # Quando o primeiro resultado ainda disponível vence; nulo sem resultado disponível.
+    results_expire_at: datetime | None
 
     @property
     def is_terminal(self) -> bool:
         return self.status in TERMINAL_STATUSES
+
+
+class ItemStatus(StrEnum):
+    PENDING = "pending"
+    OK = "ok"
+    REJECTED = "rejected"
+    DUPLICATE = "duplicate"
+
+
+@dataclass(frozen=True)
+class RunItem:
+    """Desfecho de uma entrada, só com códigos do catálogo e contagens: nada do arquivo."""
+
+    position: int
+    upload_id: UUID
+    # Do próprio upload, que é do dono; anulado pela retenção de 30 dias (1.7).
+    original_name: str | None
+    status: ItemStatus
+    error_code: ItemRejectionCode | None
+    warnings: tuple[ItemWarningCode, ...]
+    notices: tuple[ItemNoticeCode, ...]
+    counts: dict[str, int]
+    duplicate_of: int | None
+
+
+@dataclass(frozen=True)
+class RunDetail:
+    view: RunView
+    # Contagens do relatório (`inputs`, `ok`, `rejected`, `duplicates`, `outputs`), na publicação.
+    summary: dict[str, int] | None
+    items: tuple[RunItem, ...]
 
 
 @dataclass(frozen=True)
@@ -84,6 +128,7 @@ class ResultReference:
     role: ArtifactRole
     # Nome com que o download entrega o arquivo.
     file_name: str
+    availability: Availability
 
 
 @dataclass(frozen=True)
@@ -100,6 +145,41 @@ def get_run(session: Session, owner_id: UUID, run_id: UUID) -> RunView:
     if row is None:
         raise RunNotFoundError
     return _view(row)
+
+
+def get_run_detail(session: Session, owner_id: UUID, run_id: UUID) -> RunDetail:
+    """A execução com o desfecho de cada entrada, na ordem das entradas.
+
+    O detalhe gravado passou pela coleta do worker; mesmo assim só sai daqui o que está nas listas
+    fechadas (códigos e formato das contagens), para um dado fora delas nunca chegar à API.
+    """
+    row = session.execute(
+        _select_views()
+        .add_columns(run.c.summary)
+        .where(run.c.owner_id == owner_id, run.c.id == run_id)
+    ).one_or_none()
+    if row is None:
+        raise RunNotFoundError
+    items = session.execute(
+        select(
+            run_input.c.position,
+            run_input.c.upload_id,
+            upload.c.original_name,
+            run_input.c.outcome,
+            run_input.c.error_code,
+            run_input.c.details,
+        )
+        .join(
+            upload,
+            and_(upload.c.id == run_input.c.upload_id, upload.c.owner_id == run_input.c.owner_id),
+        )
+        .where(run_input.c.owner_id == owner_id, run_input.c.run_id == run_id)
+        .order_by(run_input.c.position)
+    ).all()
+    view = _view(row)
+    # Durante a execução `summary` guarda o progresso; as contagens finais só valem no fim.
+    summary = _summary(row.summary) if view.is_terminal else None
+    return RunDetail(view, summary, tuple(_item(item) for item in items))
 
 
 def list_runs(
@@ -151,6 +231,8 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             artifact.c.role,
             artifact.c.file_name,
             artifact.c.expires_at,
+            artifact.c.deleted_at,
+            (artifact.c.expires_at <= func.now()).label("expired"),
         )
         .join(
             artifact,
@@ -163,11 +245,27 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
         .order_by(run_output.c.position)
     ).all()
     references = tuple(
-        ResultReference(row.artifact_id, row.logical_name, ArtifactRole(row.role), row.file_name)
+        ResultReference(
+            row.artifact_id,
+            row.logical_name,
+            ArtifactRole(row.role),
+            row.file_name,
+            Availability.of(
+                deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+            ),
+        )
         for row in rows
     )
-    # Publicados na mesma transação, os artefatos vencem juntos; o mínimo é o prazo seguro.
-    expires_at = min((row.expires_at for row in rows), default=None)
+    # Mesmo critério de `_results_expire_at`: só os ainda disponíveis contam, e o mínimo entre
+    # eles é o prazo seguro. Excluídos e vencidos não anunciam validade.
+    expires_at = min(
+        (
+            row.expires_at
+            for row, reference in zip(rows, references, strict=True)
+            if reference.availability is Availability.AVAILABLE
+        ),
+        default=None,
+    )
     return RunResults(published=True, expires_at=expires_at, references=references)
 
 
@@ -188,10 +286,34 @@ def _select_views() -> Select[Any]:
         run.c.queue_expires_at,
         run.c.deadline_at,
         run.c.error_code,
+        run.c.parameters,
+        run.c.preset_id,
+        _results_expire_at().label("results_expire_at"),
         _physical_attempts().label("attempt"),
         _count_inputs(run_input.c.outcome.is_not(None)).label("processed"),
         _count_inputs().label("total"),
         _queue_ahead().label("queue_ahead"),
+    )
+
+
+def _results_expire_at() -> ColumnElement[datetime]:
+    """Vencimento mais próximo entre os artefatos ainda disponíveis: nem excluídos nem vencidos
+    (o vencido antes de a manutenção marcá-lo também não conta)."""
+    return (
+        select(func.min(artifact.c.expires_at))
+        .join(
+            run_output,
+            and_(
+                run_output.c.artifact_id == artifact.c.id,
+                run_output.c.owner_id == artifact.c.owner_id,
+            ),
+        )
+        .where(
+            run_output.c.run_id == run.c.id,
+            artifact.c.deleted_at.is_(None),
+            artifact.c.expires_at > func.now(),
+        )
+        .scalar_subquery()
     )
 
 
@@ -252,7 +374,77 @@ def _view(row: Row[Any]) -> RunView:
         queue_expires_at=row.queue_expires_at,
         deadline_at=row.deadline_at,
         error_code=row.error_code,
+        parameters=row.parameters,
+        preset_id=row.preset_id,
+        results_expire_at=row.results_expire_at,
     )
+
+
+_SUMMARY_KEYS = ("inputs", "ok", "rejected", "outputs")
+
+
+def _summary(raw: object) -> dict[str, int] | None:
+    """As contagens finais; durante a execução `summary` guarda só o progresso, e sai nulo."""
+    if not isinstance(raw, dict) or not all(_is_count(raw.get(key)) for key in _SUMMARY_KEYS):
+        return None
+    duplicates = raw.get("duplicates", 0)
+    return {
+        **{key: raw[key] for key in _SUMMARY_KEYS},
+        "duplicates": duplicates if _is_count(duplicates) else 0,
+    }
+
+
+def _item(row: Any) -> RunItem:
+    details = row.details if isinstance(row.details, dict) else {}
+    duplicate_of = details.get("duplicate_of")
+    duplicate_of = duplicate_of if _is_count(duplicate_of) else None
+    return RunItem(
+        position=row.position,
+        upload_id=row.upload_id,
+        original_name=row.original_name,
+        status=_item_status(row.outcome, duplicate_of),
+        error_code=_catalog(ItemRejectionCode, row.error_code),
+        warnings=_codes(ItemWarningCode, details.get("warnings")),
+        notices=_codes(ItemNoticeCode, details.get("notices")),
+        counts=_counts(details.get("counts")),
+        duplicate_of=duplicate_of,
+    )
+
+
+def _item_status(outcome: str | None, duplicate_of: int | None) -> ItemStatus:
+    if outcome is None:
+        return ItemStatus.PENDING
+    if outcome == "rejected":
+        return ItemStatus.REJECTED
+    return ItemStatus.OK if duplicate_of is None else ItemStatus.DUPLICATE
+
+
+def _catalog[C: StrEnum](codes: type[C], raw: object) -> C | None:
+    return codes(raw) if isinstance(raw, str) and raw in codes else None
+
+
+def _codes[C: StrEnum](codes: type[C], raw: object) -> tuple[C, ...]:
+    """Só os códigos da lista fechada, na ordem gravada; o resto é descartado."""
+    return tuple(code for item in _as_list(raw) if (code := _catalog(codes, item)) is not None)
+
+
+def _counts(raw: object) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    valid = {
+        name: value
+        for name, value in raw.items()
+        if isinstance(name, str) and ITEM_COUNT_NAME.fullmatch(name) and _is_count(value)
+    }
+    return dict(list(valid.items())[:MAX_ITEM_COUNTS])
+
+
+def _as_list(raw: object) -> list[object]:
+    return raw if isinstance(raw, list) else []
+
+
+def _is_count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _iso(moment: datetime | None) -> str | None:
