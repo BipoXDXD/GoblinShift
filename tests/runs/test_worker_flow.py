@@ -404,5 +404,11 @@ def test_preparacao_grava_o_contexto_com_a_imagem_fixada_na_run(
     worker.prepare(claimed)
 
     context = runner.work_dir(claimed.attempt_id) / "context.json"
-    assert json.loads(context.read_bytes()) == {"executor_image": LOCAL_EXECUTOR_IMAGE}
-    assert read_context(context) == ExecutionContext(executor_image=claimed.executor_image)
+    uploads = [str(upload_id) for upload_id in claimed.input_upload_ids]
+    assert json.loads(context.read_bytes()) == {
+        "executor_image": LOCAL_EXECUTOR_IMAGE,
+        "input_upload_ids": uploads,
+    }
+    assert read_context(context) == ExecutionContext(
+        executor_image=claimed.executor_image, input_upload_ids=tuple(uploads)
+    )

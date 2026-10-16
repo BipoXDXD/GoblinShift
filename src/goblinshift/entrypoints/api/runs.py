@@ -46,6 +46,7 @@ from goblinshift.processing.recipe import ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
+    Accepted,
     ActiveRunLimitError,
     DailyQuotaExceededError,
     IdempotencyInProgressError,
@@ -55,7 +56,9 @@ from goblinshift.runs.acceptance import (
     QueueFullError,
     RunCommand,
     accept_run,
+    find_replay,
     parse_idempotency_key,
+    preset_run_hash,
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
@@ -90,6 +93,12 @@ _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.OUTPUT_LIMIT_EXCEEDED: "As saídas passaram do limite da execução.",
     ErrorCode.REPORT_LIMIT_EXCEEDED: "O relatório passou do limite de tamanho.",
     ErrorCode.RESOURCE_LIMIT_EXCEEDED: "A execução passou dos limites de memória, disco ou tempo.",
+    ErrorCode.INPUT_LIMIT_EXCEEDED: "As entradas passaram de um limite da receita.",
+    ErrorCode.PDF_INVALID: "Um dos PDFs está danificado ou não é um PDF.",
+    ErrorCode.PDF_UNSUPPORTED_FEATURE: (
+        "Um dos PDFs tem senha, formulário, assinatura, anexo ou conteúdo ativo."
+    ),
+    ErrorCode.PDF_PAGE_NOT_FOUND: "Uma das páginas escolhidas não existe no documento.",
     ErrorCode.EXECUTOR_UNAVAILABLE: "O executor ficou indisponível nas tentativas permitidas.",
     ErrorCode.QUEUE_EXPIRED: "A execução não começou dentro do prazo da fila.",
     ErrorCode.DEADLINE_EXCEEDED: "A execução passou do prazo total.",
@@ -323,19 +332,30 @@ def create_run_from_preset(
     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
     """
+    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    inputs = tuple(command.input_upload_ids)
     try:
+        # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
+        # retry repete a Run aceita em vez de virar 422 ou 404.
         with session.begin():
-            source = get_preset(session, principal.owner_id, preset_id)
+            replay = find_replay(
+                session, principal.owner_id, idempotency_key, preset_run_hash(preset_id, inputs)
+            )
+            if replay is None:
+                source = get_preset(session, principal.owner_id, preset_id)
+    except _REFUSALS as error:
+        raise _refusal_problem(error) from None
     except PresetNotFoundError:
         raise _preset_not_found() from None
+    if replay is not None:
+        return _respond_accepted(principal.owner_id, replay, session, request, response)
     run_command = RunCommand(
         recipe_id=source.recipe_id,
         recipe_version=source.recipe_version,
-        input_upload_ids=tuple(command.input_upload_ids),
+        input_upload_ids=inputs,
         parameters=source.parameters,
         preset_id=source.id,
     )
-    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
     return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
 
 
@@ -366,13 +386,16 @@ def _accept(
         raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
-    record_run_accepted(
-        accepted.run_id,
-        run_command.recipe_id,
-        run_command.recipe_version,
-        replayed=accepted.replayed,
-    )
+    return _respond_accepted(owner_id, accepted, session, request, response)
+
+
+def _respond_accepted(
+    owner_id: UUID, accepted: Accepted, session: Session, request: Request, response: Response
+) -> AcceptedRunResponse:
     view = _read_run(session, owner_id, accepted.run_id)
+    record_run_accepted(
+        accepted.run_id, view.recipe_id, view.recipe_version, replayed=accepted.replayed
+    )
     response.headers["Location"] = request.app.url_path_for(
         get_run_route.__name__, run_id=str(accepted.run_id)
     )
@@ -401,7 +424,12 @@ def list_runs_route(
     cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_CHARS)] = None,
 ) -> RunListResponse:
     settings: Settings = request.app.state.settings
-    filters = RunFilters(recipe_id, status, created_from, created_to)
+    filters = RunFilters(
+        recipe_id,
+        status,
+        _in_utc("created_from", created_from),
+        _in_utc("created_to", created_to),
+    )
     try:
         with session.begin():
             page = list_runs(
@@ -488,6 +516,25 @@ def get_results_route(
 def _add_deprecation_headers(response: Response, recipe_id: str, version: int) -> None:
     """`Sunset` quando a versão usada está `deprecated` (1.6); a aceitação já a encontrou."""
     response.headers.update(deprecation_headers(CATALOG.get_version(recipe_id, version)))
+
+
+def _in_utc(name: str, moment: datetime | None) -> datetime | None:
+    """Filtro de período em UTC; um instante válido com fuso pode cair fora da faixa do ano 1 a
+    9999 quando convertido, e isso é entrada inválida (422), não erro do servidor."""
+    if moment is None:
+        return None
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("query", name),
+                    "type": "value_error",
+                    "msg": "a data fica fora da faixa válida em UTC",
+                }
+            ]
+        ) from None
 
 
 def _validate(command: RunCommand, idempotency_key: str | None) -> ValidatedRunResponse:

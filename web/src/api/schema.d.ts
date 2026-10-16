@@ -2529,6 +2529,31 @@ export interface operations {
                          */
                         name_prefix?: string;
                     };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
+                    };
                 });
             };
         };
@@ -2854,6 +2879,31 @@ export interface operations {
                          * @default file
                          */
                         name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
                     };
                 });
             };
@@ -3329,6 +3379,31 @@ export interface operations {
                          * @default file
                          */
                         name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
                     };
                 });
             };

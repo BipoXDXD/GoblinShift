@@ -10,7 +10,7 @@ type Variant<K extends RunCommand["recipe_id"]> = Extract<RunCommand, { recipe_i
 describe("contrato gerado de POST /runs", () => {
   it("discrimina as variantes pelo recipe_id literal", () => {
     expectTypeOf<RunCommand["recipe_id"]>().toEqualTypeOf<
-      "csv-janitor" | "image-forge" | "downloads-detox"
+      "csv-janitor" | "image-forge" | "downloads-detox" | "pdf-press"
     >();
   });
 
@@ -18,6 +18,7 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<Variant<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"pdf-press">["recipe_version"]>().toEqualTypeOf<1>();
   });
 
   it("dá à CSV Janitor os próprios parâmetros, sem index signature", () => {
@@ -61,6 +62,18 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<keyof Parameters>().toEqualTypeOf<
       "deduplicate" | "group_by" | "name_mode" | "name_prefix"
     >();
+  });
+
+  it("dá ao PDF Press os próprios parâmetros, com a seleção por upload e página", () => {
+    type Parameters = Variant<"pdf-press">["parameters"];
+
+    expectTypeOf<Parameters["operation"]>().toEqualTypeOf<
+      "merge" | "split" | "select" | undefined
+    >();
+    expectTypeOf<Parameters["select"]>().toEqualTypeOf<
+      { upload_id: string; page_number: number }[] | null | undefined
+    >();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<"operation" | "pages_per_document" | "select">();
   });
 
   it("mantém os campos comuns fora das variantes", () => {
