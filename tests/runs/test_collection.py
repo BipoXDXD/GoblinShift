@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from goblinshift.processing.recipe import ItemRejectionCode
+from goblinshift.processing.recipe import ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
     CollectionError,
@@ -498,3 +498,74 @@ def test_nome_fora_das_regras_de_saida_e_recusado(tmp_path: Path, name: str) -> 
 
     with pytest.raises(CollectionError, match="nome"):
         collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+# --- Avisos e contagens por item: só o que o catálogo e o formato admitem (1.1, 3.6) --------------
+
+
+def test_avisos_e_contagens_do_item_sao_coletados(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    counts = {"records_read": 3, "written": 2}
+    item = ok_item(0, "a.csv", counts=counts)
+    item["warnings"] = [
+        {"code": "CSV_FORMULA_CELLS", "detail": "célula =1+1 na coluna 'nome de pessoa'"},
+        {"code": "CSV_FORMULA_HEADER", "detail": "d"},
+    ]
+    write_out(out, [item, rejected_item(1)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+    first, second = collected.report.items
+    assert first.warnings == (ItemWarningCode.CSV_FORMULA_CELLS, ItemWarningCode.CSV_FORMULA_HEADER)
+    assert first.counts == counts
+    assert first.has_warnings
+    assert (second.warnings, second.counts) == ((), {})
+
+
+@pytest.mark.parametrize(
+    "warning",
+    [
+        pytest.param({"code": "INVENTADO", "detail": "d"}, id="codigo-fora-do-catalogo"),
+        pytest.param({"code": 1, "detail": "d"}, id="codigo-nao-texto"),
+        pytest.param("CSV_FORMULA_CELLS", id="aviso-nao-objeto"),
+    ],
+)
+def test_aviso_fora_do_catalogo_e_recusado(tmp_path: Path, warning: object) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [warning]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="aviso"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        pytest.param({"records_read": -1}, id="negativa"),
+        pytest.param({"records_read": "3"}, id="texto"),
+        pytest.param({"records_read": True}, id="booleano"),
+        pytest.param({"Nome Pessoal": 1}, id="chave-fora-do-formato"),
+        pytest.param({f"c{i}": 1 for i in range(17)}, id="chaves-demais"),
+        pytest.param([1], id="nao-objeto"),
+    ],
+)
+def test_contagem_fora_do_formato_e_recusada(tmp_path: Path, counts: object) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["counts"] = counts
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="counts"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_dezesseis_contagens_sao_aceitas(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    counts = {f"c{i}": i for i in range(16)}
+    write_out(out, [ok_item(0, "a.csv", counts=counts)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].counts == counts

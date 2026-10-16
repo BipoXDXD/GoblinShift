@@ -100,6 +100,9 @@ run_input = Table(
     Column("upload_id", Uuid, nullable=False),
     Column("outcome", Text),
     Column("error_code", Text),
+    # Avisos (códigos), contagens e duplicata do item, já conferidos pela coleta; sem texto do
+    # arquivo. Anulado com os demais detalhes por item na retenção de 30 dias (1.7).
+    Column("details", JSONB),
     PrimaryKeyConstraint("run_id", "position"),
     UniqueConstraint("run_id", "upload_id"),
     ForeignKeyConstraint(["owner_id", "run_id"], ["run.owner_id", "run.id"], ondelete="CASCADE"),
@@ -109,6 +112,7 @@ run_input = Table(
     Index(None, "owner_id", "upload_id"),
     CheckConstraint("position >= 0", name="position"),
     CheckConstraint("outcome IN ('ok', 'rejected')", name="outcome"),
+    CheckConstraint("jsonb_typeof(details) = 'object'", name="details"),
 )
 
 attempt = Table(

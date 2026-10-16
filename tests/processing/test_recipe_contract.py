@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from goblinshift.processing.csv_janitor.results import RejectionCode as CsvCode
+from goblinshift.processing.csv_janitor.results import WarningCode as CsvWarningCode
 from goblinshift.processing.downloads_detox.recipe import REJECTION_CODE as DETOX_CODE
 from goblinshift.processing.image_forge.rejection import RejectionCode as ImageCode
 from goblinshift.processing.recipe import (
@@ -14,8 +15,10 @@ from goblinshift.processing.recipe import (
     ItemOk,
     ItemRejected,
     ItemRejectionCode,
+    ItemWarningCode,
     OutputGroup,
     Report,
+    ReportWarning,
     require_max_inputs,
 )
 
@@ -88,6 +91,19 @@ def test_codigos_de_rejeicao_de_cada_receita_estao_no_catalogo() -> None:
 def test_rejeicao_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
     with pytest.raises(ValueError, match="catálogo"):
         ItemRejected(position=0, code=code, reason="r")
+
+
+# --- Códigos de aviso: lista fechada, porque vão para o banco e para a API ---------------------
+
+
+def test_codigos_de_aviso_de_cada_receita_estao_no_catalogo() -> None:
+    assert {*CsvWarningCode} <= {code.value for code in ItemWarningCode}
+
+
+@pytest.mark.parametrize("code", ["W", "", "csv_formula_cells"])
+def test_aviso_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
+    with pytest.raises(ValueError, match="catálogo"):
+        ReportWarning(code=code, detail="d")
 
 
 # --- Teto de entradas da versão: job acima dele é infraestrutura, não conteúdo ------------------
