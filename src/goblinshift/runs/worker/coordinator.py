@@ -490,7 +490,15 @@ class Coordinator:
                     .where(
                         run_input.c.run_id == claimed.run_id, run_input.c.position == item.position
                     )
-                    .values(outcome="ok" if item.accepted else "rejected", error_code=item.code)
+                    .values(
+                        outcome="ok" if item.accepted else "rejected",
+                        error_code=item.code,
+                        details={
+                            "warnings": [code.value for code in item.warnings],
+                            "counts": dict(item.counts),
+                            "duplicate_of": item.duplicate_of,
+                        },
+                    )
                 )
 
         return self._conclude(
