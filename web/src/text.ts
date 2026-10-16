@@ -107,6 +107,8 @@ export const TEXT = {
         "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
       "downloads-detox":
         "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
+      "pdf-press":
+        "Junta, separa ou escolhe páginas de PDFs, com o mapa de cada página, sem abrir o arquivo no navegador.",
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
@@ -353,6 +355,47 @@ export const TEXT = {
       prefixSeparator: "O prefixo não pode ter / nem \\.",
       prefixInvisible: "O prefixo não pode ter caracteres invisíveis ou de controle.",
       prefixDot: "O prefixo não pode começar com ponto.",
+    },
+  },
+  pdfPress: {
+    title: "PDF Press",
+    operation: "O que fazer com os PDFs",
+    operations: {
+      merge: "Juntar todos num PDF só, na ordem da lista",
+      split: "Separar cada PDF em partes",
+      select: "Montar um PDF com as páginas escolhidas",
+    },
+    mergeHint:
+      "A ordem dos arquivos na lista é a ordem no PDF final. Use os botões Mover para cima e Mover para baixo para mudar.",
+    pagesPerDocument: "Páginas por parte",
+    pagesPerDocumentHint: (max: number) =>
+      `De 1 a ${String(max)}. Com 1, cada página vira um PDF; com 3, as partes têm 3 páginas, e a última pode ter menos.`,
+    select: "Páginas escolhidas",
+    selectHint: (max: number) =>
+      `Cada cartão é uma página do PDF final, na ordem da lista. A mesma página pode aparecer mais de uma vez. Até ${String(max)} páginas.`,
+    selectWaitingFiles: "Envie os PDFs primeiro: cada cartão escolhe uma página de um deles.",
+    selectOrder: "Ordem das páginas",
+    addCard: "Adicionar página",
+    cardName: (position: number) => `página ${String(position)} da seleção`,
+    cardTitle: (position: number) => `${String(position)}.`,
+    cardFile: (position: number) => `PDF da página ${String(position)}`,
+    cardPage: (position: number) => `Número da página ${String(position)} no PDF`,
+    noFileChosen: "Escolha um PDF",
+    removeCard: (position: number) => `Remover a página ${String(position)}`,
+    preview: {
+      heading: "Mapa de páginas previsto",
+      empty: "O mapa aparece quando houver PDFs enviados ou páginas escolhidas.",
+      allPages: (name: string) => `${name}, todas as páginas`,
+      groups: (size: string) => `partes de ${size} página(s), na ordem`,
+      page: (name: string, page: string) => `${name}, página ${page}`,
+      noFile: "PDF não escolhido",
+    },
+    errors: {
+      integerBetween: (min: number, max: number) =>
+        `Informe um número inteiro de ${String(min)} a ${String(max)}.`,
+      chooseFile: "Escolha um dos PDFs enviados.",
+      noPages: "Adicione ao menos uma página.",
+      tooManyPages: (max: number) => `Escolha no máximo ${String(max)} páginas.`,
     },
   },
   history: {
