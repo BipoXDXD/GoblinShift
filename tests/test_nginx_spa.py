@@ -60,8 +60,6 @@ GZIP = {"Accept-Encoding": "gzip"}
 GZIP_TYPES = {
     "text/css",
     "application/javascript",
-    "application/json",
-    "application/problem+json",
     "image/svg+xml",
     "application/manifest+json",
 }
@@ -382,12 +380,18 @@ class TestCompressao:
         assert response.headers["content-encoding"] == "gzip"
         assert gzip.decompress(response.body) == stack.get("/").body
 
-    def test_json_da_api_sai_comprimido(self, stack: Stack) -> None:
+    def test_asset_sai_comprimido_atras_da_borda(self, stack: Stack) -> None:
         # A borda acrescenta Via ao pedido: sem gzip_proxied, nada atrás dela seria comprimido.
-        response = stack.get("/api/v1/runs?limit=5", headers={**GZIP, "Via": "1.1 Caddy"})
+        response = stack.get(_first_asset(stack, "js"), headers={**GZIP, "Via": "1.1 Caddy"})
 
         assert response.headers["content-encoding"] == "gzip"
-        assert json.loads(gzip.decompress(response.body))["served_by"] == "api"
+
+    def test_json_da_api_sai_sem_compressao(self, stack: Stack) -> None:
+        # BREACH: segredo e texto do cliente na mesma resposta comprimida vazam por tamanho.
+        response = stack.get("/api/v1/runs?limit=5", headers={**GZIP, "Via": "1.1 Caddy"})
+
+        assert "content-encoding" not in response.headers
+        assert json.loads(response.body)["served_by"] == "api"
 
     @pytest.mark.parametrize("extension", ["glb", "avif", "webp", "woff2"])
     def test_binario_ja_comprimido_sai_como_esta(self, stack: Stack, extension: str) -> None:
