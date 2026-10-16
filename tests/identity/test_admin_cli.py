@@ -24,6 +24,7 @@ from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import Status
+from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
 from tests.identity.support import new_user
 from tests.runs.worker_support import queue_run
@@ -488,6 +489,58 @@ def test_set_limits_sobrepoe_e_default_desfaz(capsys: pytest.CaptureFixture[str]
     assert restored["storage_bytes"] == ["1048576", "conta"]
 
 
+def limits_events(factory: sessionmaker[Session], user_id: str) -> list[tuple[str, object]]:
+    with factory() as session:
+        rows = session.execute(
+            select(audit_event.c.outcome, audit_event.c.details)
+            .where(
+                audit_event.c.user_id == UUID(user_id),
+                audit_event.c.event_type == "ACCOUNT_LIMITS_CHANGED",
+            )
+            .order_by(audit_event.c.id)
+        ).all()
+    return [(row.outcome, row.details) for row in rows]
+
+
+def test_set_limits_audita_os_valores_antigos_e_novos_dos_itens_citados(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+
+    run(
+        capsys, "set-limits", "--user", user_id, "--runs-per-24h", "5", "--storage-bytes", "1048576"
+    )
+    run(capsys, "set-limits", "--user", user_id, "--runs-per-24h", "default")
+
+    # `null` é "sem override": vale o padrão das settings. O que não foi citado não aparece.
+    assert limits_events(factory, user_id) == [
+        (
+            "success",
+            {
+                "changes": {
+                    "runs_per_24h": {"old": None, "new": 5},
+                    "storage_bytes": {"old": 4 * 1024**3, "new": 1048576},
+                }
+            },
+        ),
+        ("success", {"changes": {"runs_per_24h": {"old": 5, "new": None}}}),
+    ]
+
+
+def test_set_limits_audita_o_teto_de_armazenamento_que_volta_ao_padrao(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+    run(capsys, "set-limits", "--user", user_id, "--storage-bytes", "1048576")
+
+    run(capsys, "set-limits", "--user", user_id, "--storage-bytes", "default")
+
+    assert limits_events(factory, user_id)[-1] == (
+        "success",
+        {"changes": {"storage_bytes": {"old": 1048576, "new": 4 * 1024**3}}},
+    )
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -498,7 +551,7 @@ def test_set_limits_sobrepoe_e_default_desfaz(capsys: pytest.CaptureFixture[str]
     ],
 )
 def test_set_limits_recusa_valor_invalido_sem_mudar_nada(
-    capsys: pytest.CaptureFixture[str], args: tuple[str, ...]
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], args: tuple[str, ...]
 ) -> None:
     user_id = create_user(capsys)
     before = usage_lines(capsys, user_id)
@@ -509,6 +562,7 @@ def test_set_limits_recusa_valor_invalido_sem_mudar_nada(
 
     assert usage_error.value.code == EXIT_USAGE
     assert usage_lines(capsys, user_id) == before
+    assert limits_events(factory, user_id) == []
 
 
 def test_set_limits_sem_nada_a_mudar_sai_com_2(capsys: pytest.CaptureFixture[str]) -> None:
@@ -520,16 +574,28 @@ def test_set_limits_sem_nada_a_mudar_sai_com_2(capsys: pytest.CaptureFixture[str
     assert "nada a mudar" in err
 
 
+@pytest.mark.parametrize(
+    "args",
+    [("--storage-bytes", "1"), ("--runs-per-24h", "5", "--storage-bytes", "1")],
+    ids=["so-armazenamento", "cota-e-armazenamento"],
+)
 def test_set_limits_abaixo_do_reservado_sai_com_2(
-    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], tmp_path: Path
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    tmp_path: Path,
+    args: tuple[str, ...],
 ) -> None:
+    """A cota citada junto também não muda: a transação inteira é desfeita, sem evento."""
     owner = new_user(factory)
     queue_run(factory, FileStorage(tmp_path), owner)  # entrada de alguns bytes reservada
 
-    exit_code, _, err = run(capsys, "set-limits", "--user", str(owner), "--storage-bytes", "1")
+    exit_code, _, err = run(capsys, "set-limits", "--user", str(owner), *args)
 
     assert exit_code == EXIT_USAGE
     assert "reservou" in err
+    with factory() as session:
+        assert quota_override(session, owner) == QuotaOverride()
+    assert limits_events(factory, str(owner)) == []
 
 
 @pytest.mark.parametrize("command", ["usage", "set-limits"])

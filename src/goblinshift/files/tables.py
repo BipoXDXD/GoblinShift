@@ -103,21 +103,38 @@ artifact = Table(
     Column("owner_id", Uuid, nullable=False),
     Column("object_id", Uuid, nullable=False),
     Column("role", Text, nullable=False),
-    # Nome final da saída (regras de 3.6, já aplicadas pela receita), usado no download.
-    Column("file_name", Text, nullable=False),
+    # Nome final da saída (regras de 3.6, já aplicadas pela receita), usado no download. Anulado
+    # 30 dias depois do término da Run, só depois da exclusão (1.7, "Retenção"; migração 0015);
+    # quem lê usa `files.artifacts.generic_file_name` no lugar.
+    Column("file_name", Text),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("deleted_at", DateTime(timezone=True)),
+    # Só no preview: a saída de conteúdo de que ele deriva (GET /artifacts/{id}/preview).
+    Column("source_artifact_id", Uuid),
     UniqueConstraint("owner_id", "id"),
     ForeignKeyConstraint(
         ["owner_id", "object_id"],
         ["stored_object.owner_id", "stored_object.id"],
         ondelete="RESTRICT",
     ),
+    ForeignKeyConstraint(
+        ["owner_id", "source_artifact_id"],
+        ["artifact.owner_id", "artifact.id"],
+        # O preview não existe sem a saída de origem: a purga e a retenção a removem junto.
+        ondelete="CASCADE",
+    ),
     Index(None, "object_id"),
+    Index(
+        "artifact_source_artifact_id_idx",
+        "source_artifact_id",
+        postgresql_where=text("source_artifact_id IS NOT NULL"),
+    ),
     CheckConstraint("octet_length(file_name) BETWEEN 1 AND 240", name="file_name"),
+    CheckConstraint("file_name IS NOT NULL OR deleted_at IS NOT NULL", name="name_until_deleted"),
     Index("artifact_expires_at_idx", "expires_at", postgresql_where=text("deleted_at IS NULL")),
-    CheckConstraint("role IN ('output', 'report', 'manifest', 'package')", name="role"),
+    CheckConstraint("role IN ('output', 'report', 'manifest', 'package', 'preview')", name="role"),
+    CheckConstraint("(role = 'preview') = (source_artifact_id IS NOT NULL)", name="preview_source"),
 )
 
 object_use = Table(

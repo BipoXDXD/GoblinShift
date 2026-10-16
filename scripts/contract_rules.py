@@ -22,6 +22,12 @@ _UNPROCESSABLE = 422
 # Código do Pydantic para erro levantado por validador próprio, não por uma restrição do schema.
 _DOMAIN_ERROR = "value_error"
 _GET_UPLOAD = "GET /api/v1/uploads/{upload_id}"
+_PRECONDITION_FAILED = 412
+_PRECONDITION_REQUIRED = 428
+_IF_MATCH = "if-match"
+_PRESET_WITH_IF_MATCH = frozenset(
+    {"PUT /api/v1/presets/{preset_id}", "DELETE /api/v1/presets/{preset_id}"}
+)
 _ITEM_NAME_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.name")
 
 
@@ -97,6 +103,15 @@ def _only_run_domain_errors(rejection: Rejection) -> bool:
     )
 
 
+def _only_preset_domain_errors(rejection: Rejection) -> bool:
+    """Só erros de validador próprio: nome com controle ou só espaços, regra cruzada da receita."""
+    errors = rejection.field_errors()
+    return bool(errors) and all(
+        code == _DOMAIN_ERROR and (field == "body.name" or field.startswith("body.parameters"))
+        for field, code in errors
+    )
+
+
 _ANY_OPERATION = "*"
 
 _RULES = (
@@ -145,6 +160,43 @@ _RULES = (
         "BODY_TOO_LARGE",
         lambda _rejection: True,
     ),
+    # Presets: o nome não aceita controles nem formato invisível, e os parâmetros seguem as mesmas
+    # regras cruzadas do catálogo que `POST /runs`.
+    _Rule("POST /api/v1/presets", _UNPROCESSABLE, "VALIDATION_FAILED", _only_preset_domain_errors),
+    _Rule(
+        "PUT /api/v1/presets/{preset_id}",
+        _UNPROCESSABLE,
+        "VALIDATION_FAILED",
+        _only_preset_domain_errors,
+    ),
+    # A revisão no `If-Match` segue o formato, mas não é a atual: o estado do recurso, não o
+    # schema, decide (1.6: obsoleto → 412).
+    _Rule(
+        "PUT /api/v1/presets/{preset_id}",
+        _PRECONDITION_FAILED,
+        "PRECONDITION_FAILED",
+        lambda rejection: rejection.has_header("If-Match"),
+    ),
+    _Rule(
+        "DELETE /api/v1/presets/{preset_id}",
+        _PRECONDITION_FAILED,
+        "PRECONDITION_FAILED",
+        lambda rejection: rejection.has_header("If-Match"),
+    ),
+    # Execução a partir de preset: os mesmos limites de entradas e a mesma existência de uploads
+    # de `POST /runs`.
+    _Rule(
+        "POST /api/v1/presets/{preset_id}/runs",
+        _UNPROCESSABLE,
+        "VALIDATION_FAILED",
+        _only_errors(("body.input_upload_ids", _DOMAIN_ERROR)),
+    ),
+    _Rule(
+        "POST /api/v1/presets/{preset_id}/runs",
+        _UNPROCESSABLE,
+        "INPUT_NOT_AVAILABLE",
+        lambda _rejection: True,
+    ),
     # Nos testes com estado, o upload já falhou (conteúdo de tamanho errado) ou foi excluído.
     _Rule("PUT /api/v1/uploads/{upload_id}/content", _GONE, "GONE", lambda _rejection: True),
 )
@@ -160,6 +212,19 @@ def is_expected_rejection(rejection: Rejection) -> bool:
         and rule.code == code
         and rule.applies(rejection)
         for rule in _RULES
+    )
+
+
+def is_expected_missing_header(
+    operation: str, header: str, status: int, problem: Mapping[str, Any] | None
+) -> bool:
+    """`If-Match` ausente nos presets é 428 (1.6, RFC 6585); o check espera 400 ou 422."""
+    return (
+        operation in _PRESET_WITH_IF_MATCH
+        and header.lower() == _IF_MATCH
+        and status == _PRECONDITION_REQUIRED
+        and problem is not None
+        and problem.get("code") == "PRECONDITION_REQUIRED"
     )
 
 
