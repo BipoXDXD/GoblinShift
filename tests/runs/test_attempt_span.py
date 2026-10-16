@@ -6,18 +6,20 @@ medidas pelo executor e pelo worker. Nunca nomes de arquivo nem parâmetros.
 
 import uuid
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.telemetry import UserHasher
+from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.coordinator import Coordinator
 from goblinshift.runs.worker.runner import Runner
@@ -86,6 +88,7 @@ def test_tentativa_publicada_tem_o_evento_completo_e_link_para_a_aceitacao(
     owner = create_user(factory)
     run_id = queue_run(factory, storage, owner, ((FILE_NAME, VALID), ("ruim.csv", INVALID)))
     set_traceparent(factory, run_id, TRACEPARENT)
+    eligible_at = make_eligible_since(factory, run_id, timedelta(seconds=90))
     claimed = claim(factory, storage)
 
     traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
@@ -97,7 +100,8 @@ def test_tentativa_publicada_tem_o_evento_completo_e_link_para_a_aceitacao(
     [link] = span.links
     assert (link.context.trace_id, link.context.span_id) == (TRACE_ID, SPAN_ID)
     timing_keys = {"inspect_ms", "process_ms", "package_ms", "collect_ms", "publish_ms"}
-    assert {key: attributes[key] for key in attributes.keys() - timing_keys - {"duration_ms"}} == {
+    measured = timing_keys | {"duration_ms", "queue_wait_ms"}
+    assert {key: attributes[key] for key in attributes.keys() - measured} == {
         "main": True,
         "run_id": str(run_id),
         "attempt_id": str(attempt_row["id"]),
@@ -115,7 +119,12 @@ def test_tentativa_publicada_tem_o_evento_completo_e_link_para_a_aceitacao(
         "attempt.outputs": 1,
         "attempt.output_bytes": len(VALID),
         "attempt.rejected": 1,
+        "attempt.rejected.CSV_STRUCTURE_INVALID": 1,
     }
+    # Da elegibilidade ao início da tentativa, os dois pelo relógio do banco.
+    wait_ms = (attempt_row["started_at"] - eligible_at) // timedelta(milliseconds=1)
+    assert wait_ms >= 90_000
+    assert attributes["queue_wait_ms"] == wait_ms
     for key in (*timing_keys, "duration_ms"):
         value = attributes[key]
         assert isinstance(value, int)
@@ -123,6 +132,19 @@ def test_tentativa_publicada_tem_o_evento_completo_e_link_para_a_aceitacao(
     text = repr(attributes)
     assert "CANARIO" not in text
     assert str(owner) not in text
+
+
+def make_eligible_since(
+    factory: sessionmaker[Session], run_id: uuid.UUID, ago: timedelta
+) -> datetime:
+    with unit_of_work(factory) as session:
+        eligible_at: datetime = session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(eligible_at=func.now() - ago)
+            .returning(run.c.eligible_at)
+        ).scalar_one()
+    return eligible_at
 
 
 def test_sem_traceparent_na_run_o_span_fica_sem_link(
@@ -141,6 +163,9 @@ def test_sem_traceparent_na_run_o_span_fica_sem_link(
     assert span.links == ()
     assert span.attributes is not None
     assert span.attributes["attempt.outcome"] == "succeeded"
+    assert "attempt.rejected.CSV_STRUCTURE_INVALID" not in span.attributes
+    assert "attempt.stop_reason" not in span.attributes
+    assert "attempt.cancel_latency_ms" not in span.attributes
 
 
 def test_traceparent_invalido_nao_derruba_a_tentativa(
@@ -194,3 +219,52 @@ def test_sem_tracer_o_coordenador_funciona_igual(
     Coordinator(factory, storage, local_runner(work_root), coordinator_config()).run(claimed)
 
     assert run_row(factory, run_id)["status"] == "succeeded"
+
+
+def test_cancelamento_antes_do_inicio_traz_a_razao_e_a_latencia(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    cancel_run(factory, storage, owner, run_id)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    row = run_row(factory, run_id)
+    assert row["status"] == "canceled"
+    attributes = only_attempt_span(exporter).attributes
+    assert attributes is not None
+    assert attributes["attempt.stop_reason"] == "CANCELED"
+    # A confirmação da parada é a transação que torna a Run terminal: `finished_at`.
+    latency = row["finished_at"] - row["cancel_requested_at"]
+    assert attributes["attempt.cancel_latency_ms"] == latency // timedelta(milliseconds=1)
+    assert attributes["attempt.outcome"] == "canceled"
+
+
+def test_parada_pelo_prazo_traz_a_razao_sem_latencia_de_cancelamento(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+    # Prazo vencido gravado como a renovação do lease o gravaria, antes do início do executor.
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(status="stopping", phase=None, stop_reason="DEADLINE_EXCEEDED")
+        )
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert (run_row(factory, run_id)["error_code"]) == "DEADLINE_EXCEEDED"
+    attributes = only_attempt_span(exporter).attributes
+    assert attributes is not None
+    assert attributes["attempt.stop_reason"] == "DEADLINE_EXCEEDED"
+    assert "attempt.cancel_latency_ms" not in attributes
