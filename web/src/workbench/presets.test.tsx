@@ -116,6 +116,36 @@ describe("Bancada: Salvar preset", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
+  it("fechado pelo navegador com o pedido em voo, reabre e mostra o 409 que chegou depois", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const { user } = setup("/bancada/csv-janitor", {
+      "POST /api/v1/presets": () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+
+    const dialog = await openSaveDialog(user);
+    await user.type(within(dialog).getByLabelText("Nome do preset"), "Clientes do mês");
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+    await within(dialog).findByRole("button", { name: "Salvando…" });
+    // O Chrome fecha o diálogo no segundo Esc mesmo com o cancel impedido.
+    if (!(dialog instanceof HTMLDialogElement)) {
+      throw new Error("o diálogo de salvar não é um <dialog>");
+    }
+    dialog.close();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    answer(problemResponse(409, "STATE_CONFLICT"));
+
+    await user.click(screen.getByRole("button", { name: "Salvar preset" }));
+    const reopened = screen.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
+    expect(
+      await within(reopened).findByText(
+        "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",
+      ),
+    ).toBeVisible();
+  });
+
   it("com parâmetros inválidos, pede a correção em vez de abrir o diálogo", async () => {
     const { api, user } = setup("/bancada/image-forge");
 
