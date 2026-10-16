@@ -22,6 +22,9 @@ _COMMON_HEADERS = (
     ("x-content-type-options", "nosniff"),
     ("referrer-policy", "strict-origin-when-cross-origin"),
     ("cross-origin-opener-policy", "same-origin"),
+    # Nenhuma resposta da API é recurso para outro site embutir (img, script, fetch no-cors). O
+    # download baixado pela própria origem, por navegação ou fetch, não é afetado.
+    ("cross-origin-resource-policy", "same-origin"),
     ("permissions-policy", "camera=(), microphone=(), geolocation=()"),
     ("cache-control", "no-store"),
 )
