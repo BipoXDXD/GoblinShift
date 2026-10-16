@@ -28,8 +28,13 @@ const LIMITS_KB = {
    */
   threeDModel: 3400,
   threeDPoster: 90,
-  /** Goblin de um estado, cada arquivo (AVIF ou WebP, 1× ou 2×). */
-  illustration: 20,
+  /**
+   * Goblin de um estado ou do elenco, cada arquivo (AVIF ou WebP, de 256 a 768 px). Era 20 KB
+   * com a caixa de 128×160; em 2026-10-15 o usuário pediu as goblins em destaque (256×320 CSS) e
+   * o arquivo de 768 px, o das telas 3×, tem 9× a área. A maior é a Rúbia em WebP, com 61 KB. O
+   * navegador baixa um só arquivo por goblin (srcset e sizes), e só quando ela aparece (lazy).
+   */
+  illustration: 64,
 } as const;
 
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */

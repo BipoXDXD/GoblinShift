@@ -1,29 +1,5 @@
-import type { ReactElement } from "react";
+import { useId, type ReactElement } from "react";
 
-import adaAvif128 from "../assets/art/goblins/ada-128w.avif";
-import adaWebp128 from "../assets/art/goblins/ada-128w.webp";
-import adaAvif256 from "../assets/art/goblins/ada-256w.avif";
-import adaWebp256 from "../assets/art/goblins/ada-256w.webp";
-import fagulhaAvif128 from "../assets/art/goblins/fagulha-128w.avif";
-import fagulhaWebp128 from "../assets/art/goblins/fagulha-128w.webp";
-import fagulhaAvif256 from "../assets/art/goblins/fagulha-256w.avif";
-import fagulhaWebp256 from "../assets/art/goblins/fagulha-256w.webp";
-import ferrugemAvif128 from "../assets/art/goblins/ferrugem-128w.avif";
-import ferrugemWebp128 from "../assets/art/goblins/ferrugem-128w.webp";
-import ferrugemAvif256 from "../assets/art/goblins/ferrugem-256w.avif";
-import ferrugemWebp256 from "../assets/art/goblins/ferrugem-256w.webp";
-import jadeAvif128 from "../assets/art/goblins/jade-128w.avif";
-import jadeWebp128 from "../assets/art/goblins/jade-128w.webp";
-import jadeAvif256 from "../assets/art/goblins/jade-256w.avif";
-import jadeWebp256 from "../assets/art/goblins/jade-256w.webp";
-import luaAvif128 from "../assets/art/goblins/lua-128w.avif";
-import luaWebp128 from "../assets/art/goblins/lua-128w.webp";
-import luaAvif256 from "../assets/art/goblins/lua-256w.avif";
-import luaWebp256 from "../assets/art/goblins/lua-256w.webp";
-import nyxAvif128 from "../assets/art/goblins/nyx-128w.avif";
-import nyxWebp128 from "../assets/art/goblins/nyx-128w.webp";
-import nyxAvif256 from "../assets/art/goblins/nyx-256w.avif";
-import nyxWebp256 from "../assets/art/goblins/nyx-256w.webp";
 import { TEXT } from "../text";
 
 /** Estados da interface que ganham goblin (decisão D6: goblins só nos estados). */
@@ -32,54 +8,69 @@ export type GoblinState = (typeof GOBLIN_STATES)[number];
 
 type GoblinId = keyof typeof TEXT.art.goblins;
 
+/** Larguras geradas por scripts/arte/gerar-imagens.sh: a caixa de 192 a 256 px CSS, de 1× a 3×. */
+const WIDTHS = [256, 384, 512, 768] as const;
+const FALLBACK_WIDTH = 384;
+
+const FILES = import.meta.glob<string>("../assets/art/goblins/*.{avif,webp}", {
+  eager: true,
+  import: "default",
+});
+
 interface Goblin {
   readonly name: string;
   readonly alt: string;
-  readonly avif: { readonly x1: string; readonly x2: string };
-  readonly webp: { readonly x1: string; readonly x2: string };
+  /** `srcset` com descritor de largura, um por formato. */
+  readonly avif: string;
+  readonly webp: string;
+  /** WebP de 384 px, para navegador sem `<picture>`. */
+  readonly fallback: string;
 }
 
+/** Falha ao carregar o módulo se faltar um arquivo: imagem quebrada não chega ao build. */
+function fileUrl(id: GoblinId, width: number, format: "avif" | "webp"): string {
+  const name = `${id}-${String(width)}w.${format}`;
+  const url = FILES[`../assets/art/goblins/${name}`];
+  if (url === undefined) {
+    throw new Error(`Falta a imagem ${name} da goblin; rode scripts/arte/gerar-imagens.sh`);
+  }
+  return url;
+}
+
+function srcSetOf(id: GoblinId, format: "avif" | "webp"): string {
+  return WIDTHS.map((width) => `${fileUrl(id, width, format)} ${String(width)}w`).join(", ");
+}
+
+function goblinFrom(id: GoblinId): Goblin {
+  return {
+    ...TEXT.art.goblins[id],
+    avif: srcSetOf(id, "avif"),
+    webp: srcSetOf(id, "webp"),
+    fallback: fileUrl(id, FALLBACK_WIDTH, "webp"),
+  };
+}
+
+/** A ordem é a do elenco na página de créditos: a Rúbia, mascote da abertura, primeiro. */
 const GOBLINS: Readonly<Record<GoblinId, Goblin>> = {
-  lua: {
-    ...TEXT.art.goblins.lua,
-    avif: { x1: luaAvif128, x2: luaAvif256 },
-    webp: { x1: luaWebp128, x2: luaWebp256 },
-  },
-  ada: {
-    ...TEXT.art.goblins.ada,
-    avif: { x1: adaAvif128, x2: adaAvif256 },
-    webp: { x1: adaWebp128, x2: adaWebp256 },
-  },
-  nyx: {
-    ...TEXT.art.goblins.nyx,
-    avif: { x1: nyxAvif128, x2: nyxAvif256 },
-    webp: { x1: nyxWebp128, x2: nyxWebp256 },
-  },
-  ferrugem: {
-    ...TEXT.art.goblins.ferrugem,
-    avif: { x1: ferrugemAvif128, x2: ferrugemAvif256 },
-    webp: { x1: ferrugemWebp128, x2: ferrugemWebp256 },
-  },
-  jade: {
-    ...TEXT.art.goblins.jade,
-    avif: { x1: jadeAvif128, x2: jadeAvif256 },
-    webp: { x1: jadeWebp128, x2: jadeWebp256 },
-  },
-  fagulha: {
-    ...TEXT.art.goblins.fagulha,
-    avif: { x1: fagulhaAvif128, x2: fagulhaAvif256 },
-    webp: { x1: fagulhaWebp128, x2: fagulhaWebp256 },
-  },
+  rubia: goblinFrom("rubia"),
+  fagulha: goblinFrom("fagulha"),
+  ferrugem: goblinFrom("ferrugem"),
+  jade: goblinFrom("jade"),
+  nyx: goblinFrom("nyx"),
 };
 
+/** As cinco goblins publicadas, para quem as apresenta todas (créditos). */
+export const CAST: readonly Goblin[] = Object.values(GOBLINS);
+
 /**
- * As goblins de cada estado (ADR 030): a Lua e a Jade, tranquilas, esperam no vazio; a Ada e a
- * Fagulha, de ferramenta e couro de oficina, trabalham enquanto carrega; a Nyx, sombria,
- * acompanha o erro; a Ferrugem, a mais expansiva, comemora o sucesso.
+ * As goblins de cada estado (ADR 030): a Jade, tranquila, espera no vazio; a Rúbia,
+ * mascote da oficina, e a Fagulha, de couro e luvas de trabalho, trabalham enquanto carrega; a
+ * Nyx, sombria, acompanha o erro; a Ferrugem, a mais expansiva, comemora o sucesso. A Ada saiu do
+ * site em 2026-10-15 e a Lua em 2026-10-16, por decisão do usuário.
  */
 const GOBLINS_OF_STATE: Readonly<Record<GoblinState, readonly [GoblinId, ...GoblinId[]]>> = {
-  vazio: ["lua", "jade"],
-  carregando: ["ada", "fagulha"],
+  vazio: ["jade"],
+  carregando: ["rubia", "fagulha"],
   erro: ["nyx"],
   sucesso: ["ferrugem"],
 };
@@ -112,9 +103,13 @@ function stableHash(key: string): number {
   return hash;
 }
 
-/** Largura e altura exibidas, em px CSS (caixa 4:5; os arquivos têm 1× e 2× disso). */
-const WIDTH_PX = 128;
-const HEIGHT_PX = 160;
+/**
+ * Caixa reservada em px CSS (4:5, como os arquivos): 192×240 no celular e 256×320 a partir de
+ * 768 px. Com width e height no `<img>`, o navegador guarda o lugar antes de baixar (sem CLS).
+ */
+const WIDTH_PX = 256;
+const HEIGHT_PX = 320;
+const STATE_SIZES = "(min-width: 768px) 256px, 192px";
 
 /**
  * A goblin de um estado. Reforça o texto e nunca o substitui: o estado continua dito em texto e
@@ -129,17 +124,79 @@ interface GoblinIllustrationProps {
 export function GoblinIllustration({ state, rotationKey }: GoblinIllustrationProps): ReactElement {
   const goblin = goblinOf(state, rotationKey);
   return (
-    <picture className="shrink-0 self-center md:self-start">
-      <source type="image/avif" srcSet={`${goblin.avif.x1} 1x, ${goblin.avif.x2} 2x`} />
-      <source type="image/webp" srcSet={`${goblin.webp.x1} 1x, ${goblin.webp.x2} 2x`} />
+    <GoblinPicture
+      goblin={goblin}
+      alt={goblin.alt}
+      sizes={STATE_SIZES}
+      pictureClassName="shrink-0 self-center"
+      imgClassName="h-60 w-48 md:h-80 md:w-64"
+    />
+  );
+}
+
+/** Na grade dos créditos: duas colunas no celular, três a partir de 768 px. */
+const CAST_SIZES = "(min-width: 768px) 224px, 45vw";
+
+/** O elenco inteiro, cada goblin com o nome na legenda (página de créditos). */
+export function GoblinCast(): ReactElement {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
+      <h2 id={headingId} className="font-display text-xl font-semibold text-fg">
+        {TEXT.art.castHeading}
+      </h2>
+      <ul aria-labelledby={headingId} className="grid grid-cols-2 gap-4 md:grid-cols-3 md:gap-6">
+        {CAST.map((goblin) => (
+          <li key={goblin.name}>
+            <figure className="flex flex-col items-center gap-2 rounded-lg bg-surface p-4 shadow-card">
+              {/* A legenda já diz o nome: a foto é decorativa. */}
+              <GoblinPicture
+                goblin={goblin}
+                alt=""
+                sizes={CAST_SIZES}
+                pictureClassName="w-full"
+                imgClassName="h-auto w-full"
+              />
+              <figcaption className="font-display text-lg font-semibold text-fg">
+                {goblin.name}
+              </figcaption>
+            </figure>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+interface GoblinPictureProps {
+  readonly goblin: Goblin;
+  readonly alt: string;
+  readonly sizes: string;
+  /** Posição no layout de quem usa. */
+  readonly pictureClassName: string;
+  /** Tamanho exibido; a proporção já vem reservada por width e height. */
+  readonly imgClassName: string;
+}
+
+function GoblinPicture({
+  goblin,
+  alt,
+  sizes,
+  pictureClassName,
+  imgClassName,
+}: GoblinPictureProps): ReactElement {
+  return (
+    <picture className={pictureClassName}>
+      <source type="image/avif" srcSet={goblin.avif} sizes={sizes} />
+      <source type="image/webp" srcSet={goblin.webp} sizes={sizes} />
       <img
-        src={goblin.webp.x1}
-        alt={goblin.alt}
+        src={goblin.fallback}
+        alt={alt}
         width={WIDTH_PX}
         height={HEIGHT_PX}
         loading="lazy"
         decoding="async"
-        className="h-40 w-32 object-contain"
+        className={`object-contain ${imgClassName}`}
       />
     </picture>
   );
