@@ -12,6 +12,7 @@ import {
   RUN_ID,
   screenRequests,
 } from "../test/fakeApi";
+import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -159,6 +160,29 @@ describe("Cancelar execução: confirmação", () => {
     const button = screen.getByRole("button", { name: OPEN_BUTTON });
     expect(button).not.toHaveAttribute("aria-disabled", "true");
     expect(sentCancels(api.requests)).toHaveLength(1);
+  });
+
+  it("com o pedido em voo, o Esc não fecha; fechado pelo navegador, a falha aparece e reabre", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({
+      [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+      [CANCEL_ROUTE]: held.handler,
+    });
+    await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+    const dialog = screen.getByRole("dialog", { name: "Cancelar esta execução?" });
+    await user.click(within(dialog).getByRole("button", { name: OPEN_BUTTON }));
+    await waitFor(() => {
+      expect(sentCancels(api.requests)).toHaveLength(1);
+    });
+
+    expect(escapeIsBlocked(dialog)).toBe(true);
+    forceClose(dialog);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    held.answer(problemResponse(500, "INTERNAL_ERROR"));
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: OPEN_BUTTON }));
+    expect(screen.getByRole("dialog", { name: "Cancelar esta execução?" })).toBeVisible();
   });
 
   it("quando a execução passa a parar, o foco sai do botão para o anúncio", async () => {
