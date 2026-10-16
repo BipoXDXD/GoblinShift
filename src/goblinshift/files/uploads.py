@@ -63,7 +63,8 @@ class UploadIntent(NamedTuple):
 @dataclass(frozen=True)
 class UploadView:
     id: uuid.UUID
-    original_name: str
+    # `None` 30 dias depois, só em upload excluído (1.7, "Retenção").
+    original_name: str | None
     expected_size: int
     state: UploadState
     # Conhecidos só depois que o conteúdo foi persistido.

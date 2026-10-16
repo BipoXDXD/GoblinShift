@@ -38,6 +38,7 @@ export function meBody(overrides: MeOverrides = {}): Schemas["MeResponse"] {
       storage_reserved_bytes: 40_000_000,
       active_run_id: null,
       daily_quota_resets_at: "2026-10-15T09:30:00Z",
+      executor_ms_last_24h: 95_000,
       ...overrides.usage,
     },
     terms: {

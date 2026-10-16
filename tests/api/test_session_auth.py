@@ -127,7 +127,14 @@ def test_sessao_autentica_com_os_escopos_da_conta(
     body = response.json()
     # Só o que a autenticação decide; limites e consumo são de `test_me_usage.py`.
     assert (body["id"], body["via"]) == (str(user_id), "session")
-    assert body["scopes"] == ["files:read", "files:write", "runs:read", "runs:write"]
+    assert body["scopes"] == [
+        "files:read",
+        "files:write",
+        "presets:read",
+        "presets:write",
+        "runs:read",
+        "runs:write",
+    ]
 
 
 @pytest.mark.integration
