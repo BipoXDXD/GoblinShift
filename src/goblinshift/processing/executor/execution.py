@@ -5,10 +5,13 @@ aqui como código de saída do processo; o contrato está no docstring do pacote
 """
 
 import csv
+import errno
 import json
 import sys
+import time
 import traceback
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from enum import IntEnum
 from pathlib import Path
 from types import TracebackType
@@ -17,12 +20,13 @@ from typing import Self
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.executor.job import (
     InputIntegrityError,
+    Job,
     JobError,
     read_context,
     read_job,
     verified_inputs,
 )
-from goblinshift.processing.executor.report_file import write_report
+from goblinshift.processing.executor.report_file import write_report, write_timings
 from goblinshift.processing.image_forge.inspection import configure_pillow
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.packaging import (
@@ -33,7 +37,7 @@ from goblinshift.processing.packaging import (
     package,
 )
 from goblinshift.processing.recipe import InputFile, RecipeFailure, Report
-from goblinshift.processing.registry import RECIPES
+from goblinshift.processing.registry import RECIPES, RegisteredRecipe
 
 PACKAGE_LIMITS = PackageLimits()
 
@@ -44,6 +48,9 @@ class ExitCode(IntEnum):
     RECIPE_FAILURE = 3
     INFRASTRUCTURE = 4
     INTEGRITY = 5
+    # Disco da área de trabalho cheio (`ENOSPC`): limite de recurso de 1.6, como a memória. Sem
+    # `failure.json`, porque não haveria onde gravá-lo.
+    NO_SPACE = 6
 
 
 class _WorkDir:
@@ -54,6 +61,7 @@ class _WorkDir:
         self.out = root / "out"
         self.progress = root / "progress.jsonl"
         self.failure = root / "failure.json"
+        self.telemetry = root / "telemetry.json"
 
 
 def main(argv: Sequence[str]) -> int:
@@ -67,14 +75,28 @@ def main(argv: Sequence[str]) -> int:
         print("uso: python -m goblinshift.processing.executor <work_dir>", file=sys.stderr)
         return ExitCode.INFRASTRUCTURE
     work = _WorkDir(Path(argv[0]))
+    timings = _PhaseTimer()
     try:
-        _execute(work)
+        return _run(work, timings)
+    finally:
+        _write_timings(work.telemetry, timings)
+
+
+def _run(work: _WorkDir, timings: _PhaseTimer) -> ExitCode:
+    try:
+        _execute(work, timings)
     except InputIntegrityError as error:
         print(f"executor: integridade: {error}", file=sys.stderr)
         return ExitCode.INTEGRITY
     except RecipeFailure as failure:
         _write_failure(work.failure, failure)
         return ExitCode.RECIPE_FAILURE
+    except OSError as error:
+        if error.errno == errno.ENOSPC:
+            print("executor: disco da área de trabalho cheio (ENOSPC)", file=sys.stderr)
+            return ExitCode.NO_SPACE
+        traceback.print_exc()
+        return ExitCode.INFRASTRUCTURE
     except Exception:
         # Fronteira do processo: o detalhe vai para o stderr (logs do container) e o worker
         # recebe só a classe da falha.
@@ -83,7 +105,24 @@ def main(argv: Sequence[str]) -> int:
     return ExitCode.SUCCEEDED
 
 
-def _execute(work: _WorkDir) -> None:
+def _execute(work: _WorkDir, timings: _PhaseTimer) -> None:
+    with timings.phase("inspect_ms"):
+        recipe, inputs, spec, job = _inspect(work)
+    _prepare_empty(work.out)
+    out = FileSystemOutputDir(
+        work.out, reserved_names=(MANIFEST_NAME, REPORT_NAME, spec.package_name)
+    )
+    with timings.phase("process_ms"):
+        with _ProgressLog(work.progress) as progress:
+            report = recipe.execute(job.parameters, inputs, out, progress)
+        _require_one_item_per_input(report, inputs)
+        write_report(work.out / REPORT_NAME, report, job)
+    with timings.phase("package_ms"):
+        # A falha do empacotador (teto do manifesto ou do ZIP) é determinística como a da receita.
+        package(report, work.out, spec, PACKAGE_LIMITS)
+
+
+def _inspect(work: _WorkDir) -> tuple[RegisteredRecipe, Sequence[InputFile], PackageSpec, Job]:
     job = read_job(work.job)
     context = read_context(work.context)
     recipe = RECIPES.get((job.recipe_id, job.recipe_version))
@@ -97,16 +136,7 @@ def _execute(work: _WorkDir) -> None:
         parameters=job.parameters,
         inputs=inputs,
     )
-    _prepare_empty(work.out)
-    out = FileSystemOutputDir(
-        work.out, reserved_names=(MANIFEST_NAME, REPORT_NAME, spec.package_name)
-    )
-    with _ProgressLog(work.progress) as progress:
-        report = recipe.execute(job.parameters, inputs, out, progress)
-    _require_one_item_per_input(report, inputs)
-    write_report(work.out / REPORT_NAME, report, job)
-    # A falha do empacotador (teto do manifesto ou do ZIP) é determinística como a da receita.
-    package(report, work.out, spec, PACKAGE_LIMITS)
+    return recipe, inputs, spec, job
 
 
 def _prepare_empty(out: Path) -> None:
@@ -127,6 +157,27 @@ def _write_failure(path: Path, failure: RecipeFailure) -> None:
     document = {"code": failure.code.value, "detail": failure.detail}
     with path.open("x", encoding="utf-8") as target:
         json.dump(document, target, ensure_ascii=False)
+
+
+class _PhaseTimer:
+    """Duração de cada fase concluída, em milissegundos, pelo relógio monotônico."""
+
+    def __init__(self) -> None:
+        self.measured: dict[str, int] = {}
+
+    @contextmanager
+    def phase(self, name: str) -> Iterator[None]:
+        started = time.monotonic()
+        yield
+        self.measured[name] = round((time.monotonic() - started) * 1000)
+
+
+def _write_timings(path: Path, timings: _PhaseTimer) -> None:
+    """Telemetria é acessória: falhar ao gravá-la nunca muda o desfecho da tentativa."""
+    try:
+        write_timings(path, timings.measured)
+    except OSError as error:
+        print(f"executor: tempos das fases não gravados: {error}", file=sys.stderr)
 
 
 class _ProgressLog:
