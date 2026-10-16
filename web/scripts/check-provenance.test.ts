@@ -10,21 +10,21 @@ function doc(overrides: Record<string, unknown> = {}): unknown {
     schema: 1,
     rights: [{ id: "fonte externa", vendor: "source-c", basis: [], status: "termos lidos" }],
     generations: {
-      "lua-2d": { tool: "fonte externa", inputs: [] },
-      "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["lua-2d"], rights: "fonte externa" },
+      "nyx-2d": { tool: "fonte externa", inputs: [] },
+      "nyx-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["nyx-2d"], rights: "fonte externa" },
     },
     excluded: [{ name: "Jade", source_id: "3c7aa397-f83d", reason: "terceiros" }],
     assets: [
-      { file: "goblins/lua-128w.avif", sha256: SHA_A, derived_from: "lua-3d" },
-      { file: "goblins/lua-256w.avif", sha256: SHA_B, derived_from: "lua-3d" },
+      { file: "goblins/nyx-128w.avif", sha256: SHA_A, derived_from: "nyx-3d" },
+      { file: "goblins/nyx-256w.avif", sha256: SHA_B, derived_from: "nyx-3d" },
     ],
     ...overrides,
   };
 }
 
 const FILES: readonly ArtFile[] = [
-  { path: "goblins/lua-128w.avif", sha256: SHA_A },
-  { path: "goblins/lua-256w.avif", sha256: SHA_B },
+  { path: "goblins/nyx-128w.avif", sha256: SHA_A },
+  { path: "goblins/nyx-256w.avif", sha256: SHA_B },
 ];
 
 describe("provenanceViolations", () => {
@@ -42,43 +42,43 @@ describe("provenanceViolations", () => {
 
   it("entrada sem arquivo", () => {
     expect(provenanceViolations(FILES.slice(0, 1), doc())).toEqual([
-      "goblins/lua-256w.avif: está no PROVENANCE.json, mas o arquivo não existe",
+      "goblins/nyx-256w.avif: está no PROVENANCE.json, mas o arquivo não existe",
     ]);
   });
 
   it("hash diferente do arquivo", () => {
-    const files = [FILES[0], { path: "goblins/lua-256w.avif", sha256: SHA_A }].filter(
+    const files = [FILES[0], { path: "goblins/nyx-256w.avif", sha256: SHA_A }].filter(
       (file) => file !== undefined,
     );
 
     expect(provenanceViolations(files, doc())).toEqual([
-      "goblins/lua-256w.avif: sha256 diferente do registrado",
+      "goblins/nyx-256w.avif: sha256 diferente do registrado",
     ]);
   });
 
   it("geração que não existe na cadeia", () => {
     const broken = doc({
       generations: {
-        "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["sumiu"], rights: "fonte externa" },
+        "nyx-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["sumiu"], rights: "fonte externa" },
       },
     });
 
     expect(provenanceViolations(FILES, broken)).toEqual([
-      "goblins/lua-128w.avif: geração sumiu não registrada",
-      "goblins/lua-256w.avif: geração sumiu não registrada",
+      "goblins/nyx-128w.avif: geração sumiu não registrada",
+      "goblins/nyx-256w.avif: geração sumiu não registrada",
     ]);
   });
 
   it("direito que não existe", () => {
     const broken = doc({
       generations: {
-        "lua-2d": { tool: "fonte externa", inputs: [] },
-        "lua-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["lua-2d"], rights: "nenhum" },
+        "nyx-2d": { tool: "fonte externa", inputs: [] },
+        "nyx-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["nyx-2d"], rights: "nenhum" },
       },
     });
 
     expect(provenanceViolations(FILES, broken)).toContain(
-      "goblins/lua-128w.avif: lua-3d cita o direito nenhum, que não está em rights",
+      "goblins/nyx-128w.avif: nyx-3d cita o direito nenhum, que não está em rights",
     );
   });
 
@@ -93,8 +93,8 @@ describe("provenanceViolations", () => {
       return doc({
         rights,
         generations: {
-          "lua-2d": { tool: "fonte externa", inputs: [], ...generation },
-          "lua-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["lua-2d"], rights: "fonte externa" },
+          "nyx-2d": { tool: "fonte externa", inputs: [], ...generation },
+          "nyx-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["nyx-2d"], rights: "fonte externa" },
         },
       });
     }
@@ -109,7 +109,7 @@ describe("provenanceViolations", () => {
       const wrong = withTwoD({ upstream: "source-a", rights: "rights-b" });
 
       expect(provenanceViolations(FILES, wrong)).toContain(
-        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas cita o direito rights-b, que vale para "source-b"',
+        'goblins/nyx-128w.avif: nyx-2d tem upstream "source-a", mas cita o direito rights-b, que vale para "source-b"',
       );
     });
 
@@ -117,7 +117,7 @@ describe("provenanceViolations", () => {
       const generic = withTwoD({ upstream: "source-a", rights: "fonte externa" });
 
       expect(provenanceViolations(FILES, generic)).toContain(
-        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas cita o direito fonte externa, que não declara upstream',
+        'goblins/nyx-128w.avif: nyx-2d tem upstream "source-a", mas cita o direito fonte externa, que não declara upstream',
       );
     });
 
@@ -125,7 +125,7 @@ describe("provenanceViolations", () => {
       const bare = withTwoD({ upstream: "source-a" });
 
       expect(provenanceViolations(FILES, bare)).toContain(
-        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas não cita direito',
+        'goblins/nyx-128w.avif: nyx-2d tem upstream "source-a", mas não cita direito',
       );
     });
 
@@ -133,7 +133,7 @@ describe("provenanceViolations", () => {
       const silent = withTwoD({ rights: "rights-a" });
 
       expect(provenanceViolations(FILES, silent)).toContain(
-        'goblins/lua-128w.avif: lua-2d cita o direito rights-a, que vale para "source-a", mas não declara upstream',
+        'goblins/nyx-128w.avif: nyx-2d cita o direito rights-a, que vale para "source-a", mas não declara upstream',
       );
     });
   });
@@ -141,29 +141,29 @@ describe("provenanceViolations", () => {
   it("goblin excluída por proveniência não entra no site", () => {
     const tainted = doc({
       generations: {
-        "lua-2d": { tool: "fonte externa", inputs: [] },
-        "lua-3d": {
+        "nyx-2d": { tool: "fonte externa", inputs: [] },
+        "nyx-3d": {
           tool: "fonte externa",
           generation_id: "3c7aa397-f83d",
-          inputs: ["lua-2d"],
+          inputs: ["nyx-2d"],
           rights: "fonte externa",
         },
       },
     });
 
     expect(provenanceViolations(FILES, tainted)).toContain(
-      "goblins/lua-128w.avif: deriva de 3c7aa397-f83d (Jade), excluída: terceiros",
+      "goblins/nyx-128w.avif: deriva de 3c7aa397-f83d (Jade), excluída: terceiros",
     );
   });
 
   describe("origem de terceiros ou não verificável", () => {
     const thirdParty = {
-      "lua-ref": { tool: "fonte externa (site)", inputs: [], third_party: "imagem de terceiros" },
-      "lua-2d": { tool: "fonte externa", inputs: ["lua-ref"] },
-      "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["lua-2d"], rights: "fonte externa" },
+      "nyx-ref": { tool: "fonte externa (site)", inputs: [], third_party: "imagem de terceiros" },
+      "nyx-2d": { tool: "fonte externa", inputs: ["nyx-ref"] },
+      "nyx-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["nyx-2d"], rights: "fonte externa" },
     };
     const NO_DECISION =
-      "goblins/lua-128w.avif: deriva de lua-ref (imagem de terceiros) sem decisão registrada em exceptions";
+      "goblins/nyx-128w.avif: deriva de nyx-ref (imagem de terceiros) sem decisão registrada em exceptions";
 
     it("sem decisão registrada, recusa", () => {
       expect(provenanceViolations(FILES, doc({ generations: thirdParty }))).toContain(NO_DECISION);
@@ -174,7 +174,7 @@ describe("provenanceViolations", () => {
         generations: thirdParty,
         exceptions: [
           {
-            generation: "lua-ref",
+            generation: "nyx-ref",
             decided_by: "usuário",
             decided_at: "2026-10-15",
             reason: "assume o risco",
@@ -188,7 +188,7 @@ describe("provenanceViolations", () => {
     it("decisão sem data ou sem motivo não vale", () => {
       const incomplete = doc({
         generations: thirdParty,
-        exceptions: [{ generation: "lua-ref", decided_by: "usuário", decided_at: "", reason: "" }],
+        exceptions: [{ generation: "nyx-ref", decided_by: "usuário", decided_at: "", reason: "" }],
       });
 
       expect(provenanceViolations(FILES, incomplete)).toEqual([

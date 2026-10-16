@@ -160,7 +160,7 @@ describe("budgetViolations", () => {
         RUBIA,
         file("assets/oficina-3d-rubia-640w-x.avif", 40 * KB),
         file("assets/oficina-3d-rubia-640w-x.webp", 50 * KB),
-        ...["rubia", "fagulha", "jade", "lua", "nyx"].map((id) =>
+        ...["rubia", "fagulha", "ferrugem", "jade", "nyx"].map((id) =>
           file(`assets/oficina-3d-${id}-192w-x.avif`, 80 * KB),
         ),
         // Os modelos das outras goblins só vêm quando a pessoa as escolhe: não contam.
@@ -168,7 +168,9 @@ describe("budgetViolations", () => {
       ];
       expect(budgetViolations(initial, INDEX)).toEqual([]);
 
-      const heavier = [...initial, file("assets/oficina-3d-ferrugem-192w-x.avif", 1 * KB)];
+      const heavier = initial.map((built) =>
+        built.path === "assets/oficina-3d-nyx-192w-x.avif" ? file(built.path, 81 * KB) : built,
+      );
       expect(budgetViolations(heavier, INDEX)).toEqual([
         "3D inicial (chunk, Rúbia, imagem estática e miniaturas): 3601,0 KB passa do teto de 3600 KB",
       ]);
@@ -190,8 +192,8 @@ describe("budgetViolations", () => {
         budgetViolations(
           [
             ...WITHIN,
-            file("assets/lua-768w-x.avif", 64 * KB),
-            file("assets/lua-768w-x.webp", 64 * KB),
+            file("assets/jade-768w-x.avif", 64 * KB),
+            file("assets/jade-768w-x.webp", 64 * KB),
           ],
           INDEX,
         ),
