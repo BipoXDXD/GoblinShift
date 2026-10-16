@@ -12,8 +12,8 @@ valor, o `mapping` aponta cada `recipe_id` para um `oneOf` das versões dela, di
 
 import copy
 import dataclasses
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -22,7 +22,9 @@ from pydantic import BaseModel, ValidationError
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
-from goblinshift.processing import downloads_detox, image_forge
+from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
+from goblinshift.catalog.references import UploadReference, no_upload_references
+from goblinshift.processing import downloads_detox, image_forge, pdf_press
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
 
@@ -62,6 +64,11 @@ class RecipeVersion:
     status: VersionStatus
     parameters_model: type[BaseModel]
     limits: Mapping[str, int]
+    # Uploads citados nos parâmetros já resolvidos; a aceitação exige que estejam entre as
+    # entradas da execução (1.5: a seleção refere-se só aos uploads da execução).
+    upload_references: Callable[[Mapping[str, object]], tuple[UploadReference, ...]] = field(
+        default=no_upload_references
+    )
 
     def resolve(self, raw_params: object) -> dict[str, object]:
         """Parâmetros validados com os defaults da versão, em forma canônica.
@@ -152,7 +159,24 @@ DOWNLOADS_DETOX_V1 = RecipeVersion(
     },
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1])
+# ADR 035. O teto do lote é imposto na aceitação, como no Detox; páginas e documentos só se
+# conhecem depois de abrir os PDFs, e o executor os impõe.
+PDF_PRESS_V1 = RecipeVersion(
+    recipe_id=pdf_press.RECIPE_ID,
+    version=pdf_press.VERSION,
+    status=VersionStatus.CURRENT,
+    parameters_model=PdfPressV1Parameters,
+    limits={
+        "max_inputs": pdf_press.MAX_INPUTS,
+        "max_total_input_bytes": pdf_press.MAX_TOTAL_INPUT_BYTES,
+        "max_input_pages": pdf_press.MAX_INPUT_PAGES,
+        "max_output_pages": pdf_press.MAX_OUTPUT_PAGES,
+        "max_output_documents": pdf_press.MAX_OUTPUT_DOCUMENTS,
+    },
+    upload_references=upload_references,
+)
+
+CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1])
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:

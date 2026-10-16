@@ -34,21 +34,36 @@ def issue_csrf_token(key: bytes, session_id: UUID) -> str:
 def csrf_token_matches(
     key: bytes, session_id: UUID, cookie: str | None, header: str | None
 ) -> bool:
-    """True só se o header repete o cookie e o HMAC do cookie é desta sessão.
+    """True só se o header repete o cookie e o HMAC do cookie é desta sessão."""
+    match = _well_formed_cookie(cookie, header)
+    if match is None or header is None:
+        return False
+    same_value = hmac.compare_digest(match.string, header)
+    signed_here = hmac.compare_digest(match["mac"], _mac(key, session_id, match["random"]))
+    return same_value and signed_here
+
+
+def csrf_pair_matches(cookie: str | None, header: str | None) -> bool:
+    """True se o header repete um cookie no formato do token, sem conferir o HMAC.
+
+    Só para a mutação que não tem sessão a que ligar o token (`POST /auth/logout` com sessão já
+    expirada ou revogada): outro site não lê nem grava o cookie `__Host-`, então não monta o par.
+    """
+    match = _well_formed_cookie(cookie, header)
+    return match is not None and header is not None and hmac.compare_digest(match.string, header)
+
+
+def _well_formed_cookie(cookie: str | None, header: str | None) -> re.Match[str] | None:
+    """O cookie no formato do token, com um header ASCII do mesmo tamanho; senão None.
 
     O formato é conferido antes de qualquer comparação: `hmac.compare_digest` só aceita texto
     ASCII, e entrada enorme custa O(1).
     """
     if cookie is None or header is None:
-        return False
-    if len(cookie) != _TOKEN_LENGTH or len(header) != _TOKEN_LENGTH:
-        return False
-    match = _TOKEN_PATTERN.fullmatch(cookie)
-    if match is None or not header.isascii():
-        return False
-    same_value = hmac.compare_digest(cookie, header)
-    signed_here = hmac.compare_digest(match["mac"], _mac(key, session_id, match["random"]))
-    return same_value and signed_here
+        return None
+    if len(cookie) != _TOKEN_LENGTH or len(header) != _TOKEN_LENGTH or not header.isascii():
+        return None
+    return _TOKEN_PATTERN.fullmatch(cookie)
 
 
 def cross_site_request(sec_fetch_site: str | None, origin: str | None, public_origin: str) -> bool:

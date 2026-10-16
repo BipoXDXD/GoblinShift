@@ -128,9 +128,7 @@ Texto que abria o arquivo público até sair do build:
 
 **Decide o dono do serviço:**
 
-- **Provedor de e-mail** (item 6): qual serviço recebe e guarda as mensagens de `contato@`,
-  `abuso@` e `privacidade@` (encaminhamento da Hostinger, Cloudflare Email Routing, ImprovMX, e a
-  caixa de destino) e onde ele fica. Se for fora do Brasil, entra no item 7 junto com o J-19.
+Nenhuma pendência; o provedor de e-mail foi decidido (ver "Decisões aplicadas").
 
 **Exige advogado(a):**
 
@@ -139,7 +137,10 @@ Texto que abria o arquivo público até sair do build:
 - **J-17**, encarregado ou declaração de dispensa como agente de pequeno porte (item 1).
 - **J-18**, idade mínima e LGPD art. 14, sem como verificar idade (item 11).
 - **J-19**, transferência internacional: localização do GitHub Actions e mecanismo do art. 33
-  (itens 6 e 7). A região do B2 foi decidida em 2026-10-15: Estados Unidos (US East).
+  (itens 6 e 7). A região do B2 foi decidida em 2026-10-15: Estados Unidos (US East). O item 7
+  do Aviso passou a listar também as mensagens de e-mail (ImprovMX e Google/Gmail), cuja
+  localização não é controlada; a marcação do mecanismo do art. 33 continua citando só o
+  Backblaze e o GitHub Actions, e o revisor precisa dizer se o mecanismo cobre também esses dois.
 - **J-22**, base legal do registro do aceite: execução de contrato ou exercício regular de
   direitos (item 4).
 - **J-23 a J-25**, avaliações de legítimo interesse (LIA) da auditoria e do antiabuso, da
@@ -173,7 +174,6 @@ redação original, na ordem do arquivo.
 | 4. Para que usamos e com que base legal | [[A DEFINIR: base legal]] (mensagens por e-mail, item 3.6; sem id) |
 | 5. Por quanto tempo guardamos | [[A DEFINIR (J-26): se a conta for bloqueada e depois excluída, o identificador do provedor é mantido para que o bloqueio continue valendo? Por quanto tempo? O plano diz que o bloqueio "impede novos logins da mesma identidade", mas não diz o que acontece depois de `DELETE /me`.]] |
 | 6. Com quem compartilhamos | [[A DEFINIR (J-19): confirmar localização e mencionar como transferência internacional]] |
-| 6. Com quem compartilhamos | [[A DEFINIR: provedor e local]] (provedor de e-mail; sem id) |
 | 7. Transferência internacional | [[A DEFINIR (J-19) com a revisão jurídica: mecanismo de transferência do art. 33 da LGPD (por exemplo, cláusulas-padrão contratuais aprovadas pela ANPD, ou outro) para o Backblaze e para o GitHub Actions.]] |
 | 8. Seus direitos e como exercê-los | [[A DEFINIR (J-27) na revisão: o que fazer se uma restauração trouxer de volta uma conta excluída]] |
 | 8. Seus direitos e como exercê-los | [[A DEFINIR (J-28): procedimento de verificação de identidade e prazo de resposta; nota para a revisão: art. 19 da LGPD.]] |
@@ -288,6 +288,7 @@ saíram dos textos públicos, que passaram à versão `v2-rascunho`.
 | J-15 | Aviso destacado no site, em até 3 dias úteis, "porque não temos o seu e-mail" | Aviso 10 |
 | J-16 | Controlador: Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR), canal `privacidade@goblinshift.dev`; sem CPF nem endereço. Fica a pergunta ao advogado sobre se isso basta | Termos 1; Aviso 1 |
 | J-19 (parcial) | Região do B2: Estados Unidos (US East). O mecanismo do art. 33 continua com o advogado | Aviso 6 |
+| Provedor de e-mail | Os aliases `contato@`, `abuso@` e `privacidade@` passam pelo ImprovMX, que encaminha para uma caixa Gmail (Google) do controlador. O endereço da caixa não entra no texto. Aviso: itens 2, 3.6, 6 (duas linhas, ImprovMX e Google) e 7 (item 3 da lista). Localização dos dois: "conforme a política do fornecedor", sem afirmar país. Versão `v3-rascunho` (o aceite é um só, então os Termos sobem junto, sem mudança de cláusula) | Aviso 2, 3.6, 6 e 7; `src/goblinshift/identity/terms.py` |
 
 Lacunas fora das marcações, resolvidas no mesmo dia:
 
