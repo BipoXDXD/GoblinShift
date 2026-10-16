@@ -5,7 +5,7 @@ export function readTokensCss(): string {
   return tokensCss;
 }
 
-/** Tons crus (`--color-moss-700: oklch(...)`) do bloco `@theme static`. */
+/** Tons crus (`--color-copper-700: oklch(...)`) do bloco `@theme static`. */
 export function rawColors(css: string): ReadonlyMap<string, string> {
   const block = blockAfter(css, "@theme static {");
   const colors = new Map<string, string>();

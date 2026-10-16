@@ -12,6 +12,18 @@ const MAX_RETURN_TO_CHARS = 512;
 const DEFAULT_RETURN_TO = "/";
 /** Parâmetro com que o servidor volta quando o login falha (LOGIN_FAILED_LOCATION). */
 export const LOGIN_ERROR_PARAM = "login_error";
+// Código de referência do login recusado (`#ref=<request_id>`, LOGIN_REF_FRAGMENT): o UUID v4 que
+// o servidor gera, em minúsculas. Qualquer outro valor é ignorado, para o fragmento não virar um
+// jeito de pôr texto arbitrário na tela de erro.
+const LOGIN_REF_PARAM = "ref";
+const LOGIN_REF_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** O código de referência do fragmento (`#ref=…`), ou `null` se faltar ou não tiver o formato. */
+export function loginRefFrom(hash: string): string | null {
+  const values = new URLSearchParams(hash.replace(/^#/, "")).getAll(LOGIN_REF_PARAM);
+  const [ref] = values;
+  return values.length === 1 && ref !== undefined && LOGIN_REF_PATTERN.test(ref) ? ref : null;
+}
 
 /**
  * Caminho local para voltar depois do login, ou `/`. Tira o `login_error` da falha anterior, para
