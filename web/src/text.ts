@@ -160,6 +160,7 @@ export const TEXT = {
     loadingCatalog: "Carregando a receita.",
     recipeUnavailable:
       "Esta receita não está disponível no momento. Recarregue a página ou tente mais tarde.",
+    uploadBoundDropped: "As páginas escolhidas dependem dos arquivos enviados; escolha-as de novo.",
     upload: {
       waiting: "Na fila de envio",
       sending: (percent: number) => `Enviando: ${String(percent)}%`,
@@ -572,6 +573,40 @@ export const TEXT = {
         "A sua sessão terminou e as chaves foram revogadas. Os arquivos, resultados e dados da conta são apagados em até 24 horas.",
       backHome: "Voltar à Oficina",
     },
+  },
+  presets: {
+    heading: "Presets",
+    loading: "Carregando os presets.",
+    empty: "Nenhum preset salvo",
+    emptyHint: "Na Bancada, “Salvar preset” guarda os parâmetros de uma receita para usar de novo.",
+    listLabel: "Presets da conta",
+    open: "Abrir na Bancada",
+    openOf: (name: string) => `o preset ${name}`,
+    remove: "Excluir",
+    removeOf: (name: string) => `o preset ${name}`,
+    removeTitle: (name: string) => `Excluir o preset ${name}?`,
+    removeBody: "As execuções feitas com ele não mudam. Não dá para desfazer.",
+    removeConfirm: "Excluir preset",
+    cancel: "Cancelar",
+    removed: (name: string) => `Preset ${name} excluído.`,
+    changedElsewhere:
+      "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira antes de excluir.",
+    updatedAt: (date: string) => `Atualizado em ${date}`,
+    save: "Salvar preset",
+    saveTitle: "Salvar os parâmetros como preset",
+    saveBody: "Só os parâmetros desta receita entram no preset; os arquivos, não.",
+    nameLabel: "Nome do preset",
+    nameHint: "Até 100 caracteres, diferente dos outros presets da conta.",
+    nameRequired: "Dê um nome ao preset.",
+    nameTooLong: "Use até 100 caracteres.",
+    saving: "Salvando…",
+    saved: (name: string) => `Preset ${name} salvo.`,
+    saveConflict: "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",
+    invalidParameters: "Corrija os parâmetros antes de salvar o preset.",
+    loadingPreset: "Carregando o preset.",
+    loaded: (name: string) => `Parâmetros do preset ${name}.`,
+    wrongRecipe:
+      "Este preset é de outra receita ou de uma versão que a Bancada não conhece. A Bancada abriu com os parâmetros padrão.",
   },
   // Guia da API (texto literal: é página de consulta, sem a voz temática). Trechos entre crases
   // viram <code> na tela.
