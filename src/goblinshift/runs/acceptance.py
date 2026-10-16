@@ -12,6 +12,8 @@ entradas e o hash canônico do comando. Numa transação curta, na ordem de lock
    de contar a fila, para que duas réplicas não vejam 9 aguardando e entrem as duas (contar e
    inserir sem trava seria write skew). A espera obedece ao `lock_timeout` da conexão. As cotas
    diárias da conta (30 execuções e 2 GiB de entrada em 24 h) são contadas sob a mesma trava.
+   Antes dela, o preset de origem, se houver, travado contra exclusão até o commit (`FOR KEY
+   SHARE`): a Run nunca nasce apontando para um preset que já não existe.
 4. Capacidade da conta: o `INSERT` da Run com `ON CONFLICT DO NOTHING` sobre o índice único
    parcial `run_one_active_per_owner_idx`; sem linha devolvida, já há uma execução ativa.
 5. Uploads (`FOR SHARE`), bytes de entrada contra a cota diária, `run_input` na ordem e usos dos
@@ -39,7 +41,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from goblinshift import capacity
+from goblinshift import capacity, presets
 from goblinshift.catalog import (
     CATALOG,
     FieldError,
@@ -147,6 +149,8 @@ class RunCommand:
     recipe_version: int
     input_upload_ids: tuple[UUID, ...]
     parameters: object
+    # Preset de origem (`POST /presets/{id}/runs`), já lido da conta; só fica registrado na Run.
+    preset_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -156,11 +160,16 @@ class ValidatedRun:
     recipe: RecipeVersion
     input_upload_ids: tuple[UUID, ...]
     parameters: dict[str, object]
+    preset_id: UUID | None = None
 
     @property
     def command_hash(self) -> bytes:
         return command_hash(
-            self.recipe.recipe_id, self.recipe.version, self.parameters, self.input_upload_ids
+            self.recipe.recipe_id,
+            self.recipe.version,
+            self.parameters,
+            self.input_upload_ids,
+            preset_id=self.preset_id,
         )
 
 
@@ -184,18 +193,25 @@ def command_hash(
     recipe_version: int,
     parameters: object,
     input_upload_ids: Sequence[UUID],
+    *,
+    preset_id: UUID | None = None,
 ) -> bytes:
     """SHA-256 do JSON canônico: chaves ordenadas, sem espaços, listas na ordem recebida (1.6).
 
-    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`.
+    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`. O preset de
+    origem entra só quando existe, para o hash dos comandos sem preset continuar o mesmo: a
+    mesma chave com e sem preset é outro comando.
     """
+    document: dict[str, object] = {
+        "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+        "parameters": parameters,
+        "recipe_id": recipe_id,
+        "recipe_version": recipe_version,
+    }
+    if preset_id is not None:
+        document["preset_id"] = str(preset_id)
     canonical = json.dumps(
-        {
-            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
-            "parameters": parameters,
-            "recipe_id": recipe_id,
-            "recipe_version": recipe_version,
-        },
+        document,
         sort_keys=True,
         separators=_CANONICAL_SEPARATORS,
         ensure_ascii=False,
@@ -223,7 +239,7 @@ def validate_run(command: RunCommand) -> ValidatedRun:
             [_under("parameters", field_error) for field_error in error.errors]
         ) from None
     _check_input_shape(command.input_upload_ids, recipe.limits["max_inputs"])
-    return ValidatedRun(recipe, command.input_upload_ids, parameters)
+    return ValidatedRun(recipe, command.input_upload_ids, parameters, command.preset_id)
 
 
 def accept_run(
@@ -254,6 +270,8 @@ def accept_run(
         replay = _find_live_record(session, owner_id, key, digest)
         if replay is not None:
             return replay
+        if validated.preset_id is not None:
+            presets.hold_for_run(session, owner_id, validated.preset_id)
         _lock_global_queue(session)
         now = db_now(session)
         usage = daily_usage(session, owner_id, now)
@@ -393,6 +411,7 @@ def _insert_run(
             executor_digest=executor_image,
             parameters=validated.parameters,
             limits=dict(recipe.limits),
+            preset_id=validated.preset_id,
             status=Status.QUEUED,
             queue_expires_at=func.now() + QUEUE_WINDOW,
             traceparent=traceparent,
