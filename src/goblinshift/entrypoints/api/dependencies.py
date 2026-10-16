@@ -45,6 +45,7 @@ from goblinshift.identity import (
     authenticate_session,
     count_request,
     cross_site_request,
+    csrf_pair_matches,
     csrf_token_matches,
     find_account,
     record_audit_event,
@@ -55,6 +56,10 @@ BEARER_SCHEME = "bearer"
 # Métodos que nunca alteram estado (3.6): dispensam o CSRF.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _CHALLENGE = {"WWW-Authenticate": "Bearer"}
+_CSRF_DETAIL = (
+    f"Mutação pela sessão exige o header {CSRF_HEADER} com o valor do cookie {CSRF_COOKIE}, "
+    "enviado pela própria origem."
+)
 # Classe de rota da telemetria → limite por minuto da conta. Envio e download de conteúdo ficam
 # de fora: valem as transferências simultâneas (1.7).
 _LIMITED_CLASSES: dict[RateLimitClass, RequestClass | None] = {
@@ -158,11 +163,16 @@ CurrentPrincipal = Annotated[Principal, Depends(authenticate)]
 def optional_session(request: Request, session: DbSession, now: Now) -> Principal | None:
     """Sessão do cookie, ou None sem sessão válida (`POST /auth/logout`).
 
-    Com sessão válida, a mutação passa pelo CSRF como em `authenticate`: sem isso, outro site
-    derrubaria a sessão do usuário.
+    A mutação passa pelo CSRF com ou sem sessão. Com sessão válida, como em `authenticate`: sem
+    isso, outro site derrubaria a sessão do usuário. Sem ela (expirada ou revogada), não há sessão
+    a que o HMAC se ligue: valem a mesma origem e o par cookie e header, que outro site não monta,
+    para que ninguém de fora mande o navegador apagar os dados da origem (`Clear-Site-Data`).
     """
     _reject_simultaneous_credentials(request)
-    return _session_from_cookie(request, session, now)
+    principal = _session_from_cookie(request, session, now)
+    if principal is None and request.method not in SAFE_METHODS:
+        _verify_anonymous_csrf(request)
+    return principal
 
 
 OptionalSession = Annotated[Principal | None, Depends(optional_session)]
@@ -304,11 +314,21 @@ def _verify_csrf(request: Request, session: Session, principal: Principal, now: 
     )
     if cross_site or not token_matches:
         _audit_failure(session, AuditEventType.CSRF_FAILED, principal, request, now)
-        raise ApiProblem(
-            ProblemCode.CSRF_FAILED,
-            f"Mutação pela sessão exige o header {CSRF_HEADER} com o valor do cookie "
-            f"{CSRF_COOKIE}, enviado pela própria origem.",
-        )
+        raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
+
+
+def _verify_anonymous_csrf(request: Request) -> None:
+    web_identity: WebIdentityConfig = request.app.state.web_identity
+    cross_site = cross_site_request(
+        request.headers.get("sec-fetch-site"),
+        request.headers.get("origin"),
+        web_identity.public_origin,
+    )
+    pair_matches = csrf_pair_matches(
+        request.cookies.get(CSRF_COOKIE), request.headers.get(CSRF_HEADER)
+    )
+    if cross_site or not pair_matches:
+        raise ApiProblem(ProblemCode.CSRF_FAILED, _CSRF_DETAIL)
 
 
 def _audit_failure(
