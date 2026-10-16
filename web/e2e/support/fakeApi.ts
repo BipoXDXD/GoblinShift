@@ -366,9 +366,11 @@ function derivedDetail({ run, inputIds }: StoredRun): RunDetailParts {
   const items = inputIds.map((uploadId, index) => ({
     position: index,
     upload_id: uploadId,
+    original_name: null,
     status: done ? ("ok" as const) : ("pending" as const),
     error_code: null,
     warnings: [],
+    notices: [],
     counts: {},
     duplicate_of: null,
   }));

@@ -20,9 +20,9 @@ type Noun = keyof typeof T.nouns;
 
 /**
  * Desfecho de cada entrada, na ordem em que foram enviadas (1.1): rejeição com o motivo,
- * avisos, contagens e repetidos. A API não traz o nome do arquivo (só o `upload_id`, sem PII no
- * detalhe), então cada entrada é identificada pela posição, a mesma ordem da Bancada. A API conta
- * a partir de 0 e a tela, a partir de 1. Código que a interface ainda não conhece aparece como
+ * avisos, notas, contagens e repetidos. Cada entrada é identificada pela posição, a mesma ordem
+ * da Bancada, e pelo nome do arquivo enquanto a API o guarda (30 dias). A API conta a partir de 0
+ * e a tela, a partir de 1. Código que a interface ainda não conhece aparece como
  * desconhecido, com o código original.
  */
 export function RunItems({
@@ -70,7 +70,12 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
   return (
     <li className="flex flex-col gap-2 rounded-lg bg-surface-sunken p-4">
       <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <span className="font-semibold text-fg">{T.entry(displayPosition(item.position))}</span>
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-semibold text-fg">{T.entry(displayPosition(item.position))}</span>
+          {item.original_name !== null && (
+            <span className="font-mono text-sm break-all text-fg-muted">{item.original_name}</span>
+          )}
+        </span>
         <ItemStatus item={item} />
       </p>
       {item.error_code !== null && (
@@ -91,6 +96,11 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
           ))}
         </ul>
       )}
+      {item.notices.map((notice, index) => (
+        <p key={index} className="text-sm text-fg-muted">
+          {codeText(notice, T.notices, T.unknownNotice)}
+        </p>
+      ))}
       {counts !== null && <p className="text-sm text-fg-muted tabular-nums">{counts}</p>}
     </li>
   );
