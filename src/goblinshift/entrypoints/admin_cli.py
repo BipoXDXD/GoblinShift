@@ -24,16 +24,17 @@ identidade externa; `--pending` mostra só as contas à espera de liberação (A
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
 `set-limits` sobrepõe, para uma conta, as cotas diárias das settings (`GS_QUOTA_*`) e o teto de
 armazenamento do livro-razão (1.7); `default` volta o item ao padrão, e o que não for citado
-fica como está. `usage` imprime, separados por tab, o consumo das últimas 24 h (execuções, bytes
-de entrada e tempo de executor), o armazenamento reservado e cada limite com a origem (`conta`
-ou `padrão`).
+fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com os valores antigos
+e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
+(execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
+origem (`conta` ou `padrão`).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
 """
 
 import argparse
 import re
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -50,11 +51,13 @@ from goblinshift.identity import (
     InvalidDisplayNameError,
     InvalidKeyLifetimeError,
     InvalidScopesError,
+    LimitChange,
     UnknownAccountError,
     block_account,
     create_admin_user,
     find_account,
     issue_key,
+    limits_changed_details,
     parse_scopes,
     record_audit_event,
     revoke_key,
@@ -294,16 +297,29 @@ def _set_limits(args: argparse.Namespace, context: _Context) -> int:
         with unit_of_work(context.factory) as session:
             if find_account(session, args.user) is None:
                 return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+            changes: dict[str, LimitChange] = {}
             if quota_given:
                 current = quota_override(session, args.user)
-                merged = {
+                previous = {
                     "runs_per_24h": current.runs_per_24h,
                     "input_bytes_per_24h": current.input_bytes_per_24h,
-                    **quota_given,
                 }
-                set_account_quota(session, args.user, **merged)
+                set_account_quota(session, args.user, **{**previous, **quota_given})
+                changes |= {
+                    name: LimitChange(previous[name], new) for name, new in quota_given.items()
+                }
             if storage_given:
-                capacity.set_account_storage_max(session, args.user, args.storage_bytes)
+                old_max = capacity.set_account_storage_max(session, args.user, args.storage_bytes)
+                new_max = capacity.usage(session, args.user).storage_max_bytes
+                changes["storage_bytes"] = LimitChange(old_max, new_max)
+            # Na mesma transação: a mudança e o seu registro entram juntos ou nenhum dos dois.
+            _audit(
+                session,
+                AuditEventType.ACCOUNT_LIMITS_CHANGED,
+                args.user,
+                datetime.now(UTC),
+                details=limits_changed_details(changes),
+            )
     except capacity.StorageBelowReservedError as error:
         return _fail(EXIT_USAGE, str(error))
     print(f"limites da conta {args.user} atualizados", file=sys.stderr)
@@ -354,10 +370,23 @@ def _listing_line(account: AccountListing) -> str:
     return "\t".join(fields)
 
 
-def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime) -> None:
+def _audit(
+    session: Session,
+    event: AuditEventType,
+    user_id: UUID,
+    now: datetime,
+    *,
+    details: Mapping[str, object] | None = None,
+) -> None:
     # Ação do administrador no servidor: não há IP de cliente a registrar.
     record_audit_event(
-        session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
+        session,
+        event=event,
+        user_id=user_id,
+        ip=None,
+        outcome=AuditOutcome.SUCCESS,
+        now=now,
+        details=details,
     )
 
 
