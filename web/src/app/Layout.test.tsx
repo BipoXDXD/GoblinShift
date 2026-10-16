@@ -38,6 +38,33 @@ function nav(): Promise<HTMLElement> {
   return screen.findByRole("navigation", { name: "Principal" });
 }
 
+describe("Layout: marca no cabeçalho", () => {
+  it("o nome em texto é o nome acessível do link da Oficina", async () => {
+    setup(() => jsonResponse(meBody()));
+    await nav();
+
+    const home = screen.getByRole("link", { name: "GoblinShift" });
+    expect(home).toHaveAttribute("href", "/");
+    expect(home).not.toHaveAttribute("aria-label");
+    expect(within(home).getByText("GoblinShift")).toBeVisible();
+  });
+
+  it("o emblema é decorativo, com tamanho fixo (sem CLS) e AVIF antes do WebP", async () => {
+    setup(() => jsonResponse(meBody()));
+    await nav();
+
+    const home = screen.getByRole("link", { name: "GoblinShift" });
+    // alt="" tira a imagem da árvore de acessibilidade: o nome já está em texto ao lado.
+    expect(within(home).queryByRole("img")).toBeNull();
+    const emblem = home.querySelector("img");
+    expect(emblem).toHaveAttribute("alt", "");
+    expect(emblem).toHaveAttribute("width", "45");
+    expect(emblem).toHaveAttribute("height", "48");
+    const types = [...home.querySelectorAll("source")].map((source) => source.type);
+    expect(types).toEqual(["image/avif", "image/webp"]);
+  });
+});
+
 describe("Layout: conta no cabeçalho", () => {
   it("com sessão, o link é Acesso", async () => {
     setup(() => jsonResponse(meBody()));

@@ -1,7 +1,9 @@
-// Proveniência da arte do site (ADR 030): todo arquivo de src/assets/art/ tem entrada no
+// Proveniência da arte do site (ADR 030): todo arquivo de src/assets/art/ e toda imagem de public/
+// (ícones e imagem de compartilhamento, com o prefixo `public/`) tem entrada no
 // PROVENANCE.json com o sha256 certo, a cadeia de gerações até a ferramenta resolve, cada geração
-// cita um direito registrado, nada deriva de uma goblin excluída e geração de origem de terceiros
-// (ou não verificável) só passa com decisão registrada em `exceptions`: quem, quando e por quê.
+// cita um direito registrado que bate com o upstream declarado, nada deriva de uma goblin excluída
+// e geração de origem de terceiros (ou não verificável) só passa com decisão registrada em
+// `exceptions`: quem, quando e por quê.
 // Roda no job `web` do CI: `node scripts/check-provenance.ts` sai com 1 se algo falhar.
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
@@ -20,6 +22,8 @@ const generationSchema = z.object({
   inputs: z.array(z.string()),
   rights: z.string().optional(),
   generation_id: z.string().optional(),
+  /** Modelo de terceiros por trás da ferramenta (ex.: o gerador de imagem que a fonte externa repassa). */
+  upstream: z.string().optional(),
   /** Por que a origem é de terceiros ou não verificável; ausente quando é nossa. */
   third_party: z.string().optional(),
 });
@@ -33,7 +37,13 @@ const exceptionSchema = z.object({
 
 const provenanceSchema = z.object({
   schema: z.literal(1),
-  rights: z.array(z.object({ id: z.string() })),
+  rights: z.array(
+    z.object({
+      id: z.string(),
+      /** Trecho que o `upstream` das gerações que citam este direito precisa conter. */
+      upstream: z.string().optional(),
+    }),
+  ),
   generations: z.record(z.string(), generationSchema),
   excluded: z.array(z.object({ name: z.string(), source_id: z.string(), reason: z.string() })),
   exceptions: z.array(exceptionSchema).default([]),
@@ -43,6 +53,13 @@ const provenanceSchema = z.object({
 type Provenance = z.infer<typeof provenanceSchema>;
 
 const MANIFEST = "PROVENANCE.json";
+const PUBLIC_PREFIX = "public/";
+const IMAGE = /\.(avif|ico|jpe?g|png|svg|webp)$/;
+
+/** Imagem de `public/` (ícones, imagem de compartilhamento): também é arte do site. */
+export function isPublicArt(path: string): boolean {
+  return IMAGE.test(path);
+}
 
 /** Cada problema em texto para o log do CI; lista vazia quando está tudo certo. */
 export function provenanceViolations(files: readonly ArtFile[], document: unknown): string[] {
@@ -74,7 +91,7 @@ export function provenanceViolations(files: readonly ArtFile[], document: unknow
 
 /** Percorre a cadeia de gerações a partir de `start`, uma vez por geração. */
 function chainViolations(provenance: Provenance, start: string): string[] {
-  const rightIds = new Set(provenance.rights.map((right) => right.id));
+  const rightsById = new Map(provenance.rights.map((right) => [right.id, right]));
   const decided = new Set(provenance.exceptions.map((exception) => exception.generation));
   const violations: string[] = [];
   const seen = new Set<string>();
@@ -89,9 +106,10 @@ function chainViolations(provenance: Provenance, start: string): string[] {
       violations.push(`geração ${id} não registrada`);
       continue;
     }
-    if (generation.rights !== undefined && !rightIds.has(generation.rights)) {
+    if (generation.rights !== undefined && !rightsById.has(generation.rights)) {
       violations.push(`${id} cita o direito ${generation.rights}, que não está em rights`);
     }
+    violations.push(...upstreamViolations(id, generation, rightsById));
     if (generation.third_party !== undefined && !decided.has(id)) {
       violations.push(
         `deriva de ${id} (${generation.third_party}) sem decisão registrada em exceptions`,
@@ -108,7 +126,41 @@ function chainViolations(provenance: Provenance, start: string): string[] {
   return violations;
 }
 
-function artFiles(dir: string): ArtFile[] {
+/** O direito citado precisa ser o do upstream declarado: cada fornecedor tem termos próprios. */
+function upstreamViolations(
+  id: string,
+  generation: Provenance["generations"][string],
+  rightsById: ReadonlyMap<string, Provenance["rights"][number]>,
+): string[] {
+  const right = generation.rights === undefined ? undefined : rightsById.get(generation.rights);
+  if (generation.rights !== undefined && right === undefined) {
+    return []; // direito inexistente: já apontado
+  }
+  if (generation.upstream !== undefined) {
+    if (right === undefined) {
+      return [`${id} tem upstream "${generation.upstream}", mas não cita direito`];
+    }
+    if (right.upstream === undefined) {
+      return [
+        `${id} tem upstream "${generation.upstream}", mas cita o direito ${right.id}, que não declara upstream`,
+      ];
+    }
+    if (!generation.upstream.includes(right.upstream)) {
+      return [
+        `${id} tem upstream "${generation.upstream}", mas cita o direito ${right.id}, que vale para "${right.upstream}"`,
+      ];
+    }
+    return [];
+  }
+  if (right?.upstream !== undefined) {
+    return [
+      `${id} cita o direito ${right.id}, que vale para "${right.upstream}", mas não declara upstream`,
+    ];
+  }
+  return [];
+}
+
+function filesIn(dir: string): ArtFile[] {
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name !== MANIFEST)
     .map((entry) => {
@@ -122,8 +174,12 @@ function artFiles(dir: string): ArtFile[] {
 
 function main(): void {
   const dir = fileURLToPath(new URL("../src/assets/art", import.meta.url));
+  const publicDir = fileURLToPath(new URL("../public", import.meta.url));
+  const publicArt = filesIn(publicDir)
+    .filter((file) => isPublicArt(file.path))
+    .map((file) => ({ ...file, path: PUBLIC_PREFIX + file.path }));
   const document: unknown = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8"));
-  const violations = provenanceViolations(artFiles(dir), document);
+  const violations = provenanceViolations([...filesIn(dir), ...publicArt], document);
   for (const violation of violations) {
     console.error(violation);
   }

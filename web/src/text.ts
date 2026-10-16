@@ -73,7 +73,6 @@ export const TEXT = {
     navLabel: "Principal",
     skipToContent: "Pular para o conteúdo",
     brand: "GoblinShift",
-    brandLink: "GoblinShift, Oficina",
     editorialNote: "Ilustrações geradas com processamento externo e editadas.",
     creditsLink: "Créditos",
     footerNavLabel: "Rodapé",
@@ -526,6 +525,13 @@ export const TEXT = {
       "As goblins da oficina foram geradas com processamento externo e editadas à mão. Os conceitos em 2D saíram da fonte externa (com os modelos fonte externa e fonte externa), os modelos 3D do fonte externa fonte externa, e os renders, recortes e a otimização da cena 3D foram feitos no Blender e no glTF Transform.",
       "A saída bruta de processamento externo pode não ser protegível por direito autoral; a parte humana (seleção, renders, edição e os scripts) fica sob a licença CC BY 4.0.",
     ],
+    brandHeading: "A marca",
+    brand: [
+      "O emblema do cabeçalho e o selo da oficina mostram a Rúbia e foram gerados com processamento externo só a partir de texto, no fonte externa, e depois limpos e recortados à mão. O ícone da aba é outro desenho: a cabeça da Rúbia desenhada à mão em SVG, com processamento determinístico.",
+      "O nome GoblinShift, o emblema, o selo e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.",
+    ],
+    sealAlt:
+      "Selo da oficina GoblinShift: a goblin Rúbia, de maria-chiquinhas vermelhas, com uma chave inglesa no ombro.",
     fontsHeading: "Fontes",
     fonts:
       "Bricolage Grotesque e Atkinson Hyperlegible, auto-hospedadas, sob a SIL Open Font License 1.1.",
