@@ -14,6 +14,13 @@ CHECK: nada na linha de `run_output` diz se a Run terminou (um CHECK não lê ou
 leitor dele é a listagem de resultados, que troca NULL pelo nome genérico. A manutenção só anula os
 dois juntos, e só para saída cujo artefato já foi excluído.
 
+O CHECK do artefato varre a tabela sob `ACCESS EXCLUSIVE`, sem `NOT VALID` + `VALIDATE`, de
+propósito: `artifact` só guarda as linhas que o histórico de 90 dias ainda referencia (a
+manutenção apaga o resto), poucos milhares numa VPS, e a varredura leva milissegundos. O `env.py`
+usa o `make_engine`, com `lock_timeout` de 2 s: se um download ou a publicação de um worker
+segurar a tabela, a migração falha alto em vez de enfileirar requisições atrás do
+`ACCESS EXCLUSIVE`, e basta rodá-la de novo.
+
 A UNIQUE de `(run_id, logical_name)` fica com NULLS DISTINCT de propósito: depois da anulação todas
 as saídas da Run ficam sem nome, e NULL ali é ausência, não um nome que possa colidir.
 
