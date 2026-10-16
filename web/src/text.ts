@@ -239,6 +239,66 @@ export const TEXT = {
     stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
+    items: {
+      heading: "Arquivos da execução",
+      listLabel: "Arquivos, na ordem de entrada",
+      entry: (position: number) => `Arquivo ${String(position)}`,
+      summary: (parts: {
+        inputs: string;
+        ok: string;
+        rejected: string;
+        duplicates: string;
+        outputs: string;
+      }) =>
+        `${parts.inputs}: ${parts.ok}, ${parts.rejected}, ${parts.duplicates}. ${parts.outputs}.`,
+      nouns: {
+        inputs: ["arquivo", "arquivos"],
+        ok: ["processado", "processados"],
+        rejected: ["rejeitado", "rejeitados"],
+        duplicates: ["repetido", "repetidos"],
+        outputs: ["arquivo gerado", "arquivos gerados"],
+      },
+      statuses: {
+        pending: "Aguardando",
+        ok: "Processado",
+        rejected: "Rejeitado",
+        duplicate: "Repetido",
+      },
+      okWithWarnings: "Processado com aviso",
+      unknownStatus: "Estado desconhecido",
+      unknownRejection: (code: string) => `Motivo desconhecido (${code}).`,
+      unknownWarning: (code: string) => `Aviso desconhecido (${code}).`,
+      rejections: {
+        UNSUPPORTED_FORMAT: "O formato do arquivo não é aceito por esta receita.",
+        UNSUPPORTED_BIT_DEPTH: "A profundidade de cor da imagem não é aceita.",
+        UNSUPPORTED_COLOR_PROFILE: "O perfil de cor da imagem não é aceito; só sRGB e Display P3.",
+        IMAGE_TOO_LARGE: "A imagem passa de 24 megapixels ou de 8192 px num dos lados.",
+        CSV_STRUCTURE_INVALID: "A estrutura do CSV é inválida (aspas, colunas ou codificação).",
+        FIELD_LIMIT_EXCEEDED:
+          "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
+      },
+      warnings: {
+        CSV_ALL_RECORDS_FILTERED: "Os filtros tiraram todos os registros desta tabela.",
+        CSV_FORMULA_CELLS:
+          "Há células que parecem fórmulas de planilha. Abra a saída com cuidado, ou use a opção de prefixar.",
+        CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
+        INPUT_NOT_SELECTED: "Nenhuma página deste PDF foi escolhida; ele não entrou no resultado.",
+      },
+      notices: {
+        IMAGE_P3_CONVERTED: "A imagem estava em Display P3 e foi convertida para sRGB.",
+      },
+      unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
+      duplicateOf: (position: number) =>
+        `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
+      // Singular e plural, como em `nouns`.
+      counts: {
+        records_read: ["registro lido", "registros lidos"],
+        filtered_out: ["filtrado", "filtrados"],
+        duplicates_removed: ["duplicata removida", "duplicatas removidas"],
+        written: ["gravado", "gravados"],
+        blank_lines_ignored: ["linha vazia ignorada", "linhas vazias ignoradas"],
+      },
+    },
     cancel: {
       open: "Cancelar execução",
       title: "Cancelar esta execução?",
