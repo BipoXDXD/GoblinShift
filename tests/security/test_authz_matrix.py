@@ -30,6 +30,8 @@ from tests.security.authz_matrix import MATRIX, Policy, Rule, entries
 _IMPLICIT_METHODS = {"HEAD"}
 _PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
 _ACCOUNT_NAME = "Conta de teste"
+
+
 def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
     routes: set[tuple[str, str]] = set()
     for context in iter_route_contexts(app.routes):

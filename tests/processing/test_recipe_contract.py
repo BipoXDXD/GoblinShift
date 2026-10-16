@@ -17,6 +17,7 @@ from goblinshift.processing.recipe import (
     ItemRejectionCode,
     ItemWarningCode,
     OutputGroup,
+    Preview,
     Report,
     ReportWarning,
     require_max_inputs,
@@ -75,6 +76,7 @@ def test_grupos_de_saida_sao_a_lista_fechada_do_plano() -> None:
         "tables",
         "text",
         "archives",
+        "previews",
     ]
 
 
@@ -104,6 +106,25 @@ def test_codigos_de_aviso_de_cada_receita_estao_no_catalogo() -> None:
 def test_aviso_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
     with pytest.raises(ValueError, match="catálogo"):
         ReportWarning(code=code, detail="d")
+
+
+# --- Previews: arquivo derivado em previews/, de uma saída de conteúdo do próprio item ----------
+
+
+def test_preview_aponta_para_uma_saida_do_proprio_item() -> None:
+    item = ItemOk(0, outputs=("a.csv",), previews=(Preview("previews/a.csv", "a.csv"),))
+
+    assert item.previews[0].of == "a.csv"
+
+
+def test_preview_de_saida_que_o_item_nao_tem_nao_existe() -> None:
+    with pytest.raises(ValueError, match="preview"):
+        ItemOk(0, outputs=("a.csv",), previews=(Preview("previews/b.csv", "b.csv"),))
+
+
+def test_preview_fora_do_grupo_previews_nao_existe() -> None:
+    with pytest.raises(ValueError, match="previews/"):
+        Preview("images/a.jpg", "images/a.jpg")
 
 
 # --- Teto de entradas da versão: job acima dele é infraestrutura, não conteúdo ------------------
