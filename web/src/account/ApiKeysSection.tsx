@@ -95,6 +95,7 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
         confirmLabel={T.revokeConfirm}
         cancelLabel={T.cancel}
         confirmBlocked={revoke.pending}
+        busy={revoke.pending}
         onCancel={revoke.cancel}
         onConfirm={revoke.confirm}
       >
@@ -261,15 +262,17 @@ function useRevoke(): Revoke {
     pending: mutation.isPending,
     failure,
     message,
+    // Reaberto com o pedido em voo (o navegador fechou o <dialog>), a resposta ainda tem de chegar.
     ask: (key) => {
-      mutation.reset();
-      setMessage(null);
+      if (!mutation.isPending) {
+        mutation.reset();
+        setMessage(null);
+      }
       setTarget(key);
     },
+    // Fecha sempre: o <dialog> pode já ter fechado, e o estado não pode divergir dele.
     cancel: () => {
-      if (!mutation.isPending) {
-        setTarget(null);
-      }
+      setTarget(null);
     },
     confirm: () => {
       if (target !== null && !mutation.isPending) {
