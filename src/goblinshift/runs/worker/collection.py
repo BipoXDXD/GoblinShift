@@ -29,8 +29,8 @@ import hashlib
 import os
 import stat
 import unicodedata
-from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
@@ -47,7 +47,14 @@ from goblinshift.processing.packaging import (
     PackageLimits,
     package_name_for,
 )
-from goblinshift.processing.recipe import ItemRejectionCode, OutputGroup
+from goblinshift.processing.recipe import (
+    ITEM_COUNT_NAME,
+    MAX_ITEM_COUNTS,
+    ItemNoticeCode,
+    ItemRejectionCode,
+    ItemWarningCode,
+    OutputGroup,
+)
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.package_check import (
     ManifestInput,
@@ -114,9 +121,16 @@ class ReportItem:
     outputs: tuple[str, ...]
     # Código da rejeição (catálogo de 1.6); `None` para item aceito.
     code: ItemRejectionCode | None
-    has_warnings: bool
+    # Códigos dos avisos do item, na ordem do relatório; o `detail` fica só no relatório.
+    warnings: tuple[ItemWarningCode, ...] = ()
     # Só na duplicata do Detox: posição da primeira ocorrência, que é um item aceito com saídas.
     duplicate_of: int | None = None
+    counts: Mapping[str, int] = field(default_factory=dict)
+    notices: tuple[ItemNoticeCode, ...] = ()
+
+    @property
+    def has_warnings(self) -> bool:
+        return bool(self.warnings)
 
 
 @dataclass(frozen=True)
@@ -409,15 +423,45 @@ def _item(raw: object) -> ReportItem:
     status = item.get("status")
     if status == _ITEM_OK:
         outputs = tuple(_text(name, "item.outputs[]") for name in _list(item.get("outputs"), "o"))
-        warnings = _list(item.get("warnings"), "item.warnings")
-        return ReportItem(position, True, outputs, None, bool(warnings))
+        warnings = tuple(_warning_code(w) for w in _list(item.get("warnings"), "item.warnings"))
+        counts = _counts(item.get("counts", {}))
+        # Opcional: o executor anterior não escreve notas.
+        notices = tuple(_notice_code(n) for n in _list(item.get("notices", []), "item.notices"))
+        return ReportItem(position, True, outputs, None, warnings, counts=counts, notices=notices)
     if status == _ITEM_REJECTED:
-        return ReportItem(position, False, (), _rejection_code(item.get("code")), False)
+        return ReportItem(position, False, (), _rejection_code(item.get("code")))
     if status == _ITEM_DUPLICATE:
         # Aceito, sem saídas e sem aviso: é o comportamento pedido pelo parâmetro do Detox (1.4).
         duplicate_of = _int(item.get("duplicate_of"), "item.duplicate_of")
-        return ReportItem(position, True, (), None, False, duplicate_of)
+        return ReportItem(position, True, (), None, duplicate_of=duplicate_of)
     raise CollectionError(f"item com status desconhecido: {status!r}")
+
+
+def _notice_code(raw: object) -> ItemNoticeCode:
+    if not isinstance(raw, str) or raw not in ItemNoticeCode:
+        raise CollectionError("item.notices: nota fora do catálogo de códigos")
+    return ItemNoticeCode(raw)
+
+
+def _warning_code(raw: object) -> ItemWarningCode:
+    code = raw.get("code") if isinstance(raw, dict) else None
+    if not isinstance(code, str) or code not in ItemWarningCode:
+        raise CollectionError("item.warnings: aviso fora do catálogo de códigos")
+    return ItemWarningCode(code)
+
+
+def _counts(raw: object) -> dict[str, int]:
+    counts = _mapping(raw, "item.counts")
+    if len(counts) > MAX_ITEM_COUNTS:
+        raise CollectionError(f"item.counts com mais de {MAX_ITEM_COUNTS} contagens")
+    parsed: dict[str, int] = {}
+    for name, value in counts.items():
+        if ITEM_COUNT_NAME.fullmatch(name) is None:
+            raise CollectionError("item.counts com nome de contagem fora do formato")
+        parsed[name] = _int(value, "item.counts[]")
+        if parsed[name] < 0:
+            raise CollectionError("item.counts com contagem negativa")
+    return parsed
 
 
 def _rejection_code(raw: object) -> ItemRejectionCode:

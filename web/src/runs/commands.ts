@@ -16,6 +16,7 @@ const resultReferenceSchema = z.object({
   logical_name: z.string(),
   role: z.enum(["output", "report", "manifest", "package"]),
   file_name: z.string(),
+  availability: z.enum(["available", "expired", "deleted"]),
 });
 
 const runResultsSchema = z.object({
