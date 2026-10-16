@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -9,10 +9,12 @@ import { ConfirmDialog } from "./ConfirmDialog";
 function Harness({
   onConfirm = vi.fn(),
   confirmBlocked = false,
+  busy = false,
   withField = false,
 }: {
   readonly onConfirm?: () => void;
   readonly confirmBlocked?: boolean;
+  readonly busy?: boolean;
   readonly withField?: boolean;
 }): ReactElement {
   const [open, setOpen] = useState(false);
@@ -32,6 +34,7 @@ function Harness({
         confirmLabel="Revogar chave"
         cancelLabel="Cancelar"
         confirmBlocked={confirmBlocked}
+        busy={busy}
         onConfirm={onConfirm}
         onCancel={() => {
           setOpen(false);
@@ -110,6 +113,32 @@ describe("ConfirmDialog", () => {
 
     expect(confirm).toHaveAttribute("aria-disabled", "true");
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("com pedido em curso, o Esc (cancel nativo) não fecha o diálogo", async () => {
+    const user = userEvent.setup();
+    render(<Harness confirmBlocked busy />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    const notCanceled = fireEvent(
+      screen.getByRole("dialog"),
+      new Event("cancel", { cancelable: true }),
+    );
+
+    expect(notCanceled).toBe(false);
+  });
+
+  it("só com a confirmação bloqueada (digitação pendente), o Esc segue o navegador", async () => {
+    const user = userEvent.setup();
+    render(<Harness confirmBlocked />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    const notCanceled = fireEvent(
+      screen.getByRole("dialog"),
+      new Event("cancel", { cancelable: true }),
+    );
+
+    expect(notCanceled).toBe(true);
   });
 
   it("não tem violações do axe aberto", async () => {

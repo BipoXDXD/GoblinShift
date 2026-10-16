@@ -147,6 +147,22 @@ describe("createApiClient: cabeçalhos", () => {
     expect(sentRequest(fetchMock).headers.has("X-CSRF-Token")).toBe(false);
   });
 
+  it("manda If-Match com a revisão de quem leu, e não o inventa sem ela", async () => {
+    const { client, fetchMock } = setup(new Response(null, { status: 204 }), "tok");
+
+    await client.request({
+      method: "DELETE",
+      path: "/api/v1/coisas/a",
+      ifMatch: '"3"',
+      schema: z.unknown(),
+    });
+    await client.request({ method: "DELETE", path: "/api/v1/coisas/a", schema: z.unknown() });
+
+    const [first, second] = fetchMock.mock.calls.map((call) => new Request(...call));
+    expect(first?.headers.get("If-Match")).toBe('"3"');
+    expect(second?.headers.has("If-Match")).toBe(false);
+  });
+
   it("não manda Idempotency-Key quando não há intenção", async () => {
     const { client, fetchMock } = setup(jsonResponse({ id: "a" }));
 

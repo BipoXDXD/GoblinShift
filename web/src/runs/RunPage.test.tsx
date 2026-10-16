@@ -25,6 +25,7 @@ const publishedResults = {
       logical_name: "clientes",
       role: "output",
       file_name: "clientes.csv",
+      availability: "available",
     },
   ],
 };
@@ -108,6 +109,7 @@ describe("Execução", () => {
               logical_name: "pacote",
               role: "package",
               file_name: "resultado.zip",
+              availability: "available",
             },
           ],
         }),
@@ -211,18 +213,26 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
     published: true,
     expires_at: "2026-10-21T12:00:00Z",
     artifacts: [
-      { artifact_id: AUDIO, logical_name: "a", role: "output", file_name: "audio/férias.wav" },
+      {
+        artifact_id: AUDIO,
+        logical_name: "a",
+        role: "output",
+        file_name: "audio/férias.wav",
+        availability: "available",
+      },
       {
         artifact_id: THUMB_10,
         logical_name: "b",
         role: "output",
         file_name: "thumbnails/férias-10pct.jpg",
+        availability: "available",
       },
       {
         artifact_id: THUMB_90,
         logical_name: "c",
         role: "output",
         file_name: "thumbnails/férias-90pct.jpg",
+        availability: "available",
       },
     ],
   };
@@ -248,7 +258,20 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
       () => jsonResponse(runBody({ recipe_id: "media-mill", status: "succeeded" })),
       () => jsonResponse(mediaResults),
       `/execucoes/${RUN_ID}`,
-      { [download(THUMB_10)]: jpeg, [download(THUMB_90)]: thumb90 },
+      {
+        // A disponibilidade dos resultados vem do primeiro artefato (ResultsAvailability).
+        [`GET /api/v1/artifacts/${AUDIO}`]: () =>
+          jsonResponse({
+            id: AUDIO,
+            role: "output",
+            size: 4,
+            sha256: "0".repeat(64),
+            expires_at: mediaResults.expires_at,
+            availability: "available",
+          }),
+        [download(THUMB_10)]: jpeg,
+        [download(THUMB_90)]: thumb90,
+      },
     );
   }
 
@@ -262,7 +285,7 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
     expect(within(previews).getByRole("img", { name: "Miniatura férias-10pct.jpg" })).toBeVisible();
     const downloads = screenRequests(api.requests)
       .map((request) => new URL(request.url).pathname)
-      .filter((pathname) => pathname.startsWith("/api/v1/artifacts/"));
+      .filter((pathname) => pathname.endsWith("/download"));
     expect(downloads).toEqual([
       `/api/v1/artifacts/${THUMB_10}/download`,
       `/api/v1/artifacts/${THUMB_90}/download`,

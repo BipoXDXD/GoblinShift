@@ -12,7 +12,7 @@ outra regra (por exemplo, um CHECK diferente do que o teste pretende exercitar).
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from alembic.autogenerate import compare_metadata
@@ -561,34 +561,76 @@ def test_chave_de_api_que_vence_antes_de_nascer_e_recusada(conn: Connection) -> 
         )
 
 
-def _inserir_artefato(conn: Connection, role: str) -> None:
-    alice = criar_conta(conn, "alice")
-    objeto = criar_objeto_unico(conn, alice, "outputs/alice/1")
-    conn.execute(
-        insert(artifact).values(
-            owner_id=alice,
-            object_id=objeto,
-            role=role,
-            file_name="images/foto.jpg",
-            expires_at=UMA_HORA_DEPOIS,
-        )
+def _inserir_artefato(
+    conn: Connection, role: str, *, source: UUID | None = None, owner: UUID | None = None
+) -> UUID:
+    dono = owner or criar_conta(conn, "alice")
+    objeto = criar_objeto_unico(conn, dono, f"outputs/{uuid4()}")
+    if role == "preview" and source is None:
+        source = _inserir_artefato(conn, "output", owner=dono)
+    return _insert_returning_id(
+        conn,
+        artifact,
+        owner_id=dono,
+        object_id=objeto,
+        role=role,
+        file_name="images/foto.jpg",
+        expires_at=UMA_HORA_DEPOIS,
+        source_artifact_id=source,
     )
 
 
 @pytest.mark.parametrize("role", [role.value for role in ArtifactRole])
 def test_todo_papel_do_enum_e_aceito_pelo_banco(conn: Connection, role: str) -> None:
-    # Fatia 5 (migração 0005): manifest e package entram ao lado de output e report.
+    # Fatia 5 (migração 0005): manifest e package; 0014: preview, sempre com a saída de origem.
     _inserir_artefato(conn, role)
 
 
-@pytest.mark.parametrize("role", ["preview", "outro", "MANIFEST", ""])
+@pytest.mark.parametrize("role", ["outro", "MANIFEST", ""])
 def test_papel_fora_da_lista_e_recusado(conn: Connection, role: str) -> None:
     with barrado_por(conn, "artifact_role_check"):
         _inserir_artefato(conn, role)
 
 
-def test_papeis_da_fatia_5_estao_no_enum() -> None:
-    assert [role.value for role in ArtifactRole] == ["output", "report", "manifest", "package"]
+def test_papeis_de_artefato_estao_no_enum() -> None:
+    assert [role.value for role in ArtifactRole] == [
+        "output",
+        "report",
+        "manifest",
+        "package",
+        "preview",
+    ]
+
+
+def test_preview_sem_saida_de_origem_e_recusado(conn: Connection) -> None:
+    alice = criar_conta(conn, "alice")
+    objeto = criar_objeto_unico(conn, alice, "outputs/sem-origem")
+
+    with barrado_por(conn, "artifact_preview_source_check"):
+        conn.execute(
+            insert(artifact).values(
+                owner_id=alice,
+                object_id=objeto,
+                role="preview",
+                file_name="previews/a.jpg",
+                expires_at=UMA_HORA_DEPOIS,
+            )
+        )
+
+
+def test_saida_comum_com_origem_e_recusada(conn: Connection) -> None:
+    alice = criar_conta(conn, "alice")
+    origem = _inserir_artefato(conn, "output", owner=alice)
+
+    with barrado_por(conn, "artifact_preview_source_check"):
+        _inserir_artefato(conn, "output", source=origem, owner=alice)
+
+
+def test_preview_nao_aponta_para_saida_de_outra_conta(conn: Connection) -> None:
+    origem_de_bob = _inserir_artefato(conn, "output", owner=criar_conta(conn, "bob"))
+
+    with barrado_por(conn, "artifact_owner_id_source_artifact_id_fkey"):
+        _inserir_artefato(conn, "preview", source=origem_de_bob, owner=criar_conta(conn, "alice"))
 
 
 # --- 6. Uso de objeto -------------------------------------------------------------------------

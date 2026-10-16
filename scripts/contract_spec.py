@@ -22,6 +22,8 @@ from typing import Any
 EXIT_OK = 0
 EXIT_USAGE = 2
 _KEYWORD = "unevaluatedProperties"
+# Os presets exigem `name` nos campos comuns; o corpo de `POST /runs` não tem obrigatório comum.
+_COMMON_KEYS = frozenset({"type", "properties", "required"})
 
 
 class UnsupportedShapeError(ValueError):
@@ -62,21 +64,26 @@ def _flatten(schema: dict[str, Any]) -> dict[str, Any]:
     if len(parts) != 2 or set(parts[1]) != {"oneOf"}:
         raise UnsupportedShapeError("esperado allOf com [campos comuns, {oneOf: variantes}]")
     common, variants = parts[0], parts[1]["oneOf"]
-    if set(common) != {"type", "properties"} or common["type"] != "object":
+    if not {"type", "properties"} <= set(common) <= _COMMON_KEYS or common["type"] != "object":
         raise UnsupportedShapeError(f"campos comuns fora do formato: {sorted(common)}")
-    return {"oneOf": [_close(variant, common["properties"]) for variant in variants]}
+    return {"oneOf": [_close(variant, common) for variant in variants]}
 
 
-def _close(variant: dict[str, Any], common_properties: dict[str, Any]) -> dict[str, Any]:
+def _close(variant: dict[str, Any], common: dict[str, Any]) -> dict[str, Any]:
+    """A variante com as propriedades e os obrigatórios comuns, fechada a campos extras."""
     properties = variant.get("properties", {})
-    repeated = set(common_properties) & set(properties)
+    repeated = set(common["properties"]) & set(properties)
     if repeated:
         raise UnsupportedShapeError(f"campo comum repetido na variante: {sorted(repeated)}")
-    return {
+    closed = {
         **variant,
-        "properties": {**common_properties, **properties},
+        "properties": {**common["properties"], **properties},
         "additionalProperties": False,
     }
+    required = [*common.get("required", []), *variant.get("required", [])]
+    if required:
+        closed["required"] = required
+    return closed
 
 
 if __name__ == "__main__":
