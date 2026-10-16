@@ -401,6 +401,9 @@ function runBody(id: string, recipeId: string): Run {
     queue_expires_at: LATER,
     deadline_at: null,
     error: null,
+    parameters: {},
+    preset_id: null,
+    results_expire_at: null,
   };
 }
 

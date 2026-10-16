@@ -377,6 +377,14 @@ export interface components {
             /** Deadline At */
             deadline_at: string | null;
             error: components["schemas"]["RunErrorBody"] | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+            /** Results Expire At */
+            results_expire_at: string | null;
             /**
              * Idempotency Expires At
              * Format: date-time
@@ -541,6 +549,29 @@ export interface components {
             /** Message */
             message: string;
         };
+        /**
+         * ItemRejectionCode
+         * @description Códigos de rejeição por item do catálogo de 1.6: lista fechada.
+         *
+         *     Cada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro
+         *     código, porque o relatório vem do sandbox e o código vai para o banco e para a API.
+         * @enum {string}
+         */
+        ItemRejectionCode: "UNSUPPORTED_FORMAT" | "UNSUPPORTED_BIT_DEPTH" | "UNSUPPORTED_COLOR_PROFILE" | "IMAGE_TOO_LARGE" | "CSV_STRUCTURE_INVALID" | "FIELD_LIMIT_EXCEEDED";
+        /**
+         * ItemStatus
+         * @enum {string}
+         */
+        ItemStatus: "pending" | "ok" | "rejected" | "duplicate";
+        /**
+         * ItemWarningCode
+         * @description Códigos de aviso das receitas: lista fechada, como a das rejeições.
+         *
+         *     O código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do
+         *     arquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui.
+         * @enum {string}
+         */
+        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER";
         /** Limits */
         Limits: {
             /** Runs Per 24H */
@@ -739,12 +770,77 @@ export interface components {
             /** File Name */
             file_name: string;
         };
+        /** RunDetailResponse */
+        RunDetailResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Version */
+            recipe_version: number;
+            status: components["schemas"]["Status"];
+            /** Attempt */
+            attempt: number;
+            progress: components["schemas"]["Progress"];
+            /** Queue Ahead */
+            queue_ahead: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Queue Expires At
+             * Format: date-time
+             */
+            queue_expires_at: string;
+            /** Deadline At */
+            deadline_at: string | null;
+            error: components["schemas"]["RunErrorBody"] | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+            /** Results Expire At */
+            results_expire_at: string | null;
+            summary: components["schemas"]["RunSummaryResponse"] | null;
+            /** Items */
+            items: components["schemas"]["RunItemResponse"][];
+        };
         /** RunErrorBody */
         RunErrorBody: {
             /** Code */
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * RunItemResponse
+         * @description Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo.
+         */
+        RunItemResponse: {
+            /** Position */
+            position: number;
+            /**
+             * Upload Id
+             * Format: uuid
+             */
+            upload_id: string;
+            status: components["schemas"]["ItemStatus"];
+            error_code: components["schemas"]["ItemRejectionCode"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["ItemWarningCode"][];
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Duplicate Of */
+            duplicate_of: number | null;
         };
         /** RunListResponse */
         RunListResponse: {
@@ -783,6 +879,14 @@ export interface components {
             /** Deadline At */
             deadline_at: string | null;
             error: components["schemas"]["RunErrorBody"] | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+            /** Results Expire At */
+            results_expire_at: string | null;
         };
         /** RunResultsResponse */
         RunResultsResponse: {
@@ -792,6 +896,19 @@ export interface components {
             expires_at: string | null;
             /** Artifacts */
             artifacts: components["schemas"]["ResultReferenceResponse"][];
+        };
+        /** RunSummaryResponse */
+        RunSummaryResponse: {
+            /** Inputs */
+            inputs: number;
+            /** Ok */
+            ok: number;
+            /** Rejected */
+            rejected: number;
+            /** Duplicates */
+            duplicates: number;
+            /** Outputs */
+            outputs: number;
         };
         /**
          * Scope
@@ -3499,7 +3616,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunResponse"];
+                    "application/json": components["schemas"]["RunDetailResponse"];
                 };
             };
             /** @description Unauthorized */
