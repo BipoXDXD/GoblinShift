@@ -18,7 +18,7 @@ from goblinshift.identity.tables import app_user
 
 # "rascunho" até a revisão jurídica (plano da fatia 8, F8-5). É a versão declarada no cabeçalho e
 # na última linha do histórico dos dois textos de docs/legal (tests/test_legal_texts.py).
-CURRENT_TERMS_VERSION = "v2-rascunho"
+CURRENT_TERMS_VERSION = "v3-rascunho"
 
 
 @dataclass(frozen=True)

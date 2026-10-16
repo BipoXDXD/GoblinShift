@@ -15,3 +15,9 @@ A arte tem regime próprio, descrito em docs/art/LICENSE-ART.md: a contribuiçã
 está sob CC BY 4.0, exceto as goblins Jade e Fagulha, que não são licenciadas. O nome
 GoblinShift, o logotipo (emblema, selo e ícone da aba) e os nomes dos personagens também não são
 licenciados.
+
+Código de terceiros incluído no repositório:
+
+- Swagger UI (swagger-ui-dist), em src/goblinshift/entrypoints/api/swagger_ui/: Copyright
+  SmartBear Software, Apache License 2.0 (LICENSE e NOTICE na mesma pasta; as licenças das
+  dependências embutidas no bundle estão em swagger-ui-bundle.js.LICENSE.txt).
