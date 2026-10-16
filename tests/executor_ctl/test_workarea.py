@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from executor_ctl import workarea
-from executor_ctl.workarea import WorkAreaDirtyError, WorkDirMissingError
+from executor_ctl.workarea import WorkAreaDirtyError, WorkDirMissingError, WorkDirModeError
 
 ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 OTHER = uuid.UUID("0193a3f0-7b2c-7def-8a01-000000000000")
@@ -190,6 +190,22 @@ def test_start_passa_a_tentativa_ao_ctl_com_os_modos_do_contrato(area: Path) -> 
     assert owner_group_mode(work_dir / "inputs") == (ctl, group, 0o2750)
     assert owner_group_mode(work_dir / "inputs" / "0.csv") == (ctl, group, 0o640)
     assert owner_group_mode(work_dir / "out") == (ctl, group, 0o2770)
+
+
+def test_setgid_limpo_pelo_kernel_reprova_o_start(
+    area: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Sem CAP_FSETID e fora do grupo do arquivo, o chmod do root perde o setgid sem erro.
+    real_fchmod = os.fchmod
+
+    def fchmod_without_fsetid(fd: int, mode: int) -> None:
+        real_fchmod(fd, mode & ~stat.S_ISGID)
+
+    monkeypatch.setattr(os, "fchmod", fchmod_without_fsetid)
+    make_attempt_dir(area)
+
+    with pytest.raises(WorkDirModeError, match="3770"):
+        workarea.prepare_for_start(area, ATTEMPT, os.getgid())
 
 
 @pytest.mark.parametrize("kind", ["symlink", "diretorio"])
