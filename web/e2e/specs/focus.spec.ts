@@ -64,6 +64,14 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Histórico",
     "Acesso",
     "Tema Sistema",
+    // O seletor do elenco do palco 3D (ADR 038); sem GPU, como no CI, a cena não monta e o palco
+    // e os botões Girar e Pose inicial não entram no Tab.
+    "Rúbia",
+    "Fagulha",
+    "Ferrugem",
+    "Jade",
+    "Lua",
+    "Nyx",
     "Abrir a Bancada da CSV Janitor",
     "Abrir a Bancada da Image Forge",
     "Abrir a Bancada da Downloads Detox",

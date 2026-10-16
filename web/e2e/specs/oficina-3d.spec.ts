@@ -1,6 +1,7 @@
-// Cena 3D da abertura (ADR 027 e 030): a imagem estática chega com a página e fica no lugar sem
-// WebGL acelerado, com movimento reduzido ou se a cena falhar; com GPU, a cena chega depois do
-// `load`, sem CDN, sem violar a CSP, sem entrar no Tab e com a entrada parando em até 5 s.
+// Palco 3D da abertura (ADR 027, 030 e 038): a imagem estática da goblin escolhida chega com a
+// página e fica no lugar sem WebGL acelerado, com movimento reduzido ou se a cena falhar; com GPU,
+// a cena chega depois do `load`, sem CDN, sem violar a CSP e com a entrada parando em até 5 s.
+// Trocar de goblin no seletor baixa só o GLB dela; mouse, setas e o botão Girar mexem a vista.
 import AxeBuilder from "@axe-core/playwright";
 import type { Page, Request } from "@playwright/test";
 
@@ -9,6 +10,8 @@ import { expect, test } from "../support/test";
 
 const HERO = "[data-oficina-3d]";
 const CHUNK_OR_MODEL = /\/assets\/oficina-3d[^/]*\.js$|\.glb(\?|$)/;
+const MODEL = /\/assets\/oficina-3d-([a-z]+)-[^/]*\.glb$/;
+const CAST_GROUP = "Escolha a goblin";
 /**
  * Tempo para o chunk, o GLB e o primeiro quadro. O Chromium do CI desenha em software
  * (SwiftShader): a montagem levou de 5 a 22 s nas medições locais, conforme a carga da máquina.
@@ -86,8 +89,32 @@ async function waitPastIdle(page: Page): Promise<void> {
   }
 }
 
-function heroImage(page: Page) {
-  return page.getByRole("img", { name: /^Rúbia, goblin da oficina/ });
+function heroImage(page: Page, name = "Rúbia") {
+  return page.locator(HERO).getByRole("img", { name: new RegExp(`^${name}, goblin`) });
+}
+
+function castButton(page: Page, name: string) {
+  return page.getByRole("group", { name: CAST_GROUP }).getByRole("button", { name });
+}
+
+/** As goblins cujo GLB a página pediu, na ordem dos pedidos. */
+function modelsRequested(requests: readonly Request[]): string[] {
+  return requests.flatMap((request) => MODEL.exec(new URL(request.url()).pathname)?.[1] ?? []);
+}
+
+/** Espera a cena da goblin ficar pronta e a entrada parar, para mexer sem disputar quadros. */
+async function waitSceneStill(page: Page): Promise<void> {
+  await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "pronto", {
+    timeout: SCENE_READY_MS,
+  });
+  await expect(sceneHost(page)).toHaveAttribute("data-movimento", "parado", {
+    timeout: INTRO_LIMIT_MS,
+  });
+}
+
+/** O elemento que a cena marca com a pose e o movimento (o host do canvas). */
+function sceneHost(page: Page) {
+  return page.locator(HERO).locator("[data-movimento]");
 }
 
 test("com movimento reduzido fica a imagem e nada do 3D é pedido", async ({ page }) => {
@@ -99,6 +126,12 @@ test("com movimento reduzido fica a imagem e nada do 3D é pedido", async ({ pag
 
   await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "imagem");
   await expect(heroImage(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Girar" })).toHaveCount(0);
+
+  await castButton(page, "Nyx").click();
+  await expect(castButton(page, "Nyx")).toHaveAttribute("aria-pressed", "true");
+  await expect(heroImage(page, "Nyx")).toBeVisible();
+  await waitPastIdle(page);
   expect(requests.map((r) => r.url()).filter((url) => CHUNK_OR_MODEL.test(url))).toEqual([]);
 });
 
@@ -110,6 +143,9 @@ test("sem WebGL fica a imagem e nada do 3D é pedido", async ({ page }) => {
 
   await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "imagem");
   await expect(heroImage(page)).toBeVisible();
+
+  await castButton(page, "Ferrugem").click();
+  await expect(heroImage(page, "Ferrugem")).toBeVisible();
   expect(requests.map((r) => r.url()).filter((url) => CHUNK_OR_MODEL.test(url))).toEqual([]);
 });
 
@@ -125,6 +161,8 @@ test("WebGL só em software conta como sem WebGL", async ({ page }) => {
 test.describe("com GPU", () => {
   // Montar a cena em software leva mais que o teto padrão de 20 s da suíte.
   test.slow();
+  // Cada quadro em software trava a thread principal; sob carga, um clique espera mais que 5 s.
+  test.use({ actionTimeout: 15_000 });
   test.beforeEach(async ({ page }) => {
     await pretendGpu(page);
   });
@@ -169,9 +207,107 @@ test.describe("com GPU", () => {
     });
     expect(timing.chunkStart).toHaveLength(1);
     expect(timing.chunkStart[0] ?? 0).toBeGreaterThanOrEqual(timing.loadEnd);
+    expect(modelsRequested(requests), "a abertura baixa só o modelo da Rúbia").toEqual(["rubia"]);
   });
 
-  test("com a cena montada, o canvas fica fora do leitor de tela e do Tab, e o axe passa", async ({
+  test("trocar de goblin carrega o GLB dela e só ele, com a imagem dela enquanto carrega", async ({
+    page,
+  }) => {
+    const requests = recordRequests(page);
+    await page.goto("/");
+    const hero = page.locator(HERO);
+    await waitSceneStill(page);
+
+    // Segura o GLB da Nyx para ver a imagem dela no lugar enquanto ele não chega.
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/oficina-3d-nyx-[^/]*\.glb$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await castButton(page, "Nyx").click();
+    await expect(hero).toHaveAttribute("data-oficina-3d", "carregando");
+    await expect(heroImage(page, "Nyx")).toBeVisible();
+    release();
+
+    await expect(hero).toHaveAttribute("data-oficina-3d", "pronto", { timeout: SCENE_READY_MS });
+    await expect(sceneHost(page)).toHaveAttribute("data-goblin", "nyx");
+    await expect(page.getByRole("application", { name: "Nyx em 3D" })).toBeVisible();
+    expect(modelsRequested(requests)).toEqual(["rubia", "nyx"]);
+  });
+
+  test("setas giram e inclinam dentro dos limites, e Home volta à pose inicial @keyboard", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await waitSceneStill(page);
+    const host = sceneHost(page);
+    await page.getByRole("application", { name: "Rúbia em 3D" }).focus();
+
+    await page.keyboard.press("Home");
+    await expect(host).toHaveAttribute("data-giro", "-20");
+    await page.keyboard.press("ArrowRight");
+    await expect(host).toHaveAttribute("data-giro", "-5");
+    // De 0° a 35°: quatro passos de 10°, o último para no teto.
+    for (let step = 0; step < 4; step += 1) {
+      await page.keyboard.press("ArrowUp");
+    }
+    await expect(host).toHaveAttribute("data-inclinacao", "35");
+    // De 35° a -15°: cinco passos de 10°.
+    for (let step = 0; step < 5; step += 1) {
+      await page.keyboard.press("ArrowDown");
+    }
+    await expect(host).toHaveAttribute("data-inclinacao", "-15");
+
+    await page.keyboard.press("Home");
+    await expect(host).toHaveAttribute("data-giro", "-20");
+    await expect(host).toHaveAttribute("data-inclinacao", "0");
+  });
+
+  test("arrastar com o mouse gira e inclina a goblin", async ({ page }) => {
+    await page.goto("/");
+    const hero = page.locator(HERO);
+    await waitSceneStill(page);
+    const host = sceneHost(page);
+    await page.getByRole("button", { name: "Pose inicial" }).click();
+    await expect(host).toHaveAttribute("data-giro", "-20");
+
+    const box = await hero.boundingBox();
+    if (box === null) {
+      throw new Error("palco sem caixa");
+    }
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+    await page.mouse.move(centerX, centerY);
+    await page.mouse.down();
+    await page.mouse.move(centerX + 40, centerY + 20, { steps: 4 });
+    await page.mouse.up();
+
+    // 40 px a 0,01 rad/px giram ~23°; 20 px inclinam ~11°.
+    await expect(host).toHaveAttribute("data-giro", "3");
+    await expect(host).toHaveAttribute("data-inclinacao", "11");
+  });
+
+  test("Girar liga e desliga a auto-rotação", async ({ page }) => {
+    await page.goto("/");
+    await waitSceneStill(page);
+    const spin = page.getByRole("button", { name: "Girar" });
+    const host = sceneHost(page);
+
+    await spin.click();
+    await expect(spin).toHaveAttribute("aria-pressed", "true");
+    await expect(host).toHaveAttribute("data-movimento", "girando");
+    const before = await host.getAttribute("data-giro");
+    await expect(host).not.toHaveAttribute("data-giro", before ?? "");
+
+    await spin.click();
+    await expect(spin).toHaveAttribute("aria-pressed", "false");
+    await expect(host).toHaveAttribute("data-movimento", "parado");
+  });
+
+  test("com a cena montada, o canvas fica fora do leitor de tela, o palco entra no Tab com nome, e o axe passa", async ({
     page,
   }) => {
     await page.goto("/");
@@ -181,6 +317,9 @@ test.describe("com GPU", () => {
     const canvas = hero.locator("canvas");
     await expect(canvas.locator("xpath=..")).toHaveAttribute("aria-hidden", "true");
     expect(await canvas.evaluate((element) => element.tabIndex)).toBe(-1);
+    await expect(hero).toHaveAttribute("role", "application");
+    await expect(hero).toHaveAttribute("tabindex", "0");
+    await expect(hero).toHaveAccessibleName("Rúbia em 3D");
     await expect(heroImage(page)).toBeAttached();
 
     const results = await new AxeBuilder({ page })
