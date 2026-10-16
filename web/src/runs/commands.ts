@@ -31,7 +31,7 @@ const artifactDetailsSchema = z.object({
   size: z.number().int(),
   sha256: z.string(),
   expires_at: z.iso.datetime({ offset: true }),
-  availability: z.enum(["available", "expired", "deleted"]),
+  availability: z.enum(["available", "expired", "deleted", "missing"]),
 });
 
 /** O 202 do DELETE chega sem corpo; só o status importa. */

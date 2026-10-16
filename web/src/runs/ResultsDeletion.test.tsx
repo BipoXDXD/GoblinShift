@@ -110,6 +110,20 @@ describe("Resultados: disponibilidade", () => {
     expect(within(region).queryByRole("link", { name: /^Baixar/ })).toBeNull();
   });
 
+  it("perdidos: sem links nem Excluir, explicando que os arquivos se perderam", async () => {
+    setup({ [`GET /api/v1/artifacts/${PACKAGE_ID}`]: artifactWith("missing") });
+
+    const region = await resultsRegion();
+    expect(
+      await within(region).findByRole("heading", { name: "Resultados perdidos" }),
+    ).toBeVisible();
+    expect(region).toHaveTextContent(
+      "Os arquivos gerados por esta execução se perderam e não podem mais ser baixados. Os que você enviou não mudam.",
+    );
+    expect(within(region).queryByRole("link", { name: /^Baixar/ })).toBeNull();
+    expect(within(region).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
+  });
+
   it("enquanto a disponibilidade carrega: verificando, sem links nem Excluir", async () => {
     // null: o fakeApi nunca responde.
     setup({ [`GET /api/v1/artifacts/${PACKAGE_ID}`]: () => null });
