@@ -24,6 +24,7 @@ import type { Run, RunStatus } from "./api";
 import { CancelRun } from "./CancelRun";
 import type { RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
+import { unavailableReason } from "./availability";
 import { ResultsAvailability } from "./ResultsAvailability";
 import { useRunPolling } from "./useRunPolling";
 
@@ -243,46 +244,86 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
   const others = results.artifacts.filter((artifact) => artifact.role !== "package");
   return (
     <div className="flex flex-col gap-6">
-      {packages.map((artifact) => (
-        <a
-          key={artifact.artifact_id}
-          href={artifactDownloadPath(artifact.artifact_id)}
-          download={artifact.file_name}
-          className={buttonClassName({ variant: "primary", size: "lg" })}
-        >
-          <Download aria-hidden="true" className="size-6" />
-          {T.results.download(artifact.file_name)}
-          {/* Espaço fora do sr-only, que fora do fluxo perde o espaço inicial (HomePage). */}{" "}
-          <span className="sr-only">({T.results.roles[artifact.role]})</span>
-        </a>
-      ))}
+      {packages.map((artifact) => {
+        const reason = unavailableReason(artifact.availability, results.expires_at);
+        return reason === null ? (
+          <a
+            key={artifact.artifact_id}
+            href={artifactDownloadPath(artifact.artifact_id)}
+            download={artifact.file_name}
+            className={buttonClassName({ variant: "primary", size: "lg" })}
+          >
+            <Download aria-hidden="true" className="size-6" />
+            {T.results.download(artifact.file_name)}
+            {/* Espaço fora do sr-only, que fora do fluxo perde o espaço inicial (HomePage). */}{" "}
+            <span className="sr-only">({T.results.roles[artifact.role]})</span>
+          </a>
+        ) : (
+          <p key={artifact.artifact_id}>
+            <UnavailableFile reference={artifact} reason={reason} />
+          </p>
+        );
+      })}
       {others.length > 0 && (
         <div className="flex flex-col gap-2">
           {packages.length > 0 && (
             <h3 className="text-sm font-semibold text-fg-muted">{T.results.otherFiles}</h3>
           )}
           <ul className="flex flex-col gap-2">
-            {others.map((artifact) => (
-              <li key={artifact.artifact_id} className="flex flex-wrap items-baseline gap-x-2">
-                <a
-                  href={artifactDownloadPath(artifact.artifact_id)}
-                  download={artifact.file_name}
-                  className="font-mono text-sm"
-                >
-                  {T.results.download(artifact.file_name)}
-                </a>
-                <span className="text-sm text-fg-muted">({T.results.roles[artifact.role]})</span>
-              </li>
-            ))}
+            {others.map((artifact) => {
+              const reason = unavailableReason(artifact.availability, results.expires_at);
+              return (
+                <li key={artifact.artifact_id} className="flex flex-wrap items-baseline gap-x-2">
+                  {reason === null ? (
+                    <>
+                      <a
+                        href={artifactDownloadPath(artifact.artifact_id)}
+                        download={artifact.file_name}
+                        className="font-mono text-sm"
+                      >
+                        {T.results.download(artifact.file_name)}
+                      </a>
+                      <span className="text-sm text-fg-muted">
+                        ({T.results.roles[artifact.role]})
+                      </span>
+                    </>
+                  ) : (
+                    <UnavailableFile reference={artifact} reason={reason} />
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
-      {results.expires_at !== null && (
+      {results.expires_at !== null && !hasExpired(results) && (
         <p className="text-sm text-fg-muted">
           {T.results.availableUntil(formatDateTime(results.expires_at))}
         </p>
       )}
     </div>
+  );
+}
+
+/** Com uma referência já expirada, o prazo passou: "Disponíveis até" contradiria o motivo. */
+function hasExpired(results: RunResultsData): boolean {
+  return results.artifacts.some((artifact) => artifact.availability === "expired");
+}
+
+interface UnavailableFileProps {
+  readonly reference: RunResultsData["artifacts"][number];
+  readonly reason: string;
+}
+
+/** Arquivo que não pode mais ser baixado: o nome, sem link, com o motivo. */
+function UnavailableFile({ reference, reason }: UnavailableFileProps): ReactElement {
+  return (
+    <>
+      <span className="font-mono text-sm text-fg-muted">{reference.file_name}</span>{" "}
+      <span className="text-sm text-fg-muted">
+        ({T.results.roles[reference.role]}): {reason}.
+      </span>
+    </>
   );
 }
 
