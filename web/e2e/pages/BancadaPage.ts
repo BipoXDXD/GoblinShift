@@ -24,11 +24,21 @@ export class BancadaPage {
     await expect(this.runButton()).toBeVisible();
   }
 
-  /** Escolhe os arquivos pelo input e espera cada um terminar de enviar. */
+  /**
+   * Escolhe os arquivos pelo input e espera cada um terminar de enviar. Conta por nome: com um nome
+   * repetido, o item antigo já "Enviado" não pode responder pelo novo.
+   */
   async addFiles(files: readonly InputFile[]): Promise<void> {
-    await this.#page.getByLabel("Escolher arquivos").setInputFiles([...files]);
+    const expected = new Map<string, number>();
     for (const file of files) {
-      await expect(this.entry(file.name).getByText("Enviado", { exact: true })).toBeVisible();
+      expected.set(file.name, (expected.get(file.name) ?? 0) + 1);
+    }
+    for (const [name, added] of expected) {
+      expected.set(name, added + (await this.entry(name).count()));
+    }
+    await this.#page.getByLabel("Escolher arquivos").setInputFiles([...files]);
+    for (const [name, total] of expected) {
+      await expect(this.entry(name).getByText("Enviado", { exact: true })).toHaveCount(total);
     }
   }
 
