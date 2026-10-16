@@ -14,6 +14,8 @@ from goblinshift.identity import Scope
 class Policy(Enum):
     # Allowlist: responde sem credencial.
     PUBLIC = auto()
+    # Sem credencial, mas a mutação exige o par CSRF (cookie e header) da própria origem.
+    CSRF_ONLY = auto()
     # Sessão ou qualquer chave válida, sem escopo específico.
     ANY_CREDENTIAL = auto()
     # Sessão (que tem todos os escopos) ou chave com o escopo da regra.
@@ -43,16 +45,18 @@ def _scope(scope: Scope, resource_param: str | None = None) -> Rule:
 API = "/api/v1"
 
 MATRIX: dict[tuple[str, str], Rule] = {
-    # Infraestrutura e documentação.
+    # Infraestrutura e documentação (Swagger UI servido da própria origem: test_api_docs.py).
     ("GET", "/livez"): Rule(Policy.PUBLIC),
     ("GET", "/readyz"): Rule(Policy.PUBLIC),
     ("GET", "/docs"): Rule(Policy.PUBLIC),
+    ("GET", "/docs/assets/{name}"): Rule(Policy.PUBLIC),
     ("GET", "/openapi.json"): Rule(Policy.PUBLIC),
     # Login (Frente A): o estado do login protege o callback, não uma credencial.
     ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC),
     ("GET", "/auth/callback/{provider}"): Rule(Policy.PUBLIC),
-    # Sem sessão válida também responde 204: o estado final é o mesmo (Frente B).
-    ("POST", "/auth/logout"): Rule(Policy.PUBLIC),
+    # Sem sessão válida também responde 204, o estado final é o mesmo (Frente B), mas só com o
+    # par CSRF: outro site não manda o navegador apagar os dados da origem.
+    ("POST", "/auth/logout"): Rule(Policy.CSRF_ONLY),
     ("POST", "/auth/logout-all"): Rule(Policy.SESSION),
     # Conta.
     ("GET", f"{API}/me"): Rule(Policy.ANY_CREDENTIAL),
@@ -65,6 +69,7 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("DELETE", f"{API}/api-keys/{{key_id}}"): Rule(Policy.SESSION, resource_param="key_id"),
     # Catálogo de receitas.
     ("GET", f"{API}/catalog"): Rule(Policy.ANY_CREDENTIAL),
+    ("GET", f"{API}/catalog/{{recipe_id}}/versions/{{version}}"): Rule(Policy.ANY_CREDENTIAL),
     # Arquivos.
     ("POST", f"{API}/uploads"): _scope(Scope.FILES_WRITE),
     ("PUT", f"{API}/uploads/{{upload_id}}/content"): _scope(Scope.FILES_WRITE, "upload_id"),

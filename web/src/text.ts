@@ -75,6 +75,11 @@ export const TEXT = {
     brand: "GoblinShift",
     aiArt: "Ilustrações geradas com IA e editadas.",
     creditsLink: "Créditos",
+    footerNavLabel: "Rodapé",
+  },
+  pageTitles: {
+    workbench: "Bancada",
+    acceptTerms: "Aceite dos termos",
   },
   notice: {
     // O tipo escrito acompanha a cor da faixa: o aviso nunca depende só dela (WCAG 1.4.1).
@@ -100,6 +105,8 @@ export const TEXT = {
         "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
       "downloads-detox":
         "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
+      "pdf-press":
+        "Junta, separa ou escolhe páginas de PDFs, com o mapa de cada página, sem abrir o arquivo no navegador.",
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
@@ -165,13 +172,23 @@ export const TEXT = {
     },
     removal: {
       titleOne: (name: string) => `Remover ${name}?`,
-      bodyOne: "O arquivo sai do lote. Para usá-lo de novo, escolha-o outra vez.",
+      bodyOne:
+        "O arquivo sai do lote e é excluído do servidor. Para usá-lo de novo, escolha-o outra vez.",
       titleAll: (count: number) => `Remover os ${String(count)} arquivos?`,
-      bodyAll: "Todos os arquivos saem do lote. Para usá-los de novo, escolha-os outra vez.",
+      bodyAll:
+        "Todos os arquivos saem do lote e são excluídos do servidor. Para usá-los de novo, escolha-os outra vez.",
       confirm: "Remover",
       confirmAll: "Remover todos",
       cancel: "Cancelar",
       removeAll: "Remover todos",
+      deletionFailedOne: (name: string) => `Não foi possível excluir ${name} do servidor.`,
+      deletionFailedMany: (count: number) =>
+        `Não foi possível excluir ${String(count)} arquivos do servidor.`,
+      deletionFailedHintOne:
+        "O arquivo já saiu do lote e não entra na execução. Sem a exclusão, o servidor o apaga sozinho em até 24 horas.",
+      deletionFailedHintMany:
+        "Os arquivos já saíram do lote e não entram na execução. Sem a exclusão, o servidor os apaga sozinho em até 24 horas.",
+      retryDeletion: "Tentar excluir de novo",
     },
     serverFieldErrors: {
       missing: "Campo obrigatório.",
@@ -219,6 +236,17 @@ export const TEXT = {
     stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
+    cancel: {
+      open: "Cancelar execução",
+      title: "Cancelar esta execução?",
+      body: "A execução para e não publica resultados. Os arquivos enviados continuam na sua conta até expirarem.",
+      confirm: "Cancelar execução",
+      keepGoing: "Continuar a execução",
+      requested:
+        "Cancelamento pedido. A execução para assim que o trabalho em curso for interrompido.",
+      canceled: "Execução cancelada.",
+      alreadyFinished: "A execução já tinha terminado; não havia o que cancelar.",
+    },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
     flavor: {
       queued: "Os goblins pegam este lote assim que uma bancada vagar.",
@@ -350,6 +378,47 @@ export const TEXT = {
       prefixDot: "O prefixo não pode começar com ponto.",
     },
   },
+  pdfPress: {
+    title: "PDF Press",
+    operation: "O que fazer com os PDFs",
+    operations: {
+      merge: "Juntar todos num PDF só, na ordem da lista",
+      split: "Separar cada PDF em partes",
+      select: "Montar um PDF com as páginas escolhidas",
+    },
+    mergeHint:
+      "A ordem dos arquivos na lista é a ordem no PDF final. Use os botões Mover para cima e Mover para baixo para mudar.",
+    pagesPerDocument: "Páginas por parte",
+    pagesPerDocumentHint: (max: number) =>
+      `De 1 a ${String(max)}. Com 1, cada página vira um PDF; com 3, as partes têm 3 páginas, e a última pode ter menos.`,
+    select: "Páginas escolhidas",
+    selectHint: (max: number) =>
+      `Cada cartão é uma página do PDF final, na ordem da lista. A mesma página pode aparecer mais de uma vez. Até ${String(max)} páginas.`,
+    selectWaitingFiles: "Envie os PDFs primeiro: cada cartão escolhe uma página de um deles.",
+    selectOrder: "Ordem das páginas",
+    addCard: "Adicionar página",
+    cardName: (position: number) => `página ${String(position)} da seleção`,
+    cardTitle: (position: number) => `${String(position)}.`,
+    cardFile: (position: number) => `PDF da página ${String(position)}`,
+    cardPage: (position: number) => `Número da página ${String(position)} no PDF`,
+    noFileChosen: "Escolha um PDF",
+    removeCard: (position: number) => `Remover a página ${String(position)}`,
+    preview: {
+      heading: "Mapa de páginas previsto",
+      empty: "O mapa aparece quando houver PDFs enviados ou páginas escolhidas.",
+      allPages: (name: string) => `${name}, todas as páginas`,
+      groups: (size: string) => `partes de ${size} página(s), na ordem`,
+      page: (name: string, page: string) => `${name}, página ${page}`,
+      noFile: "PDF não escolhido",
+    },
+    errors: {
+      integerBetween: (min: number, max: number) =>
+        `Informe um número inteiro de ${String(min)} a ${String(max)}.`,
+      chooseFile: "Escolha um dos PDFs enviados.",
+      noPages: "Adicione ao menos uma página.",
+      tooManyPages: (max: number) => `Escolha no máximo ${String(max)} páginas.`,
+    },
+  },
   history: {
     title: "Histórico",
     navLink: "Histórico",
@@ -437,6 +506,7 @@ export const TEXT = {
     keys: {
       heading: "Chaves de API",
       intro: "Chaves deixam scripts usarem a API em seu nome, com os escopos que você escolher.",
+      guideLink: "Como usar a chave: guia da API",
       loading: "Carregando as chaves.",
       empty: "Nenhuma chave de API",
       emptyHint: "Crie uma chave para usar a API em scripts.",
@@ -497,6 +567,92 @@ export const TEXT = {
         "A sua sessão terminou e as chaves foram revogadas. Os arquivos, resultados e dados da conta são apagados em até 24 horas.",
       backHome: "Voltar à Oficina",
     },
+  },
+  // Guia da API (texto literal: é página de consulta, sem a voz temática). Trechos entre crases
+  // viram <code> na tela.
+  apiGuide: {
+    title: "Usar a API com chave",
+    intro:
+      "A interface usa a mesma API que um script pode usar. Com uma chave, o script envia arquivos, cria a execução, acompanha o andamento e baixa os resultados.",
+    docsLink: "Abrir a documentação interativa",
+    openApiLink: "Baixar o contrato OpenAPI",
+    beforeHeading: "Antes de começar",
+    before: [
+      "Crie a chave com só os escopos de que o script precisa. O segredo aparece uma vez, na criação.",
+      "Guarde a chave numa variável de ambiente, fora do código e do repositório: `read -rs GS_API_KEY && export GS_API_KEY`.",
+      "A conta precisa ter aceitado a versão vigente dos termos; sem o aceite, a API responde `403` com `TERMS_NOT_ACCEPTED`.",
+      "Os exemplos usam `curl` e `jq`, e um arquivo `clientes.csv` na pasta atual.",
+    ],
+    createKeyLink: "Criar uma chave no Acesso",
+    scopesHeading: "Escopos",
+    scopesCaption: "Escopos da chave",
+    scopeColumns: { scope: "Escopo", allows: "O que permite", routes: "Rotas" },
+    scopes: [
+      {
+        scope: "files:write",
+        allows: "Enviar arquivos e excluí-los",
+        routes:
+          "POST /uploads, PUT /uploads/{id}/content, DELETE /uploads/{id}, DELETE /runs/{id}/artifacts",
+      },
+      {
+        scope: "files:read",
+        allows: "Ver uploads e baixar resultados",
+        routes: "GET /uploads/{id}, GET /artifacts/{id}, GET /artifacts/{id}/download",
+      },
+      {
+        scope: "runs:write",
+        allows: "Criar e cancelar execuções",
+        routes: "POST /runs, POST /runs/{id}/cancel",
+      },
+      {
+        scope: "runs:read",
+        allows: "Acompanhar execuções e listar resultados",
+        routes: "GET /runs, GET /runs/{id}, GET /runs/{id}/results",
+      },
+    ],
+    scopesNote:
+      "`GET /catalog` e `GET /me` aceitam qualquer chave válida. Chaves, exclusão da conta e aceite dos termos só funcionam com a sessão da interface.",
+    stepsHeading: "Passo a passo",
+    scopeOfStep: (scope: string) => `Escopo: ${scope}`,
+    commandOf: (title: string) => `Comando: ${title}`,
+    steps: {
+      intent: {
+        title: "Peça a intenção de upload",
+        body: "Mande o nome e o tamanho em bytes de cada arquivo, até 100 por pedido. A resposta traz, na mesma ordem, o `id` de cada upload e as instruções de envio em `content`.",
+      },
+      content: {
+        title: "Envie o conteúdo",
+        body: "Use `content.method`, `content.url` e `content.headers` exatamente como vieram; o comando repete os valores de hoje. Um envio interrompido não retoma: peça outra intenção.",
+      },
+      run: {
+        title: "Crie a execução",
+        body: "Gere a `Idempotency-Key` uma vez por execução pretendida. Se a resposta não chegar, repita a mesma chave com o mesmo corpo: a API devolve a execução já criada em vez de outra. Os parâmetros e os defaults de cada receita estão em `GET /catalog`.",
+      },
+      poll: {
+        title: "Acompanhe",
+        body: "Consulte até o `status` ser terminal (`succeeded`, `succeeded_with_warnings`, `failed` ou `canceled`), esperando o `Retry-After` de cada resposta. Decida só pelo `status`: fase e tentativa são informativas.",
+      },
+      results: {
+        title: "Liste os resultados",
+        body: "O papel `package` é o ZIP com tudo; `output`, `report` e `manifest` vêm avulsos. Os resultados ficam disponíveis por 48 horas depois do término.",
+      },
+      download: {
+        title: "Baixe",
+        body: "O download é um streaming autenticado; `-OJ` grava com o nome que o servidor manda.",
+      },
+    },
+    limitsHeading: "Limites",
+    limits: [
+      "Uma execução não terminal por conta: criar outra antes de a atual terminar dá `409` com `ACTIVE_RUN_LIMIT`.",
+      "`429` e `503` trazem `Retry-After`: espere esse tempo antes de repetir.",
+      "Envie e baixe no máximo dois arquivos por vez; acima disso a API responde `429`.",
+      "Limites por receita (arquivos, bytes, formatos) estão em `GET /catalog`; as cotas da conta e o consumo, em `GET /me`.",
+      "Uploads que não entram em execução expiram em 24 horas; resultados, 48 horas depois do término.",
+      "A `Idempotency-Key` tem de 16 a 64 caracteres entre letras, números, `-` e `_`, e vale por 24 horas.",
+    ],
+    errorsHeading: "Erros",
+    errors:
+      "Toda resposta de erro é `application/problem+json`, com um `code` estável e o `request_id`. Decida pelo `code`, nunca pelo texto, e cite o `request_id` ao pedir ajuda.",
   },
   terms: {
     acceptTitle: "Termos de uso",
