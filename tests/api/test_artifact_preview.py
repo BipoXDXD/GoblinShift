@@ -5,7 +5,7 @@ import uuid
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.tables import artifact
@@ -141,4 +141,25 @@ def test_origem_excluida_responde_410_mesmo_com_o_preview_valido(
     response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
 
     assert_problem(response, 410, "GONE")
+    assert open_uses(factory) == 0
+
+
+@pytest.mark.parametrize("expired", ["origem", "preview"])
+def test_vencido_antes_de_a_manutencao_marcar_responde_410(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], expired: str
+) -> None:
+    # `expires_at` no instante da transação (on point de `expires_at <= now()`) e `deleted_at`
+    # ainda nulo: a manutenção não passou, e o vencimento sozinho já tira o conteúdo do ar.
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    target = source if expired == "origem" else preview
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(artifact).where(artifact.c.id == target).values(expires_at=func.now())
+        )
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    assert b"jpeg" not in response.content
     assert open_uses(factory) == 0
