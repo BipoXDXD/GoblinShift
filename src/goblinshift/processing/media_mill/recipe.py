@@ -42,6 +42,7 @@ from goblinshift.processing.media_mill.tools import (
     run_tool,
 )
 from goblinshift.processing.names import safe_stem
+from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
 from goblinshift.processing.recipe import (
     DetailValue,
     InputFile,
@@ -112,19 +113,20 @@ class MediaMillV1:
         tools = self._tools or Tools.discover()
         budget = TimeBudget(self._budget_s, self._clock)
         items: list[ItemOk | ItemRejected] = []
+        pending: list[PendingPreview] = []
         # O diretório de rascunho vem de `tempfile.tempdir`, que o executor aponta para a área de
         # trabalho da tentativa (a raiz do container é somente leitura).
         with tempfile.TemporaryDirectory(prefix="media-mill-") as scratch:
             for source in inputs:
                 work = Path(scratch, f"{source.position:04}")
                 mill = _Mill(_Runner(tools, budget, self._timeouts, work), self._limits, params)
-                items.append(mill.process(source, out))
+                items.append(mill.process(source, out, pending))
                 progress.item_done(source.position)
         details: dict[str, DetailValue] = {
             "audio_bit_depth": AUDIO_BIT_DEPTH,
             "thumbnail_max_side_px": self._limits.thumbnail_max_side_px,
         }
-        return Report(items, details=details)
+        return Report(attach_previews(items, write_previews(out, pending)), details=details)
 
 
 @dataclass(frozen=True)
@@ -179,14 +181,16 @@ class _Mill:
         self._limits = limits
         self._params = params
 
-    def process(self, source: InputFile, out: OutputDir) -> ItemOk | ItemRejected:
+    def process(
+        self, source: InputFile, out: OutputDir, pending: list[PendingPreview]
+    ) -> ItemOk | ItemRejected:
         self._work.mkdir()
         try:
             try:
                 converted = self._convert(source)
             except MediaRejected as rejection:
                 return ItemRejected(source.position, rejection.code, rejection.reason)
-            return _publish(converted, source, self._params, out)
+            return _publish(converted, source, self._params, out, pending)
         finally:
             shutil.rmtree(self._work)
 
@@ -273,7 +277,19 @@ class _Mill:
         return _Thumbnail(label, target, requested_s, log.last_frame_s, True)
 
 
-def _publish(converted: _Converted, source: InputFile, params: Params, out: OutputDir) -> ItemOk:
+def _publish(
+    converted: _Converted,
+    source: InputFile,
+    params: Params,
+    out: OutputDir,
+    pending: list[PendingPreview],
+) -> ItemOk:
+    """Copia as saídas para `out/` e guarda, para depois de todo o conteúdo, os previews.
+
+    O preview de cada miniatura é ela mesma (2.2, "mídia por miniaturas"): já é um JPEG de até
+    640 px, e reencodar pediria outra chamada ao FFmpeg. Os bytes saem do rascunho antes de ele ser
+    apagado; a que passar do teto de JPEG de preview fica sem preview (`write_previews`).
+    """
     stem = safe_stem(source.original_name, FALLBACK_STEM)
     outputs: list[str] = []
     if converted.audio is not None:
@@ -281,7 +297,9 @@ def _publish(converted: _Converted, source: InputFile, params: Params, out: Outp
         outputs.append(_copy(converted.audio, out, name, source.position, OutputGroup.AUDIO))
     for thumbnail in converted.thumbnails:
         name = f"{stem}-{thumbnail.label}pct.jpg"
-        outputs.append(_copy(thumbnail.path, out, name, source.position, OutputGroup.THUMBNAILS))
+        copied = _copy(thumbnail.path, out, name, source.position, OutputGroup.THUMBNAILS)
+        outputs.append(copied)
+        pending.append(PendingPreview(source.position, copied, name, thumbnail.path.read_bytes()))
     return ItemOk(
         position=source.position,
         outputs=tuple(outputs),

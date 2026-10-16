@@ -79,8 +79,14 @@ def test_executor_publica_audio_miniaturas_relatorio_manifesto_e_zip(
         "thumbnails/férias-90pct.jpg",
     ]
     assert item["details"]["audio_stream_index"] == 0
+    assert item["previews"] == [
+        {"path": f"previews/férias-{p}pct.jpg", "of": f"thumbnails/férias-{p}pct.jpg"}
+        for p in (10, 50, 90)
+    ]
     with zipfile.ZipFile(out / "media-mill.zip") as package:
         methods = {info.filename: info.compress_type for info in package.infolist()}
+    # O preview fica fora do pacote (ADR 037).
+    assert not any(name.startswith("previews/") for name in methods)
     assert methods["audio/férias.flac"] == zipfile.ZIP_STORED
     assert methods["thumbnails/férias-10pct.jpg"] == zipfile.ZIP_STORED
     assert methods["report.json"] == zipfile.ZIP_DEFLATED
