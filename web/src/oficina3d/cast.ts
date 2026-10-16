@@ -1,11 +1,11 @@
-// O elenco do palco 3D (ADR 038): as seis goblins, cada uma com a imagem estática que aparece
+// O elenco do palco 3D (ADR 038): as cinco goblins, cada uma com a imagem estática que aparece
 // antes e no lugar da cena, e que também é a miniatura do seletor.
 import { TEXT } from "../text";
 
 export type CastId = keyof typeof TEXT.art.goblins;
 
 /** A ordem do seletor é a do elenco nos créditos: a Rúbia, mascote da abertura, primeiro. */
-export const CAST_IDS: readonly CastId[] = ["rubia", "fagulha", "ferrugem", "jade", "lua", "nyx"];
+export const CAST_IDS: readonly CastId[] = ["rubia", "fagulha", "ferrugem", "jade", "nyx"];
 
 /** A Rúbia abre a página: é a única cena que a home carrega sem a pessoa pedir. */
 export const FIRST_ON_STAGE: CastId = "rubia";

@@ -70,7 +70,6 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Fagulha",
     "Ferrugem",
     "Jade",
-    "Lua",
     "Nyx",
     "Abrir a Bancada da CSV Janitor",
     "Abrir a Bancada da Image Forge",

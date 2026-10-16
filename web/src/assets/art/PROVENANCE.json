@@ -960,68 +960,6 @@
       ]
     },
     {
-      "file": "oficina-3d/oficina-3d-lua-192w.avif",
-      "sha256": "42bdf96dd6df4cd93c80496019a90d903cab58705c26f7e2c5db48ac2806c6a0",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "oficina-3d/oficina-3d-lua-192w.webp",
-      "sha256": "de017577609934fc6eccad1254237c82ca958fc9b5efb1ef80340f65dcbd6b9c",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "oficina-3d/oficina-3d-lua-384w.avif",
-      "sha256": "82abe5228ca4f5a324543fdd5f4683c47a0991054badb3883825b6bb3f20a603",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "oficina-3d/oficina-3d-lua-384w.webp",
-      "sha256": "06c36b4057690b14f158dc3d98568eea522f06917dbdaba598ce50255edc5377",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "oficina-3d/oficina-3d-lua-640w.avif",
-      "sha256": "4f22845cd866bcea03244383e1ce951e19920052ebf90910318add44376f6b2c",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "oficina-3d/oficina-3d-lua-640w.webp",
-      "sha256": "6f2d5a77da55c9f1fe49d72598347a8e49b4b48431314a131c2fdc491c0c5af1",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "oficina-3d/oficina-3d-lua.glb",
-      "sha256": "a7e8de7d583e34efba0defcffc2e87de7da7d93bc96a440e12ac5cfa386dbee2",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "weld, simplificação com atributos (posição, normal e UV; de 101 a 146 mil triângulos, conforme a goblin), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
-      ]
-    },
-    {
       "file": "oficina-3d/oficina-3d-nyx-192w.avif",
       "sha256": "53c8d2e5a0e6fcdb12dfaea48581797ffaf4b996d264907e997290a2ba8fe73a",
       "derived_from": "nyx-3d",

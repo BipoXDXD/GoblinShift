@@ -4,7 +4,7 @@ import { TEXT } from "../text";
 import { CAST, CAST_IDS, castMember } from "./cast";
 
 describe("CAST", () => {
-  it("tem as seis goblins publicadas, cada uma uma vez", () => {
+  it("tem as cinco goblins publicadas, cada uma uma vez", () => {
     expect([...CAST_IDS].sort()).toEqual(Object.keys(TEXT.art.goblins).sort());
   });
 
