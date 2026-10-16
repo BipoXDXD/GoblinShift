@@ -349,6 +349,9 @@ export const TEXT = {
       deletedTitle: "Resultados excluídos",
       deletedHint:
         "Os arquivos gerados por esta execução foram excluídos. Os que você enviou não mudam.",
+      missingTitle: "Resultados perdidos",
+      missingHint:
+        "Os arquivos gerados por esta execução se perderam e não podem mais ser baixados. Os que você enviou não mudam.",
       expiredTitle: "Resultados expirados",
       expiredHint: "O prazo para baixar os resultados desta execução acabou.",
       expiredOn: (date: string) => `Os resultados expiraram em ${date}.`,
