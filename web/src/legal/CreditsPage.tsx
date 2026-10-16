@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 
+import { GoblinCast } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { TEXT } from "../text";
 
@@ -20,6 +21,7 @@ export function CreditsPage(): ReactElement {
           <p key={paragraph}>{paragraph}</p>
         ))}
       </section>
+      <GoblinCast />
       <section className="flex max-w-prose flex-col gap-3">
         <h2 className="font-display text-xl font-semibold text-fg">{T.fontsHeading}</h2>
         <p>{T.fonts}</p>

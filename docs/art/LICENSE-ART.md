@@ -4,22 +4,23 @@ As goblins do site são **ilustrações e modelos 3D gerados com processamento e
 
 ## O que está no site
 
-| Goblin | Onde | Modelo 3D (fonte externa fonte externa) |
-|---|---|---|
-| Rúbia | Cena 3D da abertura e a imagem estática dela | `9f030f3c` (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
-| Lua | Estado vazio | `81ae6621` |
-| Ada | Estado carregando | `417f7fe0` |
-| Nyx | Estado de erro | `19a1ddba` |
-| Ferrugem | Estado de sucesso | `ec3a728c` |
-| Jade | Estado vazio, em rotação com a Lua | `3c7aa397` |
-| Fagulha | Estado carregando, em rotação com a Ada | `0d84776f` |
+| Goblin   | Onde                                                                                                | Modelo 3D (fonte externa fonte externa)                                                                                                                                             |
+| -------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rúbia    | Cena 3D da abertura e a imagem estática dela; estado carregando, em rotação com a Fagulha; créditos | `9f030f3c` (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
+| Lua      | Estado vazio, em rotação com a Jade; créditos                                                       | `81ae6621`                                                                                 |
+| Nyx      | Estado de erro; créditos                                                                            | `19a1ddba`                                                                                 |
+| Ferrugem | Estado de sucesso; créditos                                                                         | `ec3a728c`                                                                                 |
+| Jade     | Estado vazio, em rotação com a Lua; créditos                                                        | `3c7aa397`                                                                                 |
+| Fagulha  | Estado carregando, em rotação com a Rúbia; créditos                                                 | `0d84776f`                                                                                 |
 
-Cadeia da Rúbia, da Lua, da Ada, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
+Cadeia da Rúbia, da Lua, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
 
 1. Conceito 2D **só por texto** no fonte externa (ByteDance), pela API da fonte externa.
 2. Versão frontal e versão semi-realista por image-to-image (fonte externa e fonte externa, do Google, pela fonte externa), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do fonte externa.
 3. Modelo 3D no fonte externa fonte externa Gen-2.5 a partir da imagem do passo 2.
 4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
+
+A Ada (fonte externa `417f7fe0`) saiu do site em 2026-10-15, por decisão do usuário; ela fica em `excluded` no `PROVENANCE.json`.
 
 ## Jade e Fagulha: publicadas por decisão do usuário
 
@@ -48,7 +49,7 @@ A Jade e a Fagulha seguem outra cadeia: um modelo gerado pelo usuário direto no
 
 ## Direito autoral e licença
 
-O US Copyright Office (relatório *estudo de direitos autorais registrado externamente*, 29 de janeiro de 2025) conclui que prompt sozinho não faz de ninguém autor. A saída bruta do fonte externa, da fonte externa e dos modelos de imagem pode não ser protegível, e este repositório não afirma autoria exclusiva sobre ela.
+O US Copyright Office (relatório _estudo de direitos autorais registrado externamente_, 29 de janeiro de 2025) conclui que prompt sozinho não faz de ninguém autor. A saída bruta do fonte externa, da fonte externa e dos modelos de imagem pode não ser protegível, e este repositório não afirma autoria exclusiva sobre ela.
 
 A **contribuição humana** (seleção, renders, enquadramento, recorte e otimização dos modelos) fica sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), **exceto Jade e Fagulha** (seção anterior), sem garantia de que a saída de produção editorial seja protegível por direito autoral. Crédito sugerido: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0".
 

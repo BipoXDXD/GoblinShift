@@ -107,9 +107,13 @@ export const TEXT = {
   // Texto alternativo das goblins (ADR 030): diz quem é e como é; o estado já está no texto ao lado.
   art: {
     hero: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
+    castHeading: "O elenco",
     goblins: {
+      rubia: {
+        name: "Rúbia",
+        alt: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
+      },
       lua: { name: "Lua", alt: "Lua, goblin de cabelo preto, com um sininho dourado no pescoço." },
-      ada: { name: "Ada", alt: "Ada, goblin inventora, de óculos e jaqueta de couro." },
       nyx: { name: "Nyx", alt: "Nyx, goblin de cabelo preto com pontas rosa e vestido preto." },
       ferrugem: {
         name: "Ferrugem",
