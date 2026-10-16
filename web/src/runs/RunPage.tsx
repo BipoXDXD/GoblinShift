@@ -25,6 +25,7 @@ import { CancelRun } from "./CancelRun";
 import type { RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { ResultsAvailability } from "./ResultsAvailability";
+import { RunItems } from "./RunItems";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
@@ -69,12 +70,13 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       <LiveRegion message={announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
-      {/* No celular, os resultados sobem para antes do cartão de estado: a goblin em destaque
-          empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a do Tab, que só passa
-          pelos links dos resultados e pela nova execução) continua a mesma. */}
+      {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
+          a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
+          do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
       {run !== undefined && (
-        <div className="max-md:order-1">
+        <div className="flex flex-col gap-8 max-md:order-1">
           <RunDetails run={run} />
+          {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
       {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
