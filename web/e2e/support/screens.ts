@@ -157,7 +157,7 @@ export const SCREENS: readonly Screen[] = [
       summary: { inputs: 3, ok: 2, rejected: 1, duplicates: 0, outputs: 2 },
       items: [
         {
-          position: 1,
+          position: 0,
           upload_id: "7d3c2a1e-0000-4000-8000-000000000001",
           status: "ok",
           error_code: null,
@@ -166,7 +166,7 @@ export const SCREENS: readonly Screen[] = [
           duplicate_of: null,
         },
         {
-          position: 2,
+          position: 1,
           upload_id: "7d3c2a1e-0000-4000-8000-000000000002",
           status: "rejected",
           error_code: "CSV_STRUCTURE_INVALID",
@@ -175,7 +175,7 @@ export const SCREENS: readonly Screen[] = [
           duplicate_of: null,
         },
         {
-          position: 3,
+          position: 2,
           upload_id: "7d3c2a1e-0000-4000-8000-000000000003",
           status: "ok",
           error_code: null,

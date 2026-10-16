@@ -46,12 +46,12 @@ describe("Execução: detalhe por arquivo", () => {
     setup({
       summary,
       items: [
-        item(1, {
+        item(0, {
           counts: { records_read: 1200, filtered_out: 3, duplicates_removed: 0, written: 1197 },
         }),
-        item(2, { status: "rejected", error_code: "CSV_STRUCTURE_INVALID" }),
-        item(3, { status: "duplicate", duplicate_of: 1 }),
-        item(4, { warnings: ["CSV_FORMULA_CELLS"] }),
+        item(1, { status: "rejected", error_code: "CSV_STRUCTURE_INVALID" }),
+        item(2, { status: "duplicate", duplicate_of: 0 }),
+        item(3, { warnings: ["CSV_FORMULA_CELLS"] }),
       ],
     });
 
@@ -68,6 +68,7 @@ describe("Execução: detalhe por arquivo", () => {
     expect(entries[0]).toHaveTextContent("1.200 registros lidos");
     expect(entries[0]).toHaveTextContent("3 filtrados");
     expect(entries[0]).toHaveTextContent("1.197 gravados");
+    expect(entries[1]).toHaveTextContent("Arquivo 2");
     expect(entries[1]).toHaveTextContent("Rejeitado");
     expect(entries[1]).toHaveTextContent("A estrutura do CSV é inválida");
     expect(entries[2]).toHaveTextContent("Repetido");
@@ -77,12 +78,40 @@ describe("Execução: detalhe por arquivo", () => {
     expect(await axeViolations(region)).toEqual([]);
   });
 
-  it("contagem que a interface não conhece não aparece", async () => {
-    setup({ summary, items: [item(1, { counts: { pages_merged: 7 } })] });
+  it("contagem que a interface não conhece fica de fora; as conhecidas continuam", async () => {
+    setup({ summary, items: [item(0, { counts: { pages_merged: 7, written: 5 } })] });
 
-    const region = await itemsRegion();
-    expect(region).not.toHaveTextContent("pages_merged");
-    expect(region).not.toHaveTextContent("7");
+    const entry = within(await itemsRegion()).getByRole("listitem");
+    expect(entry).toHaveTextContent(/^Arquivo 1Processado5 gravados$/);
+  });
+
+  it("contagem que não é inteiro não derruba a página e fica de fora", async () => {
+    setup({ summary, items: [item(0, { counts: { records_read: 1.5, written: 5 } })] });
+
+    const entry = within(await itemsRegion()).getByRole("listitem");
+    expect(entry).toHaveTextContent(/^Arquivo 1Processado5 gravados$/);
+  });
+
+  it("estado, motivo e aviso que a interface não conhece aparecem como desconhecidos", async () => {
+    setup({
+      summary,
+      items: [
+        item(0, { status: "quarantined" }),
+        item(1, { status: "rejected", error_code: "PDF_ENCRYPTED" }),
+        item(2, { warnings: ["PDF_FONTS_MISSING", "CSV_FORMULA_HEADER"] }),
+      ],
+    });
+
+    const list = within(await itemsRegion()).getByRole("list", {
+      name: "Arquivos, na ordem de entrada",
+    });
+    const entries = [...list.querySelectorAll(":scope > li")];
+    expect(entries[0]).toHaveTextContent("Estado desconhecido");
+    expect(entries[1]).toHaveTextContent("Rejeitado");
+    expect(entries[1]).toHaveTextContent("Motivo desconhecido (PDF_ENCRYPTED).");
+    expect(entries[2]).toHaveTextContent("Processado com aviso");
+    expect(entries[2]).toHaveTextContent("Aviso desconhecido (PDF_FONTS_MISSING).");
+    expect(entries[2]).toHaveTextContent("O cabeçalho tem nomes que parecem fórmulas");
   });
 
   it("sem itens (antes da inspeção), a seção não aparece", async () => {
@@ -93,7 +122,7 @@ describe("Execução: detalhe por arquivo", () => {
   });
 
   it("entradas ainda não avaliadas aparecem como aguardando, sem resumo", async () => {
-    setup({ status: "running", summary: null, items: [item(1, { status: "pending" })] });
+    setup({ status: "running", summary: null, items: [item(0, { status: "pending" })] });
 
     const region = await itemsRegion();
     expect(within(region).getByRole("listitem")).toHaveTextContent("Aguardando");

@@ -36,9 +36,11 @@ export const runSchema = z.object({
   results_expire_at: z.iso.datetime({ offset: true }).nullable(),
 });
 
-// Códigos fechados da spec; um código novo chega como desconhecido e a tela o trata assim.
-const ITEM_STATUSES = ["pending", "ok", "rejected", "duplicate"] as const;
-const ITEM_REJECTIONS = [
+// Códigos fechados da spec; api.test.ts trava as listas com os tipos gerados. Um código que o
+// servidor passe a mandar antes de a interface conhecê-lo vira UNKNOWN_CODE (com o original
+// guardado para a tela), em vez de derrubar o parse da execução inteira.
+export const ITEM_STATUSES = ["pending", "ok", "rejected", "duplicate"] as const;
+export const ITEM_REJECTIONS = [
   "UNSUPPORTED_FORMAT",
   "UNSUPPORTED_BIT_DEPTH",
   "UNSUPPORTED_COLOR_PROFILE",
@@ -46,19 +48,45 @@ const ITEM_REJECTIONS = [
   "CSV_STRUCTURE_INVALID",
   "FIELD_LIMIT_EXCEEDED",
 ] as const;
-const ITEM_WARNINGS = [
+export const ITEM_WARNINGS = [
   "CSV_ALL_RECORDS_FILTERED",
   "CSV_FORMULA_CELLS",
   "CSV_FORMULA_HEADER",
 ] as const;
 
+export const UNKNOWN_CODE = "unknown";
+
+/** Código da lista fechada, ou `{ code: UNKNOWN_CODE, raw }` para um que a interface não conhece. */
+export type Coded<T extends string> =
+  T | { readonly code: typeof UNKNOWN_CODE; readonly raw: string };
+
+function tolerantCode<const T extends readonly [string, ...string[]]>(known: T) {
+  return z.string().transform((raw): Coded<T[number]> => {
+    const match = known.find((code) => code === raw);
+    return match ?? { code: UNKNOWN_CODE, raw };
+  });
+}
+
+/** Contagens inteiras e não negativas; um valor fora disso fica de fora, sem derrubar o resto. */
+const countsSchema = z
+  .record(z.string(), z.unknown())
+  .transform((counts) =>
+    Object.fromEntries(
+      Object.entries(counts).filter(
+        (entry): entry is [string, number] => Number.isInteger(entry[1]) && Number(entry[1]) >= 0,
+      ),
+    ),
+  );
+
 const runItemSchema = z.object({
+  /** Ordem de entrada a partir de 0, como na spec; a tela mostra a partir de 1. */
   position: z.number().int(),
   upload_id: z.uuid(),
-  status: z.enum(ITEM_STATUSES),
-  error_code: z.enum(ITEM_REJECTIONS).nullable(),
-  warnings: z.array(z.enum(ITEM_WARNINGS)),
-  counts: z.record(z.string(), z.number().int()),
+  status: tolerantCode(ITEM_STATUSES),
+  error_code: tolerantCode(ITEM_REJECTIONS).nullable(),
+  warnings: z.array(tolerantCode(ITEM_WARNINGS)),
+  counts: countsSchema,
+  /** Posição (a partir de 0) da primeira entrada igual. */
   duplicate_of: z.number().int().nullable(),
 });
 

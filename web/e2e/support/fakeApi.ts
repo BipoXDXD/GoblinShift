@@ -358,7 +358,7 @@ function derivedDetail({ run, inputIds }: StoredRun): RunDetailParts {
   }
   const done = isTerminal(run);
   const items = inputIds.map((uploadId, index) => ({
-    position: index + 1,
+    position: index,
     upload_id: uploadId,
     status: done ? ("ok" as const) : ("pending" as const),
     error_code: null,
