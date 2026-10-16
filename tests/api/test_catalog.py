@@ -32,13 +32,14 @@ def version_of(body: dict[str, object], recipe_id: str) -> dict[str, object]:
 # Sem banco: a montagem da resposta é uma função pura do catálogo.
 
 
-def test_lista_as_tres_receitas_na_ordem_do_catalogo() -> None:
+def test_lista_as_receitas_na_ordem_do_catalogo() -> None:
     body = catalog_response(CATALOG).model_dump(mode="json")
 
     assert [recipe["recipe_id"] for recipe in body["recipes"]] == [
         "csv-janitor",
         "image-forge",
         "downloads-detox",
+        "media-mill",
     ]
 
 
@@ -60,6 +61,7 @@ def test_versao_traz_estado_limites_e_defaults_resolvidos() -> None:
         "status": "current",
         "limits": {
             "max_inputs": 100,
+            "max_input_bytes": 32 * 1024 * 1024,
             "max_pixels": 24_000_000,
             "max_axis_px": 8192,
             "thumbnail_box_px": 320,
@@ -81,6 +83,7 @@ def test_limites_do_detox_incluem_o_teto_de_bytes_do_lote() -> None:
 
     assert version_of(body, "downloads-detox")["limits"] == {
         "max_inputs": 100,
+        "max_input_bytes": 32 * 1024 * 1024,
         "max_total_input_bytes": 480 * 1024 * 1024,
     }
 
