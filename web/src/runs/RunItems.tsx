@@ -87,7 +87,10 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
           {item.warnings.map((warning, index) => (
             <li key={index} className="flex items-start gap-2 text-warning-fg">
               <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
-              <span>{codeText(warning, T.warnings, T.unknownWarning)}</span>
+              <div className="flex flex-col gap-1">
+                <span>{codeText(warning, T.warnings, T.unknownWarning)}</span>
+                {warning === "CSV_FORMULA_CELLS" && <FormulaCells summary={item.formula_cells} />}
+              </div>
             </li>
           ))}
         </ul>
@@ -100,6 +103,39 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
       {counts !== null && <p className="text-sm text-fg-muted tabular-nums">{counts}</p>}
     </li>
   );
+}
+
+const F = T.formulaCells;
+// Nome de coluna é do usuário e pode ter até 120 caracteres na API; a tela mostra o começo.
+const MAX_COLUMN_NAME_CHARS = 40;
+
+/** As colunas com células que parecem fórmula e a nota sobre o "-", sempre junto do aviso (1.3). */
+function FormulaCells({ summary }: { readonly summary: RunItem["formula_cells"] }): ReactElement {
+  return (
+    <>
+      {summary !== null && (
+        <ul aria-label={F.columnsLabel} className="flex flex-col gap-0.5 text-sm tabular-nums">
+          {summary.columns.map((column, index) => (
+            <li key={index}>
+              {F.column(shortName(column.name), countedText(column.cells, F.cells))}
+            </li>
+          ))}
+        </ul>
+      )}
+      {summary !== null && summary.more_columns > 0 && (
+        <p className="text-sm">{F.more(countedText(summary.more_columns, F.columns))}</p>
+      )}
+      <p className="text-sm text-fg-muted">{F.minusNote}</p>
+    </>
+  );
+}
+
+/** Corta por caractere, não por unidade UTF-16: um emoji nunca fica pela metade. */
+function shortName(name: string): string {
+  const chars = Array.from(name);
+  return chars.length <= MAX_COLUMN_NAME_CHARS
+    ? name
+    : `${chars.slice(0, MAX_COLUMN_NAME_CHARS - 1).join("")}…`;
 }
 
 type KnownStatus = keyof typeof T.statuses;
