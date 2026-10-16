@@ -104,7 +104,7 @@ describe("Oficina: execuções recentes", () => {
 
     const section = await recentSection();
     expect(await within(section).findByRole("alert")).toHaveTextContent(/indisponível/);
-    expect(screen.getAllByRole("link", { name: /Abrir a Bancada/ })).toHaveLength(3);
+    expect(screen.getAllByRole("link", { name: /Abrir a Bancada/ })).toHaveLength(4);
   });
 
   it("não tem violações do axe", async () => {

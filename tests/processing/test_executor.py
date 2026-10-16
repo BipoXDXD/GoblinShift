@@ -6,6 +6,7 @@ novo por caso.
 """
 
 import csv
+import errno
 import hashlib
 import json
 import subprocess
@@ -449,3 +450,72 @@ def test_importar_o_pacote_do_executor_nao_carrega_as_receitas() -> None:
     )
 
     assert result.stdout.strip() == "False"
+
+
+# --- Tempos das fases e disco cheio (3.7) --------------------------------------------------------
+
+
+def read_telemetry(work: Path) -> dict[str, Any]:
+    document: dict[str, Any] = json.loads((work / "telemetry.json").read_text(encoding="utf-8"))
+    return document
+
+
+def test_sucesso_grava_os_tempos_das_tres_fases_fora_de_out(tmp_path: Path) -> None:
+    work = make_work_dir(tmp_path, [("clientes.csv", VALID)])
+
+    assert main([str(work)]) == ExitCode.SUCCEEDED
+
+    telemetry = read_telemetry(work)
+    assert set(telemetry) == {"schema_version", "inspect_ms", "process_ms", "package_ms"}
+    assert telemetry["schema_version"] == 1
+    assert all(isinstance(telemetry[key], int) and telemetry[key] >= 0 for key in telemetry)
+    assert not (work / "out" / "telemetry.json").exists()
+
+
+def test_falha_da_receita_grava_so_as_fases_medidas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): FailingRecipe()})
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+
+    assert main([str(work)]) == ExitCode.RECIPE_FAILURE
+
+    assert set(read_telemetry(work)) == {"schema_version", "inspect_ms"}
+
+
+class DiskFullRecipe:
+    def execute(self, *_: object) -> Report:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+
+def test_disco_cheio_sai_com_no_space_sem_failure_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): DiskFullRecipe()})
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+
+    assert main([str(work)]) == 6  # ExitCode.NO_SPACE: o worker conhece o número, não o enum
+
+    assert not (work / "failure.json").exists()
+
+
+class OtherOSErrorRecipe:
+    def execute(self, *_: object) -> Report:
+        raise OSError(errno.EIO, "Input/output error")
+
+
+def test_outro_erro_de_disco_continua_infraestrutura(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): OtherOSErrorRecipe()})
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+
+    assert main([str(work)]) == ExitCode.INFRASTRUCTURE
+
+
+def test_falha_ao_gravar_os_tempos_nao_muda_o_codigo_de_saida(tmp_path: Path) -> None:
+    work = make_work_dir(tmp_path, [("clientes.csv", VALID)])
+    # Criação exclusiva: um diretório no lugar do arquivo faz a gravação falhar.
+    (work / "telemetry.json").mkdir()
+
+    assert main([str(work)]) == ExitCode.SUCCEEDED
