@@ -12,9 +12,9 @@ relatório, não são engolidas.
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import (
     ColumnElement,
@@ -31,10 +31,20 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.files.limits import EXPIRY_BATCH_SIZE, PURGE_MAX_BYTES, PURGE_MAX_OBJECTS
-from goblinshift.files.objects import request_deletion_of_unreferenced, select_purgeable
+from goblinshift.files.objects import (
+    has_valid_reference,
+    request_deletion_of_unreferenced,
+    select_purgeable,
+)
 from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
+
+# Retenção longa (1.7): o nome do upload sai 30 dias depois da criação (só depois da exclusão) e
+# as linhas de arquivos já removidos do disco, aos 90, junto com o histórico das execuções.
+NAME_AFTER = timedelta(days=30)
+FILE_ROWS_AFTER = timedelta(days=90)
+_GONE_FROM_DISK = (ObjectState.DELETED, ObjectState.MISSING)
 
 # (id, storage_key, size_bytes), como devolvido por `select_purgeable`.
 type _Candidate = Row[tuple[uuid.UUID, str, int]]
@@ -169,6 +179,133 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
     )
 
 
+def anonymize_deleted_uploads(session: Session, now: datetime, limit: int) -> int:
+    """Anula o nome dos uploads excluídos criados há 30 dias ou mais, sem uso aberto.
+
+    Upload vivo, reaproveitado por execuções seguidas, ainda é lido; e um uso aberto é uma
+    execução que ainda vai copiar o nome para o `job.json`. Os dois esperam.
+    """
+    chosen = list(
+        session.execute(
+            select(upload.c.id)
+            .where(
+                upload.c.original_name.is_not(None),
+                upload.c.deleted_at.is_not(None),
+                upload.c.created_at <= now - NAME_AFTER,
+                ~_open_use_of(upload.c.object_id),
+            )
+            .order_by(upload.c.created_at, upload.c.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).scalars()
+    )
+    if chosen:
+        session.execute(update(upload).where(upload.c.id.in_(chosen)).values(original_name=None))
+    return len(chosen)
+
+
+@dataclass(frozen=True)
+class HistoryReferences:
+    """Como `runs` diz se o histórico ainda aponta para um upload ou artefato.
+
+    `files` fica abaixo de `runs` nas camadas e não lê as tabelas dela: quem chama passa os
+    predicados (`EXISTS` correlacionado sobre `run_input` e `run_output`).
+    """
+
+    upload: Callable[[ColumnElement[uuid.UUID]], ColumnElement[bool]]
+    artifact: Callable[[ColumnElement[uuid.UUID]], ColumnElement[bool]]
+
+
+def delete_old_file_rows(
+    session: Session, now: datetime, limit: int, history: HistoryReferences
+) -> int:
+    """Apaga as linhas de objetos que já saíram do disco e que o histórico não usa mais.
+
+    Ordem segura: a linha só sai depois do arquivo (`deleted` ou `missing`), nunca antes, para
+    nenhum arquivo ficar no disco sem registro. Upload e artefato saem aos 90 dias da criação e só
+    sem `run_input`/`run_output` apontando para eles, isto é, depois da remoção da Run
+    (`runs.retention.delete_old_runs`). Usos encerrados há 90 dias saem no mesmo lote. Devolve
+    quantos objetos foram apagados.
+    """
+    cutoff = now - FILE_ROWS_AFTER
+    _delete_old_ended_uses(session, cutoff, limit)
+    blocking_upload = exists().where(
+        upload.c.object_id == stored_object.c.id,
+        or_(
+            upload.c.deleted_at.is_(None),
+            upload.c.created_at > cutoff,
+            history.upload(upload.c.id),
+        ),
+    )
+    blocking_artifact = exists().where(
+        artifact.c.object_id == stored_object.c.id,
+        or_(
+            artifact.c.deleted_at.is_(None),
+            artifact.c.created_at > cutoff,
+            history.artifact(artifact.c.id),
+        ),
+    )
+    any_use = exists().where(object_use.c.object_id == stored_object.c.id)
+    chosen = list(
+        session.execute(
+            select(stored_object.c.id)
+            .where(
+                stored_object.c.state.in_(_GONE_FROM_DISK),
+                ~any_use,
+                ~blocking_upload,
+                ~blocking_artifact,
+            )
+            .order_by(stored_object.c.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).scalars()
+    )
+    if chosen:
+        session.execute(delete(upload).where(upload.c.object_id.in_(chosen)))
+        session.execute(delete(artifact).where(artifact.c.object_id.in_(chosen)))
+        session.execute(delete(stored_object).where(stored_object.c.id.in_(chosen)))
+    return len(chosen)
+
+
+def file_backlog(session: Session, now: datetime) -> dict[str, int]:
+    """O que ainda falta anular ou apagar em `files`: a métrica do tamanho do acúmulo."""
+    deleted_before = (upload.c.deleted_at.is_not(None),)
+    to_anonymize: int = session.execute(
+        select(func.count()).where(
+            *deleted_before,
+            upload.c.original_name.is_not(None),
+            upload.c.created_at <= now - NAME_AFTER,
+        )
+    ).scalar_one()
+    to_delete: int = session.execute(
+        select(func.count()).where(*deleted_before, upload.c.created_at <= now - FILE_ROWS_AFTER)
+    ).scalar_one()
+    return {"uploads_to_anonymize": to_anonymize, "uploads_to_delete": to_delete}
+
+
+def attempts_with_unsettled_candidates(
+    session: Session, attempt_ids: Collection[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Tentativas com candidato que o descarte ainda precisa achar pela tentativa.
+
+    Pendente (sem conteúdo confirmado) ou confirmado sem upload nem artefato válido. Quem já foi
+    pedido para exclusão segue pelo expurgo, que não depende da tentativa.
+    """
+    if not attempt_ids:
+        return set()
+    unsettled = or_(
+        stored_object.c.state == ObjectState.PENDING,
+        (stored_object.c.state == ObjectState.COMMITTED) & ~has_valid_reference(),
+    )
+    return set(
+        session.execute(
+            select(stored_object.c.attempt_id)
+            .where(stored_object.c.attempt_id.in_(attempt_ids), unsettled)
+            .distinct()
+        ).scalars()
+    )
+
+
 def next_storage_release_in(session: Session, owner_id: uuid.UUID) -> timedelta | None:
     """Tempo até o próximo upload ou artefato válido da conta vencer; `None` se não houver.
 
@@ -214,6 +351,21 @@ def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileRep
                 for o in orphans
             ],
         )
+
+
+def _open_use_of(object_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
+    return exists().where(object_use.c.object_id == object_id, object_use.c.ended_at.is_(None))
+
+
+def _delete_old_ended_uses(session: Session, cutoff: datetime, limit: int) -> None:
+    chosen = (
+        select(object_use.c.id)
+        .where(object_use.c.ended_at <= cutoff)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+    session.execute(delete(object_use).where(object_use.c.id.in_(chosen)))
 
 
 def _published_as_artifact() -> ColumnElement[bool]:
