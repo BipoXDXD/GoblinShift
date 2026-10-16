@@ -28,7 +28,13 @@ from goblinshift.identity.accounts import (
     revoke_owned_key,
     unblock_account,
 )
-from goblinshift.identity.audit import AuditEventType, AuditOutcome, truncate_ip
+from goblinshift.identity.audit import (
+    AuditEventType,
+    AuditOutcome,
+    LimitChange,
+    limits_changed_details,
+    truncate_ip,
+)
 from goblinshift.identity.audit import record as record_audit_event
 from goblinshift.identity.csrf import (
     cross_site_request,
@@ -95,6 +101,7 @@ __all__ = [
     "IssuedKey",
     "IssuedSession",
     "KeySummary",
+    "LimitChange",
     "LoginRefusal",
     "LoginRefused",
     "PresentedKey",
@@ -120,6 +127,7 @@ __all__ = [
     "issue_key_for_session",
     "key_is_active",
     "key_lifetime",
+    "limits_changed_details",
     "list_keys",
     "parse_key",
     "parse_scopes",

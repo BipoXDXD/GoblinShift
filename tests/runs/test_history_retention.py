@@ -1,9 +1,10 @@
 """Retenção do histórico de execuções (docs/GoblinShiftPlan.md, 1.7, "Retenção").
 
 Parâmetros, códigos e detalhes por item (`run_input.details`) anulados 30 dias depois do
-término, Run e Attempt removidas aos 90, `IdempotencyRecord` vencido removido. Cada função recebe
-o instante e o teto do lote, então as fronteiras são testadas sem relógio real: `on point` no
-prazo exato e `off point` 1 s antes.
+término, assim como os nomes das saídas (`run_output.logical_name` e `artifact.file_name`); Run
+e Attempt removidas aos 90, `IdempotencyRecord` vencido removido. Cada função recebe o instante e
+o teto do lote, então as fronteiras são testadas sem relógio real: `on point` no prazo exato e
+`off point` 1 s antes.
 """
 
 import uuid
@@ -21,17 +22,19 @@ from goblinshift.files.artifacts import (
 )
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
+from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.retention import (
     ANONYMIZE_AFTER,
     DELETE_AFTER,
     anonymize_finished_runs,
+    anonymize_output_names,
     delete_expired_idempotency_records,
     delete_old_runs,
     history_backlog,
 )
 from goblinshift.runs.store import db_now
-from goblinshift.runs.tables import attempt, idempotency_record, run, run_input
+from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.runs.support import insert_finished_run, new_owner, ready_inputs
 
 pytestmark = pytest.mark.integration
@@ -212,6 +215,141 @@ def test_anulacao_respeita_o_lote_e_repetir_nao_faz_nada(
     assert (first, second, third) == (2, 1, 0)
 
 
+# --- Nomes das saídas aos 30 dias -----------------------------------------------------------
+
+
+def add_outputs(
+    factory: sessionmaker[Session], run_id: uuid.UUID, *, deleted: bool = True, count: int = 2
+) -> list[uuid.UUID]:
+    """Saídas publicadas da Run, com o artefato já excluído (vence em 48 h) ou ainda vivo."""
+    with unit_of_work(factory) as session:
+        owner = session.execute(select(run.c.owner_id).where(run.c.id == run_id)).scalar_one()
+        ids = []
+        for position in range(count):
+            object_id = session.execute(
+                insert(stored_object)
+                .values(owner_id=owner, storage_key=f"runs/{run_id}/{position}")
+                .returning(stored_object.c.id)
+            ).scalar_one()
+            artifact_id = session.execute(
+                insert(artifact)
+                .values(
+                    owner_id=owner,
+                    object_id=object_id,
+                    role=ArtifactRole.OUTPUT,
+                    file_name=f"images/cliente-{position}.jpg",
+                    expires_at=func.now(),
+                    deleted_at=func.now() if deleted else None,
+                )
+                .returning(artifact.c.id)
+            ).scalar_one()
+            session.execute(
+                insert(run_output).values(
+                    run_id=run_id,
+                    position=position,
+                    owner_id=owner,
+                    artifact_id=artifact_id,
+                    logical_name=f"cliente-{position}.jpg",
+                )
+            )
+            ids.append(artifact_id)
+    return ids
+
+
+def output_names(
+    factory: sessionmaker[Session], run_id: uuid.UUID
+) -> list[tuple[str | None, str | None]]:
+    """Por saída, em ordem: (nome lógico, nome do arquivo)."""
+    with factory() as session:
+        rows = session.execute(
+            select(run_output.c.logical_name, artifact.c.file_name)
+            .join(artifact, artifact.c.id == run_output.c.artifact_id)
+            .where(run_output.c.run_id == run_id)
+            .order_by(run_output.c.position)
+        ).all()
+    return [(row.logical_name, row.file_name) for row in rows]
+
+
+def test_saidas_da_run_terminada_ha_30_dias_perdem_os_nomes(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - ANONYMIZE_AFTER)
+    add_outputs(factory, run_id)
+
+    with unit_of_work(factory) as session:
+        anonymized = anonymize_output_names(session, now, LIMIT)
+
+    assert anonymized == 2
+    assert output_names(factory, run_id) == [(None, None), (None, None)]
+    assert exists(factory, run_id)
+
+
+def test_saidas_da_run_terminada_1_s_antes_dos_30_dias_ficam_com_os_nomes(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - ANONYMIZE_AFTER + SECOND)
+    add_outputs(factory, run_id)
+
+    with unit_of_work(factory) as session:
+        anonymized = anonymize_output_names(session, now, LIMIT)
+
+    assert anonymized == 0
+    assert output_names(factory, run_id) == [
+        ("cliente-0.jpg", "images/cliente-0.jpg"),
+        ("cliente-1.jpg", "images/cliente-1.jpg"),
+    ]
+
+
+def test_saida_com_artefato_ainda_nao_excluido_espera_a_exclusao(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """O download lê o nome de artefato vivo (CHECK da 0015); a expiração de 48 h vem antes."""
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - timedelta(days=40))
+    add_outputs(factory, run_id, deleted=False, count=1)
+
+    with unit_of_work(factory) as session:
+        anonymized = anonymize_output_names(session, now, LIMIT)
+
+    assert anonymized == 0
+    assert output_names(factory, run_id) == [("cliente-0.jpg", "images/cliente-0.jpg")]
+
+
+def test_nomes_saem_tambem_da_run_que_ja_perdeu_os_parametros(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """Runs anuladas antes da 0015 ficaram com os nomes; o filtro não depende dos parâmetros."""
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - timedelta(days=40))
+    add_outputs(factory, run_id, count=1)
+    with unit_of_work(factory) as session:
+        anonymize_finished_runs(session, now, LIMIT)
+
+    with unit_of_work(factory) as session:
+        anonymized = anonymize_output_names(session, now, LIMIT)
+
+    assert anonymized == 1
+    assert output_names(factory, run_id) == [(None, None)]
+
+
+def test_anulacao_dos_nomes_respeita_o_lote_e_repetir_nao_faz_nada(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    add_outputs(factory, finished_run(factory, storage, now - timedelta(days=31)), count=3)
+
+    with unit_of_work(factory) as session:
+        first = anonymize_output_names(session, now, 2)
+    with unit_of_work(factory) as session:
+        second = anonymize_output_names(session, now, 2)
+    with unit_of_work(factory) as session:
+        third = anonymize_output_names(session, now, 2)
+
+    assert (first, second, third) == (2, 1, 0)
+
+
 # --- Remoção aos 90 dias -----------------------------------------------------------------------
 
 
@@ -355,14 +493,16 @@ def test_backlog_conta_o_que_ainda_falta_em_cada_retencao(
 ) -> None:
     now = now_of(factory)
     finished_run(factory, storage, now - timedelta(days=100))  # anular, remover e idempotência
-    finished_run(factory, storage, now - timedelta(days=40))  # anular e idempotência
-    finished_run(factory, storage, now - timedelta(hours=1))  # nada
+    # Anular (parâmetros e as duas saídas) e idempotência.
+    add_outputs(factory, finished_run(factory, storage, now - timedelta(days=40)))
+    add_outputs(factory, finished_run(factory, storage, now - timedelta(hours=1)), count=1)  # nada
 
     with factory() as session:
         backlog = history_backlog(session, now)
 
     assert backlog == {
         "runs_to_anonymize": 2,
+        "outputs_to_anonymize": 2,
         "runs_to_delete": 1,
         "idempotency_records_expired": 2,
     }
