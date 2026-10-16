@@ -27,7 +27,12 @@ test("a execução criada na Bancada abre pela Oficina e pelo Histórico", async
 
   const historico = new HistoricoPage(page);
   await historico.open();
-  await historico.rows().first().getByRole("link").click();
+  // O link do título leva à execução; o outro da linha é o "Reusar configuração".
+  await historico
+    .rows()
+    .first()
+    .getByRole("link", { name: /^CSV Janitor/ })
+    .click();
   await expect(page).toHaveURL(runUrl);
 });
 
