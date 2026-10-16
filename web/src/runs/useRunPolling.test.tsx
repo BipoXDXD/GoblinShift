@@ -59,7 +59,11 @@ function fakeClient(outcomes: readonly (() => Outcome)[]) {
       retryAfterMs: outcome.retryAfterMs,
     });
   };
-  const client: ApiClient = { request, hasSessionCookie: () => true };
+  const client: ApiClient = {
+    request,
+    requestText: () => Promise.reject(new Error("a execução não lê texto")),
+    hasSessionCookie: () => true,
+  };
   return { client, requestCount: () => served };
 }
 

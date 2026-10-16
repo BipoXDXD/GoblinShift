@@ -52,6 +52,22 @@ export type RunCommand = z.infer<typeof runCommandSchema>;
 /** Execução com os campos que a matriz de estados troca (status, progresso, erro…). */
 export type RunOverrides = Partial<Omit<Run, "id">>;
 
+/** Preview de uma saída semeada, entregue por GET /artifacts/{id da saída}/preview (ADR 037). */
+export interface SeededPreview {
+  /** Nome que a receita dá ao preview: `.jpg`, `.csv` ou `.json`. */
+  readonly name: string;
+  readonly body: Buffer;
+  /** O que a API real manda: `image/jpeg` para a imagem, bytes opacos para o resto. */
+  readonly contentType: "image/jpeg" | "application/octet-stream";
+}
+
+/** Saída publicada de uma execução semeada, com ou sem preview. */
+export interface SeededOutput {
+  readonly name: string;
+  readonly body: Buffer;
+  readonly preview?: SeededPreview;
+}
+
 export interface FakeApi {
   /** Corpo de cada POST /runs aceito, na ordem. */
   readonly createdRuns: readonly RunCommand[];
@@ -59,8 +75,11 @@ export interface FakeApi {
   readonly unhandled: readonly string[];
   /** Nome do upload pelo id, para conferir a ordem das entradas de uma execução. */
   uploadName(uploadId: string): string | undefined;
-  /** Execução parada num estado, para as telas da matriz; devolve o id. */
-  seedRun(overrides: RunOverrides): string;
+  /**
+   * Execução parada num estado, para as telas da matriz; devolve o id. Com `outputs`, os
+   * resultados são essas saídas (e os previews delas) no lugar do pacote.
+   */
+  seedRun(overrides: RunOverrides, outputs?: readonly SeededOutput[]): string;
   /** Sessão, termos e chaves da conta (fakeAccount.ts). */
   readonly account: FakeAccount;
   /**
@@ -89,7 +108,16 @@ interface StoredRun {
   /** Execução criada por POST /runs anda a cada consulta; a semeada fica parada. */
   readonly advances: boolean;
   readonly inputIds: readonly string[];
+  readonly outputs: readonly SeededOutput[];
 }
+
+/** Cabeçalhos com que a API real entrega o preview (artifacts.py e transfers.py). */
+const PREVIEW_PROTECTION_HEADERS: Readonly<Record<string, string>> = {
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "Cache-Control": "no-store",
+};
 
 /**
  * Liga a API falsa em todas as páginas do contexto. Pedido sem sessão nem
@@ -134,7 +162,7 @@ export async function installFakeApi(
     createdRuns: state.createdRuns,
     unhandled: state.unhandled,
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
-    seedRun: (overrides) => state.seedRun(overrides),
+    seedRun: (overrides, outputs) => state.seedRun(overrides, outputs),
     account,
     signIn: (options) => account.signIn(new URL(E2E.baseUrl).origin, options),
   };
@@ -153,6 +181,8 @@ class FakeState {
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
   readonly unhandled: string[] = [];
+  /** Preview publicado, pelo id da saída de origem. */
+  readonly previews = new Map<string, SeededPreview>();
   readonly #artifactsDir: string;
 
   constructor(artifactsDir: string) {
@@ -183,16 +213,18 @@ class FakeState {
       // O Chromium cancela download vindo do route.fulfill: segue para o servidor local, que
       // entrega o que publishArtifacts gravou (e2e/server/serve-dist.ts).
       await route.continue();
+    } else if (method === "GET" && resource === "artifacts" && id && action === "preview") {
+      await this.preview(route, id);
     } else {
       this.unhandled.push(`${method} ${path}`);
       await fulfillProblem(route, "NOT_FOUND", { status: 404 });
     }
   }
 
-  seedRun(overrides: RunOverrides): string {
+  seedRun(overrides: RunOverrides, outputs: readonly SeededOutput[] = []): string {
     const id = randomUUID();
     const run = { ...runBody(id, "csv-janitor"), ...overrides };
-    this.runs.set(id, { run, advances: false, inputIds: [] });
+    this.runs.set(id, { run, advances: false, inputIds: [], outputs });
     return id;
   }
 
@@ -251,7 +283,7 @@ class FakeState {
     this.createdRuns.push(command);
     const id = randomUUID();
     const run = runBody(id, command.recipe_id);
-    this.runs.set(id, { run, advances: true, inputIds });
+    this.runs.set(id, { run, advances: true, inputIds, outputs: [] });
     const accepted: Schemas["AcceptedRunResponse"] = { ...run, idempotency_expires_at: LATER };
     await fulfillJson(route, accepted, { status: 202 });
   }
@@ -311,7 +343,10 @@ class FakeState {
       await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
       return;
     }
-    const artifacts = this.publishArtifacts(stored);
+    const artifacts =
+      stored.outputs.length > 0
+        ? this.publishSeededOutputs(stored.outputs)
+        : this.publishArtifacts(stored);
     const results: Schemas["RunResultsResponse"] = {
       published: true,
       expires_at: LATER,
@@ -344,7 +379,59 @@ class FakeState {
         role,
         file_name: name,
         availability: "available" as const,
+        source_artifact_id: null,
       };
+    });
+  }
+
+  /** As saídas semeadas, cada uma seguida do seu preview, como a publicação do worker grava. */
+  private publishSeededOutputs(outputs: readonly SeededOutput[]): ArtifactReference[] {
+    return outputs.flatMap((output) => {
+      const artifactId = randomUUID();
+      writeArtifact(this.#artifactsDir, artifactId, {
+        fileName: output.name,
+        body: output.body,
+        contentType: "application/octet-stream",
+      });
+      const reference: ArtifactReference = {
+        artifact_id: artifactId,
+        logical_name: output.name,
+        role: "output",
+        file_name: output.name,
+        availability: "available",
+        source_artifact_id: null,
+      };
+      if (output.preview === undefined) {
+        return [reference];
+      }
+      this.previews.set(artifactId, output.preview);
+      const preview: ArtifactReference = {
+        artifact_id: randomUUID(),
+        logical_name: `previews/${output.preview.name}`,
+        role: "preview",
+        file_name: output.preview.name,
+        availability: "available",
+        source_artifact_id: artifactId,
+      };
+      return [reference, preview];
+    });
+  }
+
+  /** GET /artifacts/{id}/preview: recebe o id da saída; sem preview, 404 como na API. */
+  private async preview(route: Route, sourceId: string): Promise<void> {
+    const preview = this.previews.get(sourceId);
+    if (preview === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: preview.contentType,
+      headers: {
+        "Content-Disposition": `attachment; filename="${preview.name}"`,
+        ...PREVIEW_PROTECTION_HEADERS,
+      },
+      body: preview.body,
     });
   }
 }
