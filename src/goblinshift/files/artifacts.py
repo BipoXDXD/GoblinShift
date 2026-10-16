@@ -6,6 +6,7 @@ quem chama; a transferência de bytes acontece fora dela, entre `open_for_downlo
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -18,7 +19,7 @@ from goblinshift.files.errors import (
     ObjectNotAvailableError,
 )
 from goblinshift.files.limits import ARTIFACT_TTL
-from goblinshift.files.objects import hold, release
+from goblinshift.files.objects import hold, release, request_deletion_of_unreferenced
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
 from goblinshift.files.tables import artifact, stored_object
 
@@ -110,8 +111,13 @@ def publish_artifact(
     object_id: uuid.UUID,
     role: ArtifactRole,
     file_name: str,
+    *,
+    source_artifact_id: uuid.UUID | None = None,
 ) -> ArtifactView:
     """Cria o artefato sobre um objeto `committed` do dono, com retenção de 48 h (1.7).
+
+    `source_artifact_id` é obrigatório no papel `preview` (a saída de que ele deriva) e proibido
+    nos demais; o banco confere os dois e que a origem é do mesmo dono.
 
     Aceita também o objeto de uma entrada (reaproveitamento do Detox). O `FOR SHARE` impede que
     o expurgo remova o objeto enquanto a referência nova nasce.
@@ -135,6 +141,7 @@ def publish_artifact(
             role=role,
             file_name=file_name,
             expires_at=func.now() + ARTIFACT_TTL,
+            source_artifact_id=source_artifact_id,
         )
         .returning(artifact.c.id, artifact.c.created_at, artifact.c.expires_at)
     ).one()
@@ -225,6 +232,67 @@ def open_for_download(
     )
 
 
+def open_preview(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) -> DownloadTicket:
+    """O preview da saída `artifact_id`, com o mesmo controle de uso de `open_for_download`.
+
+    Saída de outra conta, inexistente ou sem preview: `ArtifactNotFoundError`, igual para todos.
+    O próprio preview não tem preview. Saída ou preview excluídos ou vencidos: `ArtifactGoneError`
+    (o preview não sobrevive à saída de que deriva).
+    """
+    source = session.execute(
+        select(artifact.c.deleted_at, artifact.c.expires_at <= func.now())
+        .where(artifact.c.owner_id == owner_id, artifact.c.id == artifact_id)
+        .with_for_update(read=True)
+    ).one_or_none()
+    if source is None:
+        raise ArtifactNotFoundError
+    deleted_at, expired = source
+    preview_id = session.execute(
+        select(artifact.c.id)
+        .where(
+            artifact.c.owner_id == owner_id,
+            artifact.c.source_artifact_id == artifact_id,
+            artifact.c.role == ArtifactRole.PREVIEW,
+        )
+        .order_by(artifact.c.id)
+        .limit(1)
+    ).scalar_one_or_none()
+    if preview_id is None:
+        raise ArtifactNotFoundError
+    if deleted_at is not None or expired:
+        raise ArtifactGoneError
+    return open_for_download(session, owner_id, preview_id)
+
+
 def finish_download(session: Session, ticket: DownloadTicket) -> None:
     """Encerra o uso do download; repetir é no-op."""
     release(session, HolderKind.DOWNLOAD, ticket.holder_id)
+
+
+def request_artifacts_deletion(
+    session: Session, owner_id: uuid.UUID, artifact_ids: Collection[uuid.UUID]
+) -> None:
+    """Torna os artefatos do dono indisponíveis na hora; os já excluídos ficam como estão.
+
+    Ordem de locks de 3.4: Artifact (`FOR UPDATE`, em ordem de ID) → StoredObject. O objeto só
+    vira `delete_requested` se nenhum upload ou outro artefato válido o aponta: a saída do Detox
+    que reaproveita o objeto da entrada (ADR 020) não apaga o original.
+    """
+    rows = session.execute(
+        select(artifact.c.id, artifact.c.object_id)
+        .where(
+            artifact.c.owner_id == owner_id,
+            artifact.c.id.in_(sorted(set(artifact_ids))),
+            artifact.c.deleted_at.is_(None),
+        )
+        .order_by(artifact.c.id)
+        .with_for_update()
+    ).all()
+    if not rows:
+        return
+    session.execute(
+        update(artifact)
+        .where(artifact.c.id.in_([row.id for row in rows]))
+        .values(deleted_at=func.now())
+    )
+    request_deletion_of_unreferenced(session, [row.object_id for row in rows])
