@@ -82,6 +82,8 @@ export class FakeAccount {
   apiKeyValid = true;
   /** O próximo login no provedor é recusado (conta bloqueada, `state` inválido…). */
   refuseNextLogin = false;
+  /** Código do último login recusado: o `X-Request-ID` do callback, como na API real. */
+  lastLoginRef: string | null = null;
   /** O próximo login no provedor nasce sem autenticação recente. */
   nextLoginRecent = true;
   readonly keys = new Map<string, StoredKey>();
@@ -232,7 +234,12 @@ export class FakeAccount {
   async #login(route: Route, url: URL): Promise<void> {
     if (this.refuseNextLogin || this.#deleted) {
       this.refuseNextLogin = false;
-      await redirect(route, LOGIN_FAILED_LOCATION);
+      const ref = randomUUID();
+      this.lastLoginRef = ref;
+      await route.fulfill({
+        status: 303,
+        headers: { Location: `${LOGIN_FAILED_LOCATION}#ref=${ref}`, "X-Request-ID": ref },
+      });
       return;
     }
     await this.#startSession(url.origin, this.nextLoginRecent);

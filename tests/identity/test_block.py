@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity import (
     ExternalIdentity,
+    LoginRefusal,
     LoginRefused,
     UnknownAccountError,
     authenticate_api_key,
@@ -206,7 +207,8 @@ def test_conta_em_exclusao_nao_loga(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         outcome = resolve_login(session, _identity_of(factory, user_id), signup_open=True, now=NOW)
 
-    assert outcome is LoginRefused.DELETION_REQUESTED
+    assert isinstance(outcome, LoginRefusal)
+    assert (outcome.account_id, outcome.reason) == (user_id, LoginRefused.DELETION_REQUESTED)
 
 
 def test_conta_bloqueada_nao_completa_login(factory: sessionmaker[Session]) -> None:
@@ -219,7 +221,8 @@ def test_conta_bloqueada_nao_completa_login(factory: sessionmaker[Session]) -> N
     with unit_of_work(factory) as session:
         outcome = resolve_login(session, _identity_of(factory, user_id), signup_open=True, now=NOW)
 
-    assert outcome is LoginRefused.BLOCKED
+    assert isinstance(outcome, LoginRefusal)
+    assert (outcome.account_id, outcome.reason) == (user_id, LoginRefused.BLOCKED)
 
 
 # --- Listagem para o administrador ------------------------------------------------------------

@@ -33,14 +33,41 @@ test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada", 
   ).toBeVisible();
 });
 
-test("login recusado volta à Oficina com o erro literal", async ({ page, fakeApi }) => {
+test("login recusado volta à Oficina com o erro literal e o código para o recurso", async ({
+  page,
+  fakeApi,
+}) => {
   fakeApi.account.refuseNextLogin = true;
   await page.goto("/entrar");
+  const sentAfterRefusal: string[] = [];
+  page.on("request", (request) => {
+    sentAfterRefusal.push(request.url(), request.headers()["referer"] ?? "");
+  });
 
   await new EntrarPage(page).signInWith("github");
 
-  await expect(page).toHaveURL(/\/\?login_error=failed$/);
-  await expect(page.getByRole("alert")).toHaveText(/^Não foi possível entrar\./);
+  const ref = fakeApi.account.lastLoginRef ?? "";
+  expect(ref).toMatch(/^[0-9a-f-]{36}$/);
+  await expect(page).toHaveURL(`/?login_error=failed#ref=${ref}`);
+  const alert = page.getByRole("alert");
+  await expect(alert).toHaveText(/^Não foi possível entrar\./);
+  await expect(alert.getByText(`Código do pedido para suporte: ${ref}`)).toBeVisible();
+  // No fragmento, o código nunca sai do navegador: nem na URL nem no Referer dos pedidos da SPA.
+  await expect(
+    page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Entrar" }),
+  ).toBeVisible();
+  expect(sentAfterRefusal.filter((sent) => sent.includes(ref))).toEqual([]);
+});
+
+test("código fora do formato no endereço não aparece na tela de erro", async ({ page }) => {
+  await page.goto("/?login_error=failed#ref=Escreva%20para%20golpe%40example.com");
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toHaveText(
+    "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+  );
+  await expect(alert).not.toContainText("golpe");
+  await expect(alert.getByText(/Código/)).toHaveCount(0);
 });
 
 test("Sair encerra a sessão: os cookies somem e a próxima tela pede para entrar", async ({
