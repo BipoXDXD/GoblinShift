@@ -14,7 +14,12 @@ import {
 } from "../catalog/api";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import { getPreset, PRESETS_QUERY_KEY, type Preset } from "../presets/api";
-import { findRecipe, type RecipeForm, type RecipeModule } from "../recipes/registry";
+import {
+  findRecipe,
+  withoutUploadBoundParameters,
+  type RecipeForm,
+  type RecipeModule,
+} from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
 import { Workbench, WorkbenchHeader } from "./Workbench";
@@ -140,13 +145,22 @@ function presetForm({ recipe, version, fallback, preset, error }: PresetFormSour
     return { form: fallback, notice: error === null ? null : <FailureNotice error={error} /> };
   }
   const sameRecipe = preset.recipe_id === recipe.id && preset.recipe_version === recipe.version;
+  const reusable = withoutUploadBoundParameters(recipe, preset.parameters);
   const form = sameRecipe
-    ? recipe.formFor({ ...version, defaults: { ...version.defaults, ...preset.parameters } })
+    ? recipe.formFor({ ...version, defaults: { ...version.defaults, ...reusable.parameters } })
     : null;
   if (form === null) {
     return { form: fallback, notice: <PresetNotice>{TEXT.presets.wrongRecipe}</PresetNotice> };
   }
-  return { form, notice: <PresetNotice>{TEXT.presets.loaded(preset.name)}</PresetNotice> };
+  return {
+    form,
+    notice: (
+      <PresetNotice>
+        {TEXT.presets.loaded(preset.name)}
+        {reusable.dropped && ` ${TEXT.workbench.uploadBoundDropped}`}
+      </PresetNotice>
+    ),
+  };
 }
 
 /** Status (WCAG 4.1.3): o aviso chega depois do carregamento do preset, no lugar do "carregando". */
