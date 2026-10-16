@@ -55,6 +55,8 @@ export type RunOverrides = Partial<Omit<Run, "id">>;
 export interface FakeApi {
   /** Corpo de cada POST /runs aceito, na ordem. */
   readonly createdRuns: readonly RunCommand[];
+  /** Nome de cada upload excluído por DELETE /uploads/{id}, na ordem. */
+  readonly deletedUploads: readonly string[];
   /** Pedido que nenhuma rota da API falsa reconhece; o fixture exige lista vazia ao fim. */
   readonly unhandled: readonly string[];
   /** Nome do upload pelo id, para conferir a ordem das entradas de uma execução. */
@@ -132,6 +134,7 @@ export async function installFakeApi(
   });
   return {
     createdRuns: state.createdRuns,
+    deletedUploads: state.deletedUploads,
     unhandled: state.unhandled,
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
     seedRun: (overrides) => state.seedRun(overrides),
@@ -155,6 +158,7 @@ class FakeState {
   /** Execução de cada artefato publicado, para a disponibilidade e a exclusão das saídas. */
   readonly artifactRuns = new Map<string, { runId: string; role: ArtifactReference["role"] }>();
   readonly runsWithoutOutputs = new Set<string>();
+  readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
   readonly #artifactsDir: string;
 
@@ -174,12 +178,16 @@ class FakeState {
       await this.createUploads(route, request);
     } else if (method === "PUT" && resource === "uploads" && action === "content" && id) {
       await this.receiveContent(route, request, id);
+    } else if (method === "DELETE" && resource === "uploads" && id && segments.length === 2) {
+      await this.deleteUpload(route, id);
     } else if (method === "POST" && path === "/runs") {
       await this.createRun(route, request);
     } else if (method === "GET" && path === "/runs") {
       await this.listRuns(route, request);
     } else if (method === "GET" && resource === "runs" && id && segments.length === 2) {
       await this.pollRun(route, id);
+    } else if (method === "POST" && resource === "runs" && id && action === "cancel") {
+      await this.cancelRun(route, id);
     } else if (method === "GET" && resource === "runs" && id && action === "results") {
       await this.results(route, id);
     } else if (method === "DELETE" && resource === "runs" && id && action === "artifacts") {
@@ -247,6 +255,17 @@ class FakeState {
     await fulfillJson(route, received, { status: 200 });
   }
 
+  /** Como a API: 202 para o próprio upload (repetir também) e 404 para o que nunca existiu. */
+  private async deleteUpload(route: Route, id: string): Promise<void> {
+    const upload = this.uploads.get(id);
+    if (upload === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    this.deletedUploads.push(upload.name);
+    await route.fulfill({ status: 202 });
+  }
+
   private async createRun(route: Route, request: Request): Promise<void> {
     const command = runCommandSchema.parse(request.postDataJSON());
     const inputIds = command.input_upload_ids;
@@ -299,7 +318,9 @@ class FakeState {
       await fulfillProblem(route, "NOT_FOUND", { status: 404 });
       return;
     }
-    if (stored.advances) {
+    if (stored.run.status === "stopping") {
+      stored.run = canceled(stored.run);
+    } else if (stored.advances) {
       stored.run = nextState(stored.run, stored.inputIds.length);
     }
     const headers: Record<string, string> = isTerminal(stored.run)
@@ -336,6 +357,29 @@ class FakeState {
       availability: this.runsWithoutOutputs.has(published.runId) ? "deleted" : "available",
     };
     await fulfillJson(route, details, { status: 200 });
+  }
+
+  /**
+   * Como runs/cancellation.py: a fila cancela na hora (200 `canceled`), o trabalho em curso passa a
+   * `stopping` (202) e vira `canceled` na consulta seguinte; terminal devolve o que é (200).
+   */
+  private async cancelRun(route: Route, id: string): Promise<void> {
+    const stored = this.runs.get(id);
+    if (stored === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    if (stored.run.status === "queued") {
+      stored.run = canceled(stored.run);
+    } else if (stored.run.status === "running") {
+      stored.run = { ...stored.run, status: "stopping" };
+    }
+    const outcome: Schemas["CancelResponse"] = {
+      id,
+      status: stored.run.status,
+      error_code: stored.run.error?.code ?? null,
+    };
+    await fulfillJson(route, outcome, { status: stored.run.status === "stopping" ? 202 : 200 });
   }
 
   private async results(route: Route, id: string): Promise<void> {
@@ -459,6 +503,15 @@ function nextState(run: Run, inputs: number): Run {
     };
   }
   return run;
+}
+
+function canceled(run: Run): Run {
+  return {
+    ...run,
+    status: "canceled",
+    progress: { ...run.progress, phase: null },
+    error: { code: "CANCELED", message: "Execução cancelada." },
+  };
 }
 
 const TERMINAL: ReadonlySet<Run["status"]> = new Set([

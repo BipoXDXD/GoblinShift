@@ -87,3 +87,31 @@ def test_nao_publica_cpf(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
 
     assert re.search(CPF, text) is None
+
+
+PUBLIC_TEXTS = {"termos-de-uso.md", "aviso-de-privacidade.md"}
+WEB = ROOT / "web"
+_LEGAL_IMPORT = re.compile(r"""["'][./]*docs/legal/([^"'?]+)""")
+
+
+def test_interface_importa_so_os_dois_textos_publicos() -> None:
+    """Notas internas e rascunhos dos LIAs (J-23 a J-25) ficam fora do build da SPA."""
+    imported = {
+        match.group(1)
+        for folder in ("src", "e2e")
+        for path in (WEB / folder).rglob("*.ts*")
+        for match in _LEGAL_IMPORT.finditer(path.read_text(encoding="utf-8"))
+    }
+
+    assert imported == PUBLIC_TEXTS
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["lia-j23-auditoria-e-antiabuso.md", "lia-j24-telemetria.md", "lia-j25-backup.md"],
+)
+def test_rascunho_de_lia_se_declara_rascunho_e_fora_do_build(name: str) -> None:
+    text = (LEGAL / name).read_text(encoding="utf-8")
+
+    assert "**RASCUNHO para o advogado, não publicar.**" in text
+    assert "Nada daqui entra no build da SPA" in text or "Fora do build da SPA" in text

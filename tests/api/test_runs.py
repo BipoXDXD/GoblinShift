@@ -491,6 +491,31 @@ def test_validate_only_com_parametro_invalido_responde_422(
     assert_problem(response, 422, "VALIDATION_FAILED")
 
 
+def test_pdf_press_com_pagina_de_upload_fora_das_entradas_responde_422_no_campo(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # ADR 035: o select cita só uploads da execução; o erro aponta o campo, nunca 404 (1.6).
+    account = Account(factory)
+    entrada, alheio = uuid.uuid4(), uuid.uuid4()
+    payload = {
+        "recipe_id": "pdf-press",
+        "recipe_version": 1,
+        "input_upload_ids": [str(entrada)],
+        "parameters": {
+            "operation": "select",
+            "select": [{"upload_id": str(alheio), "page_number": 1}],
+        },
+    }
+
+    response = post_run(client, account, payload, None, "?validate_only=true")
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [error["field"] for error in response.json()["errors"]] == [
+        "body.parameters.select.0.upload_id"
+    ]
+    assert str(alheio) not in response.text
+
+
 def test_criar_exige_o_escopo_runs_write(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
@@ -754,6 +779,24 @@ def test_cursor_vencido_responde_400(
     assert_problem(response, 400, "BAD_REQUEST")
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "created_from=0001-01-01T00:00:00%2B01:00",
+        "created_to=9999-12-31T23:59:59-01:00",
+    ],
+    ids=["antes-do-ano-1-em-utc", "depois-do-ano-9999-em-utc"],
+)
+def test_data_que_sai_da_faixa_em_utc_responde_422(
+    client: TestClient, factory: sessionmaker[Session], query: str
+) -> None:
+    account = Account(factory)
+
+    response = client.get(f"{RUNS}?{query}", headers=account.headers)
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+
+
 def test_data_sem_fuso_no_filtro_responde_422(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -882,6 +925,7 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         "csv-janitor",
         "image-forge",
         "downloads-detox",
+        "pdf-press",
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"

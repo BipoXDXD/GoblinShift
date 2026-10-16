@@ -11,9 +11,10 @@ entradas e o hash canônico do comando. Numa transação curta, na ordem de lock
 3. Capacidade global: `pg_advisory_xact_lock` numa chave constante serializa as aceitações antes
    de contar a fila, para que duas réplicas não vejam 9 aguardando e entrem as duas (contar e
    inserir sem trava seria write skew). A espera obedece ao `lock_timeout` da conexão. As cotas
-   diárias da conta (30 execuções e 2 GiB de entrada em 24 h) são contadas sob a mesma trava.
-   Antes dela, o preset de origem, se houver, travado contra exclusão até o commit (`FOR KEY
-   SHARE`): a Run nunca nasce apontando para um preset que já não existe.
+   diárias da conta (por padrão 30 execuções e 2 GiB de entrada em 24 h, com override por conta)
+   são contadas sob a mesma trava. Antes dela, o preset de origem, se houver, travado contra
+   exclusão até o commit (`FOR KEY SHARE`): a Run nunca nasce apontando para um preset que já
+   não existe.
 4. Capacidade da conta: o `INSERT` da Run com `ON CONFLICT DO NOTHING` sobre o índice único
    parcial `run_one_active_per_owner_idx`; sem linha devolvida, já há uma execução ativa.
 5. Uploads (`FOR SHARE`), bytes de entrada contra a cota diária, `run_input` na ordem e usos dos
@@ -59,10 +60,11 @@ from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES
 from goblinshift.processing.packaging import PackageLimits
 from goblinshift.runs.lifecycle import QUEUE_WINDOW, Status
 from goblinshift.runs.quotas import (
-    MAX_INPUT_BYTES_PER_WINDOW,
-    MAX_RUNS_PER_WINDOW,
+    DEFAULT_QUOTA,
     DailyUsage,
+    QuotaLimits,
     daily_usage,
+    quota_for,
 )
 from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import idempotency_record, run, run_input
@@ -92,6 +94,7 @@ RUN_OUTPUT_CEILING_BYTES = (
 # Versões que limitam a soma das entradas (o Detox copia cada entrada aceita para a saída).
 _MAX_TOTAL_INPUT_BYTES = "max_total_input_bytes"
 _MIN_RETRY_AFTER = timedelta(seconds=1)
+_NOT_AN_INPUT = "o upload não está entre as entradas da execução"
 _CANONICAL_SEPARATORS = (",", ":")
 
 
@@ -164,12 +167,10 @@ class ValidatedRun:
 
     @property
     def command_hash(self) -> bytes:
+        if self.preset_id is not None:
+            return preset_run_hash(self.preset_id, self.input_upload_ids)
         return command_hash(
-            self.recipe.recipe_id,
-            self.recipe.version,
-            self.parameters,
-            self.input_upload_ids,
-            preset_id=self.preset_id,
+            self.recipe.recipe_id, self.recipe.version, self.parameters, self.input_upload_ids
         )
 
 
@@ -193,23 +194,44 @@ def command_hash(
     recipe_version: int,
     parameters: object,
     input_upload_ids: Sequence[UUID],
-    *,
-    preset_id: UUID | None = None,
 ) -> bytes:
     """SHA-256 do JSON canônico: chaves ordenadas, sem espaços, listas na ordem recebida (1.6).
 
-    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`. O preset de
-    origem entra só quando existe, para o hash dos comandos sem preset continuar o mesmo: a
-    mesma chave com e sem preset é outro comando.
+    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`.
     """
-    document: dict[str, object] = {
-        "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
-        "parameters": parameters,
-        "recipe_id": recipe_id,
-        "recipe_version": recipe_version,
-    }
-    if preset_id is not None:
-        document["preset_id"] = str(preset_id)
+    return _canonical_hash(
+        {
+            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+            "parameters": parameters,
+            "recipe_id": recipe_id,
+            "recipe_version": recipe_version,
+        }
+    )
+
+
+def preset_run_hash(preset_id: UUID, input_upload_ids: Sequence[UUID]) -> bytes:
+    """Hash de `POST /presets/{id}/runs`: o comando do cliente é o preset e as entradas.
+
+    A configuração do preset fica de fora: editá-lo ou excluí-lo entre a chamada e o retry não
+    pode transformar o retry em outro comando (422) nem em 404; o retry repete a Run aceita.
+    """
+    return _canonical_hash(
+        {
+            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+            "preset_id": str(preset_id),
+        }
+    )
+
+
+def find_replay(
+    session: Session, owner_id: UUID, idem_key: str | None, digest: bytes
+) -> Accepted | None:
+    """Run já aceita com esta chave vigente e o mesmo comando; outro comando levanta
+    `IdempotencyKeyReusedError`. Para quem precisa saber do replay antes de ler outro recurso."""
+    return _find_live_record(session, owner_id, parse_idempotency_key(idem_key), digest)
+
+
+def _canonical_hash(document: dict[str, object]) -> bytes:
     canonical = json.dumps(
         document,
         sort_keys=True,
@@ -239,6 +261,7 @@ def validate_run(command: RunCommand) -> ValidatedRun:
             [_under("parameters", field_error) for field_error in error.errors]
         ) from None
     _check_input_shape(command.input_upload_ids, recipe.limits["max_inputs"])
+    _check_upload_references(recipe, parameters, command.input_upload_ids)
     return ValidatedRun(recipe, command.input_upload_ids, parameters, command.preset_id)
 
 
@@ -250,12 +273,14 @@ def accept_run(
     traceparent: str | None,
     *,
     executor_image: str,
+    quota_defaults: QuotaLimits = DEFAULT_QUOTA,
 ) -> Accepted:
     """Aceita e enfileira a execução, ou devolve a já aceita com a mesma chave (replay).
 
     `executor_image` é a imagem do executor deste deploy (`GS_EXECUTOR_IMAGE`), fixada na Run
-    para que todas as tentativas usem a mesma, mesmo depois de um deploy novo. Abre e confirma
-    a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
+    para que todas as tentativas usem a mesma, mesmo depois de um deploy novo. `quota_defaults`
+    são as cotas diárias das settings (`GS_QUOTA_*`), que o override da conta sobrepõe. Abre e
+    confirma a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
 
     Sem espaço para o teto de saída levanta `capacity.AccountCapacityExceededError` ou
     `capacity.GlobalCapacityExceededError`, com a transação desfeita.
@@ -275,10 +300,11 @@ def accept_run(
         _lock_global_queue(session)
         now = db_now(session)
         usage = daily_usage(session, owner_id, now)
-        _check_run_quota(usage, now)
+        quota = quota_for(session, owner_id, quota_defaults)
+        _check_run_quota(usage, quota, now)
         run_id = _insert_run(session, owner_id, validated, traceparent, executor_image)
         uploads = lock_ready_uploads(session, owner_id, validated.input_upload_ids)
-        _check_input_bytes(validated.recipe, uploads, usage, now)
+        _check_input_bytes(validated.recipe, uploads, usage, quota, now)
         session.execute(
             insert(run_input),
             [
@@ -305,6 +331,26 @@ def _check_input_shape(upload_ids: Sequence[UUID], max_inputs: int) -> None:
         _refuse("input_upload_ids", "a lista não aceita IDs repetidos")
     if len(upload_ids) > max_inputs:
         _refuse("input_upload_ids", f"a receita aceita no máximo {max_inputs} entradas")
+
+
+def _check_upload_references(
+    recipe: RecipeVersion, parameters: dict[str, object], upload_ids: Sequence[UUID]
+) -> None:
+    """Uploads citados nos parâmetros (o `select` do PDF Press) têm de estar entre as entradas.
+
+    Sem entradas (o `validate_only` não as exige) não há com o que comparar. A recusa é
+    `VALIDATION_FAILED` no campo, nunca 404: não revela se o upload existe (1.6).
+    """
+    if not upload_ids:
+        return
+    known = set(upload_ids)
+    errors = [
+        FieldError(f"parameters.{reference.location}", _NOT_AN_INPUT)
+        for reference in recipe.upload_references(parameters)
+        if reference.upload_id not in known
+    ]
+    if errors:
+        raise InvalidRunCommandError(errors)
 
 
 def _lock_idempotency_key(session: Session, owner_id: UUID, key: str) -> None:
@@ -360,8 +406,8 @@ def _lock_global_queue(session: Session) -> None:
         raise QueueFullError("fila global cheia")
 
 
-def _check_run_quota(usage: DailyUsage, now: datetime) -> None:
-    if usage.runs >= MAX_RUNS_PER_WINDOW:
+def _check_run_quota(usage: DailyUsage, quota: QuotaLimits, now: datetime) -> None:
+    if usage.runs >= quota.runs_per_24h:
         raise DailyQuotaExceededError(
             f"a conta já criou {usage.runs} execuções nas últimas 24 h",
             _until_window_frees(usage, now),
@@ -369,19 +415,23 @@ def _check_run_quota(usage: DailyUsage, now: datetime) -> None:
 
 
 def _check_input_bytes(
-    recipe: RecipeVersion, uploads: Sequence[ReadyUpload], usage: DailyUsage, now: datetime
+    recipe: RecipeVersion,
+    uploads: Sequence[ReadyUpload],
+    usage: DailyUsage,
+    quota: QuotaLimits,
+    now: datetime,
 ) -> None:
     """Teto da versão e cota diária de entrada; uma execução maior que a cota é inválida."""
     incoming = sum(u.size_bytes for u in uploads)
     version_max = recipe.limits.get(_MAX_TOTAL_INPUT_BYTES)
     if version_max is not None and incoming > version_max:
         _refuse("input_upload_ids", f"as entradas somam mais de {version_max} bytes")
-    if incoming > MAX_INPUT_BYTES_PER_WINDOW:
+    if incoming > quota.input_bytes_per_24h:
         _refuse(
             "input_upload_ids",
-            f"as entradas somam mais que a cota diária de {MAX_INPUT_BYTES_PER_WINDOW} bytes",
+            f"as entradas somam mais que a cota diária de {quota.input_bytes_per_24h} bytes",
         )
-    if usage.input_bytes + incoming > MAX_INPUT_BYTES_PER_WINDOW:
+    if usage.input_bytes + incoming > quota.input_bytes_per_24h:
         raise DailyQuotaExceededError(
             "a entrada passa da cota diária de bytes", _until_window_frees(usage, now)
         )
