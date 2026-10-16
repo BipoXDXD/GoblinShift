@@ -133,6 +133,12 @@ class FailureCode(StrEnum):
     NO_VALID_OUTPUTS = "NO_VALID_OUTPUTS"
     OUTPUT_LIMIT_EXCEEDED = "OUTPUT_LIMIT_EXCEEDED"
     REPORT_LIMIT_EXCEEDED = "REPORT_LIMIT_EXCEEDED"
+    # Receitas que compõem um resultado de várias entradas (PDF Press, 1.5) falham a execução
+    # inteira em vez de rejeitar o item: uma composição incompleta não é sucesso (ADR 035).
+    INPUT_LIMIT_EXCEEDED = "INPUT_LIMIT_EXCEEDED"
+    PDF_INVALID = "PDF_INVALID"
+    PDF_UNSUPPORTED_FEATURE = "PDF_UNSUPPORTED_FEATURE"
+    PDF_PAGE_NOT_FOUND = "PDF_PAGE_NOT_FOUND"
 
 
 class RecipeFailure(Exception):  # noqa: N818 - nome fixado pelo plano (1.6 e 3.2)
