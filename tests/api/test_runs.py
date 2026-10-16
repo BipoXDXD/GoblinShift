@@ -853,6 +853,7 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         "csv-janitor",
         "image-forge",
         "downloads-detox",
+        "media-mill",
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
