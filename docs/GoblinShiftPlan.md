@@ -156,7 +156,7 @@ A contagem fecha como `registros lidos = filtrados + duplicados removidos + sobr
 | `deduplicate` | Booleano; default `true`.                                                                                     |
 | `group_by`    | `kind` ou `none`; default `kind`.                                                                             |
 | `name_mode`   | `preserve` ou `indexed`; default `preserve`.                                                                  |
-| `name_prefix` | Texto literal de até 40 caracteres, sem separadores ou controles; usado somente em `indexed`, default `file`. |
+| `name_prefix` | Texto literal de até 40 caracteres, sem separadores ou controles; usado somente em `indexed`, default `file`; com `preserve`, enviar outro valor é recusado, e o default é aceito (os parâmetros resolvidos o trazem). |
 
 **Processamento:** inspecionar → comparar conteúdo → nomear/agrupar → ZIP/manifesto; preservar os bytes originais.
 
