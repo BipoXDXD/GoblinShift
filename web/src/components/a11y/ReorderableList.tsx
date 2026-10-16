@@ -51,6 +51,8 @@ interface ReorderableListProps<T> {
   readonly getName: (item: T) => string;
   readonly renderItem: (item: T) => ReactNode;
   readonly onMove: (move: ItemMove) => void;
+  /** Mostra a posição de cada item, quando a ordem muda o resultado (o merge do PDF Press). */
+  readonly numbered?: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export function ReorderableList<T>({
   getName,
   renderItem,
   onMove,
+  numbered = false,
 }: ReorderableListProps<T>): ReactElement {
   const instructionsId = useId();
   const [announcement, setAnnouncement] = useState<string | null>(null);
@@ -164,6 +167,16 @@ export function ReorderableList<T>({
                 aria-hidden="true"
                 className="mt-3 size-4 flex-none cursor-grab text-fg-muted"
               />
+              {numbered && (
+                // A posição já vem do <ol> para o leitor de tela; o número é para quem vê.
+                <span
+                  aria-hidden="true"
+                  data-testid="posicao"
+                  className="mt-2 min-w-6 flex-none text-right font-mono text-sm font-semibold text-fg"
+                >
+                  {index + 1}
+                </span>
+              )}
               <div className="min-w-0 flex-1">{renderItem(item)}</div>
               {(["up", "down"] as const).map((direction) => (
                 <button
