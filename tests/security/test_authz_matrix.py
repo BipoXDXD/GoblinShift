@@ -43,7 +43,13 @@ def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
 
 
 # Parâmetros que não são ids: um valor da allowlist da própria rota.
-_NAMED_VALUES = {"provider": "google", "name": "swagger-init.js"}
+# Parâmetros de caminho que não são UUID; os demais recebem um UUID novo.
+_NAMED_VALUES = {
+    "provider": "google",
+    "name": "swagger-init.js",
+    "recipe_id": "csv-janitor",
+    "version": "1",
+}
 
 
 def _concrete(path: str) -> str:
