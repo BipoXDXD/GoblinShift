@@ -119,6 +119,7 @@ def test_item_aceito_tem_exatamente_as_chaves_do_schema() -> None:
         "counts",
         "details",
         "warnings",
+        "notices",
     }
     assert set(document) == {
         "schema_version",

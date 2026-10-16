@@ -382,7 +382,13 @@ class FakeState {
         body,
         contentType: role === "package" ? "application/zip" : "application/octet-stream",
       });
-      return { artifact_id: artifactId, logical_name: name, role, file_name: name };
+      return {
+        artifact_id: artifactId,
+        logical_name: name,
+        role,
+        file_name: name,
+        availability: "available" as const,
+      };
     });
   }
 }
@@ -445,6 +451,9 @@ function runBody(id: string, recipeId: string): Run {
     queue_expires_at: LATER,
     deadline_at: null,
     error: null,
+    parameters: {},
+    preset_id: null,
+    results_expire_at: null,
   };
 }
 

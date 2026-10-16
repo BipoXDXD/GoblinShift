@@ -7,8 +7,9 @@ Diferenças em relação ao esboço de 3.2, todas aditivas:
 - `OutputDir.create` recebe a posição da entrada, porque 3.6 resolve colisões de nome "com
   sufixo pelo índice original", e devolve o nome final junto do arquivo, porque o `ItemOk`
   precisa citar o nome que de fato foi criado.
-- `ItemOk` carrega avisos e contagens da própria entrada: o relatório informa contagens e avisos
-  por arquivo (1.1, 1.3), e `Report.warnings` fica para o que vale para a execução inteira.
+- `ItemOk` carrega avisos (códigos de `ItemWarningCode`) e contagens da própria entrada: o
+  relatório informa contagens e avisos por arquivo (1.1, 1.3), e `Report.warnings` fica para o
+  que vale para a execução inteira.
 
 Fatia 5 (etapa 0, também aditiva):
 - `details`, no item e no relatório, registra fatos que não são aviso (dimensões, formato, perfil
@@ -24,6 +25,7 @@ PDF Press (ADR 035, aditivo):
   citar uploads como o contrato HTTP cita (1.5). Vem do `context.json`; `None` fora dele.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -42,10 +44,35 @@ class InputFile:
     upload_id: str | None = None
 
 
+class ItemWarningCode(StrEnum):
+    """Códigos de aviso das receitas: lista fechada, como a das rejeições.
+
+    O código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do
+    arquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui.
+    """
+
+    CSV_ALL_RECORDS_FILTERED = "CSV_ALL_RECORDS_FILTERED"
+    CSV_FORMULA_CELLS = "CSV_FORMULA_CELLS"
+    CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
+    # PDF Press: nenhuma página da entrada entrou na seleção.
+    INPUT_NOT_SELECTED = "INPUT_NOT_SELECTED"
+
+
+class ItemNoticeCode(StrEnum):
+    """Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
+    para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."""
+
+    IMAGE_P3_CONVERTED = "IMAGE_P3_CONVERTED"
+
+
 @dataclass(frozen=True)
 class ReportWarning:
-    code: str
+    code: str  # de `ItemWarningCode`
     detail: str
+
+    def __post_init__(self) -> None:
+        if self.code not in ItemWarningCode:
+            raise ValueError(f"{self.code!r} não é código de aviso do catálogo")
 
 
 type DetailValue = str | int | bool
@@ -64,6 +91,12 @@ class OutputGroup(StrEnum):
     ARCHIVES = "archives"
 
 
+# Contagens por item vão para o banco e para a API: nome de contador em snake_case, nunca dado do
+# arquivo (como um nome de coluna), e no máximo 16 por item.
+ITEM_COUNT_NAME = re.compile(r"[a-z][a-z0-9_]{0,39}")
+MAX_ITEM_COUNTS = 16
+
+
 @dataclass(frozen=True)
 class ItemOk:
     position: int
@@ -76,6 +109,13 @@ class ItemOk:
     # Fatos registrados que não são aviso (não mudam o estado para succeeded_with_warnings):
     # dimensões, formato, perfil assumido ou convertido, quadros MPO descartados, tipo do Detox.
     details: Mapping[str, DetailValue] = field(default_factory=dict)
+    # Os fatos que a interface mostra por código (o detalhe da Run não lê `details`).
+    notices: Sequence[ItemNoticeCode] = ()
+
+    def __post_init__(self) -> None:
+        for notice in self.notices:
+            if notice not in ItemNoticeCode:
+                raise ValueError(f"{notice!r} não é nota do catálogo")
 
 
 class ItemRejectionCode(StrEnum):

@@ -124,6 +124,44 @@ def test_artefato_publicado_tem_o_conteudo_limpo_na_chave_da_geracao(
         assert content.read() == VALID
 
 
+def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    formula = b"nome,cidade\r\n=SEGREDO(1),Recife\r\n"
+    run_id = queue_run(
+        factory, storage, create_user(factory), [("a.csv", formula), ("b.csv", INVALID)]
+    )
+
+    coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
+
+    with factory() as session:
+        details = (
+            session.execute(
+                select(run_input.c.details)
+                .where(run_input.c.run_id == run_id)
+                .order_by(run_input.c.position)
+            )
+            .scalars()
+            .all()
+        )
+    assert details == [
+        {
+            "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": [],
+            "counts": {
+                "blank_lines_ignored": 0,
+                "duplicates_removed": 0,
+                "filtered_out": 0,
+                "records_read": 1,
+                "written": 1,
+            },
+            "duplicate_of": None,
+        },
+        {"warnings": [], "notices": [], "counts": {}, "duplicate_of": None},
+    ]
+    assert "SEGREDO" not in str(details)
+
+
 def test_tabela_rejeitada_termina_com_avisos(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
