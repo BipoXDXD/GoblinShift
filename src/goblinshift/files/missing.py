@@ -13,13 +13,15 @@ some por caminho normal, porque o expurgo troca o estado antes de apagar.
 um arquivo perdido; o risco é marcar por engano, e é ele que as travas abaixo cobrem. Por isso só
 a varredura da manutenção marca, nunca uma requisição de usuário, e ela só marca com a sentinela
 de montagem presente (`FileStorage.is_mounted`) e com no máximo `max_absent_ratio` do lote
-ausente: muito arquivo sumido de uma vez indica storage errado, não arquivo perdido, e quem
-decide é o administrador.
+ausente (num lote pequeno, sem todos ausentes): muito arquivo sumido de uma vez indica storage
+errado, não arquivo perdido, e quem decide é o administrador. Erro de disco que não seja ausência
+deixa o objeto como está.
 """
 
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -33,12 +35,16 @@ from goblinshift.files.tables import stored_object
 DEFAULT_MAX_ABSENT_RATIO = 0.5
 # Abaixo disto o lote é pequeno demais para a fração dizer algo sobre o storage.
 GOVERNOR_MIN_SAMPLE = 10
+# Num lote pequeno, todos ausentes a partir deste tamanho também acionam o limitador.
+_SMALL_LOT_MIN_ALL_ABSENT = 2
 
 
 @dataclass(frozen=True)
 class MissingSweep:
     checked: int
     absent: int
+    # O `stat` falhou por outro motivo (EIO, permissão): nem ausente nem marcado; o próximo volta.
+    unreadable: int
     marked: int
     # Último ID do lote, se ele veio cheio; `None` quando a varredura chegou ao fim e recomeça.
     resume_after: uuid.UUID | None
@@ -46,6 +52,21 @@ class MissingSweep:
     storage_unreachable: bool
     # Ausentes demais no lote: nada foi marcado, e o mesmo lote volta no ciclo seguinte.
     governor_tripped: bool
+
+    @classmethod
+    def idle(
+        cls, *, resume_after: uuid.UUID | None = None, storage_unreachable: bool = False
+    ) -> MissingSweep:
+        """Nada conferido: sem objetos, sem a sentinela ou com a varredura falhando."""
+        return cls(
+            checked=0,
+            absent=0,
+            unreadable=0,
+            marked=0,
+            resume_after=resume_after,
+            storage_unreachable=storage_unreachable,
+            governor_tripped=False,
+        )
 
 
 def mark_missing(session: Session, object_ids: Collection[uuid.UUID]) -> int:
@@ -99,14 +120,17 @@ def sweep_missing_objects(
             query = query.where(stored_object.c.id > after)
         rows = session.execute(query.order_by(stored_object.c.id).limit(limit)).all()
     if not rows:
-        return _stopped(after=None, storage_unreachable=False)
+        return MissingSweep.idle()
     if not storage.is_mounted():
-        return _stopped(after=after, storage_unreachable=True)
-    absent = [row.id for row in rows if not _exists(storage, row.storage_key)]
+        return MissingSweep.idle(resume_after=after, storage_unreachable=True)
+    presence = {row.id: _presence(storage, row.storage_key) for row in rows}
+    absent = [object_id for object_id, found in presence.items() if found is _Presence.ABSENT]
+    unreadable = sum(found is _Presence.UNREADABLE for found in presence.values())
     if _too_many_absent(len(absent), len(rows), max_absent_ratio):
         return MissingSweep(
             checked=len(rows),
             absent=len(absent),
+            unreadable=unreadable,
             marked=0,
             resume_after=after,
             storage_unreachable=False,
@@ -119,6 +143,7 @@ def sweep_missing_objects(
     return MissingSweep(
         checked=len(rows),
         absent=len(absent),
+        unreadable=unreadable,
         marked=marked,
         resume_after=rows[-1].id if len(rows) == limit else None,
         storage_unreachable=False,
@@ -126,24 +151,29 @@ def sweep_missing_objects(
     )
 
 
-def _stopped(*, after: uuid.UUID | None, storage_unreachable: bool) -> MissingSweep:
-    return MissingSweep(
-        checked=0,
-        absent=0,
-        marked=0,
-        resume_after=after,
-        storage_unreachable=storage_unreachable,
-        governor_tripped=False,
-    )
-
-
 def _too_many_absent(absent: int, checked: int, max_absent_ratio: float) -> bool:
-    return checked >= GOVERNOR_MIN_SAMPLE and absent > max_absent_ratio * checked
+    """Ausentes demais para ser perda de arquivo, e não storage errado.
+
+    Num lote pequeno (o fim de cada volta, ou um ambiente com poucos objetos), a fração não diz
+    muito; ali o sinal é todos os conferidos sumirem de uma vez, a partir de dois.
+    """
+    if checked < GOVERNOR_MIN_SAMPLE:
+        return checked >= _SMALL_LOT_MIN_ALL_ABSENT and absent == checked
+    return absent > max_absent_ratio * checked
 
 
-def _exists(storage: FileStorage, key: str) -> bool:
+class _Presence(Enum):
+    PRESENT = auto()
+    ABSENT = auto()
+    UNREADABLE = auto()
+
+
+def _presence(storage: FileStorage, key: str) -> _Presence:
     try:
         storage.stat(key)
     except ObjectMissingError:
-        return False
-    return True
+        return _Presence.ABSENT
+    except OSError:
+        # Erro de disco não prova ausência: o objeto fica como está, e a varredura segue.
+        return _Presence.UNREADABLE
+    return _Presence.PRESENT

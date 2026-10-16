@@ -25,7 +25,7 @@ from typing import BinaryIO
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 _MAX_KEY_LENGTH = 512
 _TMP_DIR_NAME = ".tmp"
-# Gravada na raiz pelo `storage-init` (compose.yaml), no filesystem já montado.
+# Gravada na raiz pelo `storage-mark` (compose.yaml), no filesystem já montado.
 MOUNT_MARKER = ".goblinshift-storage"
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
@@ -112,8 +112,8 @@ class FileStorage:
 
         Com o filesystem do storage desmontado, a raiz some ou vira o ponto de montagem do disco
         do sistema, onde o `storage-init` recria a pasta e a aplicação volta a gravar; ter
-        conteúdo não prova nada. A sentinela só é gravada pelo `storage-init` depois de o deploy
-        conferir a montagem (deploy/release.sh), e nenhuma chave pode criá-la, porque nenhum
+        conteúdo não prova nada. A sentinela só é gravada pelo `storage-mark` depois de conferir
+        a montagem (deploy/storage-mark.sh), e nenhuma chave pode criá-la, porque nenhum
         segmento de chave começa por ponto.
         """
         try:

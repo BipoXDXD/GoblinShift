@@ -1,5 +1,6 @@
 """Objetos ausentes do storage viram `missing` (1.7, 3.3 e 3.8; ADR 007 e 009)."""
 
+import errno
 import uuid
 
 import pytest
@@ -17,7 +18,7 @@ from goblinshift.files.missing import (
 from goblinshift.files.objects import hold
 from goblinshift.files.retention import purge_deleted_objects
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
-from goblinshift.files.storage import MOUNT_MARKER, FileStorage
+from goblinshift.files.storage import MOUNT_MARKER, FileStorage, ObjectStat
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
@@ -156,22 +157,63 @@ def test_varredura_marca_so_o_objeto_sem_arquivo(
     assert account_reserved(factory, owner) == 2
 
 
+def sorted_objects(
+    factory: sessionmaker[Session], storage: FileStorage, total: int
+) -> list[tuple[uuid.UUID, str]]:
+    """`total` uploads prontos de uma conta, como (objeto, chave) em ordem de ID."""
+    owner = create_user(factory, f"conta-{uuid.uuid4()}")
+    views = [ready_upload(factory, storage, owner, bytes([i])) for i in range(total)]
+    return sorted(object_of(factory, view.id) for view in views)
+
+
 def test_varredura_anda_em_lotes_pela_ordem_do_id(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
-    owner = create_user(factory, "a")
-    views = [ready_upload(factory, storage, owner, bytes([i])) for i in range(3)]
-    objects = sorted(object_of(factory, view.id) for view in views)
-    for _, key in objects:
+    objects = sorted_objects(factory, storage, 4)
+    lost = [objects[0], objects[2]]
+    for _, key in lost:
         storage.delete(key)
     mark_mounted(storage)
 
     first = sweep(factory, storage, limit=2)
     second = sweep(factory, storage, after=first.resume_after, limit=2)
+    third = sweep(factory, storage, after=second.resume_after, limit=2)
 
-    assert (first.checked, first.marked, first.resume_after) == (2, 2, objects[1][0])
-    assert (second.checked, second.marked, second.resume_after) == (1, 1, None)
-    assert {state_of(factory, object_id) for object_id, _ in objects} == {ObjectState.MISSING}
+    assert (first.checked, first.marked, first.resume_after) == (2, 1, objects[1][0])
+    assert (second.checked, second.marked, second.resume_after) == (2, 1, objects[3][0])
+    assert (third.checked, third.resume_after) == (0, None)
+    assert {state_of(factory, object_id) for object_id, _ in lost} == {ObjectState.MISSING}
+
+
+class UnreadableStorage(FileStorage):
+    """Storage montado cujo disco devolve EIO no `stat` das chaves escolhidas."""
+
+    def __init__(self, base: FileStorage, unreadable: set[str]) -> None:
+        super().__init__(base.root)
+        self._unreadable = unreadable
+
+    def stat(self, key: str) -> ObjectStat:
+        if key in self._unreadable:
+            raise OSError(errno.EIO, "erro de entrada e saída", key)
+        return super().stat(key)
+
+
+def test_objeto_ilegivel_conta_a_parte_e_a_varredura_segue(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    objects = sorted_objects(factory, storage, 3)
+    storage.delete(objects[2][1])
+    mark_mounted(storage)
+    failing = UnreadableStorage(storage, {objects[0][1]})
+
+    first = sweep(factory, failing, limit=2)
+    second = sweep(factory, failing, after=first.resume_after, limit=2)
+
+    assert (first.checked, first.unreadable, first.absent, first.marked) == (2, 1, 0, 0)
+    assert first.resume_after == objects[1][0]
+    assert (second.checked, second.unreadable, second.marked) == (1, 0, 1)
+    assert state_of(factory, objects[0][0]) == ObjectState.COMMITTED
+    assert state_of(factory, objects[2][0]) == ObjectState.MISSING
 
 
 def test_varredura_ignora_objetos_que_nao_estao_confirmados(
@@ -258,16 +300,54 @@ def test_lote_com_metade_ausente_ainda_marca(
     assert (report.absent, report.marked, report.governor_tripped) == (5, 5, False)
 
 
-def test_lote_pequeno_demais_para_o_limitador_marca_tudo(
+def test_lote_pequeno_todo_ausente_aciona_o_limitador(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
-    lots_with_absent(
+    owner = lots_with_absent(
         factory, storage, total=GOVERNOR_MIN_SAMPLE - 1, absent=GOVERNOR_MIN_SAMPLE - 1
     )
 
     report = sweep(factory, storage)
 
-    assert (report.marked, report.governor_tripped) == (GOVERNOR_MIN_SAMPLE - 1, False)
+    assert (report.absent, report.marked, report.governor_tripped) == (
+        GOVERNOR_MIN_SAMPLE - 1,
+        0,
+        True,
+    )
+    assert account_reserved(factory, owner) == GOVERNOR_MIN_SAMPLE - 1
+
+
+@pytest.mark.parametrize(
+    ("total", "absent", "marked"),
+    [(1, 1, 1), (2, 1, 1), (GOVERNOR_MIN_SAMPLE - 1, GOVERNOR_MIN_SAMPLE - 2, 8)],
+    ids=["um-so-ausente", "dois-com-um-ausente", "pequeno-com-um-presente"],
+)
+def test_lote_pequeno_com_algum_presente_ou_um_so_marca(
+    factory: sessionmaker[Session], storage: FileStorage, total: int, absent: int, marked: int
+) -> None:
+    lots_with_absent(factory, storage, total=total, absent=absent)
+
+    report = sweep(factory, storage)
+
+    assert (report.marked, report.governor_tripped) == (marked, False)
+
+
+def test_fim_da_volta_com_lote_pequeno_todo_ausente_aciona_o_limitador(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    objects = sorted_objects(factory, storage, 15)
+    for _, key in objects[10:]:
+        storage.delete(key)
+    mark_mounted(storage)
+
+    healthy = sweep(factory, storage, limit=10)
+    tail = sweep(factory, storage, after=healthy.resume_after, limit=10)
+
+    assert (healthy.checked, healthy.absent, healthy.resume_after) == (10, 0, objects[9][0])
+    assert (tail.checked, tail.absent, tail.marked, tail.governor_tripped) == (5, 5, 0, True)
+    # O lote travado volta inteiro no ciclo seguinte, a partir do mesmo ponto.
+    assert tail.resume_after == objects[9][0]
+    assert {state_of(factory, object_id) for object_id, _ in objects} == {ObjectState.COMMITTED}
 
 
 def test_limitador_desligado_pelo_administrador_marca_o_lote_inteiro(
