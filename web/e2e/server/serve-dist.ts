@@ -39,13 +39,19 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".json": "application/json",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
   ".webp": "image/webp",
   ".avif": "image/avif",
   ".woff2": "font/woff2",
   ".glb": "model/gltf-binary",
   ".ico": "image/x-icon",
   ".txt": "text/plain; charset=utf-8",
+  // A location = /manifest.webmanifest define o tipo: o mime.types da imagem não o conhece.
+  ".webmanifest": "application/manifest+json",
 };
+
+/** Ícones, manifest e imagem de compartilhamento na raiz: nome fixo e 404 se faltar. */
+const BRAND_FILE = /^\/[^/]+\.(?:png|jpg|ico|svg|webmanifest)$/;
 
 const BACKEND_PREFIXES = ["/api/", "/auth/", "/docs/assets/"];
 const BACKEND_PATHS = new Set(["/docs", "/openapi.json", "/livez", "/readyz"]);
@@ -77,6 +83,11 @@ const server = createServer((request, response) => {
   }
   if (ROOT_TEXT_FILE.test(path)) {
     // location ~ ^/[^/]+\.(txt|xml)$: try_files $uri =404, sem cache.
+    sendFile(response, fileIn(path), "no-cache");
+    return;
+  }
+  if (BRAND_FILE.test(path)) {
+    // location ~ ^/[^/]+\.(png|jpg|ico|svg)$ e = /manifest.webmanifest: try_files $uri =404.
     sendFile(response, fileIn(path), "no-cache");
     return;
   }
