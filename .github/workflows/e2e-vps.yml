@@ -1,0 +1,84 @@
+name: Jornadas na VPS
+
+# Depois do deploy (chamado pelo job vps-smoke do ci.yml) e à mão (workflow_dispatch): a borda da
+# SPA (scripts/check-spa-edge.sh) e as jornadas só de leitura (web/e2e/specs/vps.spec.ts) contra o
+# site no ar, no Chromium e no Firefox. Só GET: nada muda na conta nem no servidor.
+#
+# Sem conta, rodam as jornadas anônimas. Com o secret E2E_VPS_API_KEY no environment production
+# (chave com runs:read e files:read de uma conta de teste que já aceitou os termos), rodam também
+# as que leem dados da conta; com o secret vazio, elas são puladas e o motivo fica no resumo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Endereço do site
+        default: https://goblinshift.dev
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      base_url:
+        default: https://goblinshift.dev
+        required: false
+        type: string
+    secrets:
+      E2E_VPS_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-vps
+  cancel-in-progress: false
+
+jobs:
+  vps:
+    name: Borda e jornadas de leitura
+    runs-on: ubuntu-24.04
+    # O environment dá acesso ao secret opcional; as regras de proteção dele valem aqui também.
+    environment: production
+    timeout-minutes: 15
+    env:
+      BASE_URL: ${{ inputs.base_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Borda da SPA (cabeçalhos, cache, 404 e tipos)
+        run: scripts/check-spa-edge.sh "$BASE_URL"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Chromium, Firefox e dependências do sistema
+        run: npx playwright install --with-deps chromium firefox
+        working-directory: web
+      - name: Conta de teste
+        env:
+          KEY: ${{ secrets.E2E_VPS_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            msg="E2E_VPS_API_KEY vazio no environment production: só as jornadas anônimas rodam."
+            echo "::notice title=Jornadas com conta puladas::$msg"
+            echo "- $msg" >>"$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Jornadas de leitura
+        working-directory: web
+        env:
+          E2E_VPS: "1"
+          E2E_BASE_URL: ${{ inputs.base_url }}
+          GS_E2E_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
+          CI: "1"
+        run: npx playwright test -c e2e
+      - name: Relatório e traces da falha
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-vps
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 7
