@@ -3874,7 +3874,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunResponse"
+                  "$ref": "#/components/schemas/RunDetailResponse"
                 }
               }
             }
@@ -4363,6 +4363,42 @@
               }
             ]
           },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "results_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Expire At"
+          },
           "idempotency_expires_at": {
             "type": "string",
             "format": "date-time",
@@ -4382,6 +4418,9 @@
           "queue_expires_at",
           "deadline_at",
           "error",
+          "parameters",
+          "preset_id",
+          "results_expire_at",
           "idempotency_expires_at"
         ],
         "title": "AcceptedRunResponse"
@@ -4732,6 +4771,39 @@
           "message"
         ],
         "title": "FieldError"
+      },
+      "ItemRejectionCode": {
+        "type": "string",
+        "enum": [
+          "UNSUPPORTED_FORMAT",
+          "UNSUPPORTED_BIT_DEPTH",
+          "UNSUPPORTED_COLOR_PROFILE",
+          "IMAGE_TOO_LARGE",
+          "CSV_STRUCTURE_INVALID",
+          "FIELD_LIMIT_EXCEEDED"
+        ],
+        "title": "ItemRejectionCode",
+        "description": "Códigos de rejeição por item do catálogo de 1.6: lista fechada.\n\nCada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro\ncódigo, porque o relatório vem do sandbox e o código vai para o banco e para a API."
+      },
+      "ItemStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "ok",
+          "rejected",
+          "duplicate"
+        ],
+        "title": "ItemStatus"
+      },
+      "ItemWarningCode": {
+        "type": "string",
+        "enum": [
+          "CSV_ALL_RECORDS_FILTERED",
+          "CSV_FORMULA_CELLS",
+          "CSV_FORMULA_HEADER"
+        ],
+        "title": "ItemWarningCode",
+        "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui."
       },
       "Limits": {
         "properties": {
@@ -5205,6 +5277,142 @@
         ],
         "title": "ResultReferenceResponse"
       },
+      "RunDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "queue_ahead": {
+            "type": "integer",
+            "title": "Queue Ahead"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "queue_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queue Expires At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunErrorBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "results_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Expire At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_version",
+          "status",
+          "attempt",
+          "progress",
+          "queue_ahead",
+          "created_at",
+          "queue_expires_at",
+          "deadline_at",
+          "error",
+          "parameters",
+          "preset_id",
+          "results_expire_at",
+          "summary",
+          "items"
+        ],
+        "title": "RunDetailResponse"
+      },
       "RunErrorBody": {
         "properties": {
           "code": {
@@ -5222,6 +5430,69 @@
           "message"
         ],
         "title": "RunErrorBody"
+      },
+      "RunItemResponse": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Upload Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ItemStatus"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemRejectionCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ItemWarningCode"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "upload_id",
+          "status",
+          "error_code",
+          "warnings",
+          "counts",
+          "duplicate_of"
+        ],
+        "title": "RunItemResponse",
+        "description": "Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo."
       },
       "RunListResponse": {
         "properties": {
@@ -5311,6 +5582,42 @@
                 "type": "null"
               }
             ]
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "results_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Expire At"
           }
         },
         "type": "object",
@@ -5325,7 +5632,10 @@
           "created_at",
           "queue_expires_at",
           "deadline_at",
-          "error"
+          "error",
+          "parameters",
+          "preset_id",
+          "results_expire_at"
         ],
         "title": "RunResponse"
       },
@@ -5362,6 +5672,39 @@
           "artifacts"
         ],
         "title": "RunResultsResponse"
+      },
+      "RunSummaryResponse": {
+        "properties": {
+          "inputs": {
+            "type": "integer",
+            "title": "Inputs"
+          },
+          "ok": {
+            "type": "integer",
+            "title": "Ok"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "duplicates": {
+            "type": "integer",
+            "title": "Duplicates"
+          },
+          "outputs": {
+            "type": "integer",
+            "title": "Outputs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inputs",
+          "ok",
+          "rejected",
+          "duplicates",
+          "outputs"
+        ],
+        "title": "RunSummaryResponse"
       },
       "Scope": {
         "type": "string",

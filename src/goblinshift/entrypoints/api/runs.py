@@ -42,6 +42,7 @@ from goblinshift.files.states import ArtifactRole
 from goblinshift.identity import Principal, Scope
 from goblinshift.platform.settings import Settings
 from goblinshift.presets import PresetNotFoundError, get_preset
+from goblinshift.processing.recipe import ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
@@ -62,11 +63,13 @@ from goblinshift.runs.lifecycle import ErrorCode, Phase, Status
 from goblinshift.runs.queries import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
+    ItemStatus,
     RunFilters,
     RunNotFoundError,
     RunView,
     get_results,
     get_run,
+    get_run_detail,
     list_runs,
 )
 
@@ -130,6 +133,38 @@ class RunResponse(BaseModel):
     queue_expires_at: datetime
     deadline_at: datetime | None
     error: RunErrorBody | None
+    # Parâmetros resolvidos (com defaults), para repetir a configuração; nulos depois de 30 dias.
+    parameters: dict[str, Any] | None
+    # Preset de origem, se houve; nulo também quando o preset foi excluído.
+    preset_id: UUID | None
+    # Vencimento do primeiro resultado ainda disponível; nulo se não há resultado disponível
+    # (antes da publicação, sem saídas, excluídos ou vencidos pela manutenção).
+    results_expire_at: datetime | None
+
+
+class RunSummaryResponse(BaseModel):
+    inputs: int
+    ok: int
+    rejected: int
+    duplicates: int
+    outputs: int
+
+
+class RunItemResponse(BaseModel):
+    """Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo."""
+
+    position: int
+    upload_id: UUID
+    status: ItemStatus
+    error_code: ItemRejectionCode | None
+    warnings: list[ItemWarningCode]
+    counts: dict[str, int]
+    duplicate_of: int | None
+
+
+class RunDetailResponse(RunResponse):
+    summary: RunSummaryResponse | None
+    items: list[RunItemResponse]
 
 
 class AcceptedRunResponse(RunResponse):
@@ -395,11 +430,31 @@ def get_run_route(
     session: DbSession,
     response: Response,
     run_id: UUID,
-) -> RunResponse:
-    view = _read_run(session, principal.owner_id, run_id)
-    if not view.is_terminal:
+) -> RunDetailResponse:
+    try:
+        with session.begin():
+            detail = get_run_detail(session, principal.owner_id, run_id)
+    except RunNotFoundError:
+        raise _run_not_found() from None
+    if not detail.view.is_terminal:
         response.headers["Retry-After"] = str(POLL_RETRY_AFTER_SECONDS)
-    return _run_response(view)
+    summary = detail.summary
+    return RunDetailResponse(
+        **_run_response(detail.view).model_dump(),
+        summary=RunSummaryResponse(**summary) if summary is not None else None,
+        items=[
+            RunItemResponse(
+                position=item.position,
+                upload_id=item.upload_id,
+                status=item.status,
+                error_code=item.error_code,
+                warnings=list(item.warnings),
+                counts=item.counts,
+                duplicate_of=item.duplicate_of,
+            )
+            for item in detail.items
+        ],
+    )
 
 
 @router.get(
@@ -542,6 +597,11 @@ def _run_response(view: RunView) -> RunResponse:
         queue_expires_at=_utc(view.queue_expires_at),
         deadline_at=_utc(view.deadline_at) if view.deadline_at is not None else None,
         error=error,
+        parameters=view.parameters,
+        preset_id=view.preset_id,
+        results_expire_at=(
+            _utc(view.results_expire_at) if view.results_expire_at is not None else None
+        ),
     )
 
 

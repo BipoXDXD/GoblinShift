@@ -28,7 +28,7 @@ from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.runs import acceptance
 from goblinshift.runs.acceptance import MAX_QUEUED_RUNS
 from goblinshift.runs.lifecycle import Status
-from goblinshift.runs.tables import run, run_output
+from goblinshift.runs.tables import run, run_input, run_output
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, prepare_database
 from tests.runs.support import (
@@ -54,7 +54,12 @@ RUN_KEYS = {
     "queue_expires_at",
     "deadline_at",
     "error",
+    "parameters",
+    "preset_id",
+    "results_expire_at",
 }
+DETAIL_KEYS = RUN_KEYS | {"summary", "items"}
+ITEM_KEYS = {"position", "upload_id", "status", "error_code", "warnings", "counts", "duplicate_of"}
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
 
@@ -132,6 +137,9 @@ def test_aceita_com_202_location_e_o_corpo_do_contrato(
     assert created["queue_ahead"] == 0
     assert created["deadline_at"] is None
     assert created["error"] is None
+    assert created["parameters"]["formula_guard"] == "none"
+    assert created["preset_id"] is None
+    assert created["results_expire_at"] is None
     created_at = datetime.fromisoformat(created["created_at"])
     assert datetime.fromisoformat(created["queue_expires_at"]) - created_at == timedelta(hours=2)
     assert created["created_at"].endswith("Z")
@@ -514,7 +522,7 @@ def test_execucao_nao_terminal_tem_retry_after_2(
 
     assert response.status_code == 200
     assert response.headers["retry-after"] == "2"
-    assert response.json().keys() == RUN_KEYS
+    assert response.json().keys() == DETAIL_KEYS
     assert response.json()["id"] == created["id"]
 
 
@@ -944,3 +952,175 @@ def test_api_em_producao_nao_sobe_sem_a_imagem_do_executor() -> None:
 
     with pytest.raises(ExecutorConfigError, match="GS_EXECUTOR_IMAGE"):
         create_app(settings)
+
+
+# Detalhe por item, parâmetros e disponibilidade dos resultados (1.1, 2.2)
+
+
+def with_items(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    owner: uuid.UUID,
+    run_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> list[uuid.UUID]:
+    uploads = ready_inputs(factory, storage, owner, len(rows))
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(run_input),
+            [
+                {
+                    "run_id": run_id,
+                    "position": i,
+                    "owner_id": owner,
+                    "upload_id": u,
+                    # Todas as linhas com as mesmas chaves: o INSERT em lote usa as da primeira.
+                    "outcome": None,
+                    "error_code": None,
+                    "details": None,
+                    **row,
+                }
+                for i, (u, row) in enumerate(zip(uploads, rows, strict=True))
+            ],
+        )
+        session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(
+                parameters={"trim_columns": ["a"]},
+                summary={"inputs": 3, "ok": 1, "rejected": 1, "duplicates": 1, "outputs": 1},
+            )
+        )
+    return uploads
+
+
+def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(
+        factory, account.id, BASE_TIME, status=Status.SUCCEEDED_WITH_WARNINGS
+    )
+    ok = {"warnings": ["CSV_FORMULA_CELLS"], "counts": {"records_read": 2}, "duplicate_of": None}
+    uploads = with_items(
+        factory,
+        storage,
+        account.id,
+        run_id,
+        [
+            {"outcome": "ok", "details": ok},
+            {
+                "outcome": "rejected",
+                "error_code": "CSV_STRUCTURE_INVALID",
+                "details": {"warnings": [], "counts": {}, "duplicate_of": None},
+            },
+            {"outcome": "ok", "details": {"warnings": [], "counts": {}, "duplicate_of": 0}},
+        ],
+    )
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body.keys() == DETAIL_KEYS
+    assert body["parameters"] == {"trim_columns": ["a"]}
+    assert body["summary"] == {"inputs": 3, "ok": 1, "rejected": 1, "duplicates": 1, "outputs": 1}
+    assert body["items"] == [
+        {
+            "position": 0,
+            "upload_id": str(uploads[0]),
+            "status": "ok",
+            "error_code": None,
+            "warnings": ["CSV_FORMULA_CELLS"],
+            "counts": {"records_read": 2},
+            "duplicate_of": None,
+        },
+        {
+            "position": 1,
+            "upload_id": str(uploads[1]),
+            "status": "rejected",
+            "error_code": "CSV_STRUCTURE_INVALID",
+            "warnings": [],
+            "counts": {},
+            "duplicate_of": None,
+        },
+        {
+            "position": 2,
+            "upload_id": str(uploads[2]),
+            "status": "duplicate",
+            "error_code": None,
+            "warnings": [],
+            "counts": {},
+            "duplicate_of": 0,
+        },
+    ]
+
+
+def test_item_ainda_nao_avaliado_aparece_pendente(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+
+    body = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()
+
+    [item] = body["items"]
+    assert item.keys() == ITEM_KEYS
+    assert (item["status"], item["warnings"], item["counts"]) == ("pending", [], {})
+    assert body["summary"] is None
+
+
+def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    tampered = {
+        "warnings": ["CSV_FORMULA_CELLS", "Ana Souza <ana@x.com>"],
+        "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
+        "duplicate_of": None,
+        "original_name": "salarios-ana.csv",
+    }
+    with_items(
+        factory,
+        storage,
+        account.id,
+        run_id,
+        [{"outcome": "rejected", "error_code": "ana@x.com", "details": tampered}],
+    )
+
+    response = client.get(f"{RUNS}/{run_id}", headers=account.headers)
+
+    [item] = response.json()["items"]
+    assert item["warnings"] == ["CSV_FORMULA_CELLS"]
+    assert item["counts"] == {"records_read": 1}
+    assert item["error_code"] is None
+    assert "ana" not in response.text.lower()
+
+
+def test_listagem_traz_parametros_e_validade_dos_resultados_sem_itens(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+
+    [listed] = client.get(RUNS, headers=account.headers).json()["data"]
+
+    assert listed.keys() == RUN_KEYS
+    assert listed["parameters"] == {}
+    assert listed["results_expire_at"] == (BASE_TIME + timedelta(hours=48)).isoformat().replace(
+        "+00:00", "Z"
+    )
+
+
+def test_resultados_excluidos_deixam_a_validade_nula(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).values(deleted_at=BASE_TIME))
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] is None
