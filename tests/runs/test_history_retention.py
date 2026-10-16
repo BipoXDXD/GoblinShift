@@ -12,7 +12,13 @@ import pytest
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.artifacts import create_candidate_object
+from goblinshift.files.artifacts import (
+    CandidateObject,
+    commit_candidate,
+    create_candidate_object,
+    publish_artifact,
+)
+from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.retention import (
@@ -85,6 +91,20 @@ def finished_run(
             )
         )
     return run_id
+
+
+def add_candidate(
+    factory: sessionmaker[Session], run_id: uuid.UUID
+) -> tuple[uuid.UUID, CandidateObject]:
+    """Candidato pendente na tentativa da Run, como o worker deixa antes de confirmar a saída."""
+    with unit_of_work(factory) as session:
+        attempt_id, owner = session.execute(
+            select(attempt.c.id, run.c.owner_id)
+            .join(run, run.c.id == attempt.c.run_id)
+            .where(run.c.id == run_id)
+        ).one()
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
+    return owner, candidate
 
 
 def run_details(factory: sessionmaker[Session], run_id: uuid.UUID) -> tuple[object, ...]:
@@ -210,19 +230,65 @@ def test_run_com_candidato_ainda_no_disco_espera_o_descarte(
     """Apagar a tentativa antes do descarte deixaria o arquivo do candidato sem quem o remova."""
     now = now_of(factory)
     run_id = finished_run(factory, storage, now - DELETE_AFTER - timedelta(days=1))
-    with unit_of_work(factory) as session:
-        attempt_id, owner = session.execute(
-            select(attempt.c.id, run.c.owner_id)
-            .join(run, run.c.id == attempt.c.run_id)
-            .where(run.c.id == run_id)
-        ).one()
-        create_candidate_object(session, owner, run_id, attempt_id, 1)
+    add_candidate(factory, run_id)
 
     with unit_of_work(factory) as session:
         deleted = delete_old_runs(session, now, LIMIT)
 
     assert deleted == 0
     assert exists(factory, run_id)
+
+
+def test_run_com_candidato_confirmado_sem_referencia_espera_o_descarte(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - DELETE_AFTER - timedelta(days=1))
+    owner, candidate = add_candidate(factory, run_id)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, b"\x00" * 32, 1)
+
+    with unit_of_work(factory) as session:
+        deleted = delete_old_runs(session, now, LIMIT)
+
+    assert deleted == 0
+    assert exists(factory, run_id)
+
+
+def test_run_com_candidato_publicado_como_artefato_sai(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """O artefato tem expiração própria: a Run não precisa esperar por ele."""
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - DELETE_AFTER - timedelta(days=1))
+    owner, candidate = add_candidate(factory, run_id)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, b"\x00" * 32, 1)
+        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv")
+
+    with unit_of_work(factory) as session:
+        deleted = delete_old_runs(session, now, LIMIT)
+
+    assert deleted == 1
+    assert not exists(factory, run_id)
+
+
+def test_lote_pula_as_runs_que_esperam_o_descarte(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """As mais antigas esperando o descarte não podem ocupar o lote inteiro a cada ciclo."""
+    now = now_of(factory)
+    waiting = [finished_run(factory, storage, now - timedelta(days=days)) for days in (95, 94)]
+    for run_id in waiting:
+        add_candidate(factory, run_id)
+    eligible = finished_run(factory, storage, now - timedelta(days=93))
+
+    with unit_of_work(factory) as session:
+        deleted = delete_old_runs(session, now, 2)
+
+    assert deleted == 1
+    assert not exists(factory, eligible)
+    assert all(exists(factory, run_id) for run_id in waiting)
 
 
 def test_remocao_respeita_o_lote(factory: sessionmaker[Session], storage: FileStorage) -> None:
