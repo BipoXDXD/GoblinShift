@@ -136,4 +136,5 @@ dpkg-reconfigure -f noninteractive unattended-upgrades
 
 echo
 echo "Pronto. Configure no GitHub: variáveis VPS_HOST e VPS_USER=${APP_USER};"
-echo "segredos VPS_SSH_KEY (chave privada da CI) e VPS_KNOWN_HOSTS (ssh-keyscan do host)."
+echo "segredos VPS_SSH_KEY (chave privada da CI) e VPS_KNOWN_HOSTS (ssh-keyscan do host) no"
+echo "environment production, com política de branches só main (não no nível do repositório)."
