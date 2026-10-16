@@ -4,7 +4,6 @@ import { CSRF_HEADER, type CsrfTokenSource } from "./csrf";
 import {
   ApiError,
   API_ACCEPT,
-  errorFromResponse,
   interpretResponse,
   interpretTextResponse,
   JSON_MEDIA_TYPE,
@@ -15,9 +14,6 @@ import {
 import { sameOriginUrl } from "./sameOrigin";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const JPEG_ACCEPT = "image/jpeg, application/problem+json";
-const JPEG_MEDIA_TYPE = "image/jpeg";
-const JPEG_SIGNATURE = [0xff, 0xd8, 0xff] as const;
 const SAFE_METHODS: ReadonlySet<HttpMethod> = new Set(["GET"]);
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -43,15 +39,6 @@ export interface TextRequest {
   readonly signal?: AbortSignal;
 }
 
-/** Imagem JPEG pequena derivada pelo próprio serviço, lida inteira para virar preview. */
-export interface JpegRequest {
-  /** Caminho na mesma origem, como o download de um artefato. */
-  readonly path: string;
-  /** Teto do corpo; acima dele a leitura é abortada. */
-  readonly maxBytes: number;
-  readonly signal?: AbortSignal;
-}
-
 export interface ApiClient {
   request<T>(request: ApiRequest<T>): Promise<ApiResponse<T>>;
   /** Mesmo prazo, origem e tradução de falhas do `request`; o sucesso é o texto, sem parse. */
@@ -61,11 +48,6 @@ export interface ApiClient {
    * página não lê): sem ele não há sessão a consultar, e o `GET /me` só daria 401 no console.
    */
   hasSessionCookie(): boolean;
-  /**
-   * GET de um JPEG com teto de bytes e conferência da assinatura (FF D8 FF); o Blob sai com tipo
-   * `image/jpeg` fixo, nunca o que o servidor declarou. Falha é `ApiError`, com o Retry-After.
-   */
-  requestJpeg(request: JpegRequest): Promise<Blob>;
 }
 
 export interface ApiClientOptions {
@@ -107,32 +89,6 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       });
       return interpretTextResponse(rawOf(response, body), options.now());
     },
-    async requestJpeg({ path, maxBytes, signal }: JpegRequest): Promise<Blob> {
-      const outgoing = {
-        method: "GET" as const,
-        path,
-        ...(signal === undefined ? {} : { signal }),
-      };
-      const { response, body } = await sendWithTimeout(options, outgoing, {
-        accept: JPEG_ACCEPT,
-        read: async (received) =>
-          received.ok
-            ? { ok: true as const, bytes: await readCapped(received, maxBytes) }
-            : { ok: false as const, text: await received.text() },
-        timeoutMs,
-      });
-      if (!body.ok) {
-        throw errorFromResponse(rawOf(response, body.text), options.now());
-      }
-      if (body.bytes === null || !startsWithJpeg(body.bytes)) {
-        throw new ApiError({
-          kind: "unexpected-response",
-          status: response.status,
-          retryAfterMs: null,
-        });
-      }
-      return new Blob([body.bytes], { type: JPEG_MEDIA_TYPE });
-    },
     hasSessionCookie(): boolean {
       return options.csrfToken() !== null;
     },
@@ -145,42 +101,6 @@ function rawOf(response: Response, text: string): RawApiResponse {
 
 function readText(response: Response): Promise<string> {
   return response.text();
-}
-
-/** Corpo inteiro até `maxBytes`; acima disso cancela a leitura e devolve `null`. */
-async function readCapped(
-  response: Response,
-  maxBytes: number,
-): Promise<Uint8Array<ArrayBuffer> | null> {
-  const reader = response.body?.getReader();
-  if (reader === undefined) {
-    return new Uint8Array(0);
-  }
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
-
-function startsWithJpeg(bytes: Uint8Array): boolean {
-  return JPEG_SIGNATURE.every((byte, index) => bytes[index] === byte);
 }
 
 type OutgoingRequest = Omit<ApiRequest<unknown>, "schema">;
