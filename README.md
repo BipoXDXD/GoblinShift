@@ -28,7 +28,7 @@ docker compose up --build     # postgres, migrate, api, worker, maintenance, ngi
 curl http://localhost/readyz
 ```
 
-A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/docs`, `/openapi.json`, `/livez` e `/readyz` vão para a API, e qualquer outra rota cai no `index.html`. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
+A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/livez` e `/readyz` vão para a API, `robots.txt` e os assets do build são arquivos de verdade (o que faltar é 404), e qualquer outra rota cai no `index.html`. Texto (HTML, CSS, JS, JSON, SVG, manifest) sai com gzip. `/docs` (Swagger UI servido pela própria API, sem CDN e com CSP própria) e `/openapi.json` também vão para a API. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
 
 O OpenObserve fica em `http://127.0.0.1:5080`, com as credenciais do `.env`.
 
