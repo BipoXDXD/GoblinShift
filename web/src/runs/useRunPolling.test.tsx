@@ -59,7 +59,7 @@ function fakeClient(outcomes: readonly (() => Outcome)[]) {
       retryAfterMs: outcome.retryAfterMs,
     });
   };
-  const client: ApiClient = { request };
+  const client: ApiClient = { request, hasSessionCookie: () => true };
   return { client, requestCount: () => served };
 }
 
