@@ -63,7 +63,7 @@ Sem PII: só contagens e bytes.
 - **Execução presa em `stopping`.** O executor não confirmou a parada. Na VPS: `sudo systemctl status goblinshift-executor-ctl` e o log da manutenção (`executor sem inspeção` ou `executor não confirmou a parada`, com o `run_id` e o `attempt_id`). Com o `executor-ctl` de pé, `docker ps --filter name=gs-` mostra o container; a manutenção para e remove sozinha quando o Runner responde. Não apague linhas à mão: a Run termina pela reconciliação.
 - **Limitador de exclusões.** Mais de 500 objetos ou 2 GiB pedidos para exclusão de uma vez. Legítimo depois de um `DELETE /me` grande ou de um dia de muito tráfego vencendo junto: as voltas seguintes terminam o serviço. Suspeito se não houver causa: pare a manutenção (`docker compose stop maintenance`) e investigue antes de deixar apagar.
 - **Exclusão de conta atrasada.** A purga não termina em 20 h, quase sempre porque a conta tem Run não terminal (a purga espera) ou um ciclo de contas falhando (log `ciclo de manutenção falhou` com `cycle = contas`). Resolva antes das 24 h prometidas no aviso de privacidade.
-- **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`, depois que existir) e o disco do storage; se o uso é legítimo, suba o teto do pool global com cuidado com o disco real.
+- **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`; `gs-admin set-limits` ajusta o teto de uma conta) e o disco do storage; se o uso é legítimo, suba o teto do pool global com cuidado com o disco real.
 
 ### Span `attempt`
 

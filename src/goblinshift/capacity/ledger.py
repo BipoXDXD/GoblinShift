@@ -55,6 +55,10 @@ class GlobalCapacityExceededError(Exception):
     """Reserva acima do teto do ambiente: 503 `SERVICE_UNAVAILABLE`, com `Retry-After`."""
 
 
+class StorageBelowReservedError(ValueError):
+    """O teto pedido para a conta é menor do que ela já reservou."""
+
+
 class ReservationNotFoundError(LookupError):
     """O detentor de origem de uma transferência não tem reserva viva."""
 
@@ -315,6 +319,30 @@ def purge_owner(session: Session, owner_id: uuid.UUID) -> None:
         delete(capacity_pool).where(
             capacity_pool.c.scope == _ACCOUNT, capacity_pool.c.owner_id == owner_id
         )
+    )
+
+
+def set_account_storage_max(session: Session, owner_id: uuid.UUID, max_bytes: int | None) -> None:
+    """Muda o teto de armazenamento da conta (`gs-admin set-limits`); `None` volta ao padrão.
+
+    Trava o pool e confere o reservado antes: abaixo dele, levanta `StorageBelowReservedError` sem
+    mudar nada. O pool global não muda; a soma dos tetos das contas pode passar dele de propósito.
+    """
+    target = ACCOUNT_STORAGE_MAX_BYTES if max_bytes is None else max_bytes
+    if target <= 0:
+        raise ValueError(f"o teto precisa ser positivo: {target}")
+    ensure_account_pool(session, owner_id, Resource.STORAGE_BYTES)
+    reserved = session.execute(
+        select(capacity_pool.c.reserved)
+        .where(account_pool(owner_id, Resource.STORAGE_BYTES))
+        .with_for_update()
+    ).scalar_one()
+    if reserved > target:
+        raise StorageBelowReservedError(f"a conta já reservou {reserved} bytes; teto {target}")
+    session.execute(
+        update(capacity_pool)
+        .where(account_pool(owner_id, Resource.STORAGE_BYTES))
+        .values(max_amount=target)
     )
 
 

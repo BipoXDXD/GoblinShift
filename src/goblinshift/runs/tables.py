@@ -1,6 +1,7 @@
 """Tabelas de execuções (docs/GoblinShiftPlan.md, 3.3 a 3.5). A própria `run` é a fila."""
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     DateTime,
@@ -175,4 +176,17 @@ idempotency_record = Table(
     Index(None, "owner_id", "run_id"),
     CheckConstraint("idem_key ~ '^[A-Za-z0-9_-]{16,64}$'", name="idem_key"),
     CheckConstraint("octet_length(command_hash) = 32", name="command_hash"),
+)
+
+# Override das cotas diárias de 1.7 por conta (`gs-admin set-limits`); NULL é "sem override", e
+# vale o padrão das settings. CASCADE: é configuração da conta, sem histórico (migração 0011).
+account_quota = Table(
+    "account_quota",
+    metadata,
+    Column("owner_id", Uuid, ForeignKey("app_user.id", ondelete="CASCADE"), primary_key=True),
+    Column("runs_per_24h", Integer),
+    Column("input_bytes_per_24h", BigInteger),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("runs_per_24h > 0", name="runs_per_24h"),
+    CheckConstraint("input_bytes_per_24h > 0", name="input_bytes_per_24h"),
 )
