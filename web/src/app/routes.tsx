@@ -63,6 +63,13 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         {
+          path: PATHS.apiGuide,
+          lazy: async () => {
+            const { ApiGuidePage } = await import("../account/ApiGuidePage");
+            return { Component: ApiGuidePage };
+          },
+        },
+        {
           path: PATHS.accountDeleted,
           lazy: async () => {
             const { AccountDeletedPage } = await import("../account/AccountDeletedPage");
