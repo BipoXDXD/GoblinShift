@@ -87,7 +87,8 @@ def delete_old_runs(session: Session, now: datetime, limit: int) -> int:
             .with_for_update(skip_locked=True)
         ).scalars()
     )
-    deletable = [run_id for run_id in chosen if run_id not in _waiting_for_discard(session, chosen)]
+    waiting = _waiting_for_discard(session, chosen)
+    deletable = [run_id for run_id in chosen if run_id not in waiting]
     for run_id in deletable:
         # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
         release(session, HolderKind.RUN, run_id)
