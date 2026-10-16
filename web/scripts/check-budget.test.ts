@@ -115,21 +115,21 @@ describe("budgetViolations", () => {
       );
     });
 
-    it("cada GLB até 2048 KB (ADR 030) e a imagem estática até 90 KB", () => {
+    it("cada GLB até 3400 KB (ADR 030) e a imagem estática até 90 KB", () => {
       const within = [
         ...WITHIN,
-        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 2048 * KB),
+        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3400 * KB),
         file("assets/oficina-3d-rubia-640w-x.avif", 90 * KB),
       ];
       expect(budgetViolations(within, INDEX)).toEqual([]);
 
       const over = [
         ...WITHIN,
-        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 2048 * KB + 1),
+        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3400 * KB + 1),
         file("assets/oficina-3d-poster-x.avif", 91 * KB),
       ];
       expect(budgetViolations(over, INDEX)).toEqual([
-        "Modelo 3D (assets/oficina-3d-rubia-x.glb): 2048,0 KB passa do teto de 2048 KB",
+        "Modelo 3D (assets/oficina-3d-rubia-x.glb): 3400,0 KB passa do teto de 3400 KB",
         "Imagem estática do 3D (assets/oficina-3d-poster-x.avif): 91,0 KB passa do teto de 90 KB",
       ]);
     });

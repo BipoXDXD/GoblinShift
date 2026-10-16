@@ -7,7 +7,8 @@
 #     web/src/assets/art/oficina-3d/, com o prefixo que o check-budget reconhece.
 # Os PNGs intermediários ficam numa pasta temporária: os brutos e renders continuam fora do Git.
 #
-# Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/gerar-imagens.sh
+# Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/gerar-imagens.sh [ID...]
+#      Sem ID, gera todas; com IDs do elenco.tsv (como `rubia`), só essas.
 # Requer: blender 5.x, magick, avifenc e cwebp no PATH, e $ARTE/ferramentas/render_glb.py.
 set -euo pipefail
 
@@ -35,10 +36,9 @@ mkdir -p "$art/goblins" "$art/oficina-3d"
 # ficam no mesmo lugar em todas as goblins).
 render_framed() {
   local glb="$1" png="$2"
-  # Modo padrão do render_glb.py (EEVEE, tom AgX do Blender, um sol): é o dos renders que o
-  # usuário aprovou. O --realista usa tom Standard e deixa a pele verde-amarelada (ADR 030).
+  shift 2
   blender -b --factory-startup -P "$render" -- "$glb" "$work/render.png" "$RENDER_PX" \
-    "--yaw=$YAW_DEGREES" >/dev/null 2>&1
+    "--yaw=$YAW_DEGREES" "$@" >/dev/null 2>&1
   magick "$work/render.png" -trim +repage "$work/trim.png"
   local w h side_h side_w
   read -r w h < <(magick identify -format '%w %h\n' "$work/trim.png")
@@ -64,12 +64,28 @@ export_sizes() {
   done
 }
 
+# selected ID [PEDIDOS...]: verdadeiro sem pedidos ou se ID está entre eles.
+selected() {
+  local id="$1" wanted
+  shift
+  (($# == 0)) && return 0
+  for wanted in "$@"; do
+    [[ "$wanted" == "$id" ]] && return 0
+  done
+  return 1
+}
+
 while IFS=$'\t' read -r id glb _; do
   [[ -z "$id" || "$id" == \#* ]] && continue
-  render_framed "$ARTE/aprovados-2026-10-15/$glb" "$work/$id.png"
+  selected "$id" "$@" || continue
   if [[ "$id" == "rubia" ]]; then
+    # A imagem estática da cena usa a luz realista (Cycles, três luzes, tom Standard), a mesma que
+    # a cena do three imita (ADR 030). As goblins dos estados ficam no modo padrão (EEVEE, tom AgX,
+    # um sol), o dos renders que o usuário aprovou para elas.
+    render_framed "$ARTE/$glb" "$work/$id.png" --realista
     export_sizes "$work/$id.png" "$art/oficina-3d/oficina-3d-rubia" "${POSTER_WIDTHS[@]}"
   else
+    render_framed "$ARTE/$glb" "$work/$id.png"
     export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
   fi
   echo "$id: ok"

@@ -22,8 +22,11 @@ const LIMITS_KB = {
   css: 25,
   latinFonts: 100,
   threeDChunk: 300,
-  /** ADR 030: a Rúbia em ~120 mil triângulos, com Meshopt e texturas WebP, mede ~1911 KB. */
-  threeDModel: 2048,
+  /**
+   * ADR 030: a Rúbia de 1 milhão de triângulos reduzida a ~240 mil, com texturas de 2048 px em
+   * WebP e Meshopt, mede 3283 KB; reduzir mais já tirava relevo do rosto.
+   */
+  threeDModel: 3400,
   threeDPoster: 90,
   /** Goblin de um estado, cada arquivo (AVIF ou WebP, 1× ou 2×). */
   illustration: 20,

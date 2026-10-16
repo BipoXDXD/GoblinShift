@@ -81,6 +81,15 @@
       "upstream": "source-001",
       "source_record": "goblinshift-editorial-20261021"
     },
+    "rubia-3d-1m": {
+      "generation_id": "9f030f3c-868c-4e55-a44e-71d6a3323265",
+      "inputs": [
+        "rubia-2d"
+      ],
+      "rights": "rights-001",
+      "upstream": "source-001",
+      "source_record": "goblinshift-editorial-20261021"
+    },
     "b-conceito": {
       "upstream": "ByteDance fonte externa (via fonte externa)",
       "task_id": "a57d10f7-d32c-4395-8e02-89edfb1b2ace",
@@ -515,64 +524,64 @@
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-192w.avif",
-      "sha256": "2cb686219c614aa8a00d55700a4b2bafe1c9169c39f9ec61fb02de481e1bcfbb",
-      "derived_from": "rubia-3d",
+      "sha256": "217c83c2727168cb8cc1506da5eb37b0cc4ed5e8273e562e4d22a1a9ab7469fa",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-192w.webp",
-      "sha256": "425f01ca59bd703a40eb07bb72628c6bed956ea50db64fa489d3ef249244b72d",
-      "derived_from": "rubia-3d",
+      "sha256": "d0659f70fdde244af6ede19a8c251f2024d0c09207fff17162f29f9965d91620",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-384w.avif",
-      "sha256": "291433b22c6e8285f968c54d2e568938f5a4cbddb3d38f38ea548352cb1b000d",
-      "derived_from": "rubia-3d",
+      "sha256": "637cfc596d38691ab8a3c1caa7fdd2d9d7660351cfe3731b17c54ec113f67784",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-384w.webp",
-      "sha256": "68979b492b8d6b57a0d58f49cdbc1e88603b2b5d04b87f97786dca3624ec83ca",
-      "derived_from": "rubia-3d",
+      "sha256": "5cc15c12dee53fd6c7b692f074a25cb57ac626c275e5f65be8d6ca844b7767f5",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-640w.avif",
-      "sha256": "79aa7496abbf3b6d7de225782168b6cc50ea40c7d3978ced8c451ed286017df6",
-      "derived_from": "rubia-3d",
+      "sha256": "1c8046e58aea2fbbc05183b09e5d8ed760155c341dfc3d49d2e082d78270504c",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-640w.webp",
-      "sha256": "ebd21453dfc752159de7750eac7d4775cc38a2365e8259e6a5af1f0c1e15d1dc",
-      "derived_from": "rubia-3d",
+      "sha256": "59b4502658159ce3840aaa1763a70c12e4090b05ea3775dc1811a13c4199cb3c",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia.glb",
-      "sha256": "3bad816c07b6096f9ed22517d0a2a38d471419c6573aa2dbcea4b57c47ead3f4",
-      "derived_from": "rubia-3d",
+      "sha256": "da2469b328419c7298f030aa3e8d4080d4da98d58b4421ebf99fc7c971fd831e",
+      "derived_from": "rubia-3d-1m",
       "human_edits": [
-        "simplificação para ~120 mil triângulos preservando as costuras de UV, texturas de 1024 px em WebP e compressão Meshopt (scripts/arte/otimizar-glb.sh)"
+        "weld, simplificação com atributos (posição, normal e UV; ~240 mil triângulos), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
       ]
     },
     {

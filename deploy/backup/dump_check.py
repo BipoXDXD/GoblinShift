@@ -186,7 +186,7 @@ def _parse_http_date(value: str | None) -> datetime | None:
         return None
     try:
         return parsedate_to_datetime(value.strip())
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
