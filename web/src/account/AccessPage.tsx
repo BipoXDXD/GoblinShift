@@ -7,6 +7,7 @@ import type { Me } from "./api";
 import { ApiKeysSection } from "./ApiKeysSection";
 import { DeleteAccountSection } from "./DeleteAccountSection";
 import { SessionSection } from "./SessionSection";
+import { SignInPrompt } from "./SignInPrompt";
 import { UsageSection } from "./UsageSection";
 import { useMe } from "./useMe";
 
@@ -21,24 +22,28 @@ export function AccessPage({ now }: { readonly now: () => number }): ReactElemen
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <FocusHeading>{T.title}</FocusHeading>
-      <AccessBody me={me.data ?? null} error={me.error} now={now} />
+      <AccessBody me={me.data} error={me.error} now={now} />
     </div>
   );
 }
 
 interface AccessBodyProps {
-  readonly me: Me | null;
+  /** `null` sem sessão; `undefined` carregando ou com falha. */
+  readonly me: Me | null | undefined;
   readonly error: Error | null;
   readonly now: () => number;
 }
 
 function AccessBody({ me, error, now }: AccessBodyProps): ReactElement {
-  if (me === null) {
+  if (me === undefined) {
     return error === null ? (
       <p className="text-fg-muted">{T.loading}</p>
     ) : (
       <FailureNotice error={error} />
     );
+  }
+  if (me === null) {
+    return <SignInPrompt />;
   }
   if (me.via === "api_key") {
     return (

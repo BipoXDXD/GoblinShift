@@ -92,6 +92,7 @@ RUN_OUTPUT_CEILING_BYTES = (
 # Versões que limitam a soma das entradas (o Detox copia cada entrada aceita para a saída).
 _MAX_TOTAL_INPUT_BYTES = "max_total_input_bytes"
 _MIN_RETRY_AFTER = timedelta(seconds=1)
+_NOT_AN_INPUT = "o upload não está entre as entradas da execução"
 _CANONICAL_SEPARATORS = (",", ":")
 
 
@@ -225,6 +226,7 @@ def validate_run(command: RunCommand) -> ValidatedRun:
             [_under("parameters", field_error) for field_error in error.errors]
         ) from None
     _check_input_shape(command.input_upload_ids, recipe.limits["max_inputs"])
+    _check_upload_references(recipe, parameters, command.input_upload_ids)
     return ValidatedRun(recipe, command.input_upload_ids, parameters)
 
 
@@ -292,6 +294,26 @@ def _check_input_shape(upload_ids: Sequence[UUID], max_inputs: int) -> None:
         _refuse("input_upload_ids", "a lista não aceita IDs repetidos")
     if len(upload_ids) > max_inputs:
         _refuse("input_upload_ids", f"a receita aceita no máximo {max_inputs} entradas")
+
+
+def _check_upload_references(
+    recipe: RecipeVersion, parameters: dict[str, object], upload_ids: Sequence[UUID]
+) -> None:
+    """Uploads citados nos parâmetros (o `select` do PDF Press) têm de estar entre as entradas.
+
+    Sem entradas (o `validate_only` não as exige) não há com o que comparar. A recusa é
+    `VALIDATION_FAILED` no campo, nunca 404: não revela se o upload existe (1.6).
+    """
+    if not upload_ids:
+        return
+    known = set(upload_ids)
+    errors = [
+        FieldError(f"parameters.{reference.location}", _NOT_AN_INPUT)
+        for reference in recipe.upload_references(parameters)
+        if reference.upload_id not in known
+    ]
+    if errors:
+        raise InvalidRunCommandError(errors)
 
 
 def _lock_idempotency_key(session: Session, owner_id: UUID, key: str) -> None:

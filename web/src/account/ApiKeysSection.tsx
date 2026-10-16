@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CircleCheck, Clock } from "lucide-react";
 import { useId, useState, type ReactElement } from "react";
+import { Link } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
+import { PATHS } from "../app/paths";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -51,6 +53,11 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
             {T.heading}
           </h2>
           <p className="max-w-prose text-fg-muted">{T.intro}</p>
+          <p>
+            <Link to={PATHS.apiGuide} className="inline-flex min-h-11 items-center font-semibold">
+              {T.guideLink}
+            </Link>
+          </p>
         </div>
         {created !== null && (
           <NewKeyReveal

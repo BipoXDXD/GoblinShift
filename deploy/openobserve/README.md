@@ -65,6 +65,26 @@ Sem PII: só contagens e bytes.
 - **Exclusão de conta atrasada.** A purga não termina em 20 h, quase sempre porque a conta tem Run não terminal (a purga espera) ou um ciclo de contas falhando (log `ciclo de manutenção falhou` com `cycle = contas`). Resolva antes das 24 h prometidas no aviso de privacidade.
 - **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`; `gs-admin set-limits` ajusta o teto de uma conta) e o disco do storage; se o uso é legítimo, suba o teto do pool global com cuidado com o disco real.
 
+### Span `attempt`
+
+O worker emite um span `attempt` por tentativa (`goblinshift.runs.worker.attempt_event`), do início do coordenador até o desfecho, inclusive quando perde o fencing. É raiz do próprio trace e tem um *link* (não é filho) para o span da requisição de aceitação, a partir do `traceparent` gravado na Run; sem `traceparent` válido, fica sem link. Hoje nenhum alerta o lê: é o evento para investigar uma tentativa. Contrato, conferido por `tests/runs/test_attempt_span.py`:
+
+| Atributo | Valor |
+|---|---|
+| `main` | `true` |
+| `run_id`, `attempt_id`, `attempt.number`, `attempt.generation`, `recipe_id`, `recipe_version`, `user.hash` | identificação, sem PII |
+| `attempt.outcome` | estado da Run depois do desfecho (`succeeded`, `running` na retentativa, `failed`, …) ou `lost_fencing` |
+| `error.code` | código do catálogo de 1.6 da Run, ausente sem falha |
+| `executor.exit_code`, `executor.oom_killed`, `executor.timed_out`, `executor.enospc` | como o executor terminou; `enospc` é a saída 6 (disco da área de trabalho cheio, `RESOURCE_LIMIT_EXCEEDED`) |
+| `inspect_ms`, `process_ms`, `package_ms` | fases medidas pelo executor (`telemetry.json`); ausentes se a fase não terminou ou se o arquivo fugiu do schema |
+| `collect_ms`, `publish_ms` | coleta e gravação dos candidatos, e a transação de publicação, medidas pelo worker |
+| `attempt.inputs`, `attempt.outputs`, `attempt.output_bytes`, `attempt.rejected` | entradas, saídas de conteúdo (quantidade e bytes) e rejeições do relatório; nunca nomes |
+| `attempt.rejected.<CODE>` | rejeições por código, um atributo por código do catálogo fechado `ItemRejectionCode` presente no relatório |
+| `queue_wait_ms` | da elegibilidade da Run (`eligible_at`, que na retentativa inclui o jitter) ao início da tentativa, pelo relógio do banco |
+| `attempt.stop_reason` | razão de parada persistida quando a tentativa termina por parada (`CANCELED`, `DEADLINE_EXCEEDED`) |
+| `attempt.cancel_latency_ms` | só no cancelamento: do `cancel_requested_at` até o coordenador confirmar a parada, pelo relógio do banco |
+| `duration_ms` | duração da tentativa no worker |
+
 ### Fora do OpenObserve, por enquanto
 
 | Causa de 3.7 | Onde fica |
