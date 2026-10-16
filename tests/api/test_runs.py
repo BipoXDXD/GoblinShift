@@ -1230,9 +1230,8 @@ def test_listagem_traz_parametros_e_validade_dos_resultados_sem_itens(
 
     assert listed.keys() == RUN_KEYS
     assert listed["parameters"] == {}
-    assert listed["results_expire_at"] == (BASE_TIME + timedelta(hours=48)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    # `publish` vence em BASE_TIME + 48 h, que já passou: nada disponível.
+    assert listed["results_expire_at"] is None
 
 
 def test_resultados_excluidos_deixam_a_validade_nula(
@@ -1277,3 +1276,48 @@ def test_item_mostra_o_nome_original_do_upload(
     [item] = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()["items"]
 
     assert item["original_name"] == "a.txt"
+
+
+def test_resultados_vencidos_deixam_a_validade_nula_antes_da_manutencao(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # `publish` vence em BASE_TIME + 48 h, já passado; a manutenção ainda não marcou nada.
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] is None
+
+
+def test_resultados_dentro_do_prazo_trazem_a_validade(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+    later = datetime(2099, 1, 1, tzinfo=UTC)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).values(expires_at=later))
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] == "2099-01-01T00:00:00Z"
+
+
+def test_contagens_finais_so_aparecem_em_execucao_terminal(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == uuid.UUID(created["id"]))
+            .values(summary={"inputs": 1, "ok": 1, "rejected": 0, "duplicates": 0, "outputs": 1})
+        )
+
+    body = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()
+
+    assert body["summary"] is None
