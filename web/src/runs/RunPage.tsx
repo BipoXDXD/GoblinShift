@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Download } from "lucide-react";
-import { useId, type ReactElement, type ReactNode } from "react";
+import { useId, useRef, type ReactElement, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { z } from "zod";
 
@@ -23,6 +23,7 @@ import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import type { RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
+import { ResultsAvailability } from "./ResultsAvailability";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
@@ -179,6 +180,7 @@ function flavorOf(status: RunStatus): string | null {
 function RunResults({ runId }: { readonly runId: string }): ReactElement {
   const client = useApiClient();
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const results = useQuery({
     queryKey: ["runs", runId, "results"] as const,
     queryFn: ({ signal }) => getRunResults(client, runId, signal),
@@ -186,12 +188,26 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
   });
   return (
     <Card as="section" aria-labelledby={headingId}>
-      <h2 id={headingId} className="mb-6 font-display text-xl font-semibold text-fg">
+      {/* tabIndex -1: recebe o foco quando Excluir resultados some com ele. */}
+      <h2
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="mb-6 font-display text-xl font-semibold text-fg"
+      >
         {T.results.heading}
       </h2>
       {results.isPending && <p className="text-fg-muted">{T.results.loading}</p>}
       {results.error !== null && <ProblemAlert failure={failureOf(results.error)} />}
-      {results.data !== undefined && <ResultFiles results={results.data} />}
+      {results.data !== undefined && (
+        <ResultsAvailability
+          runId={runId}
+          results={results.data}
+          onDeleted={() => heading.current?.focus()}
+        >
+          <ResultFiles results={results.data} />
+        </ResultsAvailability>
+      )}
     </Card>
   );
 }

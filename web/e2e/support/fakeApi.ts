@@ -152,6 +152,9 @@ class FakeState {
   readonly uploads = new Map<string, StoredUpload>();
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
+  /** Execução de cada artefato publicado, para a disponibilidade e a exclusão das saídas. */
+  readonly artifactRuns = new Map<string, { runId: string; role: ArtifactReference["role"] }>();
+  readonly runsWithoutOutputs = new Set<string>();
   readonly unhandled: string[] = [];
   readonly #artifactsDir: string;
 
@@ -179,6 +182,10 @@ class FakeState {
       await this.pollRun(route, id);
     } else if (method === "GET" && resource === "runs" && id && action === "results") {
       await this.results(route, id);
+    } else if (method === "DELETE" && resource === "runs" && id && action === "artifacts") {
+      await this.deleteRunArtifacts(route, id);
+    } else if (method === "GET" && resource === "artifacts" && id && segments.length === 2) {
+      await this.artifactDetails(route, id);
     } else if (method === "GET" && resource === "artifacts" && id && action === "download") {
       // O Chromium cancela download vindo do route.fulfill: segue para o servidor local, que
       // entrega o que publishArtifacts gravou (e2e/server/serve-dist.ts).
@@ -301,6 +308,36 @@ class FakeState {
     await fulfillJson(route, stored.run, { status: 200, headers });
   }
 
+  /** Como a API: 404 sem a execução, 409 antes do fim, 202 (também ao repetir) depois. */
+  private async deleteRunArtifacts(route: Route, id: string): Promise<void> {
+    const stored = this.runs.get(id);
+    if (stored === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    } else if (!isTerminal(stored.run)) {
+      await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
+    } else {
+      this.runsWithoutOutputs.add(id);
+      await route.fulfill({ status: 202 });
+    }
+  }
+
+  private async artifactDetails(route: Route, id: string): Promise<void> {
+    const published = this.artifactRuns.get(id);
+    if (published === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    const details: Schemas["ArtifactDetails"] = {
+      id,
+      role: published.role,
+      size: 0,
+      sha256: "0".repeat(64),
+      expires_at: LATER,
+      availability: this.runsWithoutOutputs.has(published.runId) ? "deleted" : "available",
+    };
+    await fulfillJson(route, details, { status: 200 });
+  }
+
   private async results(route: Route, id: string): Promise<void> {
     const stored = this.runs.get(id);
     if (stored === undefined) {
@@ -333,6 +370,7 @@ class FakeState {
     ];
     return files.map(({ role, name, body }) => {
       const artifactId = randomUUID();
+      this.artifactRuns.set(artifactId, { runId: stored.run.id, role });
       writeArtifact(this.#artifactsDir, artifactId, {
         fileName: name,
         body,
