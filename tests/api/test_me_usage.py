@@ -9,10 +9,15 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.capacity import set_account_storage_max
+from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.acceptance import RUN_OUTPUT_CEILING_BYTES
+from goblinshift.runs.quotas import set_account_quota
 from goblinshift.runs.store import db_now
+from goblinshift.runs.tables import attempt
 from tests.api.files_support import create_upload, new_account, send_content
 from tests.runs.support import insert_finished_run
 
@@ -41,6 +46,7 @@ USAGE_KEYS = {
     "storage_reserved_bytes",
     "active_run_id",
     "daily_quota_resets_at",
+    "executor_ms_last_24h",
 }
 
 
@@ -89,6 +95,7 @@ def test_conta_nova_tem_limites_de_1_7_e_consumo_zero(
         "storage_reserved_bytes": 0,
         "active_run_id": None,
         "daily_quota_resets_at": None,
+        "executor_ms_last_24h": 0,
     }
 
 
@@ -141,6 +148,49 @@ def test_consumo_de_outra_conta_nao_aparece(
         "storage_reserved_bytes": 0,
         "active_run_id": None,
         "daily_quota_resets_at": None,
+        "executor_ms_last_24h": 0,
     }
     assert str(other_owner) not in response.text
     assert other_upload not in response.text
+
+
+def test_override_da_conta_aparece_nos_limites(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    with unit_of_work(factory) as session:
+        set_account_quota(session, owner, runs_per_24h=5, input_bytes_per_24h=None)
+        set_account_storage_max(session, owner, 8 * MIB)
+
+    limits = client.get(ME, headers=auth).json()["limits"]
+
+    assert (limits["runs_per_24h"], limits["input_bytes_per_24h"], limits["storage_bytes"]) == (
+        5,
+        2 * GIB,
+        8 * MIB,
+    )
+
+
+def test_tempo_de_executor_da_conta_aparece_no_consumo(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    with factory() as session:
+        now = db_now(session)
+    run_id = insert_finished_run(factory, owner, now - timedelta(hours=1))
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(attempt).values(
+                run_id=run_id,
+                number=1,
+                generation=1,
+                container_name=f"gs-{uuid.uuid4()}",
+                lease_expires_at=now,
+                executor_started_at=now - timedelta(minutes=50),
+                ended_at=now - timedelta(minutes=48),
+            )
+        )
+
+    usage = client.get(ME, headers=auth).json()["usage"]
+
+    assert usage["executor_ms_last_24h"] == 2 * 60_000
