@@ -2,7 +2,7 @@ import { CircleAlert } from "lucide-react";
 import type { ReactElement } from "react";
 import { Link, Navigate, NavLink, Outlet, useLocation, useSearchParams } from "react-router";
 
-import { LOGIN_ERROR_PARAM, safeReturnTo } from "../account/signIn";
+import { LOGIN_ERROR_PARAM, loginRefFrom, safeReturnTo } from "../account/signIn";
 import { isSignedOut, useMe } from "../account/useMe";
 import type { SiteNotice } from "../notice/notice";
 import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
@@ -135,19 +135,27 @@ function TermsGate(): ReactElement {
   return <Outlet />;
 }
 
-/** O servidor volta para `/?login_error=failed` em toda recusa, sem dizer o motivo (auth_login.py). */
+/**
+ * O servidor volta para `/?login_error=failed#ref=<request_id>` em toda recusa, sem dizer o motivo
+ * (auth_login.py). O código serve para a pessoa citar no pedido de suporte ou no recurso.
+ */
 function LoginFailedAlert(): ReactElement | null {
   const [params] = useSearchParams();
+  const { hash } = useLocation();
   if (params.get(LOGIN_ERROR_PARAM) !== LOGIN_FAILED) {
     return null;
   }
+  const ref = loginRefFrom(hash);
   return (
     <div
       role="alert"
       className="mb-8 flex gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg"
     >
       <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
-      <p className="max-w-prose font-semibold">{TEXT.account.signIn.failed}</p>
+      <div className="flex max-w-prose flex-col gap-1">
+        <p className="font-semibold">{TEXT.account.signIn.failed}</p>
+        {ref !== null && <p className="font-mono text-sm">{TEXT.failure.requestId(ref)}</p>}
+      </div>
     </div>
   );
 }

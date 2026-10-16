@@ -38,9 +38,17 @@ class LoginRefused(Enum):
     DELETION_REQUESTED = auto()
 
 
+@dataclass(frozen=True)
+class LoginRefusal:
+    """Recusa com a conta que a provocou: o servidor a audita, o navegador nunca a vê."""
+
+    account_id: UUID
+    reason: LoginRefused
+
+
 def resolve_login(
     session: Session, identity: ExternalIdentity, *, signup_open: bool, now: datetime
-) -> UUID | LoginRefused:
+) -> UUID | LoginRefusal:
     """Cria ou atualiza a conta da identidade e decide se o login pode seguir.
 
     Um único `INSERT ... ON CONFLICT` cria a conta ou atualiza o nome de exibição, sem
@@ -64,11 +72,11 @@ def resolve_login(
         .returning(app_user.c.id, app_user.c.status, app_user.c.deletion_requested_at)
     )
     account = session.execute(statement).one()
-    if account.deletion_requested_at is not None:
-        return LoginRefused.DELETION_REQUESTED
-    if account.status == BLOCKED_STATUS:
-        return _blocked_reason(session, account.id)
     user_id: UUID = account.id
+    if account.deletion_requested_at is not None:
+        return LoginRefusal(user_id, LoginRefused.DELETION_REQUESTED)
+    if account.status == BLOCKED_STATUS:
+        return LoginRefusal(user_id, _blocked_reason(session, user_id))
     return user_id
 
 
