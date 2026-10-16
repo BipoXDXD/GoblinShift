@@ -45,6 +45,7 @@ describe("título da aba e indexação", () => {
     ["/historico", "Histórico · GoblinShift"],
     ["/entrar", "Entrar · GoblinShift"],
     ["/acesso", "Acesso · GoblinShift"],
+    ["/acesso/guia-da-api", "Usar a API com chave · GoblinShift"],
     ["/termos", "Termos de Uso · GoblinShift"],
     ["/privacidade", "Aviso de Privacidade · GoblinShift"],
     ["/creditos", "Créditos · GoblinShift"],
