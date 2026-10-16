@@ -255,22 +255,6 @@
       "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r6-frontal/g-sininho"
     },
-    "lua-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
-      "task_id": "373b2218-8e57-4549-a91a-10b11b3a2748",
-      "inputs": ["g-frontal", "ref-01-frente"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "tripo/r9-teste/g-sininho"
-    },
-    "lua-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
-      "generation_id": "81ae6621-dbb6-48b0-acb0-04918bfdb393",
-      "url": "https://hyper3d.ai/workspace/rodin/81ae6621-dbb6-48b0-acb0-04918bfdb393",
-      "inputs": ["lua-2d"],
-      "rights": "rodin-plano-pago"
-    },
     "rubia-render-ancora": {
       "tool": "Blender 5.2 (render_glb.py), render local",
       "inputs": ["rubia-3d"],
@@ -602,86 +586,6 @@
       "file": "goblins/jade-768w.webp",
       "sha256": "0820be44d622aac52c06c0cd9d0e0f6a77a7f5d7ebb05c34cb6c0fa3434ca68d",
       "derived_from": "jade-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-256w.avif",
-      "sha256": "cd42227b0d8d21701d8354b502f6e1c34ce4ed057831816ddc6a29a132925fd2",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-256w.webp",
-      "sha256": "b845390cfb42d0c5f1e2abf901422a1eaaf48e009a7b7ae0981b02b776ae0793",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-384w.avif",
-      "sha256": "69148e09d4b4042976a2029b2575b0a3acdd043926d09149d29c5933a1fadb11",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-384w.webp",
-      "sha256": "1a2b12edefdb05aac92b66060ad3f1e0e318bafbcfb4bd8fe5062b9659389f3a",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-512w.avif",
-      "sha256": "c37af86da5da903359b295c0ff532b60e094eee2a3e8796be19dc55d1413d566",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-512w.webp",
-      "sha256": "18f3cc5e7927426552485f8bd143c252dccce2ef7b229f21a409d2df0220e895",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-768w.avif",
-      "sha256": "e7d8a766fd74e9598f1b6679b00a93606b1420a79f5c9598eb11ca509324c202",
-      "derived_from": "lua-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "goblins/lua-768w.webp",
-      "sha256": "97010925718f80e6bac9b7b9d5c9b8d41d3939e5dfd49625400e8ddc75878d08",
-      "derived_from": "lua-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"

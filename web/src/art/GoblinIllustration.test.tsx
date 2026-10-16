@@ -13,21 +13,20 @@ import {
 const KEYS = Array.from({ length: 200 }, (_, index) => `chave-${String(index)}`);
 
 describe("goblinsOf", () => {
-  it("cada estado tem as suas goblins, e as seis aparecem uma vez só", () => {
+  it("cada estado tem as suas goblins, e as cinco aparecem uma vez só", () => {
     const names = GOBLIN_STATES.map((state) => goblinsOf(state).map((goblin) => goblin.name));
 
-    expect(names).toEqual([["Lua", "Jade"], ["Rúbia", "Fagulha"], ["Nyx"], ["Ferrugem"]]);
+    expect(names).toEqual([["Jade"], ["Rúbia", "Fagulha"], ["Nyx"], ["Ferrugem"]]);
   });
 });
 
 describe("CAST", () => {
-  it("o elenco tem as seis goblins publicadas, sem a Ada", () => {
+  it("o elenco tem as cinco goblins publicadas, sem a Ada nem a Lua", () => {
     expect(CAST.map((goblin) => goblin.name)).toEqual([
       "Rúbia",
       "Fagulha",
       "Ferrugem",
       "Jade",
-      "Lua",
       "Nyx",
     ]);
   });
@@ -40,35 +39,35 @@ describe("goblinOf (rotação estável)", () => {
     }
   });
 
-  it.each<[GoblinState, string[]]>([
-    ["vazio", ["Jade", "Lua"]],
-    ["carregando", ["Fagulha", "Rúbia"]],
-  ])("no estado %s, chaves diferentes alternam entre %j", (state, expected) => {
-    const counts = new Map<string, number>();
-    for (const key of KEYS) {
-      const { name } = goblinOf(state, key);
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
+  it.each<[GoblinState, string[]]>([["carregando", ["Fagulha", "Rúbia"]]])(
+    "no estado %s, chaves diferentes alternam entre %j",
+    (state, expected) => {
+      const counts = new Map<string, number>();
+      for (const key of KEYS) {
+        const { name } = goblinOf(state, key);
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
 
-    expect([...counts.keys()].sort()).toEqual(expected);
-    // Nenhuma das duas fica com menos de um terço: a rotação não pende para um lado.
-    for (const count of counts.values()) {
-      expect(count).toBeGreaterThan(KEYS.length / 3);
-    }
-  });
+      expect([...counts.keys()].sort()).toEqual(expected);
+      // Nenhuma das duas fica com menos de um terço: a rotação não pende para um lado.
+      for (const count of counts.values()) {
+        expect(count).toBeGreaterThan(KEYS.length / 3);
+      }
+    },
+  );
 
   it("estado com uma goblin só ignora a chave", () => {
     expect(new Set(KEYS.map((key) => goblinOf("erro", key).name))).toEqual(new Set(["Nyx"]));
   });
 
   it("chave vazia ainda escolhe uma goblin do estado", () => {
-    expect(["Lua", "Jade"]).toContain(goblinOf("vazio", "").name);
+    expect(goblinOf("vazio", "").name).toBe("Jade");
   });
 });
 
 describe("GoblinIllustration", () => {
   it.each<[GoblinState, RegExp]>([
-    ["vazio", /^(Lua|Jade), /],
+    ["vazio", /^Jade, /],
     ["carregando", /^(Rúbia|Fagulha), /],
     ["erro", /^Nyx, /],
     ["sucesso", /^Ferrugem, /],

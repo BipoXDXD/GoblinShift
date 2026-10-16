@@ -121,7 +121,6 @@ test("Créditos: as seis goblins do elenco, com nome e imagem carregada", async 
     "Fagulha",
     "Ferrugem",
     "Jade",
-    "Lua",
     "Nyx",
   ]);
   for (const image of await cast.locator("img").all()) {

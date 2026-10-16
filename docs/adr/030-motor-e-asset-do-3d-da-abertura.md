@@ -72,7 +72,7 @@ A textura pesa: na Rúbia antiga, sem mudar a malha, 2048 px em vez de 1024 px b
 
    | Estado | Goblins | Onde aparece |
    |---|---|---|
-   | Vazio | Lua (calma, sininho) e Jade (casual, de jeans) | Bancada sem arquivos; Histórico vazio |
+   | Vazio | Jade (casual, de jeans; a Lua saiu em 2026-10-16, por decisão do usuário) | Bancada sem arquivos; Histórico vazio |
    | Carregando | Rúbia (a mascote da oficina, mesmo render da imagem estática da abertura) e Fagulha (couro e luvas de oficina) | Execução na fila, em andamento ou cancelando |
    | Erro | Nyx (sombria) | Execução que falhou; página não encontrada |
    | Sucesso | Ferrugem (a mais expansiva) | Execução concluída, com ou sem avisos |

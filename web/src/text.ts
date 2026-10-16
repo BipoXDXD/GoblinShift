@@ -119,7 +119,6 @@ export const TEXT = {
         name: "Rúbia",
         alt: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
       },
-      lua: { name: "Lua", alt: "Lua, goblin de cabelo preto, com um sininho dourado no pescoço." },
       nyx: { name: "Nyx", alt: "Nyx, goblin de cabelo preto com pontas rosa e vestido preto." },
       ferrugem: {
         name: "Ferrugem",

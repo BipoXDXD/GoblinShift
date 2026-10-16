@@ -56,21 +56,20 @@ const GOBLINS: Readonly<Record<GoblinId, Goblin>> = {
   fagulha: goblinFrom("fagulha"),
   ferrugem: goblinFrom("ferrugem"),
   jade: goblinFrom("jade"),
-  lua: goblinFrom("lua"),
   nyx: goblinFrom("nyx"),
 };
 
-/** As seis goblins publicadas, para quem as apresenta todas (créditos). */
+/** As cinco goblins publicadas, para quem as apresenta todas (créditos). */
 export const CAST: readonly Goblin[] = Object.values(GOBLINS);
 
 /**
- * As goblins de cada estado (ADR 030): a Lua e a Jade, tranquilas, esperam no vazio; a Rúbia,
+ * As goblins de cada estado (ADR 030): a Jade, tranquila, espera no vazio; a Rúbia,
  * mascote da oficina, e a Fagulha, de couro e luvas de trabalho, trabalham enquanto carrega; a
  * Nyx, sombria, acompanha o erro; a Ferrugem, a mais expansiva, comemora o sucesso. A Ada saiu do
- * site em 2026-10-15, por decisão do usuário.
+ * site em 2026-10-15 e a Lua em 2026-10-16, por decisão do usuário.
  */
 const GOBLINS_OF_STATE: Readonly<Record<GoblinState, readonly [GoblinId, ...GoblinId[]]>> = {
-  vazio: ["lua", "jade"],
+  vazio: ["jade"],
   carregando: ["rubia", "fagulha"],
   erro: ["nyx"],
   sucesso: ["ferrugem"],
