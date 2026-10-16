@@ -1125,7 +1125,11 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
         "counts": {"records_read": 2},
         "duplicate_of": None,
         "formula_cells": {
-            "columns": [{"name": "valor", "cells": 3}, {"name": "<b>conta</b>", "cells": 1}],
+            "columns": [
+                {"name": "valor", "cells": 3},
+                {"name": "<b>conta</b>", "cells": 1},
+                {"name": None, "cells": 1},
+            ],
             "more_columns": 2,
         },
     }
@@ -1161,9 +1165,14 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": ["IMAGE_P3_CONVERTED"],
             "counts": {"records_read": 2},
             "duplicate_of": None,
-            # Nome de coluna é dado do usuário: sai como texto, sem escapar nem interpretar.
+            # Nome de coluna é dado do usuário: sai como texto, sem escapar nem interpretar; a
+            # coluna de cabeçalho vazio sai com nome nulo, sem sumir com a contagem.
             "formula_cells": {
-                "columns": [{"name": "valor", "cells": 3}, {"name": "<b>conta</b>", "cells": 1}],
+                "columns": [
+                    {"name": "valor", "cells": 3},
+                    {"name": "<b>conta</b>", "cells": 1},
+                    {"name": None, "cells": 1},
+                ],
                 "more_columns": 2,
             },
         },

@@ -589,6 +589,17 @@ def test_contagem_por_coluna_do_aviso_de_formula_e_coletada_com_teto(tmp_path: P
     assert collected.report.items[0].formula_cells == FormulaCells(expected, 1)
 
 
+def test_coluna_de_cabecalho_vazio_e_coletada_sem_nome(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [formula_warning([{"name": "", "cells": 2}])]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].formula_cells == FormulaCells((ColumnCells(None, 2),), 0)
+
+
 def test_aviso_de_formula_sem_colunas_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
     out = tmp_path / "out"
     write_out(out, [ok_item(0, "a.csv", warnings=1)], {"a.csv": b"1"})
@@ -607,7 +618,7 @@ def test_aviso_de_formula_sem_colunas_do_executor_anterior_e_aceito(tmp_path: Pa
         pytest.param([], id="vazia"),
         pytest.param(["a"], id="coluna-nao-objeto"),
         pytest.param([{"name": 1, "cells": 1}], id="nome-nao-texto"),
-        pytest.param([{"name": "", "cells": 1}], id="nome-vazio"),
+        pytest.param([{"cells": 1}], id="sem-nome"),
         pytest.param([{"name": "a", "cells": 0}], id="zero-celulas"),
         pytest.param([{"name": "a", "cells": "1"}], id="celulas-texto"),
         pytest.param([{"name": "a", "cells": True}], id="celulas-booleano"),

@@ -86,7 +86,8 @@ const countsSchema = z
  */
 const formulaCellsSchema = z
   .object({
-    columns: z.array(z.object({ name: z.string(), cells: z.number().int() })),
+    /** `name` nulo: cabeçalho vazio ou só de espaços; a tela dá o rótulo. */
+    columns: z.array(z.object({ name: z.string().nullable(), cells: z.number().int() })),
     more_columns: z.number().int(),
   })
   .nullable()

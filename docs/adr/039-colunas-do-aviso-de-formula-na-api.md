@@ -11,11 +11,11 @@ O plano (1.3) pede que o aviso de células que parecem fórmula informe a contag
 ## Decisão
 
 - **Relatório:** `ReportWarning.columns` com `(nome, células)` de todas as colunas de saída, na ordem da saída. Só o aviso `CSV_FORMULA_CELLS` o preenche. No `report.json` ele vira `"columns": [{"name", "cells"}]`, sem mudar a `schema_version`, e o aviso sem colunas continua aceito (executor anterior).
-- **Coleta e banco:** a coleta confere a forma (lista não vazia, nome texto não vazio, células inteiras ≥ 1) e guarda em `run_input.details.formula_cells` as **10** colunas de maior contagem (no empate, vale a ordem da saída) e `more_columns`, o número de colunas que ficaram de fora. O nome é cortado em **120** caracteres com `…`, e controle ou formato invisível (Cc, Cf) vira U+FFFD: o JSONB recusa NUL, e bidi disfarça o texto exibido.
+- **Coleta e banco:** a coleta confere a forma (lista não vazia, nome texto não vazio, células inteiras ≥ 1) e guarda em `run_input.details.formula_cells` as **10** colunas de maior contagem (no empate, vale a ordem da saída) e `more_columns`, o número de colunas que ficaram de fora. O nome é cortado em **120** caracteres com `…`, e controle ou formato invisível (Cc, Cf) vira U+FFFD: o JSONB recusa NUL, e bidi disfarça o texto exibido. Cabeçalho vazio ou só de espaços vira **nome nulo**, em vez de derrubar a contagem inteira. O relatório não traz a posição da coluna, e um rótulo em texto como "(sem nome)" colidiria com uma coluna real de mesmo nome.
 - **API:** `RunItemResponse.formula_cells` (aditivo), `null` sem o aviso. Os tetos aparecem na spec (`maxItems`, `maxLength`, `minimum`). A leitura do banco é tolerante: o que não tiver a forma esperada vira `null`.
 - **Exceção registrada:** nomes de coluna são o único texto do arquivo no detalhe da Run. Valores de célula continuam fora.
 - **Retenção:** some com `run_input.details` aos 30 dias, como avisos e contagens.
-- **Web:** mostra o nome como texto (React, nunca HTML), cortado em 40 caracteres na tela, com a nota sobre o `-`.
+- **Web:** mostra o nome como texto (React, nunca HTML), cortado em 40 caracteres na tela, com a nota sobre o `-`. O nome nulo aparece como *coluna sem nome*, em itálico: o rótulo é da interface e não se confunde com um nome vindo do arquivo.
 
 ## Alternativas descartadas
 
@@ -33,6 +33,6 @@ O plano (1.3) pede que o aviso de células que parecem fórmula informe a contag
 
 ## Como verificar
 
-- `tests/runs/test_formula_cells.py` (ordem, tetos, substituição e leitura tolerante), `tests/runs/test_collection.py` (forma e executor anterior), `tests/runs/test_worker_flow.py` (gravado sem valor de célula).
+- `tests/runs/test_formula_cells.py` (ordem, tetos, substituição, coluna sem nome e leitura tolerante), `tests/runs/test_collection.py` (forma e executor anterior), `tests/runs/test_worker_flow.py` (gravado sem valor de célula).
 - `tests/processing/test_csv_janitor_recipe.py` e `tests/processing/test_report_file.py` (relatório), `tests/api/test_runs.py` e `tests/test_openapi_limits.py` (contrato).
-- `web/src/runs/RunItems.test.tsx` (texto, corte e nota).
+- `web/src/runs/RunItems.test.tsx` (texto, corte, coluna sem nome e nota).

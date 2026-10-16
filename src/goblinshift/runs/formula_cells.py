@@ -4,7 +4,8 @@ O relatório traz todas as colunas de saída com células que parecem fórmula; 
 `MAX_COLUMNS` de maior contagem (empate na ordem da saída) e quantas ficaram de fora. O nome da
 coluna é dado do usuário: fica como texto, com teto de `MAX_COLUMN_NAME_CHARS` caracteres e sem
 controle nem formato invisível (o JSONB do PostgreSQL recusa NUL, e bidi disfarça o texto
-exibido). Some com `run_input.details` na retenção de 30 dias.
+exibido). Cabeçalho vazio ou só de espaços vira nome nulo. Some com `run_input.details` na
+retenção de 30 dias.
 """
 
 from collections.abc import Iterable
@@ -21,7 +22,9 @@ _REPLACEMENT = "\ufffd"  # U+FFFD, o caractere de substituição
 
 @dataclass(frozen=True)
 class ColumnCells:
-    name: str
+    # `None` para cabeçalho vazio ou só de espaços: a tela dá o rótulo, que nunca colide com um
+    # nome real, e a contagem da coluna não some.
+    name: str | None
     cells: int
 
 
@@ -61,7 +64,9 @@ class FormulaCells:
         }
 
 
-def _display_name(name: str) -> str:
+def _display_name(name: str) -> str | None:
+    if not name.strip():
+        return None
     safe = "".join(_REPLACEMENT if has_unsafe_char(char) else char for char in name)
     if len(safe) <= MAX_COLUMN_NAME_CHARS:
         return safe
@@ -72,9 +77,13 @@ def _stored_column(raw: object) -> ColumnCells | None:
     if not isinstance(raw, dict):
         return None
     name, cells = raw.get("name"), raw.get("cells")
-    if not isinstance(name, str) or not 0 < len(name) <= MAX_COLUMN_NAME_CHARS:
+    if name is not None and not _is_stored_name(name):
         return None
     return ColumnCells(name, cells) if _is_count(cells, minimum=1) else None
+
+
+def _is_stored_name(name: object) -> bool:
+    return isinstance(name, str) and bool(name.strip()) and len(name) <= MAX_COLUMN_NAME_CHARS
 
 
 def _is_count(value: object, *, minimum: int) -> TypeIs[int]:

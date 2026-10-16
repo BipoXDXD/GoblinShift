@@ -286,7 +286,8 @@ export const TEXT = {
       },
       formulaCells: {
         columnsLabel: "Células que parecem fórmulas, por coluna",
-        column: (name: string, cells: string) => `${name}: ${cells}`,
+        cellsOf: (cells: string) => `: ${cells}`,
+        unnamedColumn: "coluna sem nome",
         cells: ["célula", "células"],
         more: (columns: string) => `e mais ${columns}.`,
         columns: ["coluna", "colunas"],

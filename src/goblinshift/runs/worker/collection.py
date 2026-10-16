@@ -561,7 +561,10 @@ def _formula_columns(raw: object) -> list[tuple[str, int]]:
     parsed = []
     for column in columns:
         entry = _mapping(column, "item.warnings[].columns[]")
-        name = _text(entry.get("name"), "item.warnings[].columns[].name")
+        # Vazio é aceito: a coluna de cabeçalho vazio também tem contagem (`FormulaCells.of`).
+        name = entry.get("name")
+        if not isinstance(name, str):
+            raise CollectionError("item.warnings[].columns[].name deve ser texto")
         cells = _int(entry.get("cells"), "item.warnings[].columns[].cells")
         if cells < 1:
             raise CollectionError("item.warnings[].columns[].cells abaixo de 1")
