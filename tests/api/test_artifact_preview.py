@@ -5,12 +5,12 @@ import uuid
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.tables import artifact
+from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
-from tests.api.files_support import new_account, open_uses, publish
+from tests.api.files_support import new_account, open_uses, publish, storage_of
 from tests.api.support import assert_problem
 
 pytestmark = pytest.mark.integration
@@ -162,4 +162,25 @@ def test_vencido_antes_de_a_manutencao_marcar_responde_410(
 
     assert_problem(response, 410, "GONE")
     assert b"jpeg" not in response.content
+    assert open_uses(factory) == 0
+
+
+def test_preview_sumido_do_disco_responde_410_e_fica_missing_sem_afetar_a_origem(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with factory() as session:
+        key = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == preview)
+        ).scalar_one()
+    storage_of(app).delete(key)
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    assert client.get(f"{ARTIFACTS}/{preview}", headers=auth).json()["availability"] == "missing"
+    assert client.get(f"{ARTIFACTS}/{source}", headers=auth).json()["availability"] == "available"
     assert open_uses(factory) == 0

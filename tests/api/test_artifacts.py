@@ -61,6 +61,16 @@ def storage_key_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> st
     return key
 
 
+def object_state_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> str:
+    with factory() as session:
+        state: str = session.execute(
+            select(stored_object.c.state)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == artifact_id)
+        ).scalar_one()
+    return state
+
+
 # --- Metadados --------------------------------------------------------------------------------
 
 
@@ -203,6 +213,23 @@ def test_arquivo_sumido_do_disco_responde_410_e_libera_tudo(
 
     assert_problem(response, 410, "GONE")
     assert key not in response.text
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
+
+
+def test_arquivo_sumido_no_download_fica_missing_e_o_proximo_download_tambem_responde_410(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    storage_of(app).delete(storage_key_of(factory, artifact_id))
+    client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    metadata = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth)
+    again = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert metadata.json()["availability"] == "missing"
+    assert object_state_of(factory, artifact_id) == "missing"
+    assert_problem(again, 410, "GONE")
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 
