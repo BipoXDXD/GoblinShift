@@ -30,7 +30,7 @@ export const test = base.extend<Fixtures & Options>({
           ? null
           : await installFakeApi(context, E2E.apiKey, E2E.artifactsDir);
       if (auth === "api-key" && E2E.hasAccount) {
-        await injectApiKey(context, E2E.apiKey);
+        await injectApiKey(context, E2E.apiKey, E2E.baseUrl);
       }
       await use(fake);
       // Pedido que a API falsa não conhece é rota nova na interface sem cobertura aqui.

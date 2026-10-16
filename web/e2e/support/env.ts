@@ -11,6 +11,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const PRODUCTION_ORIGIN = "https://goblinshift.dev";
+
 // Outra porta (E2E_PORT) deixa o sabotage.ts subir um servidor próprio ao lado do de sempre.
 const LOCAL_PORT = Number(process.env["E2E_PORT"] ?? "4173");
 
@@ -47,6 +49,10 @@ function readEnv(): E2EEnv {
   const apiKey = process.env["GS_E2E_API_KEY"] ?? "";
   if (apiKey === "" && !vps) {
     throw new Error("E2E_BASE_URL exige GS_E2E_API_KEY com a chave da conta de teste.");
+  }
+  // A chave da conta de teste da VPS só vai para a produção, nunca para um host apontado à mão.
+  if (vps && apiKey !== "" && new URL(remoteUrl).origin !== PRODUCTION_ORIGIN) {
+    throw new Error(`Com chave, E2E_VPS=1 só roda contra ${PRODUCTION_ORIGIN}.`);
   }
   return {
     baseUrl: remoteUrl,

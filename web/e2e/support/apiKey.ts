@@ -8,11 +8,18 @@ import type { BrowserContext } from "@playwright/test";
  * Registrada depois da API falsa, roda antes dela (o Playwright chama a última rota primeiro) e
  * passa o pedido adiante com `fallback`: para a API falsa no modo local e para a rede no remoto.
  *
+ * A rota cobre só a origem de `baseUrl` (env.ts), que no modo VPS com chave é a produção.
+ *
  * Com a sessão no cookie (a spec entrou pelo login), a chave fica de fora: a API recusa as duas
  * credenciais juntas, e um navegador de verdade só tem uma.
  */
-export async function injectApiKey(context: BrowserContext, apiKey: string): Promise<void> {
-  await context.route("**/api/v1/**", async (route) => {
+export async function injectApiKey(
+  context: BrowserContext,
+  apiKey: string,
+  baseUrl: string,
+): Promise<void> {
+  // Só a origem configurada: um pedido da página a outro host nunca leva a chave.
+  await context.route(`${new URL(baseUrl).origin}/api/v1/**`, async (route) => {
     const request = route.request();
     const cookies = (await request.headerValue("cookie")) ?? "";
     if (SESSION_COOKIE.test(cookies)) {

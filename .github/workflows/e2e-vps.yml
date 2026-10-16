@@ -5,23 +5,16 @@ name: Jornadas na VPS
 # site no ar, no Chromium e no Firefox. Só GET: nada muda na conta nem no servidor.
 #
 # Sem conta, rodam as jornadas anônimas. Com o secret E2E_VPS_API_KEY no environment production
-# (chave com runs:read e files:read de uma conta de teste que já aceitou os termos), rodam também
-# as que leem dados da conta; com o secret vazio, elas são puladas e o motivo fica no resumo.
+# (chave só com runs:read e files:read, de uma conta de teste que já aceitou os termos), rodam
+# também as que leem dados da conta; com o secret vazio, elas são puladas e o motivo fica no resumo.
+#
+# A chave só vai para a produção: a URL é fixa aqui, sem input de quem dispara (um input livre
+# mandaria a chave para qualquer host), e o injectApiKey recusa outra origem. Na falha, sobe só o
+# relatório HTML, sem traces nem test-results, que guardam os cabeçalhos com a chave.
 
 on:
   workflow_dispatch:
-    inputs:
-      base_url:
-        description: Endereço do site
-        default: https://goblinshift.dev
-        required: true
-        type: string
   workflow_call:
-    inputs:
-      base_url:
-        default: https://goblinshift.dev
-        required: false
-        type: string
     secrets:
       E2E_VPS_API_KEY:
         required: false
@@ -41,7 +34,7 @@ jobs:
     environment: production
     timeout-minutes: 15
     env:
-      BASE_URL: ${{ inputs.base_url }}
+      BASE_URL: https://goblinshift.dev
     steps:
       - uses: actions/checkout@v7
       - name: Borda da SPA (cabeçalhos, cache, 404 e tipos)
@@ -69,16 +62,15 @@ jobs:
         working-directory: web
         env:
           E2E_VPS: "1"
-          E2E_BASE_URL: ${{ inputs.base_url }}
+          E2E_BASE_URL: https://goblinshift.dev
           GS_E2E_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
           CI: "1"
-        run: npx playwright test -c e2e
-      - name: Relatório e traces da falha
+        # --trace off reforça a config do modo VPS: trace guarda os cabeçalhos dos pedidos.
+        run: npx playwright test -c e2e --trace off
+      - name: Relatório da falha (sem traces)
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report-vps
-          path: |
-            web/playwright-report/
-            web/test-results/
+          path: web/playwright-report/
           retention-days: 7
