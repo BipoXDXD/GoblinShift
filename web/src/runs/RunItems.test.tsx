@@ -19,6 +19,7 @@ function item(position: number, overrides: Record<string, unknown> = {}) {
     notices: [],
     counts: {},
     duplicate_of: null,
+    formula_cells: null,
     ...overrides,
   };
 }
@@ -182,5 +183,150 @@ describe("Execução: detalhe por arquivo", () => {
       "A imagem estava em Display P3 e foi convertida para sRGB.",
     );
     expect(entries[1]).toHaveTextContent("Nota desconhecida (PDF_LINEARIZED).");
+  });
+
+  describe("aviso de fórmulas com a contagem por coluna", () => {
+    const NOTE = "Valores que começam com “-”, como números negativos, também entram nesta conta";
+
+    function formulaItem(formulaCells: unknown) {
+      return item(0, { warnings: ["CSV_FORMULA_CELLS"], formula_cells: formulaCells });
+    }
+
+    async function columnsList(): Promise<HTMLElement> {
+      return within(await itemsRegion()).findByRole("list", {
+        name: "Células que parecem fórmulas, por coluna",
+      });
+    }
+
+    it("lista as colunas com singular e plural, as que sobraram e a nota sobre o “-”", async () => {
+      setup({
+        summary,
+        items: [
+          formulaItem({
+            columns: [
+              { name: "valor", cells: 1200 },
+              { name: "conta", cells: 1 },
+            ],
+            more_columns: 2,
+          }),
+        ],
+      });
+
+      const columns = within(await columnsList()).getAllByRole("listitem");
+      expect(columns.map((column) => column.textContent)).toEqual([
+        "valor: 1.200 células",
+        "conta: 1 célula",
+      ]);
+      const region = await itemsRegion();
+      expect(region).toHaveTextContent("e mais 2 colunas.");
+      expect(region).toHaveTextContent(NOTE);
+      expect(await axeViolations(region)).toEqual([]);
+    });
+
+    it("uma coluna a mais fica no singular e nenhuma não aparece", async () => {
+      setup({
+        summary,
+        items: [
+          formulaItem({ columns: [{ name: "a", cells: 2 }], more_columns: 1 }),
+          item(1, {
+            warnings: ["CSV_FORMULA_CELLS"],
+            formula_cells: { columns: [{ name: "b", cells: 2 }], more_columns: 0 },
+          }),
+        ],
+      });
+
+      const list = within(await itemsRegion()).getByRole("list", {
+        name: "Arquivos, na ordem de entrada",
+      });
+      const entries = [...list.querySelectorAll(":scope > li")];
+      expect(entries[0]).toHaveTextContent("e mais 1 coluna.");
+      expect(entries[1]).not.toHaveTextContent("e mais");
+    });
+
+    it("coluna de cabeçalho vazio aparece com rótulo próprio e a contagem", async () => {
+      setup({
+        summary,
+        items: [
+          formulaItem({
+            columns: [
+              { name: null, cells: 2 },
+              { name: "(sem nome)", cells: 1 },
+            ],
+            more_columns: 0,
+          }),
+        ],
+      });
+
+      const columns = within(await columnsList()).getAllByRole("listitem");
+      expect(columns.map((column) => column.textContent)).toEqual([
+        "coluna sem nome: 2 células",
+        "(sem nome): 1 célula",
+      ]);
+      // O rótulo é da interface, não do arquivo: em itálico, distinto de um nome real.
+      expect(columns[0]?.querySelector("em")).toHaveTextContent("coluna sem nome");
+      expect(columns[1]?.querySelector("em")).toBeNull();
+    });
+
+    it("nome de coluna é texto, nunca HTML", async () => {
+      setup({
+        summary,
+        items: [
+          formulaItem({
+            columns: [{ name: "<img src=x onerror=alert(1)><b>c</b>", cells: 3 }],
+            more_columns: 0,
+          }),
+        ],
+      });
+
+      const list = await columnsList();
+      expect(list).toHaveTextContent("<img src=x onerror=alert(1)><b>c</b>: 3 células");
+      expect(list.querySelector("img, b")).toBeNull();
+    });
+
+    it("nome no teto de 40 caracteres fica inteiro e um acima é cortado com reticências", async () => {
+      const atLimit = "x".repeat(40);
+      const above = "y".repeat(41);
+      setup({
+        summary,
+        items: [
+          formulaItem({
+            columns: [
+              { name: atLimit, cells: 2 },
+              { name: above, cells: 1 },
+            ],
+            more_columns: 0,
+          }),
+        ],
+      });
+
+      const columns = within(await columnsList()).getAllByRole("listitem");
+      expect(columns[0]).toHaveTextContent(`${atLimit}: 2 células`);
+      expect(columns[1]).toHaveTextContent(`${"y".repeat(39)}…: 1 célula`);
+    });
+
+    it("o corte não parte um caractere fora do plano básico ao meio", async () => {
+      setup({
+        summary,
+        items: [formulaItem({ columns: [{ name: "😀".repeat(41), cells: 1 }], more_columns: 0 })],
+      });
+
+      const [column] = within(await columnsList()).getAllByRole("listitem");
+      expect(column).toHaveTextContent(`${"😀".repeat(39)}…: 1 célula`);
+    });
+
+    it("sem a contagem (execução antiga ou fora da forma), mostra o aviso e a nota", async () => {
+      setup({
+        summary,
+        items: [formulaItem(null), formulaItem({ columns: "valor", more_columns: 0 })],
+      });
+
+      const region = await itemsRegion();
+      const entries = within(region).getAllByText(/Há células que parecem fórmulas/);
+      expect(entries).toHaveLength(2);
+      expect(within(region).getAllByText(new RegExp(NOTE))).toHaveLength(2);
+      expect(
+        within(region).queryByRole("list", { name: "Células que parecem fórmulas, por coluna" }),
+      ).toBeNull();
+    });
   });
 });

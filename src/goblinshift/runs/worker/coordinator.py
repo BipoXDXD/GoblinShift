@@ -576,6 +576,11 @@ class Coordinator:
                             "notices": [code.value for code in item.notices],
                             "counts": dict(item.counts),
                             "duplicate_of": item.duplicate_of,
+                            "formula_cells": (
+                                item.formula_cells.as_json()
+                                if item.formula_cells is not None
+                                else None
+                            ),
                         },
                     )
                 )

@@ -69,6 +69,7 @@ ITEM_KEYS = {
     "notices",
     "counts",
     "duplicate_of",
+    "formula_cells",
 }
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
@@ -1209,6 +1210,14 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
         "notices": ["IMAGE_P3_CONVERTED"],
         "counts": {"records_read": 2},
         "duplicate_of": None,
+        "formula_cells": {
+            "columns": [
+                {"name": "valor", "cells": 3},
+                {"name": "<b>conta</b>", "cells": 1},
+                {"name": None, "cells": 1},
+            ],
+            "more_columns": 2,
+        },
     }
     uploads = with_items(
         factory,
@@ -1242,6 +1251,16 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": ["IMAGE_P3_CONVERTED"],
             "counts": {"records_read": 2},
             "duplicate_of": None,
+            # Nome de coluna é dado do usuário: sai como texto, sem escapar nem interpretar; a
+            # coluna de cabeçalho vazio sai com nome nulo, sem sumir com a contagem.
+            "formula_cells": {
+                "columns": [
+                    {"name": "valor", "cells": 3},
+                    {"name": "<b>conta</b>", "cells": 1},
+                    {"name": None, "cells": 1},
+                ],
+                "more_columns": 2,
+            },
         },
         {
             "position": 1,
@@ -1253,6 +1272,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": [],
             "counts": {},
             "duplicate_of": None,
+            "formula_cells": None,
         },
         {
             "position": 2,
@@ -1264,6 +1284,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": [],
             "counts": {},
             "duplicate_of": 0,
+            "formula_cells": None,
         },
     ]
 
@@ -1279,6 +1300,7 @@ def test_item_ainda_nao_avaliado_aparece_pendente(
     [item] = body["items"]
     assert item.keys() == ITEM_KEYS
     assert (item["status"], item["warnings"], item["counts"]) == ("pending", [], {})
+    assert item["formula_cells"] is None
     assert body["summary"] is None
 
 
@@ -1293,6 +1315,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
         "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
         "duplicate_of": None,
         "original_name": "salarios-ana.csv",
+        "formula_cells": {"columns": [{"name": "Ana", "cells": "7"}], "more_columns": 0},
     }
     with_items(
         factory,
@@ -1309,6 +1332,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
     assert item["notices"] == []
     assert item["counts"] == {"records_read": 1}
     assert item["error_code"] is None
+    assert item["formula_cells"] is None
     assert "ana" not in response.text.lower()
 
 
