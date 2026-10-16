@@ -187,6 +187,7 @@ describe("Acesso: uso e cotas", () => {
               input_bytes_last_24h: 0,
               storage_reserved_bytes: 0,
               daily_quota_resets_at: null,
+              executor_ms_last_24h: 0,
             },
           }),
         ),
