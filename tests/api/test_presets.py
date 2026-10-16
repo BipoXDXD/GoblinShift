@@ -328,6 +328,20 @@ def test_substituir_com_if_match_fora_do_formato_responde_400_sem_mudar(
     assert stored(factory, created["id"])["revision"] == 1  # type: ignore[index]
 
 
+def test_put_vencido_com_nome_em_conflito_responde_412(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # A revisão é conferida antes do nome: quem leu uma versão velha precisa reler primeiro.
+    account = Account(factory)
+    create(client, account, "Ocupado")
+    created = create(client, account, "Livre")
+    put(client, account, created["id"], preset_body("Renomeado"), '"1"')
+
+    response = put(client, account, created["id"], preset_body("Ocupado"), '"1"')
+
+    assert_problem(response, 412, "PRECONDITION_FAILED")
+
+
 def test_dois_put_com_o_mesmo_etag_o_segundo_recebe_412(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
