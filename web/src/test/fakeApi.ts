@@ -21,13 +21,19 @@ export interface FakeApi {
 }
 
 interface FakeApiOptions {
-  /** Token do cookie de CSRF que o cliente lê; `null` é o navegador sem sessão. */
+  /**
+   * Token do cookie de CSRF que o cliente lê; `null` é o navegador sem sessão, que nem chama o
+   * `GET /me`. O padrão acompanha o `GET /me` padrão: há sessão.
+   */
   readonly csrfToken?: string | null;
 }
 
+/** Cookie de CSRF do navegador com sessão, nos testes que não escolhem outro. */
+export const TEST_CSRF_TOKEN = "csrf-da-sessao-de-teste";
+
 export function fakeApi(
   handlers: Readonly<Record<string, Handler>>,
-  { csrfToken = null }: FakeApiOptions = {},
+  { csrfToken = TEST_CSRF_TOKEN }: FakeApiOptions = {},
 ): FakeApi {
   const requests: Request[] = [];
   const fetchMock = vi.fn<typeof fetch>((input, init) => {
