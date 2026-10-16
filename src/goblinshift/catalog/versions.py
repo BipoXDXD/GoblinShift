@@ -27,6 +27,13 @@ from goblinshift.processing import downloads_detox, image_forge, media_mill
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
 
+MIB = 1024 * 1024
+# 1.7: "arquivo comum, 32 MiB". Toda versão declara `max_input_bytes` e a aceitação o aplica a cada
+# entrada pelo tamanho guardado, nunca pelo nome: o envio dá 256 MiB a um nome terminado em .mp4,
+# e só a versão que declara esse teto (Media Mill) aceita a entrada maior (ADR 036). O teste do
+# catálogo confere que o valor é o mesmo `MAX_FILE_BYTES` de `files.limits`.
+COMMON_MAX_INPUT_BYTES = 32 * MIB
+
 
 class VersionStatus(StrEnum):
     CURRENT = "current"
@@ -122,7 +129,11 @@ CSV_JANITOR_V1 = RecipeVersion(
     version=csv_janitor.VERSION,
     status=VersionStatus.CURRENT,
     parameters_model=CsvJanitorV1Parameters,
-    limits={"max_inputs": csv_janitor.MAX_TABLES, **dataclasses.asdict(Limits())},
+    limits={
+        "max_inputs": csv_janitor.MAX_TABLES,
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
+        **dataclasses.asdict(Limits()),
+    },
 )
 
 _IMAGE_LIMITS = image_forge.Limits()
@@ -134,6 +145,7 @@ IMAGE_FORGE_V1 = RecipeVersion(
     parameters_model=ImageForgeV1Parameters,
     limits={
         "max_inputs": image_forge.MAX_INPUTS,
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
         "max_pixels": _IMAGE_LIMITS.max_pixels,
         "max_axis_px": _IMAGE_LIMITS.max_axis,
         "thumbnail_box_px": _IMAGE_LIMITS.thumbnail_box,
@@ -149,14 +161,14 @@ DOWNLOADS_DETOX_V1 = RecipeVersion(
     parameters_model=DownloadsDetoxV1Parameters,
     limits={
         "max_inputs": downloads_detox.MAX_INPUTS,
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
         "max_total_input_bytes": downloads_detox.MAX_TOTAL_INPUT_BYTES,
     },
 )
 
 _MEDIA_LIMITS = media_mill.Limits()
 
-# `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036); as
-# outras versões não o declaram e ficam no teto comum de `files.limits`.
+# `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036).
 MEDIA_MILL_V1 = RecipeVersion(
     recipe_id=media_mill.RECIPE_ID,
     version=media_mill.VERSION,

@@ -252,23 +252,24 @@ def test_entrada_que_completa_2_gib_em_24h_e_aceita(
 def test_execucao_cuja_entrada_sozinha_passa_de_2_gib_e_invalida(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
+    # Só o Image Forge (100 entradas de 32 MiB) chega a passar de 2 GiB numa execução.
     owner = new_owner(factory)
-    first, second = ready_inputs(factory, storage, owner, 2)
-    pretend_size(factory, first, GIB)
-    pretend_size(factory, second, GIB + 1)
+    inputs = ready_inputs(factory, storage, owner, 65)
+    for upload_id in inputs:
+        pretend_size(factory, upload_id, 32 * 1024**2)
 
-    with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
-        accept(factory, owner, run_command([first, second]))
+    with pytest.raises(InvalidRunCommandError, match="cota diária"):
+        accept(factory, owner, RunCommand("image-forge", 1, tuple(inputs), {}))
 
 
 def test_detox_recusa_entradas_acima_do_teto_da_versao(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = new_owner(factory)
-    first, second = ready_inputs(factory, storage, owner, 2)
-    pretend_size(factory, first, 240 * 1024**2)
-    pretend_size(factory, second, 240 * 1024**2 + 1)
-    command = RunCommand("downloads-detox", 1, (first, second), {})
+    inputs = ready_inputs(factory, storage, owner, 16)
+    for upload_id in inputs:
+        pretend_size(factory, upload_id, 31 * 1024**2)
+    command = RunCommand("downloads-detox", 1, tuple(inputs), {})
 
     with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
         accept(factory, owner, command)
@@ -278,11 +279,11 @@ def test_detox_aceita_entradas_no_teto_da_versao(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = new_owner(factory)
-    first, second = ready_inputs(factory, storage, owner, 2)
-    pretend_size(factory, first, 240 * 1024**2)
-    pretend_size(factory, second, 240 * 1024**2)
+    inputs = ready_inputs(factory, storage, owner, 15)
+    for upload_id in inputs:
+        pretend_size(factory, upload_id, 32 * 1024**2)
 
-    accept(factory, owner, RunCommand("downloads-detox", 1, (first, second), {}))
+    accept(factory, owner, RunCommand("downloads-detox", 1, tuple(inputs), {}))
 
 
 def test_media_mill_aceita_video_no_teto_por_arquivo(
@@ -321,6 +322,17 @@ def test_media_mill_recusa_lote_acima_de_512_mib(
 
     with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
         accept(factory, owner, RunCommand("media-mill", 1, (first, second, third), {}))
+
+
+def test_receita_comum_recusa_entrada_acima_de_32_mib(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = new_owner(factory)
+    [upload_id] = ready_inputs(factory, storage, owner)
+    pretend_size(factory, upload_id, 32 * 1024**2 + 1)
+
+    with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
+        accept(factory, owner, run_command([upload_id]))
 
 
 def test_quota_nao_conta_execucao_recusada(
