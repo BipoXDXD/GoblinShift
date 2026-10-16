@@ -69,6 +69,7 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("DELETE", f"{API}/api-keys/{{key_id}}"): Rule(Policy.SESSION, resource_param="key_id"),
     # Catálogo de receitas.
     ("GET", f"{API}/catalog"): Rule(Policy.ANY_CREDENTIAL),
+    ("GET", f"{API}/catalog/{{recipe_id}}/versions/{{version}}"): Rule(Policy.ANY_CREDENTIAL),
     # Arquivos.
     ("POST", f"{API}/uploads"): _scope(Scope.FILES_WRITE),
     ("PUT", f"{API}/uploads/{{upload_id}}/content"): _scope(Scope.FILES_WRITE, "upload_id"),
