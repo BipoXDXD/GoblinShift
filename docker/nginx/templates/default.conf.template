@@ -73,6 +73,22 @@ server {
         include /etc/nginx/snippets/spa-headers.conf;
     }
 
+    # Ícones e imagem de compartilhamento (web/public/): nome fixo, sem hash, por isso sem cache
+    # longo. Fora do fallback da SPA: o navegador e o iOS pedem ícones por conta própria
+    # (/apple-touch-icon-precomposed.png), e o que não existir é 404, nunca o index.html como imagem.
+    location ~ ^/[^/]+\.(?:png|jpg|ico|svg)$ {
+        try_files $uri =404;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+    # O mime.types da imagem não conhece .webmanifest; sem isto sairia application/octet-stream.
+    location = /manifest.webmanifest {
+        default_type application/manifest+json;
+        try_files $uri =404;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
+
     # Arquivos com hash no nome (build do Vite): mudam de nome a cada mudança de conteúdo. Um
     # asset ausente é 404, nunca o index.html servido como JavaScript.
     location /assets/ {
