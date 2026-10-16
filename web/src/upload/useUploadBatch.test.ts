@@ -45,10 +45,31 @@ const createUploadsBody = z.object({
   items: z.array(z.object({ name: z.string(), size: z.number() })),
 });
 
-/** API falsa: POST /uploads responde uma intenção por item, ou o problema configurado. */
+/**
+ * API falsa: POST /uploads responde uma intenção por item, ou o problema configurado; DELETE
+ * /uploads/{id} responde 202, ou o status configurado em `deleteStatus`, e fica registrado.
+ */
 function fakeApi() {
-  const state: { failNextWith: { code: string; status: number } | null } = { failNextWith: null };
-  const fetchMock = vi.fn<typeof fetch>((_input, init) => {
+  const state: {
+    failNextWith: { code: string; status: number } | null;
+    deleteStatus: number;
+    holdIntents: (() => void)[] | null;
+  } = { failNextWith: null, deleteStatus: 202, holdIntents: null };
+  const deleted: string[] = [];
+  const fetchMock = vi.fn<typeof fetch>((input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
+    if (init?.method === "DELETE") {
+      deleted.push(url.pathname.split("/").at(-1) ?? "");
+      const status = state.deleteStatus;
+      return Promise.resolve(
+        status === 202
+          ? new Response(null, { status })
+          : new Response(JSON.stringify(problem("INTERNAL_ERROR", status)), {
+              status,
+              headers: { "Content-Type": "application/problem+json" },
+            }),
+      );
+    }
     const failure = state.failNextWith;
     if (failure !== null) {
       state.failNextWith = null;
@@ -61,15 +82,23 @@ function fakeApi() {
     }
     const rawBody = typeof init?.body === "string" ? init.body : "";
     const { items } = createUploadsBody.parse(JSON.parse(rawBody));
-    return Promise.resolve(
+    const respond = (): Response =>
       new Response(JSON.stringify({ items: items.map(intentFor) }), {
         status: 201,
         headers: { "Content-Type": "application/json" },
-      }),
-    );
+      });
+    const held = state.holdIntents;
+    if (held !== null) {
+      return new Promise((resolve) => {
+        held.push(() => {
+          resolve(respond());
+        });
+      });
+    }
+    return Promise.resolve(respond());
   });
   const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: Date.now });
-  return { client, fetchMock, state };
+  return { client, fetchMock, state, deleted };
 }
 
 interface PendingUpload {
@@ -328,5 +357,131 @@ describe("useUploadBatch", () => {
     hook.unmount();
 
     expect(pending[0]?.options.signal?.aborted).toBe(true);
+  });
+});
+
+describe("useUploadBatch: exclusão no servidor", () => {
+  function add(hook: ReturnType<typeof setup>["hook"], names: string[]): void {
+    act(() => {
+      hook.result.current.add(names.map(file));
+    });
+  }
+
+  function idOf(upload: PendingUpload | undefined): string {
+    return upload?.options.content.url.split("/")[4] ?? "";
+  }
+
+  it("remover um arquivo pronto manda o DELETE do upload dele", async () => {
+    const { api, pending, hook } = setup();
+    add(hook, ["a.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+    const upload = pending[0];
+    if (upload === undefined) throw new Error("sem envio");
+    act(() => {
+      upload.resolve(receivedFor(upload.options.content));
+    });
+    await waitFor(() => {
+      expect(statuses(hook.result.current.entries)).toEqual(["ready"]);
+    });
+
+    act(() => {
+      hook.result.current.remove(hook.result.current.entries[0]?.localId ?? "");
+    });
+
+    await waitFor(() => {
+      expect(api.deleted).toEqual([idOf(upload)]);
+    });
+    expect(hook.result.current.failedDeletions).toEqual([]);
+  });
+
+  it("remover no meio do envio aborta e exclui a intenção", async () => {
+    const { api, pending, hook } = setup();
+    add(hook, ["a.csv", "b.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+
+    act(() => {
+      hook.result.current.remove(hook.result.current.entries[1]?.localId ?? "");
+    });
+
+    expect(pending[1]?.options.signal?.aborted).toBe(true);
+    await waitFor(() => {
+      expect(api.deleted).toEqual([idOf(pending[1])]);
+    });
+  });
+
+  it("remover antes de a intenção chegar exclui a intenção quando ela chega, sem enviar", async () => {
+    const { api, pending, hook } = setup();
+    const held: (() => void)[] = [];
+    api.state.holdIntents = held;
+    add(hook, ["a.csv"]);
+    await waitFor(() => {
+      expect(held).toHaveLength(1);
+    });
+
+    act(() => {
+      hook.result.current.remove(hook.result.current.entries[0]?.localId ?? "");
+    });
+    act(() => {
+      held[0]?.();
+    });
+
+    await waitFor(() => {
+      expect(api.deleted).toHaveLength(1);
+    });
+    expect(pending).toEqual([]);
+  });
+
+  it("removeAll exclui todos os uploads do lote", async () => {
+    const { api, pending, hook } = setup();
+    add(hook, ["a.csv", "b.csv", "c.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+
+    act(() => {
+      hook.result.current.removeAll();
+    });
+
+    await waitFor(() => {
+      expect(api.deleted).toHaveLength(3);
+    });
+    expect(new Set(api.deleted).size).toBe(3);
+  });
+
+  it("falha do DELETE fica registrada com o nome, e tentar de novo limpa", async () => {
+    const { api, pending, hook } = setup();
+    api.state.deleteStatus = 500;
+    add(hook, ["a.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+
+    act(() => {
+      hook.result.current.remove(hook.result.current.entries[0]?.localId ?? "");
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current.failedDeletions).toEqual([
+        {
+          uploadId: idOf(pending[0]),
+          name: "a.csv",
+          failure: expect.objectContaining({ kind: "problem", status: 500 }) as unknown,
+        },
+      ]);
+    });
+
+    api.state.deleteStatus = 202;
+    act(() => {
+      hook.result.current.retryDeletions();
+    });
+
+    await waitFor(() => {
+      expect(hook.result.current.failedDeletions).toEqual([]);
+    });
+    expect(api.deleted).toEqual([idOf(pending[0]), idOf(pending[0])]);
   });
 });
