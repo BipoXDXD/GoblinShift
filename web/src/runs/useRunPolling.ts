@@ -4,12 +4,12 @@ import { useRef, useState } from "react";
 import { useApiClient } from "../api/ApiClientContext";
 import type { ApiResponse } from "../api/response";
 import { announcementFor, type RunProgressSnapshot } from "./announce";
-import { getRun, type Run } from "./api";
+import { getRun, type RunDetail } from "./api";
 import { nextPollDelayMs, type PollSnapshot } from "./polling";
 
 interface RunPolling {
   /** Estado da consulta do TanStack Query; `data` é a execução já validada. */
-  readonly query: UseQueryResult<Run>;
+  readonly query: UseQueryResult<RunDetail>;
   /** Texto da região `aria-live="polite"`; muda só quando status ou fase mudam. */
   readonly announcement: string | null;
 }
@@ -19,7 +19,7 @@ interface RunPollingOptions {
   readonly random?: () => number;
 }
 
-type RunQuery = Query<ApiResponse<Run>, Error, ApiResponse<Run>, readonly string[]>;
+type RunQuery = Query<ApiResponse<RunDetail>, Error, ApiResponse<RunDetail>, readonly string[]>;
 
 /**
  * Acompanha uma execução por polling (2.2): a próxima consulta espera o Retry-After da resposta,
@@ -81,7 +81,7 @@ function lastUpdatedAt(query: RunQuery): number {
   return Math.max(query.state.dataUpdatedAt, query.state.errorUpdatedAt);
 }
 
-function useAnnouncement(run: Run | undefined): string | null {
+function useAnnouncement(run: RunDetail | undefined): string | null {
   const [tracked, setTracked] = useState<{
     snapshot: RunProgressSnapshot | null;
     announcement: string | null;
@@ -97,6 +97,6 @@ function useAnnouncement(run: Run | undefined): string | null {
   return tracked.announcement;
 }
 
-function changed(previous: RunProgressSnapshot | null, run: Run): boolean {
+function changed(previous: RunProgressSnapshot | null, run: RunDetail): boolean {
   return previous?.status !== run.status || previous.phase !== run.progress.phase;
 }

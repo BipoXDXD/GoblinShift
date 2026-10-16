@@ -11,12 +11,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import type { ApiClient, ApiRequest } from "../api/client";
 import { ApiError, type ApiFailure, type ApiResponse } from "../api/response";
-import type { Run, RunPhase, RunStatus } from "./api";
+import type { RunDetail, RunPhase, RunStatus } from "./api";
 import { useRunPolling } from "./useRunPolling";
 
 const RUN_ID = "0e9a1c52-0000-4000-8000-000000000001";
 
-function run(status: RunStatus, phase: RunPhase | null = null): Run {
+function run(status: RunStatus, phase: RunPhase | null = null): RunDetail {
   return {
     id: RUN_ID,
     recipe_id: "csv-janitor",
@@ -32,10 +32,12 @@ function run(status: RunStatus, phase: RunPhase | null = null): Run {
     parameters: {},
     preset_id: null,
     results_expire_at: null,
+    summary: null,
+    items: [],
   };
 }
 
-type Outcome = { run: Run; retryAfterMs: number | null } | { failure: ApiFailure };
+type Outcome = { run: RunDetail; retryAfterMs: number | null } | { failure: ApiFailure };
 
 /**
  * Cliente falso que responde em sequência (a última resposta se repete). Dispensa o fetch: o corpo
