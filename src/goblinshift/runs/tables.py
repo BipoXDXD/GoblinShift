@@ -32,7 +32,7 @@ run = Table(
     Column("recipe_version", Integer, nullable=False),
     Column("executor_digest", Text, nullable=False),
     # Parâmetros com defaults aplicados e limites de 1.7, fixados na aceitação. Os parâmetros são
-    # anulados 30 dias depois do término (1.7, "Retenção"; migração 0020).
+    # anulados 30 dias depois do término (1.7, "Retenção"; migração 0010).
     Column("parameters", JSONB),
     Column("limits", JSONB, nullable=False),
     Column("status", Text, nullable=False, server_default="queued"),

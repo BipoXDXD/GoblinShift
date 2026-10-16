@@ -1,11 +1,8 @@
 """Anulação de 30 dias (1.7, "Retenção"): nome do upload e parâmetros da Run anuláveis.
 
-Revision ID: 0020
+Revision ID: 0010
 Revises: 0009
 Create Date: 2026-10-15 23:30:00.000000
-
-Número alto de propósito: a frente de presets é dona das migrações novas e renumera esta na
-integração.
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Nada aqui é escrito pelo código atual:
 as colunas só deixam de exigir valor, e o código anterior continua gravando e lendo como antes.
@@ -26,7 +23,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0020"
+revision: str = "0010"
 down_revision: str | Sequence[str] | None = "0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
