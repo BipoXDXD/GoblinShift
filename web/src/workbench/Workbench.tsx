@@ -1,5 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState, type ReactElement, type SubmitEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+  type SubmitEvent,
+} from "react";
 import { ChevronLeft } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 
@@ -26,6 +34,7 @@ import { createRun } from "../runs/commands";
 import { TEXT } from "../text";
 import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
+import { SavePreset } from "./SavePreset";
 import { UploadEntryView } from "./UploadEntryView";
 
 const FILES_FIELD_ID = "bancada-arquivos";
@@ -39,6 +48,8 @@ interface WorkbenchProps {
   /** Formulário com os defaults e limites da versão no catálogo. */
   readonly form: RecipeForm;
   readonly uploadServices: UploadServices;
+  /** De onde vieram os parâmetros (preset), logo abaixo do título; `null` sem aviso. */
+  readonly notice?: ReactNode;
 }
 
 interface Submission {
@@ -51,7 +62,12 @@ interface Submission {
  * parâmetros e executar. Os erros só aparecem depois da primeira tentativa de executar; a
  * `Idempotency-Key` acompanha o comando, então repetir o mesmo envio não cria outra execução.
  */
-export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): ReactElement {
+export function Workbench({
+  recipe,
+  form,
+  uploadServices,
+  notice = null,
+}: WorkbenchProps): ReactElement {
   const client = useApiClient();
   const navigate = useNavigate();
   const batch = useUploadBatch(uploadServices);
@@ -140,6 +156,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
   return (
     <div className="flex flex-col gap-8">
       <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
+      {notice}
       <form noValidate onSubmit={onSubmit} className="flex flex-col gap-8">
         <ErrorSummary issues={issues} attempt={attempt} />
         {/* Duas colunas a partir de 1024 px (D9): arquivos fluida, parâmetros com largura fixa. A
@@ -208,6 +225,8 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
                 {form.renderFields({ errors: fieldErrors, onDraftChange: setDraft })}
               </div>
             </Card>
+            {/* Secundária antes da primária: Executar fecha o conteúdo e a ordem do Tab. */}
+            <SavePreset draft={draft} />
             {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
             <Button
               type="submit"
