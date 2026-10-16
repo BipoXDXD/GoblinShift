@@ -86,7 +86,7 @@ export function ResultsAvailability({
 }
 
 type Reference = RunResults["artifacts"][number];
-type UnavailableReason = "deleted" | "expired" | "other";
+type UnavailableReason = "deleted" | "expired" | "missing" | "other";
 
 function isAvailable(reference: Reference): boolean {
   return reference.availability === "available";
@@ -96,7 +96,7 @@ function isAvailable(reference: Reference): boolean {
 function sharedReason(results: RunResults): UnavailableReason {
   const reasons = new Set(results.artifacts.map((reference) => reference.availability));
   const [only] = reasons;
-  if (reasons.size === 1 && (only === "deleted" || only === "expired")) {
+  if (reasons.size === 1 && (only === "deleted" || only === "expired" || only === "missing")) {
     return only;
   }
   return "other";
@@ -127,6 +127,13 @@ function Unavailable({ reason, expiresAt }: UnavailableProps): ReactElement {
     return (
       <EmptyState title={T.deletedTitle} headingLevel={3}>
         <p>{T.deletedHint}</p>
+      </EmptyState>
+    );
+  }
+  if (reason === "missing") {
+    return (
+      <EmptyState title={T.missingTitle} headingLevel={3}>
+        <p>{T.missingHint}</p>
       </EmptyState>
     );
   }

@@ -61,6 +61,9 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
         "gs-causa-capacidade-global",
+        "gs-causa-storage-sem-sentinela",
+        "gs-causa-limitador-de-ausentes",
+        "gs-causa-objetos-ausentes",
         "gs-heartbeat",
     }
 
@@ -136,6 +139,9 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
         "gs-causa-limitador-de-exclusoes",
         "gs-causa-exclusao-de-conta-atrasada",
         "gs-causa-capacidade-global",
+        "gs-causa-storage-sem-sentinela",
+        "gs-causa-limitador-de-ausentes",
+        "gs-causa-objetos-ausentes",
     }
     chosen = [a for a in alerts(stream="s", prefix=PREFIX) if a.name in names]
 
@@ -149,3 +155,14 @@ def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
     for column in CAUSE_COLUMNS:
         assert column in TRACE_COLUMNS
     assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
+
+
+def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
+    by_name = {alert.name: alert for alert in alerts(stream="default", prefix=PREFIX)}
+
+    for name in (
+        "gs-causa-storage-sem-sentinela",
+        "gs-causa-limitador-de-ausentes",
+        "gs-causa-objetos-ausentes",
+    ):
+        assert by_name[name].destination is DestinationKey.WARNING, name

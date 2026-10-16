@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr, ValidationError
 
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.files.missing import DEFAULT_MAX_ABSENT_RATIO
 from goblinshift.platform.settings import (
     MissingSecretError,
     Settings,
@@ -276,3 +277,7 @@ def test_producao_deixa_o_hsts_para_o_nginx(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "strict-transport-security" not in response.headers
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_limitador_de_ausentes_tem_o_mesmo_default_do_modulo_de_arquivos() -> None:
+    assert Settings().missing_sweep_max_absent_ratio == DEFAULT_MAX_ABSENT_RATIO

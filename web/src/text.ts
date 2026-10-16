@@ -284,6 +284,16 @@ export const TEXT = {
         CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
         INPUT_NOT_SELECTED: "Nenhuma página deste PDF foi escolhida; ele não entrou no resultado.",
       },
+      formulaCells: {
+        columnsLabel: "Células que parecem fórmulas, por coluna",
+        cellsOf: (cells: string) => `: ${cells}`,
+        unnamedColumn: "coluna sem nome",
+        cells: ["célula", "células"],
+        more: (columns: string) => `e mais ${columns}.`,
+        columns: ["coluna", "colunas"],
+        minusNote:
+          "Valores que começam com “-”, como números negativos, também entram nesta conta; muitos são falsos positivos.",
+      },
       notices: {
         IMAGE_P3_CONVERTED: "A imagem estava em Display P3 e foi convertida para sRGB.",
       },
@@ -346,9 +356,29 @@ export const TEXT = {
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
+      preview: {
+        imageAlt: (fileName: string) => `Pré-visualização de ${fileName}`,
+        loading: "Carregando a pré-visualização.",
+        failed: "Não foi possível carregar a pré-visualização.",
+        gone: "A pré-visualização expirou ou foi excluída.",
+        unavailable: {
+          expired: "Pré-visualização indisponível: o arquivo expirou.",
+          deleted: "Pré-visualização indisponível: o arquivo foi excluído.",
+          missing: "Pré-visualização indisponível: o arquivo se perdeu.",
+        },
+        tableCaption: (fileName: string, rows: number) =>
+          `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
+        pagesCaption: (fileName: string, pages: number) =>
+          `Páginas de ${fileName}: ${pages === 1 ? "1 página" : `${String(pages)} páginas`}`,
+        page: (pageNumber: number, inputPosition: number) =>
+          `Página ${String(pageNumber)} do arquivo ${String(inputPosition + 1)}`,
+      },
       deletedTitle: "Resultados excluídos",
       deletedHint:
         "Os arquivos gerados por esta execução foram excluídos. Os que você enviou não mudam.",
+      missingTitle: "Resultados perdidos",
+      missingHint:
+        "Os arquivos gerados por esta execução se perderam e não podem mais ser baixados. Os que você enviou não mudam.",
       expiredTitle: "Resultados expirados",
       expiredHint: "O prazo para baixar os resultados desta execução acabou.",
       expiredOn: (date: string) => `Os resultados expiraram em ${date}.`,
@@ -358,6 +388,7 @@ export const TEXT = {
       fileExpired: "expirou",
       fileExpiredOn: (date: string) => `expirou em ${date}`,
       fileDeleted: "excluído",
+      fileMissing: "perdido",
       fileUnavailable: "indisponível",
       remove: "Excluir resultados",
       removeTitle: "Excluir os resultados desta execução?",

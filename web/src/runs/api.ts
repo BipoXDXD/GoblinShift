@@ -80,6 +80,19 @@ const countsSchema = z
     ),
   );
 
+/**
+ * Contagem por coluna do aviso CSV_FORMULA_CELLS. O nome da coluna é dado do usuário, só texto.
+ * Fora da forma vira `null`: a tela mostra o aviso sem a lista, em vez de perder a execução.
+ */
+const formulaCellsSchema = z
+  .object({
+    /** `name` nulo: cabeçalho vazio ou só de espaços; a tela dá o rótulo. */
+    columns: z.array(z.object({ name: z.string().nullable(), cells: z.number().int() })),
+    more_columns: z.number().int(),
+  })
+  .nullable()
+  .catch(null);
+
 const runItemSchema = z.object({
   /** Ordem de entrada a partir de 0, como na spec; a tela mostra a partir de 1. */
   position: z.number().int(),
@@ -94,6 +107,7 @@ const runItemSchema = z.object({
   counts: countsSchema,
   /** Posição (a partir de 0) da primeira entrada igual. */
   duplicate_of: z.number().int().nullable(),
+  formula_cells: formulaCellsSchema,
 });
 
 const runSummarySchema = z.object({

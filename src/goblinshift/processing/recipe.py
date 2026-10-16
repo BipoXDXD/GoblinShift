@@ -48,7 +48,9 @@ class ItemWarningCode(StrEnum):
     """Códigos de aviso das receitas: lista fechada, como a das rejeições.
 
     O código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do
-    arquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui.
+    arquivo, fica só no `report.json`. A exceção é a contagem por coluna de `CSV_FORMULA_CELLS`
+    (`ReportWarning.columns`): nomes de coluna, nunca valores de célula, vão para a API com teto
+    (1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui.
     """
 
     CSV_ALL_RECORDS_FILTERED = "CSV_ALL_RECORDS_FILTERED"
@@ -69,6 +71,8 @@ class ItemNoticeCode(StrEnum):
 class ReportWarning:
     code: str  # de `ItemWarningCode`
     detail: str
+    # (nome da coluna, células) na ordem das colunas de saída; só no aviso que conta por coluna.
+    columns: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
         if self.code not in ItemWarningCode:
