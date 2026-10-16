@@ -1,7 +1,7 @@
 """Presets: tabela `preset` e `run.preset_id` com `ON DELETE SET NULL (preset_id)`.
 
-Revision ID: 0010
-Revises: 0009
+Revision ID: 0012
+Revises: 0011
 Create Date: 2026-10-16 00:00:00.000000
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Tabela nova e coluna anulável sem
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0010"
-down_revision: str | Sequence[str] | None = "0009"
+revision: str = "0012"
+down_revision: str | Sequence[str] | None = "0011"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
