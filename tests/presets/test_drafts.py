@@ -8,29 +8,25 @@ from goblinshift.catalog import CATALOG, Catalog, RecipeVersionRetiredError, Ver
 from goblinshift.presets import InvalidPresetError, parse_draft
 from goblinshift.presets import drafts as drafts_module
 
-CSV_DEFAULTS: dict[str, object] = {
-    "case_rules": [],
-    "deduplicate_by": [],
-    "filters": [],
-    "formula_guard": "none",
-    "input_delimiter": ",",
-    "output_columns": None,
-    "output_delimiter": ",",
-    "trim_columns": [],
-}
-
 
 def locations(error: pytest.ExceptionInfo[InvalidPresetError]) -> list[str]:
     return [field.location for field in error.value.errors]
 
 
-def test_rascunho_guarda_os_parametros_com_os_defaults_da_versao() -> None:
+def test_rascunho_guarda_os_parametros_como_enviados() -> None:
     draft = parse_draft("Limpeza mensal", "csv-janitor", 1, {"trim_columns": ["a"]})
 
     assert draft.name == "Limpeza mensal"
     assert draft.recipe.recipe_id == "csv-janitor"
     assert draft.recipe.version == 1
-    assert draft.parameters == {**CSV_DEFAULTS, "trim_columns": ["a"]}
+    assert draft.parameters == {"trim_columns": ["a"]}
+
+
+def test_parametros_guardados_resolvem_de_novo_em_toda_receita() -> None:
+    for version in CATALOG.list_versions():
+        draft = parse_draft("x", version.recipe_id, version.version, {})
+
+        assert version.resolve(draft.parameters) == version.resolve({})
 
 
 def test_parametro_invalido_vira_erro_no_campo_sob_parameters() -> None:

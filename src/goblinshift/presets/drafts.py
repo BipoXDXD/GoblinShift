@@ -1,8 +1,13 @@
 """Rascunho de preset: nome e configuração já validados, antes de tocar o banco (1.6).
 
 A configuração passa pelo mesmo catálogo que `POST /runs`: versão conhecida e não retirada, e
-parâmetros resolvidos com os defaults da versão. Assim um preset nunca guarda o que uma execução
-recusaria, e o que ele guarda é exatamente o que a execução vai usar.
+parâmetros válidos para ela. Assim um preset nunca guarda o que uma execução recusaria.
+
+O preset guarda os parâmetros como o cliente os enviou, não os resolvidos: a execução os resolve
+de novo, e os resolvidos nem sempre passam por uma segunda validação (o Detox recusa
+`name_prefix` enviado com `name_mode: preserve`, e o default dele está nos resolvidos; ver
+`catalog.downloads_detox_v1`). Como os defaults nunca mudam dentro de uma versão (1.6), o resultado
+é o mesmo.
 """
 
 import unicodedata
@@ -35,6 +40,7 @@ class InvalidPresetError(ValueError):
 class PresetDraft:
     name: str
     recipe: RecipeVersion
+    # Como enviados e já validados pela versão (não os resolvidos; ver o topo do módulo).
     parameters: dict[str, object]
 
 
@@ -56,12 +62,14 @@ def parse_draft(
     if recipe.status is VersionStatus.RETIRED:
         raise RecipeVersionRetiredError(f"{recipe.recipe_id} v{recipe.version}")
     try:
-        parameters = recipe.resolve(raw_parameters)
+        recipe.resolve(raw_parameters)
     except InvalidParametersError as error:
         raise InvalidPresetError([*errors, *map(_under_parameters, error.errors)]) from None
     if errors:
         raise InvalidPresetError(errors)
-    return PresetDraft(normalized_name, recipe, parameters)
+    if not isinstance(raw_parameters, dict):
+        raise TypeError("parâmetros válidos que não são objeto")
+    return PresetDraft(normalized_name, recipe, raw_parameters)
 
 
 def _under_parameters(error: FieldError) -> FieldError:
