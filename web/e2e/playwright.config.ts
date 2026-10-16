@@ -69,7 +69,11 @@ export default defineConfig({
     baseURL: E2E.baseUrl,
     locale: "pt-BR",
     timezoneId: "America/Sao_Paulo",
-    trace: "retain-on-failure",
+    // Contra a VPS, nada que guarde os cabeçalhos (a chave da conta de teste): sem trace, vídeo
+    // nem screenshot. No local, a chave é um canário e o trace ajuda a depurar.
+    trace: E2E.vps ? "off" : "retain-on-failure",
+    video: "off",
+    screenshot: "off",
     actionTimeout: 5_000,
   },
   projects: E2E.vps ? VPS_PROJECTS : LOCAL_PROJECTS,
