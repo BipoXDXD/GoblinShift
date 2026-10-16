@@ -260,8 +260,16 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
         )
         for row in rows
     )
-    # Publicados na mesma transação, os artefatos vencem juntos; o mínimo é o prazo seguro.
-    expires_at = min((row.expires_at for row in rows), default=None)
+    # Mesmo critério de `_results_expire_at`: só os ainda disponíveis contam, e o mínimo entre
+    # eles é o prazo seguro. Excluídos e vencidos não anunciam validade.
+    expires_at = min(
+        (
+            row.expires_at
+            for row, reference in zip(rows, references, strict=True)
+            if reference.availability is Availability.AVAILABLE
+        ),
+        default=None,
+    )
     return RunResults(published=True, expires_at=expires_at, references=references)
 
 

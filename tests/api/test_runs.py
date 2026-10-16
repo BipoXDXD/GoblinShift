@@ -905,7 +905,8 @@ def test_resultados_publicados_em_ordem_de_posicao(
     assert response.status_code == 200
     results = response.json()
     assert results["published"] is True
-    assert results["expires_at"] is not None
+    # Os dois venceram: nenhuma validade a anunciar, como em `results_expire_at`.
+    assert results["expires_at"] is None
     assert results["artifacts"] == [
         {
             "artifact_id": str(table),
@@ -1329,6 +1330,33 @@ def test_resultados_trazem_a_disponibilidade_de_cada_artefato(
     artifacts = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()["artifacts"]
 
     assert [a["availability"] for a in artifacts] == ["deleted", "expired"]
+
+
+def test_com_um_artefato_excluido_e_outro_disponivel_a_validade_e_a_do_disponivel(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        # O excluído venceria antes; se contasse, a validade anunciada seria a dele.
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == table)
+            .values(expires_at=datetime(2098, 1, 1, tzinfo=UTC), deleted_at=BASE_TIME)
+        )
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == report)
+            .values(expires_at=datetime(2099, 1, 1, tzinfo=UTC))
+        )
+
+    detail = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+    results = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()
+
+    assert detail["results_expire_at"] == "2099-01-01T00:00:00Z"
+    assert results["expires_at"] == "2099-01-01T00:00:00Z"
+    assert [a["availability"] for a in results["artifacts"]] == ["deleted", "available"]
 
 
 def test_item_mostra_o_nome_original_do_upload(
