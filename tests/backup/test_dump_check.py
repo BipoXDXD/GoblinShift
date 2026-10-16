@@ -175,6 +175,18 @@ def test_chave_com_caminho_ou_caracteres_extras_e_ignorada(name: str) -> None:
     assert result.stdout == ""
 
 
+def test_objeto_estranho_mais_recente_nao_tira_o_lugar_do_dump() -> None:
+    """Como o `teste-diagnostico2.txt` que ficou travado 30 dias no bucket de produção."""
+    dumped = NOW - timedelta(hours=3)
+    stray = f"{PREFIX}teste-diagnostico2.txt"
+    body = listing((key(dumped), dumped), (stray, NOW - timedelta(hours=1)))
+
+    result = latest(body)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [key(dumped), "3"]
+
+
 def test_listagem_truncada_reprova() -> None:
     sent = NOW - timedelta(hours=1)
 

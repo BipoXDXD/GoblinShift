@@ -7,6 +7,7 @@ callback gravou, e o token do cookie é conferido contra o hash guardado.
 import base64
 import hmac
 import json
+import re
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from pathlib import Path
@@ -32,6 +33,11 @@ from tests.identity.support import prepare_database
 
 PUBLIC_ORIGIN = "https://goblinshift.test"
 LOGIN_FAILED_LOCATION = "/?login_error=failed"
+# A recusa leva o request_id do callback no fragmento, que o navegador nunca envia a servidor.
+LOGIN_FAILED_WITH_REF = re.compile(
+    re.escape(LOGIN_FAILED_LOCATION)
+    + r"#ref=([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})"
+)
 BROWSER_ORIGIN = "https://testserver"
 
 
@@ -141,12 +147,23 @@ def login(client: TestClient, fake: FakeProviders, provider: str, **params: str)
     return client.get(fake.consent(started.headers["location"]))
 
 
-def assert_login_failed(response: httpx.Response) -> None:
-    """Toda recusa responde igual: o mesmo redirect, sem cookie de sessão nem detalhe."""
+def assert_login_failed(response: httpx.Response) -> UUID:
+    """Toda recusa responde igual: o mesmo redirect, sem cookie de sessão nem detalhe.
+
+    Devolve o código de referência, que é o `X-Request-ID` do próprio callback.
+    """
     assert response.status_code == 303, response.text
-    assert response.headers["location"] == LOGIN_FAILED_LOCATION
+    matched = LOGIN_FAILED_WITH_REF.fullmatch(response.headers["location"])
+    assert matched is not None, response.headers["location"]
+    assert matched.group(1) == response.headers["x-request-id"]
     assert response.content == b""
     assert "__Host-gs_session" not in response.headers.get("set-cookie", "")
+    return UUID(matched.group(1))
+
+
+def mask_ref(location: str) -> str:
+    """O destino com o código aleatório trocado por `<ref>`, para comparar recusas."""
+    return LOGIN_FAILED_WITH_REF.sub(f"{LOGIN_FAILED_LOCATION}#ref=<ref>", location)
 
 
 def set_cookie_headers(response: httpx.Response) -> list[str]:
@@ -179,6 +196,17 @@ def audit_events(factory: sessionmaker[Session]) -> list[tuple[str, str, UUID | 
             )
         ).all()
     return [(row.event_type, row.outcome, row.user_id) for row in rows]
+
+
+def audit_by_ref(factory: sessionmaker[Session], ref: UUID) -> list[tuple[str, UUID | None]]:
+    """A consulta do operador: o código da tela de login leva ao evento e à conta."""
+    with unit_of_work(factory) as session:
+        rows = session.execute(
+            select(audit_event.c.event_type, audit_event.c.user_id)
+            .where(audit_event.c.request_id == ref)
+            .order_by(audit_event.c.id)
+        ).all()
+    return [(row.event_type, row.user_id) for row in rows]
 
 
 def accounts(factory: sessionmaker[Session]) -> list[dict[str, Any]]:

@@ -33,6 +33,7 @@ from tests.api.auth.support import (
     cookie_header,
     cookie_value,
     login,
+    mask_ref,
     open_signup,
     start_login,
 )
@@ -178,7 +179,7 @@ def test_cadastro_fechado_identidade_nova_e_recusada_e_fica_pendente(
     assert sessions.started == []
     [account] = accounts(factory)
     assert account["status"] == "blocked"
-    assert audit_events(factory) == [("LOGIN_FAILED", "failure", None)]
+    assert audit_events(factory) == [("LOGIN_FAILED", "failure", account["id"])]
 
 
 def test_conta_bloqueada_pendente_e_erro_do_provedor_respondem_igual(
@@ -194,7 +195,7 @@ def test_conta_bloqueada_pendente_e_erro_do_provedor_respondem_igual(
         with browser(login_app) as client:
             response = login(client, fake, "google")
         names = sorted(cookie.split("=")[0] for cookie in response.headers.get_list("set-cookie"))
-        return response.status_code, response.headers["location"], response.content, names
+        return response.status_code, mask_ref(response.headers["location"]), response.content, names
 
     def block() -> None:
         with unit_of_work(factory) as session:

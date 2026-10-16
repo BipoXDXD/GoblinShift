@@ -29,7 +29,7 @@ const SPACING_UTILITY =
   /(?<=^|[\s"'`:])-?((?:p|m)[xytrblse]?|gap(?:-[xy])?|space-[xy]|w|h|size|min-w|min-h|max-w|max-h|inset(?:-[xy])?|top|right|bottom|left|translate-[xy])-([0-9][0-9.]*)(?=$|[\s"'`])/g;
 const ARBITRARY_VALUE = /([a-z0-9]+)-\[[^\]]*\](:?)/g;
 const RAW_COLOR =
-  /(?<=^|[\s"'`:])(?:bg|text|border|outline|ring|fill|stroke|shadow|accent|decoration|divide|caret)-(?:moss|brass|stone|ember|patina|white)(?:-[0-9]+)?\b/g;
+  /(?<=^|[\s"'`:])(?:bg|text|border|outline|ring|fill|stroke|shadow|accent|decoration|divide|caret)-(?:wood|copper|amber|ember|patina|white)(?:-[0-9]+)?\b/g;
 /** Três níveis de elevação mais a rebaixada (spec 2026-10-15, decisão 2). */
 const ALLOWED_SHADOWS = new Set(["card", "float", "dialog", "sunken", "none"]);
 /** O nível vai até o fim da classe, para que opacidade (`/20`) e variável (`(--x)`) não escapem. */
@@ -88,7 +88,9 @@ describe("styleViolations", () => {
     ["-mt-10", "espaçamento fora da escala: -mt-10"],
     ["w-[13px]", "valor arbitrário: w-[13px]"],
     ["grid-cols-[1fr_2fr]", "valor arbitrário: cols-[1fr_2fr]"],
-    ["bg-moss-700", "tom cru em componente (use o papel semântico): bg-moss-700"],
+    ["bg-copper-700", "tom cru em componente (use o papel semântico): bg-copper-700"],
+    ["text-wood-900", "tom cru em componente (use o papel semântico): text-wood-900"],
+    ["ring-amber-400", "tom cru em componente (use o papel semântico): ring-amber-400"],
     ["text-patina-800", "tom cru em componente (use o papel semântico): text-patina-800"],
     ["shadow-3", "sombra fora dos níveis: shadow-3"],
     ["hover:shadow-md", "sombra fora dos níveis: shadow-md"],
