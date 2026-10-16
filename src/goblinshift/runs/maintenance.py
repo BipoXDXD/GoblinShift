@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.files.candidates import attempts_with_loose_candidates, discard_candidates
 from goblinshift.files.limits import EXPIRY_BATCH_SIZE
+from goblinshift.files.missing import sweep_missing_objects
 from goblinshift.files.objects import holders_with_open_uses
 from goblinshift.files.retention import (
     anonymize_deleted_uploads,
@@ -89,6 +90,8 @@ class MaintenanceConfig:
     batch_size: int = DEFAULT_BATCH_SIZE
     # Lote de cada etapa da retenção longa (1.7): linhas simples, transação curta.
     retention_batch_size: int = EXPIRY_BATCH_SIZE
+    # Objetos `committed` conferidos no disco por ciclo (um `stat` cada), em rodízio pelo ID.
+    missing_sweep_batch_size: int = EXPIRY_BATCH_SIZE
     stop_grace: timedelta = timedelta(seconds=10)
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
@@ -115,6 +118,9 @@ class Maintenance:
         self._runner = runner
         self._config = config
         self._on_finished = on_finished
+        # Onde a varredura de ausentes parou. Só em memória: reiniciar o processo recomeça do
+        # primeiro objeto, o que custa uma volta a mais e nada mais.
+        self._missing_resume_after: uuid.UUID | None = None
 
     def run_cycle(self) -> dict[str, int]:
         """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
@@ -335,12 +341,43 @@ class Maintenance:
             )
         counts["objects_purged"] = report.objects
         counts["bytes_purged"] = report.bytes
+        counts.update(self.mark_missing_objects())
         # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
         reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)
         counts["capacity_pools_corrected"] = reconciled.pools_corrected
         counts["capacity_objects_adopted"] = reconciled.objects_adopted
         counts["purge_limit_reached"] = int(report.limit_reached)
         return {**counts, **self.apply_history_retention()}
+
+    def mark_missing_objects(self) -> dict[str, int]:
+        """Um lote da varredura de objetos sem arquivo no disco (1.7, 3.8: `missing`).
+
+        Antes da reconciliação de capacidade, que já vê as reservas liberadas aqui.
+        """
+        sweep = sweep_missing_objects(
+            self._new_session(),
+            self._storage,
+            after=self._missing_resume_after,
+            limit=self._config.missing_sweep_batch_size,
+        )
+        self._missing_resume_after = sweep.resume_after
+        if sweep.storage_unreachable:
+            # Filesystem do storage desmontado ou vazio: nada foi marcado, e o administrador olha.
+            logger.warning(
+                "storage sem conteúdo; varredura de ausentes suspensa",
+                extra={"fields": {"alert": "storage_unreachable"}},
+            )
+        if sweep.marked:
+            # Esperado depois de restaurar o banco de um backup (3.8); fora disso, investigar.
+            logger.warning(
+                "objetos ausentes do storage marcados missing",
+                extra={"fields": {"alert": "objects_missing", "objects": sweep.marked}},
+            )
+        return {
+            "objects_missing_checked": sweep.checked,
+            "objects_marked_missing": sweep.marked,
+            "missing_sweep_skipped": int(sweep.storage_unreachable),
+        }
 
     def apply_history_retention(self) -> dict[str, int]:
         """Retenção longa (1.7), cada etapa um lote numa transação própria.
