@@ -24,6 +24,7 @@ from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import Status
+from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
 from tests.identity.support import new_user
 from tests.runs.worker_support import queue_run
@@ -573,16 +574,27 @@ def test_set_limits_sem_nada_a_mudar_sai_com_2(capsys: pytest.CaptureFixture[str
     assert "nada a mudar" in err
 
 
+@pytest.mark.parametrize(
+    "args",
+    [("--storage-bytes", "1"), ("--runs-per-24h", "5", "--storage-bytes", "1")],
+    ids=["so-armazenamento", "cota-e-armazenamento"],
+)
 def test_set_limits_abaixo_do_reservado_sai_com_2(
-    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], tmp_path: Path
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    tmp_path: Path,
+    args: tuple[str, ...],
 ) -> None:
+    """A cota citada junto também não muda: a transação inteira é desfeita, sem evento."""
     owner = new_user(factory)
     queue_run(factory, FileStorage(tmp_path), owner)  # entrada de alguns bytes reservada
 
-    exit_code, _, err = run(capsys, "set-limits", "--user", str(owner), "--storage-bytes", "1")
+    exit_code, _, err = run(capsys, "set-limits", "--user", str(owner), *args)
 
     assert exit_code == EXIT_USAGE
     assert "reservou" in err
+    with factory() as session:
+        assert quota_override(session, owner) == QuotaOverride()
     assert limits_events(factory, str(owner)) == []
 
 
