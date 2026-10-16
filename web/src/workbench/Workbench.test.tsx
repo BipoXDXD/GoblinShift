@@ -716,3 +716,43 @@ describe("Bancada", () => {
     expect(runRequests(api.requests)).toHaveLength(0);
   });
 });
+
+describe("Bancada do PDF Press", () => {
+  const pdf = (name: string) => new File(["%PDF-1.4\n"], name, { type: "application/pdf" });
+
+  it("numera os PDFs na ordem do merge e aceita só .pdf na escolha", async () => {
+    const { user } = await setup({ recipe: "pdf-press" });
+
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [pdf("a.pdf"), pdf("b.pdf")]);
+    await waitUntilSent(2);
+
+    expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute(
+      "accept",
+      ".pdf,application/pdf",
+    );
+    expect(screen.getAllByTestId("posicao").map((badge) => badge.textContent)).toEqual(["1", "2"]);
+  });
+
+  it("a seleção cita os uploads enviados, na ordem dos cartões", async () => {
+    const { user, api } = await setup({ recipe: "pdf-press" });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [pdf("a.pdf"), pdf("b.pdf")]);
+    await waitUntilSent(2);
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "O que fazer com os PDFs" }),
+      "select",
+    );
+    await user.click(screen.getByRole("button", { name: "Adicionar página" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "PDF da página 1" }), "b.pdf");
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await waitFor(() => {
+      expect(runRequests(api.requests)).toHaveLength(1);
+    });
+    const command = await bodyOf(runRequests(api.requests)[0]);
+    expect(command.parameters).toEqual({
+      operation: "select",
+      select: [{ upload_id: uploadIdFor(2), page_number: 1 }],
+    });
+  });
+});

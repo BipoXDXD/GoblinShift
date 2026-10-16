@@ -45,6 +45,11 @@ export interface JpegRequest {
 export interface ApiClient {
   request<T>(request: ApiRequest<T>): Promise<ApiResponse<T>>;
   /**
+   * O cookie legível de CSRF existe. Ele nasce e morre junto do cookie da sessão (HttpOnly, que a
+   * página não lê): sem ele não há sessão a consultar, e o `GET /me` só daria 401 no console.
+   */
+  hasSessionCookie(): boolean;
+  /**
    * GET de um JPEG com teto de bytes e conferência da assinatura (FF D8 FF); o Blob sai com tipo
    * `image/jpeg` fixo, nunca o que o servidor declarou. Falha é `ApiError`, com o Retry-After.
    */
@@ -102,6 +107,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         });
       }
       return new Blob([body.bytes], { type: JPEG_MEDIA_TYPE });
+    },
+    hasSessionCookie(): boolean {
+      return options.csrfToken() !== null;
     },
   };
 }

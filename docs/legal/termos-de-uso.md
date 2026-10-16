@@ -1,6 +1,6 @@
 # Termos de Uso do GoblinShift
 
-- **Versão:** v2-rascunho
+- **Versão:** v3-rascunho
 - **Vigência:** 2026-10-15
 - **Endereço do serviço:** https://goblinshift.dev
 
@@ -202,3 +202,4 @@ Estes Termos são regidos pelas leis da República Federativa do Brasil.
 |---|---|---|
 | `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
 | `v2-rascunho` | 2026-10-15 | Identificação de quem oferece o serviço; domínio e e-mails de contato; política de divulgação de vulnerabilidades; proibição de ceder chaves de API; prazo de resposta às denúncias; recurso contra bloqueio; aviso de 30 dias antes do fim do serviço; licença Apache 2.0 do código e CC BY 4.0 da arte; pedido de retirada de material do site; antecedência de 15 dias para mudanças e este histórico |
+| `v3-rascunho` | 2026-10-15 | Sem mudança de cláusula: o aceite é um só para os dois textos, e a versão sobe junto com o Aviso de Privacidade |

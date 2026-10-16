@@ -21,7 +21,12 @@ function setup(errors: ReadonlyMap<string, string> = new Map()) {
   const onDraftChange = vi.fn<(draft: RecipeDraft<"media-mill">) => void>();
   const user = userEvent.setup();
   const view = render(
-    <MediaMillFields settings={SETTINGS} errors={errors} onDraftChange={onDraftChange} />,
+    <MediaMillFields
+      settings={SETTINGS}
+      errors={errors}
+      onDraftChange={onDraftChange}
+      inputs={[]}
+    />,
   );
   const lastDraft = (): RecipeDraft<"media-mill"> => {
     const draft = onDraftChange.mock.lastCall?.[0];

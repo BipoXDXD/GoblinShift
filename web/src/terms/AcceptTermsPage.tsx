@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 
 import { acceptTerms, logout, ME_QUERY_KEY, type Me } from "../account/api";
 import { returnPathFrom } from "../account/returnParam";
+import { SignInPrompt } from "../account/SignInPrompt";
 import { useEndSession } from "../account/useEndSession";
 import { useMe } from "../account/useMe";
 import { useApiClient } from "../api/ApiClientContext";
@@ -25,7 +26,7 @@ export function AcceptTermsPage(): ReactElement {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <FocusHeading>{T.acceptTitle}</FocusHeading>
-      <AcceptBody me={me.data ?? null} error={me.error} />
+      <AcceptBody me={me.data} error={me.error} />
     </div>
   );
 }
@@ -34,17 +35,21 @@ function AcceptBody({
   me,
   error,
 }: {
-  readonly me: Me | null;
+  /** `null` sem sessão; `undefined` carregando ou com falha. */
+  readonly me: Me | null | undefined;
   readonly error: Error | null;
 }): ReactElement {
   const { search } = useLocation();
   const returnTo = returnPathFrom(search);
-  if (me === null) {
+  if (me === undefined) {
     return error === null ? (
       <p className="text-fg-muted">{T.loading}</p>
     ) : (
       <FailureNotice error={error} />
     );
+  }
+  if (me === null) {
+    return <SignInPrompt />;
   }
   if (!me.terms.acceptance_required) {
     return (

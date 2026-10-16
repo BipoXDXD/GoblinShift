@@ -58,6 +58,7 @@ function fakeClient(outcomes: readonly (() => Outcome)[]) {
   };
   const client: ApiClient = {
     request,
+    hasSessionCookie: () => true,
     requestJpeg: () => Promise.reject(new Error("o polling não busca imagens")),
   };
   return { client, requestCount: () => served };

@@ -17,6 +17,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.66b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
     "opentelemetry-sdk>=1.45.1",
+    "pikepdf==10.16.0",
     "pillow==12.3.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
@@ -37,9 +38,10 @@ requires = ["uv_build>=0.12.15,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-# Única dependência de terceiros da imagem do executor (ADR 018): o Dockerfile instala só este
-# grupo, a partir do lock. O pin repete o de [project.dependencies]; um teste confere os dois.
-executor = ["pillow==12.3.0"]
+# Dependências de terceiros da imagem do executor (Pillow, ADR 018; pikepdf, que traz o qpdf na
+# wheel e puxa lxml e packaging, ADR 035): o Dockerfile instala só este grupo, a partir do lock.
+# Os pins repetem os de [project.dependencies]; tests/test_dependencies.py confere os dois.
+executor = ["pikepdf==10.16.0", "pillow==12.3.0"]
 # Teste de contrato (scripts/contract-test.sh, job "Contrato" do CI). Fora do `dev` para não
 # pesar na sincronização dos outros jobs; versão exata porque cada release muda as heurísticas e
 # um CI vermelho tem de vir de mudança na API, não do fuzzer.
@@ -207,6 +209,24 @@ source_modules = [
 forbidden_modules = ["PIL"]
 allow_indirect_imports = false
 
+# ADR 035: o pikepdf (e o qpdf que ele carrega) só abre PDF dentro do executor, pelo mesmo motivo
+# do PIL. É isto que obriga o __init__ de processing.pdf_press a não importá-lo de forma ansiosa.
+[[tool.importlinter.contracts]]
+name = "Só o executor carrega o pikepdf"
+type = "forbidden"
+source_modules = [
+    "goblinshift.catalog",
+    "goblinshift.files",
+    "goblinshift.runs",
+    "goblinshift.presets",
+    "goblinshift.identity",
+    "goblinshift.capacity",
+    "goblinshift.platform",
+    "goblinshift.entrypoints",
+]
+forbidden_modules = ["pikepdf"]
+allow_indirect_imports = false
+
 # Cada receita é uma unidade de versão própria (1.6): mudar uma não pode mudar o comportamento de
 # outra. O que for comum vai para processing (names.py, output_dir.py), não de uma receita à outra.
 [[tool.importlinter.contracts]]
@@ -217,6 +237,7 @@ modules = [
     "goblinshift.processing.image_forge",
     "goblinshift.processing.downloads_detox",
     "goblinshift.processing.media_mill",
+    "goblinshift.processing.pdf_press",
 ]
 
 # 3.2: o pacote (manifesto e ZIP) é montado uma vez, pelo executor, depois da receita. Uma receita
@@ -229,6 +250,7 @@ source_modules = [
     "goblinshift.processing.image_forge",
     "goblinshift.processing.downloads_detox",
     "goblinshift.processing.media_mill",
+    "goblinshift.processing.pdf_press",
 ]
 forbidden_modules = ["goblinshift.processing.packaging", "zipfile"]
 

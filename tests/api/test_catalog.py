@@ -39,6 +39,7 @@ def test_lista_as_receitas_na_ordem_do_catalogo() -> None:
         "csv-janitor",
         "image-forge",
         "downloads-detox",
+        "pdf-press",
         "media-mill",
     ]
 
