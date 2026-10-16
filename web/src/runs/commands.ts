@@ -25,15 +25,6 @@ const runResultsSchema = z.object({
   artifacts: z.array(resultReferenceSchema),
 });
 
-const artifactDetailsSchema = z.object({
-  id: z.uuid(),
-  role: z.enum(["output", "report", "manifest", "package", "preview"]),
-  size: z.number().int(),
-  sha256: z.string(),
-  expires_at: z.iso.datetime({ offset: true }),
-  availability: z.enum(["available", "expired", "deleted"]),
-});
-
 /** O 202 do DELETE chega sem corpo; só o status importa. */
 const acceptedSchema = z.unknown();
 
@@ -45,7 +36,6 @@ const cancelOutcomeSchema = z.object({
 });
 
 export type AcceptedRun = z.infer<typeof acceptedRunSchema>;
-export type ArtifactDetails = z.infer<typeof artifactDetailsSchema>;
 export type CancelOutcome = z.infer<typeof cancelOutcomeSchema>;
 export type RunResults = z.infer<typeof runResultsSchema>;
 
@@ -98,21 +88,6 @@ export async function getRunResults(
     method: "GET",
     path: `/api/v1/runs/${encodeURIComponent(runId)}/results`,
     schema: runResultsSchema,
-    ...(signal === undefined ? {} : { signal }),
-  });
-  return response.data;
-}
-
-/** GET /artifacts/{id}: metadados e disponibilidade (vencido ou excluído) de um artefato. */
-export async function getArtifact(
-  client: ApiClient,
-  artifactId: string,
-  signal?: AbortSignal,
-): Promise<ArtifactDetails> {
-  const response = await client.request({
-    method: "GET",
-    path: `/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
-    schema: artifactDetailsSchema,
     ...(signal === undefined ? {} : { signal }),
   });
   return response.data;

@@ -22,30 +22,39 @@ const PACKAGE_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
 const DELETE_ROUTE = `DELETE /api/v1/runs/${RUN_ID}/artifacts`;
 const OPEN_BUTTON = "Excluir resultados";
 
-const results = {
-  published: true,
-  expires_at: "2026-10-16T12:00:00Z",
-  artifacts: [
-    {
-      artifact_id: PACKAGE_ID,
-      logical_name: "pacote",
-      role: "package",
-      file_name: "csv-janitor.zip",
-      availability: "available",
-    },
-  ],
-};
+const REPORT_ID = "7d3c2a1e-0000-4000-8000-0000000000bb";
+const EXPIRES_AT = "2026-10-16T12:00:00Z";
 
-function artifactWith(availability: string): Handler {
-  return () =>
-    jsonResponse({
-      id: PACKAGE_ID,
-      role: "package",
-      size: 22,
-      sha256: "0".repeat(64),
-      expires_at: "2026-10-16T12:00:00Z",
-      availability,
-    });
+type Availability = "available" | "expired" | "deleted";
+
+function packageRef(availability: Availability) {
+  return {
+    artifact_id: PACKAGE_ID,
+    logical_name: "pacote",
+    role: "package",
+    file_name: "csv-janitor.zip",
+    availability,
+  };
+}
+
+function reportRef(availability: Availability) {
+  return {
+    artifact_id: REPORT_ID,
+    logical_name: "relatorio",
+    role: "report",
+    file_name: "relatorio.json",
+    availability,
+  };
+}
+
+function resultsWith(...artifacts: readonly object[]) {
+  return { published: true, expires_at: EXPIRES_AT, artifacts };
+}
+
+const results = resultsWith(packageRef("available"));
+
+function resultsHandler(body: object): Handler {
+  return () => jsonResponse(body);
 }
 
 function setup(handlers: Readonly<Record<string, Handler>> = {}) {
@@ -53,7 +62,6 @@ function setup(handlers: Readonly<Record<string, Handler>> = {}) {
     {
       [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody({ status: "succeeded" })),
       [`GET /api/v1/runs/${RUN_ID}/results`]: () => jsonResponse(results),
-      [`GET /api/v1/artifacts/${PACKAGE_ID}`]: artifactWith("available"),
       ...handlers,
     },
     { csrfToken: CSRF },
@@ -76,17 +84,26 @@ async function resultsRegion(): Promise<HTMLElement> {
   return screen.findByRole("region", { name: "Resultados" });
 }
 
-describe("Resultados: disponibilidade", () => {
-  it("disponíveis: os downloads e o Excluir resultados", async () => {
-    setup();
+describe("Resultados: disponibilidade vem do /results", () => {
+  it("disponíveis: os downloads e o Excluir resultados, sem consultar cada artefato", async () => {
+    const { api } = setup();
 
     const region = await resultsRegion();
     expect(await within(region).findByRole("button", { name: OPEN_BUTTON })).toBeVisible();
     expect(within(region).getByRole("link", { name: /^Baixar csv-janitor\.zip/ })).toBeVisible();
+    expect(
+      screenRequests(api.requests).filter((request) =>
+        new URL(request.url).pathname.startsWith("/api/v1/artifacts/"),
+      ),
+    ).toEqual([]);
   });
 
-  it("excluídos: sem links, com o estado vazio que diz por quê", async () => {
-    setup({ [`GET /api/v1/artifacts/${PACKAGE_ID}`]: artifactWith("deleted") });
+  it("todos excluídos: sem links nem Excluir, com o estado vazio que diz por quê", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("deleted"), reportRef("deleted")),
+      ),
+    });
 
     const region = await resultsRegion();
     expect(
@@ -96,56 +113,71 @@ describe("Resultados: disponibilidade", () => {
     expect(within(region).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
   });
 
-  it("expirados: sem links, com a data em que venceram (sem prazo fixo no texto)", async () => {
-    setup({ [`GET /api/v1/artifacts/${PACKAGE_ID}`]: artifactWith("expired") });
+  it("todos expirados: sem links, com a data em que venceram (sem prazo fixo no texto)", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("expired"), reportRef("expired")),
+      ),
+    });
 
     const region = await resultsRegion();
     expect(
       await within(region).findByRole("heading", { name: "Resultados expirados" }),
     ).toBeVisible();
-    expect(region).toHaveTextContent(
-      `Os resultados expiraram em ${formatDateTime(results.expires_at)}.`,
-    );
+    expect(region).toHaveTextContent(`Os resultados expiraram em ${formatDateTime(EXPIRES_AT)}.`);
     expect(region).not.toHaveTextContent("48 horas");
     expect(within(region).queryByRole("link", { name: /^Baixar/ })).toBeNull();
+    expect(within(region).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
   });
 
-  it("enquanto a disponibilidade carrega: verificando, sem links nem Excluir", async () => {
-    // null: o fakeApi nunca responde.
-    setup({ [`GET /api/v1/artifacts/${PACKAGE_ID}`]: () => null });
+  it("nenhum disponível por motivos diferentes: estado vazio de indisponíveis", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("expired"), reportRef("deleted")),
+      ),
+    });
 
     const region = await resultsRegion();
     expect(
-      await within(region).findByText("Verificando se os resultados ainda estão disponíveis…"),
+      await within(region).findByRole("heading", { name: "Resultados indisponíveis" }),
     ).toBeVisible();
     expect(within(region).queryByRole("link", { name: /^Baixar/ })).toBeNull();
     expect(within(region).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
   });
 
-  it("se a disponibilidade falhar: avisa que não deu para confirmar e deixa verificar de novo", async () => {
-    let calls = 0;
-    const { user } = setup({
-      [`GET /api/v1/artifacts/${PACKAGE_ID}`]: (request) => {
-        calls += 1;
-        return calls === 1
-          ? problemResponse(500, "INTERNAL_ERROR")
-          : artifactWith("expired")(request);
-      },
+  it("um arquivo expirado entre disponíveis: sem link para ele, com a data em que expirou", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("available"), reportRef("expired")),
+      ),
     });
 
     const region = await resultsRegion();
     expect(
-      await within(region).findByText(
-        "Não deu para confirmar se os resultados ainda estão disponíveis; o download pode falhar.",
-      ),
+      await within(region).findByRole("link", { name: /^Baixar csv-janitor\.zip/ }),
     ).toBeVisible();
-    // O link continua, mas com o aviso ao lado: o download responde por si.
-    expect(within(region).getByRole("link", { name: /^Baixar csv-janitor\.zip/ })).toBeVisible();
-    await user.click(within(region).getByRole("button", { name: "Verificar de novo" }));
+    expect(within(region).queryByRole("link", { name: /relatorio\.json/ })).toBeNull();
+    expect(within(region).getByRole("listitem")).toHaveTextContent(
+      `relatorio.json (relatório): expirou em ${formatDateTime(EXPIRES_AT)}.`,
+    );
+    // O prazo já passou: "Disponíveis até" a mesma data contradiria o motivo.
+    expect(region).not.toHaveTextContent("Disponíveis até");
+    expect(within(region).getByRole("button", { name: OPEN_BUTTON })).toBeVisible();
+  });
 
+  it("o pacote excluído entre disponíveis: sem o Baixar primário, com o motivo", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("deleted"), reportRef("available")),
+      ),
+    });
+
+    const region = await resultsRegion();
     expect(
-      await within(region).findByRole("heading", { name: "Resultados expirados" }),
+      await within(region).findByRole("link", { name: /^Baixar relatorio\.json/ }),
     ).toBeVisible();
+    expect(within(region).queryByRole("link", { name: /csv-janitor\.zip/ })).toBeNull();
+    expect(region).toHaveTextContent("csv-janitor.zip (pacote com todos os arquivos): excluído.");
   });
 });
 
@@ -170,8 +202,8 @@ describe("Resultados: excluir", () => {
         deleted = true;
         return new Response(null, { status: 202 });
       },
-      [`GET /api/v1/artifacts/${PACKAGE_ID}`]: (request) =>
-        artifactWith(deleted ? "deleted" : "available")(request),
+      [`GET /api/v1/runs/${RUN_ID}/results`]: () =>
+        jsonResponse(resultsWith(packageRef(deleted ? "deleted" : "available"))),
     });
 
     const region = await resultsRegion();
