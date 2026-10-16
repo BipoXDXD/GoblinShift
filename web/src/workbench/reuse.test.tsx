@@ -59,6 +59,31 @@ describe("Bancada aberta pela execução (reusar configuração)", () => {
     expect(await screen.findByText(/Esta execução é de outra receita/)).toBeVisible();
   });
 
+  it("execução do PDF Press com páginas escolhidas reabre sem elas e pede para escolhê-las de novo", async () => {
+    setup(
+      () =>
+        jsonResponse(
+          runBody({
+            recipe_id: "pdf-press",
+            status: "succeeded",
+            parameters: {
+              operation: "select",
+              pages_per_document: 1,
+              select: [{ upload_id: "0b9f6c1e-3a2d-4e5f-8a7b-6c5d4e3f2a1b", page_number: 2 }],
+            },
+          }),
+        ),
+      `/bancada/pdf-press?execucao=${RUN_ID}`,
+    );
+
+    const notice = await screen.findByText(/^Parâmetros da execução de /);
+    expect(notice).toHaveTextContent(
+      "As páginas escolhidas dependem dos arquivos enviados; escolha-as de novo.",
+    );
+    expect(screen.queryByText(/Esta execução é de outra receita/)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "O que fazer com os PDFs" })).toHaveValue("select");
+  });
+
   it("execução que não existe mostra a falha e a Bancada com os padrões", async () => {
     setup(() => problemResponse(404, "NOT_FOUND"));
 
