@@ -33,12 +33,18 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
   ...pairs("info-fg", ["info-bg"], TEXT),
   ...pairs("fg", ["dropzone-active"], TEXT),
   ...pairs("fg-muted", ["dropzone-active"], TEXT),
+  // Faixa do herói da página inicial: título e texto de apoio ficam sobre ela.
+  ...pairs("fg", ["hero-band"], TEXT),
+  ...pairs("fg-muted", ["hero-band"], TEXT),
   ...pairs("selection-fg", ["selection-bg"], TEXT),
   // Terciário: só texto grande (18 px ou mais) ou decorativo.
   ...pairs("fg-subtle", ["bg", "surface"], NON_TEXT),
   ...pairs("border-ui", [...SURFACES, "dropzone-active"], NON_TEXT),
   ...pairs("ring", [...SURFACES, "danger-bg", "warning-bg"], NON_TEXT),
   ...pairs("progress-fill", ["progress-track"], NON_TEXT),
+  // Fio inferior da faixa do aviso global, sobre o próprio fundo da faixa.
+  ...pairs("warning-accent", ["warning-bg"], NON_TEXT),
+  ...pairs("danger-accent", ["danger-bg"], NON_TEXT),
 ];
 
 const THEMES = [
@@ -73,7 +79,7 @@ describe("tons crus", () => {
   });
 
   it("existem as cinco famílias da paleta, com 11 tons cada", () => {
-    const families = ["moss", "brass", "stone", "ember", "patina"].map(
+    const families = ["wood", "copper", "amber", "ember", "patina"].map(
       (family) => [...rawColors(css).keys()].filter((name) => name.startsWith(`${family}-`)).length,
     );
     expect(families).toEqual([11, 11, 11, 11, 11]);
@@ -81,22 +87,36 @@ describe("tons crus", () => {
 });
 
 describe("papéis de cor", () => {
-  // Musgo é a cor do que se clica (PUI): sucesso tem matiz próprio, a pátina.
+  // Cobre é a cor do que se clica (PUI): sucesso tem matiz próprio, a pátina.
   it.each(THEMES)("sucesso usa pátina no tema $name", ({ selector }) => {
     const block = declarationLines(css, `${selector} {`).join("\n");
     expect(block).toMatch(/--success-bg:\s*var\(--color-patina-\d+\)/);
     expect(block).toMatch(/--success-fg:\s*var\(--color-patina-\d+\)/);
   });
 
-  // Progresso e sucesso são estado, não ação: no musgo pareceriam clicáveis.
+  // Progresso e sucesso são estado, não ação: no cobre pareceriam clicáveis.
   it.each([...THEMES.map(({ selector }) => selector), ":root:not([data-theme])"])(
-    "nenhum papel de estado aponta para o musgo em %s",
+    "nenhum papel de estado aponta para o cobre em %s",
     (selector) => {
       const stateRoles = declarationLines(css, `${selector} {`).filter((line) =>
         /^--(?:success-[a-z]+|progress-fill):/.test(line),
       );
       expect(stateRoles.length).toBeGreaterThanOrEqual(STATE_ROLE_COUNT);
-      expect(stateRoles.filter((line) => line.includes("--color-moss-"))).toEqual([]);
+      expect(stateRoles.filter((line) => line.includes("--color-copper-"))).toEqual([]);
+    },
+  );
+
+  // Taverna escura (decisão de 2026-10-15): cobre no que se clica, âmbar só no foco e no aviso,
+  // faixa de acento no cobre-500 nos dois temas.
+  it.each(THEMES)(
+    "primária no cobre, foco no âmbar e faixa no cobre-500 no tema $name",
+    ({ selector }) => {
+      const block = declarationLines(css, `${selector} {`).join("\n");
+      expect(block).toMatch(/--primary:\s*var\(--color-copper-\d+\)/);
+      expect(block).toMatch(/--ring:\s*var\(--color-amber-\d+\)/);
+      expect(block).toMatch(/--warning-fg:\s*var\(--color-amber-\d+\)/);
+      expect(block).toMatch(/--warning-accent:\s*var\(--color-amber-\d+\)/);
+      expect(block).toContain("--accent-band: var(--color-copper-500);");
     },
   );
 

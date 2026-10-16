@@ -1,5 +1,7 @@
 # Plano de implementação: revisão do design pelos livros de UI
 
+> **Nota:** os nomes `moss`, `brass` e `stone` deste plano são da paleta anterior; a atual é a Taverna escura ([ADR 032](../../adr/032-paleta-taverna-escura.md)).
+
 > **Para agentes:** SUB-SKILL OBRIGATÓRIA: use superpowers:subagent-driven-development (recomendada) ou superpowers:executing-plans para executar este plano tarefa por tarefa. Os passos usam checkbox (`- [ ]`).
 
 **Objetivo:** aplicar as decisões da spec ao sistema visual da SPA:
