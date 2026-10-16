@@ -10,6 +10,7 @@ from goblinshift.processing.recipe import (
     InputContractError,
     ItemOk,
     ItemRejected,
+    Preview,
     RecipeFailure,
 )
 from tests.image_forge import media
@@ -290,3 +291,61 @@ def test_falha_de_leitura_da_entrada_e_infraestrutura(work: Workspace) -> None:
 
     with pytest.raises(FileNotFoundError):
         work.run()
+
+
+# --- Preview: imagem reduzida, sempre JPEG, depois de todo o conteúdo (2.2, 3.6).
+
+
+def test_preview_jpeg_cabe_em_512_e_deriva_da_saida(work: Workspace) -> None:
+    work.add("a.png", rgb_png((2400, 1200)))
+
+    item = only_ok(work.run())
+
+    assert item.previews == (Preview("previews/a.jpg", "images/a.png"),)
+    preview = work.open_output("previews/a.jpg")
+    assert (preview.format, preview.size) == ("JPEG", (512, 256))
+
+
+def test_preview_de_imagem_pequena_nao_amplia(work: Workspace) -> None:
+    work.add("a.png", rgb_png((100, 50)))
+
+    only_ok(work.run())
+
+    assert work.open_output("previews/a.jpg").size == (100, 50)
+
+
+def test_preview_de_imagem_com_transparencia_sai_sem_alfa(work: Workspace) -> None:
+    work.add("a.png", media.png(media.solid("RGBA", (64, 64), (10, 20, 30, 0))))
+
+    only_ok(work.run())
+
+    assert work.open_output("previews/a.jpg").mode == "RGB"
+
+
+def test_sem_espaco_o_preview_some_e_o_conteudo_fica(work: Workspace) -> None:
+    work.add("a.png", rgb_png((64, 64)))
+    one_file = FileSystemOutputDir(work.out_dir, max_files=1)
+
+    report = ImageForgeV1().run(Params(), work.inputs, one_file, work.progress)
+
+    [item] = report.items
+    assert isinstance(item, ItemOk)
+    assert (item.outputs, item.previews) == (("images/a.png",), ())
+    assert work.previews() == []
+
+
+def test_previews_vem_depois_de_todas_as_saidas(work: Workspace) -> None:
+    work.add("a.png", rgb_png((64, 64)))
+    work.add("b.png", rgb_png((64, 64)))
+    out = FileSystemOutputDir(work.out_dir)
+
+    ImageForgeV1().run(Params(make_thumbnails=True), work.inputs, out, work.progress)
+
+    assert [name for name, _role in out.created] == [
+        "images/a.png",
+        "thumbnails/a.png",
+        "images/b.png",
+        "thumbnails/b.png",
+        "previews/a.jpg",
+        "previews/b.jpg",
+    ]

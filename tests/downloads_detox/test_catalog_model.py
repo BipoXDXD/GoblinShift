@@ -49,11 +49,20 @@ def test_prefixo_explicito_com_indexed_e_aceito() -> None:
     "raw",
     [
         pytest.param({"name_prefix": "doc"}, id="preserve-por-default"),
-        pytest.param({"name_mode": "preserve", "name_prefix": "file"}, id="igual-ao-default"),
+        pytest.param({"name_mode": "preserve", "name_prefix": "doc"}, id="preserve-explicito"),
     ],
 )
 def test_prefixo_explicito_com_preserve_e_recusado(raw: dict[str, object]) -> None:
     assert errors(raw) == [()]
+
+
+def test_prefixo_igual_ao_default_com_preserve_e_aceito() -> None:
+    # A13 (decisão de 2026-10-16): o default volta nos parâmetros resolvidos e pode ser reenviado.
+    model = DownloadsDetoxV1Parameters.model_validate(
+        {"name_mode": "preserve", "name_prefix": "file"}
+    )
+
+    assert model.name_prefix == "file"
 
 
 @pytest.mark.parametrize(

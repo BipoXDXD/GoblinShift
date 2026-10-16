@@ -42,14 +42,14 @@ REPORT = Report(
         ItemOk(
             0,
             ("images/Foto.png",),
-            warnings=(ReportWarning("W", "aviso do item"),),
+            warnings=(ReportWarning("CSV_FORMULA_CELLS", "aviso do item"),),
             counts={"n": 1},
             details={"kind": "image"},
         ),
         ItemDuplicate(1, 0),
         ItemRejected(2, "UNSUPPORTED_FORMAT", "HTML não é aceito"),
     ),
-    warnings=(ReportWarning("G", "aviso global"),),
+    warnings=(ReportWarning("CSV_FORMULA_HEADER", "aviso global"),),
     details={"note": "ZIP opaco"},
 )
 DIGESTS = {"images/Foto.png": FileDigest(size=1234, sha256="c" * 64)}
@@ -75,7 +75,7 @@ def test_manifesto_completo_tem_exatamente_o_esquema_1() -> None:
                 "sha256": "a" * 64,
                 "status": "ok",
                 "outputs": ["images/Foto.png"],
-                "warnings": [{"code": "W", "detail": "aviso do item"}],
+                "warnings": [{"code": "CSV_FORMULA_CELLS", "detail": "aviso do item"}],
             },
             {
                 "position": 1,
@@ -98,7 +98,7 @@ def test_manifesto_completo_tem_exatamente_o_esquema_1() -> None:
         "outputs": [
             {"path": "images/Foto.png", "size": 1234, "sha256": "c" * 64, "source_position": 0}
         ],
-        "warnings": [{"code": "G", "detail": "aviso global"}],
+        "warnings": [{"code": "CSV_FORMULA_HEADER", "detail": "aviso global"}],
     }
     assert MANIFEST_SCHEMA_VERSION == 1
 
