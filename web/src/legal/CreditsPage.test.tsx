@@ -52,6 +52,27 @@ describe("/creditos", () => {
     }
   });
 
+  it("mostra o selo da oficina, a marca secundária, com texto alternativo e tamanho fixo", async () => {
+    setup("/creditos");
+    await expectHeadingFocused("Créditos");
+
+    const section = screen.getByRole("region", { name: "A marca" });
+    const seal = within(section).getByRole("img", { name: /^Selo da oficina GoblinShift/ });
+    expect(seal).toHaveAttribute("width", "128");
+    expect(seal).toHaveAttribute("height", "128");
+    expect(seal).toHaveAttribute("loading", "lazy");
+  });
+
+  it("diz como a marca foi feita e que ela não é licenciada", async () => {
+    setup("/creditos");
+    await expectHeadingFocused("Créditos");
+
+    const section = screen.getByRole("region", { name: "A marca" });
+    expect(section).toHaveTextContent("fonte externa");
+    expect(section).toHaveTextContent("desenhada à mão em SVG, com processamento determinístico");
+    expect(section).toHaveTextContent(/não são licenciados/);
+  });
+
   it("não tem violações do axe", async () => {
     const { container } = setup("/creditos");
     await expectHeadingFocused("Créditos");

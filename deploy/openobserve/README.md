@@ -40,7 +40,7 @@ O SLO de execução lê o span `run.finished`, que o worker e a manutenção emi
 | Causa de 3.7 | Onde fica |
 |---|---|
 | Backup diário que falhou | healthchecks.io (ping do `pg-backup.sh`) |
-| Certificado TLS a menos de 14 dias | monitor de uptime externo (UptimeRobot ou Better Stack) |
+| Certificado TLS a menos de 14 dias | workflow tls-check + healthchecks.io (certificado TLS, 1 dia / 6 h) |
 | Teste de aceitação do ambiente falhando | healthchecks.io (ping do `deploy/acceptance/scheduled.sh`, pelo timer semanal) |
 | Execução presa em `stopping` por mais de 10 min | falta o evento por ciclo da manutenção |
 | Limitador de exclusões acionado | falta o evento por ciclo da manutenção |
@@ -55,7 +55,8 @@ O OpenObserve roda na própria VPS: se ela cair, ninguém avisa. Por isso estes 
 | `restauração mensal` | healthchecks.io | 31 dias / 1 dia | workflow "Restauração testada do backup" | secret `RESTORE_HEALTHCHECK_URL` (environment `backup-restore`) |
 | `alertas do OpenObserve` | healthchecks.io | 1 h / 30 min | alerta `gs-heartbeat` (prova que o OpenObserve avalia e alcança a internet) | `GS_ALERT_HEARTBEAT_URL` em `~/.config/goblinshift/alertas.env` |
 | `aceitação semanal` | healthchecks.io | 7 dias / 2 h | `deploy/acceptance/scheduled.sh` pelo `goblinshift-acceptance.timer` (`/start`, sucesso, `/fail`) | `ACCEPTANCE_HEALTHCHECK_URL` em `/etc/goblinshift/acceptance.env` (root, `chmod 600`) |
-| `/readyz` e TLS | UptimeRobot (ou Better Stack) | 5 min; alerta depois de 2 falhas | `GET /readyz` esperando 200, certificado a menos de 14 dias e expiração do domínio | na conta do serviço; não há URL de ping |
+| `certificado TLS` | healthchecks.io | 1 dia / 6 h | workflow `tls-check` (`deploy/tls_check`: cadeia, hostname e 14 dias ou mais; sucesso ou `/fail`) | secret de repositório `TLS_HEALTHCHECK_URL` |
+| `/readyz` | UptimeRobot (ou Better Stack) | 5 min; alerta depois de 2 falhas | `GET /readyz` esperando 200 e expiração do domínio | na conta do serviço; não há URL de ping |
 
 A tolerância de 2 h dos checks do backup e da aceitação cobre o sorteio de até 30 min dos timers (`RandomizedDelaySec`) e a até 1 h de teste. A aceitação semanal para o worker por cerca de 10 a 30 minutos, no domingo de madrugada (07:30 UTC mais o sorteio, depois da janela do backup): as execuções aceitas nesse intervalo esperam na fila. Detalhes e instalação no README da raiz, "Teste de aceitação do ambiente".
 
