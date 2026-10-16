@@ -25,6 +25,7 @@ const publishedResults = {
       logical_name: "clientes",
       role: "output",
       file_name: "clientes.csv",
+      availability: "available",
     },
   ],
 };
@@ -106,6 +107,7 @@ describe("Execução", () => {
               logical_name: "pacote",
               role: "package",
               file_name: "resultado.zip",
+              availability: "available",
             },
           ],
         }),

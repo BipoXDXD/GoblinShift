@@ -87,6 +87,9 @@ class FileSystemOutputDir:
         self._created.append((path, role))
         return OutputFile(path, stream)
 
+    def room_for(self, size_bytes: int) -> bool:
+        return len(self._created) < self._max_files and self._budget.fits(size_bytes)
+
     def _ensure_group(self, group: OutputGroup) -> str:
         if group not in self._ready_groups:
             directory = self._root / group.value
@@ -144,8 +147,11 @@ class _ByteBudget:
         self._limit = limit
         self._used = 0
 
+    def fits(self, size: int) -> bool:
+        return self._used + size <= self._limit
+
     def spend(self, size: int) -> None:
-        if self._used + size > self._limit:
+        if not self.fits(size):
             raise RecipeFailure(
                 FailureCode.OUTPUT_LIMIT_EXCEEDED,
                 f"as saídas passariam de {self._limit} bytes",
