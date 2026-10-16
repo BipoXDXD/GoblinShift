@@ -30,7 +30,7 @@ A tela de resultado mostra uma comparação (2.2) sem renderizar uploads brutos:
 ## Consequências
 
 - Image Forge com 100 imagens e miniaturas usa 200 arquivos; sobram 20 previews. Sem miniaturas, todos cabem.
-- `GET /runs/{id}/results` passa a listar artefatos `preview` (valor novo no enum de saída `role`).
+- `GET /runs/{id}/results` passa a listar artefatos `preview` (valor novo no enum de saída `role`), com `source_artifact_id` apontando a saída de origem (`null` nos outros papéis), para a interface mostrar cada preview junto da saída sem um pedido por arquivo.
 - Excluir as saídas (`DELETE /runs/{id}/artifacts`) e a retenção de 48 h tratam o preview como qualquer artefato da Run.
 
 ## Como verificar
