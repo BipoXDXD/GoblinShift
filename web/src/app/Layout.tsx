@@ -41,7 +41,7 @@ interface LayoutProps {
 }
 
 /**
- * Moldura de todas as telas (D8): faixa de acento em latão, barra no topo com a marca, o Histórico,
+ * Moldura de todas as telas (D8): faixa de acento em cobre, barra no topo com a marca, o Histórico,
  * o Acesso (ou Entrar, sem sessão) e o seletor de tema, o aviso global, quando há, e o conteúdo
  * centrado. Conta que ainda não aceitou os termos vigentes vai para o aceite antes de qualquer outra
  * tela.
