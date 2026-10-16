@@ -1,0 +1,45 @@
+name: Vencimento do certificado TLS
+
+# Todo dia, de fora da VPS: conecta em goblinshift.dev:443 com SNI, valida a cadeia e o hostname
+# e confere que faltam 14 dias ou mais para o notAfter (deploy/tls_check). O Caddy renova sozinho;
+# isto é só a rede de segurança. Sucesso pinga o check "certificado TLS" do healthchecks.io
+# (1 dia, tolerância de 6 h); falha pinga /fail. Sem ping nenhum, o healthchecks.io avisa sozinho.
+#
+# O log deste workflow é público. A URL do ping é segredo (quem a tem cala o alerta pingando
+# sucesso): vai pelo env e chega ao curl pelo stdin, nunca na linha de comando.
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Conferir o vencimento
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Conferir o certificado e pingar o healthchecks.io
+        env:
+          TLS_HEALTHCHECK_URL: ${{ secrets.TLS_HEALTHCHECK_URL }}
+        # Python do próprio runner (3.12): o script só usa a biblioteca padrão.
+        run: |
+          if [[ -z "$TLS_HEALTHCHECK_URL" ]]; then
+            echo "::error::O secret TLS_HEALTHCHECK_URL está vazio ou não existe. Cadastre a URL de ping do check \"certificado TLS\" do healthchecks.io em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          status=0
+          (cd deploy && python3 -m tls_check goblinshift.dev) || status=$?
+          suffix=""
+          [[ "$status" -eq 0 ]] || suffix="/fail"
+          url="${TLS_HEALTHCHECK_URL%/}${suffix}"
+          url="${url//\\/\\\\}"
+          url="${url//\"/\\\"}"
+          printf 'url = "%s"\n' "$url" |
+            curl --config - -fsS -m 10 --retry 3 --output /dev/null
+          exit "$status"
