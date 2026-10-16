@@ -612,6 +612,20 @@ def test_amostra_csv_e_aceita(tmp_path: Path) -> None:
     assert preview.of == "a.csv"
 
 
+def test_mapa_de_paginas_em_json_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    page_map = b'{"schema_version": 1, "path": "a.pdf", "pages": []}'
+    write_out(
+        out,
+        [with_preview("previews/a.json", "a.pdf")],
+        {"a.pdf": b"%PDF", "previews/a.json": page_map},
+    )
+
+    [preview] = collect_outputs(out, recipe_id=RECIPE, input_count=1).previews
+
+    assert preview.of == "a.pdf"
+
+
 def test_relatorio_sem_previews_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
     out = tmp_path / "out"
     write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"x"})
@@ -628,6 +642,9 @@ def test_relatorio_sem_previews_do_executor_anterior_e_aceito(tmp_path: Path) ->
         pytest.param("previews/a.csv", b"a\x00b", id="csv-com-nul"),
         pytest.param("previews/a.csv", b"a" * (64 * 1024 + 1), id="csv-acima-de-64-kib"),
         pytest.param("previews/a.html", b"<b>x</b>", id="extensao-fora-da-lista"),
+        pytest.param("previews/a.json", b"[1, 2]", id="json-que-nao-e-objeto"),
+        pytest.param("previews/a.json", b'{"a": 1, "a": 2}', id="json-com-chave-repetida"),
+        pytest.param("previews/a.json", b"{" * 10, id="json-malformado"),
     ],
 )
 def test_preview_fora_do_formato_e_recusado(tmp_path: Path, path: str, content: bytes) -> None:

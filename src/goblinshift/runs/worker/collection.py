@@ -68,6 +68,7 @@ _PACKAGE_LIMITS = PackageLimits()
 _PREVIEWS_PREFIX = f"{OutputGroup.PREVIEWS.value}/"
 _JPEG_EXTENSION = ".jpg"
 _CSV_EXTENSION = ".csv"
+_JSON_EXTENSION = ".json"
 _JPEG_MAGIC = b"\xff\xd8\xff"
 # Tetos dos previews (2.2): a amostra CSV tem no máximo 64 KiB; o JPEG de 512 x 512, bem menos.
 PREVIEW_IMAGE_MAX_BYTES = 512 * 1024
@@ -75,6 +76,8 @@ PREVIEW_TABLE_MAX_BYTES = 64 * 1024
 _PREVIEW_MAX_BYTES = {
     _JPEG_EXTENSION: PREVIEW_IMAGE_MAX_BYTES,
     _CSV_EXTENSION: PREVIEW_TABLE_MAX_BYTES,
+    # Mapa de páginas de um documento do PDF Press: até 400 páginas, bem menos que 64 KiB.
+    _JSON_EXTENSION: PREVIEW_TABLE_MAX_BYTES,
 }
 READ_CHUNK_BYTES = 1024 * 1024
 _ITEM_OK = "ok"
@@ -267,7 +270,8 @@ def _checked_preview(found: _Found) -> OutputFile:
     """Só os dois formatos que as receitas geram, com tipo e tamanho conferidos pelo worker.
 
     O preview de imagem é servido com o tipo real (`image/jpeg`): por isso precisa começar como
-    JPEG; a amostra CSV, servida como bytes opacos, só precisa ser UTF-8 sem NUL.
+    JPEG; a amostra CSV e o mapa de páginas (JSON), servidos como bytes opacos, só precisam ser
+    UTF-8 sem NUL e, o mapa, um objeto JSON estrito.
     """
     extension = PurePosixPath(found.name).suffix
     limit = _PREVIEW_MAX_BYTES.get(extension)
@@ -280,7 +284,16 @@ def _checked_preview(found: _Found) -> OutputFile:
         raise CollectionError(f"preview que não é JPEG: {found.name!r}")
     if extension == _CSV_EXTENSION and not _is_plain_utf8(data):
         raise CollectionError(f"preview CSV fora de UTF-8 ou com NUL: {found.name!r}")
+    if extension == _JSON_EXTENSION and not _is_json_object(data):
+        raise CollectionError(f"preview JSON que não é objeto JSON aceito: {found.name!r}")
     return _from_bytes(found, data)
+
+
+def _is_json_object(data: bytes) -> bool:
+    try:
+        return isinstance(parse_strict_json(data), dict)
+    except ValueError:
+        return False
 
 
 def _is_plain_utf8(data: bytes) -> bool:
