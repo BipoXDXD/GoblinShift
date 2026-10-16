@@ -364,6 +364,7 @@ export const TEXT = {
         unavailable: {
           expired: "Pré-visualização indisponível: o arquivo expirou.",
           deleted: "Pré-visualização indisponível: o arquivo foi excluído.",
+          missing: "Pré-visualização indisponível: o arquivo se perdeu.",
         },
         tableCaption: (fileName: string, rows: number) =>
           `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
