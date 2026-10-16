@@ -82,6 +82,62 @@ describe("provenanceViolations", () => {
     );
   });
 
+  describe("direito e upstream da geração", () => {
+    const rights = [
+      { id: "fonte externa", vendor: "source-c", basis: [], status: "termos lidos" },
+      { id: "rights-a", vendor: "fonte externa", upstream: "source-a", basis: [], status: "x" },
+      { id: "rights-b", vendor: "fonte externa", upstream: "source-b", basis: [], status: "x" },
+    ];
+
+    function withTwoD(generation: Record<string, unknown>): unknown {
+      return doc({
+        rights,
+        generations: {
+          "lua-2d": { tool: "fonte externa", inputs: [], ...generation },
+          "lua-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["lua-2d"], rights: "fonte externa" },
+        },
+      });
+    }
+
+    it("upstream que contém o declarado no direito: aceita", () => {
+      const ok = withTwoD({ upstream: "source-a", rights: "rights-a" });
+
+      expect(provenanceViolations(FILES, ok)).toEqual([]);
+    });
+
+    it("direito de outro upstream: recusa", () => {
+      const wrong = withTwoD({ upstream: "source-a", rights: "rights-b" });
+
+      expect(provenanceViolations(FILES, wrong)).toContain(
+        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas cita o direito rights-b, que vale para "source-b"',
+      );
+    });
+
+    it("upstream declarado com direito que não distingue upstream: recusa", () => {
+      const generic = withTwoD({ upstream: "source-a", rights: "fonte externa" });
+
+      expect(provenanceViolations(FILES, generic)).toContain(
+        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas cita o direito fonte externa, que não declara upstream',
+      );
+    });
+
+    it("upstream declarado sem direito: recusa", () => {
+      const bare = withTwoD({ upstream: "source-a" });
+
+      expect(provenanceViolations(FILES, bare)).toContain(
+        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas não cita direito',
+      );
+    });
+
+    it("direito por upstream em geração sem upstream declarado: recusa", () => {
+      const silent = withTwoD({ rights: "rights-a" });
+
+      expect(provenanceViolations(FILES, silent)).toContain(
+        'goblins/lua-128w.avif: lua-2d cita o direito rights-a, que vale para "source-a", mas não declara upstream',
+      );
+    });
+  });
+
   it("goblin excluída por proveniência não entra no site", () => {
     const tainted = doc({
       generations: {
