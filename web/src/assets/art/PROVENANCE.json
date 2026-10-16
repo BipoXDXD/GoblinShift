@@ -849,75 +849,6 @@
       "ai_generated": true
     },
     {
-      "file": "oficina-3d/oficina-3d-rubia-192w.avif",
-      "sha256": "217c83c2727168cb8cc1506da5eb37b0cc4ed5e8273e562e4d22a1a9ab7469fa",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "oficina-3d/oficina-3d-rubia-192w.webp",
-      "sha256": "d0659f70fdde244af6ede19a8c251f2024d0c09207fff17162f29f9965d91620",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "oficina-3d/oficina-3d-rubia-384w.avif",
-      "sha256": "637cfc596d38691ab8a3c1caa7fdd2d9d7660351cfe3731b17c54ec113f67784",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "oficina-3d/oficina-3d-rubia-384w.webp",
-      "sha256": "5cc15c12dee53fd6c7b692f074a25cb57ac626c275e5f65be8d6ca844b7767f5",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "oficina-3d/oficina-3d-rubia-640w.avif",
-      "sha256": "1c8046e58aea2fbbc05183b09e5d8ed760155c341dfc3d49d2e082d78270504c",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "oficina-3d/oficina-3d-rubia-640w.webp",
-      "sha256": "59b4502658159ce3840aaa1763a70c12e4090b05ea3775dc1811a13c4199cb3c",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
-      "file": "oficina-3d/oficina-3d-rubia.glb",
-      "sha256": "da2469b328419c7298f030aa3e8d4080d4da98d58b4421ebf99fc7c971fd831e",
-      "derived_from": "rubia-3d-1m",
-      "human_edits": [
-        "weld, simplificação com atributos (posição, normal e UV; ~240 mil triângulos), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
-      ],
-      "ai_generated": true
-    },
-    {
       "file": "marca/rubia-escudo-144h.avif",
       "sha256": "ab0d1b96d7e500618d6d0fe86c57defc38812d2e14d0cd1a4a3604712d759e0a",
       "derived_from": "logo-a1-escudo",
@@ -1038,6 +969,420 @@
       "ai_generated": true
     },
     {
+      "file": "oficina-3d/oficina-3d-fagulha-192w.avif",
+      "sha256": "1b0423cb394c0d8637063b90d52b969ef601c9c2597247e17a5394c9165a0f85",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-fagulha-192w.webp",
+      "sha256": "e57f9b591df8ebeba9350123245509650e0eb448bbd855612b9e6e3ca05e7849",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-fagulha-384w.avif",
+      "sha256": "d2bbabc319ec9196d4e02cf15d43cd206e148d0bf54017c4e4f6362806e47220",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-fagulha-384w.webp",
+      "sha256": "e320a0ecb8d59d3d11c95b713f6f37bd61ad5b8d121d48ec9012aa1d5a546ab9",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-fagulha-640w.avif",
+      "sha256": "3152fc55ff36da9fe6a999c39eaddd0784c517c36cd483bf2985c6e811ed8da3",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-fagulha-640w.webp",
+      "sha256": "cf05968c9c624d414a0692b78c8f52937c9f4bf73b2d5ecfb96b429164512b7b",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-fagulha.glb",
+      "sha256": "14b74f85cbd5148ec260d2161959afcdbb712af23a6bc741e22e03823e8ac5df",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "weld, simplificação com atributos (posição, normal e UV; de 101 a 146 mil triângulos, conforme a goblin), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem-192w.avif",
+      "sha256": "961d17b62b1f7612c29af9266f990443e45546c75962a13c01bb1d2cf9aead6c",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem-192w.webp",
+      "sha256": "8fbead22afb2dea5426d4b1b720b74ef63620f46a6bb347c189f01aeab87c28f",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem-384w.avif",
+      "sha256": "04d890d0313f8e366cb4fe3990a3870f8754902b9bfb3f777117f63108999b2b",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem-384w.webp",
+      "sha256": "60a5eac0dade785e1fc5d3de2c6eb6432e6956ebe54084f8cb834ad228997982",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem-640w.avif",
+      "sha256": "072e5374d6998928d2c32f50528b367b81f57fee4b2ca5c8f1ebecebb463fd27",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem-640w.webp",
+      "sha256": "9004e69190fb8c7aa07e005cf190e68616561e943fec4e53e2ac77645af11058",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-ferrugem.glb",
+      "sha256": "797f8de98b71fc1a147a1392f197989c7e7e20de69c55b0938b31c67ec6289e7",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "weld, simplificação com atributos (posição, normal e UV; de 101 a 146 mil triângulos, conforme a goblin), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade-192w.avif",
+      "sha256": "7ee2b8620ba91d17283e76f458d490273ea6ffbaea57d1c8041ea481876e843f",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade-192w.webp",
+      "sha256": "35b2e45541e257a55bf286d649716c2818a79ee41a14c5a0929dc69afdd44372",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade-384w.avif",
+      "sha256": "74606dd76684f9dc1107590655ce415bdca86e9c310c8d01077054be26653d16",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade-384w.webp",
+      "sha256": "6fb84cdc68d38433c1b0b24e72f5fb0c1197df935cfd0359bc28cf85cbe155b8",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade-640w.avif",
+      "sha256": "7c24bc6848fb1a1130d3477025f48341ecbc2d3440f18e5728921662eacaf9cb",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade-640w.webp",
+      "sha256": "3bb6de4fec79adf5e73b01d4c6d2242338d8f6d41f3340d86fb63a895a4344d7",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-jade.glb",
+      "sha256": "6dba16f3ec9b8d785d4848b03ae7831b2469da3475a1cc1e38d62c71fbc17a84",
+      "derived_from": "jade-3d",
+      "human_edits": [
+        "weld, simplificação com atributos (posição, normal e UV; de 101 a 146 mil triângulos, conforme a goblin), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua-192w.avif",
+      "sha256": "42bdf96dd6df4cd93c80496019a90d903cab58705c26f7e2c5db48ac2806c6a0",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua-192w.webp",
+      "sha256": "de017577609934fc6eccad1254237c82ca958fc9b5efb1ef80340f65dcbd6b9c",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua-384w.avif",
+      "sha256": "82abe5228ca4f5a324543fdd5f4683c47a0991054badb3883825b6bb3f20a603",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua-384w.webp",
+      "sha256": "06c36b4057690b14f158dc3d98568eea522f06917dbdaba598ce50255edc5377",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua-640w.avif",
+      "sha256": "4f22845cd866bcea03244383e1ce951e19920052ebf90910318add44376f6b2c",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua-640w.webp",
+      "sha256": "6f2d5a77da55c9f1fe49d72598347a8e49b4b48431314a131c2fdc491c0c5af1",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-lua.glb",
+      "sha256": "a7e8de7d583e34efba0defcffc2e87de7da7d93bc96a440e12ac5cfa386dbee2",
+      "derived_from": "lua-3d",
+      "human_edits": [
+        "weld, simplificação com atributos (posição, normal e UV; de 101 a 146 mil triângulos, conforme a goblin), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx-192w.avif",
+      "sha256": "53c8d2e5a0e6fcdb12dfaea48581797ffaf4b996d264907e997290a2ba8fe73a",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx-192w.webp",
+      "sha256": "733f8eff9c0064ae79cdd1ab7200fafe326d8eee1c5cc4888eeeba46c150401f",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx-384w.avif",
+      "sha256": "ccda90310b1bede9d80f607186f04c987619efd361d028f8001e0c11a8968df8",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx-384w.webp",
+      "sha256": "2de53bd415250242648b8c2022792dfc643672f43c898667ee305269686d76e1",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx-640w.avif",
+      "sha256": "7c2af89b69558e3843b9556d17f1a413a7c547651e8a24a5d0f364488339cc4e",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx-640w.webp",
+      "sha256": "6e3d70a43e2a946bbf5548897dfd1d7845f15168c0b8d8e586492456a9188553",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-nyx.glb",
+      "sha256": "6fb03cafe89f34a3c708b8f2303ae1aa479ff2ecdbd9866e6d848ff547cb28b6",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "weld, simplificação com atributos (posição, normal e UV; de 101 a 146 mil triângulos, conforme a goblin), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-192w.avif",
+      "sha256": "217c83c2727168cb8cc1506da5eb37b0cc4ed5e8273e562e4d22a1a9ab7469fa",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-192w.webp",
+      "sha256": "d0659f70fdde244af6ede19a8c251f2024d0c09207fff17162f29f9965d91620",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-384w.avif",
+      "sha256": "637cfc596d38691ab8a3c1caa7fdd2d9d7660351cfe3731b17c54ec113f67784",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-384w.webp",
+      "sha256": "5cc15c12dee53fd6c7b692f074a25cb57ac626c275e5f65be8d6ca844b7767f5",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-640w.avif",
+      "sha256": "1c8046e58aea2fbbc05183b09e5d8ed760155c341dfc3d49d2e082d78270504c",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia-640w.webp",
+      "sha256": "59b4502658159ce3840aaa1763a70c12e4090b05ea3775dc1811a13c4199cb3c",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "oficina-3d/oficina-3d-rubia.glb",
+      "sha256": "da2469b328419c7298f030aa3e8d4080d4da98d58b4421ebf99fc7c971fd831e",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "weld, simplificação com atributos (posição, normal e UV; ~240 mil triângulos), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
       "file": "public/apple-touch-icon.png",
       "sha256": "c82e3aa3936b720a81e983c7259bcffded7e419ea4df1e96830739deb8a2d680",
       "derived_from": "logo-a1-escudo",
@@ -1046,6 +1391,22 @@
         "emblema centrado sobre madeira (wood-900), 180 px, paleta de 256 cores"
       ],
       "ai_generated": true
+    },
+    {
+      "file": "public/favicon.ico",
+      "sha256": "c4dcc1157057231e3e323aeebf80b7f8c1506d6e873c71ed42c555e4dfed2dc5",
+      "derived_from": "favicon-rubia",
+      "human_edits": [
+        "rasterização do favicon.svg em 16, 32 e 48 px no Chromium (scripts/arte/render-marca.mjs)"
+      ],
+      "ai_generated": false
+    },
+    {
+      "file": "public/favicon.svg",
+      "sha256": "717343f5221da71c7425578bd7a431f2493843095535f567f483ca37a2e6c80b",
+      "derived_from": "favicon-rubia",
+      "human_edits": ["desenho vetorial à mão na grade de 32 px"],
+      "ai_generated": false
     },
     {
       "file": "public/icon-192.png",
@@ -1076,22 +1437,6 @@
         "composição de 1200×630 com o selo sobre madeira, faixa de cobre e o título na Bricolage Grotesque (scripts/arte/render-marca.mjs)"
       ],
       "ai_generated": true
-    },
-    {
-      "file": "public/favicon.svg",
-      "sha256": "717343f5221da71c7425578bd7a431f2493843095535f567f483ca37a2e6c80b",
-      "derived_from": "favicon-rubia",
-      "human_edits": ["desenho vetorial à mão na grade de 32 px"],
-      "ai_generated": false
-    },
-    {
-      "file": "public/favicon.ico",
-      "sha256": "c4dcc1157057231e3e323aeebf80b7f8c1506d6e873c71ed42c555e4dfed2dc5",
-      "derived_from": "favicon-rubia",
-      "human_edits": [
-        "rasterização do favicon.svg em 16, 32 e 48 px no Chromium (scripts/arte/render-marca.mjs)"
-      ],
-      "ai_generated": false
     }
   ],
   "exceptions": [
