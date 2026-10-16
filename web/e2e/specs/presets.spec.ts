@@ -64,3 +64,34 @@ test("Esc com o salvamento em voo não esconde o 409, e o diálogo reabre depois
   await page.getByRole("button", { name: "Salvar preset" }).click();
   await expect(dialog).toBeVisible();
 });
+
+test("Esc com a exclusão em voo não fecha; a falha aparece na Oficina e o diálogo reabre", async ({
+  page,
+}) => {
+  const bancada = new BancadaPage(page);
+  await bancada.open("csv-janitor");
+  await page.getByRole("button", { name: "Salvar preset" }).click();
+  await page.getByLabel("Nome do preset").fill("Clientes do mês");
+  await page.getByLabel("Nome do preset").press("Enter");
+  await expect(page.getByText("Preset Clientes do mês salvo.")).toBeVisible();
+  await page.goto("/");
+  const presets = page.getByRole("region", { name: "Presets" });
+  const held = holdRequest(page, "**/api/v1/presets/*", "DELETE");
+
+  const remove = presets.getByRole("button", { name: "Excluir o preset Clientes do mês" });
+  await remove.click();
+  const dialog = page.getByRole("dialog", { name: "Excluir o preset Clientes do mês?" });
+  const confirm = dialog.getByRole("button", { name: "Excluir preset" });
+  await confirm.click();
+  const deletion = await held;
+  // O Esc só depois de a tela mostrar o pedido em voo.
+  await expect(confirm).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await fulfillProblem(deletion, { code: "SERVICE_UNAVAILABLE", status: 503 });
+
+  await expect(presets.getByRole("alert")).toContainText("O serviço está indisponível");
+  await expect(dialog).toBeHidden();
+  await remove.click();
+  await expect(dialog).toBeVisible();
+});
