@@ -16,7 +16,7 @@ const resultReferenceSchema = z.object({
   logical_name: z.string(),
   role: z.enum(["output", "report", "manifest", "package", "preview"]),
   file_name: z.string(),
-  availability: z.enum(["available", "expired", "deleted"]),
+  availability: z.enum(["available", "expired", "deleted", "missing"]),
   source_artifact_id: z.uuid().nullable(),
 });
 
@@ -32,7 +32,7 @@ const artifactDetailsSchema = z.object({
   size: z.number().int(),
   sha256: z.string(),
   expires_at: z.iso.datetime({ offset: true }),
-  availability: z.enum(["available", "expired", "deleted"]),
+  availability: z.enum(["available", "expired", "deleted", "missing"]),
 });
 
 /** O 202 do DELETE chega sem corpo; só o status importa. */

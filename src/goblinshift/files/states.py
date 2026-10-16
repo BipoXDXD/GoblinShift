@@ -37,24 +37,34 @@ class ArtifactRole(StrEnum):
 class Availability(StrEnum):
     """Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
 
-    Não é gravada: deriva de `deleted_at` e `expires_at`. A retenção também grava `deleted_at`
-    ao expirar, então a causa vem da ordem: `deleted_at` antes de `expires_at` é exclusão pedida
-    pelo dono, que vence a expiração; a partir de `expires_at`, o recurso venceu por retenção.
+    Não é gravada: deriva de `deleted_at`, `expires_at` e do estado do objeto. A retenção também
+    grava `deleted_at` ao expirar, então a causa vem da ordem: `deleted_at` antes de `expires_at`
+    é exclusão pedida pelo dono, que vence a expiração; a partir de `expires_at`, o recurso venceu
+    por retenção. O arquivo perdido do armazenamento (`missing`) só aparece enquanto o recurso ainda
+    estaria disponível: exclusão e expiração são as causas previstas e prevalecem.
     """
 
     AVAILABLE = "available"
     EXPIRED = "expired"
     DELETED = "deleted"
+    MISSING = "missing"
 
     @classmethod
     def of(
-        cls, *, deleted_at: datetime | None, expires_at: datetime, expired: bool
+        cls,
+        *,
+        deleted_at: datetime | None,
+        expires_at: datetime,
+        expired: bool,
+        object_missing: bool,
     ) -> Availability:
         """`expired` é `expires_at <= now()` calculado pelo banco, a mesma hora de quem consulta."""
         if deleted_at is not None and deleted_at < expires_at:
             return cls.DELETED
         if expired or deleted_at is not None:
             return cls.EXPIRED
+        if object_missing:
+            return cls.MISSING
         return cls.AVAILABLE
 
 

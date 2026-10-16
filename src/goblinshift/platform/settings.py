@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # Raiz do storage de objetos (3.6): fora de qualquer raiz pública servida pelo Nginx. O
     # default serve ao desenvolvimento local e é ignorado pelo git.
     storage_root: Path = Path(".storage")
+    # Limitador da varredura de objetos ausentes (files/missing.py): acima desta fração do lote
+    # ausente, nada é marcado `missing`. 1.0 desliga, só depois de um restore proposital (3.8).
+    # O default é `files.missing.DEFAULT_MAX_ABSENT_RATIO` (platform não importa files).
+    missing_sweep_max_absent_ratio: float = Field(default=0.5, gt=0, le=1)
 
     # Execução (3.4 e 3.6). Em produção só o `executor_ctl` (container gVisor por tentativa); o
     # Runner local, em subprocesso sem sandbox, é de desenvolvimento e testes.

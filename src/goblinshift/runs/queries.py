@@ -14,8 +14,8 @@ from sqlalchemy import ColumnElement, Row, Select, and_, case, func, select, tup
 from sqlalchemy.orm import Session
 
 from goblinshift.files.artifacts import file_name_of
-from goblinshift.files.states import ArtifactRole, Availability
-from goblinshift.files.tables import artifact, upload
+from goblinshift.files.states import ArtifactRole, Availability, ObjectState
+from goblinshift.files.tables import artifact, stored_object, upload
 from goblinshift.processing.recipe import (
     ITEM_COUNT_NAME,
     MAX_ITEM_COUNTS,
@@ -243,6 +243,7 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             artifact.c.expires_at,
             artifact.c.deleted_at,
             (artifact.c.expires_at <= func.now()).label("expired"),
+            stored_object.c.state.label("object_state"),
         )
         .join(
             artifact,
@@ -251,6 +252,7 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
                 artifact.c.owner_id == run_output.c.owner_id,
             ),
         )
+        .join(stored_object, stored_object.c.id == artifact.c.object_id)
         .where(run_output.c.owner_id == owner_id, run_output.c.run_id == run_id)
         .order_by(run_output.c.position)
     ).all()
@@ -261,14 +263,17 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             ArtifactRole(row.role),
             file_name_of(row.file_name, ArtifactRole(row.role), row.artifact_id),
             Availability.of(
-                deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+                deleted_at=row.deleted_at,
+                expires_at=row.expires_at,
+                expired=row.expired,
+                object_missing=row.object_state == ObjectState.MISSING,
             ),
             row.source_artifact_id,
         )
         for row in rows
     )
     # Mesmo critério de `_results_expire_at`: só os ainda disponíveis contam, e o mínimo entre
-    # eles é o prazo seguro. Excluídos e vencidos não anunciam validade.
+    # eles é o prazo seguro. Excluídos, vencidos e ausentes não anunciam validade.
     expires_at = min(
         (
             row.expires_at
@@ -308,8 +313,8 @@ def _select_views() -> Select[Any]:
 
 
 def _results_expire_at() -> ColumnElement[datetime]:
-    """Vencimento mais próximo entre os artefatos ainda disponíveis: nem excluídos nem vencidos
-    (o vencido antes de a manutenção marcá-lo também não conta)."""
+    """Vencimento mais próximo entre os artefatos ainda disponíveis: nem excluídos, nem vencidos,
+    nem com o objeto ausente (o vencido antes de a manutenção marcá-lo também não conta)."""
     return (
         select(func.min(artifact.c.expires_at))
         .join(
@@ -319,10 +324,12 @@ def _results_expire_at() -> ColumnElement[datetime]:
                 run_output.c.owner_id == artifact.c.owner_id,
             ),
         )
+        .join(stored_object, stored_object.c.id == artifact.c.object_id)
         .where(
             run_output.c.run_id == run.c.id,
             artifact.c.deleted_at.is_(None),
             artifact.c.expires_at > func.now(),
+            stored_object.c.state != ObjectState.MISSING,
         )
         .scalar_subquery()
     )
