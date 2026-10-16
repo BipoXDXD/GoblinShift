@@ -353,7 +353,7 @@ def test_lote_com_ausentes_demais_aciona_o_limitador_e_alerta(
     assert counts["missing_governor_tripped"] == 1
     assert {object_state(factory, object_id) for object_id in lost} == {ObjectState.COMMITTED}
     assert alert_fields(caplog, "missing_governor") == [
-        {"alert": "missing_governor", "checked": 10, "absent": 10}
+        {"alert": "missing_governor", "checked": 10, "absent": 10, "unreadable": 0}
     ]
 
 

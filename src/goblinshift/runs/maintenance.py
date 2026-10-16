@@ -399,6 +399,7 @@ class Maintenance:
                         "alert": "missing_governor",
                         "checked": sweep.checked,
                         "absent": sweep.absent,
+                        "unreadable": sweep.unreadable,
                     }
                 },
             )
