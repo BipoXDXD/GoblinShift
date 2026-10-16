@@ -95,3 +95,17 @@ def test_comandos_json_publicam_erros_do_decodificador_compartilhado() -> None:
             content = operation.get("requestBody", {}).get("content", {})
             if "application/json" in content:
                 assert {"400", "413", "415"} <= operation["responses"].keys()
+
+
+def test_contagem_por_coluna_do_detalhe_publica_os_tetos() -> None:
+    schemas = SPEC["components"]["schemas"]
+    columns = schemas["FormulaCellsResponse"]["properties"]["columns"]
+    name = schemas["FormulaColumnResponse"]["properties"]["name"]
+    cells = schemas["FormulaColumnResponse"]["properties"]["cells"]
+
+    assert (columns["minItems"], columns["maxItems"]) == (1, 10)
+    [text, null] = name["anyOf"]
+    assert (text["minLength"], text["maxLength"]) == (1, 120)
+    assert null == {"type": "null"}
+    assert cells["minimum"] == 1
+    assert schemas["FormulaCellsResponse"]["properties"]["more_columns"]["minimum"] == 0
