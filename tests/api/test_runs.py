@@ -59,7 +59,17 @@ RUN_KEYS = {
     "results_expire_at",
 }
 DETAIL_KEYS = RUN_KEYS | {"summary", "items"}
-ITEM_KEYS = {"position", "upload_id", "status", "error_code", "warnings", "counts", "duplicate_of"}
+ITEM_KEYS = {
+    "position",
+    "upload_id",
+    "original_name",
+    "status",
+    "error_code",
+    "warnings",
+    "notices",
+    "counts",
+    "duplicate_of",
+}
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
 
@@ -806,12 +816,15 @@ def test_resultados_publicados_em_ordem_de_posicao(
             "logical_name": "dados.csv",
             "role": "output",
             "file_name": "output-final.dat",
+            # `publish` vence em BASE_TIME + 48 h, que já passou.
+            "availability": "expired",
         },
         {
             "artifact_id": str(report),
             "logical_name": "report.json",
             "role": "report",
             "file_name": "report-final.dat",
+            "availability": "expired",
         },
     ]
 
@@ -1007,7 +1020,12 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
     run_id = insert_finished_run(
         factory, account.id, BASE_TIME, status=Status.SUCCEEDED_WITH_WARNINGS
     )
-    ok = {"warnings": ["CSV_FORMULA_CELLS"], "counts": {"records_read": 2}, "duplicate_of": None}
+    ok = {
+        "warnings": ["CSV_FORMULA_CELLS"],
+        "notices": ["IMAGE_P3_CONVERTED"],
+        "counts": {"records_read": 2},
+        "duplicate_of": None,
+    }
     uploads = with_items(
         factory,
         storage,
@@ -1033,27 +1051,33 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
         {
             "position": 0,
             "upload_id": str(uploads[0]),
+            "original_name": "a.txt",
             "status": "ok",
             "error_code": None,
             "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": ["IMAGE_P3_CONVERTED"],
             "counts": {"records_read": 2},
             "duplicate_of": None,
         },
         {
             "position": 1,
             "upload_id": str(uploads[1]),
+            "original_name": "a.txt",
             "status": "rejected",
             "error_code": "CSV_STRUCTURE_INVALID",
             "warnings": [],
+            "notices": [],
             "counts": {},
             "duplicate_of": None,
         },
         {
             "position": 2,
             "upload_id": str(uploads[2]),
+            "original_name": "a.txt",
             "status": "duplicate",
             "error_code": None,
             "warnings": [],
+            "notices": [],
             "counts": {},
             "duplicate_of": 0,
         },
@@ -1081,6 +1105,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
     run_id = insert_finished_run(factory, account.id, BASE_TIME)
     tampered = {
         "warnings": ["CSV_FORMULA_CELLS", "Ana Souza <ana@x.com>"],
+        "notices": ["ana@x.com"],
         "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
         "duplicate_of": None,
         "original_name": "salarios-ana.csv",
@@ -1097,6 +1122,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
 
     [item] = response.json()["items"]
     assert item["warnings"] == ["CSV_FORMULA_CELLS"]
+    assert item["notices"] == []
     assert item["counts"] == {"records_read": 1}
     assert item["error_code"] is None
     assert "ana" not in response.text.lower()
@@ -1130,3 +1156,33 @@ def test_resultados_excluidos_deixam_a_validade_nula(
     body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
 
     assert body["results_expire_at"] is None
+
+
+def test_resultados_trazem_a_disponibilidade_de_cada_artefato(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).where(artifact.c.id == table).values(deleted_at=BASE_TIME))
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == report)
+            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+
+    artifacts = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()["artifacts"]
+
+    assert [a["availability"] for a in artifacts] == ["deleted", "expired"]
+
+
+def test_item_mostra_o_nome_original_do_upload(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+
+    [item] = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()["items"]
+
+    assert item["original_name"] == "a.txt"

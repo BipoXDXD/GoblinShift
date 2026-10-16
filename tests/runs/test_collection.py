@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from goblinshift.processing.recipe import ItemRejectionCode, ItemWarningCode
+from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
     CollectionError,
@@ -671,3 +671,25 @@ def test_previews_contam_no_teto_de_arquivos(tmp_path: Path) -> None:
 
     with pytest.raises(OutputLimitError):
         collect_outputs(out, limits=OutputLimits(max_files=1), recipe_id=RECIPE, input_count=1)
+
+
+def test_notas_do_item_sao_coletadas_e_nao_viram_aviso(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["notices"] = ["IMAGE_P3_CONVERTED"]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].notices == (ItemNoticeCode.IMAGE_P3_CONVERTED,)
+    assert collected.report.outcome is PublishOutcome.SUCCEEDED
+
+
+def test_nota_fora_da_lista_e_recusada(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["notices"] = ["Ana <ana@x.com>"]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="nota"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)

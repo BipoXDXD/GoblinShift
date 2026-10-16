@@ -50,6 +50,13 @@ class ItemWarningCode(StrEnum):
     CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
 
 
+class ItemNoticeCode(StrEnum):
+    """Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
+    para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."""
+
+    IMAGE_P3_CONVERTED = "IMAGE_P3_CONVERTED"
+
+
 @dataclass(frozen=True)
 class ReportWarning:
     code: str  # de `ItemWarningCode`
@@ -111,11 +118,16 @@ class ItemOk:
     details: Mapping[str, DetailValue] = field(default_factory=dict)
     # Opcionais: a receita grava os que cabem nos tetos depois de todo o conteúdo.
     previews: Sequence[Preview] = ()
+    # Os fatos que a interface mostra por código (o detalhe da Run não lê `details`).
+    notices: Sequence[ItemNoticeCode] = ()
 
     def __post_init__(self) -> None:
         for preview in self.previews:
             if preview.of not in self.outputs:
                 raise ValueError(f"preview de {preview.of!r}, que não é saída do item")
+        for notice in self.notices:
+            if notice not in ItemNoticeCode:
+                raise ValueError(f"{notice!r} não é nota do catálogo")
 
 
 class ItemRejectionCode(StrEnum):

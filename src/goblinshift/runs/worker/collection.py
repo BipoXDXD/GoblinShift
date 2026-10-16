@@ -50,6 +50,7 @@ from goblinshift.processing.packaging import (
 from goblinshift.processing.recipe import (
     ITEM_COUNT_NAME,
     MAX_ITEM_COUNTS,
+    ItemNoticeCode,
     ItemRejectionCode,
     ItemWarningCode,
     OutputGroup,
@@ -138,6 +139,7 @@ class ReportItem:
     counts: Mapping[str, int] = field(default_factory=dict)
     # (caminho em previews/, saída de conteúdo do próprio item de que deriva)
     previews: tuple[tuple[str, str], ...] = ()
+    notices: tuple[ItemNoticeCode, ...] = ()
 
     @property
     def has_warnings(self) -> bool:
@@ -478,7 +480,18 @@ def _item(raw: object) -> ReportItem:
         warnings = tuple(_warning_code(w) for w in _list(item.get("warnings"), "item.warnings"))
         counts = _counts(item.get("counts", {}))
         previews = _previews(item.get("previews", []), outputs)
-        return ReportItem(position, True, outputs, None, warnings, counts=counts, previews=previews)
+        # Opcional: o executor anterior não escreve notas.
+        notices = tuple(_notice_code(n) for n in _list(item.get("notices", []), "item.notices"))
+        return ReportItem(
+            position,
+            True,
+            outputs,
+            None,
+            warnings,
+            counts=counts,
+            previews=previews,
+            notices=notices,
+        )
     if status == _ITEM_REJECTED:
         return ReportItem(position, False, (), _rejection_code(item.get("code")))
     if status == _ITEM_DUPLICATE:
@@ -499,6 +512,12 @@ def _previews(raw: object, outputs: tuple[str, ...]) -> tuple[tuple[str, str], .
             raise CollectionError(f"preview fora de previews/ ou de saída alheia: {path!r}")
         previews.append((path, of))
     return tuple(previews)
+
+
+def _notice_code(raw: object) -> ItemNoticeCode:
+    if not isinstance(raw, str) or raw not in ItemNoticeCode:
+        raise CollectionError("item.notices: nota fora do catálogo de códigos")
+    return ItemNoticeCode(raw)
 
 
 def _warning_code(raw: object) -> ItemWarningCode:

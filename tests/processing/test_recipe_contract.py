@@ -127,6 +127,11 @@ def test_preview_fora_do_grupo_previews_nao_existe() -> None:
         Preview("images/a.jpg", "images/a.jpg")
 
 
+def test_nota_fora_da_lista_nao_existe() -> None:
+    with pytest.raises(ValueError, match="nota"):
+        ItemOk(0, outputs=("a.png",), notices=("QUALQUER",))  # type: ignore[arg-type]
+
+
 # --- Teto de entradas da versão: job acima dele é infraestrutura, não conteúdo ------------------
 
 
