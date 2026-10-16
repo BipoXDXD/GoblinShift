@@ -157,6 +157,7 @@ export const TEXT = {
     loadingCatalog: "Carregando a receita.",
     recipeUnavailable:
       "Esta receita não está disponível no momento. Recarregue a página ou tente mais tarde.",
+    uploadBoundDropped: "As páginas escolhidas dependem dos arquivos enviados; escolha-as de novo.",
     upload: {
       waiting: "Na fila de envio",
       sending: (percent: number) => `Enviando: ${String(percent)}%`,

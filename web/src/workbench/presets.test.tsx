@@ -116,6 +116,63 @@ describe("Bancada: Salvar preset", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
+  it("nome de 100 caracteres contados como o servidor (code points após NFC) é aceito", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    // 60 emojis são 120 unidades UTF-16; "e" + acento combinado vira um só caractere no NFC.
+    await user.click(within(dialog).getByLabelText("Nome do preset"));
+    await user.paste("🧌".repeat(60) + "e\u0301".repeat(40));
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    await waitFor(() => {
+      expect(sent(api.requests, "POST /api/v1/presets")).toHaveLength(1);
+    });
+    expect(within(dialog).queryByText(/Use até 100 caracteres\./)).toBeNull();
+  });
+
+  it("101 code points são recusados mesmo com menos de 101 unidades por caractere", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    await user.click(within(dialog).getByLabelText("Nome do preset"));
+    await user.paste("🧌".repeat(101));
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    expect(within(dialog).getByText(/Use até 100 caracteres\./)).toBeVisible();
+    expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
+  });
+
+  it("fechado pelo navegador com o pedido em voo, reabre e mostra o 409 que chegou depois", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const { user } = setup("/bancada/csv-janitor", {
+      "POST /api/v1/presets": () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+
+    const dialog = await openSaveDialog(user);
+    await user.type(within(dialog).getByLabelText("Nome do preset"), "Clientes do mês");
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+    await within(dialog).findByRole("button", { name: "Salvando…" });
+    // O Chrome fecha o diálogo no segundo Esc mesmo com o cancel impedido.
+    if (!(dialog instanceof HTMLDialogElement)) {
+      throw new Error("o diálogo de salvar não é um <dialog>");
+    }
+    dialog.close();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    answer(problemResponse(409, "STATE_CONFLICT"));
+
+    await user.click(screen.getByRole("button", { name: "Salvar preset" }));
+    const reopened = screen.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
+    expect(
+      await within(reopened).findByText(
+        "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",
+      ),
+    ).toBeVisible();
+  });
+
   it("com parâmetros inválidos, pede a correção em vez de abrir o diálogo", async () => {
     const { api, user } = setup("/bancada/image-forge");
 
@@ -174,6 +231,29 @@ describe("Bancada aberta com um preset", () => {
       await screen.findByText(/Este preset é de outra receita ou de uma versão/),
     ).toBeVisible();
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
+  });
+
+  it("preset do PDF Press com páginas escolhidas abre sem as páginas e pede para escolhê-las de novo", async () => {
+    setup(`/bancada/pdf-press?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(
+          presetBody({
+            recipe_id: "pdf-press",
+            parameters: {
+              operation: "select",
+              select: [{ upload_id: "0b9f6c1e-3a2d-4e5f-8a7b-6c5d4e3f2a1b", page_number: 2 }],
+            },
+          }),
+        ),
+    });
+
+    const notice = await screen.findByText(/Parâmetros do preset Clientes do mês\./);
+    expect(notice).toHaveTextContent("Parâmetros do preset Clientes do mês.");
+    expect(notice).toHaveTextContent(
+      "As páginas escolhidas dependem dos arquivos enviados; escolha-as de novo.",
+    );
+    expect(screen.queryByText(/Este preset é de outra receita/)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "O que fazer com os PDFs" })).toHaveValue("select");
   });
 
   it("preset que não existe mostra a falha e a Bancada com os padrões", async () => {

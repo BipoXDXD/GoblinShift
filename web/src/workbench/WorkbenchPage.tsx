@@ -11,7 +11,12 @@ import {
   type CatalogVersion,
 } from "../catalog/api";
 import { FailureNotice } from "../components/feedback/FailureNotice";
-import { findRecipe, type RecipeForm, type RecipeModule } from "../recipes/registry";
+import {
+  findRecipe,
+  withoutUploadBoundParameters,
+  type RecipeForm,
+  type RecipeModule,
+} from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
 import {
@@ -143,13 +148,23 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
   if (source.stored.kind === "gone") {
     return { form: fallback, notice: <SourceNotice>{source.stored.notice}</SourceNotice> };
   }
+  const reusable = withoutUploadBoundParameters(recipe, source.stored.parameters);
   const form = recipe.formFor({
     ...version,
-    defaults: { ...version.defaults, ...source.stored.parameters },
+    defaults: { ...version.defaults, ...reusable.parameters },
   });
-  return form === null
-    ? { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> }
-    : { form, notice: <SourceNotice>{source.loadedNotice}</SourceNotice> };
+  if (form === null) {
+    return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
+  }
+  return {
+    form,
+    notice: (
+      <SourceNotice>
+        {source.loadedNotice}
+        {reusable.dropped && ` ${TEXT.workbench.uploadBoundDropped}`}
+      </SourceNotice>
+    ),
+  };
 }
 
 /**
