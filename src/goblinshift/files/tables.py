@@ -98,16 +98,30 @@ artifact = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("deleted_at", DateTime(timezone=True)),
+    # Só no preview: a saída de conteúdo de que ele deriva (GET /artifacts/{id}/preview).
+    Column("source_artifact_id", Uuid),
     UniqueConstraint("owner_id", "id"),
     ForeignKeyConstraint(
         ["owner_id", "object_id"],
         ["stored_object.owner_id", "stored_object.id"],
         ondelete="RESTRICT",
     ),
+    ForeignKeyConstraint(
+        ["owner_id", "source_artifact_id"],
+        ["artifact.owner_id", "artifact.id"],
+        # O preview não existe sem a saída de origem: a purga e a retenção a removem junto.
+        ondelete="CASCADE",
+    ),
     Index(None, "object_id"),
+    Index(
+        "artifact_source_artifact_id_idx",
+        "source_artifact_id",
+        postgresql_where=text("source_artifact_id IS NOT NULL"),
+    ),
     CheckConstraint("octet_length(file_name) BETWEEN 1 AND 240", name="file_name"),
     Index("artifact_expires_at_idx", "expires_at", postgresql_where=text("deleted_at IS NULL")),
-    CheckConstraint("role IN ('output', 'report', 'manifest', 'package')", name="role"),
+    CheckConstraint("role IN ('output', 'report', 'manifest', 'package', 'preview')", name="role"),
+    CheckConstraint("(role = 'preview') = (source_artifact_id IS NOT NULL)", name="preview_source"),
 )
 
 object_use = Table(

@@ -36,7 +36,7 @@ OCTET_STREAM_BODY: dict[str, object] = {
 }
 # Cabeçalhos de 3.6: o conteúdo do usuário é servido na mesma origem que emite chaves, então
 # nenhum arquivo pode virar página ativa nem ficar em cache intermediário.
-_DOWNLOAD_PROTECTION_HEADERS = {
+DOWNLOAD_PROTECTION_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",
     "Cross-Origin-Resource-Policy": "same-origin",
@@ -137,7 +137,7 @@ class DownloadResponse(StreamingResponse):
                 "Content-Disposition": content_disposition(filename),
                 # O cliente percebe um download cortado pelo tamanho que faltou.
                 "Content-Length": str(size),
-                **_DOWNLOAD_PROTECTION_HEADERS,
+                **DOWNLOAD_PROTECTION_HEADERS,
             },
         )
         self._file = file

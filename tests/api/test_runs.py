@@ -895,10 +895,16 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
     assert operation["operationId"] == "createRun"
 
 
-def test_openapi_publica_os_quatro_papeis_de_artefato(client: TestClient) -> None:
+def test_openapi_publica_os_cinco_papeis_de_artefato(client: TestClient) -> None:
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
 
-    assert schemas["ArtifactRole"]["enum"] == ["output", "report", "manifest", "package"]
+    assert schemas["ArtifactRole"]["enum"] == [
+        "output",
+        "report",
+        "manifest",
+        "package",
+        "preview",
+    ]
 
 
 # Imagem do executor

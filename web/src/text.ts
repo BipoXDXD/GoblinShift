@@ -254,6 +254,7 @@ export const TEXT = {
         report: "relatório",
         manifest: "manifesto",
         package: "pacote com todos os arquivos",
+        preview: "pré-visualização",
       },
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
