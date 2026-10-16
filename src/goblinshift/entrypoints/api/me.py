@@ -20,6 +20,7 @@ from goblinshift.files.limits import (
     MAX_BATCH_FILES,
     MAX_FILE_BYTES,
     MAX_TRANSFERS_PER_ACCOUNT,
+    MAX_VIDEO_FILE_BYTES,
 )
 from goblinshift.identity import Scope, find_account
 from goblinshift.runs.quotas import (
@@ -42,6 +43,8 @@ class Limits(BaseModel):
     storage_bytes: int
     active_runs: int
     file_bytes: int
+    # Vídeo (.mp4, .mov, .webm), aceito só pelo Media Mill (1.7, ADR 036).
+    video_file_bytes: int
     batch_files: int
     batch_bytes: int
     concurrent_uploads: int
@@ -103,6 +106,7 @@ def get_me(
             storage_bytes=storage.storage_max_bytes,
             active_runs=ACTIVE_RUNS_PER_ACCOUNT,
             file_bytes=MAX_FILE_BYTES,
+            video_file_bytes=MAX_VIDEO_FILE_BYTES,
             batch_files=MAX_BATCH_FILES,
             batch_bytes=MAX_BATCH_BYTES,
             concurrent_uploads=MAX_TRANSFERS_PER_ACCOUNT,

@@ -4,11 +4,13 @@
 aqui como código de saída do processo; o contrato está no docstring do pacote.
 """
 
+import contextlib
 import csv
 import json
 import sys
+import tempfile
 import traceback
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from enum import IntEnum
 from pathlib import Path
 from types import TracebackType
@@ -52,6 +54,7 @@ class _WorkDir:
         self.context = root / "context.json"
         self.inputs = root / "inputs"
         self.out = root / "out"
+        self.scratch = root / "tmp"
         self.progress = root / "progress.jsonl"
         self.failure = root / "failure.json"
 
@@ -98,10 +101,11 @@ def _execute(work: _WorkDir) -> None:
         inputs=inputs,
     )
     _prepare_empty(work.out)
+    _prepare_empty(work.scratch)
     out = FileSystemOutputDir(
         work.out, reserved_names=(MANIFEST_NAME, REPORT_NAME, spec.package_name)
     )
-    with _ProgressLog(work.progress) as progress:
+    with _ProgressLog(work.progress) as progress, _temporary_files_in(work.scratch):
         report = recipe.execute(job.parameters, inputs, out, progress)
     _require_one_item_per_input(report, inputs)
     write_report(work.out / REPORT_NAME, report, job)
@@ -109,11 +113,28 @@ def _execute(work: _WorkDir) -> None:
     package(report, work.out, spec, PACKAGE_LIMITS)
 
 
-def _prepare_empty(out: Path) -> None:
-    """Saídas de outra tentativa nunca se misturam às desta."""
-    out.mkdir(exist_ok=True)
-    if any(out.iterdir()):
-        raise JobError(f"{out.name}/ já tem arquivos")
+def _prepare_empty(directory: Path) -> None:
+    """Saídas e temporários de outra tentativa nunca se misturam aos desta."""
+    directory.mkdir(exist_ok=True)
+    if any(directory.iterdir()):
+        raise JobError(f"{directory.name}/ já tem arquivos")
+
+
+@contextlib.contextmanager
+def _temporary_files_in(scratch: Path) -> Iterator[None]:
+    """`tempfile` aponta para `scratch` enquanto a receita roda.
+
+    A raiz do container é somente leitura; os temporários das receitas (o Media Mill grava ali o
+    que o FFmpeg produz antes de copiar para out/) ficam na área de trabalho da tentativa, sob o
+    mesmo teto de disco (ADR 005). `tempfile.tempdir` é estado global do módulo: volta ao valor
+    anterior no fim, para quem chama `main` no próprio processo (os testes) não herdá-lo.
+    """
+    previous = tempfile.tempdir
+    tempfile.tempdir = str(scratch)
+    try:
+        yield
+    finally:
+        tempfile.tempdir = previous
 
 
 def _require_one_item_per_input(report: Report, inputs: Sequence[InputFile]) -> None:

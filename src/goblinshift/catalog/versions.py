@@ -22,7 +22,8 @@ from pydantic import BaseModel, ValidationError
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
-from goblinshift.processing import downloads_detox, image_forge
+from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
+from goblinshift.processing import downloads_detox, image_forge, media_mill
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
 
@@ -152,7 +153,30 @@ DOWNLOADS_DETOX_V1 = RecipeVersion(
     },
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1])
+_MEDIA_LIMITS = media_mill.Limits()
+
+# `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036); as
+# outras versões não o declaram e ficam no teto comum de `files.limits`.
+MEDIA_MILL_V1 = RecipeVersion(
+    recipe_id=media_mill.RECIPE_ID,
+    version=media_mill.VERSION,
+    status=VersionStatus.CURRENT,
+    parameters_model=MediaMillV1Parameters,
+    limits={
+        "max_inputs": media_mill.MAX_INPUTS,
+        "max_input_bytes": media_mill.MAX_INPUT_BYTES,
+        "max_total_input_bytes": media_mill.MAX_TOTAL_INPUT_BYTES,
+        "max_duration_s": _MEDIA_LIMITS.max_duration_s,
+        "max_long_side_px": _MEDIA_LIMITS.max_long_side_px,
+        "max_short_side_px": _MEDIA_LIMITS.max_short_side_px,
+        "max_fps": _MEDIA_LIMITS.max_fps,
+        "max_audio_sample_rate_hz": _MEDIA_LIMITS.max_sample_rate_hz,
+        "max_audio_channels": _MEDIA_LIMITS.max_channels,
+        "thumbnail_max_side_px": _MEDIA_LIMITS.thumbnail_max_side_px,
+    },
+)
+
+CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, MEDIA_MILL_V1])
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:

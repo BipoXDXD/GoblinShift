@@ -18,6 +18,8 @@ from goblinshift.processing.packaging import compression_for
         "images/foto.Png",
         "archives/pacote.zip",
         "pacote.ZIP",
+        "audio/trilha.flac",
+        "audio/trilha.FLAC",
     ],
 )
 def test_formatos_ja_comprimidos_vao_sem_compressao(arcname: str) -> None:
@@ -35,6 +37,7 @@ def test_formatos_ja_comprimidos_vao_sem_compressao(arcname: str) -> None:
         "images/foto.jpg.txt",
         "archives/.zip",
         "foto.jpgx",
+        "audio/trilha.wav",
     ],
 )
 def test_o_resto_vai_com_deflate(arcname: str) -> None:

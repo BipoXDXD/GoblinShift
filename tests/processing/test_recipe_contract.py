@@ -7,6 +7,7 @@ import pytest
 from goblinshift.processing.csv_janitor.results import RejectionCode as CsvCode
 from goblinshift.processing.downloads_detox.recipe import REJECTION_CODE as DETOX_CODE
 from goblinshift.processing.image_forge.rejection import RejectionCode as ImageCode
+from goblinshift.processing.media_mill.rejection import RejectionCode as MediaCode
 from goblinshift.processing.recipe import (
     InputContractError,
     InputFile,
@@ -72,6 +73,7 @@ def test_grupos_de_saida_sao_a_lista_fechada_do_plano() -> None:
         "tables",
         "text",
         "archives",
+        "audio",
     ]
 
 
@@ -79,7 +81,7 @@ def test_grupos_de_saida_sao_a_lista_fechada_do_plano() -> None:
 
 
 def test_codigos_de_rejeicao_de_cada_receita_estao_no_catalogo() -> None:
-    used = {*CsvCode, *ImageCode, DETOX_CODE}
+    used = {*CsvCode, *ImageCode, *MediaCode, DETOX_CODE}
 
     assert used <= {code.value for code in ItemRejectionCode}
 

@@ -50,7 +50,9 @@ from goblinshift.files.limits import (
     MAX_BATCH_FILES,
     MAX_FILE_BYTES,
     MAX_NAME_CHARS,
+    MAX_VIDEO_FILE_BYTES,
     MIB,
+    VIDEO_EXTENSIONS,
 )
 from goblinshift.files.states import Availability, TransferDirection, UploadState
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
@@ -77,8 +79,14 @@ class UploadItem(BaseModel):
     name: str = Field(
         min_length=1, max_length=MAX_NAME_CHARS, json_schema_extra={"pattern": UPLOAD_NAME_PATTERN}
     )
+    # O teto publicado é o do vídeo; `files.uploads` aplica o do tipo pelo nome (1.7).
     size: int = Field(
-        ge=0, le=MAX_FILE_BYTES, description=f"Bytes; o lote soma até {MAX_BATCH_BYTES // MIB} MiB."
+        ge=0,
+        le=MAX_VIDEO_FILE_BYTES,
+        description=(
+            f"Bytes: até {MAX_FILE_BYTES // MIB} MiB, ou {MAX_VIDEO_FILE_BYTES // MIB} MiB para "
+            f"vídeo ({', '.join(VIDEO_EXTENSIONS)}); o lote soma até {MAX_BATCH_BYTES // MIB} MiB."
+        ),
     )
 
 

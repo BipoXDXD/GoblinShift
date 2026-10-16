@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
-from goblinshift.processing import csv_janitor, downloads_detox, image_forge
+from goblinshift.processing import csv_janitor, downloads_detox, image_forge, media_mill
 from goblinshift.processing.csv_janitor import recipe as csv_janitor_recipe
 from goblinshift.processing.downloads_detox import DownloadsDetoxV1
 from goblinshift.processing.image_forge.recipe import ImageForgeV1
+from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.recipe import InputFile, OutputDir, Progress, Recipe, Report
 
 type RecipeKey = tuple[str, int]
@@ -53,11 +54,13 @@ _IMAGE_FORGE_V1: _Bound[image_forge.Params] = _Bound(
 _DOWNLOADS_DETOX_V1: _Bound[downloads_detox.Params] = _Bound(
     downloads_detox.params_from_mapping, DownloadsDetoxV1()
 )
+_MEDIA_MILL_V1: _Bound[media_mill.Params] = _Bound(media_mill.params_from_mapping, MediaMillV1())
 
 RECIPES: Mapping[RecipeKey, RegisteredRecipe] = MappingProxyType(
     {
         (csv_janitor_recipe.RECIPE_ID, csv_janitor_recipe.VERSION): _CSV_JANITOR_V1,
         (image_forge.RECIPE_ID, image_forge.VERSION): _IMAGE_FORGE_V1,
         (downloads_detox.RECIPE_ID, downloads_detox.VERSION): _DOWNLOADS_DETOX_V1,
+        (media_mill.RECIPE_ID, media_mill.VERSION): _MEDIA_MILL_V1,
     }
 )
