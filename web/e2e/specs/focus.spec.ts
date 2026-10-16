@@ -60,7 +60,7 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
   const names = (await tabThrough(page)).map((stop) => stop.name);
   expect(names).toEqual([
     "Pular para o conteúdo",
-    "GoblinShift, Oficina",
+    "GoblinShift",
     "Histórico",
     "Acesso",
     "Tema Sistema",

@@ -24,7 +24,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("link", { name: "GoblinShift, Oficina" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "GoblinShift" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: "Pular para o conteúdo" })).toHaveAttribute(
       "href",
       `#${screen.getByRole("main").id}`,

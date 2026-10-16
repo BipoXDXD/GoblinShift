@@ -5,29 +5,50 @@
       "id": "hyper3d-terms",
       "url": "https://hyper3d.ai/legal/terms",
       "last_updated": null,
-      "read_at": "2026-10-15",
-      "clauses": "2 (export conforme o plano), 5(b) (não limita o uso da saída), sem garantia de proteção autoral"
+      "read_at": "2026-10-16",
+      "clauses": "2 (export conforme o plano), 5(b) (não limita o uso da saída), sem cessão de propriedade e sem garantia de proteção autoral"
     },
     {
       "id": "hyper3d-pricing",
       "url": "https://hyper3d.ai/pricing",
       "last_updated": null,
-      "read_at": "2026-10-15",
-      "clauses": "Creator e acima: 'Unlimited export and any use'"
+      "read_at": "2026-10-16",
+      "clauses": "Só Creator e acima: 'Unlimited export and any use'"
     },
     {
       "id": "tripo-terms",
       "url": "https://developers.tripo3d.com/en/terms",
       "last_updated": "2025-07-11",
-      "read_at": "2026-10-15",
-      "clauses": "3.2 (uso comercial), 3.4 (saída de terceiros sob os termos deles), 5.2.2 (Paid Users têm os direitos), 6.4 (créditos de API pré-pagos)"
+      "read_at": "2026-10-16",
+      "clauses": "3.2 (uso comercial), 3.4 ('Third Party Output' segue os termos do terceiro), 5.2.1 (no plano Free os direitos ficam com a Tripo), 5.2.2 (Paid User tem todos os direitos, inclusive licenciar; 'Paid User' não é definido), 6.4 (créditos de API pré-pagos)"
     },
     {
       "id": "gemini-api-terms",
       "url": "https://ai.google.dev/gemini-api/terms",
       "last_updated": "2026-04-28",
-      "read_at": "2026-10-15",
+      "read_at": "2026-10-16",
       "clauses": "'Google won't claim ownership over that content'"
+    },
+    {
+      "id": "openai-terms-of-use",
+      "url": "https://openai.com/policies/terms-of-use/",
+      "last_updated": "2026-01-01",
+      "read_at": "2026-10-16",
+      "clauses": "Cessão da saída ao usuário da OpenAI; aqui esse usuário é a Tripo"
+    },
+    {
+      "id": "openai-services-agreement",
+      "url": "https://openai.com/policies/services-agreement/",
+      "last_updated": "2026-01-01",
+      "read_at": "2026-10-16",
+      "clauses": "4.1 (cessão da saída ao cliente da OpenAI, que aqui é a Tripo)"
+    },
+    {
+      "id": "byteplus-modelark-terms",
+      "url": "https://docs.byteplus.com/en/docs/ModelArk/Terms_and_Conditions",
+      "last_updated": null,
+      "read_at": "2026-10-16",
+      "clauses": "Cláusula de titularidade da saída do Seedream não localizada; não está claro que estes sejam os termos que ligam a ByteDance à Tripo. Pendente de leitura"
     }
   ],
   "rights": [
@@ -35,13 +56,32 @@
       "id": "rodin-plano-pago",
       "vendor": "hyper3d",
       "basis": ["hyper3d-terms", "hyper3d-pricing"],
-      "status": "termos lidos; usuário assinante do Rodin (informado em 2026-10-15)"
+      "status": "termos lidos; 'any use' só nos planos Creator ou superiores e os termos não cedem a propriedade; usuário assinante do Rodin (informado em 2026-10-15), plano exato não conferido",
+      "note": "Retroatividade não verificada: não se sabe se o plano de hoje cobre as gerações feitas antes da assinatura ou do upgrade para Creator+."
     },
     {
-      "id": "tripo-api-wallet",
+      "id": "tripo-paid-openai-gpt-image",
       "vendor": "tripo",
+      "upstream": "GPT Image 2.5",
+      "basis": ["tripo-terms", "openai-terms-of-use", "openai-services-agreement"],
+      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)",
+      "note": "A cessão do upstream vai à Tripo; repasse ao usuário via Tripo 5.2.2/3.4, não verificado."
+    },
+    {
+      "id": "tripo-paid-google-banana-pro",
+      "vendor": "tripo",
+      "upstream": "Banana Pro",
       "basis": ["tripo-terms", "gemini-api-terms"],
-      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)"
+      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)",
+      "note": "A cessão do upstream vai à Tripo; repasse ao usuário via Tripo 5.2.2/3.4, não verificado."
+    },
+    {
+      "id": "tripo-paid-bytedance-seedream",
+      "vendor": "tripo",
+      "upstream": "Seedream",
+      "basis": ["tripo-terms", "byteplus-modelark-terms"],
+      "status": "termos da Tripo lidos; termos da ByteDance sem cláusula de titularidade localizada; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)",
+      "note": "A cessão do upstream vai à Tripo; repasse ao usuário via Tripo 5.2.2/3.4, não verificado."
     }
   ],
   "generations": {
@@ -51,7 +91,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "2c56c15e-deeb-4b99-9f2b-3e4b1c8544f0",
       "inputs": [],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r5-goticas/a-trancas-vermelhas"
     },
     "a-frontal": {
@@ -60,7 +100,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "eb807d09-a173-47ac-8028-280ddc46491a",
       "inputs": ["a-conceito"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r6-frontal/a-trancas-vermelhas"
     },
     "a-3d-gotica": {
@@ -94,7 +134,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "a16cc6f2-4982-4ca7-ad92-72b0d8c41871",
       "inputs": ["a-conceito", "a-render-gotica"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "tripo/r7-realista/a-realista-banana"
     },
     "rubia-3d": {
@@ -119,7 +159,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "a57d10f7-d32c-4395-8e02-89edfb1b2ace",
       "inputs": [],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r5-goticas/b-laranja-couro"
     },
     "b-frontal": {
@@ -128,7 +168,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "cb7cf4e5-443a-473e-979c-d33922745a9f",
       "inputs": [],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r6-frontal/b-laranja-couro"
     },
     "ferrugem-2d": {
@@ -137,7 +177,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "1711dadc-9bb3-4583-b56e-a48c8d3327b5",
       "inputs": ["b-frontal", "ref-01-frente"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "tripo/r9-teste/b-laranja-couro"
     },
     "ferrugem-3d": {
@@ -153,7 +193,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "1025c32e-f903-48f1-b0ca-fed54e8e06d8",
       "inputs": [],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r5-goticas/c-inventora"
     },
     "c-frontal": {
@@ -162,7 +202,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "3bf88944-5660-46d2-988f-1ca4922a7dc3",
       "inputs": ["c-conceito"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r6-frontal/c-inventora"
     },
     "ada-2d": {
@@ -171,7 +211,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "032f6ed0-17ba-4beb-8923-0e0d79eefb79",
       "inputs": ["c-frontal", "ref-01-frente"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "tripo/r9-teste/c-inventora"
     },
     "ada-3d": {
@@ -187,7 +227,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "1a0a9bf7-9a99-4565-9b31-928287f0531b",
       "inputs": [],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r6-frontal/e-preta-rosa"
     },
     "nyx-2d": {
@@ -196,7 +236,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "2b13f0c5-224b-4a8c-abaa-4e6f6943c5ec",
       "inputs": ["e-frontal", "ref-01-frente"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "tripo/r9-teste/e-preta-rosa"
     },
     "nyx-3d": {
@@ -212,7 +252,7 @@
       "upstream": "ByteDance Seedream (via Tripo)",
       "task_id": "29b1c89e-b07b-48fd-8dab-67c1dac7ef80",
       "inputs": [],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-bytedance-seedream",
       "local": "tripo/r6-frontal/g-sininho"
     },
     "lua-2d": {
@@ -221,7 +261,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "373b2218-8e57-4549-a91a-10b11b3a2748",
       "inputs": ["g-frontal", "ref-01-frente"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "tripo/r9-teste/g-sininho"
     },
     "lua-3d": {
@@ -255,7 +295,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "5783276f-9228-407d-b368-c795b723b0a5",
       "inputs": ["jade-render-origem", "rubia-render-ancora"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "rodin/r10-realista/cab576c8/2d-v1"
     },
     "jade-3d": {
@@ -284,7 +324,7 @@
       "upstream": "Google Gemini/Banana Pro (via Tripo)",
       "task_id": "58862e7d-2083-4038-893a-0bd4143a7d83",
       "inputs": ["fagulha-render-origem", "rubia-render-ancora"],
-      "rights": "tripo-api-wallet",
+      "rights": "tripo-paid-google-banana-pro",
       "local": "rodin/r10-realista/f37f6132/2d-v1"
     },
     "fagulha-3d": {
@@ -293,6 +333,31 @@
       "url": "https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd",
       "inputs": ["fagulha-2d"],
       "rights": "rodin-plano-pago"
+    },
+    "logo-a1-escudo": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "chat_image_2.5_sunburst",
+      "upstream": "GPT Image 2.5 (via Tripo; a API expõe só o nome chat_image_2.5_sunburst)",
+      "task_id": "6a4e850a-f39d-40cb-a47d-c73ea583b5bf",
+      "inputs": [],
+      "rights": "tripo-paid-openai-gpt-image",
+      "local": "logo/r1/a1-escudo",
+      "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG"
+    },
+    "logo-b1-selo": {
+      "tool": "Tripo API v3 (text-to-image)",
+      "model": "chat_image_2.5_sunburst",
+      "upstream": "GPT Image 2.5 (via Tripo; a API expõe só o nome chat_image_2.5_sunburst)",
+      "task_id": "81de143f-ea91-4608-a325-4c10d1ca3751",
+      "inputs": [],
+      "rights": "tripo-paid-openai-gpt-image",
+      "local": "logo/r1/b1-selo",
+      "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG"
+    },
+    "favicon-rubia": {
+      "tool": "SVG desenhado à mão (web/public/favicon.svg)",
+      "inputs": [],
+      "note": "obra própria do projeto: formas geométricas simples, sem IA nem imagem de terceiros"
     }
   },
   "excluded": [],
@@ -605,6 +670,182 @@
         "weld, simplificação com atributos (posição, normal e UV; ~240 mil triângulos), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
       ],
       "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-144h.avif",
+      "sha256": "ab0d1b96d7e500618d6d0fe86c57defc38812d2e14d0cd1a4a3604712d759e0a",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-144h.webp",
+      "sha256": "8841e028abff8e1510dbbcb61189f13e55302845187cf04265b16ebdc024c614",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-48h.avif",
+      "sha256": "51e25b43912e2d1dc747f9048dbeca55b5dab9a2623b05506f0446039b866a95",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-48h.webp",
+      "sha256": "6864e7278762b6ed38e93ba24e535a9bc44eeaf4d50f9327c512f3e8bf76ede3",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-512h.avif",
+      "sha256": "da913d252a62f81999892fd6063b1869a2dc22aeda02b6f2586386eb611a6f12",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-512h.webp",
+      "sha256": "431b04075391bc3b9e3ed69bf486376f9533ae54296a34073f4b0635bbe3b1d3",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-96h.avif",
+      "sha256": "93fd8cad635a3c238709ec13e49711940fc461ee7b8bc4cf04d3b9d33c7653d9",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/rubia-escudo-96h.webp",
+      "sha256": "d5d4e227618926497746a1621beb9211ab37ceff4b2fe357d53c49a21146445a",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/selo-oficina-128h.avif",
+      "sha256": "44afa096c1b57c7755abd073b50aeb37d2c436522e2306a077ecc0e2eaa7575c",
+      "derived_from": "logo-b1-selo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/selo-oficina-128h.webp",
+      "sha256": "6efeddd366ffd70aa7dafd54912ed2ede0c7d6b1dceb39649cf4f2c1b80fb8aa",
+      "derived_from": "logo-b1-selo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/selo-oficina-256h.avif",
+      "sha256": "7dee23b405cb95a3a8d79315e37ffcfd884175ce569b35562c5008118a15d685",
+      "derived_from": "logo-b1-selo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "marca/selo-oficina-256h.webp",
+      "sha256": "3be33c18af06331b10eec88d28562d501b4301a61e4b8d93394855146f3917a6",
+      "derived_from": "logo-b1-selo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "public/apple-touch-icon.png",
+      "sha256": "c82e3aa3936b720a81e983c7259bcffded7e419ea4df1e96830739deb8a2d680",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "emblema centrado sobre madeira (wood-900), 180 px, paleta de 256 cores"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "public/icon-192.png",
+      "sha256": "2c8474ca34be16b0c09639eefa120ab2cf113bbcc4d663ca5f5106248944a61c",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "emblema centrado sobre madeira (wood-900), 192 px, paleta de 256 cores"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "public/icon-512.png",
+      "sha256": "75b5ff64e0a7becf3e34b49a37bc9e9964aac1b18c4341902f90b9ec826867e4",
+      "derived_from": "logo-a1-escudo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "emblema centrado sobre madeira (wood-900), 512 px, paleta de 256 cores"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "public/og-image.jpg",
+      "sha256": "01f672ee3f76a9c7101a5d21ba98035b107e4da999bc797ed9ff6f8f27605e31",
+      "derived_from": "logo-b1-selo",
+      "human_edits": [
+        "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
+        "composição de 1200×630 com o selo sobre madeira, faixa de cobre e o título na Bricolage Grotesque (scripts/arte/render-marca.mjs)"
+      ],
+      "ai_generated": true
+    },
+    {
+      "file": "public/favicon.svg",
+      "sha256": "717343f5221da71c7425578bd7a431f2493843095535f567f483ca37a2e6c80b",
+      "derived_from": "favicon-rubia",
+      "human_edits": ["desenho vetorial à mão na grade de 32 px"],
+      "ai_generated": false
+    },
+    {
+      "file": "public/favicon.ico",
+      "sha256": "c4dcc1157057231e3e323aeebf80b7f8c1506d6e873c71ed42c555e4dfed2dc5",
+      "derived_from": "favicon-rubia",
+      "human_edits": [
+        "rasterização do favicon.svg em 16, 32 e 48 px no Chromium (scripts/arte/render-marca.mjs)"
+      ],
+      "ai_generated": false
     }
   ],
   "exceptions": [
