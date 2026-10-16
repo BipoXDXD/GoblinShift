@@ -355,6 +355,19 @@ export const TEXT = {
     },
   },
   history: {
+    reuse: "Reusar configuração",
+    reuseOf: (recipe: string, date: string) => `da execução de ${recipe} em ${date}`,
+    availability: {
+      until: (date: string) => `Resultados até ${date}`,
+      expired: "Resultados expirados",
+      unavailable: "Resultados indisponíveis",
+    },
+    reuseLoaded: (date: string) => `Parâmetros da execução de ${date}.`,
+    reuseGone:
+      "Os parâmetros desta execução não estão mais guardados (ficam 30 dias). A Bancada abriu com os parâmetros padrão.",
+    reuseWrongRecipe:
+      "Esta execução é de outra receita ou de uma versão que a Bancada não conhece. A Bancada abriu com os parâmetros padrão.",
+    loadingRun: "Carregando a execução.",
     title: "Histórico",
     navLink: "Histórico",
     filters: "Filtros",

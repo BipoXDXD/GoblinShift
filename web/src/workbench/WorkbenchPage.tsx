@@ -1,11 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactElement, ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { NotFoundPage } from "../app/NotFoundPage";
-import { PRESET_PARAM } from "../app/paths";
 import {
   CATALOG_QUERY_KEY,
   findCatalogVersion,
@@ -13,10 +11,15 @@ import {
   type CatalogVersion,
 } from "../catalog/api";
 import { FailureNotice } from "../components/feedback/FailureNotice";
-import { getPreset, PRESETS_QUERY_KEY, type Preset } from "../presets/api";
 import { findRecipe, type RecipeForm, type RecipeModule } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
+import {
+  sourceFromSearch,
+  useParameterSource,
+  type ParameterSource,
+  type SourceRef,
+} from "./parameterSource";
 import { Workbench, WorkbenchHeader } from "./Workbench";
 
 interface WorkbenchPageProps {
@@ -27,29 +30,25 @@ interface WorkbenchPageProps {
 export function WorkbenchPage({ uploadServices }: WorkbenchPageProps): ReactElement {
   const recipe = findRecipe(useParams()["recipeId"] ?? "");
   const [search] = useSearchParams();
-  // Id fora do formato é ignorado: a Bancada abre com os padrões, sem consultar a API.
-  const parsedPreset = presetIdSchema.safeParse(search.get(PRESET_PARAM));
-  const presetId = parsedPreset.success ? parsedPreset.data : null;
+  const source = sourceFromSearch(search);
   if (recipe === null) {
     return <NotFoundPage />;
   }
-  // A key recria a Bancada ao trocar de receita ou de preset, sem herdar arquivos nem parâmetros.
+  // A key recria a Bancada ao trocar de receita ou de origem, sem herdar arquivos nem parâmetros.
   return (
     <CatalogGate
-      key={`${recipe.id}:${presetId ?? ""}`}
+      key={`${recipe.id}:${source?.kind ?? ""}:${source?.id ?? ""}`}
       recipe={recipe}
-      presetId={presetId}
+      source={source}
       uploadServices={uploadServices}
     />
   );
 }
 
-const presetIdSchema = z.uuid();
-
 interface CatalogGateProps {
   readonly recipe: RecipeModule;
-  /** Preset que pré-preenche os parâmetros (`?preset=`), ou `null`. */
-  readonly presetId: string | null;
+  /** Preset (`?preset=`) ou execução (`?execucao=`) que pré-preenche os parâmetros. */
+  readonly source: SourceRef | null;
   readonly uploadServices: UploadServices;
 }
 
@@ -57,29 +56,26 @@ interface CatalogGateProps {
  * Defaults e limites da receita vêm de GET /catalog (2.2): a Bancada só abre com a versão do
  * formulário presente no catálogo e no formato que ele conhece.
  */
-function CatalogGate({ recipe, presetId, uploadServices }: CatalogGateProps): ReactElement {
+function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): ReactElement {
   const client = useApiClient();
-  const preset = useQuery({
-    queryKey: [...PRESETS_QUERY_KEY, presetId] as const,
-    queryFn: ({ signal }) => getPreset(client, presetId ?? "", signal),
-    enabled: presetId !== null,
-    retry: false,
-  });
+  const loaded = useParameterSource(source);
   const catalog = useQuery({
     queryKey: CATALOG_QUERY_KEY,
     queryFn: ({ signal }) => getCatalog(client, signal),
     // Muda só com um deploy; o navegador revalida pelo ETag a cada carga da página.
     staleTime: Infinity,
   });
-  const presetPending = presetId !== null && preset.isPending;
-  if (catalog.data === undefined || presetPending) {
+  const sourcePending = source !== null && loaded.isPending;
+  if (catalog.data === undefined || sourcePending) {
     return (
       <div className="flex flex-col gap-8">
         <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
         {catalog.data === undefined ? (
           <CatalogPending error={catalog.error} />
         ) : (
-          <p className="text-fg-muted">{TEXT.presets.loadingPreset}</p>
+          <p className="text-fg-muted">
+            {source?.kind === "run" ? TEXT.history.loadingRun : TEXT.presets.loadingPreset}
+          </p>
         )}
       </div>
     );
@@ -100,14 +96,14 @@ function CatalogGate({ recipe, presetId, uploadServices }: CatalogGateProps): Re
     );
   }
   const prefilled =
-    presetId === null || version === null
+    source === null || version === null
       ? { form, notice: null }
-      : presetForm({
+      : prefilledForm({
           recipe,
           version,
           fallback: form,
-          preset: preset.data ?? null,
-          error: preset.error,
+          source: loaded.data ?? null,
+          error: loaded.error,
         });
   return (
     <Workbench
@@ -119,37 +115,44 @@ function CatalogGate({ recipe, presetId, uploadServices }: CatalogGateProps): Re
   );
 }
 
-/**
- * O formulário com os parâmetros do preset no lugar dos defaults do catálogo, e o aviso de onde
- * vieram. Preset que não abre (falha, outra receita, formato desconhecido) deixa os padrões.
- */
-interface PresetFormSources {
+interface PrefillSources {
   readonly recipe: RecipeModule;
   readonly version: CatalogVersion;
-  /** O formulário com os defaults do catálogo, para quando o preset não abre. */
+  /** O formulário com os defaults do catálogo, para quando a origem não abre. */
   readonly fallback: RecipeForm;
-  readonly preset: Preset | null;
+  readonly source: ParameterSource | null;
   readonly error: Error | null;
 }
 
-function presetForm({ recipe, version, fallback, preset, error }: PresetFormSources): {
+/**
+ * O formulário com os parâmetros da origem no lugar dos defaults do catálogo, e o aviso de onde
+ * vieram. Origem que não abre (falha, outra receita, parâmetros apagados pela retenção, formato
+ * desconhecido) deixa os padrões, com o motivo.
+ */
+function prefilledForm({ recipe, version, fallback, source, error }: PrefillSources): {
   readonly form: RecipeForm;
   readonly notice: ReactNode;
 } {
-  if (preset === null) {
+  if (source === null) {
     return { form: fallback, notice: error === null ? null : <FailureNotice error={error} /> };
   }
-  const sameRecipe = preset.recipe_id === recipe.id && preset.recipe_version === recipe.version;
-  const form = sameRecipe
-    ? recipe.formFor({ ...version, defaults: { ...version.defaults, ...preset.parameters } })
-    : null;
-  if (form === null) {
-    return { form: fallback, notice: <PresetNotice>{TEXT.presets.wrongRecipe}</PresetNotice> };
+  const sameRecipe = source.recipeId === recipe.id && source.recipeVersion === recipe.version;
+  if (!sameRecipe) {
+    return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
   }
-  return { form, notice: <PresetNotice>{TEXT.presets.loaded(preset.name)}</PresetNotice> };
+  if (source.parameters === null) {
+    return { form: fallback, notice: <SourceNotice>{source.goneNotice}</SourceNotice> };
+  }
+  const form = recipe.formFor({
+    ...version,
+    defaults: { ...version.defaults, ...source.parameters },
+  });
+  return form === null
+    ? { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> }
+    : { form, notice: <SourceNotice>{source.loadedNotice}</SourceNotice> };
 }
 
-function PresetNotice({ children }: { readonly children: ReactNode }): ReactElement {
+function SourceNotice({ children }: { readonly children: ReactNode }): ReactElement {
   return <p className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">{children}</p>;
 }
 
