@@ -169,13 +169,23 @@ export const TEXT = {
     },
     removal: {
       titleOne: (name: string) => `Remover ${name}?`,
-      bodyOne: "O arquivo sai do lote. Para usá-lo de novo, escolha-o outra vez.",
+      bodyOne:
+        "O arquivo sai do lote e é excluído do servidor. Para usá-lo de novo, escolha-o outra vez.",
       titleAll: (count: number) => `Remover os ${String(count)} arquivos?`,
-      bodyAll: "Todos os arquivos saem do lote. Para usá-los de novo, escolha-os outra vez.",
+      bodyAll:
+        "Todos os arquivos saem do lote e são excluídos do servidor. Para usá-los de novo, escolha-os outra vez.",
       confirm: "Remover",
       confirmAll: "Remover todos",
       cancel: "Cancelar",
       removeAll: "Remover todos",
+      deletionFailedOne: (name: string) => `Não foi possível excluir ${name} do servidor.`,
+      deletionFailedMany: (count: number) =>
+        `Não foi possível excluir ${String(count)} arquivos do servidor.`,
+      deletionFailedHintOne:
+        "O arquivo já saiu do lote e não entra na execução. Sem a exclusão, o servidor o apaga sozinho em até 24 horas.",
+      deletionFailedHintMany:
+        "Os arquivos já saíram do lote e não entram na execução. Sem a exclusão, o servidor os apaga sozinho em até 24 horas.",
+      retryDeletion: "Tentar excluir de novo",
     },
     serverFieldErrors: {
       missing: "Campo obrigatório.",
