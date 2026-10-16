@@ -322,21 +322,22 @@ def purge_owner(session: Session, owner_id: uuid.UUID) -> None:
     )
 
 
-def set_account_storage_max(session: Session, owner_id: uuid.UUID, max_bytes: int | None) -> None:
+def set_account_storage_max(session: Session, owner_id: uuid.UUID, max_bytes: int | None) -> int:
     """Muda o teto de armazenamento da conta (`gs-admin set-limits`); `None` volta ao padrão.
 
     Trava o pool e confere o reservado antes: abaixo dele, levanta `StorageBelowReservedError` sem
     mudar nada. O pool global não muda; a soma dos tetos das contas pode passar dele de propósito.
+    Devolve o teto anterior, lido sob a mesma trava, para a auditoria do comando.
     """
     target = ACCOUNT_STORAGE_MAX_BYTES if max_bytes is None else max_bytes
     if target <= 0:
         raise ValueError(f"o teto precisa ser positivo: {target}")
     ensure_account_pool(session, owner_id, Resource.STORAGE_BYTES)
-    reserved = session.execute(
-        select(capacity_pool.c.reserved)
+    reserved, previous = session.execute(
+        select(capacity_pool.c.reserved, capacity_pool.c.max_amount)
         .where(account_pool(owner_id, Resource.STORAGE_BYTES))
         .with_for_update()
-    ).scalar_one()
+    ).one()
     if reserved > target:
         raise StorageBelowReservedError(f"a conta já reservou {reserved} bytes; teto {target}")
     session.execute(
@@ -344,6 +345,8 @@ def set_account_storage_max(session: Session, owner_id: uuid.UUID, max_bytes: in
         .where(account_pool(owner_id, Resource.STORAGE_BYTES))
         .values(max_amount=target)
     )
+    previous_max: int = previous
+    return previous_max
 
 
 def ensure_account_pool(session: Session, owner_id: uuid.UUID, resource: Resource) -> None:

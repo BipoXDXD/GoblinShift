@@ -196,11 +196,21 @@ class RunListResponse(BaseModel):
     next_cursor: str | None
 
 
+_ANONYMIZED_NAME_NOTE = (
+    " Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como "
+    "`<role>-<artifact_id>`."
+)
+
+
 class ResultReferenceResponse(BaseModel):
     artifact_id: UUID
-    logical_name: str
+    logical_name: str = Field(
+        description="Nome da saída dentro da execução." + _ANONYMIZED_NAME_NOTE
+    )
     role: ArtifactRole
-    file_name: str
+    file_name: str = Field(
+        description="Nome com que o download entrega o arquivo." + _ANONYMIZED_NAME_NOTE
+    )
     availability: Availability
     # Só no papel `preview`: a saída que ele mostra, para a interface pôr os dois juntos (2.2).
     source_artifact_id: UUID | None

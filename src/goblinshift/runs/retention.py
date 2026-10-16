@@ -4,6 +4,9 @@
   por item (`run_input.details`: avisos e contagens) são anulados 30 dias depois do término; a
   Run continua, com estado, contagens e datas. O desfecho por item (`ok`/`rejected`) fica, porque
   só diz quantas entradas foram processadas.
+- Os nomes das saídas (`run_output.logical_name` e `artifact.file_name`) também saem aos 30 dias,
+  numa etapa própria e só quando o artefato já foi excluído (vence em 48 h): o download lê o nome
+  de artefato vivo. Quem lê um nome anulado usa `files.artifacts.generic_file_name`.
 - Run e Attempt são removidas 90 dias depois do término, com entradas, saídas e registros de
   idempotência (FK `CASCADE` a partir da Run).
 - `IdempotencyRecord` vencido é removido: a chave só vale 24 h (1.6).
@@ -29,6 +32,7 @@ from sqlalchemy.orm import Session
 from goblinshift.files.objects import release
 from goblinshift.files.retention import HistoryReferences, has_unsettled_candidate
 from goblinshift.files.states import HolderKind
+from goblinshift.files.tables import artifact
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 
 ANONYMIZE_AFTER = timedelta(days=30)
@@ -74,6 +78,38 @@ def anonymize_finished_runs(session: Session, now: datetime, limit: int) -> int:
         )
         .values(error_code=None, details=null())
     )
+    return len(chosen)
+
+
+def anonymize_output_names(session: Session, now: datetime, limit: int) -> int:
+    """Anula os nomes das saídas das Runs terminadas há 30 dias ou mais; devolve quantas saídas.
+
+    Não depende de `run.parameters`: as Runs anuladas antes da migração 0015 ficaram com os nomes.
+    A saída cujo artefato ainda não foi excluído espera os ciclos seguintes.
+    """
+    chosen = session.execute(
+        select(run_output.c.run_id, run_output.c.position, run_output.c.artifact_id)
+        .join(run, run.c.id == run_output.c.run_id)
+        .join(artifact, artifact.c.id == run_output.c.artifact_id)
+        .where(
+            run_output.c.logical_name.is_not(None),
+            run.c.finished_at.is_not(None),
+            run.c.finished_at <= now - ANONYMIZE_AFTER,
+            artifact.c.deleted_at.is_not(None),
+        )
+        .order_by(run.c.finished_at, run_output.c.run_id, run_output.c.position)
+        .limit(limit)
+        .with_for_update(skip_locked=True, of=(run_output, artifact))
+    ).all()
+    if not chosen:
+        return 0
+    artifact_ids = [row.artifact_id for row in chosen]
+    session.execute(
+        update(run_output)
+        .where(run_output.c.artifact_id.in_(artifact_ids))
+        .values(logical_name=None)
+    )
+    session.execute(update(artifact).where(artifact.c.id.in_(artifact_ids)).values(file_name=None))
     return len(chosen)
 
 
@@ -139,6 +175,17 @@ def history_backlog(session: Session, now: datetime) -> dict[str, int]:
             session,
             select(func.count()).where(
                 run.c.parameters.is_not(None), finished, run.c.finished_at <= now - ANONYMIZE_AFTER
+            ),
+        ),
+        "outputs_to_anonymize": _count(
+            session,
+            select(func.count())
+            .select_from(run_output)
+            .join(run, run.c.id == run_output.c.run_id)
+            .where(
+                run_output.c.logical_name.is_not(None),
+                finished,
+                run.c.finished_at <= now - ANONYMIZE_AFTER,
             ),
         ),
         "runs_to_delete": _count(

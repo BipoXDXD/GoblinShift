@@ -795,10 +795,16 @@ export interface components {
              * Format: uuid
              */
             artifact_id: string;
-            /** Logical Name */
+            /**
+             * Logical Name
+             * @description Nome da saída dentro da execução. Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como `<role>-<artifact_id>`.
+             */
             logical_name: string;
             role: components["schemas"]["ArtifactRole"];
-            /** File Name */
+            /**
+             * File Name
+             * @description Nome com que o download entrega o arquivo. Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como `<role>-<artifact_id>`.
+             */
             file_name: string;
             availability: components["schemas"]["Availability"];
             /** Source Artifact Id */
