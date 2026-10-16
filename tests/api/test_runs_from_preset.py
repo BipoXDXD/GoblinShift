@@ -277,3 +277,60 @@ def test_editar_o_preset_nao_muda_a_execucao_ja_aceita(
     saved = stored_run(factory, accepted.json()["id"])
     assert saved.parameters["trim_columns"] == ["a"]
     assert saved.preset_id == uuid.UUID(preset["id"])
+
+
+def test_retry_depois_de_editar_o_preset_repete_a_mesma_execucao(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account, trim_columns=["a"])
+    inputs = ready_inputs(factory, storage, account.id)
+    key = str(uuid.uuid4())
+    first = run_preset(client, account, preset["id"], inputs, key)
+    client.put(
+        f"{PRESETS}/{preset['id']}",
+        json={
+            "name": "Editado",
+            "recipe_id": "csv-janitor",
+            "recipe_version": 1,
+            "parameters": {"trim_columns": ["b"]},
+        },
+        headers={**account.headers, "If-Match": '"1"'},
+    )
+
+    again = run_preset(client, account, preset["id"], inputs, key)
+
+    assert again.status_code == 202, again.text
+    assert again.headers["idempotency-replayed"] == "true"
+    assert again.json()["id"] == first.json()["id"]
+
+
+def test_retry_depois_de_excluir_o_preset_repete_a_mesma_execucao(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account)
+    inputs = ready_inputs(factory, storage, account.id)
+    key = str(uuid.uuid4())
+    first = run_preset(client, account, preset["id"], inputs, key)
+    client.delete(f"{PRESETS}/{preset['id']}", headers={**account.headers, "If-Match": '"1"'})
+
+    again = run_preset(client, account, preset["id"], inputs, key)
+
+    assert again.status_code == 202, again.text
+    assert again.json()["id"] == first.json()["id"]
+
+
+def test_mesma_chave_com_outras_entradas_no_mesmo_preset_e_outro_comando(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account)
+    key = str(uuid.uuid4())
+    run_preset(client, account, preset["id"], ready_inputs(factory, storage, account.id), key)
+
+    other = run_preset(
+        client, account, preset["id"], ready_inputs(factory, storage, account.id), key
+    )
+
+    assert_problem(other, 422, "IDEMPOTENCY_KEY_REUSED")

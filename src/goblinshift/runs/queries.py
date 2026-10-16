@@ -178,7 +178,10 @@ def get_run_detail(session: Session, owner_id: UUID, run_id: UUID) -> RunDetail:
         .where(run_input.c.owner_id == owner_id, run_input.c.run_id == run_id)
         .order_by(run_input.c.position)
     ).all()
-    return RunDetail(_view(row), _summary(row.summary), tuple(_item(item) for item in items))
+    view = _view(row)
+    # Durante a execução `summary` guarda o progresso; as contagens finais só valem no fim.
+    summary = _summary(row.summary) if view.is_terminal else None
+    return RunDetail(view, summary, tuple(_item(item) for item in items))
 
 
 def list_runs(
@@ -290,7 +293,8 @@ def _select_views() -> Select[Any]:
 
 
 def _results_expire_at() -> ColumnElement[datetime]:
-    """Vencimento mais próximo entre os artefatos publicados que ninguém excluiu."""
+    """Vencimento mais próximo entre os artefatos ainda disponíveis: nem excluídos nem vencidos
+    (o vencido antes de a manutenção marcá-lo também não conta)."""
     return (
         select(func.min(artifact.c.expires_at))
         .join(
@@ -300,7 +304,11 @@ def _results_expire_at() -> ColumnElement[datetime]:
                 run_output.c.owner_id == artifact.c.owner_id,
             ),
         )
-        .where(run_output.c.run_id == run.c.id, artifact.c.deleted_at.is_(None))
+        .where(
+            run_output.c.run_id == run.c.id,
+            artifact.c.deleted_at.is_(None),
+            artifact.c.expires_at > func.now(),
+        )
         .scalar_subquery()
     )
 
