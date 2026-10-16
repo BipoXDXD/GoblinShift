@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, Row, Select, and_, case, func, select, tuple_
 from sqlalchemy.orm import Session
 
+from goblinshift.files.artifacts import file_name_of
 from goblinshift.files.states import ArtifactRole, Availability, ObjectState
 from goblinshift.files.tables import artifact, stored_object, upload
 from goblinshift.processing.recipe import (
@@ -23,6 +24,7 @@ from goblinshift.processing.recipe import (
     ItemWarningCode,
 )
 from goblinshift.runs.cursor import Position, decode_cursor, encode_cursor
+from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import TERMINAL_STATUSES, ErrorCode, Phase, Status
 from goblinshift.runs.tables import attempt, run, run_input, run_output
 
@@ -76,7 +78,7 @@ class ItemStatus(StrEnum):
 
 @dataclass(frozen=True)
 class RunItem:
-    """Desfecho de uma entrada, só com códigos do catálogo e contagens: nada do arquivo."""
+    """Desfecho de uma entrada: códigos do catálogo e contagens, e nenhum valor do arquivo."""
 
     position: int
     upload_id: UUID
@@ -88,6 +90,8 @@ class RunItem:
     notices: tuple[ItemNoticeCode, ...]
     counts: dict[str, int]
     duplicate_of: int | None
+    # Única exceção ao "nada do arquivo": nomes de coluna do aviso de fórmula (1.3; ADR 039).
+    formula_cells: FormulaCells | None
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,9 @@ class RunPage:
 
 @dataclass(frozen=True)
 class ResultReference:
+    """Uma saída publicada. Depois da retenção de 30 dias (1.7) os dois nomes são o genérico
+    `<papel>-<id do artefato>` (`files.artifacts.generic_file_name`)."""
+
     artifact_id: UUID
     logical_name: str
     role: ArtifactRole
@@ -249,9 +256,9 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
     references = tuple(
         ResultReference(
             row.artifact_id,
-            row.logical_name,
+            file_name_of(row.logical_name, ArtifactRole(row.role), row.artifact_id),
             ArtifactRole(row.role),
-            row.file_name,
+            file_name_of(row.file_name, ArtifactRole(row.role), row.artifact_id),
             Availability.of(
                 deleted_at=row.deleted_at,
                 expires_at=row.expires_at,
@@ -415,6 +422,7 @@ def _item(row: Any) -> RunItem:
         notices=_codes(ItemNoticeCode, details.get("notices")),
         counts=_counts(details.get("counts")),
         duplicate_of=duplicate_of,
+        formula_cells=FormulaCells.from_json(details.get("formula_cells")),
     )
 
 

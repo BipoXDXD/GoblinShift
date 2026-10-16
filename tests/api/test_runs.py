@@ -69,6 +69,7 @@ ITEM_KEYS = {
     "notices",
     "counts",
     "duplicate_of",
+    "formula_cells",
 }
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
@@ -926,6 +927,34 @@ def test_resultados_publicados_em_ordem_de_posicao(
     ]
 
 
+def test_resultados_com_nomes_anulados_trazem_o_nome_generico(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    """Aos 30 dias a retenção anula os nomes (1.7); a resposta não muda de forma."""
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id.in_([report, table]))
+            .values(deleted_at=func.now(), file_name=None)
+        )
+        session.execute(
+            update(run_output).where(run_output.c.run_id == run_id).values(logical_name=None)
+        )
+
+    response = client.get(f"{RUNS}/{run_id}/results", headers=account.headers)
+
+    assert response.status_code == 200
+    assert [
+        (a["logical_name"], a["file_name"], a["availability"]) for a in response.json()["artifacts"]
+    ] == [
+        (f"output-{table}", f"output-{table}", "expired"),
+        (f"report-{report}", f"report-{report}", "expired"),
+    ]
+
+
 def test_publicado_sem_saidas_e_published_true(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -1123,6 +1152,14 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
         "notices": ["IMAGE_P3_CONVERTED"],
         "counts": {"records_read": 2},
         "duplicate_of": None,
+        "formula_cells": {
+            "columns": [
+                {"name": "valor", "cells": 3},
+                {"name": "<b>conta</b>", "cells": 1},
+                {"name": None, "cells": 1},
+            ],
+            "more_columns": 2,
+        },
     }
     uploads = with_items(
         factory,
@@ -1156,6 +1193,16 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": ["IMAGE_P3_CONVERTED"],
             "counts": {"records_read": 2},
             "duplicate_of": None,
+            # Nome de coluna é dado do usuário: sai como texto, sem escapar nem interpretar; a
+            # coluna de cabeçalho vazio sai com nome nulo, sem sumir com a contagem.
+            "formula_cells": {
+                "columns": [
+                    {"name": "valor", "cells": 3},
+                    {"name": "<b>conta</b>", "cells": 1},
+                    {"name": None, "cells": 1},
+                ],
+                "more_columns": 2,
+            },
         },
         {
             "position": 1,
@@ -1167,6 +1214,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": [],
             "counts": {},
             "duplicate_of": None,
+            "formula_cells": None,
         },
         {
             "position": 2,
@@ -1178,6 +1226,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": [],
             "counts": {},
             "duplicate_of": 0,
+            "formula_cells": None,
         },
     ]
 
@@ -1193,6 +1242,7 @@ def test_item_ainda_nao_avaliado_aparece_pendente(
     [item] = body["items"]
     assert item.keys() == ITEM_KEYS
     assert (item["status"], item["warnings"], item["counts"]) == ("pending", [], {})
+    assert item["formula_cells"] is None
     assert body["summary"] is None
 
 
@@ -1207,6 +1257,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
         "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
         "duplicate_of": None,
         "original_name": "salarios-ana.csv",
+        "formula_cells": {"columns": [{"name": "Ana", "cells": "7"}], "more_columns": 0},
     }
     with_items(
         factory,
@@ -1223,6 +1274,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
     assert item["notices"] == []
     assert item["counts"] == {"records_read": 1}
     assert item["error_code"] is None
+    assert item["formula_cells"] is None
     assert "ana" not in response.text.lower()
 
 

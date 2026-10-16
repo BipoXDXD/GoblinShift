@@ -55,7 +55,7 @@ As sete causas da manutenção leem o span `maintenance.cycle` (`goblinshift.ent
 | `maintenance.purge_limit_reached` | `1` se o limitador cortou o expurgo da volta, `0` se não |
 | `maintenance.accounts_deletion_overdue` | contas com `DELETE /me` pedido há 20 h ou mais |
 | `maintenance.storage_global_reserved_bytes`, `maintenance.storage_global_max_bytes` | o pool global do livro-razão (ADR 024) |
-| `maintenance.runs_to_anonymize`, `maintenance.runs_to_delete`, `maintenance.idempotency_records_expired`, `maintenance.uploads_to_anonymize`, `maintenance.uploads_to_delete` | o que a retenção de 1.7 ainda deve: tamanho do acúmulo depois da volta |
+| `maintenance.runs_to_anonymize`, `maintenance.outputs_to_anonymize`, `maintenance.runs_to_delete`, `maintenance.idempotency_records_expired`, `maintenance.uploads_to_anonymize`, `maintenance.uploads_to_delete` | o que a retenção de 1.7 ainda deve: tamanho do acúmulo depois da volta |
 | `maintenance.objects_missing_checked`, `maintenance.objects_missing_absent`, `maintenance.objects_missing_unreadable`, `maintenance.objects_marked_missing` | a varredura de objetos ausentes da volta: conferidos no disco, ausentes, ilegíveis (`stat` com erro que não é ausência; o objeto fica como está) e marcados `missing` (causa `gs-causa-objetos-ausentes`) |
 | `maintenance.missing_sweep_skipped` | `1` se faltou a sentinela de montagem e nada foi conferido (causa `gs-causa-storage-sem-sentinela`) |
 | `maintenance.missing_governor_tripped` | `1` se o limitador travou o lote e nada foi marcado: mais da metade ausente, um lote pequeno (abaixo de 10) inteiro ausente a partir de dois, ou ilegível junto com ausente (causa `gs-causa-limitador-de-ausentes`) |
