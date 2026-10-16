@@ -22,8 +22,10 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - name: Instalar o age (testes do backup do PostgreSQL)
-        run: sudo apt-get update -q && sudo apt-get install -yq age
+      - name: Instalar o age (backup) e o FFmpeg completo (vídeos sintéticos do Media Mill)
+        # O FFmpeg do runner só gera e confere fixtures; a receita, na imagem do executor, usa o
+        # build mínimo do ADR 036.
+        run: sudo apt-get update -q && sudo apt-get install -yq age ffmpeg
       - name: Ruff (lint)
         run: uv run ruff check .
       - name: Ruff (formatação)
@@ -35,7 +37,9 @@ jobs:
       - name: Testes (inclui PostgreSQL real via Testcontainers)
         # Os do OpenObserve rodam no job próprio, em paralelo, para caber no orçamento do commit
         # stage (5 min): só o cenário do agendador leva cerca de 2 min.
-        run: uv run pytest -m "not openobserve"
+        # A imagem do executor compila o FFmpeg (ADR 036): os testes dela rodam só no job gvisor,
+        # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
+        run: uv run pytest -m "not openobserve and not executor_image"
 
   openobserve:
     name: SLOs e alertas (OpenObserve)
@@ -212,6 +216,8 @@ jobs:
           fi
           sudo systemctl restart docker
           docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+      - name: FFmpeg completo (gera os vídeos sintéticos dos testes do Media Mill na imagem)
+        run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
       - name: Testes do executor-ctl e da imagem do executor sob runsc
         env:
           GS_TEST_RUNTIME: runsc
