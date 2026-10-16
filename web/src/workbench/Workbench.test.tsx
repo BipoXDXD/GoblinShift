@@ -110,10 +110,10 @@ describe("Bancada", () => {
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");
   });
 
-  it("outra receita pode cair na outra goblin do vazio, e sempre na mesma", async () => {
+  it("em outra receita o vazio também mostra a Jade, a única goblin do estado", async () => {
     await setup({ recipe: "image-forge" });
 
-    expect(screen.getByRole("img", { name: /^Lua, / })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^Jade, / })).toBeInTheDocument();
   });
 
   it("a ordem do Tab segue a leitura nas duas colunas: arquivos, parâmetros, Executar", async () => {
