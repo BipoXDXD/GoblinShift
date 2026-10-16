@@ -12,7 +12,10 @@ import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
 
 const T = TEXT.presets;
-/** Teto do nome na API (presets/drafts.py); conferido aqui para o erro aparecer no campo. */
+/**
+ * Teto do nome na API (presets/drafts.py), em code points depois do NFC como lá; conferido aqui
+ * para o erro aparecer no campo.
+ */
 const MAX_NAME_LENGTH = 100;
 
 /**
@@ -134,5 +137,7 @@ function nameErrorOf(name: string): string | null {
   if (trimmed === "") {
     return T.nameRequired;
   }
-  return trimmed.length > MAX_NAME_LENGTH ? T.nameTooLong : null;
+  // Code points, não grafemas: é o que o `len` do Python conta no servidor.
+  const length = Array.from(trimmed.normalize("NFC")).length;
+  return length > MAX_NAME_LENGTH ? T.nameTooLong : null;
 }

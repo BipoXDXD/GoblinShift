@@ -116,6 +116,33 @@ describe("Bancada: Salvar preset", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
+  it("nome de 100 caracteres contados como o servidor (code points após NFC) é aceito", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    // 60 emojis são 120 unidades UTF-16; "e" + acento combinado vira um só caractere no NFC.
+    await user.click(within(dialog).getByLabelText("Nome do preset"));
+    await user.paste("🧌".repeat(60) + "e\u0301".repeat(40));
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    await waitFor(() => {
+      expect(sent(api.requests, "POST /api/v1/presets")).toHaveLength(1);
+    });
+    expect(within(dialog).queryByText(/Use até 100 caracteres\./)).toBeNull();
+  });
+
+  it("101 code points são recusados mesmo com menos de 101 unidades por caractere", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    await user.click(within(dialog).getByLabelText("Nome do preset"));
+    await user.paste("🧌".repeat(101));
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    expect(within(dialog).getByText(/Use até 100 caracteres\./)).toBeVisible();
+    expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
+  });
+
   it("fechado pelo navegador com o pedido em voo, reabre e mostra o 409 que chegou depois", async () => {
     let answer: (response: Response) => void = () => undefined;
     const { user } = setup("/bancada/csv-janitor", {
