@@ -64,8 +64,9 @@ upload = Table(
     Column("id", Uuid, primary_key=True, server_default=func.uuidv7()),
     Column("owner_id", Uuid, nullable=False),
     Column("object_id", Uuid, nullable=False, unique=True),
-    # Dado do usuário, nunca caminho (3.6).
-    Column("original_name", Text, nullable=False),
+    # Dado do usuário, nunca caminho (3.6). Anulado 30 dias depois de criado, só depois da
+    # exclusão (1.7, "Retenção"; migração 0020).
+    Column("original_name", Text),
     Column("expected_size", BigInteger, nullable=False),
     Column("state", Text, nullable=False, server_default="created"),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
@@ -84,6 +85,15 @@ upload = Table(
     CheckConstraint("state IN ('created', 'receiving', 'ready', 'failed')", name="state"),
     CheckConstraint("expected_size >= 0", name="expected_size"),
     CheckConstraint("length(original_name) BETWEEN 1 AND 255", name="original_name"),
+    CheckConstraint(
+        "original_name IS NOT NULL OR deleted_at IS NOT NULL", name="name_until_deleted"
+    ),
+    # Uploads excluídos que a retenção ainda vai anular (1.7).
+    Index(
+        "upload_anonymize_idx",
+        "created_at",
+        postgresql_where=text("original_name IS NOT NULL AND deleted_at IS NOT NULL"),
+    ),
 )
 
 artifact = Table(
