@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Funções comuns dos scripts de ponta a ponta (e2e-csv-janitor.sh, e2e-image-forge.sh,
-# e2e-downloads-detox.sh e e2e-pdf-press.sh). Não roda sozinho: cada script faz `source` e
-# chama `e2e_setup`.
+# e2e-downloads-detox.sh, e2e-pdf-press.sh e e2e-media-mill.sh). Não roda sozinho: cada script
+# faz `source` e chama `e2e_setup`.
 #
 # Só curl e o python3 do host com -I (biblioteca padrão, sem o ambiente do projeto), exceto na
 # geração das fixtures, que usa o `uv` do repositório (o Pillow do uv.lock).
@@ -184,4 +184,33 @@ print(json.dumps({"recipe_id": expected["recipe_id"], "recipe_version": expected
 
 check_package() {
   python3 -I "$E2E_REPO_ROOT/scripts/e2e_check_package.py" "$1" "$2/expected.json" "$2"
+}
+
+# Cenário inteiro a partir das fixtures geradas: um upload em lote e o mesmo pedido duas vezes,
+# cada ZIP conferido contra o expected.json e os dois idênticos. Uso: run_fixture_scenario
+# recipe_id "Nome da receita"
+run_fixture_scenario() {
+  local recipe="$1" label="$2" fixtures="$WORK/fixtures" command status run_id round
+  echo "1. fixtures"
+  generate_fixtures "$recipe" "$fixtures"
+
+  echo "2. upload em lote"
+  upload_fixtures "$fixtures" >"$WORK/upload_ids"
+  command=$(command_from_expected "$fixtures" "$WORK/upload_ids")
+  status=$(expected_field "$fixtures" '["status"]')
+
+  for round in 1 2; do
+    echo "3.$round. execução"
+    run_id=$(start_run "$command" "$recipe-$round")
+    echo "   acompanhamento de $run_id (esperado: $status)"
+    require_status "$run_id" "$status"
+    require_roles "$run_id" output report manifest package
+    fetch_package "$run_id" "$recipe" "$WORK/pacote-$round.zip"
+    check_package "$WORK/pacote-$round.zip" "$fixtures"
+  done
+
+  echo "4. determinismo"
+  require_same_package "$WORK/pacote-1.zip" "$WORK/pacote-2.zip"
+
+  echo "ok: $label de ponta a ponta em $BASE (duas runs com o mesmo ZIP)"
 }

@@ -6,10 +6,21 @@ MIB = 1024 * 1024
 GIB = 1024 * MIB
 
 MAX_FILE_BYTES = 32 * MIB
+# 1.7: "vídeo, quando disponível, até 256 MiB" (Media Mill, ADR 036). O tipo vem da extensão do
+# nome, que é só indício: o conteúdo é conferido no executor, e só a versão de receita que declara
+# `max_input_bytes` acima de 32 MiB aceita a entrada maior na execução.
+MAX_VIDEO_FILE_BYTES = 256 * MIB
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
 MAX_BATCH_FILES = 100
 MAX_BATCH_BYTES = 512 * MIB
 # Igual ao CHECK da coluna `upload.original_name`, contado em caracteres.
 MAX_NAME_CHARS = 255
+
+
+def max_file_bytes_for(name: str) -> int:
+    """Teto de bytes de um arquivo pelo nome declarado no envio."""
+    return MAX_VIDEO_FILE_BYTES if name.casefold().endswith(VIDEO_EXTENSIONS) else MAX_FILE_BYTES
+
 
 # Retenção (1.7): incompleto expira após 1 h sem atividade; pronto, após 24 h sem uso; entrada
 # usada por uma execução, 48 h após o término dela, como as saídas.

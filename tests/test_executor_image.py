@@ -25,6 +25,7 @@ from goblinshift.catalog import CATALOG
 from tests.downloads_detox import samples
 from tests.image_forge import media
 from tests.image_forge.icc import DISPLAY_P3, rgb_profile
+from tests.media_mill import media as video
 from tests.pdf_press import samples as pdf_samples
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,7 +36,8 @@ IMAGE = f"goblinshift-executor:test-{hashlib.sha256(bytes(ROOT)).hexdigest()[:12
 RUNTIME = os.environ.get("GS_TEST_RUNTIME", "runc")
 EXECUTOR_UID = 61000
 EXECUTOR_GID = 61001
-BUILD_TIMEOUT_SECONDS = 600
+# O estágio do FFmpeg (ADR 036) compila do fonte quando não há cache: alguns minutos.
+BUILD_TIMEOUT_SECONDS = 1200
 RUN_TIMEOUT_SECONDS = 120
 # O usuário do container não é o dono do diretório temporário do teste; na VPS o acesso vem do
 # grupo gs-exec (modo 2770), que o teste não consegue criar sem root.
@@ -43,6 +45,7 @@ WORLD_WRITABLE_DIR = 0o777
 WORLD_READABLE_DIR = 0o755
 WORLD_READABLE_FILE = 0o644
 SUCCEEDED = 0
+FFMPEG_VERSION = "8.1.2"  # ADR 036; ARG FFMPEG_VERSION em docker/executor.Dockerfile
 PILLOW_VERSION = "12.3.0"  # ADR 018; tests/test_dependencies.py confere o mesmo pin no lock
 PIKEPDF_VERSION = "10.16.0"  # ADR 035; idem
 QPDF_VERSION = "12.4.2"  # o libqpdf que vem dentro da wheel do pikepdf
@@ -402,6 +405,101 @@ def test_downloads_detox_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(
     second = run_recipe(image, tmp_path / "2", detox_batch(), "downloads-detox")
 
     assert package_digest(first, "downloads-detox") == package_digest(second, "downloads-detox")
+
+
+# --- Media Mill na imagem: o FFmpeg mínimo do ADR 036 -----------------------------------------
+
+
+def run_tool(image: str, *argv: str) -> subprocess.CompletedProcess[str]:
+    return docker(*fixed_profile("--entrypoint", argv[0], image, *argv[1:]))
+
+
+def test_ffmpeg_e_ffprobe_tem_a_versao_fixada(image: str) -> None:
+    for tool in ("ffmpeg", "ffprobe"):
+        result = run_tool(image, tool, "-hide_banner", "-version")
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.startswith(f"{tool} version {FFMPEG_VERSION} ")
+
+
+def test_ffmpeg_so_le_mov_e_matroska(image: str) -> None:
+    result = run_tool(image, "ffmpeg", "-hide_banner", "-demuxers")
+
+    assert result.returncode == 0, result.stderr
+    # Depois da legenda ("D. = Demuxing supported"), uma linha por formato: " D   <nomes> <desc>".
+    listing = result.stdout.split("--", 1)[1]
+    demuxers = [line.split()[1] for line in listing.splitlines() if line.startswith(" D")]
+    assert demuxers == ["matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2"]
+
+
+def test_ffmpeg_so_tem_os_protocolos_file_e_pipe(image: str) -> None:
+    result = run_tool(image, "ffmpeg", "-hide_banner", "-protocols")
+
+    assert result.returncode == 0, result.stderr
+    names = [line.strip() for line in result.stdout.splitlines()[1:]]
+    assert names == ["Input:", "file", "pipe", "Output:", "file", "pipe"]
+
+
+@pytest.mark.parametrize("demuxer", ["hls", "concat", "image2", "lavfi"])
+def test_demuxers_que_abrem_outros_arquivos_nao_existem(image: str, demuxer: str) -> None:
+    result = run_tool(image, "ffmpeg", "-nostdin", "-f", demuxer, "-i", "file:/nao-existe")
+
+    assert result.returncode != 0
+    assert f"Unknown input format: '{demuxer}'" in result.stderr
+
+
+def media_batch(root: Path) -> list[tuple[str, bytes]]:
+    """Celular em pé (rotação 90), WebM VP9/Opus, HLS disfarçado de .mp4 e 4K."""
+    root.mkdir()
+    mp4 = video.generate(video.CLIPS["mp4"], root / "a.mp4")
+    return [
+        ("celular.mp4", video.rotated(mp4, root / "r.mp4", 90).read_bytes()),
+        ("clipe.webm", video.generate(video.CLIPS["webm_vp9_opus"], root / "b.webm").read_bytes()),
+        ("lista.mp4", video.HLS_PLAYLIST),
+        ("grande.mp4", video.generate(video.CLIPS["mp4_4k"], root / "c.mp4").read_bytes()),
+    ]
+
+
+def test_media_mill_converte_e_recusa_na_imagem(image: str, tmp_path: Path) -> None:
+    batch = media_batch(tmp_path / "videos")
+
+    out = run_recipe(image, tmp_path, batch, "media-mill", audio_format="flac", thumbnail_count=3)
+
+    report = read_json(out / "report.json")
+    statuses = [(item["status"], item.get("code")) for item in report["items"]]
+    assert statuses == [
+        ("ok", None),
+        ("ok", None),
+        ("rejected", "UNSUPPORTED_FORMAT"),
+        ("rejected", "MEDIA_TOO_LARGE"),
+    ]
+    with Image.open(out / "thumbnails" / "celular-10pct.jpg") as thumbnail:
+        assert thumbnail.size == (240, 320)
+    with zipfile.ZipFile(out / "media-mill.zip") as archive:
+        assert archive.namelist() == [
+            "audio/celular.flac",
+            "thumbnails/celular-10pct.jpg",
+            "thumbnails/celular-50pct.jpg",
+            "thumbnails/celular-90pct.jpg",
+            "audio/clipe.flac",
+            "thumbnails/clipe-10pct.jpg",
+            "thumbnails/clipe-50pct.jpg",
+            "thumbnails/clipe-90pct.jpg",
+            "manifest.json",
+            "report.json",
+        ]
+        assert archive.read("audio/clipe.flac").startswith(b"fLaC")
+
+
+def test_media_mill_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(
+    image: str, tmp_path: Path
+) -> None:
+    batch = media_batch(tmp_path / "videos")
+
+    first = run_recipe(image, tmp_path / "1", batch, "media-mill", thumbnail_count=3)
+    second = run_recipe(image, tmp_path / "2", batch, "media-mill", thumbnail_count=3)
+
+    assert package_digest(first, "media-mill") == package_digest(second, "media-mill")
 
 
 # --- PDF Press na imagem (1.5; ADR 035) -------------------------------------------------------
