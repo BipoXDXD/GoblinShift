@@ -13,7 +13,11 @@ import pytest
 from pikepdf import Dictionary, Name, String
 
 from goblinshift.processing.pdf_press import Limits
-from goblinshift.processing.pdf_press.inspection import InspectedDocument, inspect_document
+from goblinshift.processing.pdf_press.inspection import (
+    MAX_PAGE_TREE_DEPTH,
+    InspectedDocument,
+    inspect_document,
+)
 from goblinshift.processing.recipe import FailureCode, InputFile, RecipeFailure
 from tests.pdf_press import samples
 
@@ -245,3 +249,69 @@ def test_detalhe_da_falha_nao_traz_caminho_nem_objeto_interno(tmp_path: Path) ->
     assert str(tmp_path) not in failure.detail
     assert "BytesIO" not in failure.detail
     assert "entrada 1" in failure.detail
+
+
+# --- árvore de páginas hostil (achado da revisão de segurança) -----------------------------
+# O teto vale antes de o qpdf percorrer a árvore: a inspeção a anda à mão, com teto de
+# profundidade e de filhos e um conjunto de visitados.
+
+
+def test_arvore_de_paginas_comum_feita_a_mao_e_aceita(tmp_path: Path) -> None:
+    with inspected(tmp_path, samples.page_tree_with_count(declared=3, pages=3)) as document:
+        assert document.page_count == 3
+
+
+def test_arvore_de_paginas_com_ciclo_falha(tmp_path: Path) -> None:
+    failure = refusal(tmp_path, samples.page_tree_with_cycle())
+
+    assert failure.code is FailureCode.PDF_INVALID
+    assert "árvore de páginas" in failure.detail
+
+
+def test_arvore_de_paginas_de_10_mil_niveis_falha(tmp_path: Path) -> None:
+    failure = refusal(tmp_path, samples.deep_page_tree(10_000))
+
+    assert failure.code is FailureCode.PDF_INVALID
+    assert "profunda" in failure.detail
+
+
+def test_arvore_na_profundidade_maxima_e_aceita(tmp_path: Path) -> None:
+    data = samples.deep_page_tree(MAX_PAGE_TREE_DEPTH)
+
+    with inspected(tmp_path, data) as document:
+        assert document.page_count == 1
+
+
+def test_arvore_um_nivel_alem_da_profundidade_maxima_falha(tmp_path: Path) -> None:
+    failure = refusal(tmp_path, samples.deep_page_tree(MAX_PAGE_TREE_DEPTH + 1))
+
+    assert failure.code is FailureCode.PDF_INVALID
+
+
+@pytest.mark.parametrize("declared", [0, 2, 1_000_000_000])
+def test_count_mentiroso_falha(tmp_path: Path, declared: int) -> None:
+    failure = refusal(tmp_path, samples.page_tree_with_count(declared=declared, pages=1))
+
+    assert failure.code is FailureCode.PDF_INVALID
+    assert "/Count" in failure.detail
+
+
+def test_milhoes_de_filhos_falham_antes_de_percorrer_a_lista(tmp_path: Path) -> None:
+    failure = refusal(tmp_path, samples.page_tree_with_many_kids(2_000_000))
+
+    assert failure.code is FailureCode.INPUT_LIMIT_EXCEEDED
+
+
+def test_mesma_pagina_repetida_na_arvore_falha(tmp_path: Path) -> None:
+    failure = refusal(tmp_path, samples.page_tree_with_many_kids(2))
+
+    assert failure.code is FailureCode.PDF_INVALID
+
+
+def test_teto_de_objetos_usa_o_xref_real_e_nao_o_size_declarado(tmp_path: Path) -> None:
+    # /Size mentiroso (2) num arquivo com 4 objetos no xref: vale a contagem real.
+    data = samples.page_tree_with_count(declared=2, pages=2).replace(b"/Size 5", b"/Size 2")
+
+    failure = refusal(tmp_path, data, limits=Limits(max_objects_per_document=3))
+
+    assert failure.code is FailureCode.INPUT_LIMIT_EXCEEDED

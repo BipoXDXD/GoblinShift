@@ -34,6 +34,7 @@ from goblinshift.processing.recipe import FailureCode, InputFile, RecipeFailure
 # O cabeçalho no byte 0, sem tolerar lixo antes (o qpdf aceitaria com aviso).
 _HEADER = re.compile(rb"%PDF-[12]\.[0-9]")
 _HEADER_BYTES = 8
+MAX_PAGE_TREE_DEPTH = 32
 _ALLOWED_ACTIONS = frozenset({"/GoTo", "/URI"})
 # Onde um dicionário guarda uma ação; `/AA` é recusado inteiro, por disparar sozinho.
 _ACTION_KEYS = ("/A", "/OpenAction", "/Next")
@@ -91,7 +92,9 @@ def _require_header(path: Path, where: str) -> None:
 def _open(path: Path, where: str) -> pikepdf.Pdf:
     try:
         # Sem recuperação: o que o qpdf precisaria reconstruir é arquivo danificado (1.5).
-        return pikepdf.open(path, attempt_recovery=False)
+        # Sem herança de atributos na abertura: ela percorreria a árvore de páginas antes de
+        # qualquer teto. O qpdf ainda resolve os atributos herdados ao copiar a página.
+        return pikepdf.open(path, attempt_recovery=False, inherit_page_attributes=False)
     except pikepdf.PasswordError:
         raise _unsupported(where, ["protegido por senha"]) from None
     except pikepdf.PdfError:
@@ -102,8 +105,9 @@ def _checked_page_count(pdf: pikepdf.Pdf, where: str, page_budget: int, limits: 
     try:
         if pdf.is_encrypted:
             raise _unsupported(where, ["criptografado"])
-        _require_object_count(int(pdf.trailer.get("/Size", 0)), where, limits)
-        page_count = _page_count(pdf, where, page_budget)
+        # O xref já lido na abertura, e não o /Size do trailer, que o arquivo declara como quiser.
+        _require_object_count(len(pdf.get_xref_table()), where, limits)
+        page_count = _bounded_page_count(pdf, where, page_budget)
         objects = pdf.objects
         _require_object_count(len(objects), where, limits)
         reasons = _unsupported_reasons(objects)
@@ -125,16 +129,64 @@ def _require_object_count(count: int, where: str, limits: Limits) -> None:
         )
 
 
-def _page_count(pdf: pikepdf.Pdf, where: str, page_budget: int) -> int:
-    count = len(pdf.pages)
-    if count == 0:
+def _bounded_page_count(pdf: pikepdf.Pdf, where: str, page_budget: int) -> int:
+    """Conta as folhas da árvore de páginas andando-a à mão, com tetos que valem antes do qpdf.
+
+    Profundidade até `MAX_PAGE_TREE_DEPTH`; cada nó indireto visitado uma vez só (ciclo ou página
+    repetida é arquivo danificado); uma lista /Kids maior que o que resta do teto de páginas é
+    recusada antes de ser percorrida; o /Count da raiz tem de bater com as folhas contadas. Só
+    depois disso o `pdf.pages` do qpdf é usado, já sobre uma árvore conferida.
+    """
+    root = pdf.Root.get("/Pages")
+    if not isinstance(root, Dictionary) or not root.is_indirect:
+        raise _invalid(where, "árvore de páginas sem raiz")
+    leaves = 0
+    visited: set[tuple[int, int]] = set()
+    stack: list[tuple[pikepdf.Object, int]] = [(root, 0)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > MAX_PAGE_TREE_DEPTH:
+            raise _invalid(where, "árvore de páginas profunda demais")
+        if not isinstance(node, Dictionary) or not node.is_indirect or node.objgen in visited:
+            raise _invalid(where, "árvore de páginas com ciclo, nó direto ou página repetida")
+        visited.add(node.objgen)
+        if str(node.get("/Type", "")) == "/Page":
+            leaves += 1
+            if leaves > page_budget:
+                raise _page_limit(where)
+            continue
+        stack.extend((kid, depth + 1) for kid in _kids(node, where, page_budget - leaves))
+    _require_declared_count(root, leaves, where)
+    if leaves == 0:
         raise _invalid(where, "documento sem páginas")
-    if count > page_budget:
-        raise RecipeFailure(
-            FailureCode.INPUT_LIMIT_EXCEEDED,
-            f"{where}: {count} páginas passam do limite de páginas de entrada da execução",
-        )
-    return count
+    if len(pdf.pages) != leaves:
+        raise _invalid(where, "árvore de páginas incoerente")
+    return leaves
+
+
+def _kids(node: pikepdf.Object, where: str, room: int) -> list[pikepdf.Object]:
+    if str(node.get("/Type", "")) != "/Pages":
+        raise _invalid(where, "árvore de páginas com nó que não é /Pages nem /Page")
+    kids = node.get("/Kids")
+    if not isinstance(kids, Array):
+        raise _invalid(where, "árvore de páginas com /Kids inválido")
+    # Cada filho leva ao menos uma página; mais filhos do que páginas restantes já estoura o teto.
+    if len(kids) > room:
+        raise _page_limit(where)
+    return list(kids)
+
+
+def _require_declared_count(root: pikepdf.Object, leaves: int, where: str) -> None:
+    declared = root.get("/Count")
+    if not isinstance(declared, int) or isinstance(declared, bool) or declared != leaves:
+        raise _invalid(where, "/Count da árvore de páginas não confere com as páginas")
+
+
+def _page_limit(where: str) -> RecipeFailure:
+    return RecipeFailure(
+        FailureCode.INPUT_LIMIT_EXCEEDED,
+        f"{where}: as páginas passam do limite de páginas de entrada da execução",
+    )
 
 
 def _unsupported_reasons(objects: Iterable[pikepdf.Object]) -> list[str]:
