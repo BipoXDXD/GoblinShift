@@ -27,10 +27,12 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
   const [message, setMessage] = useState<string | null>(null);
   const save = useSave();
 
+  // Fecha sempre, até com o pedido em voo (o navegador pode ter fechado o <dialog>): a resposta
+  // que chegar depois aparece ao reabrir, e só então o erro antigo é descartado.
   const close = (): void => {
+    setOpen(false);
+    setNameError(null);
     if (!save.isPending) {
-      setOpen(false);
-      setNameError(null);
       save.reset();
     }
   };
@@ -84,6 +86,7 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
         confirmLabel={save.isPending ? T.saving : T.save}
         cancelLabel={T.cancel}
         confirmBlocked={save.isPending}
+        busy={save.isPending}
         destructive={false}
         onCancel={close}
         onConfirm={submit}
