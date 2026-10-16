@@ -6,6 +6,7 @@ os construtores de `tests/` sem mexer em `sys.path`):
     uv run python -m scripts.e2e_fixtures image-forge <dir>
     uv run python -m scripts.e2e_fixtures downloads-detox <dir>
     uv run python -m scripts.e2e_fixtures pdf-press <dir>
+    uv run python -m scripts.e2e_fixtures media-mill <dir>
 
 Grava cada entrada em `<dir>/inputs/<posição>/<nome do upload>` (um diretório por entrada,
 porque `Foto.png` e `foto.PNG` se sobrescreveriam num filesystem que ignora a caixa) e o
@@ -14,21 +15,25 @@ valores esperados são escritos à mão a partir de 1.2, 1.4, 1.5 e 3.6, não re
 receitas.
 
 Determinístico: nada é baixado, e os mesmos bytes saem a cada execução no mesmo ambiente (o
-Pillow do `uv.lock` grava o JPEG, o MPO e o PNG RGBA).
+Pillow do `uv.lock` grava o JPEG, o MPO e o PNG RGBA; os vídeos do Media Mill saem do FFmpeg
+completo do `PATH`, com `+bitexact`, porque o build mínimo da imagem do executor não codifica
+H.264 nem VP9).
 """
 
 import hashlib
 import json
 import random
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from PIL import Image, ImageChops
 
 from tests.downloads_detox import samples
 from tests.image_forge import icc, media
+from tests.media_mill import media as video
 from tests.pdf_press import samples as pdf_samples
 
 RECIPE_VERSION = 1
@@ -198,6 +203,64 @@ def pdf_press() -> Scenario:
     )
 
 
+MEDIA_MILL_THUMBNAILS = ("10pct", "50pct", "90pct")
+# Os vídeos sintéticos têm 320 x 240 (tests/media_mill/media.py): a caixa de 640 px não amplia.
+CLIP_SIZE = [320, 240]
+# Sem `+bitexact`, o muxer do WebM sorteia os UIDs do segmento e cada geração muda os bytes.
+_BITEXACT = ("-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact")
+
+
+def media_mill() -> Scenario:
+    """Lote de 1.5 no teto de 5 vídeos: dois aceitos e três hostis, com FLAC e 3 miniaturas.
+
+    O MP4 leva um canário nos metadados (título e local de gravação), que não pode chegar a
+    nenhuma saída; a playlist HLS com nome de MP4 é recusada pela assinatura, sem FFmpeg; o 5.1
+    passa dos 2 canais e o MPEG-4 Part 2 está fora da allowlist de codecs (ADR 036).
+    """
+    fixtures = (
+        Fixture("ferias.mp4", clip("mp4_metadata"), ok(*media_mill_outputs("ferias"))),
+        Fixture("clipe.webm", clip("webm_vp9_opus"), ok(*media_mill_outputs("clipe"))),
+        Fixture("playlist.mp4", video.HLS_PLAYLIST, rejected("UNSUPPORTED_FORMAT")),
+        Fixture("surround.mp4", clip("mp4_six_channels"), rejected("AUDIO_LIMIT_EXCEEDED")),
+        Fixture("antigo.mp4", clip("mp4_mpeg4"), rejected("UNSUPPORTED_FORMAT")),
+    )
+    outputs = (*media_mill_outputs("ferias"), *media_mill_outputs("clipe"))
+    return Scenario(
+        recipe_id="media-mill",
+        parameters={"extract_audio": True, "audio_format": "flac", "thumbnail_count": 3},
+        fixtures=fixtures,
+        status=SUCCEEDED_WITH_WARNINGS,
+        zip_entries=(*outputs, "manifest.json", "report.json"),
+        extra={
+            # Taxa e canais da origem, sem resample nem downmix; 16 bits declarados (1.5). O Opus
+            # decodifica sempre a 48 kHz.
+            "audio": {
+                "audio/ferias.flac": {"sample_rate": 44100, "channels": 2, "bits_per_sample": 16},
+                "audio/clipe.flac": {"sample_rate": 48000, "channels": 2, "bits_per_sample": 16},
+            },
+            "jpeg_sizes": {path: CLIP_SIZE for path in outputs if path.startswith("thumbnails/")},
+            "jpeg_without_exif": [path for path in outputs if path.startswith("thumbnails/")],
+            "absent_text": [video.CANARY],
+        },
+    )
+
+
+def media_mill_outputs(stem: str) -> tuple[str, ...]:
+    return (
+        f"audio/{stem}.flac",
+        *(f"thumbnails/{stem}-{mark}.jpg" for mark in MEDIA_MILL_THUMBNAILS),
+    )
+
+
+def clip(name: str) -> bytes:
+    """Bytes de um vídeo sintético de tests/media_mill/media.py, gerado com `+bitexact`."""
+    base = video.CLIPS[name]
+    *options, format_flag, format_name = base.output
+    exact = replace(base, output=(*options, *_BITEXACT, format_flag, format_name))
+    with tempfile.TemporaryDirectory() as directory:
+        return video.generate(exact, Path(directory) / name).read_bytes()
+
+
 # Pior caso do Image Forge para a medição na VPS (plano da fatia 5, item 9): o teto de entradas e
 # de pixels da v1, na conversão mais cara (Display P3, orientação 6 e miniatura).
 LOAD_COUNT = 100
@@ -254,6 +317,7 @@ _BUILDERS = {
     "image-forge": image_forge,
     "downloads-detox": downloads_detox,
     "pdf-press": pdf_press,
+    "media-mill": media_mill,
 }
 RECIPES = tuple(_BUILDERS)
 

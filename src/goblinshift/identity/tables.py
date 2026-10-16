@@ -23,7 +23,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, CIDR
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, JSONB
 
 from goblinshift.platform.db import metadata
 
@@ -126,13 +126,23 @@ audit_event = Table(
     # `X-Request-ID` da requisição que gerou o evento; no login recusado, é o código que a tela
     # mostra e que a pessoa cita no recurso contra o bloqueio (J-10). Nulo fora de requisição.
     Column("request_id", Uuid),
+    # Só no `ACCOUNT_LIMITS_CHANGED` (migração 0016): `{"changes": {<item>: {"old", "new"}}}`.
+    # Números e nomes fixos, sem dado pessoal: sai com a linha aos 90 dias (1.7).
+    Column("details", JSONB),
     Index(None, "occurred_at"),
     Index(None, "user_id", "occurred_at"),
     CheckConstraint(
         "event_type IN ('LOGIN_SUCCEEDED', 'LOGIN_FAILED', 'LOGOUT', 'LOGOUT_ALL', 'KEY_ISSUED', "
         "'KEY_REVOKED', 'REAUTH_REQUIRED', 'CSRF_FAILED', 'ACCESS_DENIED', "
-        "'ACCOUNT_DELETION_REQUESTED', 'ACCOUNT_BLOCKED', 'ACCOUNT_UNBLOCKED', 'TERMS_ACCEPTED')",
+        "'ACCOUNT_DELETION_REQUESTED', 'ACCOUNT_BLOCKED', 'ACCOUNT_UNBLOCKED', 'TERMS_ACCEPTED', "
+        "'ACCOUNT_LIMITS_CHANGED')",
         name="event_type",
+    ),
+    CheckConstraint(
+        "CASE WHEN event_type = 'ACCOUNT_LIMITS_CHANGED' "
+        "THEN coalesce(jsonb_typeof(details) = 'object', false) "
+        "ELSE details IS NULL END",
+        name="details",
     ),
     CheckConstraint("outcome IN ('success', 'failure')", name="outcome"),
     CheckConstraint(

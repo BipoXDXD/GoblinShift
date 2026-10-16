@@ -24,9 +24,10 @@ identidade externa; `--pending` mostra só as contas à espera de liberação (A
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
 `set-limits` sobrepõe, para uma conta, as cotas diárias das settings (`GS_QUOTA_*`) e o teto de
 armazenamento do livro-razão (1.7); `default` volta o item ao padrão, e o que não for citado
-fica como está. `usage` imprime, separados por tab, o consumo das últimas 24 h (execuções, bytes
-de entrada e tempo de executor), o armazenamento reservado e cada limite com a origem (`conta`
-ou `padrão`).
+fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com os valores antigos
+e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
+(execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
+origem (`conta` ou `padrão`).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
 """
 
@@ -69,13 +70,13 @@ from goblinshift.identity.accounts import (
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
+from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
     QuotaLimits,
     daily_usage,
     executor_time_ms,
     quota_override,
-    set_account_quota,
 )
 from goblinshift.runs.store import db_now
 
@@ -282,28 +283,16 @@ def _limit_value(text: str) -> int | None:
 
 
 def _set_limits(args: argparse.Namespace, context: _Context) -> int:
-    quota_given = {
-        name: getattr(args, name)
-        for name in ("runs_per_24h", "input_bytes_per_24h")
-        if getattr(args, name) is not _UNCHANGED
+    limits = {
+        name: getattr(args, name) for name in LIMIT_ITEMS if getattr(args, name) is not _UNCHANGED
     }
-    storage_given = args.storage_bytes is not _UNCHANGED
-    if not quota_given and not storage_given:
+    if not limits:
         return _fail(EXIT_USAGE, "nada a mudar: informe ao menos um limite")
     try:
         with unit_of_work(context.factory) as session:
             if find_account(session, args.user) is None:
                 return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-            if quota_given:
-                current = quota_override(session, args.user)
-                merged = {
-                    "runs_per_24h": current.runs_per_24h,
-                    "input_bytes_per_24h": current.input_bytes_per_24h,
-                    **quota_given,
-                }
-                set_account_quota(session, args.user, **merged)
-            if storage_given:
-                capacity.set_account_storage_max(session, args.user, args.storage_bytes)
+            change_account_limits(session, args.user, limits, datetime.now(UTC))
     except capacity.StorageBelowReservedError as error:
         return _fail(EXIT_USAGE, str(error))
     print(f"limites da conta {args.user} atualizados", file=sys.stderr)

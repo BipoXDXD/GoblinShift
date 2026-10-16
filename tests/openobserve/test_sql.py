@@ -353,6 +353,27 @@ def test_capacidade_global_perto_do_teto(
     assert bool(cause_rows(telemetry, "causa-capacidade-global", stream)) is fires
 
 
+@pytest.mark.parametrize(
+    ("cause", "counter"),
+    [
+        ("causa-storage-sem-sentinela", "missing_sweep_skipped"),
+        ("causa-limitador-de-ausentes", "missing_governor_tripped"),
+        ("causa-objetos-ausentes", "objects_marked_missing"),
+    ],
+)
+@pytest.mark.parametrize(("value", "fires"), [(0, False), (1, True)])
+def test_causas_da_varredura_de_ausentes(
+    telemetry: Telemetry, cause: str, counter: str, value: int, fires: bool
+) -> None:
+    stream = unique_stream("ausentes")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(**{counter: value})
+    traces.maintenance_cycle(**{counter: 0}, age_s=2 * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, cause, stream)) is fires
+
+
 def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Telemetry) -> None:
     stream = unique_stream("outro")
     traces = telemetry.traces(stream)
@@ -364,6 +385,9 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
             "maintenance.runs_stuck_stopping": 3,
             "maintenance.purge_limit_reached": 1,
             "maintenance.accounts_deletion_overdue": 1,
+            "maintenance.missing_sweep_skipped": 1,
+            "maintenance.missing_governor_tripped": 1,
+            "maintenance.objects_marked_missing": 1,
         },
         1.0,
     )
@@ -373,5 +397,8 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-execucao-presa",
         "causa-limitador-de-exclusoes",
         "causa-exclusao-de-conta-atrasada",
+        "causa-storage-sem-sentinela",
+        "causa-limitador-de-ausentes",
+        "causa-objetos-ausentes",
     ):
         assert not cause_rows(telemetry, name, stream), name

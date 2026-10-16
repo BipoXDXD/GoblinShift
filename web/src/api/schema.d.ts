@@ -197,6 +197,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/artifacts/{artifact_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact Preview
+         * @description Preview de uma saída, quando a receita gerou um (2.2; 3.6).
+         *
+         *     Só derivados gerados pelo serviço chegam aqui: a imagem reduzida sai com o tipo real; a
+         *     amostra CSV, como bytes opacos. Os dois com `nosniff`, CSP `sandbox` e `attachment`. Sem vaga
+         *     de transferência: o preview tem no máximo 512 KiB e é lido inteiro antes de responder.
+         */
+        get: operations["getArtifactPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Presets Route */
+        get: operations["listPresets"];
+        put?: never;
+        /** Create Preset Route */
+        post: operations["createPreset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/presets/{preset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Preset Route */
+        get: operations["getPreset"];
+        /** Replace Preset Route */
+        put: operations["replacePreset"];
+        post?: never;
+        /** Delete Preset Route */
+        delete: operations["deletePreset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -209,6 +270,29 @@ export interface paths {
         put?: never;
         /** Create Run */
         post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/presets/{preset_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Run From Preset
+         * @description Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).
+         *
+         *     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
+         *     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
+         */
+        post: operations["createRunFromPreset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -266,6 +350,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Run Artifacts */
+        delete: operations["deleteRunArtifacts"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -300,6 +401,14 @@ export interface components {
             /** Deadline At */
             deadline_at: string | null;
             error: components["schemas"]["RunErrorBody"] | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+            /** Results Expire At */
+            results_expire_at: string | null;
             /**
              * Idempotency Expires At
              * Format: date-time
@@ -370,17 +479,19 @@ export interface components {
          * ArtifactRole
          * @enum {string}
          */
-        ArtifactRole: "output" | "report" | "manifest" | "package";
+        ArtifactRole: "output" | "report" | "manifest" | "package" | "preview";
         /**
          * Availability
          * @description Se o conteúdo ainda pode ser usado, independente do estado histórico (1.7).
          *
-         *     Não é gravada: deriva de `deleted_at` e `expires_at`. A retenção também grava `deleted_at`
-         *     ao expirar, então a causa vem da ordem: `deleted_at` antes de `expires_at` é exclusão pedida
-         *     pelo dono, que vence a expiração; a partir de `expires_at`, o recurso venceu por retenção.
+         *     Não é gravada: deriva de `deleted_at`, `expires_at` e do estado do objeto. A retenção também
+         *     grava `deleted_at` ao expirar, então a causa vem da ordem: `deleted_at` antes de `expires_at`
+         *     é exclusão pedida pelo dono, que vence a expiração; a partir de `expires_at`, o recurso venceu
+         *     por retenção. O arquivo perdido do armazenamento (`missing`) só aparece enquanto o recurso ainda
+         *     estaria disponível: exclusão e expiração são as causas previstas e prevalecem.
          * @enum {string}
          */
-        Availability: "available" | "expired" | "deleted";
+        Availability: "available" | "expired" | "deleted" | "missing";
         /** CancelResponse */
         CancelResponse: {
             /**
@@ -464,6 +575,55 @@ export interface components {
             /** Message */
             message: string;
         };
+        /**
+         * FormulaCellsResponse
+         * @description Contagem por coluna de `CSV_FORMULA_CELLS`: as maiores primeiro, até o teto (1.3).
+         */
+        FormulaCellsResponse: {
+            /** Columns */
+            columns: components["schemas"]["FormulaColumnResponse"][];
+            /** More Columns */
+            more_columns: number;
+        };
+        /** FormulaColumnResponse */
+        FormulaColumnResponse: {
+            /** Name */
+            name: string | null;
+            /** Cells */
+            cells: number;
+        };
+        /**
+         * ItemNoticeCode
+         * @description Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
+         *     para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API.
+         * @enum {string}
+         */
+        ItemNoticeCode: "IMAGE_P3_CONVERTED";
+        /**
+         * ItemRejectionCode
+         * @description Códigos de rejeição por item do catálogo de 1.6: lista fechada.
+         *
+         *     Cada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro
+         *     código, porque o relatório vem do sandbox e o código vai para o banco e para a API.
+         * @enum {string}
+         */
+        ItemRejectionCode: "UNSUPPORTED_FORMAT" | "UNSUPPORTED_BIT_DEPTH" | "UNSUPPORTED_COLOR_PROFILE" | "IMAGE_TOO_LARGE" | "CSV_STRUCTURE_INVALID" | "FIELD_LIMIT_EXCEEDED" | "MEDIA_TOO_LARGE" | "AUDIO_LIMIT_EXCEEDED" | "AUDIO_STREAM_NOT_FOUND";
+        /**
+         * ItemStatus
+         * @enum {string}
+         */
+        ItemStatus: "pending" | "ok" | "rejected" | "duplicate";
+        /**
+         * ItemWarningCode
+         * @description Códigos de aviso das receitas: lista fechada, como a das rejeições.
+         *
+         *     O código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do
+         *     arquivo, fica só no `report.json`. A exceção é a contagem por coluna de `CSV_FORMULA_CELLS`
+         *     (`ReportWarning.columns`): nomes de coluna, nunca valores de célula, vão para a API com teto
+         *     (1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui.
+         * @enum {string}
+         */
+        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED" | "THUMBNAIL_BEFORE_TARGET";
         /** Limits */
         Limits: {
             /** Runs Per 24H */
@@ -513,19 +673,55 @@ export interface components {
          * @enum {string}
          */
         Phase: "inspecting" | "processing" | "packaging" | "finalizing" | "retry_wait";
+        /** PresetListResponse */
+        PresetListResponse: {
+            /** Data */
+            data: components["schemas"]["PresetResponse"][];
+        };
+        /** PresetResponse */
+        PresetResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Version */
+            recipe_version: number;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Revision */
+            revision: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * ProblemCode
          * @description Códigos HTTP do catálogo de 1.6, mais os genéricos que o catálogo não nomeia.
          *
          *     Os genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,
          *     `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`,
-         *     `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os
+         *     `GONE`, `PRECONDITION_FAILED`, `UNSUPPORTED_MEDIA_TYPE`, `PRECONDITION_REQUIRED`,
+         *     `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os
          *     status da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de
          *     execução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com
          *     quem os produz.
          * @enum {string}
          */
-        ProblemCode: "BAD_REQUEST" | "JSON_INVALID" | "IDEMPOTENCY_KEY_INVALID" | "AUTHENTICATION_REQUIRED" | "REAUTH_REQUIRED" | "INSUFFICIENT_SCOPE" | "FORBIDDEN" | "CSRF_FAILED" | "TERMS_NOT_ACCEPTED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "REQUEST_TIMEOUT" | "STATE_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "ACTIVE_RUN_LIMIT" | "GONE" | "BODY_TOO_LARGE" | "UNSUPPORTED_MEDIA_TYPE" | "VALIDATION_FAILED" | "IDEMPOTENCY_KEY_REUSED" | "INPUT_NOT_AVAILABLE" | "RECIPE_VERSION_RETIRED" | "QUOTA_EXCEEDED" | "RATE_LIMITED" | "INTERNAL_ERROR" | "QUEUE_FULL" | "SERVICE_UNAVAILABLE";
+        ProblemCode: "BAD_REQUEST" | "JSON_INVALID" | "IDEMPOTENCY_KEY_INVALID" | "AUTHENTICATION_REQUIRED" | "REAUTH_REQUIRED" | "INSUFFICIENT_SCOPE" | "FORBIDDEN" | "CSRF_FAILED" | "TERMS_NOT_ACCEPTED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "REQUEST_TIMEOUT" | "STATE_CONFLICT" | "IDEMPOTENCY_IN_PROGRESS" | "ACTIVE_RUN_LIMIT" | "GONE" | "PRECONDITION_FAILED" | "BODY_TOO_LARGE" | "UNSUPPORTED_MEDIA_TYPE" | "VALIDATION_FAILED" | "IDEMPOTENCY_KEY_REUSED" | "INPUT_NOT_AVAILABLE" | "RECIPE_VERSION_RETIRED" | "PRECONDITION_REQUIRED" | "QUOTA_EXCEEDED" | "RATE_LIMITED" | "INTERNAL_ERROR" | "QUEUE_FULL" | "SERVICE_UNAVAILABLE";
         /**
          * ProblemDetails
          * @description Schema publicado no OpenAPI; as respostas são montadas por `problem_response`.
@@ -622,11 +818,62 @@ export interface components {
              * Format: uuid
              */
             artifact_id: string;
-            /** Logical Name */
+            /**
+             * Logical Name
+             * @description Nome da saída dentro da execução. Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como `<role>-<artifact_id>`.
+             */
             logical_name: string;
             role: components["schemas"]["ArtifactRole"];
-            /** File Name */
+            /**
+             * File Name
+             * @description Nome com que o download entrega o arquivo. Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como `<role>-<artifact_id>`.
+             */
             file_name: string;
+            availability: components["schemas"]["Availability"];
+            /** Source Artifact Id */
+            source_artifact_id: string | null;
+        };
+        /** RunDetailResponse */
+        RunDetailResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Version */
+            recipe_version: number;
+            status: components["schemas"]["Status"];
+            /** Attempt */
+            attempt: number;
+            progress: components["schemas"]["Progress"];
+            /** Queue Ahead */
+            queue_ahead: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Queue Expires At
+             * Format: date-time
+             */
+            queue_expires_at: string;
+            /** Deadline At */
+            deadline_at: string | null;
+            error: components["schemas"]["RunErrorBody"] | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+            /** Results Expire At */
+            results_expire_at: string | null;
+            summary: components["schemas"]["RunSummaryResponse"] | null;
+            /** Items */
+            items: components["schemas"]["RunItemResponse"][];
         };
         /** RunErrorBody */
         RunErrorBody: {
@@ -634,6 +881,34 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * RunItemResponse
+         * @description Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo.
+         */
+        RunItemResponse: {
+            /** Position */
+            position: number;
+            /**
+             * Upload Id
+             * Format: uuid
+             */
+            upload_id: string;
+            /** Original Name */
+            original_name: string | null;
+            status: components["schemas"]["ItemStatus"];
+            error_code: components["schemas"]["ItemRejectionCode"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["ItemWarningCode"][];
+            /** Notices */
+            notices: components["schemas"]["ItemNoticeCode"][];
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Duplicate Of */
+            duplicate_of: number | null;
+            formula_cells: components["schemas"]["FormulaCellsResponse"] | null;
         };
         /** RunListResponse */
         RunListResponse: {
@@ -672,6 +947,14 @@ export interface components {
             /** Deadline At */
             deadline_at: string | null;
             error: components["schemas"]["RunErrorBody"] | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            } | null;
+            /** Preset Id */
+            preset_id: string | null;
+            /** Results Expire At */
+            results_expire_at: string | null;
         };
         /** RunResultsResponse */
         RunResultsResponse: {
@@ -682,15 +965,27 @@ export interface components {
             /** Artifacts */
             artifacts: components["schemas"]["ResultReferenceResponse"][];
         };
+        /** RunSummaryResponse */
+        RunSummaryResponse: {
+            /** Inputs */
+            inputs: number;
+            /** Ok */
+            ok: number;
+            /** Rejected */
+            rejected: number;
+            /** Duplicates */
+            duplicates: number;
+            /** Outputs */
+            outputs: number;
+        };
         /**
          * Scope
          * @description Escopos de chave de API da tabela de rotas de 1.6.
          *
-         *     `presets:*` entra com os presets; o banco guarda texto, então acrescentar um escopo
-         *     não exige migração.
+         *     O banco guarda texto, então acrescentar um escopo não exige migração.
          * @enum {string}
          */
-        Scope: "files:read" | "files:write" | "runs:read" | "runs:write";
+        Scope: "files:read" | "files:write" | "runs:read" | "runs:write" | "presets:read" | "presets:write";
         /**
          * Status
          * @enum {string}
@@ -1308,7 +1603,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** Scopes */
-                    scopes: ("files:read" | "files:write" | "runs:read" | "runs:write")[];
+                    scopes: ("files:read" | "files:write" | "runs:read" | "runs:write" | "presets:read" | "presets:write")[];
                     /**
                      * Days
                      * @default 30
@@ -2112,6 +2407,981 @@ export interface operations {
             };
         };
     };
+    getArtifactPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Imagem reduzida (`image/jpeg`) ou amostra CSV escapada, como bytes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Gone */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listPresets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    createPreset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                } & ({
+                    /** @constant */
+                    recipe_id: "csv-janitor";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** CsvJanitorV1Parameters */
+                    parameters: {
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        input_delimiter?: "," | ";" | "\t";
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        output_delimiter?: "," | ";" | "\t";
+                        /** Trim Columns */
+                        trim_columns?: string[];
+                        /** Case Rules */
+                        case_rules?: {
+                            column: string;
+                            /**
+                             * CaseMode
+                             * @enum {string}
+                             */
+                            mode: "lower" | "upper";
+                        }[];
+                        /** Filters */
+                        filters?: {
+                            column: string;
+                            /**
+                             * FilterOp
+                             * @enum {string}
+                             */
+                            op: "eq" | "ne" | "contains" | "is_empty";
+                            /** Value */
+                            value?: string | null;
+                        }[];
+                        /** Deduplicate By */
+                        deduplicate_by?: string[];
+                        /** Output Columns */
+                        output_columns?: string[] | null;
+                        /**
+                         * FormulaGuard
+                         * @default none
+                         * @enum {string}
+                         */
+                        formula_guard?: "none" | "tab_prefix";
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "image-forge";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** ImageForgeV1Parameters */
+                    parameters: {
+                        /** @default 1600 */
+                        max_width?: number;
+                        /** @default 1600 */
+                        max_height?: number;
+                        /**
+                         * OutputFormat
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        output_format?: "preserve" | "jpeg" | "png";
+                        /**
+                         * Jpeg Quality
+                         * @default 85
+                         */
+                        jpeg_quality?: number;
+                        /**
+                         * Jpeg Background
+                         * @default #FFFFFF
+                         */
+                        jpeg_background?: string;
+                        /**
+                         * Make Thumbnails
+                         * @default false
+                         */
+                        make_thumbnails?: boolean;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "downloads-detox";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** DownloadsDetoxV1Parameters */
+                    parameters: {
+                        /**
+                         * Deduplicate
+                         * @default true
+                         */
+                        deduplicate?: boolean;
+                        /**
+                         * GroupBy
+                         * @default kind
+                         * @enum {string}
+                         */
+                        group_by?: "kind" | "none";
+                        /**
+                         * NameMode
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        name_mode?: "preserve" | "indexed";
+                        /**
+                         * Name Prefix
+                         * @default file
+                         */
+                        name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** MediaMillV1Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormat
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
+                    };
+                });
+            };
+        };
+        responses: {
+            /** @description Preset criado. */
+            201: {
+                headers: {
+                    /** @description Revisão entre aspas (`"3"`); envie-a em `If-Match` para alterar. */
+                    ETag: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getPreset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Revisão entre aspas (`"3"`); envie-a em `If-Match` para alterar. */
+                    ETag: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    replacePreset: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag da leitura (`"3"`); ausente → 428, de outra revisão → 412. */
+                "If-Match": string;
+            };
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                } & ({
+                    /** @constant */
+                    recipe_id: "csv-janitor";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** CsvJanitorV1Parameters */
+                    parameters: {
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        input_delimiter?: "," | ";" | "\t";
+                        /**
+                         * Delimiter
+                         * @default ,
+                         * @enum {string}
+                         */
+                        output_delimiter?: "," | ";" | "\t";
+                        /** Trim Columns */
+                        trim_columns?: string[];
+                        /** Case Rules */
+                        case_rules?: {
+                            column: string;
+                            /**
+                             * CaseMode
+                             * @enum {string}
+                             */
+                            mode: "lower" | "upper";
+                        }[];
+                        /** Filters */
+                        filters?: {
+                            column: string;
+                            /**
+                             * FilterOp
+                             * @enum {string}
+                             */
+                            op: "eq" | "ne" | "contains" | "is_empty";
+                            /** Value */
+                            value?: string | null;
+                        }[];
+                        /** Deduplicate By */
+                        deduplicate_by?: string[];
+                        /** Output Columns */
+                        output_columns?: string[] | null;
+                        /**
+                         * FormulaGuard
+                         * @default none
+                         * @enum {string}
+                         */
+                        formula_guard?: "none" | "tab_prefix";
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "image-forge";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** ImageForgeV1Parameters */
+                    parameters: {
+                        /** @default 1600 */
+                        max_width?: number;
+                        /** @default 1600 */
+                        max_height?: number;
+                        /**
+                         * OutputFormat
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        output_format?: "preserve" | "jpeg" | "png";
+                        /**
+                         * Jpeg Quality
+                         * @default 85
+                         */
+                        jpeg_quality?: number;
+                        /**
+                         * Jpeg Background
+                         * @default #FFFFFF
+                         */
+                        jpeg_background?: string;
+                        /**
+                         * Make Thumbnails
+                         * @default false
+                         */
+                        make_thumbnails?: boolean;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "downloads-detox";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** DownloadsDetoxV1Parameters */
+                    parameters: {
+                        /**
+                         * Deduplicate
+                         * @default true
+                         */
+                        deduplicate?: boolean;
+                        /**
+                         * GroupBy
+                         * @default kind
+                         * @enum {string}
+                         */
+                        group_by?: "kind" | "none";
+                        /**
+                         * NameMode
+                         * @default preserve
+                         * @enum {string}
+                         */
+                        name_mode?: "preserve" | "indexed";
+                        /**
+                         * Name Prefix
+                         * @default file
+                         */
+                        name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** MediaMillV1Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormat
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
+                    };
+                });
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Revisão entre aspas (`"3"`); envie-a em `If-Match` para alterar. */
+                    ETag: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deletePreset: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description ETag da leitura (`"3"`); ausente → 428, de outra revisão → 412. */
+                "If-Match": string;
+            };
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Failed */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Precondition Required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     listRuns: {
         parameters: {
             query?: {
@@ -2510,6 +3780,149 @@ export interface operations {
             };
         };
     };
+    createRunFromPreset: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Uploads prontos, na ordem de processamento, sem repetição (1 a max_inputs da versão do preset). */
+                    input_upload_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedRunResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported Media Type */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     getRun: {
         parameters: {
             query?: never;
@@ -2527,7 +3940,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunResponse"];
+                    "application/json": components["schemas"]["RunDetailResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -2729,6 +4142,98 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deleteRunArtifacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

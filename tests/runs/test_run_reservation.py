@@ -157,7 +157,7 @@ def test_publicacao_passa_cada_objeto_publicado_para_reserva_propria_e_libera_o_
     coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
 
     published = published_objects(factory, run_id)
-    assert len(published) == 4  # saída, relatório, manifesto e ZIP
+    assert len(published) == 5  # saída, amostra (preview), relatório, manifesto e ZIP
     for object_id, size in published.items():
         assert live_amount(factory, HolderKind.OBJECT, object_id) == size
     assert live_amount(factory, HolderKind.RUN, run_id) is None
@@ -192,10 +192,11 @@ def test_publicacao_de_run_aceita_antes_do_deploy_nao_falha_e_alerta(
         coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
 
     published = published_objects(factory, run_id)
-    assert len(published) == 4
+    assert len(published) == 5
     # A saída limpa igual à entrada reaproveita o objeto do upload, que já tem reserva; os
-    # objetos novos da tentativa ficam sem reserva até a reconciliação.
-    assert sum(live_amount(factory, HolderKind.OBJECT, o) is None for o in published) == 3
+    # objetos novos da tentativa (preview, relatório, manifesto e ZIP) ficam sem reserva até a
+    # reconciliação.
+    assert sum(live_amount(factory, HolderKind.OBJECT, o) is None for o in published) == 4
     assert any(
         getattr(r, "fields", {}).get("alert") == "run_without_reservation" for r in caplog.records
     )
