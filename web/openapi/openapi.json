@@ -3593,8 +3593,16 @@
             "title": "Id"
           },
           "name": {
-            "type": "string",
-            "title": "Name"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Nulo 30 dias depois do envio, só em upload já excluído (retenção de 1.7)."
           },
           "size": {
             "type": "integer",
