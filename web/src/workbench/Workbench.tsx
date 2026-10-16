@@ -1,5 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState, type ReactElement, type SubmitEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type SubmitEvent,
+} from "react";
 import { ChevronLeft } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 
@@ -21,7 +29,7 @@ import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatBytes } from "../format";
 import type { RecipeForm, RecipeModule } from "../recipes/registry";
-import type { RecipeDraft, RecipeId } from "../recipes/types";
+import type { RecipeDraft, RecipeId, RecipeInput } from "../recipes/types";
 import { createRun } from "../runs/commands";
 import { TEXT } from "../text";
 import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
@@ -65,6 +73,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
 
   const entries = orderEntries(batch.entries, order);
   const inputs = runInputs(entries, form.inputLimits);
+  const readyInputs = useStableInputs(entries);
   const command = commandFrom(draft, inputs);
   const intent = command === null ? "" : JSON.stringify(command);
   const idempotency = useIdempotencyKey(intent);
@@ -173,6 +182,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
                   items={entries}
                   getKey={(entry) => entry.localId}
                   getName={(entry) => entry.file.name}
+                  numbered={recipe.numberedInputs === true}
                   renderItem={(entry) => (
                     <UploadEntryView entry={entry} onRetry={batch.retry} onRemove={askRemoval} />
                   )}
@@ -205,7 +215,11 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
                 <h2 id={parametersHeadingId} className={SECTION_LABEL}>
                   {TEXT.workbench.parametersHeading}
                 </h2>
-                {form.renderFields({ errors: fieldErrors, onDraftChange: setDraft })}
+                {form.renderFields({
+                  errors: fieldErrors,
+                  onDraftChange: setDraft,
+                  inputs: readyInputs,
+                })}
               </div>
             </Card>
             {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
@@ -345,6 +359,21 @@ function fieldIdForServerPath(field: string, recipe: RecipeModule): string | nul
     return recipe.fieldIdFor(rest);
   }
   return root === "input_upload_ids" ? FILES_FIELD_ID : null;
+}
+
+/**
+ * Arquivos prontos, na ordem da lista, como o formulário da receita os cita. A referência só
+ * muda quando a lista muda: o formulário do PDF Press recalcula o rascunho a cada mudança dela.
+ */
+function useStableInputs(entries: readonly UploadEntry[]): readonly RecipeInput[] {
+  const ready = entries.flatMap((entry) =>
+    entry.state.status === "ready"
+      ? [{ uploadId: entry.state.uploadId, name: entry.file.name }]
+      : [],
+  );
+  const key = JSON.stringify(ready);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a chave é o conteúdo da lista.
+  return useMemo(() => ready, [key]);
 }
 
 function localIdOf(entry: UploadEntry): string {
