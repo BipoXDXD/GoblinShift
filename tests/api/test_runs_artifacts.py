@@ -94,6 +94,25 @@ def test_exclui_as_saidas_com_202_e_bloqueia_novos_downloads(
         assert_problem(download, 410, "GONE")
 
 
+def test_depois_de_excluir_as_saidas_a_validade_dos_resultados_fica_nula(
+    app: FastAPI, client: TestClient
+) -> None:
+    owner, auth = new_account(app.state.session_factory)
+    finished = finished_run(app, owner)
+    before = client.get(f"{RUNS}/{finished.run_id}/results", headers=auth).json()
+    assert before["expires_at"] is not None
+
+    deleted = client.delete(f"{RUNS}/{finished.run_id}/artifacts", headers=auth)
+
+    assert deleted.status_code == 202
+    results = client.get(f"{RUNS}/{finished.run_id}/results", headers=auth).json()
+    assert results["published"] is True
+    assert results["expires_at"] is None
+    assert [a["availability"] for a in results["artifacts"]] == ["deleted", "deleted"]
+    detail = client.get(f"{RUNS}/{finished.run_id}", headers=auth).json()
+    assert detail["results_expire_at"] is None
+
+
 def test_o_original_continua_disponivel_mesmo_com_objeto_compartilhado(
     app: FastAPI, client: TestClient
 ) -> None:
