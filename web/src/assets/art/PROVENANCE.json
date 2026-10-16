@@ -8,27 +8,39 @@
       "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
     },
     {
-      "id": "fonte externa-api-wallet",
+      "id": "rights-002",
       "source_record": "goblinshift-editorial-20261021",
-      "upstream": "fonte externa-api-wallet",
+      "upstream": "source-002",
+      "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
+    },
+    {
+      "id": "rights-003",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-003",
+      "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
+    },
+    {
+      "id": "rights-004",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-004",
       "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
     }
   ],
   "generations": {
     "a-conceito": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "2c56c15e-deeb-4b99-9f2b-3e4b1c8544f0",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "a-frontal": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "eb807d09-a173-47ac-8028-280ddc46491a",
       "inputs": [
         "a-conceito"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "a-3d-gotica": {
@@ -63,13 +75,13 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "a16cc6f2-4982-4ca7-ad92-72b0d8c41871",
       "inputs": [
         "a-conceito",
         "a-render-gotica"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-3d": {
@@ -91,27 +103,27 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "b-conceito": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "a57d10f7-d32c-4395-8e02-89edfb1b2ace",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "b-frontal": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "cb7cf4e5-443a-473e-979c-d33922745a9f",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ferrugem-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "1711dadc-9bb3-4583-b56e-a48c8d3327b5",
       "inputs": [
         "b-frontal",
         "ref-01-frente"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ferrugem-3d": {
@@ -124,29 +136,29 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "c-conceito": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "1025c32e-f903-48f1-b0ca-fed54e8e06d8",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "c-frontal": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "3bf88944-5660-46d2-988f-1ca4922a7dc3",
       "inputs": [
         "c-conceito"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ada-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "032f6ed0-17ba-4beb-8923-0e0d79eefb79",
       "inputs": [
         "c-frontal",
         "ref-01-frente"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ada-3d": {
@@ -159,20 +171,20 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "e-frontal": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "1a0a9bf7-9a99-4565-9b31-928287f0531b",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "nyx-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "2b13f0c5-224b-4a8c-abaa-4e6f6943c5ec",
       "inputs": [
         "e-frontal",
         "ref-01-frente"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "nyx-3d": {
@@ -185,20 +197,20 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "g-frontal": {
-      "upstream": "ByteDance fonte externa (via fonte externa)",
+      "upstream": "source-004",
       "task_id": "29b1c89e-b07b-48fd-8dab-67c1dac7ef80",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "lua-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "373b2218-8e57-4549-a91a-10b11b3a2748",
       "inputs": [
         "g-frontal",
         "ref-01-frente"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "lua-3d": {
@@ -231,13 +243,13 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "jade-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "5783276f-9228-407d-b368-c795b723b0a5",
       "inputs": [
         "jade-render-origem",
         "rubia-render-ancora"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "jade-3d": {
@@ -264,13 +276,13 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "fagulha-2d": {
-      "upstream": "Google fonte externa/fonte externa (via fonte externa)",
+      "upstream": "source-003",
       "task_id": "58862e7d-2083-4038-893a-0bd4143a7d83",
       "inputs": [
         "fagulha-render-origem",
         "rubia-render-ancora"
       ],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "fagulha-3d": {
@@ -283,18 +295,18 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "logo-a1-escudo": {
-      "upstream": "fonte externa(via fonte externa; a API expõe só o nome fonte externa)",
+      "upstream": "source-002",
       "task_id": "6a4e850a-f39d-40cb-a47d-c73ea583b5bf",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-002",
       "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG",
       "source_record": "goblinshift-editorial-20261021"
     },
     "logo-b1-selo": {
-      "upstream": "fonte externa(via fonte externa; a API expõe só o nome fonte externa)",
+      "upstream": "source-002",
       "task_id": "81de143f-ea91-4608-a325-4c10d1ca3751",
       "inputs": [],
-      "rights": "fonte externa-api-wallet",
+      "rights": "rights-002",
       "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG",
       "source_record": "goblinshift-editorial-20261021"
     },
