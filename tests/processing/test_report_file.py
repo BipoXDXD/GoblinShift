@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from goblinshift.processing.executor.job import InputEntry, Job
-from goblinshift.processing.executor.report_file import encode_report, write_report
+from goblinshift.processing.executor.report_file import encode_report, write_report, write_timings
 from goblinshift.processing.recipe import (
     FailureCode,
     ItemDuplicate,
@@ -131,3 +131,17 @@ def test_item_aceito_tem_exatamente_as_chaves_do_schema() -> None:
         "details",
     }
     assert document["schema_version"] == 1
+
+
+def test_tempos_gravados_com_versao_e_so_as_fases_medidas(tmp_path: Path) -> None:
+    write_timings(tmp_path / "telemetry.json", {"inspect_ms": 12, "process_ms": 340})
+
+    document = json.loads((tmp_path / "telemetry.json").read_text(encoding="utf-8"))
+    assert document == {"schema_version": 1, "inspect_ms": 12, "process_ms": 340}
+
+
+def test_tempos_nao_sobrescrevem_arquivo_existente(tmp_path: Path) -> None:
+    (tmp_path / "telemetry.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        write_timings(tmp_path / "telemetry.json", {"inspect_ms": 1})

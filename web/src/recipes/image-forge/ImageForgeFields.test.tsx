@@ -27,7 +27,14 @@ const SETTINGS: ImageForgeSettings = {
 function setup(errors: ReadonlyMap<string, string> = new Map()) {
   const onDraftChange = vi.fn<(draft: RecipeDraft<"image-forge">) => void>();
   const user = userEvent.setup();
-  render(<ImageForgeFields settings={SETTINGS} errors={errors} onDraftChange={onDraftChange} />);
+  render(
+    <ImageForgeFields
+      settings={SETTINGS}
+      errors={errors}
+      onDraftChange={onDraftChange}
+      inputs={[]}
+    />,
+  );
   const lastDraft = (): RecipeDraft<"image-forge"> => {
     const draft = onDraftChange.mock.lastCall?.[0];
     if (draft === undefined) {
