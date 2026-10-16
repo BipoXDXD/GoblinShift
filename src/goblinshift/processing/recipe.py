@@ -56,6 +56,7 @@ class OutputGroup(StrEnum):
     TABLES = "tables"
     TEXT = "text"
     ARCHIVES = "archives"
+    AUDIO = "audio"  # Media Mill (ADR 036)
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,10 @@ class ItemRejectionCode(StrEnum):
     IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE"
     CSV_STRUCTURE_INVALID = "CSV_STRUCTURE_INVALID"
     FIELD_LIMIT_EXCEEDED = "FIELD_LIMIT_EXCEEDED"
+    # Media Mill (ADR 036).
+    MEDIA_TOO_LARGE = "MEDIA_TOO_LARGE"
+    AUDIO_LIMIT_EXCEEDED = "AUDIO_LIMIT_EXCEEDED"
+    AUDIO_STREAM_NOT_FOUND = "AUDIO_STREAM_NOT_FOUND"
 
 
 @dataclass(frozen=True)
@@ -133,6 +138,8 @@ class FailureCode(StrEnum):
     NO_VALID_OUTPUTS = "NO_VALID_OUTPUTS"
     OUTPUT_LIMIT_EXCEEDED = "OUTPUT_LIMIT_EXCEEDED"
     REPORT_LIMIT_EXCEEDED = "REPORT_LIMIT_EXCEEDED"
+    # Tempo, memória ou disco de um processo da receita (Media Mill: FFmpeg além do orçamento).
+    RESOURCE_LIMIT_EXCEEDED = "RESOURCE_LIMIT_EXCEEDED"
 
 
 class RecipeFailure(Exception):  # noqa: N818 - nome fixado pelo plano (1.6 e 3.2)

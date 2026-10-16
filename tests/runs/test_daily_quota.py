@@ -285,6 +285,44 @@ def test_detox_aceita_entradas_no_teto_da_versao(
     accept(factory, owner, RunCommand("downloads-detox", 1, (first, second), {}))
 
 
+def test_media_mill_aceita_video_no_teto_por_arquivo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = new_owner(factory)
+    first, second = ready_inputs(factory, storage, owner, 2)
+    pretend_size(factory, first, 256 * 1024**2)
+    pretend_size(factory, second, 256 * 1024**2)
+
+    accept(factory, owner, RunCommand("media-mill", 1, (first, second), {}))
+
+
+def test_media_mill_recusa_video_acima_do_teto_por_arquivo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = new_owner(factory)
+    [video] = ready_inputs(factory, storage, owner)
+    pretend_size(factory, video, 256 * 1024**2 + 1)
+    before = count_rows(factory)
+
+    with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
+        accept(factory, owner, RunCommand("media-mill", 1, (video,), {}))
+
+    assert count_rows(factory) == before
+
+
+def test_media_mill_recusa_lote_acima_de_512_mib(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = new_owner(factory)
+    first, second, third = ready_inputs(factory, storage, owner, 3)
+    for video in (first, second):
+        pretend_size(factory, video, 256 * 1024**2)
+    pretend_size(factory, third, 1)
+
+    with pytest.raises(InvalidRunCommandError, match="input_upload_ids"):
+        accept(factory, owner, RunCommand("media-mill", 1, (first, second, third), {}))
+
+
 def test_quota_nao_conta_execucao_recusada(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:

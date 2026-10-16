@@ -89,6 +89,9 @@ RUN_OUTPUT_CEILING_BYTES = (
 )
 # Versões que limitam a soma das entradas (o Detox copia cada entrada aceita para a saída).
 _MAX_TOTAL_INPUT_BYTES = "max_total_input_bytes"
+# Versões que limitam cada entrada (Media Mill: o vídeo de até 256 MiB de 1.7, ADR 036). As demais
+# ficam no teto do envio, que já recusa mais de 32 MiB para o que não é vídeo pelo nome.
+_MAX_INPUT_BYTES = "max_input_bytes"
 _MIN_RETRY_AFTER = timedelta(seconds=1)
 _CANONICAL_SEPARATORS = (",", ":")
 
@@ -354,6 +357,9 @@ def _check_input_bytes(
     recipe: RecipeVersion, uploads: Sequence[ReadyUpload], usage: DailyUsage, now: datetime
 ) -> None:
     """Teto da versão e cota diária de entrada; uma execução maior que a cota é inválida."""
+    file_max = recipe.limits.get(_MAX_INPUT_BYTES)
+    if file_max is not None and any(u.size_bytes > file_max for u in uploads):
+        _refuse("input_upload_ids", f"cada entrada pode ter até {file_max} bytes")
     incoming = sum(u.size_bytes for u in uploads)
     version_max = recipe.limits.get(_MAX_TOTAL_INPUT_BYTES)
     if version_max is not None and incoming > version_max:

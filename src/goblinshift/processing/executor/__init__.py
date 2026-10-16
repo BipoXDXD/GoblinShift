@@ -34,6 +34,9 @@ O executor escreve, sempre com criação exclusiva:
   último, o pacote comum (fatia 5, ADR 019): `manifest.json` e `<recipe_id>.zip`, gravados por
   `goblinshift.processing.packaging`. Manifesto acima de 8 MiB sai com `REPORT_LIMIT_EXCEEDED`;
   ZIP acima de 512 MiB, com `OUTPUT_LIMIT_EXCEEDED` (código 3, como a falha da receita).
+- `tmp/`: criado pelo executor (ou vazio), rascunho das receitas (`tempfile.tempdir`); a raiz do
+  container é somente leitura. O Media Mill grava ali o que o FFmpeg produz antes de copiar para
+  `out/` (ADR 036). O worker não coleta nada de `tmp/`; o `executor-ctl` o apaga com a área.
 - `progress.jsonl`: uma linha `{"position": n}` por entrada avaliada (aceita ou rejeitada), na
   ordem de conclusão; o worker conta as linhas para `progress.processed`.
 - `failure.json`: só na falha determinística, `{"code": "<código de 1.6>", "detail": "…"}`.

@@ -215,6 +215,7 @@ modules = [
     "goblinshift.processing.csv_janitor",
     "goblinshift.processing.image_forge",
     "goblinshift.processing.downloads_detox",
+    "goblinshift.processing.media_mill",
 ]
 
 # 3.2: o pacote (manifesto e ZIP) é montado uma vez, pelo executor, depois da receita. Uma receita
@@ -226,5 +227,28 @@ source_modules = [
     "goblinshift.processing.csv_janitor",
     "goblinshift.processing.image_forge",
     "goblinshift.processing.downloads_detox",
+    "goblinshift.processing.media_mill",
 ]
 forbidden_modules = ["goblinshift.processing.packaging", "zipfile"]
+
+# ADR 036: o FFmpeg processa conteúdo do usuário e só roda dentro do sandbox. API, worker e
+# manutenção importam os parâmetros e limites do Media Mill (pelo catálogo), nunca o módulo que
+# abre processos; o `__init__` de processing.media_mill não importa `tools` nem `recipe`.
+[[tool.importlinter.contracts]]
+name = "Só o executor roda o FFmpeg"
+type = "forbidden"
+source_modules = [
+    "goblinshift.catalog",
+    "goblinshift.files",
+    "goblinshift.runs",
+    "goblinshift.presets",
+    "goblinshift.identity",
+    "goblinshift.capacity",
+    "goblinshift.platform",
+    "goblinshift.entrypoints",
+]
+forbidden_modules = [
+    "goblinshift.processing.media_mill.tools",
+    "goblinshift.processing.media_mill.recipe",
+]
+allow_indirect_imports = false
