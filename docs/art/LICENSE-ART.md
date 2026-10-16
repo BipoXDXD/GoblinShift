@@ -46,19 +46,29 @@ A Jade e a Fagulha seguem outra cadeia: um modelo gerado pelo usuário direto no
 
 **Jade e Fagulha ficam fora da licença CC BY 4.0 abaixo**, em todos os arquivos que derivam desses modelos: não licenciamos o que talvez não seja nosso.
 
-## Termos que sustentam a publicação (lidos em 2026-10-15)
+## Termos dos fornecedores (lidos em 2026-10-16)
 
-- **Hyper3D Rodin** ([termos](https://hyper3d.ai/legal/terms), "Current version", sem data; [preços](https://hyper3d.ai/pricing)):
-  - seção 2: a exportação vale "for private or commercial use depending on your subscription plan";
-  - seção 5(b): "we will not limit your use of such Output", e a empresa não garante que a saída seja protegível por direito autoral;
-  - página de preços: o plano Creator e os acima dão "Unlimited export and any use".
-  - **Base:** o usuário é assinante do Rodin (informado em 2026-10-15), então as gerações caem no plano pago. Um print do plano ativo na conta reforçaria o registro, mas não é condição.
-- **Tripo** ([termos](https://developers.tripo3d.com/en/terms), "Last updated: July 11, 2025"), que gerou as imagens 2D de entrada (elas não estão no site):
-  - 5.2.2: "Paid Users generally have all rights" sobre entradas e saídas, e a empresa não treina com elas;
-  - 3.2: uso comercial permitido;
-  - 3.4: saída de serviço de terceiro (Seedream e Banana Pro) segue os termos do terceiro;
-  - **Base:** o usuário é assinante da Tripo e tem saldo pago na API (informado em 2026-10-15), então é "Paid User" pelos dois caminhos: a assinatura e os créditos de API comprados. Os termos não definem "Paid User", mas uma conta com assinatura ativa se enquadra em qualquer leitura.
-- **Google, Gemini API** ([termos](https://ai.google.dev/gemini-api/terms), atualizados em 2026-04-28), por trás do Banana Pro: "Google won't claim ownership over that content".
+O que sustenta a publicação é a **assinatura paga da Tripo** (e a do Rodin), não o saldo da carteira de API. Cada geração 2D cita no `PROVENANCE.json` o direito do seu upstream, e o `check-provenance` recusa direito que não bate com o `upstream` declarado.
+
+| Direito (`rights`) | Gerações | Termos |
+|---|---|---|
+| `tripo-paid-openai-gpt-image` | Marca: emblema a1 e selo b1 (GPT Image 2.5, pela Tripo) | Tripo + OpenAI Terms of Use e Services Agreement 4.1 (vigentes desde 2026-01-01) |
+| `tripo-paid-google-banana-pro` | Versões semi-realistas (Banana Pro, pela Tripo) | Tripo + [Gemini API](https://ai.google.dev/gemini-api/terms) (2026-04-28): "Google won't claim ownership over that content" |
+| `tripo-paid-bytedance-seedream` | Conceitos e versões frontais (Seedream v5, pela Tripo) | Tripo + termos da ByteDance/BytePlus: **cláusula de titularidade da saída não localizada** |
+| `rodin-plano-pago` | Modelos 3D (Hyper3D Rodin) | [Termos](https://hyper3d.ai/legal/terms) e [preços](https://hyper3d.ai/pricing) do Rodin |
+
+- **Tripo** ([termos](https://developers.tripo3d.com/en/terms), atualizados em 2025-07-11): 5.2.2 dá ao "Paid User" todos os direitos, inclusive licenciar; 5.2.1 deixa os direitos com a Tripo no plano Free; 3.4 manda a "Third Party Output" seguir os termos do terceiro.
+- **Cessão do upstream vai à Tripo.** Nos termos da OpenAI, a saída é cedida ao cliente da OpenAI, que aqui é a Tripo; para Google e ByteDance, o que a Tripo recebe não foi verificado. O repasse ao usuário depende da Tripo 5.2.2/3.4 e **não foi verificado**.
+- **Rodin:** "any use" só nos planos Creator ou superiores, e os termos não cedem a propriedade da saída. O usuário é assinante (informado em 2026-10-15), mas o plano exato não foi conferido e **não se sabe se o plano vale para o que foi gerado antes da assinatura ou do upgrade**.
+
+Riscos que ficam para advogado (também em [`docs/legal/notas-internas.md`](../legal/notas-internas.md)):
+
+- cadeia de cessão do logo (OpenAI → Tripo → usuário), que não foi verificada;
+- saída de IA possivelmente não protegível e não exclusiva, o que afeta o registro da marca;
+- "Paid User" não é definido nos termos da Tripo;
+- retroatividade do plano do Rodin;
+- indenizações e limites de responsabilidade dos termos dos fornecedores;
+- jurisdição estrangeira nos termos dos fornecedores.
 
 ## Direito autoral e licença
 
