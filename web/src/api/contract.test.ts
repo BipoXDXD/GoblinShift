@@ -10,7 +10,7 @@ type Variant<K extends RunCommand["recipe_id"]> = Extract<RunCommand, { recipe_i
 describe("contrato gerado de POST /runs", () => {
   it("discrimina as variantes pelo recipe_id literal", () => {
     expectTypeOf<RunCommand["recipe_id"]>().toEqualTypeOf<
-      "csv-janitor" | "image-forge" | "downloads-detox"
+      "csv-janitor" | "image-forge" | "downloads-detox" | "media-mill"
     >();
   });
 
@@ -18,6 +18,7 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<Variant<"csv-janitor">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"image-forge">["recipe_version"]>().toEqualTypeOf<1>();
     expectTypeOf<Variant<"downloads-detox">["recipe_version"]>().toEqualTypeOf<1>();
+    expectTypeOf<Variant<"media-mill">["recipe_version"]>().toEqualTypeOf<1>();
   });
 
   it("dá à CSV Janitor os próprios parâmetros, sem index signature", () => {
@@ -60,6 +61,17 @@ describe("contrato gerado de POST /runs", () => {
     expectTypeOf<Parameters["name_mode"]>().toEqualTypeOf<"preserve" | "indexed" | undefined>();
     expectTypeOf<keyof Parameters>().toEqualTypeOf<
       "deduplicate" | "group_by" | "name_mode" | "name_prefix"
+    >();
+  });
+
+  it("dá ao Media Mill os próprios parâmetros, sem index signature", () => {
+    type Parameters = Variant<"media-mill">["parameters"];
+
+    expectTypeOf<Parameters["audio_format"]>().toEqualTypeOf<"wav" | "flac" | undefined>();
+    expectTypeOf<Parameters["audio_stream_index"]>().toEqualTypeOf<number | null | undefined>();
+    expectTypeOf<Parameters["thumbnail_count"]>().toEqualTypeOf<0 | 1 | 3 | undefined>();
+    expectTypeOf<keyof Parameters>().toEqualTypeOf<
+      "extract_audio" | "audio_format" | "audio_stream_index" | "thumbnail_count"
     >();
   });
 

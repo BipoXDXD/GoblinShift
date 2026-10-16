@@ -459,6 +459,8 @@ export interface components {
             active_runs: number;
             /** File Bytes */
             file_bytes: number;
+            /** Video File Bytes */
+            video_file_bytes: number;
             /** Batch Files */
             batch_files: number;
             /** Batch Bytes */
@@ -1378,7 +1380,7 @@ export interface operations {
                         name: string;
                         /**
                          * Size
-                         * @description Bytes; o lote soma até 512 MiB.
+                         * @description Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.
                          */
                         size: number;
                     }[];
@@ -2191,6 +2193,32 @@ export interface operations {
                          * @default file
                          */
                         name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** MediaMillV1Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormat
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
                     };
                 });
             };

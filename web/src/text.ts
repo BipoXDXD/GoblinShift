@@ -101,6 +101,8 @@ export const TEXT = {
         "Reduz e converte imagens em lote, mantendo a proporção, e gera miniaturas se você quiser.",
       "downloads-detox":
         "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
+      "media-mill":
+        "Tira o áudio de vídeos curtos em WAV ou FLAC e gera miniaturas, sem editar o vídeo.",
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
@@ -139,10 +141,15 @@ export const TEXT = {
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:
       "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e os goblins começam.",
-    limitsHint: (maxInputs: number, maxTotal: string | null) =>
-      maxTotal === null
-        ? `Até ${String(maxInputs)} arquivos por execução.`
-        : `Até ${String(maxInputs)} arquivos por execução, somando no máximo ${maxTotal}.`,
+    limitsHint: (maxInputs: number, maxTotal: string | null, maxFile: string | null) =>
+      [
+        maxTotal === null
+          ? `Até ${String(maxInputs)} arquivos por execução.`
+          : `Até ${String(maxInputs)} arquivos por execução, somando no máximo ${maxTotal}.`,
+        maxFile === null ? null : `Cada arquivo com até ${maxFile}.`,
+      ]
+        .filter((sentence) => sentence !== null)
+        .join(" "),
     parametersHeading: "Parâmetros",
     run: "Executar",
     creatingRun: "Criando a execução.",
@@ -194,6 +201,8 @@ export const TEXT = {
       tooManyFiles: (max: number) => `Use no máximo ${String(max)} arquivos.`,
       tooManyBytes: (total: string, max: string) =>
         `Os arquivos somam ${total}; o máximo por execução é ${max}.`,
+      fileTooLarge: (name: string, size: string, max: string) =>
+        `${name} tem ${size}; o máximo por arquivo nesta receita é ${max}.`,
     },
   },
   run: {
@@ -250,6 +259,12 @@ export const TEXT = {
         package: "pacote com todos os arquivos",
       },
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
+      thumbnails: {
+        heading: "Miniaturas",
+        alt: (fileName: string) => `Miniatura ${fileName}`,
+        loading: "Carregando a miniatura.",
+        failed: "Não foi possível mostrar esta miniatura; ela continua no pacote para baixar.",
+      },
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
     },
@@ -348,6 +363,36 @@ export const TEXT = {
       prefixDot: "O prefixo não pode começar com ponto.",
     },
   },
+  mediaMill: {
+    title: "Media Mill",
+    extractAudio: "Extrair o áudio",
+    extractAudioHint: (maxRateKhz: string, maxChannels: number) =>
+      `Uma faixa de áudio por vídeo, na taxa e nos canais de origem: sem reamostrar nem misturar canais. Vídeo com áudio acima de ${maxRateKhz} kHz ou de ${String(maxChannels)} canais é recusado.`,
+    audioFormat: "Formato do áudio",
+    audioFormatHint:
+      "Os dois saem com amostras de 16 bits, uma conversão declarada: o FLAC não recupera qualidade que o vídeo já perdeu.",
+    audioFormats: {
+      wav: "WAV (PCM, sem compressão)",
+      flac: "FLAC (compressão sem perdas)",
+    },
+    audioDisabledHint: "Marque Extrair o áudio para escolher o formato e a faixa.",
+    audioStreamIndex: "Faixa de áudio",
+    audioStreamIndexHint: (max: number) =>
+      `Deixe vazio para usar a primeira faixa de cada vídeo. Para outra, informe o número de 0 a ${String(max)}, contando só as faixas de áudio a partir de 0.`,
+    thumbnailCount: "Miniaturas",
+    thumbnailCountHint: (maxSide: number) =>
+      `JPEGs de até ${String(maxSide)} pixels no maior lado, sem ampliar vídeos pequenos.`,
+    thumbnailCounts: {
+      0: "Nenhuma",
+      1: "Uma, em 10% da duração",
+      3: "Três, em 10%, 50% e 90% da duração",
+    },
+    errors: {
+      streamIndex: (max: number) =>
+        `Deixe vazio ou informe um número inteiro de 0 a ${String(max)}.`,
+      noOutput: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
+    },
+  },
   history: {
     title: "Histórico",
     navLink: "Histórico",
@@ -428,6 +473,7 @@ export const TEXT = {
       activeRun: "Execução em andamento",
       limitsHeading: "Limites por lote",
       fileBytes: "Por arquivo",
+      videoFileBytes: "Por vídeo",
       batchFiles: "Arquivos por lote",
       batchBytes: "Por lote",
       concurrentUploads: "Envios simultâneos",

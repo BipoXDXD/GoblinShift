@@ -23,6 +23,8 @@ import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import type { RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
+import { ThumbnailPreviews } from "./ThumbnailPreviews";
+import { thumbnailArtifacts } from "./thumbnails";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
@@ -68,7 +70,9 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
       {run !== undefined && <RunDetails run={run} />}
-      {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
+      {run !== undefined && SUCCEEDED.has(run.status) && (
+        <RunResults runId={run.id} recipeId={run.recipe_id} />
+      )}
       {run !== undefined && <NewRunLink recipeId={run.recipe_id} />}
     </div>
   );
@@ -176,7 +180,12 @@ function flavorOf(status: RunStatus): string | null {
   return SUCCEEDED.has(status) ? T.flavor.succeeded : null;
 }
 
-function RunResults({ runId }: { readonly runId: string }): ReactElement {
+interface RunResultsProps {
+  readonly runId: string;
+  readonly recipeId: string;
+}
+
+function RunResults({ runId, recipeId }: RunResultsProps): ReactElement {
   const client = useApiClient();
   const headingId = useId();
   const results = useQuery({
@@ -191,7 +200,12 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
       </h2>
       {results.isPending && <p className="text-fg-muted">{T.results.loading}</p>}
       {results.error !== null && <ProblemAlert failure={failureOf(results.error)} />}
-      {results.data !== undefined && <ResultFiles results={results.data} />}
+      {results.data !== undefined && (
+        <div className="flex flex-col gap-8">
+          {recipeId === MEDIA_MILL && <MediaMillPreviews results={results.data} />}
+          <ResultFiles results={results.data} />
+        </div>
+      )}
     </Card>
   );
 }
@@ -253,6 +267,14 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
       )}
     </div>
   );
+}
+
+const MEDIA_MILL = "media-mill";
+
+/** As miniaturas que o Media Mill gerou, como preview; o resto continua só para baixar. */
+function MediaMillPreviews({ results }: { readonly results: RunResultsData }): ReactElement | null {
+  const thumbnails = results.published ? thumbnailArtifacts(results.artifacts) : [];
+  return thumbnails.length === 0 ? null : <ThumbnailPreviews thumbnails={thumbnails} />;
 }
 
 function NewRunLink({ recipeId }: { readonly recipeId: string }): ReactElement | null {

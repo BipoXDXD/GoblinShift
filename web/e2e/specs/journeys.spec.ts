@@ -3,7 +3,13 @@
 // acompanhar até concluir e baixar o pacote e um arquivo avulso.
 import { statSync } from "node:fs";
 
-import { CSV_FILES, DOWNLOADS_FILES, PNG_FILES, type InputFile } from "../fixtures/files";
+import {
+  CSV_FILES,
+  DOWNLOADS_FILES,
+  MP4_FILES,
+  PNG_FILES,
+  type InputFile,
+} from "../fixtures/files";
 import { BancadaPage, type RecipeId } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { expect, test } from "../support/test";
@@ -77,6 +83,39 @@ for (const journey of JOURNEYS) {
     await expectDownload(page, execucao, second.name);
   });
 }
+
+test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ver miniaturas → baixar", async ({
+  page,
+  fakeApi,
+}) => {
+  const bancada = new BancadaPage(page);
+  await bancada.open("media-mill");
+
+  await bancada.addFiles(MP4_FILES);
+  // O vídeo enviado nunca aparece na tela: nem player, nem imagem do arquivo escolhido.
+  await expect(page.locator("video, audio, img[src^='blob:']")).toHaveCount(0);
+  await bancada.pick("FLAC (compressão sem perdas)");
+  await bancada.pick("Três, em 10%, 50% e 90% da duração");
+  await bancada.run();
+
+  const execucao = new ExecucaoPage(page);
+  await execucao.waitForStatus("Concluída");
+  expectCommand(
+    fakeApi,
+    {
+      recipeId: "media-mill",
+      files: MP4_FILES,
+      fillParameters: () => Promise.resolve(),
+      expectedParameters: { audio_format: "flac", thumbnail_count: 3, extract_audio: true },
+    },
+    MP4_FILES.map((file) => file.name),
+  );
+  await expect
+    .poll(() => execucao.thumbnails())
+    .toEqual(["Miniatura ferias-10pct.jpg", "Miniatura aniversario-10pct.jpg"]);
+
+  await expectDownload(page, execucao, "media-mill.zip");
+});
 
 function expectCommand(api: FakeApi, journey: Journey, order: readonly string[]): void {
   expect(api.createdRuns).toHaveLength(1);

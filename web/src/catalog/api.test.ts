@@ -22,6 +22,7 @@ describe("getCatalog", () => {
       "csv-janitor",
       "image-forge",
       "downloads-detox",
+      "media-mill",
     ]);
     expect(requests[0]?.method).toBe("GET");
   });
@@ -45,7 +46,7 @@ describe("findCatalogVersion", () => {
   });
 
   it.each([
-    ["receita ausente", "media-mill", 1],
+    ["receita ausente", "pdf-press", 1],
     ["versão ausente", "image-forge", 2],
   ])("%s → null", async (_, recipeId, version) => {
     const catalog = await loadCatalog();

@@ -56,7 +56,10 @@ function fakeClient(outcomes: readonly (() => Outcome)[]) {
       retryAfterMs: outcome.retryAfterMs,
     });
   };
-  const client: ApiClient = { request };
+  const client: ApiClient = {
+    request,
+    requestJpeg: () => Promise.reject(new Error("o polling não busca imagens")),
+  };
   return { client, requestCount: () => served };
 }
 
