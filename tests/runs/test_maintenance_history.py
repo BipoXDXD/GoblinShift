@@ -11,18 +11,18 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.objects import release
 from goblinshift.files.states import HolderKind, ObjectState
 from goblinshift.files.storage import FileStorage
-from goblinshift.files.tables import object_use, stored_object, upload
+from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.files.uploads import request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
-from goblinshift.runs.tables import attempt, run, run_input
+from goblinshift.runs.tables import attempt, run, run_input, run_output
 from tests.runs.worker_support import claim, create_user, local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -87,6 +87,50 @@ def test_ciclo_remove_a_run_de_90_dias_e_depois_as_linhas_dos_arquivos(
     assert count(factory, run, run.c.id == run_id) == 0
     assert count(factory, upload, upload.c.id == upload_id) == 0
     assert counts["runs_to_delete"] == 0
+
+
+def test_ciclo_anula_os_nomes_das_saidas_da_run_de_40_dias(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id, upload_id = finished_long_ago(factory, storage, days=40)
+    with unit_of_work(factory) as session:
+        owner, object_id = session.execute(
+            select(upload.c.owner_id, upload.c.object_id).where(upload.c.id == upload_id)
+        ).one()
+        # Saída que reaproveita o objeto da entrada (Detox), já vencida e excluída.
+        artifact_id = session.execute(
+            insert(artifact)
+            .values(
+                owner_id=owner,
+                object_id=object_id,
+                role="output",
+                file_name="cliente.csv",
+                expires_at=func.now(),
+                deleted_at=func.now(),
+            )
+            .returning(artifact.c.id)
+        ).scalar_one()
+        session.execute(
+            insert(run_output).values(
+                run_id=run_id,
+                position=0,
+                owner_id=owner,
+                artifact_id=artifact_id,
+                logical_name="cliente.csv",
+            )
+        )
+
+    counts = maintenance(factory, storage, work_root).run_cycle()
+
+    assert counts["outputs_anonymized"] == 1
+    assert counts["outputs_to_anonymize"] == 0
+    with factory() as session:
+        names = session.execute(
+            select(run_output.c.logical_name, artifact.c.file_name).join(
+                artifact, artifact.c.id == run_output.c.artifact_id
+            )
+        ).one()
+    assert tuple(names) == (None, None)
 
 
 def test_ciclo_anula_a_run_de_40_dias_e_mantem_a_linha_do_upload(
