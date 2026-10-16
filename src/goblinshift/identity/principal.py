@@ -16,14 +16,15 @@ SCOPE_SEPARATOR = ","
 class Scope(StrEnum):
     """Escopos de chave de API da tabela de rotas de 1.6.
 
-    `presets:*` entra com os presets; o banco guarda texto, então acrescentar um escopo
-    não exige migração.
+    O banco guarda texto, então acrescentar um escopo não exige migração.
     """
 
     FILES_READ = "files:read"
     FILES_WRITE = "files:write"
     RUNS_READ = "runs:read"
     RUNS_WRITE = "runs:write"
+    PRESETS_READ = "presets:read"
+    PRESETS_WRITE = "presets:write"
 
 
 @dataclass(frozen=True)

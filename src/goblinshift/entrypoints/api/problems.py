@@ -45,7 +45,8 @@ class ProblemCode(StrEnum):
 
     Os genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,
     `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`,
-    `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os
+    `GONE`, `PRECONDITION_FAILED`, `UNSUPPORTED_MEDIA_TYPE`, `PRECONDITION_REQUIRED`,
+    `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os
     status da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de
     execução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com
     quem os produz.
@@ -67,12 +68,14 @@ class ProblemCode(StrEnum):
     IDEMPOTENCY_IN_PROGRESS = "IDEMPOTENCY_IN_PROGRESS"
     ACTIVE_RUN_LIMIT = "ACTIVE_RUN_LIMIT"
     GONE = "GONE"
+    PRECONDITION_FAILED = "PRECONDITION_FAILED"
     BODY_TOO_LARGE = "BODY_TOO_LARGE"
     UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"
     VALIDATION_FAILED = "VALIDATION_FAILED"
     IDEMPOTENCY_KEY_REUSED = "IDEMPOTENCY_KEY_REUSED"
     INPUT_NOT_AVAILABLE = "INPUT_NOT_AVAILABLE"
     RECIPE_VERSION_RETIRED = "RECIPE_VERSION_RETIRED"
+    PRECONDITION_REQUIRED = "PRECONDITION_REQUIRED"
     QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
     RATE_LIMITED = "RATE_LIMITED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
@@ -107,12 +110,14 @@ PROBLEMS: Mapping[ProblemCode, ProblemSpec] = {
     ProblemCode.IDEMPOTENCY_IN_PROGRESS: ProblemSpec(409, "Requisição idempotente em andamento"),
     ProblemCode.ACTIVE_RUN_LIMIT: ProblemSpec(409, "Já existe uma execução ativa"),
     ProblemCode.GONE: ProblemSpec(410, "Conteúdo expirado ou excluído"),
+    ProblemCode.PRECONDITION_FAILED: ProblemSpec(412, "Revisão desatualizada"),
     ProblemCode.BODY_TOO_LARGE: ProblemSpec(413, "Corpo grande demais"),
     ProblemCode.UNSUPPORTED_MEDIA_TYPE: ProblemSpec(415, "Tipo de mídia não suportado"),
     ProblemCode.VALIDATION_FAILED: ProblemSpec(422, "Validação falhou"),
     ProblemCode.IDEMPOTENCY_KEY_REUSED: ProblemSpec(422, "Idempotency-Key reutilizada"),
     ProblemCode.INPUT_NOT_AVAILABLE: ProblemSpec(422, "Entrada indisponível"),
     ProblemCode.RECIPE_VERSION_RETIRED: ProblemSpec(422, "Versão de receita retirada"),
+    ProblemCode.PRECONDITION_REQUIRED: ProblemSpec(428, "Precondição ausente"),
     ProblemCode.QUOTA_EXCEEDED: ProblemSpec(429, "Cota excedida"),
     ProblemCode.RATE_LIMITED: ProblemSpec(429, "Muitas requisições"),
     ProblemCode.INTERNAL_ERROR: ProblemSpec(500, "Erro interno"),
@@ -132,9 +137,11 @@ _HTTP_STATUS_CODES: Mapping[int, ProblemCode] = {
     408: ProblemCode.REQUEST_TIMEOUT,
     409: ProblemCode.STATE_CONFLICT,
     410: ProblemCode.GONE,
+    412: ProblemCode.PRECONDITION_FAILED,
     413: ProblemCode.BODY_TOO_LARGE,
     415: ProblemCode.UNSUPPORTED_MEDIA_TYPE,
     422: ProblemCode.VALIDATION_FAILED,
+    428: ProblemCode.PRECONDITION_REQUIRED,
     429: ProblemCode.RATE_LIMITED,
     500: ProblemCode.INTERNAL_ERROR,
     503: ProblemCode.SERVICE_UNAVAILABLE,

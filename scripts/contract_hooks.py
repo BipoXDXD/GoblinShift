@@ -7,10 +7,11 @@ só é importado pelo Schemathesis, que vem do grupo `contract` (fora do ambient
 from typing import Any
 
 import schemathesis
-from schemathesis.openapi.checks import RejectedPositiveData, UseAfterFree
+from schemathesis.openapi.checks import MissingHeaderNotRejected, RejectedPositiveData, UseAfterFree
 
 from scripts.contract_rules import (
     Rejection,
+    is_expected_missing_header,
     is_expected_read_after_delete,
     is_expected_rejection,
     normalize_integral_floats,
@@ -37,6 +38,10 @@ def filter_failure(_context: Any, failure: Any, case: Any, response: Any) -> boo
     if isinstance(failure, UseAfterFree):
         return not is_expected_read_after_delete(
             operation, response.status_code, _json_object(response)
+        )
+    if isinstance(failure, MissingHeaderNotRejected):
+        return not is_expected_missing_header(
+            operation, failure.header_name, response.status_code, _json_object(response)
         )
     if isinstance(failure, RejectedPositiveData):
         rejection = Rejection(

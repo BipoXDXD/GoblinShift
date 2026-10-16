@@ -44,6 +44,7 @@ export const TEXT = {
       ACTIVE_RUN_LIMIT:
         "Você já tem uma execução em andamento. Espere ela terminar para começar outra.",
       GONE: "Isto expirou e não está mais disponível.",
+      PRECONDITION_FAILED: "Isto foi alterado em outro lugar. Atualize a página e tente de novo.",
       BODY_TOO_LARGE: "O arquivo ou o pedido passa do tamanho permitido.",
       UNSUPPORTED_MEDIA_TYPE: "O tipo de conteúdo enviado não é aceito.",
       VALIDATION_FAILED: "Alguns valores foram recusados. Confira os erros indicados.",
@@ -53,6 +54,7 @@ export const TEXT = {
         "Algum arquivo de entrada não está mais disponível. Envie os arquivos de novo.",
       RECIPE_VERSION_RETIRED:
         "Esta versão da receita foi retirada. Recarregue a página para usar a atual.",
+      PRECONDITION_REQUIRED: "O pedido foi recusado. Recarregue a página e tente de novo.",
       QUOTA_EXCEEDED: "Você atingiu a cota da conta. Libere espaço ou espere a cota renovar.",
       RATE_LIMITED: "Muitos pedidos em pouco tempo. Aguarde um pouco e tente de novo.",
       INTERNAL_ERROR: "Erro interno no servidor. Tente de novo em instantes.",
@@ -518,6 +520,8 @@ export const TEXT = {
         "files:write": "Enviar arquivos",
         "runs:read": "Ver execuções",
         "runs:write": "Criar e cancelar execuções",
+        "presets:read": "Ver presets",
+        "presets:write": "Salvar e excluir presets",
       },
       scopesRequired: "Escolha pelo menos um escopo.",
       days: "Validade, em dias",

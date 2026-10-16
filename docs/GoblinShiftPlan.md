@@ -207,6 +207,7 @@ Uma miniatura utiliza o ponto de 10% da duração; três utilizam 10%, 50% e 90%
 | `POST /presets`                                              | `201`: preset validado.                                                                                                                                                                                      | `presets:write`                 |
 | `PUT /presets/{id}`                                          | `200`: atualização integral com `If-Match`.                                                                                                                                                                  | `presets:write`                 |
 | `DELETE /presets/{id}`                                       | `204`: exclusão com `If-Match`; execuções anteriores não mudam.                                                                                                                                              | `presets:write`                 |
+| `POST /presets/{id}/runs`                                    | `202`: nova execução com receita, versão e parâmetros do preset, que fica registrado na Run; requer `Idempotency-Key`.                                                                                       | `runs:write` e `presets:read`   |
 | `POST /runs`                                                 | `202`: execução persistida; requer `Idempotency-Key`. Com `?validate_only=true`, `200` com os parâmetros resolvidos (defaults aplicados) ou `422`, sem criar Run, sem consumir a chave e sem exigir uploads. | `runs:write`                    |
 | `GET /runs` / `GET /runs/{id}`                               | Histórico paginado ou estado detalhado.                                                                                                                                                                      | `runs:read`                     |
 | `POST /runs/{id}/cancel`                                     | `202` enquanto encerra; `200` se já terminal, devolvendo o estado real.                                                                                                                                      | `runs:write`                    |
@@ -223,7 +224,7 @@ Login fora da base: `GET /auth/login/{provider}`, `GET /auth/callback/{provider}
 
 **Acompanhamento:** `GET /runs/{id}` de uma execução não terminal devolve `Retry-After: 2`, que é o intervalo de polling esperado. A resposta informa `queue_ahead` (quantas execuções aceitas antes desta ainda não começaram), um dado real e não uma estimativa de tempo.
 
-**Presets:** `name`, `recipe_id`, `recipe_version`, `parameters`, `revision`. ETag/If-Match controlam edição: ausente → `428`, obsoleto → `412`. Repetir preset requer novos uploads; não altera execuções.
+**Presets:** `name` (1 a 100 caracteres, único na conta), `recipe_id`, `recipe_version`, `parameters`, `revision`. ETag/If-Match controlam edição e exclusão: ausente → `428`, obsoleto → `412`. O `ETag` é a revisão entre aspas (`"3"`), e `If-Match: *` não é aceito, porque valeria para qualquer revisão. Repetir preset (`POST /presets/{id}/runs`) requer novos uploads; editar ou excluir o preset não altera execuções.
 
 **Idempotência:** chave por conta e operação durante 24 h, seguindo o draft IETF do header `Idempotency-Key` (é draft, não norma; [D04](GoblinShiftReferencias.md#d-1)). Formato fixo: 16 a 64 caracteres `[A-Za-z0-9_-]`, como um UUID. O hash do comando aplica os defaults da versão da receita, ordena chaves e preserva a ordem dos arrays; ele só é estável porque defaults nunca mudam dentro de uma `recipe_version` (ver evolução abaixo). Informar `idempotency_expires_at`; após esse prazo, a chave pode criar nova Run.
 
@@ -280,12 +281,14 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 | `IDEMPOTENCY_IN_PROGRESS`   | Requisição     | —                    | Tentar de novo após `Retry-After`                           | `409` |
 | `ACTIVE_RUN_LIMIT`          | Política       | —                    | Recusado                                                    | `409` |
 | `GONE`                      | Requisição     | —                    | Conteúdo expirado ou excluído                               | `410` |
+| `PRECONDITION_FAILED`       | Requisição     | —                    | Revisão desatualizada; leia de novo                         | `412` |
 | `BODY_TOO_LARGE`            | Requisição     | —                    | Recusado                                                    | `413` |
 | `UNSUPPORTED_MEDIA_TYPE`    | Requisição     | —                    | Recusado                                                    | `415` |
 | `VALIDATION_FAILED`         | Requisição     | —                    | Recusado, com `errors` por campo                            | `422` |
 | `IDEMPOTENCY_KEY_REUSED`    | Requisição     | —                    | Recusado                                                    | `422` |
 | `INPUT_NOT_AVAILABLE`       | Requisição     | —                    | Recusado                                                    | `422` |
 | `RECIPE_VERSION_RETIRED`    | Requisição     | —                    | Recusado                                                    | `422` |
+| `PRECONDITION_REQUIRED`     | Requisição     | —                    | Envie `If-Match` com o `ETag` lido                          | `428` |
 | `QUOTA_EXCEEDED`            | Política       | —                    | Recusado, com `Retry-After`                                 | `429` |
 | `RATE_LIMITED`              | Política       | —                    | Recusado, com `Retry-After`                                 | `429` |
 | `INTERNAL_ERROR`            | Servidor       | —                    | Falha inesperada, sem detalhe interno                       | `500` |
@@ -311,7 +314,7 @@ Após `202`, conteúdo ainda pode falhar na execução; não se altera a respost
 | `INFRA_POISON`              | Parada         | Não                  | `failed`                                                    | —     |
 | `CANCELED`                  | Parada         | Não                  | `canceled`                                                  | —     |
 
-Os códigos genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os status da tabela acima que não tinham código próprio. O status de cada `code` sai do catálogo em `entrypoints/api/problems.py`, para que um código nunca apareça com dois status; um erro HTTP do framework com status fora do catálogo sai como `BAD_REQUEST` (4xx) ou `INTERNAL_ERROR` (5xx), com o status do catálogo. A URI de `type` é `https://goblinshift.dev/problems/<code-em-kebab>` (por exemplo, `.../problems/body-too-large`), gerada por `ProblemCode.type_uri` no mesmo arquivo; é um identificador estável, não precisa ser navegável.
+Os códigos genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`, `GONE`, `PRECONDITION_FAILED`, `UNSUPPORTED_MEDIA_TYPE`, `PRECONDITION_REQUIRED`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os status da tabela acima que não tinham código próprio. O status de cada `code` sai do catálogo em `entrypoints/api/problems.py`, para que um código nunca apareça com dois status; um erro HTTP do framework com status fora do catálogo sai como `BAD_REQUEST` (4xx) ou `INTERNAL_ERROR` (5xx), com o status do catálogo. A URI de `type` é `https://goblinshift.dev/problems/<code-em-kebab>` (por exemplo, `.../problems/body-too-large`), gerada por `ProblemCode.type_uri` no mesmo arquivo; é um identificador estável, não precisa ser navegável.
 
 No código das receitas, a classe sai do tipo levantado: `ItemRejected(code)` vira rejeição por item no relatório, `RecipeFailure(code)` é falha determinística, e qualquer outra exceção é tratada como infraestrutura (transitória). Só dois lugares traduzem exceções: o handler do FastAPI e o laço do worker.
 
