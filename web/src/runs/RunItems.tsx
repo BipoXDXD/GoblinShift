@@ -51,11 +51,7 @@ export function RunItems({
 }
 
 function summaryText(summary: RunSummary): string {
-  const counted = (noun: Noun): string => {
-    const count = summary[noun];
-    const [singular, plural] = T.nouns[noun];
-    return `${formatCount(count)} ${count === 1 ? singular : plural}`;
-  };
+  const counted = (noun: Noun): string => countedText(summary[noun], T.nouns[noun]);
   return T.summary({
     inputs: counted("inputs"),
     ok: counted("ok"),
@@ -153,9 +149,14 @@ function displayPosition(position: number): number {
 /** Só as contagens que a interface sabe nomear; uma chave nova da API fica de fora. */
 function countsText(counts: Readonly<Record<string, number>>): string | null {
   const parts = Object.entries(counts).flatMap(([name, count]) =>
-    isCountName(name) ? [T.counts[name](formatCount(count))] : [],
+    isCountName(name) ? [countedText(count, T.counts[name])] : [],
   );
   return parts.length === 0 ? null : parts.join(" · ");
+}
+
+/** "1 arquivo", "0 arquivos", "1.200 arquivos": singular só com exatamente 1. */
+function countedText(count: number, [singular, plural]: readonly [string, string]): string {
+  return `${formatCount(count)} ${count === 1 ? singular : plural}`;
 }
 
 function isCountName(name: string): name is CountName {

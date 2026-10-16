@@ -80,6 +80,30 @@ describe("Execução: detalhe por arquivo", () => {
     expect(await axeViolations(region)).toEqual([]);
   });
 
+  it.each([
+    [1, "1 registro lido · 1 filtrado · 1 duplicata removida · 1 gravado · 1 linha vazia ignorada"],
+    [
+      0,
+      "0 registros lidos · 0 filtrados · 0 duplicatas removidas · 0 gravados · 0 linhas vazias ignoradas",
+    ],
+    [
+      2,
+      "2 registros lidos · 2 filtrados · 2 duplicatas removidas · 2 gravados · 2 linhas vazias ignoradas",
+    ],
+  ])("contagens por arquivo iguais a %i concordam em número, como o resumo", async (n, text) => {
+    const counts = {
+      records_read: n,
+      filtered_out: n,
+      duplicates_removed: n,
+      written: n,
+      blank_lines_ignored: n,
+    };
+    setup({ summary, items: [item(0, { counts })] });
+
+    const entry = within(await itemsRegion()).getByRole("listitem");
+    expect(entry).toHaveTextContent(`Arquivo 1Processado${text}`);
+  });
+
   it("contagem que a interface não conhece fica de fora; as conhecidas continuam", async () => {
     setup({ summary, items: [item(0, { counts: { pages_merged: 7, written: 5 } })] });
 
