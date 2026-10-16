@@ -126,3 +126,19 @@ def test_artefato_inexistente_responde_404(
     response = client.get(f"{ARTIFACTS}/{uuid.uuid4()}/preview", headers=auth)
 
     assert_problem(response, 404, "NOT_FOUND")
+
+
+def test_origem_excluida_responde_410_mesmo_com_o_preview_valido(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    source, _ = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(artifact).where(artifact.c.id == source).values(deleted_at=artifact.c.created_at)
+        )
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    assert open_uses(factory) == 0

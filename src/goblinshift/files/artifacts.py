@@ -236,8 +236,17 @@ def open_preview(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
     """O preview da saída `artifact_id`, com o mesmo controle de uso de `open_for_download`.
 
     Saída de outra conta, inexistente ou sem preview: `ArtifactNotFoundError`, igual para todos.
-    O próprio preview não tem preview. Preview excluído ou vencido: `ArtifactGoneError`.
+    O próprio preview não tem preview. Saída ou preview excluídos ou vencidos: `ArtifactGoneError`
+    (o preview não sobrevive à saída de que deriva).
     """
+    source = session.execute(
+        select(artifact.c.deleted_at, artifact.c.expires_at <= func.now())
+        .where(artifact.c.owner_id == owner_id, artifact.c.id == artifact_id)
+        .with_for_update(read=True)
+    ).one_or_none()
+    if source is None:
+        raise ArtifactNotFoundError
+    deleted_at, expired = source
     preview_id = session.execute(
         select(artifact.c.id)
         .where(
@@ -250,6 +259,8 @@ def open_preview(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
     ).scalar_one_or_none()
     if preview_id is None:
         raise ArtifactNotFoundError
+    if deleted_at is not None or expired:
+        raise ArtifactGoneError
     return open_for_download(session, owner_id, preview_id)
 
 
