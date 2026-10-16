@@ -156,6 +156,38 @@ def test_tamanho_fora_das_bordas_e_recusado(factory: sessionmaker[Session], size
     assert error.value.field == "items[1].expected_size"
 
 
+MAX_VIDEO_FILE_BYTES = 256 * MIB
+
+
+@pytest.mark.parametrize("name", ["video.mp4", "VIDEO.MOV", "clipe.webm", "a.b.Mp4"])
+def test_video_pelo_nome_aceita_ate_256_mib(factory: sessionmaker[Session], name: str) -> None:
+    # 1.7: "vídeo, quando disponível, até 256 MiB". A extensão é só indício: o conteúdo é
+    # conferido no executor, e só o Media Mill aceita uma entrada desse tamanho (ADR 036).
+    view = create_intent(factory, create_user(factory, "a"), name=name, size=MAX_VIDEO_FILE_BYTES)
+
+    assert view.expected_size == MAX_VIDEO_FILE_BYTES
+
+
+@pytest.mark.parametrize(
+    ("name", "size"),
+    [
+        ("video.mp4", MAX_VIDEO_FILE_BYTES + 1),
+        ("video.mp4.csv", MAX_FILE_BYTES + 1),
+        ("video.mkv", MAX_FILE_BYTES + 1),
+        ("mp4", MAX_FILE_BYTES + 1),
+    ],
+)
+def test_acima_do_teto_do_tipo_pelo_nome_e_recusado(
+    factory: sessionmaker[Session], name: str, size: int
+) -> None:
+    owner = create_user(factory, "a")
+
+    with pytest.raises(InvalidUploadRequestError) as error, unit_of_work(factory) as session:
+        create_intents(session, owner, [(name, size)])
+
+    assert error.value.field == "items[0].expected_size"
+
+
 @pytest.mark.parametrize("name", ["a", "x" * 255, "relatório final (1).CSV", "..oculto", "a.b."])
 def test_nome_valido_e_guardado_como_recebido(factory: sessionmaker[Session], name: str) -> None:
     view = create_intent(factory, create_user(factory, "a"), name=name)

@@ -19,6 +19,17 @@ export class ExecucaoPage {
     await expect(this.#page.getByText(status, { exact: true })).toBeVisible({ timeout: 10_000 });
   }
 
+  /** Miniaturas mostradas como preview (Media Mill), já carregadas e decodificadas. */
+  async thumbnails(): Promise<string[]> {
+    const previews = this.#page.getByRole("region", { name: "Miniaturas" }).getByRole("img");
+    await expect(previews.first()).toBeVisible();
+    return previews.evaluateAll((images) =>
+      images
+        .filter((image) => image instanceof HTMLImageElement && image.naturalWidth > 0)
+        .map((image) => image.getAttribute("alt") ?? ""),
+    );
+  }
+
   /** Baixa pelo link "Baixar <arquivo>" e devolve o download já concluído. */
   async download(fileName: string): Promise<Download> {
     const link = this.#page.getByRole("link", { name: new RegExp(`^Baixar ${fileName}`) });

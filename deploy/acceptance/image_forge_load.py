@@ -57,14 +57,19 @@ def main() -> int:
     config = load_config(DEFAULT_CONFIG_PATH)
     host = Host(config, grp.getgrnam(config.group).gr_gid)
     print(f"construindo {IMAGE} a partir de {REPO_ROOT}")
-    _docker("build", "--quiet", "--file", str(REPO_ROOT / "docker" / "executor.Dockerfile"),
-            "--tag", IMAGE, str(REPO_ROOT), timeout=BUILD_TIMEOUT_S)  # fmt: skip
+    build_image()
     with tempfile.TemporaryDirectory(prefix="gs-carga-") as generated:
         fixtures = Path(generated)
         print("gerando as fixtures na própria imagem")
         _generate(fixtures)
         expected = json.loads((fixtures / "expected.json").read_text(encoding="utf-8"))
         return measure_with_maintenance_suspended(lambda: measure(host, fixtures, expected))
+
+
+def build_image() -> None:
+    """A imagem do executor do checkout, com a tag da medição."""
+    _docker("build", "--quiet", "--file", str(REPO_ROOT / "docker" / "executor.Dockerfile"),
+            "--tag", IMAGE, str(REPO_ROOT), timeout=BUILD_TIMEOUT_S)  # fmt: skip
 
 
 def measure_with_maintenance_suspended(
@@ -108,17 +113,24 @@ def plan_job(
 
 
 def judge(
-    *, exit_code: int, duration_s: float, timed_out: bool, summary: Mapping[str, int] | None
+    *,
+    exit_code: int,
+    duration_s: float,
+    timed_out: bool,
+    summary: Mapping[str, int] | None,
+    criterion: str = CRITERION,
 ) -> Outcome:
     all_ok = summary is not None and summary["ok"] == summary["inputs"]
     passed = exit_code == 0 and not timed_out and all_ok and duration_s <= ATTEMPT_LIMIT_S
     evidence = f"{duration_s:.0f} s, saída {exit_code}, resumo {dict(summary or {})}"
     if timed_out:
         evidence += "; parado pelo teto"
-    return Outcome(CRITERION, passed, evidence)
+    return Outcome(criterion, passed, evidence)
 
 
-def measure(host: Host, fixtures: Path, expected: Mapping[str, Any]) -> Outcome:
+def measure(
+    host: Host, fixtures: Path, expected: Mapping[str, Any], criterion: str = CRITERION
+) -> Outcome:
     attempt = uuid.uuid4()
     name = profile.container_name(attempt)
     area = host.config.work_area
@@ -150,7 +162,13 @@ def measure(host: Host, fixtures: Path, expected: Mapping[str, Any]) -> Outcome:
     finally:
         docker.remove(name)
         workarea.remove_attempt_dir(area, attempt)
-    return judge(exit_code=exit_code, duration_s=duration_s, timed_out=timed_out, summary=summary)
+    return judge(
+        exit_code=exit_code,
+        duration_s=duration_s,
+        timed_out=timed_out,
+        summary=summary,
+        criterion=criterion,
+    )
 
 
 def _generate(target: Path) -> None:

@@ -607,7 +607,7 @@ export interface components {
          *     código, porque o relatório vem do sandbox e o código vai para o banco e para a API.
          * @enum {string}
          */
-        ItemRejectionCode: "UNSUPPORTED_FORMAT" | "UNSUPPORTED_BIT_DEPTH" | "UNSUPPORTED_COLOR_PROFILE" | "IMAGE_TOO_LARGE" | "CSV_STRUCTURE_INVALID" | "FIELD_LIMIT_EXCEEDED";
+        ItemRejectionCode: "UNSUPPORTED_FORMAT" | "UNSUPPORTED_BIT_DEPTH" | "UNSUPPORTED_COLOR_PROFILE" | "IMAGE_TOO_LARGE" | "CSV_STRUCTURE_INVALID" | "FIELD_LIMIT_EXCEEDED" | "MEDIA_TOO_LARGE" | "AUDIO_LIMIT_EXCEEDED" | "AUDIO_STREAM_NOT_FOUND";
         /**
          * ItemStatus
          * @enum {string}
@@ -623,7 +623,7 @@ export interface components {
          *     (1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui.
          * @enum {string}
          */
-        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED";
+        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED" | "THUMBNAIL_BEFORE_TARGET";
         /** Limits */
         Limits: {
             /** Runs Per 24H */
@@ -636,6 +636,8 @@ export interface components {
             active_runs: number;
             /** File Bytes */
             file_bytes: number;
+            /** Video File Bytes */
+            video_file_bytes: number;
             /** Batch Files */
             batch_files: number;
             /** Batch Bytes */
@@ -1812,7 +1814,7 @@ export interface operations {
                         name: string;
                         /**
                          * Size
-                         * @description Bytes; o lote soma até 512 MiB.
+                         * @description Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.
                          */
                         size: number;
                     }[];
@@ -2723,6 +2725,32 @@ export interface operations {
                             page_number: number;
                         }[] | null;
                     };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** MediaMillV1Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormat
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
+                    };
                 });
             };
         };
@@ -3073,6 +3101,32 @@ export interface operations {
                             upload_id: string;
                             page_number: number;
                         }[] | null;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** MediaMillV1Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormat
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
                     };
                 });
             };
@@ -3573,6 +3627,32 @@ export interface operations {
                             upload_id: string;
                             page_number: number;
                         }[] | null;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "media-mill";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** MediaMillV1Parameters */
+                    parameters: {
+                        /**
+                         * Extract Audio
+                         * @default true
+                         */
+                        extract_audio?: boolean;
+                        /**
+                         * AudioFormat
+                         * @default wav
+                         * @enum {string}
+                         */
+                        audio_format?: "wav" | "flac";
+                        /** Audio Stream Index */
+                        audio_stream_index?: number | null;
+                        /**
+                         * @default 1
+                         * @enum {integer}
+                         */
+                        thumbnail_count?: 0 | 1 | 3;
                     };
                 });
             };

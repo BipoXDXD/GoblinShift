@@ -46,11 +46,14 @@ def test_nome_do_upload_publica_tamanho_e_caracteres_proibidos() -> None:
     assert name["pattern"] == UPLOAD_NAME_PATTERN
 
 
-def test_tamanho_do_upload_publica_de_0_a_32_mib() -> None:
+def test_tamanho_do_upload_publica_de_0_ao_teto_do_video() -> None:
+    # 256 MiB é o teto do vídeo (1.7, ADR 036); o do arquivo comum (32 MiB) depende do nome e está
+    # na descrição, aplicado no serviço e na aceitação pelo `max_input_bytes` da receita.
     size = _json_body("/api/v1/uploads", "post")["properties"]["items"]["items"]["properties"]
     size = size["size"]
 
-    assert (size["minimum"], size["maximum"]) == (0, 32 * 1024 * 1024)
+    assert (size["minimum"], size["maximum"]) == (0, 256 * 1024 * 1024)
+    assert "32 MiB" in size["description"]
 
 
 def test_padrao_do_nome_recusa_exatamente_separadores_e_controles() -> None:

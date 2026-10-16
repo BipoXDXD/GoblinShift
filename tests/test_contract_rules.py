@@ -73,6 +73,12 @@ def _rejection(
             body={"items": [{"name": "a"}, {"name": ".."}]},
         ),
         _rejection(
+            CREATE_UPLOADS,
+            422,
+            _problem("VALIDATION_FAILED", ("body.items.0.size", "invalid")),
+            body={"items": [{"name": "dados.csv", "size": 32 * 1024 * 1024 + 1}]},
+        ),
+        _rejection(
             CREATE_RUN,
             422,
             _problem(
@@ -94,6 +100,7 @@ def _rejection(
         "uploads-inexistentes",
         "nul-no-corpo",
         "nome-ponto-ponto",
+        "arquivo-comum-acima-de-32-mib",
         "regra-cruzada-dos-parametros",
     ],
 )
@@ -201,6 +208,25 @@ def test_leitura_apos_exclusao_fora_da_regra_continua_falha(
     operation: str, status: int, body: dict[str, Any] | None
 ) -> None:
     assert not is_expected_read_after_delete(operation, status, body)
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        pytest.param({"name": "clipe.mp4", "size": 32 * 1024 * 1024 + 1}, id="video-acima-de-32"),
+        pytest.param({"name": "dados.csv", "size": 32 * 1024 * 1024}, id="comum-no-teto"),
+    ],
+)
+def test_recusa_de_tamanho_dentro_do_teto_do_tipo_continua_falha(item: dict[str, Any]) -> None:
+    # O teto publicado é o do vídeo (256 MiB); só o arquivo comum acima de 32 MiB pode ser recusado.
+    rejection = _rejection(
+        CREATE_UPLOADS,
+        422,
+        _problem("VALIDATION_FAILED", ("body.items.0.size", "invalid")),
+        body={"items": [item]},
+    )
+
+    assert not is_expected_rejection(rejection)
 
 
 @pytest.mark.parametrize(

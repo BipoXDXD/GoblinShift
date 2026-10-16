@@ -4,7 +4,7 @@ import type { InputLimits } from "../catalog/inputLimits";
 import type { UploadEntry, UploadEntryState } from "../upload/useUploadBatch";
 import { orderEntries, runInputs as runInputsWithLimits, uploadAnnouncement } from "./inputs";
 
-const LIMITS: InputLimits = { maxInputs: 5, maxTotalBytes: null };
+const LIMITS: InputLimits = { maxInputs: 5, maxTotalBytes: null, maxFileBytes: null };
 
 function entry(
   localId: string,
@@ -93,7 +93,9 @@ describe("runInputs", () => {
       entry(String(index), ready(String(index))),
     );
 
-    expect(runInputsWithLimits(entries, { maxInputs: 2, maxTotalBytes: null })).toEqual({
+    expect(
+      runInputsWithLimits(entries, { maxInputs: 2, maxTotalBytes: null, maxFileBytes: null }),
+    ).toEqual({
       ok: false,
       message: "Use no máximo 2 arquivos.",
     });
@@ -109,13 +111,17 @@ describe("runInputs", () => {
       entry("c", { status: "canceled" }, "c.zip", "não conta"),
     ];
 
-    expect(runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes }).ok).toBe(ok);
+    expect(
+      runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes, maxFileBytes: null }).ok,
+    ).toBe(ok);
   });
 
   it("acima do teto de bytes, a mensagem traz o teto", () => {
     const entries = [entry("a", ready("1"), "a.zip", "x".repeat(2_000))];
 
-    expect(runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes: 1_500 })).toEqual({
+    expect(
+      runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes: 1_500, maxFileBytes: null }),
+    ).toEqual({
       ok: false,
       message: "Os arquivos somam 2 kB; o máximo por execução é 1,5 kB.",
     });
@@ -144,5 +150,35 @@ describe("uploadAnnouncement", () => {
     expect(uploadAnnouncement(previous, entries)).toBe(
       "clientes.csv enviado. Falha ao enviar vendas.csv.",
     );
+  });
+});
+
+describe("runInputs com teto por arquivo", () => {
+  const limits = (maxFileBytes: number): InputLimits => ({
+    maxInputs: 5,
+    maxTotalBytes: null,
+    maxFileBytes,
+  });
+
+  it.each([
+    ["no teto", 5, true],
+    ["acima do teto", 4, false],
+  ])("arquivo %s é aceito: %s", (_, maxFileBytes, ok) => {
+    const entries = [entry("a", ready("1"), "a.mp4", "12345")];
+
+    expect(runInputsWithLimits(entries, limits(maxFileBytes)).ok).toBe(ok);
+  });
+
+  it("a mensagem cita o arquivo e o teto; cancelado não conta", () => {
+    const entries = [
+      entry("a", ready("1"), "a.mp4", "123"),
+      entry("b", ready("2"), "grande.mp4", "x".repeat(2_000)),
+      entry("c", { status: "canceled" }, "c.mp4", "x".repeat(5_000)),
+    ];
+
+    expect(runInputsWithLimits(entries, limits(1_500))).toEqual({
+      ok: false,
+      message: "grande.mp4 tem 2 kB; o máximo por arquivo nesta receita é 1,5 kB.",
+    });
   });
 });

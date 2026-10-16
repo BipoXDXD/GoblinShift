@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import type { components } from "../../src/api/schema";
 import { CATALOG_BODY } from "../../src/test/catalogBody";
+import { THUMBNAIL_JPEG } from "../fixtures/files";
 import { writeArtifact } from "./artifacts";
 import { E2E } from "./env";
 import {
@@ -530,7 +531,9 @@ class FakeState {
     });
     const files = [
       { role: "package" as const, name: `${recipeId}.zip`, body: EMPTY_ZIP },
-      ...outputs.map((output) => ({ role: "output" as const, ...output })),
+      ...(recipeId === "media-mill" ? outputs.flatMap(mediaMillOutputs) : outputs).map(
+        (output) => ({ role: "output" as const, ...output }),
+      ),
     ];
     return files.map(({ role, name, body }) => {
       const artifactId = randomUUID();
@@ -601,6 +604,15 @@ class FakeState {
       body: preview.body,
     });
   }
+}
+
+/** Media Mill: um áudio e uma miniatura por vídeo, nos grupos de `out/` da API real (ADR 036). */
+function mediaMillOutputs({ name }: { readonly name: string }): { name: string; body: Buffer }[] {
+  const stem = name.replace(/\.[^.]*$/, "");
+  return [
+    { name: `audio/${stem}.wav`, body: Buffer.from("RIFF") },
+    { name: `thumbnails/${stem}-10pct.jpg`, body: THUMBNAIL_JPEG },
+  ];
 }
 
 /** Como o worker: itens pendentes enquanto roda; ao concluir, todos ok e o resumo. */

@@ -7,11 +7,14 @@ export interface InputLimits {
   readonly maxInputs: number;
   /** Soma dos tamanhos das entradas; `null` quando a versão não limita o lote. */
   readonly maxTotalBytes: number | null;
+  /** Teto de cada entrada na receita; `null` quando o catálogo não o publica (API anterior). */
+  readonly maxFileBytes: number | null;
 }
 
 const limitsSchema = z.object({
   max_inputs: z.int().positive(),
   max_total_input_bytes: z.int().positive().optional(),
+  max_input_bytes: z.int().positive().optional(),
 });
 
 /** `null` quando o catálogo não traz os limites no formato esperado. */
@@ -23,5 +26,6 @@ export function inputLimitsOf(version: Pick<CatalogVersion, "limits">): InputLim
   return {
     maxInputs: parsed.data.max_inputs,
     maxTotalBytes: parsed.data.max_total_input_bytes ?? null,
+    maxFileBytes: parsed.data.max_input_bytes ?? null,
   };
 }
