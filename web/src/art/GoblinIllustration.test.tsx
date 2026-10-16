@@ -21,7 +21,7 @@ describe("goblinsOf", () => {
 });
 
 describe("CAST", () => {
-  it("o elenco tem as cinco goblins publicadas, sem a Ada nem a Lua", () => {
+  it("o elenco tem as cinco goblins publicadas", () => {
     expect(CAST.map((goblin) => goblin.name)).toEqual([
       "Rúbia",
       "Fagulha",

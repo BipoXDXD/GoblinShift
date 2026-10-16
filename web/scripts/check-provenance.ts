@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 export interface ArtFile {
-  /** Caminho relativo a `src/assets/art/`, como `goblins/lua-128w.avif`. */
+  /** Caminho relativo a `src/assets/art/`, como `goblins/nyx-128w.avif`. */
   readonly path: string;
   readonly sha256: string;
 }
