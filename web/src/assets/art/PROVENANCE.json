@@ -203,25 +203,6 @@
       "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
-    "lua-2d": {
-      "upstream": "source-003",
-      "task_id": "373b2218-8e57-4549-a91a-10b11b3a2748",
-      "inputs": [
-        "g-frontal",
-        "ref-01-frente"
-      ],
-      "rights": "rights-003",
-      "source_record": "goblinshift-editorial-20261021"
-    },
-    "lua-3d": {
-      "generation_id": "81ae6621-dbb6-48b0-acb0-04918bfdb393",
-      "inputs": [
-        "lua-2d"
-      ],
-      "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
-    },
     "rubia-render-ancora": {
       "inputs": [
         "rubia-3d"
@@ -316,62 +297,14 @@
       "source_record": "goblinshift-editorial-20261021"
     }
   },
-  "excluded": [],
+  "excluded": [
+    {
+      "name": "Ada",
+      "reason": "retirada do site por decisão do usuário em 2026-10-15 (não gostou do resultado)",
+      "source_id": "417f7fe0-23a6-4fec-922a-33fbb3c69032"
+    }
+  ],
   "assets": [
-    {
-      "file": "goblins/ada-128w.avif",
-      "sha256": "121bd90d78e7e3ad6c40067fc3296b8d1a761fd1522ba92083015817ff864a4e",
-      "derived_from": "ada-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "goblins/ada-128w.webp",
-      "sha256": "7109826eeb0a4f562e0f3f8519d9015eb9f9c9d7d889e44807ec0bb48f7a594e",
-      "derived_from": "ada-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "goblins/ada-256w.avif",
-      "sha256": "4b0cd3fef3a18457f3886f65e55ba95d3e78fc15c5c6fbf2145835fb6fcf44d9",
-      "derived_from": "ada-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "goblins/ada-256w.webp",
-      "sha256": "ba26f292c94141e344270a9f9512f22acba3b7ca6afb56042b071a41fb110a05",
-      "derived_from": "ada-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "goblins/fagulha-128w.avif",
-      "sha256": "d2e5602d9ad10d34f3e249cd0320d5ea4e74949e8859c70a97679ae6ee52ab17",
-      "derived_from": "fagulha-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
-    {
-      "file": "goblins/fagulha-128w.webp",
-      "sha256": "c0c146c68687cfcdd352c130bc6ac0870d8c7c621a4244c29736867e52be8838",
-      "derived_from": "fagulha-3d",
-      "human_edits": [
-        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
-        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ]
-    },
     {
       "file": "goblins/fagulha-256w.avif",
       "sha256": "4be16b26a58e5926c0985d543eb80ba91eaf448ce28acb8f79b1818c4500c34e",
@@ -391,18 +324,54 @@
       ]
     },
     {
-      "file": "goblins/ferrugem-128w.avif",
-      "sha256": "e0e425dbe9f290b02c00e7a9d91aa9691fe38e990507eb4a17908f29e7af32a9",
-      "derived_from": "ferrugem-3d",
+      "file": "goblins/fagulha-384w.avif",
+      "sha256": "3d790e447a3fef7b052af666962093eabacd59c5629d0a9114f351d8019a5fda",
+      "derived_from": "fagulha-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/ferrugem-128w.webp",
-      "sha256": "73836373859f23134e85850f855ed2db61e7da5571cf65766a051f84d3f6ed70",
-      "derived_from": "ferrugem-3d",
+      "file": "goblins/fagulha-384w.webp",
+      "sha256": "467fde6577ca4e5ff3011a9f53dca4557e601305d22a1e58a8889360ac6023fc",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/fagulha-512w.avif",
+      "sha256": "69fbea1b8f893058256c4030168b7f02048581b16e5e4414161dce7ba31b3b23",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/fagulha-512w.webp",
+      "sha256": "b919cebb05512aa31bebd2df83c5cef6398e488feca6a2d48a3f2bfe6d5ea665",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/fagulha-768w.avif",
+      "sha256": "cb6173e92c41a9178a407260d0a5b1001ab1b8f785e588ae274f1afbc7aec99d",
+      "derived_from": "fagulha-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/fagulha-768w.webp",
+      "sha256": "0fdd0ad32fc2cfb7c5698d414d8ac9de3fe9e1006b962f960293027045b24fd7",
+      "derived_from": "fagulha-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
@@ -427,18 +396,54 @@
       ]
     },
     {
-      "file": "goblins/jade-128w.avif",
-      "sha256": "5b668a4618191b1d9abda02d56894e2f02984b54bf56d96462cb5e949eeb8e7d",
-      "derived_from": "jade-3d",
+      "file": "goblins/ferrugem-384w.avif",
+      "sha256": "2b9ffc876062111142e1d8339ad75d4bad32ad4dfac6cdf1f0dd1060abed56e3",
+      "derived_from": "ferrugem-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/jade-128w.webp",
-      "sha256": "e8c0b5623627e96583d3929d7beff25a3fd55084c85aebe864ed4665c729f087",
-      "derived_from": "jade-3d",
+      "file": "goblins/ferrugem-384w.webp",
+      "sha256": "1fe41e94b1bd09a62baf992bc09f404aabc08cf3f543065f884312c1e13a9fe4",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/ferrugem-512w.avif",
+      "sha256": "36f39db847a4318f803d8a93e91a4fe41f7089dc442f0f4754121eba5e778f5e",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/ferrugem-512w.webp",
+      "sha256": "0aa83e52ae3799501f0ba89c76360a276a972bd39d46d1321fe5e7e0b4b64fd4",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/ferrugem-768w.avif",
+      "sha256": "637dde784c5065029f3aab47f8d50cd57fd79737b7d6a2b1d7908d489ed80633",
+      "derived_from": "ferrugem-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/ferrugem-768w.webp",
+      "sha256": "2a24fbdf482b1087d795172e6595777f041e0225acc5fadeae283c4750cb81fb",
+      "derived_from": "ferrugem-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
@@ -463,54 +468,54 @@
       ]
     },
     {
-      "file": "goblins/lua-128w.avif",
-      "sha256": "06f1c8007f2d9d80a91cfb7c30fcf8f32d7ce4598b6b86ae075e660760a1dc7f",
-      "derived_from": "lua-3d",
+      "file": "goblins/jade-384w.avif",
+      "sha256": "bb2c05071a34f86b60abf698b8e713d067db3a85b915ec57972a05c3ffda52c8",
+      "derived_from": "jade-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/lua-128w.webp",
-      "sha256": "38253c25f95934fda044763d0bc5f13d21c7b311fe51fd01ba261e19968d56da",
-      "derived_from": "lua-3d",
+      "file": "goblins/jade-384w.webp",
+      "sha256": "baba017f5240ada0994ad910598b09029aa0bac72e52fb1aa66753cfd1c75453",
+      "derived_from": "jade-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/lua-256w.avif",
-      "sha256": "cd42227b0d8d21701d8354b502f6e1c34ce4ed057831816ddc6a29a132925fd2",
-      "derived_from": "lua-3d",
+      "file": "goblins/jade-512w.avif",
+      "sha256": "14620d8388f687d90681859a8c6b6ff4df323e0c56b55be8cdef854109dca863",
+      "derived_from": "jade-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/lua-256w.webp",
-      "sha256": "b845390cfb42d0c5f1e2abf901422a1eaaf48e009a7b7ae0981b02b776ae0793",
-      "derived_from": "lua-3d",
+      "file": "goblins/jade-512w.webp",
+      "sha256": "1bdd2cfa75ad1d2da7af8967de1b51116b9b36cdc029ff04f5870783fae685f2",
+      "derived_from": "jade-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/nyx-128w.avif",
-      "sha256": "8993087b636390bb2b27752193a5449439bde6ff6a8626f1470d2d90f669dc91",
-      "derived_from": "nyx-3d",
+      "file": "goblins/jade-768w.avif",
+      "sha256": "9a245805d0f5cf39ee26a758094f0b9edeb6b844652a65e532d619d989dcf7bf",
+      "derived_from": "jade-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },
     {
-      "file": "goblins/nyx-128w.webp",
-      "sha256": "8492e42d798e85eca6884b6e3136a2ab28114ff63cd0342a1cc6d3ab3efc1a47",
-      "derived_from": "nyx-3d",
+      "file": "goblins/jade-768w.webp",
+      "sha256": "0820be44d622aac52c06c0cd9d0e0f6a77a7f5d7ebb05c34cb6c0fa3434ca68d",
+      "derived_from": "jade-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
@@ -531,6 +536,132 @@
       "derived_from": "nyx-3d",
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/nyx-384w.avif",
+      "sha256": "7ee6834381847c0caed3bf57d01172ff7284c4534e00394ee5cb7f375c99425b",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/nyx-384w.webp",
+      "sha256": "5004d745228936f9e921519ba44928f2b51d58b589874e3f4347bf1f69fb964a",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/nyx-512w.avif",
+      "sha256": "a17490209513b26543e01154504b8df0d68cefb6c0774b23a2cac75480d01aff",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/nyx-512w.webp",
+      "sha256": "8a867a5e4c8435f1458453b81ec009a68e156cb95fa44862d38a86cdd3b1a95e",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/nyx-768w.avif",
+      "sha256": "08d51a28e3a5bc142a0da342c6e36e87b95f7ce97e56b3c87b0ed66e636c30f7",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/nyx-768w.webp",
+      "sha256": "174c7c81ca1e394ba882961fa9e40407868e87886fcfdd6a9ad68ec3565567ad",
+      "derived_from": "nyx-3d",
+      "human_edits": [
+        "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-256w.avif",
+      "sha256": "113e3995c8a8a54e1ea7853aaf03c246faff8037165ef4cb3d2ed05e92338ee3",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-256w.webp",
+      "sha256": "4182a04b2f4022acb93696aa7efb7e85c14c1278c3d92340444d30b37b9d02c4",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-384w.avif",
+      "sha256": "9b4f214373ad4ab8c71fe7bebf38eebac547371a94f6ef36dd1c3d137a6589bc",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-384w.webp",
+      "sha256": "14ae92eb47c222d3f9b95d095ea0909e4f33bdf38849471de3389a9617541f4c",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-512w.avif",
+      "sha256": "edbea3dccf6a2c0682cccb5d275eb65c67cd83808f8755cea2f7bd154390f3ec",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-512w.webp",
+      "sha256": "bd4e11126e238e07188592088efcb9fa0640899cd27545b743bd1843c3031e29",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-768w.avif",
+      "sha256": "5796198f945d9155dfd9664434cb174c77a977f081df0ac3aa23d7f8356a750e",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
+        "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
+      ]
+    },
+    {
+      "file": "goblins/rubia-768w.webp",
+      "sha256": "2a6c480dd5549eceecd33129abc48127b5308a9d64358ccb6ada4d42867867d7",
+      "derived_from": "rubia-3d-1m",
+      "human_edits": [
+        "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
       ]
     },

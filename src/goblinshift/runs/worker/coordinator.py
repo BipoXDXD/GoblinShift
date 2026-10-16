@@ -34,6 +34,7 @@ import os
 import random
 import stat
 import time
+import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -540,10 +541,18 @@ class Coordinator:
         report = collected.report
 
         def publish_outputs(session: Session) -> None:
+            published: dict[str, uuid.UUID] = {}
             for position, candidate in enumerate(stored):
+                source = None if candidate.preview_of is None else published[candidate.preview_of]
                 artifact = publish_artifact(
-                    session, claimed.owner_id, candidate.object_id, candidate.role, candidate.name
+                    session,
+                    claimed.owner_id,
+                    candidate.object_id,
+                    candidate.role,
+                    candidate.name,
+                    source_artifact_id=source,
                 )
+                published[candidate.name] = artifact.id
                 session.execute(
                     insert(run_output).values(
                         run_id=claimed.run_id,
