@@ -8,6 +8,8 @@ import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = () => Response | null;
 
+const EMPTY = { data: [], next_cursor: null };
+
 function setup(runs: Handler, path = "/") {
   const api = fakeApi({ "GET /api/v1/runs": runs });
   return { ...renderRoutes({ routes: appRoutes(api.client), path, client: api.client }), api };
@@ -56,6 +58,44 @@ describe("Oficina: execuções recentes", () => {
     expect(
       await within(section).findByRole("heading", { level: 3, name: "Entre para continuar" }),
     ).toBeVisible();
+  });
+
+  it("sem o cookie de sessão, convida a entrar sem chamar o /me nem a lista", async () => {
+    const api = fakeApi({ "GET /api/v1/runs": () => jsonResponse(EMPTY) }, { csrfToken: null });
+    renderRoutes({ routes: appRoutes(api.client), path: "/", client: api.client });
+
+    const section = await recentSection();
+    expect(
+      await within(section).findByRole("heading", { level: 3, name: "Entre para continuar" }),
+    ).toBeVisible();
+    expect(api.requests).toEqual([]);
+  });
+
+  it("com o /me dizendo que a sessão acabou, não chama a lista", async () => {
+    const api = fakeApi({
+      "GET /api/v1/me": () => problemResponse(401, "AUTHENTICATION_REQUIRED"),
+      "GET /api/v1/runs": () => jsonResponse(EMPTY),
+    });
+    renderRoutes({ routes: appRoutes(api.client), path: "/", client: api.client });
+
+    const section = await recentSection();
+    expect(
+      await within(section).findByRole("heading", { level: 3, name: "Entre para continuar" }),
+    ).toBeVisible();
+    expect(screenRequests(api.requests)).toEqual([]);
+  });
+
+  it("enquanto o /me não confirma a sessão, não chama a lista", async () => {
+    const api = fakeApi({
+      "GET /api/v1/me": () => null,
+      "GET /api/v1/runs": () => jsonResponse(EMPTY),
+    });
+    renderRoutes({ routes: appRoutes(api.client), path: "/", client: api.client });
+
+    expect(
+      await within(await recentSection()).findByText("Carregando as execuções."),
+    ).toBeVisible();
+    expect(screenRequests(api.requests)).toEqual([]);
   });
 
   it("falha da lista não derruba a Oficina", async () => {
