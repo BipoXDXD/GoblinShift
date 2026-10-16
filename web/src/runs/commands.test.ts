@@ -5,6 +5,8 @@ import type { RunCommand } from "../api/types";
 import { fakeApi, jsonResponse, runBody, RUN_ID } from "../test/fakeApi";
 import {
   artifactDownloadPath,
+  cancelRun,
+  type CancelOutcome,
   createRun,
   getRunResults,
   type AcceptedRun,
@@ -21,6 +23,10 @@ const command: RunCommand = {
 describe("tipos espelham a spec", () => {
   it("AcceptedRun", () => {
     expectTypeOf<AcceptedRun>().toEqualTypeOf<components["schemas"]["AcceptedRunResponse"]>();
+  });
+
+  it("CancelOutcome", () => {
+    expectTypeOf<CancelOutcome>().toEqualTypeOf<components["schemas"]["CancelResponse"]>();
   });
 
   it("RunResults", () => {
@@ -41,6 +47,32 @@ describe("createRun", () => {
     const [request] = requests;
     expect(request?.headers.get("Idempotency-Key")).toBe("chave-de-intencao-123");
     expect(await request?.json()).toEqual(command);
+  });
+});
+
+describe("cancelRun", () => {
+  it("manda o POST de cancelamento e devolve o estado que o servidor decidiu", async () => {
+    const { client, requests } = fakeApi({
+      [`POST /api/v1/runs/${RUN_ID}/cancel`]: () =>
+        jsonResponse({ id: RUN_ID, status: "stopping", error_code: null }, 202),
+    });
+
+    const result = await cancelRun(client, RUN_ID);
+
+    expect(result).toEqual({
+      outcome: { id: RUN_ID, status: "stopping", error_code: null },
+      accepted: true,
+    });
+    expect(requests.map((request) => request.method)).toEqual(["POST"]);
+  });
+
+  it("execução já terminal (200) não conta como pedido aceito", async () => {
+    const { client } = fakeApi({
+      [`POST /api/v1/runs/${RUN_ID}/cancel`]: () =>
+        jsonResponse({ id: RUN_ID, status: "succeeded", error_code: null }),
+    });
+
+    expect((await cancelRun(client, RUN_ID)).accepted).toBe(false);
   });
 });
 

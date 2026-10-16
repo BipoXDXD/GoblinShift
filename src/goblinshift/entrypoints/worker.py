@@ -72,12 +72,23 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     config = CoordinatorConfig(
         lease=lease, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
     )
+    hasher = UserHasher(settings.user_hash_key())
     try:
         with (
-            run_finished_reporter(settings, factory, "goblinshift-worker") as finished,
+            process_tracer(settings, "goblinshift-worker") as tracer,
             QueueListener(engine, settings.db_connect_timeout_s) as listener,
         ):
-            coordinator = Coordinator(factory, storage, runner, config, on_finished=finished.report)
+            # Um provider por processo: o span `attempt` e o `run.finished` saem pelo mesmo lote.
+            finished = RunFinishedReporter(factory, hasher, tracer)
+            coordinator = Coordinator(
+                factory,
+                storage,
+                runner,
+                config,
+                on_finished=finished.report,
+                tracer=tracer,
+                user_hasher=hasher,
+            )
             logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
             while not shutdown.is_set():
                 if not _work_once(factory, storage, lease, coordinator, finished):
@@ -89,21 +100,27 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
 
 
 @contextmanager
-def run_finished_reporter(
-    settings: Settings, factory: sessionmaker[Session], default_service: str
-) -> Iterator[RunFinishedReporter]:
-    """Emissor do `run.finished` (3.7) do processo; ao sair, exporta o lote pendente.
+def process_tracer(settings: Settings, default_service: str) -> Iterator[Tracer]:
+    """Tracer dos eventos amplos do processo (3.7); ao sair, exporta o lote pendente.
 
-    Sem endpoint OTLP (desenvolvimento e testes), o evento vai para um tracer que não grava.
+    Sem endpoint OTLP (desenvolvimento e testes), um tracer que não grava.
     """
-    hasher = UserHasher(settings.user_hash_key())
     provider = make_tracer_provider(settings, default_service)
-    tracer: Tracer = provider.get_tracer(__name__) if provider is not None else NoOpTracer()
     try:
-        yield RunFinishedReporter(factory, hasher, tracer)
+        yield provider.get_tracer(__name__) if provider is not None else NoOpTracer()
     finally:
         if provider is not None:
             provider.shutdown()
+
+
+@contextmanager
+def run_finished_reporter(
+    settings: Settings, factory: sessionmaker[Session], default_service: str
+) -> Iterator[RunFinishedReporter]:
+    """Emissor do `run.finished` (3.7) do processo, com o próprio `process_tracer`."""
+    hasher = UserHasher(settings.user_hash_key())
+    with process_tracer(settings, default_service) as tracer:
+        yield RunFinishedReporter(factory, hasher, tracer)
 
 
 def _work_once(

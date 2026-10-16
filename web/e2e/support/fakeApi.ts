@@ -183,6 +183,8 @@ class FakeState {
       await this.listRuns(route, request);
     } else if (method === "GET" && resource === "runs" && id && segments.length === 2) {
       await this.pollRun(route, id);
+    } else if (method === "POST" && resource === "runs" && id && action === "cancel") {
+      await this.cancelRun(route, id);
     } else if (method === "GET" && resource === "runs" && id && action === "results") {
       await this.results(route, id);
     } else if (method === "GET" && resource === "artifacts" && id && action === "download") {
@@ -309,13 +311,38 @@ class FakeState {
       await fulfillProblem(route, "NOT_FOUND", { status: 404 });
       return;
     }
-    if (stored.advances) {
+    if (stored.run.status === "stopping") {
+      stored.run = canceled(stored.run);
+    } else if (stored.advances) {
       stored.run = nextState(stored.run, stored.inputIds.length);
     }
     const headers: Record<string, string> = isTerminal(stored.run)
       ? {}
       : { "Retry-After": POLL_RETRY_AFTER_SECONDS };
     await fulfillJson(route, stored.run, { status: 200, headers });
+  }
+
+  /**
+   * Como runs/cancellation.py: a fila cancela na hora (200 `canceled`), o trabalho em curso passa a
+   * `stopping` (202) e vira `canceled` na consulta seguinte; terminal devolve o que é (200).
+   */
+  private async cancelRun(route: Route, id: string): Promise<void> {
+    const stored = this.runs.get(id);
+    if (stored === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    if (stored.run.status === "queued") {
+      stored.run = canceled(stored.run);
+    } else if (stored.run.status === "running") {
+      stored.run = { ...stored.run, status: "stopping" };
+    }
+    const outcome: Schemas["CancelResponse"] = {
+      id,
+      status: stored.run.status,
+      error_code: stored.run.error?.code ?? null,
+    };
+    await fulfillJson(route, outcome, { status: stored.run.status === "stopping" ? 202 : 200 });
   }
 
   private async results(route: Route, id: string): Promise<void> {
@@ -438,6 +465,15 @@ function nextState(run: Run, inputs: number): Run {
     };
   }
   return run;
+}
+
+function canceled(run: Run): Run {
+  return {
+    ...run,
+    status: "canceled",
+    progress: { ...run.progress, phase: null },
+    error: { code: "CANCELED", message: "Execução cancelada." },
+  };
 }
 
 const TERMINAL: ReadonlySet<Run["status"]> = new Set([
