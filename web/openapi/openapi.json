@@ -3709,6 +3709,11 @@
               }
             ],
             "title": "Daily Quota Resets At"
+          },
+          "executor_ms_last_24h": {
+            "type": "integer",
+            "title": "Executor Ms Last 24H",
+            "description": "Tempo de executor das tentativas que começaram nas últimas 24 h (1.8)."
           }
         },
         "type": "object",
@@ -3717,7 +3722,8 @@
           "input_bytes_last_24h",
           "storage_reserved_bytes",
           "active_run_id",
-          "daily_quota_resets_at"
+          "daily_quota_resets_at",
+          "executor_ms_last_24h"
         ],
         "title": "Usage"
       },
