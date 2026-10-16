@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import CATALOG, Catalog, VersionStatus
 from goblinshift.catalog.versions import CSV_JANITOR_V1
+from goblinshift.entrypoints.api import runs as runs_route
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.files.states import ArtifactRole
@@ -276,6 +277,64 @@ def test_versao_retirada_responde_422(
     )
 
     assert_problem(response, 422, "RECIPE_VERSION_RETIRED")
+
+
+SUNSET = datetime(2027, 1, 15, 12, 30, tzinfo=UTC)
+SUNSET_HTTP_DATE = "Fri, 15 Jan 2027 12:30:00 GMT"
+
+
+def deprecate_csv_janitor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """csv-janitor v1 deprecated na aceitação e na rota (cada módulo guarda a sua referência)."""
+    deprecated = Catalog(
+        [replace(CSV_JANITOR_V1, status=VersionStatus.DEPRECATED, sunset_at=SUNSET)]
+    )
+    monkeypatch.setattr(acceptance, "CATALOG", deprecated)
+    monkeypatch.setattr(runs_route, "CATALOG", deprecated)
+
+
+def test_versao_deprecated_e_aceita_com_o_header_sunset(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deprecate_csv_janitor(monkeypatch)
+    account = Account(factory)
+    key = str(uuid.uuid4())
+    payload = body(ready_inputs(factory, storage, account.id))
+
+    accepted = post_run(client, account, payload, key)
+    replayed = post_run(client, account, payload, key)
+
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.headers["sunset"] == SUNSET_HTTP_DATE
+    assert replayed.headers["idempotency-replayed"] == "true"
+    assert replayed.headers["sunset"] == SUNSET_HTTP_DATE
+
+
+def test_validate_only_de_versao_deprecated_traz_o_header_sunset(
+    client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deprecate_csv_janitor(monkeypatch)
+    payload = {"recipe_id": "csv-janitor", "recipe_version": 1, "parameters": {}}
+
+    response = post_run(client, Account(factory), payload, query="?validate_only=true")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["sunset"] == SUNSET_HTTP_DATE
+
+
+def test_versao_atual_nao_traz_o_header_sunset(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+
+    response = post_run(
+        client, account, body(ready_inputs(factory, storage, account.id)), str(uuid.uuid4())
+    )
+
+    assert response.status_code == 202
+    assert "sunset" not in response.headers
 
 
 def test_segunda_execucao_ativa_responde_409(
