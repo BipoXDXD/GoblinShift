@@ -8,6 +8,10 @@ a validação do ID token (assinatura RS256 pela JWKS, `iss`, `aud`, `exp`, `non
 fica em `login_state` e só vale no navegador que tem o marcador no cookie `__Secure-gs_login`.
 Toda recusa (provedor, state, token, conta bloqueada ou pendente) responde o mesmo redirect
 genérico, sem dizer qual foi o caso; o log do servidor registra só o provedor e o tipo da falha.
+O redirect leva no fragmento um código de referência, o `request_id` do callback (o mesmo do
+header `X-Request-ID`), gravado no evento `LOGIN_FAILED` com a conta recusada: a pessoa o cita no
+recurso contra o bloqueio e o operador acha a conta (J-10). O código é aleatório e igual em forma
+para toda recusa; no fragmento, o navegador não o envia a servidor nenhum, nem no `Referer`.
 
 As rotas são `async` porque a integração Starlette do Authlib é; o banco é acessado numa thread
 do pool, em transação curta, e nunca durante uma chamada ao provedor.
@@ -36,13 +40,13 @@ from starlette.concurrency import run_in_threadpool
 
 from goblinshift.entrypoints.api.cookies import SESSION_COOKIE, set_session_cookies
 from goblinshift.entrypoints.api.dependencies import Now
-from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
+from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, request_id_of
 from goblinshift.identity import (
     AuditEventType,
     AuditOutcome,
     ExternalIdentity,
     IssuedSession,
-    LoginRefused,
+    LoginRefusal,
     authenticate_session,
     record_audit_event,
     resolve_login,
@@ -73,8 +77,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", include_in_schema=False)
 
-# Mesmo destino para toda recusa: a SPA mostra "não foi possível entrar" (sem enumeração).
+# Mesmo destino para toda recusa: a SPA mostra "não foi possível entrar" (sem enumeração) e o
+# código de referência do fragmento (`#ref=<request_id>`).
 LOGIN_FAILED_LOCATION = "/?login_error=failed"
+LOGIN_REF_FRAGMENT = "ref"
 # Proteção contra open redirect: só caminho local, sem `//`, `\`, controle nem esquema.
 RETURN_TO_PATTERN = re.compile(r"/(?!/)[A-Za-z0-9/_\-.?=&%]*")
 MAX_RETURN_TO_CHARS = 512
@@ -202,13 +208,20 @@ async def _read_github_identity(oauth_app: Any, request: Request) -> ExternalIde
 
 @router.get("/login/{provider}")
 async def start_login(
-    request: Request, provider: str, return_to: str | None = None, reauth: str | None = None
+    request: Request,
+    provider: str,
+    now: Now,
+    return_to: str | None = None,
+    reauth: str | None = None,
 ) -> Response:
     """Redireciona ao provedor com PKCE e `state`; só `return_to` e `reauth=1` são aceitos."""
     name = _provider_name(provider)
     login_provider = _providers(request).get(name)
     if login_provider is None:
-        return _login_failed()
+        attempt = _attempt(request, now)
+        factory: sessionmaker[Session] = request.app.state.session_factory
+        await run_in_threadpool(_record_login_failure, factory, attempt)
+        return _login_failed(attempt)
     request.session[_return_to_key(name)] = _safe_return_to(return_to)
     extra = {"prompt": REAUTH_PROMPT} if reauth == "1" else {}
     response: Response = await login_provider.oauth_app.authorize_redirect(
@@ -222,18 +235,18 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
     """Valida a volta do provedor, resolve a conta e emite uma sessão nova."""
     name = _provider_name(provider)
     factory: sessionmaker[Session] = request.app.state.session_factory
-    ip = request.client.host if request.client else None
+    attempt = _attempt(request, now)
     return_to = _safe_return_to(request.session.pop(_return_to_key(name), None))
     login_provider = _providers(request).get(name)
     if login_provider is None:
-        await run_in_threadpool(_record_login_failure, factory, ip, now)
-        return _login_failed()
+        await run_in_threadpool(_record_login_failure, factory, attempt)
+        return _login_failed(attempt)
     try:
         identity = await login_provider.fetch_identity(request)
     except LOGIN_ERRORS as exc:
         logger.warning("login %s recusado: %s", name, _failure_kind(exc))
-        await run_in_threadpool(_record_login_failure, factory, ip, now)
-        return _login_failed()
+        await run_in_threadpool(_record_login_failure, factory, attempt)
+        return _login_failed(attempt)
 
     web: WebIdentityConfig = request.app.state.web_identity
     result = await run_in_threadpool(
@@ -243,12 +256,11 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
         web.signup_open,
         web.csrf_key,
         request.cookies.get(SESSION_COOKIE),
-        ip,
-        now,
+        attempt,
     )
-    if isinstance(result, LoginRefused):
-        logger.info("login %s recusado: conta %s", name, result.name)
-        return _login_failed()
+    if isinstance(result, LoginRefusal):
+        logger.info("login %s recusado: conta %s", name, result.reason.name)
+        return _login_failed(attempt)
     response = RedirectResponse(return_to, status_code=303)
     set_session_cookies(response, result)
     return response
@@ -257,26 +269,35 @@ async def finish_login(request: Request, provider: str, now: Now) -> Response:
 # --- Banco (numa thread do pool) --------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class LoginAttempt:
+    """O que a auditoria guarda de cada callback: IP (truncado na gravação), código e hora."""
+
+    ip: str | None
+    request_id: UUID
+    now: datetime
+
+
 def _complete_login(
     factory: sessionmaker[Session],
     identity: ExternalIdentity,
     signup_open: bool,
     csrf_key: bytes,
     previous_token: str | None,
-    ip: str | None,
-    now: datetime,
-) -> IssuedSession | LoginRefused:
+    attempt: LoginAttempt,
+) -> IssuedSession | LoginRefusal:
     """Conta, sessão nova e auditoria numa transação só (a conta pendente também é gravada)."""
+    now = attempt.now
     with unit_of_work(factory) as session:
         resolved = resolve_login(session, identity, signup_open=signup_open, now=now)
-        if isinstance(resolved, LoginRefused):
-            _record(session, AuditEventType.LOGIN_FAILED, None, ip, AuditOutcome.FAILURE, now)
+        if isinstance(resolved, LoginRefusal):
+            _record(session, AuditEventType.LOGIN_FAILED, resolved.account_id, attempt)
             return resolved
         _revoke_previous_session(session, previous_token, now)
         issued = start_session(
             session, user_id=resolved, authenticated_at=now, now=now, csrf_key=csrf_key
         )
-        _record(session, AuditEventType.LOGIN_SUCCEEDED, resolved, ip, AuditOutcome.SUCCESS, now)
+        _record(session, AuditEventType.LOGIN_SUCCEEDED, resolved, attempt)
         return issued
 
 
@@ -289,20 +310,26 @@ def _revoke_previous_session(session: Session, token: str | None, now: datetime)
         revoke_session(session, previous.session_id, now)
 
 
-def _record_login_failure(factory: sessionmaker[Session], ip: str | None, now: datetime) -> None:
+def _record_login_failure(factory: sessionmaker[Session], attempt: LoginAttempt) -> None:
     with unit_of_work(factory) as session:
-        _record(session, AuditEventType.LOGIN_FAILED, None, ip, AuditOutcome.FAILURE, now)
+        _record(session, AuditEventType.LOGIN_FAILED, None, attempt)
 
 
 def _record(
-    session: Session,
-    event: AuditEventType,
-    user_id: UUID | None,
-    ip: str | None,
-    outcome: AuditOutcome,
-    now: datetime,
+    session: Session, event: AuditEventType, user_id: UUID | None, attempt: LoginAttempt
 ) -> None:
-    record_audit_event(session, event=event, user_id=user_id, ip=ip, outcome=outcome, now=now)
+    outcome = (
+        AuditOutcome.SUCCESS if event is AuditEventType.LOGIN_SUCCEEDED else AuditOutcome.FAILURE
+    )
+    record_audit_event(
+        session,
+        event=event,
+        user_id=user_id,
+        ip=attempt.ip,
+        outcome=outcome,
+        now=attempt.now,
+        request_id=attempt.request_id,
+    )
 
 
 # --- Apoio ------------------------------------------------------------------------------------
@@ -339,6 +366,14 @@ def _safe_return_to(value: object) -> str:
     return DEFAULT_RETURN_TO
 
 
+def _attempt(request: Request, now: datetime) -> LoginAttempt:
+    return LoginAttempt(
+        ip=request.client.host if request.client else None,
+        request_id=UUID(request_id_of(request)),
+        now=now,
+    )
+
+
 def _failure_kind(exc: Exception) -> str:
     """Tipo da falha para o log, sem a mensagem: ela pode trazer dado do provedor ou do cliente."""
     if isinstance(exc, HTTPStatusError):
@@ -346,5 +381,7 @@ def _failure_kind(exc: Exception) -> str:
     return type(exc).__name__
 
 
-def _login_failed() -> Response:
-    return RedirectResponse(LOGIN_FAILED_LOCATION, status_code=303)
+def _login_failed(attempt: LoginAttempt) -> Response:
+    """O redirect genérico, com o código de referência no fragmento (nunca na query)."""
+    location = f"{LOGIN_FAILED_LOCATION}#{LOGIN_REF_FRAGMENT}={attempt.request_id}"
+    return RedirectResponse(location, status_code=303)

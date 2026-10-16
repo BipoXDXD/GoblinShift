@@ -54,8 +54,12 @@ def record(
     ip: str | None,
     outcome: AuditOutcome,
     now: datetime,
+    request_id: UUID | None = None,
 ) -> None:
     """Grava o evento na transação de quem chama.
+
+    `request_id` liga o evento ao `X-Request-ID` da resposta; o login o grava para o operador
+    achar a conta pelo código da tela de login recusado.
 
     Uma recusa (CSRF, 403) desfaz a transação da requisição; quem a audita abre uma transação
     própria para que o evento sobreviva ao rollback.
@@ -67,6 +71,7 @@ def record(
             outcome=outcome.value,
             ip_prefix=truncate_ip(ip),
             occurred_at=now,
+            request_id=request_id,
         )
     )
 
