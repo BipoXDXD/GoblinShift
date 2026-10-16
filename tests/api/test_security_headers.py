@@ -20,6 +20,7 @@ from starlette.types import Receive, Scope, Send
 
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from tests.api.files_support import new_account, publish
+from tests.api.test_api_docs import DOCS_CSP
 from tests.security.authz_matrix import entries
 
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
@@ -173,8 +174,8 @@ def test_respostas_da_api_tem_cabecalhos_de_3_6(offline_client: TestClient, path
     response = offline_client.get(concrete)
 
     if path == _DOCS:
-        _assert_common(response.headers, csp=None)
-        assert "content-security-policy" not in response.headers
+        # A /docs tem CSP própria (test_api_docs.py); o resto dos cabeçalhos é o comum.
+        _assert_common(response.headers, csp=DOCS_CSP)
     else:
         _assert_common(response.headers)
 

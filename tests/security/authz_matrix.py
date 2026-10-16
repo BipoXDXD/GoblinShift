@@ -45,10 +45,11 @@ def _scope(scope: Scope, resource_param: str | None = None) -> Rule:
 API = "/api/v1"
 
 MATRIX: dict[tuple[str, str], Rule] = {
-    # Infraestrutura e documentação (a documentação só existe fora de produção: test_api_docs.py).
+    # Infraestrutura e documentação (Swagger UI servido da própria origem: test_api_docs.py).
     ("GET", "/livez"): Rule(Policy.PUBLIC),
     ("GET", "/readyz"): Rule(Policy.PUBLIC),
     ("GET", "/docs"): Rule(Policy.PUBLIC),
+    ("GET", "/docs/assets/{name}"): Rule(Policy.PUBLIC),
     ("GET", "/openapi.json"): Rule(Policy.PUBLIC),
     # Login (Frente A): o estado do login protege o callback, não uma credencial.
     ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC),
