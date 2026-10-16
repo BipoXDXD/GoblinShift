@@ -621,7 +621,7 @@ export interface components {
          *     (1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui.
          * @enum {string}
          */
-        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED";
+        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED" | "THUMBNAIL_BEFORE_TARGET";
         /** Limits */
         Limits: {
             /** Runs Per 24H */

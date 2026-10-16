@@ -296,6 +296,8 @@ export const TEXT = {
           "Há células que parecem fórmulas de planilha. Abra a saída com cuidado, ou use a opção de prefixar.",
         CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
         INPUT_NOT_SELECTED: "Nenhuma página deste PDF foi escolhida; ele não entrou no resultado.",
+        THUMBNAIL_BEFORE_TARGET:
+          "Não havia quadro no ponto pedido do vídeo; a miniatura usa o último quadro anterior.",
       },
       formulaCells: {
         columnsLabel: "Células que parecem fórmulas, por coluna",
