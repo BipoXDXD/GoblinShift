@@ -87,6 +87,12 @@ _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.OUTPUT_LIMIT_EXCEEDED: "As saídas passaram do limite da execução.",
     ErrorCode.REPORT_LIMIT_EXCEEDED: "O relatório passou do limite de tamanho.",
     ErrorCode.RESOURCE_LIMIT_EXCEEDED: "A execução passou dos limites de memória, disco ou tempo.",
+    ErrorCode.INPUT_LIMIT_EXCEEDED: "As entradas passaram de um limite da receita.",
+    ErrorCode.PDF_INVALID: "Um dos PDFs está danificado ou não é um PDF.",
+    ErrorCode.PDF_UNSUPPORTED_FEATURE: (
+        "Um dos PDFs tem senha, formulário, assinatura, anexo ou conteúdo ativo."
+    ),
+    ErrorCode.PDF_PAGE_NOT_FOUND: "Uma das páginas escolhidas não existe no documento.",
     ErrorCode.EXECUTOR_UNAVAILABLE: "O executor ficou indisponível nas tentativas permitidas.",
     ErrorCode.QUEUE_EXPIRED: "A execução não começou dentro do prazo da fila.",
     ErrorCode.DEADLINE_EXCEEDED: "A execução passou do prazo total.",
