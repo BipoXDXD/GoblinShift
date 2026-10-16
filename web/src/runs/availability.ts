@@ -21,6 +21,8 @@ export function unavailableReason(
       return expiresAt === null ? T.fileExpired : T.fileExpiredOn(formatDateTime(expiresAt));
     case "deleted":
       return T.fileDeleted;
+    case "missing":
+      return T.fileMissing;
     default:
       return T.fileUnavailable;
   }

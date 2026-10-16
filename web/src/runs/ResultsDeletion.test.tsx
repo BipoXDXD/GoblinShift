@@ -25,7 +25,7 @@ const OPEN_BUTTON = "Excluir resultados";
 const REPORT_ID = "7d3c2a1e-0000-4000-8000-0000000000bb";
 const EXPIRES_AT = "2026-10-16T12:00:00Z";
 
-type Availability = "available" | "expired" | "deleted";
+type Availability = "available" | "expired" | "deleted" | "missing";
 
 function packageRef(availability: Availability) {
   return {
@@ -34,6 +34,7 @@ function packageRef(availability: Availability) {
     role: "package",
     file_name: "csv-janitor.zip",
     availability,
+    source_artifact_id: null,
   };
 }
 
@@ -44,6 +45,7 @@ function reportRef(availability: Availability) {
     role: "report",
     file_name: "relatorio.json",
     availability,
+    source_artifact_id: null,
   };
 }
 
@@ -128,6 +130,41 @@ describe("Resultados: disponibilidade vem do /results", () => {
     expect(region).not.toHaveTextContent("48 horas");
     expect(within(region).queryByRole("link", { name: /^Baixar/ })).toBeNull();
     expect(within(region).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
+  });
+
+  it("todos perdidos: sem links nem Excluir, explicando que os arquivos se perderam", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("missing"), reportRef("missing")),
+      ),
+    });
+
+    const region = await resultsRegion();
+    expect(
+      await within(region).findByRole("heading", { name: "Resultados perdidos" }),
+    ).toBeVisible();
+    expect(region).toHaveTextContent(
+      "Os arquivos gerados por esta execução se perderam e não podem mais ser baixados. Os que você enviou não mudam.",
+    );
+    expect(within(region).queryByRole("link", { name: /^Baixar/ })).toBeNull();
+    expect(within(region).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
+  });
+
+  it("um arquivo perdido entre disponíveis: sem link para ele, dizendo que se perdeu", async () => {
+    setup({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: resultsHandler(
+        resultsWith(packageRef("available"), reportRef("missing")),
+      ),
+    });
+
+    const region = await resultsRegion();
+    expect(
+      await within(region).findByRole("link", { name: /^Baixar csv-janitor\.zip/ }),
+    ).toBeVisible();
+    expect(within(region).queryByRole("link", { name: /relatorio\.json/ })).toBeNull();
+    expect(within(region).getByRole("listitem")).toHaveTextContent(
+      "relatorio.json (relatório): perdido.",
+    );
   });
 
   it("nenhum disponível por motivos diferentes: estado vazio de indisponíveis", async () => {

@@ -166,6 +166,13 @@ export const SCREENS: readonly Screen[] = [
           notices: [],
           counts: { records_read: 1200, filtered_out: 3, written: 1197 },
           duplicate_of: null,
+          formula_cells: {
+            columns: [
+              { name: "saldo", cells: 14 },
+              { name: "observação", cells: 1 },
+            ],
+            more_columns: 2,
+          },
         },
         {
           position: 1,
@@ -177,6 +184,7 @@ export const SCREENS: readonly Screen[] = [
           notices: [],
           counts: {},
           duplicate_of: null,
+          formula_cells: null,
         },
         {
           position: 2,
@@ -188,6 +196,7 @@ export const SCREENS: readonly Screen[] = [
           notices: [],
           counts: { records_read: 10, written: 10 },
           duplicate_of: null,
+          formula_cells: null,
         },
       ],
     },

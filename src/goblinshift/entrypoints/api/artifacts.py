@@ -117,6 +117,8 @@ def download_artifact(
     try:
         file = storage.open(ticket.storage_key)
     except ObjectMissingError:
+        # Sem gravar `missing`: só a varredura da manutenção marca, com a sentinela de montagem e
+        # o limitador (files/missing.py); daqui, um storage desmontado marcaria objetos válidos.
         logger.error("download: objeto do artefato %s ausente do storage", artifact_id)
         finish()
         raise _artifact_problem(ArtifactGoneError()) from None
@@ -203,6 +205,8 @@ def _artifact_problem(error: FilesError) -> ApiProblem:
         case ArtifactNotFoundError():
             return ApiProblem(ProblemCode.NOT_FOUND, "Artefato não encontrado.")
         case ArtifactGoneError():
-            return ApiProblem(ProblemCode.GONE, "O artefato expirou ou foi excluído.")
+            return ApiProblem(
+                ProblemCode.GONE, "O artefato expirou, foi excluído ou o arquivo se perdeu."
+            )
         case _:
             raise error

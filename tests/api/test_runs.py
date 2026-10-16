@@ -69,6 +69,7 @@ ITEM_KEYS = {
     "notices",
     "counts",
     "duplicate_of",
+    "formula_cells",
 }
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
@@ -915,6 +916,7 @@ def test_resultados_publicados_em_ordem_de_posicao(
             "file_name": "output-final.dat",
             # `publish` vence em BASE_TIME + 48 h, que já passou.
             "availability": "expired",
+            "source_artifact_id": None,
         },
         {
             "artifact_id": str(report),
@@ -922,8 +924,25 @@ def test_resultados_publicados_em_ordem_de_posicao(
             "role": "report",
             "file_name": "report-final.dat",
             "availability": "expired",
+            "source_artifact_id": None,
         },
     ]
+
+
+def test_preview_nos_resultados_aponta_a_saida_de_origem(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    _, table = publish(factory, account.id, run_id)
+    preview = publish_preview(factory, account.id, run_id, of=table)
+
+    artifacts = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()["artifacts"]
+
+    by_id = {a["artifact_id"]: a for a in artifacts}
+    assert by_id[str(preview)]["role"] == "preview"
+    assert by_id[str(preview)]["source_artifact_id"] == str(table)
+    assert by_id[str(table)]["source_artifact_id"] is None
 
 
 def test_resultados_com_nomes_anulados_trazem_o_nome_generico(
@@ -1016,6 +1035,46 @@ def publish(
             ],
         )
     return ids[ArtifactRole.REPORT], ids[ArtifactRole.OUTPUT]
+
+
+def publish_preview(
+    factory: sessionmaker[Session], owner_id: uuid.UUID, run_id: uuid.UUID, *, of: uuid.UUID
+) -> uuid.UUID:
+    """Preview da saída `of`, na posição 2, depois do que `publish` grava (ADR 037)."""
+    with unit_of_work(factory) as session:
+        object_id = session.execute(
+            insert(stored_object)
+            .values(
+                owner_id=owner_id,
+                storage_key=f"runs/{run_id}/preview",
+                state="committed",
+                sha256=b"\x00" * 32,
+                size_bytes=1,
+            )
+            .returning(stored_object.c.id)
+        ).scalar_one()
+        preview_id: uuid.UUID = session.execute(
+            insert(artifact)
+            .values(
+                owner_id=owner_id,
+                object_id=object_id,
+                role=ArtifactRole.PREVIEW,
+                file_name="dados.csv",
+                expires_at=BASE_TIME + timedelta(hours=48),
+                source_artifact_id=of,
+            )
+            .returning(artifact.c.id)
+        ).scalar_one()
+        session.execute(
+            insert(run_output).values(
+                run_id=run_id,
+                position=2,
+                owner_id=owner_id,
+                artifact_id=preview_id,
+                logical_name="previews/dados.csv",
+            )
+        )
+    return preview_id
 
 
 def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
@@ -1151,6 +1210,14 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
         "notices": ["IMAGE_P3_CONVERTED"],
         "counts": {"records_read": 2},
         "duplicate_of": None,
+        "formula_cells": {
+            "columns": [
+                {"name": "valor", "cells": 3},
+                {"name": "<b>conta</b>", "cells": 1},
+                {"name": None, "cells": 1},
+            ],
+            "more_columns": 2,
+        },
     }
     uploads = with_items(
         factory,
@@ -1184,6 +1251,16 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": ["IMAGE_P3_CONVERTED"],
             "counts": {"records_read": 2},
             "duplicate_of": None,
+            # Nome de coluna é dado do usuário: sai como texto, sem escapar nem interpretar; a
+            # coluna de cabeçalho vazio sai com nome nulo, sem sumir com a contagem.
+            "formula_cells": {
+                "columns": [
+                    {"name": "valor", "cells": 3},
+                    {"name": "<b>conta</b>", "cells": 1},
+                    {"name": None, "cells": 1},
+                ],
+                "more_columns": 2,
+            },
         },
         {
             "position": 1,
@@ -1195,6 +1272,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": [],
             "counts": {},
             "duplicate_of": None,
+            "formula_cells": None,
         },
         {
             "position": 2,
@@ -1206,6 +1284,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "notices": [],
             "counts": {},
             "duplicate_of": 0,
+            "formula_cells": None,
         },
     ]
 
@@ -1221,6 +1300,7 @@ def test_item_ainda_nao_avaliado_aparece_pendente(
     [item] = body["items"]
     assert item.keys() == ITEM_KEYS
     assert (item["status"], item["warnings"], item["counts"]) == ("pending", [], {})
+    assert item["formula_cells"] is None
     assert body["summary"] is None
 
 
@@ -1235,6 +1315,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
         "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
         "duplicate_of": None,
         "original_name": "salarios-ana.csv",
+        "formula_cells": {"columns": [{"name": "Ana", "cells": "7"}], "more_columns": 0},
     }
     with_items(
         factory,
@@ -1251,6 +1332,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
     assert item["notices"] == []
     assert item["counts"] == {"records_read": 1}
     assert item["error_code"] is None
+    assert item["formula_cells"] is None
     assert "ana" not in response.text.lower()
 
 
