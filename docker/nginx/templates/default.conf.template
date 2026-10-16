@@ -36,6 +36,12 @@ limit_req_status 429;
 # nunca repetindo métodos não idempotentes). O rollout espera esse `valid` antes de parar a API velha.
 resolver 127.0.0.11 valid=5s ipv6=off;
 
+# O mime.types da imagem não conhece o GLB da abertura (ADR 030): sem isto sairia
+# application/octet-stream. No contexto http, este bloco soma ao mime.types em vez de trocá-lo.
+types {
+    model/gltf-binary glb;
+}
+
 server {
     listen 80 default_server;
     server_name ${GS_DOMAIN};
@@ -54,6 +60,17 @@ server {
 
     # Teto padrão dos comandos JSON (docs/GoblinShiftPlan.md, 1.7).
     client_max_body_size 64k;
+
+    # Compressão só do que é texto estático (o text/html entra sempre). Imagens, GLB, fontes e ZIP
+    # já chegam comprimidos. O JSON da API fica de fora: ele leva segredos (a chave de API mostrada
+    # uma vez) ao lado de texto que o cliente controla, a receita do BREACH, e é pequeno.
+    # `gzip_proxied any`: a borda acrescenta Via aos pedidos, e sem isto nada atrás dela seria
+    # comprimido.
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_types text/css application/javascript image/svg+xml application/manifest+json;
 
     # SPA: arquivo existente ou o index.html, que o React Router resolve no navegador. Sem
     # cache: um deploy novo vale na próxima navegação.
@@ -88,21 +105,33 @@ server {
         add_header Cache-Control no-cache always;
         include /etc/nginx/snippets/spa-headers.conf;
     }
+    # robots.txt (e outro .txt ou .xml que vier a existir na raiz) servido de verdade; o que não
+    # existir é 404, nunca o index.html com 200 (soft 404 para os buscadores).
+    location ~ ^/[^/]+\.(?:txt|xml)$ {
+        try_files $uri =404;
+        charset utf-8;
+        add_header Cache-Control no-cache always;
+        include /etc/nginx/snippets/spa-headers.conf;
+    }
 
     # Arquivos com hash no nome (build do Vite): mudam de nome a cada mudança de conteúdo. Um
-    # asset ausente é 404, nunca o index.html servido como JavaScript.
+    # asset ausente é 404, nunca o index.html servido como JavaScript. O cache imutável sem
+    # `always` vale só para 2xx e 304: um 404 imutável ficaria um ano no navegador.
     location /assets/ {
         try_files $uri =404;
-        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header Cache-Control "public, max-age=31536000, immutable";
         include /etc/nginx/snippets/spa-headers.conf;
     }
 
     # Backend. A CSP da SPA não se aplica: a API define a sua (downloads com sandbox) e a /docs
-    # serve o Swagger UI.
+    # tem a própria, com o Swagger UI servido pela API, da mesma origem (api_docs.py).
     location /api/ {
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location = /docs {
+        include /etc/nginx/snippets/proxy-api.conf;
+    }
+    location /docs/assets/ {
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location = /openapi.json {

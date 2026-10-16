@@ -5,8 +5,8 @@ do OpenTelemetry. Mexe só na mensagem `http.response.start`; o corpo passa inta
 sobrescreve nem duplica um header que a rota já definiu (o download tem a sua CSP).
 
 A CSP da SPA (`script-src 'self'`…) é do Nginx, que serve os estáticos (fatia 7). As respostas da
-API não são documentos: recebem `default-src 'none'`. A exceção é o HTML da `/docs`, cujo Swagger
-UI carrega script e estilo e quebraria com essa CSP.
+API não são documentos: recebem `default-src 'none'`. A exceção é o HTML da `/docs`, que define
+a própria CSP (api_docs.py): o Swagger UI carrega script e estilo da origem.
 """
 
 from starlette.datastructures import MutableHeaders
@@ -22,6 +22,9 @@ _COMMON_HEADERS = (
     ("x-content-type-options", "nosniff"),
     ("referrer-policy", "strict-origin-when-cross-origin"),
     ("cross-origin-opener-policy", "same-origin"),
+    # Nenhuma resposta da API é recurso para outro site embutir (img, script, fetch no-cors). O
+    # download baixado pela própria origem, por navegação ou fetch, não é afetado.
+    ("cross-origin-resource-policy", "same-origin"),
     ("permissions-policy", "camera=(), microphone=(), geolocation=()"),
     ("cache-control", "no-store"),
 )
