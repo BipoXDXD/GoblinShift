@@ -44,6 +44,7 @@ describe("tipos de execução espelham a spec", () => {
       notices: Coded<SpecItem["notices"][number]>[];
       counts: SpecItem["counts"];
       duplicate_of: SpecItem["duplicate_of"];
+      formula_cells: SpecItem["formula_cells"];
     }>();
   });
 });
