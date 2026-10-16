@@ -32,10 +32,16 @@ class Rule:
     scope: Scope | None = None
     # Parâmetro do caminho que identifica um recurso com dono: outra conta recebe 404.
     resource_param: str | None = None
+    # Escopos exigidos além de `scope`; faltar qualquer um deles também é 403.
+    also_requires: frozenset[Scope] = frozenset()
 
     def __post_init__(self) -> None:
         if (self.policy is Policy.SCOPE) != (self.scope is not None):
             raise ValueError("escopo existe só, e sempre, na política SCOPE")
+
+    @property
+    def required_scopes(self) -> frozenset[Scope]:
+        return self.also_requires | ({self.scope} if self.scope is not None else set())
 
 
 def _scope(scope: Scope, resource_param: str | None = None) -> Rule:
@@ -77,6 +83,18 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("DELETE", f"{API}/uploads/{{upload_id}}"): _scope(Scope.FILES_WRITE, "upload_id"),
     ("GET", f"{API}/artifacts/{{artifact_id}}"): _scope(Scope.FILES_READ, "artifact_id"),
     ("GET", f"{API}/artifacts/{{artifact_id}}/download"): _scope(Scope.FILES_READ, "artifact_id"),
+    # Presets.
+    ("GET", f"{API}/presets"): _scope(Scope.PRESETS_READ),
+    ("POST", f"{API}/presets"): _scope(Scope.PRESETS_WRITE),
+    ("GET", f"{API}/presets/{{preset_id}}"): _scope(Scope.PRESETS_READ, "preset_id"),
+    ("PUT", f"{API}/presets/{{preset_id}}"): _scope(Scope.PRESETS_WRITE, "preset_id"),
+    ("DELETE", f"{API}/presets/{{preset_id}}"): _scope(Scope.PRESETS_WRITE, "preset_id"),
+    ("POST", f"{API}/presets/{{preset_id}}/runs"): Rule(
+        Policy.SCOPE,
+        scope=Scope.RUNS_WRITE,
+        resource_param="preset_id",
+        also_requires=frozenset({Scope.PRESETS_READ}),
+    ),
     # Execuções.
     ("POST", f"{API}/runs"): _scope(Scope.RUNS_WRITE),
     ("GET", f"{API}/runs"): _scope(Scope.RUNS_READ),
