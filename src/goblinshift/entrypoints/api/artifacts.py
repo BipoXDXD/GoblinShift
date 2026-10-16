@@ -29,6 +29,7 @@ from goblinshift.entrypoints.api.transfers import (
 from goblinshift.files.artifacts import (
     DownloadTicket,
     finish_download,
+    finish_missing_download,
     get_artifact,
     open_for_download,
     open_preview,
@@ -118,7 +119,9 @@ def download_artifact(
         file = storage.open(ticket.storage_key)
     except ObjectMissingError:
         logger.error("download: objeto do artefato %s ausente do storage", artifact_id)
-        finish()
+        with unit_of_work(factory) as finishing:
+            release_transfer_slot(finishing, slot_id)
+            finish_missing_download(finishing, ticket)
         raise _artifact_problem(ArtifactGoneError()) from None
     except BaseException:
         finish()
@@ -173,10 +176,13 @@ def get_artifact_preview(
             content = file.read(PREVIEW_READ_MAX_BYTES + 1)
     except ObjectMissingError:
         logger.error("preview: objeto do artefato %s ausente do storage", ticket.artifact_id)
-        raise _artifact_problem(ArtifactGoneError()) from None
-    finally:
         with unit_of_work(factory) as finishing:
-            finish_download(finishing, ticket)
+            finish_missing_download(finishing, ticket)
+        raise _artifact_problem(ArtifactGoneError()) from None
+    except BaseException:
+        _finish_preview(factory, ticket)
+        raise
+    _finish_preview(factory, ticket)
     if len(content) != ticket.size_bytes:
         raise RuntimeError(f"preview {ticket.artifact_id} com tamanho diferente do registrado")
     name = PurePosixPath(ticket.file_name).name
@@ -185,6 +191,11 @@ def get_artifact_preview(
         media_type=JPEG_MEDIA_TYPE if name.endswith(_JPEG_SUFFIX) else OCTET_STREAM,
         headers={"Content-Disposition": content_disposition(name), **DOWNLOAD_PROTECTION_HEADERS},
     )
+
+
+def _finish_preview(factory: sessionmaker[Session], ticket: DownloadTicket) -> None:
+    with unit_of_work(factory) as session:
+        finish_download(session, ticket)
 
 
 def _finish_download(factory: sessionmaker[Session], ticket: DownloadTicket, slot_id: UUID) -> None:
@@ -203,6 +214,8 @@ def _artifact_problem(error: FilesError) -> ApiProblem:
         case ArtifactNotFoundError():
             return ApiProblem(ProblemCode.NOT_FOUND, "Artefato não encontrado.")
         case ArtifactGoneError():
-            return ApiProblem(ProblemCode.GONE, "O artefato expirou ou foi excluído.")
+            return ApiProblem(
+                ProblemCode.GONE, "O artefato expirou, foi excluído ou o arquivo se perdeu."
+            )
         case _:
             raise error
