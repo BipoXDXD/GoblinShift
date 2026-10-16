@@ -37,6 +37,7 @@ const meSchema = z.object({
     storage_reserved_bytes: z.number().int(),
     active_run_id: z.uuid().nullable(),
     daily_quota_resets_at: instant.nullable(),
+    executor_ms_last_24h: z.number().int(),
   }),
   terms: z.object({
     current_version: z.string(),

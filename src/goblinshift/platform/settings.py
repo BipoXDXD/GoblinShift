@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     # Teto de cada tentativa (1.7, "Duração").
     attempt_timeout_s: float = 600.0
     maintenance_interval_s: float = 30.0
+    # Cotas diárias por conta (1.7): o padrão de toda conta, que `gs-admin set-limits` sobrepõe
+    # conta a conta. Os tetos de armazenamento ficam no livro-razão (ADR 024).
+    quota_runs_per_24h: int = Field(default=30, gt=0)
+    quota_input_bytes_per_24h: int = Field(default=2 * 1024**3, gt=0)
     # Lotes da manutenção toleram consultas mais longas que a API (3.2).
     maintenance_statement_timeout_ms: int = 30_000
 
