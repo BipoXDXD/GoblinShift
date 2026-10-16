@@ -26,6 +26,8 @@ export interface ApiRequest<T> {
   readonly body?: unknown;
   /** Chave da intenção (useIdempotencyKey) nos POST que a API deduplica. */
   readonly idempotencyKey?: string;
+  /** ETag da leitura, nas edições com controle de concorrência (presets: `"<revisão>"`). */
+  readonly ifMatch?: string;
   readonly signal?: AbortSignal;
   /** Schema do corpo de sucesso: a resposta só chega a quem chamou depois do parse. */
   readonly schema: z.ZodType<T>;
@@ -90,6 +92,7 @@ interface OutgoingRequest {
   readonly path: string;
   readonly body?: unknown;
   readonly idempotencyKey?: string;
+  readonly ifMatch?: string;
   readonly signal?: AbortSignal;
   readonly accept?: string;
 }
@@ -139,6 +142,9 @@ function requestHeaders(options: ApiClientOptions, request: OutgoingRequest): He
   }
   if (request.idempotencyKey !== undefined) {
     headers.set("Idempotency-Key", request.idempotencyKey);
+  }
+  if (request.ifMatch !== undefined) {
+    headers.set("If-Match", request.ifMatch);
   }
   if (!SAFE_METHODS.has(request.method)) {
     const token = options.csrfToken();

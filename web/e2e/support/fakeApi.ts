@@ -21,11 +21,18 @@ import {
 type Schemas = components["schemas"];
 type Run = Schemas["RunResponse"];
 type ArtifactReference = Schemas["ResultReferenceResponse"];
+type Preset = Schemas["PresetResponse"];
 
 // O pedido sai do bundle, que monta o corpo pela spec; a API falsa lê só o que usa, e um corpo
 // fora desse formato derruba o teste com o erro do Zod em vez de seguir com lixo.
 const uploadIntentsSchema = z.object({
   items: z.array(z.object({ name: z.string(), size: z.number().int() })),
+});
+const presetDraftSchema = z.object({
+  name: z.string().min(1).max(100),
+  recipe_id: z.string(),
+  recipe_version: z.number().int(),
+  parameters: z.record(z.string(), z.unknown()),
 });
 const runCommandSchema = z.object({
   recipe_id: z.string(),
@@ -183,6 +190,7 @@ class FakeState {
   readonly uploads = new Map<string, StoredUpload>();
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
+  readonly presets = new Map<string, Preset>();
   readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
   /** Preview publicado, pelo id da saída de origem. */
@@ -205,6 +213,8 @@ class FakeState {
       await this.createUploads(route, request);
     } else if (method === "PUT" && resource === "uploads" && action === "content" && id) {
       await this.receiveContent(route, request, id);
+    } else if (resource === "presets" && action === undefined) {
+      await this.handlePreset(route, request, id);
     } else if (method === "DELETE" && resource === "uploads" && id && segments.length === 2) {
       await this.deleteUpload(route, id);
     } else if (method === "POST" && path === "/runs") {
@@ -278,6 +288,67 @@ class FakeState {
       sha256: createHash("sha256").update(content).digest("hex"),
     };
     await fulfillJson(route, received, { status: 200 });
+  }
+
+  /**
+   * Presets como a API (presets.py): lista por nome, nome único (409), e DELETE só com o `If-Match`
+   * da revisão atual (ausente → 428, vencido → 412).
+   */
+  private async handlePreset(
+    route: Route,
+    request: Request,
+    id: string | undefined,
+  ): Promise<void> {
+    const method = request.method();
+    if (id === undefined) {
+      await (method === "POST" ? this.createPreset(route, request) : this.listPresets(route));
+      return;
+    }
+    const preset = this.presets.get(id);
+    if (preset === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    } else if (method === "DELETE") {
+      await this.deletePreset(route, request, preset);
+    } else {
+      await fulfillJson(route, preset, {
+        status: 200,
+        headers: { ETag: `"${String(preset.revision)}"` },
+      });
+    }
+  }
+
+  private async listPresets(route: Route): Promise<void> {
+    const data = [...this.presets.values()].sort((a, b) => a.name.localeCompare(b.name));
+    await fulfillJson(route, { data } satisfies Schemas["PresetListResponse"], { status: 200 });
+  }
+
+  private async createPreset(route: Route, request: Request): Promise<void> {
+    const draft = presetDraftSchema.parse(request.postDataJSON());
+    if ([...this.presets.values()].some((preset) => preset.name === draft.name)) {
+      await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
+      return;
+    }
+    const preset: Preset = {
+      ...draft,
+      id: randomUUID(),
+      revision: 1,
+      created_at: NOW,
+      updated_at: NOW,
+    };
+    this.presets.set(preset.id, preset);
+    await fulfillJson(route, preset, { status: 201, headers: { ETag: '"1"' } });
+  }
+
+  private async deletePreset(route: Route, request: Request, preset: Preset): Promise<void> {
+    const ifMatch = await request.headerValue("if-match");
+    if (ifMatch === null) {
+      await fulfillProblem(route, "PRECONDITION_REQUIRED", { status: 428 });
+    } else if (ifMatch !== `"${String(preset.revision)}"`) {
+      await fulfillProblem(route, "PRECONDITION_FAILED", { status: 412 });
+    } else {
+      this.presets.delete(preset.id);
+      await route.fulfill({ status: 204 });
+    }
   }
 
   /** Como a API: 202 para o próprio upload (repetir também) e 404 para o que nunca existiu. */
