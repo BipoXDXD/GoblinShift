@@ -12,7 +12,7 @@ import { Rate } from 'k6/metrics';
 import { BASE_URL, problemCode } from './lib.js';
 
 const ALLOWED_IN_BURST = 11;
-const AUTH_PATH = __ENV.GS_LOAD_AUTH_PATH || '/auth/github/login';
+const AUTH_PATH = __ENV.GS_LOAD_AUTH_PATH || '/auth/login/github';
 
 const withinBurst = new Rate('gs_auth_dentro_da_rajada');
 const overBurstRefused = new Rate('gs_auth_acima_recusado');
@@ -24,11 +24,17 @@ export const options = {
   thresholds: {
     gs_auth_dentro_da_rajada: ['rate==1'],
     gs_auth_acima_recusado: ['rate==1'],
+    // Pega rota que deixou de existir: um 404 dentro da rajada passaria sem chegar ao login.
+    http_req_failed: ['rate==0'],
   },
 };
 
 export default function () {
-  const params = { redirects: 0, tags: { route: 'GET /auth/*' } };
+  const params = {
+    redirects: 0,
+    tags: { route: 'GET /auth/*' },
+    responseCallback: http.expectedStatuses({ min: 200, max: 399 }, 429),
+  };
   for (let i = 0; i < ALLOWED_IN_BURST; i += 1) {
     const response = http.get(`${BASE_URL}${AUTH_PATH}`, params);
     withinBurst.add(response.status !== 429 && response.status < 500);

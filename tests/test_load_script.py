@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LOAD_DIR = ROOT / "deploy" / "load"
 RUN_LOCAL = LOAD_DIR / "run-local.sh"
 SCENARIOS = LOAD_DIR / "scenarios"
+AUTH_LOGIN = ROOT / "src" / "goblinshift" / "entrypoints" / "api" / "auth_login.py"
 SCENARIO_NAMES = ("jornada", "fila", "transferencias", "limite-por-conta", "limite-auth")
 LIMIT_SCENARIOS = ("limite-por-conta", "limite-auth")
 SCRIPT_TIMEOUT_SECONDS = 10
@@ -102,6 +103,24 @@ def test_limit_scenarios_run_by_default_and_can_be_disabled() -> None:
     script = RUN_LOCAL.read_text(encoding="utf-8")
     assert 'if [[ "${GS_LOAD_RATE_LIMIT:-1}" != 0 ]]' in script
     assert 'if [[ "${GS_LOAD_AUTH:-1}" != 0 ]]' in script
+
+
+def test_journey_treats_rate_limit_on_runs_as_back_pressure() -> None:
+    journey = _scenario("jornada")
+    assert "http.expectedStatuses(202, 429, 503)" in journey
+    assert "problemCode(r) === 'RATE_LIMITED'" in journey
+
+
+def test_auth_scenario_targets_the_login_route() -> None:
+    login_route = re.search(
+        r'@router\.get\("(/login)/\{provider\}"', AUTH_LOGIN.read_text(encoding="utf-8")
+    )
+    assert login_route is not None
+    assert f"'/auth{login_route.group(1)}/github'" in _scenario("limite-auth")
+
+
+def test_auth_scenario_fails_on_unexpected_status() -> None:
+    assert "http_req_failed: ['rate==0']" in _scenario("limite-auth")
 
 
 def test_default_target_is_local() -> None:
