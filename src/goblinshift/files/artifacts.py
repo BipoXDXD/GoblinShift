@@ -19,6 +19,7 @@ from goblinshift.files.errors import (
     ObjectNotAvailableError,
 )
 from goblinshift.files.limits import ARTIFACT_TTL
+from goblinshift.files.missing import mark_missing
 from goblinshift.files.objects import hold, release, request_deletion_of_unreferenced
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
 from goblinshift.files.tables import artifact, stored_object
@@ -48,6 +49,7 @@ class DownloadTicket:
 
     holder_id: uuid.UUID
     artifact_id: uuid.UUID
+    object_id: uuid.UUID
     storage_key: str
     size_bytes: int
     sha256: bytes
@@ -174,6 +176,7 @@ def get_artifact(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
             (artifact.c.expires_at <= func.now()).label("expired"),
             stored_object.c.size_bytes,
             stored_object.c.sha256,
+            stored_object.c.state,
         )
         .join(stored_object, stored_object.c.id == artifact.c.object_id)
         .where(artifact.c.id == artifact_id, artifact.c.owner_id == owner_id)
@@ -189,7 +192,10 @@ def get_artifact(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
         created_at=row.created_at,
         expires_at=row.expires_at,
         availability=Availability.of(
-            deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+            deleted_at=row.deleted_at,
+            expires_at=row.expires_at,
+            expired=row.expired,
+            object_missing=row.state == ObjectState.MISSING,
         ),
     )
 
@@ -228,7 +234,14 @@ def open_for_download(
         # Artefato válido sobre objeto ausente (`missing`): para o dono, o conteúdo sumiu.
         raise ArtifactGoneError from None
     return DownloadTicket(
-        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role), file_name
+        holder_id,
+        artifact_id,
+        object_id,
+        storage_key,
+        size_bytes,
+        sha256,
+        ArtifactRole(role),
+        file_name,
     )
 
 
@@ -267,6 +280,16 @@ def open_preview(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
 def finish_download(session: Session, ticket: DownloadTicket) -> None:
     """Encerra o uso do download; repetir é no-op."""
     release(session, HolderKind.DOWNLOAD, ticket.holder_id)
+
+
+def finish_missing_download(session: Session, ticket: DownloadTicket) -> None:
+    """Encerra o download cujo arquivo sumiu do storage e marca o objeto `missing` (1.7).
+
+    Daí em diante o artefato aparece `missing`, e o próximo download já é recusado na abertura,
+    sem chegar ao disco. Repetir é no-op.
+    """
+    finish_download(session, ticket)
+    mark_missing(session, [ticket.object_id])
 
 
 def request_artifacts_deletion(

@@ -104,6 +104,18 @@ class FileStorage:
             raise ObjectMissingError(key) from None
         return ObjectStat(size_bytes=info.st_size)
 
+    def has_content(self) -> bool:
+        """A raiz existe e guarda algum objeto (ou temporário).
+
+        Com o filesystem do storage desmontado, a raiz some ou vira o ponto de montagem vazio, e
+        todo objeto pareceria ausente. Quem procura objetos ausentes confere isto antes.
+        """
+        try:
+            with os.scandir(self.root) as entries:
+                return any(True for _ in entries)
+        except FileNotFoundError:
+            return False
+
     def delete(self, key: str) -> None:
         """Remove o objeto; remover o que já não existe é sucesso (o estado final é o mesmo)."""
         self._path_for(key).unlink(missing_ok=True)
