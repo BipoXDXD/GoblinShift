@@ -152,8 +152,15 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
     : { form, notice: <SourceNotice>{source.loadedNotice}</SourceNotice> };
 }
 
+/**
+ * Status (WCAG 4.1.3): o aviso chega depois do carregamento da origem, no lugar do "carregando".
+ */
 function SourceNotice({ children }: { readonly children: ReactNode }): ReactElement {
-  return <p className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">{children}</p>;
+  return (
+    <p role="status" className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">
+      {children}
+    </p>
+  );
 }
 
 /** Enquanto não há catálogo: carregando, sem login (aviso, não erro) ou a falha em texto. */

@@ -51,6 +51,10 @@ describe("Bancada: Salvar preset", () => {
 
     expect(await screen.findByText("Preset Clientes do mês salvo.")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
+    // O diálogo mora dentro do <form> da Bancada: o clique não pode enviar a execução, que sem
+    // arquivos mostraria o resumo de erros.
+    expect(screen.queryByText("Corrija os itens abaixo antes de continuar.")).toBeNull();
+    expect(sent(api.requests, "POST /api/v1/runs")).toEqual([]);
     const [request] = sent(api.requests, "POST /api/v1/presets");
     expect(request?.headers.get("X-CSRF-Token")).toBe(CSRF);
     expect(await request?.json()).toMatchObject({
@@ -130,7 +134,9 @@ describe("Bancada aberta com um preset", () => {
   it("pré-preenche os parâmetros e diz de qual preset vieram", async () => {
     setup(`/bancada/csv-janitor?preset=${PRESET_ID}`);
 
-    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
+    const notice = await screen.findByText("Parâmetros do preset Clientes do mês.");
+    expect(notice).toBeVisible();
+    expect(notice).toHaveAttribute("role", "status");
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(";");
     expect(screen.getByLabelText("Colunas sem espaços nas pontas")).toHaveValue("nome");
   });
@@ -139,6 +145,29 @@ describe("Bancada aberta com um preset", () => {
     setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
       [`GET /api/v1/presets/${PRESET_ID}`]: () =>
         jsonResponse(presetBody({ recipe_id: "image-forge", parameters: {} })),
+    });
+
+    expect(
+      await screen.findByText(/Este preset é de outra receita ou de uma versão/),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
+  });
+
+  it("preset de outra versão da receita abre com os parâmetros padrão e avisa", async () => {
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 2 })),
+    });
+
+    expect(
+      await screen.findByText(/Este preset é de outra receita ou de uma versão/),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
+  });
+
+  it("parâmetros num formato que a interface não conhece abrem os padrões e avisam", async () => {
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(presetBody({ parameters: { output_delimiter: 42 } })),
     });
 
     expect(
