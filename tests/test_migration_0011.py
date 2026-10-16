@@ -1,4 +1,4 @@
-"""Migração 0021: `account_quota`, o override das cotas diárias por conta (1.7; `set-limits`).
+"""Migração 0011: `account_quota`, o override das cotas diárias por conta (1.7; `set-limits`).
 
 Expand: tabela nova, que o código anterior não lê. CASCADE para a conta, porque a linha é
 configuração dela, sem histórico. O downgrade apaga a tabela (os overrides se perdem).
@@ -36,7 +36,7 @@ def new_user(engine: Engine) -> object:
 
 
 def test_override_sai_junto_com_a_conta(db_settings: Settings, engine: Engine) -> None:
-    run_migrations(db_settings, "0021")
+    run_migrations(db_settings, "0011")
     user_id = new_user(engine)
     with engine.begin() as conn:
         conn.execute(
@@ -51,7 +51,7 @@ def test_override_sai_junto_com_a_conta(db_settings: Settings, engine: Engine) -
 
 @pytest.mark.parametrize("column", ["runs_per_24h", "input_bytes_per_24h"])
 def test_override_zero_e_recusado(db_settings: Settings, engine: Engine, column: str) -> None:
-    run_migrations(db_settings, "0021")
+    run_migrations(db_settings, "0011")
     user_id = new_user(engine)
 
     with pytest.raises(IntegrityError), engine.begin() as conn:
@@ -62,8 +62,8 @@ def test_override_zero_e_recusado(db_settings: Settings, engine: Engine, column:
 
 
 def test_downgrade_apaga_a_tabela(db_settings: Settings, engine: Engine) -> None:
-    run_migrations(db_settings, "0021")
+    run_migrations(db_settings, "0011")
 
-    downgrade_migrations(db_settings, "0020")
+    downgrade_migrations(db_settings, "0010")
 
     assert "account_quota" not in inspect(engine).get_table_names()

@@ -179,7 +179,7 @@ idempotency_record = Table(
 )
 
 # Override das cotas diárias de 1.7 por conta (`gs-admin set-limits`); NULL é "sem override", e
-# vale o padrão das settings. CASCADE: é configuração da conta, sem histórico (migração 0021).
+# vale o padrão das settings. CASCADE: é configuração da conta, sem histórico (migração 0011).
 account_quota = Table(
     "account_quota",
     metadata,
