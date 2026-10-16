@@ -1,0 +1,32 @@
+name: Auditoria dos workflows
+
+# zizmor (análise estática de segurança do GitHub Actions) só quando um workflow muda: fora disso
+# não há o que auditar, e o job fica fora do commit stage do ci.yml. `--offline` dispensa o token
+# da API do GitHub; o achado justificado leva `# zizmor: ignore[...]` na própria linha.
+on:
+  pull_request:
+    paths: [".github/workflows/**"]
+  push:
+    branches: [main]
+    paths: [".github/workflows/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zizmor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: Segurança dos workflows (zizmor)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: zizmor
+        # Versão fixada: um audit novo numa versão nova não pode quebrar um PR sem relação com ele.
+        run: uvx zizmor@1.30.1 --offline --format=github .github/workflows
