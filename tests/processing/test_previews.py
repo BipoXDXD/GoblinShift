@@ -3,13 +3,18 @@
 from pathlib import Path
 
 from goblinshift.processing.output_dir import FileSystemOutputDir
-from goblinshift.processing.previews import PendingPreview, write_previews
+from goblinshift.processing.previews import (
+    IMAGE_PREVIEW_MAX_BYTES,
+    TABLE_PREVIEW_MAX_BYTES,
+    PendingPreview,
+    write_previews,
+)
 from goblinshift.processing.recipe import OutputRole, Preview
 
 
-def pending(position: int, of: str, size: int = 3) -> PendingPreview:
+def pending(position: int, of: str, size: int = 3, extension: str = ".jpg") -> PendingPreview:
     return PendingPreview(
-        position=position, of=of, logical_name=f"p{position}.jpg", content=b"x" * size
+        position=position, of=of, logical_name=f"p{position}{extension}", content=b"x" * size
     )
 
 
@@ -51,3 +56,33 @@ def test_sem_previews_nao_cria_o_grupo(tmp_path: Path) -> None:
 
     assert write_previews(out, []) == {}
     assert not (tmp_path / "previews").exists()
+
+
+def test_jpeg_acima_do_teto_da_coleta_e_pulado_sem_falhar(tmp_path: Path) -> None:
+    # A coleta do worker recusaria a execução inteira por um preview grande demais (3.6).
+    out = FileSystemOutputDir(tmp_path)
+
+    written = write_previews(
+        out,
+        [
+            pending(0, "a.jpg", size=IMAGE_PREVIEW_MAX_BYTES + 1),
+            pending(1, "b.jpg", size=IMAGE_PREVIEW_MAX_BYTES),
+        ],
+    )
+
+    assert list(written) == [1]
+    assert not (tmp_path / "previews" / "p0.jpg").exists()
+
+
+def test_amostra_acima_do_teto_da_coleta_e_pulada(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    written = write_previews(
+        out,
+        [
+            pending(0, "a.csv", size=TABLE_PREVIEW_MAX_BYTES + 1, extension=".csv"),
+            pending(1, "b.csv", size=TABLE_PREVIEW_MAX_BYTES, extension=".csv"),
+        ],
+    )
+
+    assert list(written) == [1]
