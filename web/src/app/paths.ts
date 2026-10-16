@@ -11,6 +11,7 @@ export const PATHS = {
   history: "/historico",
   signIn: "/entrar",
   access: "/acesso",
+  apiGuide: "/acesso/guia-da-api",
   terms: "/termos",
   privacy: "/privacidade",
   credits: "/creditos",
