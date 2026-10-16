@@ -51,6 +51,7 @@ SPA_CSP = (
 )
 IMMUTABLE = "public, max-age=31536000, immutable"
 SECURITY_TXT = ROOT / "web" / "public" / ".well-known" / "security.txt"
+PUBLIC = ROOT / "web" / "public"
 
 
 def _yaml(path: Path) -> Any:
@@ -317,6 +318,54 @@ class TestSecurityTxt:
 
     def test_outro_arquivo_em_well_known_e_404_e_nao_o_index(self, stack: Stack) -> None:
         response = stack.get("/.well-known/nao-existe.txt")
+
+        assert response.status == 404
+        assert b'<div id="root">' not in response.body
+
+
+class TestMarca:
+    """Ícones, manifest e imagem de compartilhamento: nome fixo, fora do fallback da SPA."""
+
+    pytestmark = pytestmark_integration
+
+    @pytest.mark.parametrize(
+        ("path", "content_type"),
+        [
+            ("/favicon.svg", "image/svg+xml"),
+            ("/favicon.ico", "image/x-icon"),
+            ("/apple-touch-icon.png", "image/png"),
+            ("/icon-192.png", "image/png"),
+            ("/icon-512.png", "image/png"),
+            ("/og-image.jpg", "image/jpeg"),
+            # O mime.types da imagem não conhece .webmanifest: sem a location própria sairia
+            # application/octet-stream.
+            ("/manifest.webmanifest", "application/manifest+json"),
+        ],
+    )
+    def test_arquivo_da_marca_sai_com_o_tipo_certo_e_nao_como_o_index(
+        self, stack: Stack, path: str, content_type: str
+    ) -> None:
+        response = stack.get(path)
+
+        assert response.status == 200
+        assert response.headers["content-type"] == content_type
+        assert response.body == (PUBLIC / path.removeprefix("/")).read_bytes()
+        # Nome fixo, sem hash: um deploy novo vale na próxima visita.
+        assert response.headers["cache-control"] == "no-cache"
+        _assert_spa_security_headers(response)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # O iOS pede estes por conta própria, mesmo com o <link rel="apple-touch-icon">.
+            "/apple-touch-icon-precomposed.png",
+            "/apple-touch-icon-120x120.png",
+            "/icon-1024.png",
+            "/favicon.png",
+        ],
+    )
+    def test_icone_inexistente_e_404_e_nao_o_index(self, stack: Stack, path: str) -> None:
+        response = stack.get(path)
 
         assert response.status == 404
         assert b'<div id="root">' not in response.body
