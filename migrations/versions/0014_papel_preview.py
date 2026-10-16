@@ -11,6 +11,9 @@ a saída de que deriva, e a purga apaga artefatos por objeto, em qualquer ordem.
 existentes não são previews e ficam com a coluna nula, o que o CHECK novo exige. A tabela de
 artefatos guarda só 48 h de saídas, então criar índice e constraints na transação, sem
 `CONCURRENTLY`, basta.
+
+O downgrade apaga os previews, que o CHECK antigo não aceita, e marca `delete_requested` os
+objetos que só eles apontavam, para a purga da manutenção removê-los do disco.
 """
 
 from collections.abc import Sequence
@@ -60,6 +63,27 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Antes de apagar os previews, pede a remoção dos objetos que só eles apontam, como
+    # `files.objects.request_deletion_of_unreferenced`: sem isso o arquivo ficaria `committed` e
+    # sem referência, fora do alcance da purga e ocupando a cota. O objeto que outro artefato ou
+    # upload ainda válido aponta fica como está.
+    op.execute(
+        """
+        UPDATE stored_object SET state = 'delete_requested', delete_requested_at = now()
+        WHERE state = 'committed'
+          AND id IN (SELECT object_id FROM artifact WHERE role = 'preview')
+          AND NOT EXISTS (
+              SELECT 1 FROM artifact
+              WHERE artifact.object_id = stored_object.id
+                AND artifact.role <> 'preview'
+                AND artifact.deleted_at IS NULL
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM upload
+              WHERE upload.object_id = stored_object.id AND upload.deleted_at IS NULL
+          )
+        """
+    )
     op.execute(
         "DELETE FROM run_output WHERE artifact_id IN "
         "(SELECT id FROM artifact WHERE role = 'preview')"
