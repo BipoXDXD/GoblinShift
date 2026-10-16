@@ -165,12 +165,10 @@ class ValidatedRun:
 
     @property
     def command_hash(self) -> bytes:
+        if self.preset_id is not None:
+            return preset_run_hash(self.preset_id, self.input_upload_ids)
         return command_hash(
-            self.recipe.recipe_id,
-            self.recipe.version,
-            self.parameters,
-            self.input_upload_ids,
-            preset_id=self.preset_id,
+            self.recipe.recipe_id, self.recipe.version, self.parameters, self.input_upload_ids
         )
 
 
@@ -194,23 +192,44 @@ def command_hash(
     recipe_version: int,
     parameters: object,
     input_upload_ids: Sequence[UUID],
-    *,
-    preset_id: UUID | None = None,
 ) -> bytes:
     """SHA-256 do JSON canônico: chaves ordenadas, sem espaços, listas na ordem recebida (1.6).
 
-    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`. O preset de
-    origem entra só quando existe, para o hash dos comandos sem preset continuar o mesmo: a
-    mesma chave com e sem preset é outro comando.
+    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`.
     """
-    document: dict[str, object] = {
-        "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
-        "parameters": parameters,
-        "recipe_id": recipe_id,
-        "recipe_version": recipe_version,
-    }
-    if preset_id is not None:
-        document["preset_id"] = str(preset_id)
+    return _canonical_hash(
+        {
+            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+            "parameters": parameters,
+            "recipe_id": recipe_id,
+            "recipe_version": recipe_version,
+        }
+    )
+
+
+def preset_run_hash(preset_id: UUID, input_upload_ids: Sequence[UUID]) -> bytes:
+    """Hash de `POST /presets/{id}/runs`: o comando do cliente é o preset e as entradas.
+
+    A configuração do preset fica de fora: editá-lo ou excluí-lo entre a chamada e o retry não
+    pode transformar o retry em outro comando (422) nem em 404; o retry repete a Run aceita.
+    """
+    return _canonical_hash(
+        {
+            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+            "preset_id": str(preset_id),
+        }
+    )
+
+
+def find_replay(
+    session: Session, owner_id: UUID, idem_key: str | None, digest: bytes
+) -> Accepted | None:
+    """Run já aceita com esta chave vigente e o mesmo comando; outro comando levanta
+    `IdempotencyKeyReusedError`. Para quem precisa saber do replay antes de ler outro recurso."""
+    return _find_live_record(session, owner_id, parse_idempotency_key(idem_key), digest)
+
+
+def _canonical_hash(document: dict[str, object]) -> bytes:
     canonical = json.dumps(
         document,
         sort_keys=True,

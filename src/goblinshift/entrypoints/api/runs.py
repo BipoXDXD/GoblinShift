@@ -45,6 +45,7 @@ from goblinshift.presets import PresetNotFoundError, get_preset
 from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
+    Accepted,
     ActiveRunLimitError,
     DailyQuotaExceededError,
     IdempotencyInProgressError,
@@ -54,7 +55,9 @@ from goblinshift.runs.acceptance import (
     QueueFullError,
     RunCommand,
     accept_run,
+    find_replay,
     parse_idempotency_key,
+    preset_run_hash,
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
@@ -294,19 +297,30 @@ def create_run_from_preset(
     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
     """
+    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    inputs = tuple(command.input_upload_ids)
     try:
+        # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
+        # retry repete a Run aceita em vez de virar 422 ou 404.
         with session.begin():
-            source = get_preset(session, principal.owner_id, preset_id)
+            replay = find_replay(
+                session, principal.owner_id, idempotency_key, preset_run_hash(preset_id, inputs)
+            )
+            if replay is None:
+                source = get_preset(session, principal.owner_id, preset_id)
+    except _REFUSALS as error:
+        raise _refusal_problem(error) from None
     except PresetNotFoundError:
         raise _preset_not_found() from None
+    if replay is not None:
+        return _respond_accepted(principal.owner_id, replay, session, request, response)
     run_command = RunCommand(
         recipe_id=source.recipe_id,
         recipe_version=source.recipe_version,
-        input_upload_ids=tuple(command.input_upload_ids),
+        input_upload_ids=inputs,
         parameters=source.parameters,
         preset_id=source.id,
     )
-    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
     return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
 
 
@@ -337,13 +351,16 @@ def _accept(
         raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
-    record_run_accepted(
-        accepted.run_id,
-        run_command.recipe_id,
-        run_command.recipe_version,
-        replayed=accepted.replayed,
-    )
+    return _respond_accepted(owner_id, accepted, session, request, response)
+
+
+def _respond_accepted(
+    owner_id: UUID, accepted: Accepted, session: Session, request: Request, response: Response
+) -> AcceptedRunResponse:
     view = _read_run(session, owner_id, accepted.run_id)
+    record_run_accepted(
+        accepted.run_id, view.recipe_id, view.recipe_version, replayed=accepted.replayed
+    )
     response.headers["Location"] = request.app.url_path_for(
         get_run_route.__name__, run_id=str(accepted.run_id)
     )
