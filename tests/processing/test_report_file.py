@@ -13,6 +13,7 @@ from goblinshift.processing.recipe import (
     ItemDuplicate,
     ItemOk,
     ItemRejected,
+    Preview,
     RecipeFailure,
     Report,
 )
@@ -119,6 +120,7 @@ def test_item_aceito_tem_exatamente_as_chaves_do_schema() -> None:
         "counts",
         "details",
         "warnings",
+        "previews",
     }
     assert set(document) == {
         "schema_version",
@@ -130,3 +132,19 @@ def test_item_aceito_tem_exatamente_as_chaves_do_schema() -> None:
         "details",
     }
     assert document["schema_version"] == 1
+
+
+def test_previews_do_item_vao_para_o_relatorio_com_a_saida_de_origem() -> None:
+    report = Report(
+        [
+            ItemOk(
+                0,
+                outputs=("a.csv",),
+                previews=(Preview(path="previews/a.csv", of="a.csv"),),
+            )
+        ]
+    )
+
+    document = _decoded(report, JOB)
+
+    assert document["items"][0]["previews"] == [{"path": "previews/a.csv", "of": "a.csv"}]

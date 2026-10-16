@@ -9,6 +9,7 @@ O relatório registra fatos, não avisos (ambiguidade A2): perfil assumido ou co
 MPO descartados ficam em `details`, sem mudar o estado para `succeeded_with_warnings`.
 """
 
+import io
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -17,10 +18,11 @@ from PIL import Image
 from goblinshift.processing.image_forge.encoding import SaveFormat, encode
 from goblinshift.processing.image_forge.geometry import fit_size
 from goblinshift.processing.image_forge.limits import MAX_INPUTS, Limits
-from goblinshift.processing.image_forge.params import OutputFormat, Params
+from goblinshift.processing.image_forge.params import WHITE, OutputFormat, Params
 from goblinshift.processing.image_forge.preparation import Prepared, prepare
 from goblinshift.processing.image_forge.rejection import ImageRejected
 from goblinshift.processing.names import safe_stem
+from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
 from goblinshift.processing.recipe import (
     DetailValue,
     InputFile,
@@ -37,6 +39,10 @@ from goblinshift.processing.recipe import (
 FALLBACK_STEM = "imagem"
 RESAMPLING = Image.Resampling.LANCZOS
 RESAMPLING_NAME = "lanczos"
+# Preview (2.2): JPEG que cabe em 512 x 512, sem ampliar, com fundo branco onde havia alfa.
+PREVIEW_BOX = 512
+PREVIEW_JPEG_QUALITY = 80
+PREVIEW_EXTENSION = ".jpg"
 
 
 class ImageForgeV1:
@@ -49,17 +55,18 @@ class ImageForgeV1:
     ) -> Report:
         require_max_inputs(inputs, self._max_inputs, "imagens")
         items: list[ItemOk | ItemRejected] = []
+        pending: list[PendingPreview] = []
         for source in inputs:
-            items.append(self._forge_one(source, params, out))
+            items.append(self._forge_one(source, params, out, pending))
             progress.item_done(source.position)
         details: dict[str, DetailValue] = {
             "resampling": RESAMPLING_NAME,
             "thumbnail_box": self._limits.thumbnail_box,
         }
-        return Report(items, details=details)
+        return Report(attach_previews(items, write_previews(out, pending)), details=details)
 
     def _forge_one(
-        self, source: InputFile, params: Params, out: OutputDir
+        self, source: InputFile, params: Params, out: OutputDir, pending: list[PendingPreview]
     ) -> ItemOk | ItemRejected:
         try:
             prepared = prepare(source.path, self._limits)
@@ -74,6 +81,12 @@ class ImageForgeV1:
         )
         resized = _fit(prepared.image, params.max_width, params.max_height)
         outputs = [writer.write(resized, OutputGroup.IMAGES)]
+        # Guardado em memória (no máximo 512 x 512) e gravado depois de todo o conteúdo.
+        pending.append(
+            PendingPreview(
+                source.position, outputs[0], writer.stem + PREVIEW_EXTENSION, _preview(resized)
+            )
+        )
         if params.make_thumbnails:
             box = self._limits.thumbnail_box
             outputs.append(writer.write(_fit(resized, box, box), OutputGroup.THUMBNAILS))
@@ -107,6 +120,18 @@ class _Writer:
                 jpeg_background=self.params.jpeg_background,
             )
         return output.name
+
+
+def _preview(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    encode(
+        _fit(image, PREVIEW_BOX, PREVIEW_BOX),
+        SaveFormat.JPEG,
+        buffer,
+        jpeg_quality=PREVIEW_JPEG_QUALITY,
+        jpeg_background=WHITE,
+    )
+    return buffer.getvalue()
 
 
 def _save_format(requested: OutputFormat, source_format: str) -> SaveFormat:
