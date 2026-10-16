@@ -76,6 +76,11 @@ export const TEXT = {
     brandLink: "GoblinShift, Oficina",
     aiArt: "Ilustrações geradas com IA e editadas.",
     creditsLink: "Créditos",
+    footerNavLabel: "Rodapé",
+  },
+  pageTitles: {
+    workbench: "Bancada",
+    acceptTerms: "Aceite dos termos",
   },
   notice: {
     // O tipo escrito acompanha a cor da faixa: o aviso nunca depende só dela (WCAG 1.4.1).
