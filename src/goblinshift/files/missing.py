@@ -37,6 +37,8 @@ DEFAULT_MAX_ABSENT_RATIO = 0.5
 GOVERNOR_MIN_SAMPLE = 10
 # Num lote pequeno, todos ausentes a partir deste tamanho também acionam o limitador.
 _SMALL_LOT_MIN_ALL_ABSENT = 2
+# `max_absent_ratio` a partir do qual o limitador de ausentes fica desligado.
+_GOVERNOR_OFF = 1.0
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,10 @@ def _too_many_absent(absent: int, unreadable: int, checked: int, max_absent_rati
         return False
     if unreadable > 0:
         return True
+    if max_absent_ratio >= _GOVERNOR_OFF:
+        # Desligado pelo administrador depois de um restore proposital (3.8), também no fim
+        # da volta; o erro de disco acima continua travando.
+        return False
     if checked < GOVERNOR_MIN_SAMPLE:
         return checked >= _SMALL_LOT_MIN_ALL_ABSENT and absent == checked
     return absent > max_absent_ratio * checked
