@@ -164,9 +164,13 @@ run_output = Table(
     Column("position", Integer, nullable=False),
     Column("owner_id", Uuid, nullable=False),
     Column("artifact_id", Uuid, nullable=False, unique=True),
-    Column("logical_name", Text, nullable=False),
+    # Anulado com `artifact.file_name` (1.7, "Retenção"; migração 0015). A UNIQUE fica com NULLS
+    # DISTINCT de propósito: NULL é ausência de nome, e todas as saídas anuladas da Run convivem.
+    Column("logical_name", Text),
     PrimaryKeyConstraint("run_id", "position"),
     UniqueConstraint("run_id", "logical_name"),
+    # Saídas que a retenção ainda vai anular (1.7).
+    Index("run_output_anonymize_idx", "run_id", postgresql_where=text("logical_name IS NOT NULL")),
     ForeignKeyConstraint(["owner_id", "run_id"], ["run.owner_id", "run.id"], ondelete="CASCADE"),
     ForeignKeyConstraint(
         ["owner_id", "artifact_id"], ["artifact.owner_id", "artifact.id"], ondelete="RESTRICT"
