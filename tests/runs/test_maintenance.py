@@ -10,6 +10,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object
+from goblinshift.files.missing import GOVERNOR_MIN_SAMPLE
 from goblinshift.files.states import Availability, ObjectState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import stored_object, upload
@@ -21,7 +22,7 @@ from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.runner import LocalRunner
-from tests.files.support import ready_upload
+from tests.files.support import mark_mounted, ready_upload
 from tests.runs.worker_support import (
     LEASE,
     attempts,
@@ -285,6 +286,7 @@ def test_ciclo_marca_missing_o_objeto_sem_arquivo_e_alerta(
 ) -> None:
     lost = lose_file(factory, storage)
     ready_upload(factory, storage, create_user(factory, "outra"), b"zz")
+    mark_mounted(storage)
     cycles = maintenance(factory, storage, local_runner(work_root))
 
     with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
@@ -302,6 +304,7 @@ def test_varredura_de_ausentes_continua_de_onde_parou_no_ciclo_seguinte(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
     lost = [lose_file(factory, storage) for _ in range(2)]
+    mark_mounted(storage)
     config = MaintenanceConfig(
         stop_grace=timedelta(seconds=2), jitter=lambda: MIN_RETRY_JITTER, missing_sweep_batch_size=1
     )
@@ -313,17 +316,15 @@ def test_varredura_de_ausentes_continua_de_onde_parou_no_ciclo_seguinte(
     assert {object_state(factory, object_id) for object_id in lost} == {ObjectState.MISSING}
 
 
-def test_storage_vazio_pula_a_varredura_e_alerta(
+def test_storage_sem_sentinela_pula_a_varredura_e_alerta(
     factory: sessionmaker[Session],
     storage: FileStorage,
     work_root: Path,
-    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     owner = create_user(factory)
     view = ready_upload(factory, storage, owner, b"abc")
-    unmounted = FileStorage(tmp_path / "nao-montado")
-    cycles = maintenance(factory, unmounted, local_runner(work_root))
+    cycles = maintenance(factory, storage, local_runner(work_root))
 
     with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
         counts = cycles.run_cycle()
@@ -332,3 +333,24 @@ def test_storage_vazio_pula_a_varredura_e_alerta(
     with factory() as session:
         assert get_upload(session, owner, view.id).availability is Availability.AVAILABLE
     assert alert_fields(caplog, "storage_unreachable") == [{"alert": "storage_unreachable"}]
+
+
+def test_lote_com_ausentes_demais_aciona_o_limitador_e_alerta(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    lost = [lose_file(factory, storage) for _ in range(GOVERNOR_MIN_SAMPLE)]
+    mark_mounted(storage)
+    cycles = maintenance(factory, storage, local_runner(work_root))
+
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+        counts = cycles.run_cycle()
+
+    assert (counts["objects_missing_absent"], counts["objects_marked_missing"]) == (10, 0)
+    assert counts["missing_governor_tripped"] == 1
+    assert {object_state(factory, object_id) for object_id in lost} == {ObjectState.COMMITTED}
+    assert alert_fields(caplog, "missing_governor") == [
+        {"alert": "missing_governor", "checked": 10, "absent": 10}
+    ]
