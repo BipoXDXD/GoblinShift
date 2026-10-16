@@ -45,7 +45,7 @@ describe("/creditos", () => {
     const names = within(cast)
       .getAllByRole("listitem")
       .map((item) => within(item).getByRole("figure").textContent);
-    expect(names).toEqual(["Rúbia", "Fagulha", "Ferrugem", "Jade", "Lua", "Nyx"]);
+    expect(names).toEqual(["Rúbia", "Fagulha", "Ferrugem", "Jade", "Nyx"]);
     // A foto repete o nome que a legenda já diz: é decorativa.
     for (const image of cast.querySelectorAll("img")) {
       expect(image).toHaveAttribute("alt", "");

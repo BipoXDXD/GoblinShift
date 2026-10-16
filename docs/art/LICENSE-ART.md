@@ -7,13 +7,12 @@ As goblins do site e a marca são **ilustrações e modelos 3D gerados com proce
 | Goblin | Onde | Modelo 3D (fonte externa fonte externa) |
 |---|---|---|
 | Rúbia | Cena 3D da abertura e a imagem estática dela; estado carregando, em rotação com a Fagulha; créditos | `9f030f3c` (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
-| Lua | Estado vazio, em rotação com a Jade; créditos | `81ae6621` |
 | Nyx | Estado de erro; créditos | `19a1ddba` |
 | Ferrugem | Estado de sucesso; créditos | `ec3a728c` |
-| Jade | Estado vazio, em rotação com a Lua; créditos | `3c7aa397` |
+| Jade | Estado vazio; créditos | `3c7aa397` |
 | Fagulha | Estado carregando, em rotação com a Rúbia; créditos | `0d84776f` |
 
-Cadeia da Rúbia, da Lua, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
+Cadeia da Rúbia, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
 
 1. Conceito 2D **só por texto** no fonte externa (ByteDance), pela API da fonte externa.
 2. Versão frontal e versão semi-realista por image-to-image (fonte externa e fonte externa, do Google, pela fonte externa), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do fonte externa.
