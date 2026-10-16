@@ -297,9 +297,13 @@ export function WorkbenchHeader({ title }: { readonly title: string }): ReactEle
 }
 
 function limitsHint({ inputLimits }: RecipeForm): string {
-  const maxTotal =
-    inputLimits.maxTotalBytes === null ? null : formatBytes(inputLimits.maxTotalBytes);
-  return TEXT.workbench.limitsHint(inputLimits.maxInputs, maxTotal);
+  const bytes = (value: number | null): string | null =>
+    value === null ? null : formatBytes(value);
+  return TEXT.workbench.limitsHint(
+    inputLimits.maxInputs,
+    bytes(inputLimits.maxTotalBytes),
+    bytes(inputLimits.maxFileBytes),
+  );
 }
 
 function removalTitle(removal: PendingRemoval | null): string {

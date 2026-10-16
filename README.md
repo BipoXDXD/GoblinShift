@@ -18,7 +18,7 @@ Python 3.14 · FastAPI · PostgreSQL 18 (também como fila) · SQLAlchemy 2 · A
 
 ## Desenvolvimento local
 
-Requisitos: [uv](https://docs.astral.sh/uv/) e Docker com Compose.
+Requisitos: [uv](https://docs.astral.sh/uv/), Docker com Compose e o FFmpeg completo no `PATH` (`brew install ffmpeg` ou `apt install ffmpeg`), que os testes do Media Mill usam para gerar vídeos sintéticos.
 
 ```bash
 uv sync                       # ambiente e dependências
@@ -108,6 +108,7 @@ Cada tabela aceita vira `limpas/<nome>.csv` (UTF-8 sem BOM, CRLF, aspas só quan
 | `image-forge` | 1 | Redimensiona JPEG e PNG sem ampliar, aplica a orientação EXIF, converte Display P3 para sRGB, usa o quadro principal do MPO, remove metadados e gera miniaturas opcionais em `thumbnails/` ([1.2](docs/GoblinShiftPlan.md#s1-2)) | 100 imagens, 24 MP e 8192 px por eixo, conferidos antes de decodificar |
 | `downloads-detox` | 1 | Classifica por assinatura em `images/`, `tables/`, `text/` e `archives/`, deduplica por SHA-256 e tamanho, renomeia e recusa executáveis, scripts, HTML e SVG ([1.4](docs/GoblinShiftPlan.md#s1-4)) | 100 arquivos, 480 MiB por lote |
 | `pdf-press` | 1 | Junta (`merge`), separa em partes (`split`) ou monta um PDF com páginas escolhidas, repetições incluídas (`select`), com o qpdf; publica o `page-map.json` com cada página. Recusa senha, formulário, assinatura, anexo e conteúdo ativo, e falha a execução inteira em PDF danificado ou página inexistente ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 035](docs/adr/035-pdf-press-com-pikepdf.md)) | 20 PDFs, 256 MiB, 200 páginas de entrada, 400 de saída e 200 documentos |
+| `media-mill` | 1 | Extrai uma faixa de áudio em WAV ou FLAC de 16 bits, na taxa e nos canais de origem, e gera 0, 1 ou 3 miniaturas JPEG de até 640 px em `thumbnails/`, de MP4/MOV (H.264 + AAC/PCM) e WebM (VP8/VP9 + Opus/Vorbis) conferidos por assinatura e ffprobe ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)) | 5 vídeos de até 256 MiB (512 MiB por lote), 300 s, 1920 × 1080, 60 fps, 48 kHz e estéreo |
 
 Toda execução publica, além do conteúdo, o `report.json`, o `manifest.json` (entradas, hashes, parâmetros, digest da imagem do executor, duplicatas e rejeições) e o ZIP determinístico `<receita>.zip`, montados pelo empacotador comum no executor ([ADR 019](docs/adr/019-layout-de-out-pacote-e-papeis.md)). Uma saída idêntica a uma entrada não ocupa espaço de novo: o artefato aponta para o objeto do upload ([ADR 020](docs/adr/020-detox-reaproveita-o-objeto-da-entrada.md)). A versão de cada receita e os limites efetivos estão no OpenAPI de `POST /runs`.
 
@@ -179,7 +180,7 @@ Rotação:
 
 ## Imagem do executor
 
-Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, e o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)): nada de banco, web nem outras dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
+Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)) e o FFmpeg 8.1.2 compilado do fonte oficial (conferido por SHA-256) só com os demuxers `mov` e `matroska` e os protocolos `file` e `pipe`, sem componentes GPL ([ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)): nada de banco, web nem outras dependências de terceiros. Sem cache, construir a imagem leva alguns minutos por causa do FFmpeg; por isso os testes `executor_image` rodam na CI só no job `gvisor`. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
 
 No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`, gravada pelo `deploy/release-env.sh` no `release.env` do host.
 
@@ -213,7 +214,7 @@ sudo systemctl start goblinshift-acceptance.service   # roda já; resultado em j
 
 O serviço roda como root, então não executa nada do checkout nem lê nada de `/srv/goblinshift/secrets`, que pertencem ao usuário `goblinshift`: quem controlasse esses caminhos rodaria código como root. O instalador copia `deploy/acceptance`, `deploy/executor_ctl` e `deploy/backup/lib.sh` para `/usr/local/lib/goblinshift` (do root, sem escrita para outros) recusa diretório de destino que outro usuário grave ou que seja symlink e lê o checkout com os privilégios do `goblinshift`, para que um symlink plantado ali não copie um arquivo que só o root lê. Por isso uma mudança na aceitação só chega ao timer quando o `install.sh` roda de novo, como no executor-ctl; rode-o a partir de um checkout conferido (`git status` limpo, no commit implantado). A unit tem o sistema de arquivos somente leitura fora da área de trabalho e só as capabilities que as sondas usam (`systemd-analyze security goblinshift-acceptance.service`).
 
-Não rode o teste de caos nem o do Image Forge no horário do timer: os três usam a mesma área de trabalho.
+Não rode o teste de caos nem os do Image Forge e do Media Mill no horário do timer: todos usam a mesma área de trabalho.
 
 ### Pior caso do Image Forge (na VPS, antes de publicar uma versão)
 
@@ -221,6 +222,16 @@ Mede 100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas numa tenta
 
 ```bash
 cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.image_forge_load   # PASSOU só dentro de 600 s
+```
+
+### Pior caso do Media Mill (na VPS, antes de publicar a versão)
+
+A VPS não tem FFmpeg e a imagem do executor só tem o build mínimo, que não codifica H.264: os vídeos saem de uma máquina com o FFmpeg completo e vão para a VPS. Mede 5 vídeos de 300 s em 1080p60 com keyframe a cada 10 s, FLAC e 3 miniaturas numa tentativa com o perfil de produção, sem passar pela API, com a manutenção parada ([ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)). Rode com o worker parado:
+
+```bash
+./scripts/media-mill-worst-case.sh /tmp/pior-caso            # na máquina com FFmpeg (~375 MiB)
+scp /tmp/pior-caso/*.mp4 stillon:/tmp/pior-caso/
+cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.media_mill_load /tmp/pior-caso   # PASSOU só dentro de 600 s
 ```
 
 ### Teste de caos do worker (na VPS)

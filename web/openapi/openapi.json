@@ -914,10 +914,10 @@
                         },
                         "size": {
                           "type": "integer",
-                          "maximum": 33554432.0,
+                          "maximum": 268435456.0,
                           "minimum": 0.0,
                           "title": "Size",
-                          "description": "Bytes; o lote soma até 512 MiB."
+                          "description": "Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB."
                         }
                       },
                       "additionalProperties": false,
@@ -2271,6 +2271,66 @@
                           "parameters"
                         ],
                         "title": "pdf-press v1"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
+                            "const": "media-mill"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "properties": {
+                              "extract_audio": {
+                                "type": "boolean",
+                                "title": "Extract Audio",
+                                "default": true
+                              },
+                              "audio_format": {
+                                "type": "string",
+                                "enum": [
+                                  "wav",
+                                  "flac"
+                                ],
+                                "title": "AudioFormat",
+                                "default": "wav"
+                              },
+                              "audio_stream_index": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "maximum": 15.0,
+                                    "minimum": 0.0
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Audio Stream Index"
+                              },
+                              "thumbnail_count": {
+                                "type": "integer",
+                                "enum": [
+                                  0,
+                                  1,
+                                  3
+                                ],
+                                "default": 1
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "MediaMillV1Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "media-mill v1"
                       }
                     ]
                   }
@@ -3091,6 +3151,66 @@
                           "recipe_version",
                           "parameters"
                         ]
+                      },
+                      {
+                        "title": "media-mill v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "media-mill"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "extract_audio": {
+                                "default": true,
+                                "title": "Extract Audio",
+                                "type": "boolean"
+                              },
+                              "audio_format": {
+                                "enum": [
+                                  "wav",
+                                  "flac"
+                                ],
+                                "title": "AudioFormat",
+                                "type": "string",
+                                "default": "wav"
+                              },
+                              "audio_stream_index": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 15,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Audio Stream Index"
+                              },
+                              "thumbnail_count": {
+                                "enum": [
+                                  0,
+                                  1,
+                                  3
+                                ],
+                                "type": "integer",
+                                "default": 1
+                              }
+                            },
+                            "title": "MediaMillV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
                       }
                     ]
                   }
@@ -3788,6 +3908,66 @@
                               }
                             },
                             "title": "PdfPressV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "media-mill v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "media-mill"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "extract_audio": {
+                                "default": true,
+                                "title": "Extract Audio",
+                                "type": "boolean"
+                              },
+                              "audio_format": {
+                                "enum": [
+                                  "wav",
+                                  "flac"
+                                ],
+                                "title": "AudioFormat",
+                                "type": "string",
+                                "default": "wav"
+                              },
+                              "audio_stream_index": {
+                                "anyOf": [
+                                  {
+                                    "maximum": 15,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Audio Stream Index"
+                              },
+                              "thumbnail_count": {
+                                "enum": [
+                                  0,
+                                  1,
+                                  3
+                                ],
+                                "type": "integer",
+                                "default": 1
+                              }
+                            },
+                            "title": "MediaMillV1Parameters",
                             "type": "object"
                           }
                         },
@@ -5196,7 +5376,10 @@
           "UNSUPPORTED_COLOR_PROFILE",
           "IMAGE_TOO_LARGE",
           "CSV_STRUCTURE_INVALID",
-          "FIELD_LIMIT_EXCEEDED"
+          "FIELD_LIMIT_EXCEEDED",
+          "MEDIA_TOO_LARGE",
+          "AUDIO_LIMIT_EXCEEDED",
+          "AUDIO_STREAM_NOT_FOUND"
         ],
         "title": "ItemRejectionCode",
         "description": "Códigos de rejeição por item do catálogo de 1.6: lista fechada.\n\nCada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro\ncódigo, porque o relatório vem do sandbox e o código vai para o banco e para a API."
@@ -5217,7 +5400,8 @@
           "CSV_ALL_RECORDS_FILTERED",
           "CSV_FORMULA_CELLS",
           "CSV_FORMULA_HEADER",
-          "INPUT_NOT_SELECTED"
+          "INPUT_NOT_SELECTED",
+          "THUMBNAIL_BEFORE_TARGET"
         ],
         "title": "ItemWarningCode",
         "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. A exceção é a contagem por coluna de `CSV_FORMULA_CELLS`\n(`ReportWarning.columns`): nomes de coluna, nunca valores de célula, vão para a API com teto\n(1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui."
@@ -5244,6 +5428,10 @@
             "type": "integer",
             "title": "File Bytes"
           },
+          "video_file_bytes": {
+            "type": "integer",
+            "title": "Video File Bytes"
+          },
           "batch_files": {
             "type": "integer",
             "title": "Batch Files"
@@ -5268,6 +5456,7 @@
           "storage_bytes",
           "active_runs",
           "file_bytes",
+          "video_file_bytes",
           "batch_files",
           "batch_bytes",
           "concurrent_uploads",

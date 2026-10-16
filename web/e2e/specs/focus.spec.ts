@@ -69,6 +69,7 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Abrir a Bancada da Image Forge",
     "Abrir a Bancada da Downloads Detox",
     "Abrir a Bancada da PDF Press",
+    "Abrir a Bancada da Media Mill",
     // O rodapé vem depois de todo o conteúdo.
     "Termos de Uso",
     "Aviso de Privacidade",

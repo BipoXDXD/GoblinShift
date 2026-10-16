@@ -29,6 +29,7 @@ from goblinshift.runs import acceptance
 from goblinshift.runs.acceptance import MAX_QUEUED_RUNS
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run, run_input, run_output
+from tests.api.files_support import create_upload, send_content
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, prepare_database
 from tests.runs.support import (
@@ -238,6 +239,35 @@ def test_upload_repetido_responde_422_no_campo(
 
     problem = assert_problem(response, 422, "VALIDATION_FAILED")
     assert [e["field"] for e in problem["errors"]] == ["body.input_upload_ids"]
+
+
+@pytest.mark.parametrize(
+    ("recipe_id", "status"),
+    [("csv-janitor", 422), ("image-forge", 422), ("downloads-detox", 422), ("media-mill", 202)],
+)
+def test_arquivo_de_40_mib_com_nome_de_video_so_entra_no_media_mill(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    recipe_id: str,
+    status: int,
+) -> None:
+    # A extensão .mp4 dá ao envio o teto de vídeo (256 MiB), mas não é fronteira de segurança: o
+    # teto de cada receita (`max_input_bytes`, 32 MiB nas demais) vale na aceitação (ADR 036).
+    account = Account(factory)
+    size = 40 * 1024 * 1024
+    item = create_upload(client, account.headers, name="x.mp4", size=size)
+    send_content(client, account.headers, item, b"\0" * size)
+    before = count_rows(factory)
+    payload = {**body([uuid.UUID(item["id"])]), "recipe_id": recipe_id}
+
+    response = post_run(client, account, payload, str(uuid.uuid4()))
+
+    assert response.status_code == status, response.text
+    if status == 422:
+        problem = assert_problem(response, 422, "VALIDATION_FAILED")
+        assert [e["field"] for e in problem["errors"]] == ["body.input_upload_ids"]
+        assert count_rows(factory) == before
 
 
 @pytest.mark.parametrize(("count", "status"), [(5, 202), (6, 422)])
@@ -1088,6 +1118,7 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         "image-forge",
         "downloads-detox",
         "pdf-press",
+        "media-mill",
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
