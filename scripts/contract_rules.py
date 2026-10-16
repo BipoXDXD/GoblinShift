@@ -14,6 +14,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from goblinshift.files.limits import max_file_bytes_for
+
 _OK = 200
 _BAD_REQUEST = 400
 _GONE = 410
@@ -23,6 +25,7 @@ _UNPROCESSABLE = 422
 _DOMAIN_ERROR = "value_error"
 _GET_UPLOAD = "GET /api/v1/uploads/{upload_id}"
 _ITEM_NAME_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.name")
+_ITEM_SIZE_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.size")
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,29 @@ def _is_dot_name(items: list[Any], field: str) -> bool:
     return isinstance(item, dict) and item.get("name") in {".", ".."}
 
 
+def _only_oversized_common_files(rejection: Rejection) -> bool:
+    """Todo erro aponta um item que não é vídeo pelo nome e passa dos 32 MiB do arquivo comum.
+
+    A spec publica o teto do vídeo (256 MiB); o do tipo depende do nome (1.7, ADR 036).
+    """
+    errors = rejection.field_errors()
+    items = rejection.body.get("items") if isinstance(rejection.body, dict) else None
+    if not errors or not isinstance(items, list):
+        return False
+    return all(code == "invalid" and _is_oversized_common(items, field) for field, code in errors)
+
+
+def _is_oversized_common(items: list[Any], field: str) -> bool:
+    match = _ITEM_SIZE_FIELD.fullmatch(field)
+    if match is None or int(match["index"]) >= len(items):
+        return False
+    item = items[int(match["index"])]
+    if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+        return False
+    size = item.get("size")
+    return isinstance(size, int) and size > max_file_bytes_for(item["name"])
+
+
 def _only_run_domain_errors(rejection: Rejection) -> bool:
     """Só erros de validador próprio, nos uploads citados ou nos parâmetros da receita."""
     errors = rejection.field_errors()
@@ -104,6 +130,9 @@ _RULES = (
     # todo texto; o decodificador dos comandos o recusa com 400 (`json_command`).
     _Rule(_ANY_OPERATION, _BAD_REQUEST, "JSON_INVALID", lambda rejection: _has_nul(rejection.body)),
     _Rule("POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_dot_names),
+    _Rule(
+        "POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_oversized_common_files
+    ),
     # A chave só é exigida sem `validate_only`, e OpenAPI não tem parâmetro condicional. Enviada
     # no formato publicado, a recusa seria defeito.
     _Rule(
