@@ -504,6 +504,7 @@ class Coordinator:
                         error_code=item.code,
                         details={
                             "warnings": [code.value for code in item.warnings],
+                            "notices": [code.value for code in item.notices],
                             "counts": dict(item.counts),
                             "duplicate_of": item.duplicate_of,
                         },

@@ -148,6 +148,7 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
     assert details == [
         {
             "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": [],
             "counts": {
                 "blank_lines_ignored": 0,
                 "duplicates_removed": 0,
@@ -157,7 +158,7 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
             },
             "duplicate_of": None,
         },
-        {"warnings": [], "counts": {}, "duplicate_of": None},
+        {"warnings": [], "notices": [], "counts": {}, "duplicate_of": None},
     ]
     assert "SEGREDO" not in str(details)
 
