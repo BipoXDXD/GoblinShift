@@ -5126,6 +5126,59 @@
         ],
         "title": "FieldError"
       },
+      "FormulaCellsResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/FormulaColumnResponse"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Columns"
+          },
+          "more_columns": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "More Columns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "more_columns"
+        ],
+        "title": "FormulaCellsResponse",
+        "description": "Contagem por coluna de `CSV_FORMULA_CELLS`: as maiores primeiro, até o teto (1.3)."
+      },
+      "FormulaColumnResponse": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "cells": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Cells"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "cells"
+        ],
+        "title": "FormulaColumnResponse"
+      },
       "ItemNoticeCode": {
         "type": "string",
         "enum": [
@@ -5166,7 +5219,7 @@
           "INPUT_NOT_SELECTED"
         ],
         "title": "ItemWarningCode",
-        "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui."
+        "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. A exceção é a contagem por coluna de `CSV_FORMULA_CELLS`\n(`ReportWarning.columns`): nomes de coluna, nunca valores de célula, vão para a API com teto\n(1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui."
       },
       "Limits": {
         "properties": {
@@ -5879,6 +5932,16 @@
               }
             ],
             "title": "Duplicate Of"
+          },
+          "formula_cells": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FormulaCellsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -5891,10 +5954,11 @@
           "warnings",
           "notices",
           "counts",
-          "duplicate_of"
+          "duplicate_of",
+          "formula_cells"
         ],
         "title": "RunItemResponse",
-        "description": "Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo."
+        "description": "Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo."
       },
       "RunListResponse": {
         "properties": {

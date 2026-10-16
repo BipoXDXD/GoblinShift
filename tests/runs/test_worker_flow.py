@@ -125,7 +125,7 @@ def test_artefato_publicado_tem_o_conteudo_limpo_na_chave_da_geracao(
         assert content.read() == VALID
 
 
-def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
+def test_detalhe_por_item_guarda_avisos_e_contagens_sem_valor_de_celula(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
     formula = b"nome,cidade\r\n=SEGREDO(1),Recife\r\n"
@@ -157,8 +157,16 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
                 "written": 1,
             },
             "duplicate_of": None,
+            # O nome da coluna vai para a tela (1.3); o valor da célula, nunca.
+            "formula_cells": {"columns": [{"name": "nome", "cells": 1}], "more_columns": 0},
         },
-        {"warnings": [], "notices": [], "counts": {}, "duplicate_of": None},
+        {
+            "warnings": [],
+            "notices": [],
+            "counts": {},
+            "duplicate_of": None,
+            "formula_cells": None,
+        },
     ]
     assert "SEGREDO" not in str(details)
 

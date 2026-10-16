@@ -62,6 +62,7 @@ from goblinshift.runs.acceptance import (
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
+from goblinshift.runs.formula_cells import MAX_COLUMN_NAME_CHARS, MAX_COLUMNS, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, Phase, Status
 from goblinshift.runs.queries import (
     DEFAULT_PAGE_SIZE,
@@ -159,8 +160,23 @@ class RunSummaryResponse(BaseModel):
     outputs: int
 
 
+class FormulaColumnResponse(BaseModel):
+    # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto. Nulo
+    # quando o cabeçalho é vazio ou só de espaços (a tela dá o rótulo).
+    name: str | None = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
+    cells: int = Field(ge=1)
+
+
+class FormulaCellsResponse(BaseModel):
+    """Contagem por coluna de `CSV_FORMULA_CELLS`: as maiores primeiro, até o teto (1.3)."""
+
+    columns: list[FormulaColumnResponse] = Field(min_length=1, max_length=MAX_COLUMNS)
+    # Colunas com células que parecem fórmula e que ficaram fora de `columns` pelo teto.
+    more_columns: int = Field(ge=0)
+
+
 class RunItemResponse(BaseModel):
-    """Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo."""
+    """Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo."""
 
     position: int
     upload_id: UUID
@@ -173,6 +189,8 @@ class RunItemResponse(BaseModel):
     notices: list[ItemNoticeCode]
     counts: dict[str, int]
     duplicate_of: int | None
+    # Só com o aviso CSV_FORMULA_CELLS; nulo sem ele e depois de 30 dias, como `counts`.
+    formula_cells: FormulaCellsResponse | None
 
 
 class RunDetailResponse(RunResponse):
@@ -499,6 +517,7 @@ def get_run_route(
                 notices=list(item.notices),
                 counts=item.counts,
                 duplicate_of=item.duplicate_of,
+                formula_cells=_formula_cells(item.formula_cells),
             )
             for item in detail.items
         ],
@@ -647,6 +666,15 @@ def _run_not_found() -> ApiProblem:
 
 def _preset_not_found() -> ApiProblem:
     return ApiProblem(ProblemCode.NOT_FOUND, "Preset não encontrado.")
+
+
+def _formula_cells(summary: FormulaCells | None) -> FormulaCellsResponse | None:
+    if summary is None:
+        return None
+    return FormulaCellsResponse(
+        columns=[FormulaColumnResponse(name=c.name, cells=c.cells) for c in summary.columns],
+        more_columns=summary.more_columns,
+    )
 
 
 def _run_response(view: RunView) -> RunResponse:
