@@ -320,10 +320,16 @@ jobs:
     # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
     # execuções aceitas sem ter onde rodar.
     needs: [image, executor-image, web-image, gvisor, openobserve]
-    # Só roda depois que a VPS estiver configurada (variáveis do repositório definidas).
-    if: vars.VPS_HOST != ''
+    # Só em push na main (nunca em PR) e só depois que a VPS estiver configurada. VPS_HOST fica
+    # como variável do repositório: o `if` do job é avaliado antes do environment existir e não
+    # enxerga variável dele.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.VPS_HOST != ''
     runs-on: ubuntu-24.04
+    # Os segredos VPS_SSH_KEY e VPS_KNOWN_HOSTS moram só neste environment, cuja política de
+    # branches é "só main" (configuração do GitHub, ADR 033): nenhum outro ref lê a chave da VPS.
     environment: production
+    # O job não usa o GITHUB_TOKEN (sem checkout nem API): nenhuma permissão.
+    permissions: {}
     steps:
       - name: Configurar SSH
         env:

@@ -7,9 +7,14 @@ import { FocusHeading } from "../components/a11y/FocusHeading";
 import { TEXT } from "../text";
 import { PATHS } from "./paths";
 
+/**
+ * Rota inexistente. O Nginx serve o index.html com 200 para qualquer caminho da SPA; o `noindex`
+ * (que o React leva ao <head> e tira ao sair da tela) evita que a página entre na busca.
+ */
 export function NotFoundPage(): ReactElement {
   return (
     <div className="flex flex-col gap-4">
+      <meta name="robots" content="noindex" />
       <FocusHeading>{TEXT.notFound.title}</FocusHeading>
       <GoblinIllustration state="erro" rotationKey="pagina-nao-encontrada" />
       <p>
