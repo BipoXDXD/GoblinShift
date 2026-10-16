@@ -67,6 +67,14 @@ def test_nome_com_100_caracteres_e_aceito() -> None:
     assert parse_draft("a" * 100, "csv-janitor", 1, {}).name == "a" * 100
 
 
+def test_nome_e_aparado_nas_pontas() -> None:
+    assert parse_draft("  Mensal de março \n", "csv-janitor", 1, {}).name == "Mensal de março"
+
+
+def test_nome_com_100_caracteres_mais_espacos_nas_pontas_e_aceito() -> None:
+    assert parse_draft(f" {'a' * 100} ", "csv-janitor", 1, {}).name == "a" * 100
+
+
 def test_nome_e_normalizado_para_nfc() -> None:
     decomposed = "Café"
 
