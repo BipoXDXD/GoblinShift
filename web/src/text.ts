@@ -286,12 +286,13 @@ export const TEXT = {
       unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
       duplicateOf: (position: number) =>
         `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
+      // Singular e plural, como em `nouns`.
       counts: {
-        records_read: (n: string) => `${n} registros lidos`,
-        filtered_out: (n: string) => `${n} filtrados`,
-        duplicates_removed: (n: string) => `${n} duplicatas removidas`,
-        written: (n: string) => `${n} gravados`,
-        blank_lines_ignored: (n: string) => `${n} linhas vazias ignoradas`,
+        records_read: ["registro lido", "registros lidos"],
+        filtered_out: ["filtrado", "filtrados"],
+        duplicates_removed: ["duplicata removida", "duplicatas removidas"],
+        written: ["gravado", "gravados"],
+        blank_lines_ignored: ["linha vazia ignorada", "linhas vazias ignoradas"],
       },
     },
     cancel: {
