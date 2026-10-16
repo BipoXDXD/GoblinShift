@@ -56,6 +56,9 @@ docker exec "$BACKUP_PG_CONTAINER" \
 
 # PUT simples (até 5 GB, folga sobre os 10 GiB do banco comprimidos): o S3 não aceita corpo
 # chunked, por isso o dump passa por um arquivo temporário em vez de ir direto do pipe.
+# O B2 recusa com 400 o PUT sem Content-MD5 num bucket com Object Lock. O hash é do arquivo já
+# gravado, com os mesmos bytes que o curl envia, e o header entra na assinatura SigV4.
+md5="$(openssl dgst -md5 -binary "$encrypted" | base64)"
 s3_curl --upload-file "$encrypted" --header "Content-Type: application/octet-stream" \
-  --max-time 1800 --output /dev/null "$(s3_url "$key")"
+  --header "Content-MD5: $md5" --max-time 1800 --output /dev/null "$(s3_url "$key")"
 echo "backup enviado: dump de $(dump_instant "$key") ($(wc -c <"$encrypted" | tr -d ' ') bytes cifrados)"
