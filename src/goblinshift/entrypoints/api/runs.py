@@ -238,6 +238,7 @@ def create_run(
             idempotency_key,
             _current_traceparent(),
             executor_image=request.app.state.executor_image,
+            quota_defaults=request.app.state.quota_defaults,
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None

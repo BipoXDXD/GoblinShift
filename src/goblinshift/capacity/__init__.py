@@ -22,6 +22,7 @@ from goblinshift.capacity.ledger import (
     InsufficientReservationError,
     ReservationNotFoundError,
     Resource,
+    StorageBelowReservedError,
     delete_released_reservations,
     global_usage,
     has_live_reservation,
@@ -30,6 +31,7 @@ from goblinshift.capacity.ledger import (
     release_many,
     reserve,
     reserve_many,
+    set_account_storage_max,
     transfer,
     usage,
 )
@@ -49,6 +51,7 @@ __all__ = [
     "ReconcileReport",
     "ReservationNotFoundError",
     "Resource",
+    "StorageBelowReservedError",
     "Unreserved",
     "delete_released_reservations",
     "global_usage",
@@ -59,6 +62,7 @@ __all__ = [
     "release_many",
     "reserve",
     "reserve_many",
+    "set_account_storage_max",
     "transfer",
     "usage",
 ]
