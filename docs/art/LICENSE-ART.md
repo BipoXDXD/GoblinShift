@@ -6,20 +6,20 @@ As goblins do site e a marca são **ilustrações e modelos 3D gerados com IA e 
 
 | Goblin | Onde | Modelo 3D (Hyper3D Rodin) |
 |---|---|---|
-| Rúbia | Cena 3D da abertura e a imagem estática dela | [`9f030f3c`](https://hyper3d.ai/workspace/rodin/9f030f3c-868c-4e55-a44e-71d6a3323265) (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
-| Lua | Estado vazio | [`81ae6621`](https://hyper3d.ai/workspace/rodin/81ae6621-dbb6-48b0-acb0-04918bfdb393) |
-| Ada | Estado carregando | [`417f7fe0`](https://hyper3d.ai/workspace/rodin/417f7fe0-23a6-4fec-922a-33fbb3c69032) |
-| Nyx | Estado de erro | [`19a1ddba`](https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9) |
-| Ferrugem | Estado de sucesso | [`ec3a728c`](https://hyper3d.ai/workspace/rodin/ec3a728c-d58f-40f4-a298-a144e6ba668b) |
-| Jade | Estado vazio, em rotação com a Lua | [`3c7aa397`](https://hyper3d.ai/workspace/rodin/3c7aa397-f83d-44ac-bf1b-bd65b0cb8524) |
-| Fagulha | Estado carregando, em rotação com a Ada | [`0d84776f`](https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd) |
+| Rúbia | Cena 3D da abertura e a imagem estática dela; estado carregando, em rotação com a Fagulha; créditos | [`9f030f3c`](https://hyper3d.ai/workspace/rodin/9f030f3c-868c-4e55-a44e-71d6a3323265) (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
+| Nyx | Estado de erro; créditos | [`19a1ddba`](https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9) |
+| Ferrugem | Estado de sucesso; créditos | [`ec3a728c`](https://hyper3d.ai/workspace/rodin/ec3a728c-d58f-40f4-a298-a144e6ba668b) |
+| Jade | Estado vazio; créditos | [`3c7aa397`](https://hyper3d.ai/workspace/rodin/3c7aa397-f83d-44ac-bf1b-bd65b0cb8524) |
+| Fagulha | Estado carregando, em rotação com a Rúbia; créditos | [`0d84776f`](https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd) |
 
-Cadeia da Rúbia, da Lua, da Ada, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
+Cadeia da Rúbia, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
 
 1. Conceito 2D **só por texto** no Seedream (ByteDance), pela API da Tripo.
 2. Versão frontal e versão semi-realista por image-to-image (Seedream e Banana Pro, do Google, pela Tripo), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do Rodin.
 3. Modelo 3D no Hyper3D Rodin Gen-2.5 a partir da imagem do passo 2.
 4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
+
+A Ada (Rodin `417f7fe0`) saiu do site em 2026-10-15, por decisão do usuário; ela fica em `excluded` no `PROVENANCE.json`.
 
 ## A marca
 
