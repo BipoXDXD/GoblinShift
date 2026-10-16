@@ -31,8 +31,9 @@ run = Table(
     Column("recipe_id", Text, nullable=False),
     Column("recipe_version", Integer, nullable=False),
     Column("executor_digest", Text, nullable=False),
-    # Parâmetros com defaults aplicados e limites de 1.7, fixados na aceitação.
-    Column("parameters", JSONB, nullable=False),
+    # Parâmetros com defaults aplicados e limites de 1.7, fixados na aceitação. Os parâmetros são
+    # anulados 30 dias depois do término (1.7, "Retenção"; migração 0010).
+    Column("parameters", JSONB),
     Column("limits", JSONB, nullable=False),
     Column("status", Text, nullable=False, server_default="queued"),
     Column("phase", Text),
@@ -79,6 +80,17 @@ run = Table(
     ),
     CheckConstraint("status <> 'failed' OR error_code IS NOT NULL", name="failed_has_code"),
     CheckConstraint("generation >= 0 AND claim_count >= 0", name="counters"),
+    CheckConstraint(
+        "parameters IS NOT NULL OR finished_at IS NOT NULL", name="parameters_until_finished"
+    ),
+    # Retenção (1.7): Runs terminadas ainda com parâmetros (anulação aos 30 dias) e todas as
+    # terminadas (remoção aos 90).
+    Index(
+        "run_anonymize_idx",
+        "finished_at",
+        postgresql_where=text("parameters IS NOT NULL AND finished_at IS NOT NULL"),
+    ),
+    Index("run_finished_at_idx", "finished_at", postgresql_where=text("finished_at IS NOT NULL")),
 )
 
 run_input = Table(
