@@ -41,11 +41,13 @@ uv run lint-imports           # contratos de arquitetura (docs/GoblinShiftPlan.m
 uv run pytest                 # inclui PostgreSQL real via Testcontainers
 ```
 
+Depois de mexer no worker, na manutenção ou no Runner, `./scripts/stress-runs.sh [suítes]` roda N suítes `tests/runs` em paralelo (padrão: 5), a carga em que os testes do worker como processo já falharam; sai com 1 e aponta o log de cada suíte vermelha.
+
 ### Interface web (`web/`)
 
 Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas), Bancada (arquivos e parâmetros) e Execução (estado e downloads).
 
-Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: musgo, latão, pedra e brasa em OKLCH; papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A abertura tem a Rúbia em 3D (three.js, carregada depois do conteúdo, só com GPU e sem movimento reduzido, com a imagem estática como fallback) e as outras goblins aparecem nos estados vazio, carregando, erro e sucesso ([ADR 027](docs/adr/027-3d-na-abertura.md) e [ADR 030](docs/adr/030-motor-e-asset-do-3d-da-abertura.md)). A arte é gerada por `scripts/arte/` a partir dos brutos fora do repositório, com proveniência e licença em [`docs/art/LICENSE-ART.md`](docs/art/LICENSE-ART.md), conferidas no CI.
+Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: paleta Taverna escura, com madeira, cobre, âmbar, brasa e pátina em OKLCH, [ADR 032](docs/adr/032-paleta-taverna-escura.md); papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A abertura tem a Rúbia em 3D (three.js, carregada depois do conteúdo, só com GPU e sem movimento reduzido, com a imagem estática como fallback) e as outras goblins aparecem nos estados vazio, carregando, erro e sucesso ([ADR 027](docs/adr/027-3d-na-abertura.md) e [ADR 030](docs/adr/030-motor-e-asset-do-3d-da-abertura.md)). A arte é gerada por `scripts/arte/` a partir dos brutos fora do repositório, com proveniência e licença em [`docs/art/LICENSE-ART.md`](docs/art/LICENSE-ART.md), conferidas no CI.
 
 ```bash
 cd web
@@ -196,6 +198,21 @@ cd deploy && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passare
 ```
 
 O teste monta o `docker run` das sondas com o perfil de produção do `executor-ctl` (`deploy/executor_ctl/profile.py`) e confere que o serviço responde no socket. Rode com o worker parado: a área de trabalho só admite uma tentativa por vez. O próprio teste para o container `maintenance` durante as sondas e o religa no fim, porque a manutenção removeria a sonda como tentativa sem registro ([ADR 017](docs/adr/017-aceitacao-suspende-a-manutencao.md)); se o teste for morto à força, ele já terá impresso o `docker start` que religa a manutenção.
+
+### Aceitação semanal, agendada
+
+O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por semana, no domingo às 07:30 UTC com até 30 min de sorteio, e pinga o check "aceitação semanal" do healthchecks.io (7 dias, tolerância de 2 h) (`/start`, sucesso ou `/fail`; tabela dos monitores em [`deploy/openobserve/README.md`](deploy/openobserve/README.md#monitores-externos)). O `deploy/acceptance/scheduled.sh` para o worker durante o teste e o religa no fim, também quando a aceitação reprova; se o worker não voltar, o resultado é `/fail` e o log traz o `docker start` que o religa. Nesses 10 a 30 minutos (ADR 017) as execuções esperam na fila.
+
+```bash
+sudo bash deploy/acceptance/install.sh       # copia o código e cria /etc/goblinshift/acceptance.env vazio (root, 600)
+sudoedit /etc/goblinshift/acceptance.env     # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>
+sudo bash deploy/acceptance/install.sh       # com a URL preenchida, liga o timer
+sudo systemctl start goblinshift-acceptance.service   # roda já; resultado em journalctl -u goblinshift-acceptance
+```
+
+O serviço roda como root, então não executa nada do checkout nem lê nada de `/srv/goblinshift/secrets`, que pertencem ao usuário `goblinshift`: quem controlasse esses caminhos rodaria código como root. O instalador copia `deploy/acceptance`, `deploy/executor_ctl` e `deploy/backup/lib.sh` para `/usr/local/lib/goblinshift` (do root, sem escrita para outros) recusa diretório de destino que outro usuário grave ou que seja symlink e lê o checkout com os privilégios do `goblinshift`, para que um symlink plantado ali não copie um arquivo que só o root lê. Por isso uma mudança na aceitação só chega ao timer quando o `install.sh` roda de novo, como no executor-ctl; rode-o a partir de um checkout conferido (`git status` limpo, no commit implantado). A unit tem o sistema de arquivos somente leitura fora da área de trabalho e só as capabilities que as sondas usam (`systemd-analyze security goblinshift-acceptance.service`).
+
+Não rode o teste de caos nem o do Image Forge no horário do timer: os três usam a mesma área de trabalho.
 
 ### Pior caso do Image Forge (na VPS, antes de publicar uma versão)
 
