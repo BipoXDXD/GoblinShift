@@ -130,13 +130,20 @@ function SampleTable({
   readonly fileName: string;
   readonly sample: CsvSample;
 }): ReactElement {
+  const captionId = useId();
   return (
     // Tabela larga rola dentro da própria caixa, não a página (WCAG 1.4.10); com foco, rola pelo
-    // teclado (regra scrollable-region-focusable do axe), como em LegalDocument.
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
-    <div tabIndex={0} className="overflow-x-auto rounded-lg bg-surface-sunken p-3 shadow-sunken">
+    // teclado (regra scrollable-region-focusable do axe), como em LegalDocument. O foco anuncia a
+    // região pelo nome da legenda.
+    <div
+      role="region"
+      aria-labelledby={captionId}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
+      tabIndex={0}
+      className="overflow-x-auto rounded-lg bg-surface-sunken p-3 shadow-sunken"
+    >
       <table className="w-full border-collapse text-left text-sm">
-        <caption className="mb-2 text-left text-fg-muted">
+        <caption id={captionId} className="mb-2 text-left text-fg-muted">
           {T.tableCaption(fileName, sample.rows.length)}
         </caption>
         <thead>
@@ -201,8 +208,11 @@ function PageList({
       <p id={captionId} className="text-sm text-fg-muted">
         {T.pagesCaption(fileName, pageMap.pages.length)}
       </p>
-      {/* Até 400 páginas: a lista rola dentro da caixa, com foco para o teclado. */}
+      {/* Até 400 páginas: a lista rola dentro da caixa, com foco para o teclado e o nome da
+          legenda ao receber o foco. */}
       <div
+        role="region"
+        aria-labelledby={captionId}
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
         tabIndex={0}
         className="max-h-48 overflow-y-auto rounded-lg"
