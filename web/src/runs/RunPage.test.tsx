@@ -173,9 +173,9 @@ describe("Execução", () => {
 
   describe("goblin do estado", () => {
     it.each([
-      ["queued", /^Ada, /],
-      ["running", /^Ada, /],
-      ["stopping", /^Ada, /],
+      ["queued", /^Rúbia, /],
+      ["running", /^Rúbia, /],
+      ["stopping", /^Rúbia, /],
       ["succeeded", /^Ferrugem, /],
       ["succeeded_with_warnings", /^Ferrugem, /],
       ["failed", /^Nyx, /],
