@@ -15,12 +15,18 @@ from starlette.responses import Response
 
 from goblinshift.entrypoints.api.cookies import (
     CSRF_COOKIE,
+    CSRF_HEADER,
     SESSION_COOKIE,
     clear_session_cookies,
     set_session_cookies,
 )
 from goblinshift.entrypoints.api.dependencies import current_time, require_recent_session
-from goblinshift.identity import IssuedSession, Principal, authenticate_api_key
+from goblinshift.identity import (
+    IssuedSession,
+    Principal,
+    authenticate_api_key,
+    issue_csrf_token,
+)
 from goblinshift.identity.tables import audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.session_support import open_session, session_headers
@@ -39,6 +45,8 @@ ISSUED = IssuedSession(
     idle_expires_at=NOW,
     absolute_expires_at=NOW,
 )
+# Token no formato real, sem sessão viva a que o HMAC se ligue (logout depois de expirar).
+ANONYMOUS_CSRF = issue_csrf_token(b"k" * 32, UUID("00000000-0000-0000-0000-000000000002"))
 
 
 def _cookie_only(issued: IssuedSession) -> dict[str, str]:
@@ -264,21 +272,59 @@ def test_logout_revoga_no_servidor_e_cookie_antigo_401(
     assert _audit_events(factory) == [("LOGOUT", user_id, "success")]
 
 
+def _anonymous_logout_headers(session_cookie: str | None) -> dict[str, str]:
+    """Par CSRF da própria origem (cookie e header iguais), com ou sem cookie de sessão."""
+    cookies = [f"{CSRF_COOKIE}={ANONYMOUS_CSRF}"]
+    if session_cookie is not None:
+        cookies.insert(0, f"{SESSION_COOKIE}={session_cookie}")
+    return {"Cookie": "; ".join(cookies), CSRF_HEADER: ANONYMOUS_CSRF}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "session_cookie",
+    [
+        pytest.param(None, id="sem-cookie-de-sessao"),
+        pytest.param("S" * 43, id="sessao-desconhecida"),
+        pytest.param("lixo", id="cookie-malformado"),
+    ],
+)
+def test_logout_sem_sessao_valida_com_o_par_csrf_responde_204(
+    client: TestClient, factory: sessionmaker[Session], session_cookie: str | None
+) -> None:
+    response = client.post(LOGOUT, headers=_anonymous_logout_headers(session_cookie))
+
+    _assert_signed_out(response)
+    assert _audit_events(factory) == []
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     "headers",
     [
-        pytest.param({}, id="sem-cookie"),
-        pytest.param({"Cookie": f"{SESSION_COOKIE}={'S' * 43}"}, id="sessao-desconhecida"),
-        pytest.param({"Cookie": f"{SESSION_COOKIE}=lixo"}, id="cookie-malformado"),
+        pytest.param({}, id="sem-cookie-nem-token"),
+        pytest.param(
+            {"Cookie": f"{SESSION_COOKIE}={'S' * 43}"}, id="sessao-desconhecida-sem-token"
+        ),
+        pytest.param({"Cookie": f"{CSRF_COOKIE}={ANONYMOUS_CSRF}"}, id="cookie-sem-header"),
+        pytest.param({CSRF_HEADER: ANONYMOUS_CSRF}, id="header-sem-cookie"),
+        pytest.param(
+            {**_anonymous_logout_headers(None), "Sec-Fetch-Site": "cross-site"}, id="outro-site"
+        ),
+        pytest.param(
+            {**_anonymous_logout_headers(None), "Origin": "https://evil.example"},
+            id="outra-origem",
+        ),
     ],
 )
-def test_logout_sem_sessao_valida_tambem_responde_204(
+def test_logout_sem_sessao_valida_e_sem_o_par_csrf_403(
     client: TestClient, factory: sessionmaker[Session], headers: dict[str, str]
 ) -> None:
     response = client.post(LOGOUT, headers=headers)
 
-    _assert_signed_out(response)
+    assert_problem(response, 403, "CSRF_FAILED")
+    assert "set-cookie" not in response.headers
+    assert "clear-site-data" not in response.headers
     assert _audit_events(factory) == []
 
 

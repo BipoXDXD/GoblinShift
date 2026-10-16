@@ -14,6 +14,8 @@ from goblinshift.identity import Scope
 class Policy(Enum):
     # Allowlist: responde sem credencial.
     PUBLIC = auto()
+    # Sem credencial, mas a mutação exige o par CSRF (cookie e header) da própria origem.
+    CSRF_ONLY = auto()
     # Sessão ou qualquer chave válida, sem escopo específico.
     ANY_CREDENTIAL = auto()
     # Sessão (que tem todos os escopos) ou chave com o escopo da regra.
@@ -43,7 +45,7 @@ def _scope(scope: Scope, resource_param: str | None = None) -> Rule:
 API = "/api/v1"
 
 MATRIX: dict[tuple[str, str], Rule] = {
-    # Infraestrutura e documentação.
+    # Infraestrutura e documentação (a documentação só existe fora de produção: test_api_docs.py).
     ("GET", "/livez"): Rule(Policy.PUBLIC),
     ("GET", "/readyz"): Rule(Policy.PUBLIC),
     ("GET", "/docs"): Rule(Policy.PUBLIC),
@@ -51,8 +53,9 @@ MATRIX: dict[tuple[str, str], Rule] = {
     # Login (Frente A): o estado do login protege o callback, não uma credencial.
     ("GET", "/auth/login/{provider}"): Rule(Policy.PUBLIC),
     ("GET", "/auth/callback/{provider}"): Rule(Policy.PUBLIC),
-    # Sem sessão válida também responde 204: o estado final é o mesmo (Frente B).
-    ("POST", "/auth/logout"): Rule(Policy.PUBLIC),
+    # Sem sessão válida também responde 204, o estado final é o mesmo (Frente B), mas só com o
+    # par CSRF: outro site não manda o navegador apagar os dados da origem.
+    ("POST", "/auth/logout"): Rule(Policy.CSRF_ONLY),
     ("POST", "/auth/logout-all"): Rule(Policy.SESSION),
     # Conta.
     ("GET", f"{API}/me"): Rule(Policy.ANY_CREDENTIAL),
