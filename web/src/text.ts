@@ -105,8 +105,15 @@ export const TEXT = {
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
   // Texto alternativo das goblins (ADR 030): diz quem é e como é; o estado já está no texto ao lado.
   art: {
-    hero: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
     castHeading: "O elenco",
+    // Palco 3D da abertura (ADR 038): uma goblin por vez, escolhida no seletor.
+    stage: {
+      label: (name: string) => `${name} em 3D`,
+      hint: "Arraste para girar. Com o foco aqui, as setas giram e inclinam, e Home volta à pose inicial. No celular, dois dedos inclinam.",
+      castLabel: "Escolha a goblin",
+      spin: "Girar",
+      reset: "Pose inicial",
+    },
     goblins: {
       rubia: {
         name: "Rúbia",

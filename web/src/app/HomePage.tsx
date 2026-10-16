@@ -15,8 +15,8 @@ const SUMMARIES: Readonly<Record<RecipeId, string>> = T.summaries;
 
 /**
  * Oficina (2.2): a abertura e as receitas. A ação são os cartões, então a tela não tem botão
- * primário; as execuções recentes vêm depois das receitas. A abertura tem a Rúbia em 3D, que
- * chega depois do conteúdo (ADR 027 e 030).
+ * primário; as execuções recentes vêm depois das receitas. A abertura tem o elenco em 3D, uma goblin por
+ * vez, que chega depois do conteúdo (ADR 027, 030 e 038).
  */
 export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
