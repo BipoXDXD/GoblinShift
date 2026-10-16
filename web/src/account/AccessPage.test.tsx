@@ -178,6 +178,14 @@ describe("Acesso: uso e cotas", () => {
     expect(within(usage).queryByText("No limite") !== null).toBe(atLimit);
   });
 
+  it("mostra o teto por arquivo e o teto por vídeo", async () => {
+    setup();
+
+    const usage = await section("Uso e cotas");
+    expect(usage).toHaveTextContent("Por arquivo33,6 MB");
+    expect(usage).toHaveTextContent("Por vídeo268,4 MB");
+  });
+
   it("uso zero, sem execução na janela: sem a hora de renovação", async () => {
     setup({
       "GET /api/v1/me": () =>

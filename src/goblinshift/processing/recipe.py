@@ -58,6 +58,8 @@ class ItemWarningCode(StrEnum):
     CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
     # PDF Press: nenhuma página da entrada entrou na seleção.
     INPUT_NOT_SELECTED = "INPUT_NOT_SELECTED"
+    # Media Mill: sem quadro em ou depois do ponto pedido; a miniatura usa o último anterior.
+    THUMBNAIL_BEFORE_TARGET = "THUMBNAIL_BEFORE_TARGET"
 
 
 class ItemNoticeCode(StrEnum):
@@ -93,6 +95,7 @@ class OutputGroup(StrEnum):
     TABLES = "tables"
     TEXT = "text"
     ARCHIVES = "archives"
+    AUDIO = "audio"  # Media Mill (ADR 036)
     # Derivados para pré-visualização (imagem reduzida, amostra de tabela): publicados com o papel
     # `preview`, fora do manifesto e do ZIP.
     PREVIEWS = "previews"
@@ -155,6 +158,10 @@ class ItemRejectionCode(StrEnum):
     IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE"
     CSV_STRUCTURE_INVALID = "CSV_STRUCTURE_INVALID"
     FIELD_LIMIT_EXCEEDED = "FIELD_LIMIT_EXCEEDED"
+    # Media Mill (ADR 036).
+    MEDIA_TOO_LARGE = "MEDIA_TOO_LARGE"
+    AUDIO_LIMIT_EXCEEDED = "AUDIO_LIMIT_EXCEEDED"
+    AUDIO_STREAM_NOT_FOUND = "AUDIO_STREAM_NOT_FOUND"
 
 
 @dataclass(frozen=True)
@@ -203,6 +210,8 @@ class FailureCode(StrEnum):
     NO_VALID_OUTPUTS = "NO_VALID_OUTPUTS"
     OUTPUT_LIMIT_EXCEEDED = "OUTPUT_LIMIT_EXCEEDED"
     REPORT_LIMIT_EXCEEDED = "REPORT_LIMIT_EXCEEDED"
+    # Tempo, memória ou disco de um processo da receita (Media Mill: FFmpeg além do orçamento).
+    RESOURCE_LIMIT_EXCEEDED = "RESOURCE_LIMIT_EXCEEDED"
     # Receitas que compõem um resultado de várias entradas (PDF Press, 1.5) falham a execução
     # inteira em vez de rejeitar o item: uma composição incompleta não é sucesso (ADR 035).
     INPUT_LIMIT_EXCEEDED = "INPUT_LIMIT_EXCEEDED"

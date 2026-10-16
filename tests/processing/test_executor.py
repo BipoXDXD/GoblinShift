@@ -11,10 +11,12 @@ import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 import warnings
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -35,6 +37,7 @@ from goblinshift.processing.recipe import (
     RecipeFailure,
     Report,
 )
+from goblinshift.processing.registry import RECIPES
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
@@ -333,6 +336,37 @@ def test_configura_o_pillow_uma_vez_no_inicio(
         assert image_forge.Limits().max_pixels == Image.MAX_IMAGE_PIXELS
         with pytest.raises(Image.DecompressionBombWarning):
             warnings.warn("bomba", Image.DecompressionBombWarning, stacklevel=1)
+
+
+def test_temporarios_das_receitas_ficam_na_area_de_trabalho(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A raiz do container é somente leitura: o rascunho (Media Mill, ADR 036) vai para work/tmp.
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+    seen: list[str] = []
+    real_execute = RECIPES["csv-janitor", 1].execute
+
+    def spying_execute(*args: Any) -> Report:
+        seen.append(tempfile.gettempdir())
+        return real_execute(*args)
+
+    monkeypatch.setattr(
+        execution, "RECIPES", {("csv-janitor", 1): SimpleNamespace(execute=spying_execute)}
+    )
+    before = tempfile.gettempdir()
+
+    assert main([str(work)]) == ExitCode.SUCCEEDED
+
+    assert seen == [str(work / "tmp")]
+    assert tempfile.gettempdir() == before
+
+
+def test_rascunho_de_outra_tentativa_e_falha_de_infraestrutura(tmp_path: Path) -> None:
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+    (work / "tmp").mkdir()
+    (work / "tmp" / "resto.wav").write_bytes(b"de outra tentativa")
+
+    assert main([str(work)]) == ExitCode.INFRASTRUCTURE
 
 
 def read_manifest(work: Path) -> dict[str, Any]:

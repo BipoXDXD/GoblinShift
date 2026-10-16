@@ -8,8 +8,9 @@ Roda no Python do host, só com a biblioteca padrão (sem Pillow, sem o ambiente
 - o manifesto: receita, parâmetros enviados, cada entrada (nome, tamanho, SHA-256 do arquivo
   local, status, saídas, código de rejeição, `duplicate_of`) e cada saída (caminho, tamanho e
   SHA-256 dos bytes dentro do ZIP);
-- os extras do cenário: dimensões de JPEG lidas do SOF, ausência de EXIF e saída com os mesmos
-  bytes de uma entrada.
+- os extras do cenário: dimensões de JPEG lidas do SOF, ausência de EXIF, saída com os mesmos
+  bytes de uma entrada, taxa, canais e bits do áudio (STREAMINFO do FLAC) e
+  texto que não pode aparecer em nenhuma entrada do ZIP (o canário dos metadados de um vídeo).
 Sai com 0 e uma linha "ok" se tudo confere; senão, 1 com a lista de divergências no stderr.
 """
 
@@ -25,6 +26,11 @@ MANIFEST_NAME = "manifest.json"
 REPORT_NAME = "report.json"
 _SOF_MARKERS = (0xC0, 0xC1, 0xC2)
 _EXIF_HEADER = b"Exif\x00\x00"
+_FLAC_MAGIC = b"fLaC"
+_FLAC_STREAMINFO = 0
+# STREAMINFO começa depois do "fLaC" e do cabeçalho do bloco (4 + 4 bytes); taxa, canais e bits
+# ficam nos 8 bytes a partir do 11º byte do bloco (RFC 9639, 8.2).
+_FLAC_FIELDS = slice(18, 26)
 
 
 def main(argv: list[str]) -> int:
@@ -59,6 +65,8 @@ def check(archive: zipfile.ZipFile, expected: dict[str, Any], fixtures: Path) ->
         + _check_jpeg_sizes(archive, expected.get("jpeg_sizes", {}))
         + _check_without_exif(archive, expected.get("jpeg_without_exif", []))
         + _check_same_bytes(archive, expected.get("same_bytes_as_input", {}), expected, fixtures)
+        + _check_audio(archive, expected.get("audio", {}))
+        + _check_absent_text(archive, expected.get("absent_text", []))
     )
 
 
@@ -146,6 +154,36 @@ def _check_same_bytes(
         if archive.read(path) != original:
             problems.append(f"{path}: bytes diferentes da entrada {position}")
     return problems
+
+
+def _check_audio(archive: zipfile.ZipFile, specs: dict[str, Any]) -> list[str]:
+    problems = []
+    for path, wanted in specs.items():
+        found = _audio_format(archive.read(path))
+        if found != wanted:
+            problems.append(f"{path}: {found}; esperado {wanted}")
+    return problems
+
+
+def _audio_format(data: bytes) -> dict[str, int] | None:
+    """Taxa, canais e bits por amostra do STREAMINFO de um FLAC; None se não for FLAC."""
+    if not data.startswith(_FLAC_MAGIC) or data[4] & 0x7F != _FLAC_STREAMINFO:
+        return None
+    fields = int.from_bytes(data[_FLAC_FIELDS], "big")
+    return {
+        "sample_rate": fields >> 44,
+        "channels": ((fields >> 41) & 0x7) + 1,
+        "bits_per_sample": ((fields >> 36) & 0x1F) + 1,
+    }
+
+
+def _check_absent_text(archive: zipfile.ZipFile, texts: list[str]) -> list[str]:
+    return [
+        f"{name}: contém {text!r}"
+        for text in texts
+        for name in archive.namelist()
+        if text.encode() in archive.read(name)
+    ]
 
 
 def _sha256(data: bytes) -> str:

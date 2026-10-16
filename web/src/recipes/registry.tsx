@@ -15,6 +15,9 @@ import { parsePdfPress, pdfPressFieldId } from "./pdf-press/schema";
 import { pdfPressSettings } from "./pdf-press/settings";
 import { imageForgeFieldId, parseImageForge } from "./image-forge/schema";
 import { imageForgeSettings } from "./image-forge/settings";
+import { MediaMillFields } from "./media-mill/MediaMillFields";
+import { mediaMillFieldId, parseMediaMill } from "./media-mill/schema";
+import { mediaMillSettings } from "./media-mill/settings";
 import type {
   RecipeCommandFor,
   RecipeDraft,
@@ -132,6 +135,19 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
     }),
     fieldIdFor: pdfPressFieldId,
     uploadBoundParameters: ["select"],
+  },
+  "media-mill": {
+    id: "media-mill",
+    version: 1,
+    title: TEXT.mediaMill.title,
+    // Só os contêineres da allowlist (1.5); o conteúdo é conferido pelo ffprobe no executor.
+    accept: ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm",
+    formFor: catalogForm({
+      settingsOf: mediaMillSettings,
+      initialDraft: (settings) => parseMediaMill(settings.defaults, settings),
+      Fields: MediaMillFields,
+    }),
+    fieldIdFor: mediaMillFieldId,
   },
 };
 

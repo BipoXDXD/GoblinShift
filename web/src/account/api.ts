@@ -26,6 +26,7 @@ const meSchema = z.object({
     storage_bytes: z.number().int(),
     active_runs: z.number().int(),
     file_bytes: z.number().int(),
+    video_file_bytes: z.number().int(),
     batch_files: z.number().int(),
     batch_bytes: z.number().int(),
     concurrent_uploads: z.number().int(),

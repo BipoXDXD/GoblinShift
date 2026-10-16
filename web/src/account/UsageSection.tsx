@@ -60,8 +60,9 @@ export function UsageSection({ me }: { readonly me: Me }): ReactElement {
           <h3 id={limitsHeadingId} className="text-sm font-semibold text-fg-muted">
             {T.limitsHeading}
           </h3>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
             <Limit term={T.fileBytes} value={formatBytes(limits.file_bytes)} />
+            <Limit term={T.videoFileBytes} value={formatBytes(limits.video_file_bytes)} />
             <Limit term={T.batchFiles} value={String(limits.batch_files)} />
             <Limit term={T.batchBytes} value={formatBytes(limits.batch_bytes)} />
             <Limit term={T.concurrentUploads} value={String(limits.concurrent_uploads)} />

@@ -14,12 +14,22 @@ describe("findRecipe", () => {
     ["image-forge", "Image Forge"],
     ["downloads-detox", "Downloads Detox"],
     ["pdf-press", "PDF Press"],
+    ["media-mill", "Media Mill"],
   ] as const)("encontra %s", (id, title) => {
     expect(findRecipe(id)?.title).toBe(title);
   });
 
-  it.each(["media-mill", "", "__proto__", "toString", "constructor"])("não encontra %j", (id) => {
-    expect(findRecipe(id)).toBeNull();
+  it.each(["receita-inexistente", "", "__proto__", "toString", "constructor"])(
+    "não encontra %j",
+    (id) => {
+      expect(findRecipe(id)).toBeNull();
+    },
+  );
+
+  it("Media Mill aceita só os contêineres de vídeo da allowlist", () => {
+    expect(findRecipe("media-mill")?.accept).toBe(
+      ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm",
+    );
   });
 
   it("traduz o caminho do servidor para o campo da receita", () => {
@@ -45,7 +55,11 @@ describe("formFor", () => {
   it("traz os limites de entrada da versão", () => {
     const form = findRecipe("downloads-detox")?.formFor(catalogVersion("downloads-detox"));
 
-    expect(form?.inputLimits).toEqual({ maxInputs: 100, maxTotalBytes: 503316480 });
+    expect(form?.inputLimits).toEqual({
+      maxInputs: 100,
+      maxTotalBytes: 503316480,
+      maxFileBytes: 33554432,
+    });
   });
 
   it.each([

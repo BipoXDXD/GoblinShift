@@ -37,6 +37,17 @@ export function runInputs(entries: readonly UploadEntry[], limits: InputLimits):
   if (kept.length > limits.maxInputs) {
     return { ok: false, message: TEXT.workbench.errors.tooManyFiles(limits.maxInputs) };
   }
+  const oversized = firstAbove(kept, limits.maxFileBytes);
+  if (oversized !== null) {
+    return {
+      ok: false,
+      message: TEXT.workbench.errors.fileTooLarge(
+        oversized.entry.file.name,
+        formatBytes(oversized.entry.file.size),
+        formatBytes(oversized.maxFileBytes),
+      ),
+    };
+  }
   const totalBytes = kept.reduce((sum, entry) => sum + entry.file.size, 0);
   if (limits.maxTotalBytes !== null && totalBytes > limits.maxTotalBytes) {
     return {
@@ -54,6 +65,18 @@ export function runInputs(entries: readonly UploadEntry[], limits: InputLimits):
     return { ok: false, message: TEXT.workbench.errors.failedFiles };
   }
   return { ok: true, uploadIds };
+}
+
+/** Primeira entrada acima do teto por arquivo da versão; `null` sem teto ou sem excesso. */
+function firstAbove(
+  entries: readonly UploadEntry[],
+  maxFileBytes: number | null,
+): { readonly entry: UploadEntry; readonly maxFileBytes: number } | null {
+  if (maxFileBytes === null) {
+    return null;
+  }
+  const entry = entries.find((candidate) => candidate.file.size > maxFileBytes);
+  return entry === undefined ? null : { entry, maxFileBytes };
 }
 
 /**

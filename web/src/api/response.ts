@@ -64,12 +64,18 @@ export function interpretResponse<T>(
   return { data: parsed.data, status: raw.status, retryAfterMs };
 }
 
+/** `ApiError` de uma resposta fora de 2xx, com o problem+json do catálogo e o Retry-After. */
+export function errorFromResponse(raw: RawApiResponse, nowMs: number): ApiError {
+  const retryAfterMs = parseRetryAfterMs(raw.header("Retry-After"), nowMs);
+  return new ApiError(failureFrom(raw, parseJsonBody(raw.text), retryAfterMs));
+}
+
 /** Como `interpretResponse`, mas o corpo de sucesso é o texto como veio, sem parse. */
 export function interpretTextResponse(raw: RawApiResponse, nowMs: number): ApiResponse<string> {
-  const retryAfterMs = parseRetryAfterMs(raw.header("Retry-After"), nowMs);
   if (!isSuccess(raw)) {
-    throw new ApiError(failureFrom(raw, parseJsonBody(raw.text), retryAfterMs));
+    throw errorFromResponse(raw, nowMs);
   }
+  const retryAfterMs = parseRetryAfterMs(raw.header("Retry-After"), nowMs);
   return { data: raw.text, status: raw.status, retryAfterMs };
 }
 
