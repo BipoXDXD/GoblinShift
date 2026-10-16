@@ -268,7 +268,12 @@ export const TEXT = {
         CSV_FORMULA_CELLS:
           "Há células que parecem fórmulas de planilha. Abra a saída com cuidado, ou use a opção de prefixar.",
         CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
+        INPUT_NOT_SELECTED: "Nenhuma página deste PDF foi escolhida; ele não entrou no resultado.",
       },
+      notices: {
+        IMAGE_P3_CONVERTED: "A imagem estava em Display P3 e foi convertida para sRGB.",
+      },
+      unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
       duplicateOf: (position: number) =>
         `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
       counts: {

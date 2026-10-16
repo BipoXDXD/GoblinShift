@@ -52,7 +52,9 @@ export const ITEM_WARNINGS = [
   "CSV_ALL_RECORDS_FILTERED",
   "CSV_FORMULA_CELLS",
   "CSV_FORMULA_HEADER",
+  "INPUT_NOT_SELECTED",
 ] as const;
+export const ITEM_NOTICES = ["IMAGE_P3_CONVERTED"] as const;
 
 export const UNKNOWN_CODE = "unknown";
 
@@ -82,9 +84,13 @@ const runItemSchema = z.object({
   /** Ordem de entrada a partir de 0, como na spec; a tela mostra a partir de 1. */
   position: z.number().int(),
   upload_id: z.uuid(),
+  /** Nome do arquivo enviado; nulo depois de 30 dias. */
+  original_name: z.string().nullable(),
   status: tolerantCode(ITEM_STATUSES),
   error_code: tolerantCode(ITEM_REJECTIONS).nullable(),
   warnings: z.array(tolerantCode(ITEM_WARNINGS)),
+  /** Fatos sobre a entrada que não são aviso (não mudam o estado da execução). */
+  notices: z.array(tolerantCode(ITEM_NOTICES)),
   counts: countsSchema,
   /** Posição (a partir de 0) da primeira entrada igual. */
   duplicate_of: z.number().int().nullable(),

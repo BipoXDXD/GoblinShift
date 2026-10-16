@@ -12,9 +12,11 @@ function item(position: number, overrides: Record<string, unknown> = {}) {
   return {
     position,
     upload_id: UPLOAD(position),
+    original_name: null,
     status: "ok",
     error_code: null,
     warnings: [],
+    notices: [],
     counts: {},
     duplicate_of: null,
     ...overrides,
@@ -127,5 +129,34 @@ describe("Execução: detalhe por arquivo", () => {
     const region = await itemsRegion();
     expect(within(region).getByRole("listitem")).toHaveTextContent("Aguardando");
     expect(region).not.toHaveTextContent("processados");
+  });
+
+  it("mostra o nome do arquivo enviado quando a API ainda o guarda", async () => {
+    setup({ summary, items: [item(0, { original_name: "clientes.csv" }), item(1)] });
+
+    const entries = within(await itemsRegion()).getAllByRole("listitem");
+    expect(entries[0]).toHaveTextContent(/^Arquivo 1clientes\.csvProcessado$/);
+    expect(entries[1]).toHaveTextContent(/^Arquivo 2Processado$/);
+  });
+
+  it("aviso de PDF sem página escolhida e nota de imagem convertida", async () => {
+    setup({
+      summary,
+      items: [
+        item(0, { warnings: ["INPUT_NOT_SELECTED"] }),
+        item(1, { notices: ["IMAGE_P3_CONVERTED", "PDF_LINEARIZED"] }),
+      ],
+    });
+
+    const list = within(await itemsRegion()).getByRole("list", {
+      name: "Arquivos, na ordem de entrada",
+    });
+    const entries = [...list.querySelectorAll(":scope > li")];
+    expect(entries[0]).toHaveTextContent("Nenhuma página deste PDF foi escolhida");
+    expect(entries[1]).toHaveTextContent("Processado");
+    expect(entries[1]).toHaveTextContent(
+      "A imagem estava em Display P3 e foi convertida para sRGB.",
+    );
+    expect(entries[1]).toHaveTextContent("Nota desconhecida (PDF_LINEARIZED).");
   });
 });

@@ -3,6 +3,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import type { components } from "../api/schema";
 import type {
   Coded,
+  ITEM_NOTICES,
   ITEM_REJECTIONS,
   ITEM_STATUSES,
   ITEM_WARNINGS,
@@ -29,15 +30,18 @@ describe("tipos de execução espelham a spec", () => {
     expectTypeOf<(typeof ITEM_STATUSES)[number]>().toEqualTypeOf<Schemas["ItemStatus"]>();
     expectTypeOf<(typeof ITEM_REJECTIONS)[number]>().toEqualTypeOf<Schemas["ItemRejectionCode"]>();
     expectTypeOf<(typeof ITEM_WARNINGS)[number]>().toEqualTypeOf<Schemas["ItemWarningCode"]>();
+    expectTypeOf<(typeof ITEM_NOTICES)[number]>().toEqualTypeOf<Schemas["ItemNoticeCode"]>();
   });
 
   it("RunItem: os campos da spec, com os códigos tolerantes a um valor novo", () => {
     expectTypeOf<RunItem>().toEqualTypeOf<{
       position: SpecItem["position"];
       upload_id: SpecItem["upload_id"];
+      original_name: SpecItem["original_name"];
       status: Coded<SpecItem["status"]>;
       error_code: Coded<NonNullable<SpecItem["error_code"]>> | null;
       warnings: Coded<SpecItem["warnings"][number]>[];
+      notices: Coded<SpecItem["notices"][number]>[];
       counts: SpecItem["counts"];
       duplicate_of: SpecItem["duplicate_of"];
     }>();
