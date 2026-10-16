@@ -45,11 +45,13 @@ describe("Entrar", () => {
   it("linka os Termos de Uso e o Aviso de Privacidade", async () => {
     setup("/entrar");
 
-    expect(await screen.findByRole("link", { name: "Termos de Uso" })).toHaveAttribute(
+    // O rodapé também linka os dois; aqui vale o aviso junto dos botões de login.
+    const main = within(await screen.findByRole("main"));
+    expect(await main.findByRole("link", { name: "Termos de Uso" })).toHaveAttribute(
       "href",
       "/termos",
     );
-    expect(screen.getByRole("link", { name: "Aviso de Privacidade" })).toHaveAttribute(
+    expect(main.getByRole("link", { name: "Aviso de Privacidade" })).toHaveAttribute(
       "href",
       "/privacidade",
     );

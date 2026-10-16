@@ -31,6 +31,35 @@ export const DOWNLOADS_FILES = [
   text("planilha.csv", "text/csv", "a,b\n1,2\n"),
 ] as const;
 
+/**
+ * PDF mínimo e válido, de uma página, montado aqui com o xref calculado: nenhum PDF de terceiros
+ * no repositório, e a API real também o aceita (cabeçalho %PDF-, sem recurso ativo).
+ */
+function onePagePdf(name: string, marker: string): InputFile {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R >>",
+    `<< /Length ${String(marker.length + 3)} >>\nstream\n% ${marker}\nendstream`,
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((object, index) => {
+    offsets.push(body.length);
+    body += `${String(index + 1)} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${String(objects.length + 1)}\n0000000000 65535 f \n`;
+  body += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer << /Root 1 0 R /Size ${String(objects.length + 1)} >>\nstartxref\n${String(xref)}\n%%EOF\n`;
+  return { name, mimeType: "application/pdf", buffer: Buffer.from(body, "latin1") };
+}
+
+export const PDF_FILES = [
+  onePagePdf("contrato.pdf", "contrato"),
+  onePagePdf("anexo.pdf", "anexo"),
+] as const;
+
 // Vídeos de mentira para a API falsa: só a caixa `ftyp` de um MP4, porque o conteúdo nunca é
 // lido no navegador (a interface não mostra o vídeo enviado) e a API falsa não o processa.
 function fakeMp4(name: string): InputFile {

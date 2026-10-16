@@ -1,13 +1,14 @@
 # Imagem do executor: roda uma tentativa dentro do container gVisor (docs/GoblinShiftPlan.md, 3.6).
-# Só a biblioteca padrão, o Pillow fixado (ADR 018), o FFmpeg mínimo do Media Mill (ADR 036) e o
+# Só a biblioteca padrão, o Pillow fixado (ADR 018), o pikepdf fixado com o qpdf da própria wheel
+# e suas dependências lxml e packaging (ADR 035), o FFmpeg mínimo do Media Mill (ADR 036) e o
 # pacote goblinshift.processing; nada de banco, web nem outras dependências de terceiros, para que
-# o conteúdo do usuário encontre a menor superfície possível. O executor-ctl só aceita esta imagem pelo digest que o deploy grava na
-# allowlist (deploy/release.sh).
+# o conteúdo do usuário encontre a menor superfície possível. O executor-ctl só aceita esta imagem
+# pelo digest que o deploy grava na allowlist (deploy/release.sh).
 #
 # Bases fixadas pelo digest do índice multiplataforma (amd64 na VPS e na CI, arm64 no Mac).
 FROM ghcr.io/astral-sh/uv:0.12.15@sha256:62f8c047d0a0e9ece6b53fc63df902585a67a47a7f318ddec4a37db586edc8e3 AS uv
 
-# Estágio de build: instala o grupo `executor` do uv.lock (só o Pillow) com os hashes do lock e só
+# Estágio de build: instala o grupo `executor` do uv.lock (Pillow e pikepdf) com os hashes do lock e só
 # a partir de wheels. Nem o uv nem o requirements gerado chegam à imagem final.
 FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS deps
 COPY --from=uv /uv /bin/uv
@@ -80,13 +81,15 @@ RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
 COPY --from=ffmpeg /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=ffmpeg /opt/ffmpeg/share/doc/ffmpeg /usr/local/share/doc/ffmpeg
 
-# No site-packages da base, o Pillow aparece para o importlib.metadata como qualquer distribuição.
+# No site-packages da base, as dependências aparecem para o importlib.metadata como qualquer
+# distribuição.
 COPY --from=deps /opt/deps /usr/local/lib/python3.14/site-packages/
 COPY src/goblinshift/__init__.py /opt/goblinshift/goblinshift/__init__.py
 COPY src/goblinshift/processing /opt/goblinshift/goblinshift/processing
 # unchecked-hash: a imagem é imutável, então o .pyc nunca é revalidado contra o fonte.
 RUN python -m compileall -q --invalidation-mode unchecked-hash \
-        /opt/goblinshift /usr/local/lib/python3.14/site-packages/PIL
+        /opt/goblinshift /usr/local/lib/python3.14/site-packages/PIL \
+        /usr/local/lib/python3.14/site-packages/pikepdf
 
 USER 61000:61001
 WORKDIR /work

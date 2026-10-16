@@ -8,12 +8,13 @@ describe("findRecipe", () => {
     ["csv-janitor", "CSV Janitor"],
     ["image-forge", "Image Forge"],
     ["downloads-detox", "Downloads Detox"],
+    ["pdf-press", "PDF Press"],
     ["media-mill", "Media Mill"],
   ] as const)("encontra %s", (id, title) => {
     expect(findRecipe(id)?.title).toBe(title);
   });
 
-  it.each(["pdf-press", "", "__proto__", "toString", "constructor"])("não encontra %j", (id) => {
+  it.each(["receita-inexistente", "", "__proto__", "toString", "constructor"])("não encontra %j", (id) => {
     expect(findRecipe(id)).toBeNull();
   });
 

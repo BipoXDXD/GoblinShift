@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useId, type ReactElement } from "react";
 import { Link } from "react-router";
 
+import { SignInPrompt } from "../account/SignInPrompt";
+import { isSignedOut, useMe } from "../account/useMe";
 import { useApiClient } from "../api/ApiClientContext";
 import { PATHS } from "../app/paths";
 import { EmptyState } from "../components/feedback/EmptyState";
@@ -20,16 +22,24 @@ const RECENT_LIMIT = 5;
 export function RecentRuns(): ReactElement {
   const headingId = useId();
   const client = useApiClient();
+  const me = useMe();
+  // Só com a sessão confirmada: o visitante anônimo não gera um 401 no console a cada visita.
+  const signedIn = me.data !== undefined && me.data !== null;
   const recent = useQuery({
     queryKey: ["runs", "recent"],
     queryFn: ({ signal }) => listRuns(client, { limit: RECENT_LIMIT }, signal),
+    enabled: signedIn,
   });
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
       <h2 id={headingId} className="text-sm font-semibold text-fg-muted">
         {T.recentHeading}
       </h2>
-      <RecentBody data={recent.data?.data ?? null} error={recent.error} />
+      {isSignedOut(me.data) ? (
+        <SignInPrompt headingLevel={3} />
+      ) : (
+        <RecentBody data={recent.data?.data ?? null} error={me.error ?? recent.error} />
+      )}
     </section>
   );
 }

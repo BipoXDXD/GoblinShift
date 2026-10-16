@@ -1,6 +1,6 @@
 # GoblinShift
 
-API de processamento de arquivos por receitas — imagens, tabelas CSV e lotes de downloads — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
+API de processamento de arquivos por receitas — imagens, tabelas CSV, lotes de downloads e PDFs — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
 
 > Em construção. Fatias 0 a 4 (fundação e deploy, sandbox, CSV Janitor, fluxo durável e executor real sob gVisor) concluídas; **5 — Image Forge e Downloads Detox** em revisão. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
 
@@ -28,7 +28,7 @@ docker compose up --build     # postgres, migrate, api, worker, maintenance, ngi
 curl http://localhost/readyz
 ```
 
-A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/docs`, `/openapi.json`, `/livez` e `/readyz` vão para a API, e qualquer outra rota cai no `index.html`. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
+A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/livez` e `/readyz` vão para a API, `robots.txt` e os assets do build são arquivos de verdade (o que faltar é 404), e qualquer outra rota cai no `index.html`. Texto (HTML, CSS, JS, JSON, SVG, manifest) sai com gzip. `/docs` (Swagger UI servido pela própria API, sem CDN e com CSP própria) e `/openapi.json` também vão para a API. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
 
 O OpenObserve fica em `http://127.0.0.1:5080`, com as credenciais do `.env`.
 
@@ -73,7 +73,7 @@ O pytest falha se o `openapi.json` não acompanhar a API, e o job "Interface web
 
 #### No navegador (Playwright, `web/e2e/`)
 
-As specs rodam no Chromium, em desktop (1280 px) e celular (400 px): as jornadas das três receitas (arquivos, reordenar só por botões, parâmetros, executar, baixar), o Histórico (execuções recentes na Oficina, Carregar mais pelo cursor, filtros na URL), axe WCAG 2.2 A/AA com contraste nos dois temas, anel de foco e ordem do Tab, movimento reduzido, troca de tema sem piscar, CLS e CSP sem violação. O build de `dist/` é servido com os cabeçalhos lidos de `docker/nginx/snippets/spa-headers.conf`, a mesma CSP de produção, e a API é falsa, dentro do processo do Playwright (`e2e/support/fakeApi.ts`), com os tipos da spec.
+As specs rodam no Chromium, em desktop (1280 px) e celular (400 px): as jornadas das quatro receitas (arquivos, reordenar só por botões, parâmetros, executar, baixar), o Histórico (execuções recentes na Oficina, Carregar mais pelo cursor, filtros na URL), axe WCAG 2.2 A/AA com contraste nos dois temas, anel de foco e ordem do Tab, movimento reduzido, troca de tema sem piscar, CLS e CSP sem violação. O build de `dist/` é servido com os cabeçalhos lidos de `docker/nginx/snippets/spa-headers.conf`, a mesma CSP de produção, e a API é falsa, dentro do processo do Playwright (`e2e/support/fakeApi.ts`), com os tipos da spec.
 
 A chave de API só existe no processo de teste: cada pedido para `/api/v1/` ganha o `Authorization` por rota do Playwright, e uma spec confere que a chave, um canário `CANARY-<uuid>`, não aparece no HTML, nos assets, no storage nem nos cookies. Sem a chave, a API recusa com 401 e a Bancada mostra o aviso de login em breve, sem repetir a leitura.
 
@@ -107,6 +107,7 @@ Cada tabela aceita vira `limpas/<nome>.csv` (UTF-8 sem BOM, CRLF, aspas só quan
 | `csv-janitor` | 1 | Limpa tabelas CSV ([1.3](docs/GoblinShiftPlan.md#s1-3)) | 5 tabelas de até 8 MiB |
 | `image-forge` | 1 | Redimensiona JPEG e PNG sem ampliar, aplica a orientação EXIF, converte Display P3 para sRGB, usa o quadro principal do MPO, remove metadados e gera miniaturas opcionais em `thumbnails/` ([1.2](docs/GoblinShiftPlan.md#s1-2)) | 100 imagens, 24 MP e 8192 px por eixo, conferidos antes de decodificar |
 | `downloads-detox` | 1 | Classifica por assinatura em `images/`, `tables/`, `text/` e `archives/`, deduplica por SHA-256 e tamanho, renomeia e recusa executáveis, scripts, HTML e SVG ([1.4](docs/GoblinShiftPlan.md#s1-4)) | 100 arquivos, 480 MiB por lote |
+| `pdf-press` | 1 | Junta (`merge`), separa em partes (`split`) ou monta um PDF com páginas escolhidas, repetições incluídas (`select`), com o qpdf; publica o `page-map.json` com cada página. Recusa senha, formulário, assinatura, anexo e conteúdo ativo, e falha a execução inteira em PDF danificado ou página inexistente ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 035](docs/adr/035-pdf-press-com-pikepdf.md)) | 20 PDFs, 256 MiB, 200 páginas de entrada, 400 de saída e 200 documentos |
 | `media-mill` | 1 | Extrai uma faixa de áudio em WAV ou FLAC de 16 bits, na taxa e nos canais de origem, e gera 0, 1 ou 3 miniaturas JPEG de até 640 px em `thumbnails/`, de MP4/MOV (H.264 + AAC/PCM) e WebM (VP8/VP9 + Opus/Vorbis) conferidos por assinatura e ffprobe ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)) | 5 vídeos de até 256 MiB (512 MiB por lote), 300 s, 1920 × 1080, 60 fps, 48 kHz e estéreo |
 
 Toda execução publica, além do conteúdo, o `report.json`, o `manifest.json` (entradas, hashes, parâmetros, digest da imagem do executor, duplicatas e rejeições) e o ZIP determinístico `<receita>.zip`, montados pelo empacotador comum no executor ([ADR 019](docs/adr/019-layout-de-out-pacote-e-papeis.md)). Uma saída idêntica a uma entrada não ocupa espaço de novo: o artefato aponta para o objeto do upload ([ADR 020](docs/adr/020-detox-reaproveita-o-objeto-da-entrada.md)). A versão de cada receita e os limites efetivos estão no OpenAPI de `POST /runs`.
@@ -279,11 +280,12 @@ Com a pilha de pé e uma chave com os escopos `files:*` e `runs:*`, cada script 
 GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost      # saída limpa byte a byte
 GS_API_KEY=gsk_… ./scripts/e2e-image-forge.sh http://localhost      # P3, orientação, MPO, 16 bits, bomba
 GS_API_KEY=gsk_… ./scripts/e2e-downloads-detox.sh http://localhost  # colisão de nomes, JAR, cópia, HTML
+GS_API_KEY=gsk_… ./scripts/e2e-pdf-press.sh http://localhost        # split em partes, mapa de páginas
 ```
 
 Contra a VPS, a URL é `https://goblinshift.dev`: a borda não encaminha o acesso pelo IP ao GoblinShift, para a chave não trafegar em texto claro ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)).
 
-As fixtures do Image Forge e do Detox saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução, junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
+As fixtures do Image Forge, do Detox e do PDF Press saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução, junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 
 Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
@@ -293,7 +295,7 @@ Em desenvolvimento, o worker roda a receita num subprocesso do próprio containe
 src/goblinshift/
   entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin, gs-csv-janitor e gs-export-openapi
   platform/          configuração, banco, telemetria e compatibilidade de schema
-  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/), empacotador e executor
+  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/, pdf_press/), empacotador e executor
   runs/              ciclo de vida da execução: aceitação, fila, fencing, worker, manutenção
   files/             storage, uploads, artefatos, usos, transferências e retenção
   catalog/           receitas e versões publicadas, schemas e defaults

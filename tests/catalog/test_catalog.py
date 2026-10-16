@@ -234,13 +234,14 @@ def test_schema_da_variante_fixa_receita_e_versao_e_recusa_campos_extras() -> No
 # --- Receitas da fatia 5 -------------------------------------------------------------------
 
 
-def test_catalogo_lista_as_receitas_na_versao_1() -> None:
+def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
     keys = {(version.recipe_id, version.version) for version in CATALOG.list_versions()}
 
     assert keys == {
         ("csv-janitor", 1),
         ("image-forge", 1),
         ("downloads-detox", 1),
+        ("pdf-press", 1),
         ("media-mill", 1),
     }
 

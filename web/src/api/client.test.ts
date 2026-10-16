@@ -156,6 +156,21 @@ describe("createApiClient: cabeçalhos", () => {
   });
 });
 
+describe("createApiClient: sinal de sessão", () => {
+  it("com o cookie de CSRF legível, há sessão a consultar", () => {
+    const { client, fetchMock } = setup(new Response(null, { status: 204 }), "tok-123");
+
+    expect(client.hasSessionCookie()).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sem o cookie de CSRF, não há sessão", () => {
+    const { client } = setup(new Response(null, { status: 204 }), null);
+
+    expect(client.hasSessionCookie()).toBe(false);
+  });
+});
+
 describe("createApiClient: origem", () => {
   it.each(["https://evil.example/api/v1/coisas", "//evil.example/api/v1/coisas"])(
     "recusa caminho fora da origem (%s) sem chamar a API nem expor o CSRF",

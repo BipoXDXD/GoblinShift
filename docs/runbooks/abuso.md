@@ -62,6 +62,16 @@ SELECT owner_id, revoked_at FROM api_key WHERE public_id = :'id';
 SQL
 ```
 
+**Código da tela de login recusado** (recurso contra o bloqueio, [termos, item 8](../legal/termos-de-uso.md)). A pessoa cita o `Código do pedido para suporte: <uuid>` que a tela mostrou depois de um login recusado. Ele é o `request_id` do callback, o mesmo UUID do header `X-Request-ID` daquela resposta, e leva ao evento `LOGIN_FAILED` e, quando a recusa veio da conta, à conta. O procedimento completo, com as respostas possíveis, está no [passo 8](#8-recurso-contra-o-bloqueio):
+
+```bash
+ref='<uuid citado no e-mail>'
+psql_gs -v ref="$ref" <<'SQL'
+SELECT user_id, event_type, outcome, occurred_at, ip_prefix
+FROM audit_event WHERE request_id = :'ref'::uuid;
+SQL
+```
+
 Guarde o id numa variável para os passos seguintes:
 
 ```bash
@@ -155,6 +165,45 @@ Sessões e chaves continuam revogadas: a pessoa entra de novo e emite chaves nov
 - Prazo de resposta: o que os termos fixarem (ponto J-9, ainda em aberto na revisão jurídica).
 - Ordem judicial ou pedido de autoridade: não responda sozinho; siga a orientação jurídica (aviso de privacidade, finalidade "Atender denúncias, ordens e obrigações legais").
 - Feche a ficha do caso com: data da denúncia, `user.hash`, `owner_id`, o que foi feito e quando.
+
+## 8. Recurso contra o bloqueio
+
+Os termos (item 8) pedem que quem acha o bloqueio um engano escreva para `contato@goblinshift.dev` com o código da tela de login e o provedor (Google ou GitHub). Não há e-mail na conta, então o código é a única ligação entre a mensagem e a conta. Ele é o `request_id` do callback, gravado em `audit_event.request_id` (migração 0009; coluna `uuid` anulável, sem índice, porque só o operador consulta por ela, à mão, numa tabela de 90 dias).
+
+**Sem código válido, não confirme nada.** Se a mensagem não traz o código, ou ele não tem o formato de um UUID, peça o código que a tela mostrou e não diga se existe ou não conta, bloqueio ou evento para aquele nome, provedor ou remetente. Quem escreve pode não ser o titular, e confirmar a existência da conta seria enumerá-la.
+
+**1. Achar o evento.** A consulta é a do passo 1 (código da tela de login). Com o `ref` colado do e-mail, tire espaços e quebras de linha: um texto que não é UUID faz o `psql` parar com `invalid input syntax for type uuid`, e isso é o esperado.
+
+- **Nenhuma linha:** o código está errado, é de outro ambiente ou o evento já expirou (a auditoria guarda 90 dias). Peça para a pessoa tentar entrar de novo e mandar o código novo.
+- **`user_id` vazio:** a recusa não veio da conta (falha no provedor, `state` inválido ou provedor desligado). Não há bloqueio a rever: a pessoa deve tentar de novo.
+- **`event_type` = `LOGIN_SUCCEEDED`:** o login foi aceito. O código não é de uma recusa; peça o código da tela de recusa.
+- **`user_id` preenchido num `LOGIN_FAILED`:** a conta foi recusada. Siga para o estado da conta.
+
+**2. Conferir o estado da conta.** O `issuer` confirma o provedor que a pessoa informou; o `subject` nunca é consultado nem copiado para a ficha.
+
+```bash
+owner_id='<user_id da consulta acima>'
+psql_gs -v id="$owner_id" <<'SQL'
+SELECT status, issuer, deletion_requested_at, created_at,
+       EXISTS (SELECT 1 FROM web_session WHERE user_id = :'id') AS ja_teve_sessao
+FROM app_user WHERE id = :'id';
+SELECT event_type, occurred_at FROM audit_event
+  WHERE user_id = :'id' AND event_type IN ('ACCOUNT_BLOCKED', 'ACCOUNT_UNBLOCKED')
+  ORDER BY occurred_at DESC LIMIT 10;
+SQL
+```
+
+| Estado | Significado | O que fazer |
+|---|---|---|
+| Nenhuma linha em `app_user` | A conta já foi purgada (`DELETE /me`); a auditoria sobrevive 90 dias | Não há bloqueio a rever. Responda de forma neutra |
+| `deletion_requested_at` preenchido | O titular pediu a exclusão, e o pedido é irrevogável | O `unblock` sai com 1. Explique que a conta está em exclusão, sem dar detalhes de conteúdo |
+| `status` = `blocked` e `ja_teve_sessao` falso | Conta pendente do cadastro fechado ([ADR 023](../adr/023-cadastro-fechado-ate-a-abertura.md)), não um bloqueio por abuso | Liberar é aprovar o cadastro: decida pela fila de pendentes (`gs_admin list-users --pending`), não pelo passo 6 por reflexo |
+| `status` = `blocked` e `ja_teve_sessao` verdadeiro | Bloqueio de verdade | Revise a ficha do caso (passo 2) e o `ACCOUNT_BLOCKED` acima. Se foi engano, passo 6 |
+| `status` = `active` | A conta já foi liberada desde a recusa | Peça para a pessoa entrar de novo |
+
+**3. Responder.** Por `contato@goblinshift.dev`, sem dizer o que a conta fez: "Recebemos o seu pedido e analisamos o caso." Se liberar, diga só que a pessoa pode entrar de novo, e que as sessões e chaves anteriores continuam revogadas. Anote na ficha do caso o `ref`, o `owner_id` e a decisão, nunca o `subject`.
+
+O código também está no evento amplo da telemetria (`request_id` no OpenObserve), mas a telemetria guarda 30 dias e a auditoria, 90.
 
 ## Abuso sexual infantil (CSAM)
 

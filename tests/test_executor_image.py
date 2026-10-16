@@ -26,6 +26,7 @@ from tests.downloads_detox import samples
 from tests.image_forge import media
 from tests.image_forge.icc import DISPLAY_P3, rgb_profile
 from tests.media_mill import media as video
+from tests.pdf_press import samples as pdf_samples
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = ROOT / "docker" / "executor.Dockerfile"
@@ -46,6 +47,11 @@ WORLD_READABLE_FILE = 0o644
 SUCCEEDED = 0
 FFMPEG_VERSION = "8.1.2"  # ADR 036; ARG FFMPEG_VERSION em docker/executor.Dockerfile
 PILLOW_VERSION = "12.3.0"  # ADR 018; tests/test_dependencies.py confere o mesmo pin no lock
+PIKEPDF_VERSION = "10.16.0"  # ADR 035; idem
+QPDF_VERSION = "12.4.2"  # o libqpdf que vem dentro da wheel do pikepdf
+RECIPE_FAILURE = 3
+# Perfil de recursos do executor-ctl (1.7): 1 vCPU e 2 GiB, com swap igual à memória.
+RESOURCE_LIMITS = ("--memory=2g", "--memory-swap=2g", "--cpus=1")
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
@@ -101,8 +107,9 @@ def run_python(image: str, code: str, *extra: str) -> subprocess.CompletedProces
     return docker(*fixed_profile(*extra, "--entrypoint", "python", image, "-c", code))
 
 
-def run_executor(image: str, work: Path) -> subprocess.CompletedProcess[str]:
+def run_executor(image: str, work: Path, *extra: str) -> subprocess.CompletedProcess[str]:
     mounts = [
+        *extra,
         f"--user={EXECUTOR_UID}:{EXECUTOR_GID}",
         "--volume", f"{work}:/work",
         "--volume", f"{work / 'inputs'}:/work/inputs:ro",
@@ -213,7 +220,16 @@ def test_pillow_traz_as_bibliotecas_nativas_que_o_image_forge_usa(image: str, fe
     assert result.stdout.strip() == "True"
 
 
-def test_pillow_e_a_unica_distribuicao_de_terceiros(image: str) -> None:
+def test_pikepdf_e_qpdf_fixados_sao_as_versoes_do_lock(image: str) -> None:
+    result = run_python(
+        image, "import pikepdf; print(pikepdf.__version__, pikepdf.__libqpdf_version__)"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == [PIKEPDF_VERSION, QPDF_VERSION]
+
+
+def test_so_as_distribuicoes_de_terceiros_do_grupo_do_executor(image: str) -> None:
     code = (
         "import importlib.metadata as m\n"
         "print('\\n'.join(sorted(d.metadata['Name'].lower() for d in m.distributions())))"
@@ -222,7 +238,7 @@ def test_pillow_e_a_unica_distribuicao_de_terceiros(image: str) -> None:
     result = run_python(image, code)
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["pillow"]
+    assert result.stdout.split() == ["lxml", "packaging", "pikepdf", "pillow"]
 
 
 def test_instaladores_nao_ficam_na_imagem(image: str) -> None:
@@ -484,3 +500,53 @@ def test_media_mill_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(
     second = run_recipe(image, tmp_path / "2", batch, "media-mill", thumbnail_count=3)
 
     assert package_digest(first, "media-mill") == package_digest(second, "media-mill")
+
+
+# --- PDF Press na imagem (1.5; ADR 035) -------------------------------------------------------
+
+
+def test_pdf_press_junta_os_pdfs_na_imagem(image: str, tmp_path: Path) -> None:
+    batch = [("a.pdf", pdf_samples.document("a", pages=2)), ("b.pdf", pdf_samples.document("b"))]
+
+    out = run_recipe(image, tmp_path, batch, "pdf-press")
+
+    assert pdf_samples.markers((out / "merged.pdf").read_bytes()) == ["a:1", "a:2", "b:1"]
+    with zipfile.ZipFile(out / "pdf-press.zip") as archive:
+        assert archive.namelist() == ["page-map.json", "merged.pdf", "manifest.json", "report.json"]
+
+
+def test_pdf_press_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(image: str, tmp_path: Path) -> None:
+    batch = [("a.pdf", pdf_samples.document("a", pages=3))]
+
+    first = run_recipe(image, tmp_path / "1", batch, "pdf-press", operation="split")
+    second = run_recipe(image, tmp_path / "2", batch, "pdf-press", operation="split")
+
+    assert package_digest(first, "pdf-press") == package_digest(second, "pdf-press")
+
+
+@pytest.mark.parametrize(
+    ("data", "code"),
+    [
+        pytest.param(
+            pdf_samples.document(mutate=pdf_samples.javascript_name_tree),
+            "PDF_UNSUPPORTED_FEATURE",
+            id="javascript",
+        ),
+        pytest.param(pdf_samples.truncated(pdf_samples.document()), "PDF_INVALID", id="truncado"),
+        pytest.param(
+            pdf_samples.page_tree_with_many_kids(2_000_000),
+            "INPUT_LIMIT_EXCEEDED",
+            id="bomba-de-paginas",
+        ),
+        pytest.param(pdf_samples.deep_page_tree(10_000), "PDF_INVALID", id="arvore-profunda"),
+    ],
+)
+def test_pdf_hostil_falha_deterministicamente_dentro_dos_limites_do_executor(
+    image: str, tmp_path: Path, data: bytes, code: str
+) -> None:
+    work = make_work_dir(tmp_path, [("hostil.pdf", data)], "pdf-press", {})
+
+    result = run_executor(image, work, *RESOURCE_LIMITS)
+
+    assert result.returncode == RECIPE_FAILURE, result.stderr
+    assert read_json(work / "failure.json")["code"] == code

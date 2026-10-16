@@ -16,6 +16,12 @@ está sob CC BY 4.0, exceto as goblins Jade e Fagulha, que não são licenciadas
 GoblinShift, o logotipo (emblema, selo e ícone da aba) e os nomes dos personagens também não são
 licenciados.
 
+Código de terceiros incluído no repositório:
+
+- Swagger UI (swagger-ui-dist), em src/goblinshift/entrypoints/api/swagger_ui/: Copyright
+  SmartBear Software, Apache License 2.0 (LICENSE e NOTICE na mesma pasta; as licenças das
+  dependências embutidas no bundle estão em swagger-ui-bundle.js.LICENSE.txt).
+
 A imagem do executor (docker/executor.Dockerfile) inclui o FFmpeg 8.1.2, compilado do código-fonte
 oficial sem componentes GPL e distribuído sob a GNU Lesser General Public License 2.1 ou posterior
 (https://ffmpeg.org/legal.html). O texto da licença acompanha os binários na imagem, em
