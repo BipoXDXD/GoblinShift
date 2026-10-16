@@ -21,6 +21,7 @@ import { formatDateTime } from "../format";
 import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
+import { CancelRun } from "./CancelRun";
 import type { RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { useRunPolling } from "./useRunPolling";
@@ -143,6 +144,7 @@ function RunDetails({ run }: { readonly run: Run }): ReactElement {
               <span className="tabular-nums">{run.attempt}</span>
             </Detail>
           </dl>
+          <CancelRun runId={run.id} status={run.status} />
         </div>
         {/* Depois do texto: o leitor de tela ouve o estado antes da goblin, e no celular ela fica
             embaixo, sem empurrar o estado para fora da primeira dobra. */}

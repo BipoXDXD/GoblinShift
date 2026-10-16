@@ -2,8 +2,10 @@ import type { RouteObject } from "react-router";
 
 import type { SiteNotice } from "../notice/notice";
 import type { UploadServices } from "../upload/useUploadBatch";
+import { TEXT } from "../text";
 import { Layout } from "./Layout";
 import { NotFoundPage } from "./NotFoundPage";
+import type { PageTitleHandle } from "./pageTitle";
 import { PATHS } from "./paths";
 
 export interface AppServices {
@@ -36,6 +38,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.workbench,
+          handle: titled(TEXT.pageTitles.workbench),
           lazy: async () => {
             const { WorkbenchPage } = await import("../workbench/WorkbenchPage");
             return { element: <WorkbenchPage uploadServices={uploadServices} /> };
@@ -43,6 +46,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.history,
+          handle: titled(TEXT.history.title),
           lazy: async () => {
             const { HistoryPage } = await import("../history/HistoryPage");
             return { element: <HistoryPage now={now} /> };
@@ -50,6 +54,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.signIn,
+          handle: titled(TEXT.account.signIn.navSignIn),
           lazy: async () => {
             const { SignInPage } = await import("../account/SignInPage");
             return { Component: SignInPage };
@@ -57,13 +62,23 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.access,
+          handle: titled(TEXT.account.access.title),
           lazy: async () => {
             const { AccessPage } = await import("../account/AccessPage");
             return { element: <AccessPage now={now} /> };
           },
         },
         {
+          path: PATHS.apiGuide,
+          handle: titled(TEXT.apiGuide.title),
+          lazy: async () => {
+            const { ApiGuidePage } = await import("../account/ApiGuidePage");
+            return { Component: ApiGuidePage };
+          },
+        },
+        {
           path: PATHS.accountDeleted,
+          handle: titled(TEXT.account.deletion.doneTitle),
           lazy: async () => {
             const { AccountDeletedPage } = await import("../account/AccountDeletedPage");
             return { Component: AccountDeletedPage };
@@ -71,6 +86,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.acceptTerms,
+          handle: titled(TEXT.pageTitles.acceptTerms),
           lazy: async () => {
             const { AcceptTermsPage } = await import("../terms/AcceptTermsPage");
             return { Component: AcceptTermsPage };
@@ -78,6 +94,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.terms,
+          handle: titled(TEXT.legal.termsTitle),
           lazy: async () => {
             const { TermsPage } = await import("../legal/TermsPage");
             return { Component: TermsPage };
@@ -85,6 +102,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.privacy,
+          handle: titled(TEXT.legal.privacyTitle),
           lazy: async () => {
             const { PrivacyPage } = await import("../legal/PrivacyPage");
             return { Component: PrivacyPage };
@@ -92,6 +110,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.credits,
+          handle: titled(TEXT.credits.title),
           lazy: async () => {
             const { CreditsPage } = await import("../legal/CreditsPage");
             return { Component: CreditsPage };
@@ -99,15 +118,21 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
         },
         {
           path: PATHS.run,
+          handle: titled(TEXT.run.title),
           lazy: async () => {
             const { RunPage } = await import("../runs/RunPage");
             return { Component: RunPage };
           },
         },
-        { path: "*", element: <NotFoundPage /> },
+        { path: "*", element: <NotFoundPage />, handle: titled(TEXT.notFound.title) },
       ],
     },
   ];
+}
+
+/** Título da aba da rota (Layout); a Oficina fica só com o nome do site. */
+function titled(title: string): PageTitleHandle {
+  return { title };
 }
 
 function EmptyFallback(): null {

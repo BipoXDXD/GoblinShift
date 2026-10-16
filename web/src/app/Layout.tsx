@@ -1,6 +1,14 @@
 import { CircleAlert } from "lucide-react";
-import type { ReactElement } from "react";
-import { Link, Navigate, NavLink, Outlet, useLocation, useSearchParams } from "react-router";
+import { useEffect, type ReactElement } from "react";
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Outlet,
+  useLocation,
+  useMatches,
+  useSearchParams,
+} from "react-router";
 
 import { LOGIN_ERROR_PARAM, loginRefFrom, safeReturnTo } from "../account/signIn";
 import { isSignedOut, useMe } from "../account/useMe";
@@ -9,6 +17,7 @@ import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { BrandLink } from "./BrandLink";
+import { pageTitleOf } from "./pageTitle";
 import { acceptTermsPath, PATHS, signInPath } from "./paths";
 
 const T = TEXT.layout;
@@ -32,6 +41,13 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.accountDeleted,
 ]);
 
+/** Textos legais e créditos, em toda tela; o aviso de processamento externo aponta para os créditos. */
+const FOOTER_LINKS = [
+  { to: PATHS.terms, label: TEXT.legal.termsTitle },
+  { to: PATHS.privacy, label: TEXT.legal.privacyTitle },
+  { to: PATHS.credits, label: T.creditsLink },
+] as const;
+
 /** O id do aviso fechado fica no armazenamento do navegador (ADR 031). */
 const browserStorage = (): Storage => window.localStorage;
 
@@ -48,6 +64,7 @@ interface LayoutProps {
  * tela.
  */
 export function Layout({ now, notice }: LayoutProps): ReactElement {
+  useDocumentTitle();
   return (
     <div className="flex min-h-svh flex-col">
       <a
@@ -86,12 +103,16 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
       </main>
       {/* Aviso de processamento externo discreto em toda tela (docs/art/LICENSE-ART.md); o detalhe fica nos créditos. */}
       <footer className="border-t border-line-soft">
-        <p className="mx-auto w-full max-w-5xl px-4 py-6 text-sm text-fg-muted md:px-8">
-          {T.editorialNote}{" "}
-          <Link to={PATHS.credits} className="font-semibold">
-            {T.creditsLink}
-          </Link>
-        </p>
+        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-sm text-fg-muted md:px-8">
+          <p>{T.editorialNote}</p>
+          <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6">
+            {FOOTER_LINKS.map(({ to, label }) => (
+              <Link key={to} to={to} className="inline-flex min-h-11 items-center font-semibold">
+                {label}
+              </Link>
+            ))}
+          </nav>
+        </div>
       </footer>
     </div>
   );
@@ -104,7 +125,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
 function AccountLink(): ReactElement {
   const me = useMe();
   const { pathname, search } = useLocation();
-  if (isSignedOut(me.error)) {
+  if (isSignedOut(me.data)) {
     return (
       <NavLink to={signInPath(safeReturnTo(pathname, search))} className={NAV_LINK}>
         {TEXT.account.signIn.navSignIn}
@@ -116,6 +137,21 @@ function AccountLink(): ReactElement {
       {TEXT.account.signIn.navAccess}
     </NavLink>
   );
+}
+
+/**
+ * Título da aba pela rota (`handle.title` em routes.tsx): a SPA serve o mesmo index.html em toda
+ * URL, e sem isto toda aba e todo resultado de busca diria só "GoblinShift".
+ */
+function useDocumentTitle(): void {
+  const matches = useMatches();
+  const title = matches
+    .map((match) => pageTitleOf(match.handle))
+    .filter((candidate): candidate is string => candidate !== null)
+    .at(-1);
+  useEffect(() => {
+    document.title = title === undefined ? T.brand : `${title} · ${T.brand}`;
+  }, [title]);
 }
 
 /** A tela da rota, ou o aceite dos termos se a conta ainda não aceitou a versão vigente. */
