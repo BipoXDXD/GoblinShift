@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
+  CAST,
   GOBLIN_STATES,
   goblinOf,
   GoblinIllustration,
@@ -15,7 +16,20 @@ describe("goblinsOf", () => {
   it("cada estado tem as suas goblins, e as seis aparecem uma vez só", () => {
     const names = GOBLIN_STATES.map((state) => goblinsOf(state).map((goblin) => goblin.name));
 
-    expect(names).toEqual([["Lua", "Jade"], ["Ada", "Fagulha"], ["Nyx"], ["Ferrugem"]]);
+    expect(names).toEqual([["Lua", "Jade"], ["Rúbia", "Fagulha"], ["Nyx"], ["Ferrugem"]]);
+  });
+});
+
+describe("CAST", () => {
+  it("o elenco tem as seis goblins publicadas, sem a Ada", () => {
+    expect(CAST.map((goblin) => goblin.name)).toEqual([
+      "Rúbia",
+      "Fagulha",
+      "Ferrugem",
+      "Jade",
+      "Lua",
+      "Nyx",
+    ]);
   });
 });
 
@@ -28,7 +42,7 @@ describe("goblinOf (rotação estável)", () => {
 
   it.each<[GoblinState, string[]]>([
     ["vazio", ["Jade", "Lua"]],
-    ["carregando", ["Ada", "Fagulha"]],
+    ["carregando", ["Fagulha", "Rúbia"]],
   ])("no estado %s, chaves diferentes alternam entre %j", (state, expected) => {
     const counts = new Map<string, number>();
     for (const key of KEYS) {
@@ -55,7 +69,7 @@ describe("goblinOf (rotação estável)", () => {
 describe("GoblinIllustration", () => {
   it.each<[GoblinState, RegExp]>([
     ["vazio", /^(Lua|Jade), /],
-    ["carregando", /^(Ada|Fagulha), /],
+    ["carregando", /^(Rúbia|Fagulha), /],
     ["erro", /^Nyx, /],
     ["sucesso", /^Ferrugem, /],
   ])("no estado %s mostra uma goblin do estado com texto alternativo", (state, alt) => {
@@ -64,21 +78,30 @@ describe("GoblinIllustration", () => {
     expect(screen.getByRole("img")).toHaveAccessibleName(alt);
   });
 
-  it("reserva o tamanho, carrega tarde e oferece AVIF antes do WebP em 1× e 2×", () => {
-    const { container } = render(<GoblinIllustration state="erro" rotationKey="x" />);
+  it("reserva a caixa de destaque e carrega tarde", () => {
+    render(<GoblinIllustration state="erro" rotationKey="x" />);
 
     const img = screen.getByRole("img");
-    expect(img).toHaveAttribute("width", "128");
-    expect(img).toHaveAttribute("height", "160");
+    // 4:5, como os arquivos: com width e height o navegador reserva a caixa antes de baixar (CLS).
+    expect(img).toHaveAttribute("width", "256");
+    expect(img).toHaveAttribute("height", "320");
     expect(img).toHaveAttribute("loading", "lazy");
     expect(img).toHaveAttribute("decoding", "async");
+  });
+
+  it("oferece AVIF antes do WebP, de 256 a 768 px, com sizes da caixa", () => {
+    const { container } = render(<GoblinIllustration state="erro" rotationKey="x" />);
+
     const sources = [...container.querySelectorAll("source")];
     expect(sources.map((source) => source.getAttribute("type"))).toEqual([
       "image/avif",
       "image/webp",
     ]);
     for (const source of sources) {
-      expect(source.getAttribute("srcset")).toMatch(/nyx-128w\.\w+ 1x, .*nyx-256w\.\w+ 2x$/);
+      expect(source.getAttribute("srcset")).toMatch(
+        /nyx-256w\.\w+ 256w, .*nyx-384w\.\w+ 384w, .*nyx-512w\.\w+ 512w, .*nyx-768w\.\w+ 768w$/,
+      );
+      expect(source.getAttribute("sizes")).toBe("(min-width: 768px) 256px, 192px");
     }
   });
 });
