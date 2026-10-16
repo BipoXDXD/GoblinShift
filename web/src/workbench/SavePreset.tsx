@@ -12,7 +12,10 @@ import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
 
 const T = TEXT.presets;
-/** Teto do nome na API (presets/drafts.py); conferido aqui para o erro aparecer no campo. */
+/**
+ * Teto do nome na API (presets/drafts.py), em code points depois do NFC como lá; conferido aqui
+ * para o erro aparecer no campo.
+ */
 const MAX_NAME_LENGTH = 100;
 
 /**
@@ -27,10 +30,12 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
   const [message, setMessage] = useState<string | null>(null);
   const save = useSave();
 
+  // Fecha sempre, até com o pedido em voo (o navegador pode ter fechado o <dialog>): a resposta
+  // que chegar depois aparece ao reabrir, e só então o erro antigo é descartado.
   const close = (): void => {
+    setOpen(false);
+    setNameError(null);
     if (!save.isPending) {
-      setOpen(false);
-      setNameError(null);
       save.reset();
     }
   };
@@ -84,6 +89,7 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
         confirmLabel={save.isPending ? T.saving : T.save}
         cancelLabel={T.cancel}
         confirmBlocked={save.isPending}
+        busy={save.isPending}
         destructive={false}
         onCancel={close}
         onConfirm={submit}
@@ -131,5 +137,7 @@ function nameErrorOf(name: string): string | null {
   if (trimmed === "") {
     return T.nameRequired;
   }
-  return trimmed.length > MAX_NAME_LENGTH ? T.nameTooLong : null;
+  // Code points, não grafemas: é o que o `len` do Python conta no servidor.
+  const length = Array.from(trimmed.normalize("NFC")).length;
+  return length > MAX_NAME_LENGTH ? T.nameTooLong : null;
 }
