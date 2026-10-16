@@ -8,18 +8,25 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.capacity import HolderKind as CapacityHolder
 from goblinshift.files.artifacts import get_artifact, publish_artifact
-from goblinshift.files.missing import mark_missing, sweep_missing_objects
+from goblinshift.files.missing import (
+    GOVERNOR_MIN_SAMPLE,
+    MissingSweep,
+    mark_missing,
+    sweep_missing_objects,
+)
 from goblinshift.files.objects import hold
 from goblinshift.files.retention import purge_deleted_objects
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import MOUNT_MARKER, FileStorage
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
 from tests.capacity.support import account_reserved, global_reserved, live_amount
-from tests.files.support import create_user, ready_upload
+from tests.files.support import create_user, mark_mounted, ready_upload
 
 pytestmark = pytest.mark.integration
+
+MAX_ABSENT_RATIO = 0.5
 
 
 def object_of(factory: sessionmaker[Session], upload_id: uuid.UUID) -> tuple[uuid.UUID, str]:
@@ -118,6 +125,18 @@ def test_upload_e_artefato_sobre_objeto_ausente_aparecem_missing(
 # --- Varredura da manutenção ------------------------------------------------------------------
 
 
+def sweep(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    *,
+    after: uuid.UUID | None = None,
+    limit: int = 50,
+) -> MissingSweep:
+    return sweep_missing_objects(
+        factory(), storage, after=after, limit=limit, max_absent_ratio=MAX_ABSENT_RATIO
+    )
+
+
 def test_varredura_marca_so_o_objeto_sem_arquivo(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
@@ -126,11 +145,12 @@ def test_varredura_marca_so_o_objeto_sem_arquivo(
     lost = ready_upload(factory, storage, owner, b"abcd")
     lost_object, lost_key = object_of(factory, lost.id)
     storage.delete(lost_key)
+    mark_mounted(storage)
 
-    report = sweep_missing_objects(factory(), storage, after=None, limit=10)
+    report = sweep(factory, storage)
 
-    assert (report.checked, report.marked, report.resume_after) == (2, 1, None)
-    assert report.storage_unreachable is False
+    assert (report.checked, report.absent, report.marked, report.resume_after) == (2, 1, 1, None)
+    assert (report.storage_unreachable, report.governor_tripped) == (False, False)
     assert state_of(factory, lost_object) == ObjectState.MISSING
     assert state_of(factory, object_of(factory, kept.id)[0]) == ObjectState.COMMITTED
     assert account_reserved(factory, owner) == 2
@@ -144,9 +164,10 @@ def test_varredura_anda_em_lotes_pela_ordem_do_id(
     objects = sorted(object_of(factory, view.id) for view in views)
     for _, key in objects:
         storage.delete(key)
+    mark_mounted(storage)
 
-    first = sweep_missing_objects(factory(), storage, after=None, limit=2)
-    second = sweep_missing_objects(factory(), storage, after=first.resume_after, limit=2)
+    first = sweep(factory, storage, limit=2)
+    second = sweep(factory, storage, after=first.resume_after, limit=2)
 
     assert (first.checked, first.marked, first.resume_after) == (2, 2, objects[1][0])
     assert (second.checked, second.marked, second.resume_after) == (1, 1, None)
@@ -158,6 +179,7 @@ def test_varredura_ignora_objetos_que_nao_estao_confirmados(
 ) -> None:
     owner = create_user(factory, "a")
     ready_upload(factory, storage, owner, b"zz")
+    mark_mounted(storage)
     with unit_of_work(factory) as session:
         pending = session.execute(
             insert(stored_object)
@@ -165,26 +187,94 @@ def test_varredura_ignora_objetos_que_nao_estao_confirmados(
             .returning(stored_object.c.id)
         ).scalar_one()
 
-    report = sweep_missing_objects(factory(), storage, after=None, limit=10)
+    report = sweep(factory, storage)
 
     assert (report.checked, report.marked) == (1, 0)
     assert state_of(factory, pending) == ObjectState.PENDING
 
 
-@pytest.mark.parametrize("unmounted", ["sem-raiz", "raiz-vazia"])
-def test_storage_sem_conteudo_nao_marca_nada(
+@pytest.mark.parametrize(
+    "unmounted",
+    ["sem-raiz", "raiz-vazia", "raiz-com-conteudo-sem-sentinela", "sentinela-diretorio"],
+)
+def test_storage_sem_a_sentinela_de_montagem_nao_marca_nada(
     factory: sessionmaker[Session], storage: FileStorage, unmounted: str
 ) -> None:
     owner = create_user(factory, "a")
     view = ready_upload(factory, storage, owner, b"abcd")
-    object_id, _ = object_of(factory, view.id)
-    # Filesystem do storage desmontado: a raiz some, ou sobra o ponto de montagem vazio.
-    elsewhere = FileStorage(storage.root.parent / "nao-montado")
-    if unmounted == "raiz-vazia":
-        elsewhere.root.mkdir()
+    object_id, key = object_of(factory, view.id)
+    # Filesystem desmontado: a raiz some, sobra o ponto de montagem vazio, ou alguém recriou a
+    # pasta e escreveu nela (temporários, objetos novos) sem que fosse o filesystem certo.
+    target = FileStorage(storage.root.parent / "nao-montado")
+    match unmounted:
+        case "raiz-vazia":
+            target.root.mkdir()
+        case "raiz-com-conteudo-sem-sentinela":
+            target = storage
+            storage.delete(key)
+            ready_upload(factory, storage, owner, b"zz")
+        case "sentinela-diretorio":
+            (target.root / MOUNT_MARKER).mkdir(parents=True)
 
-    report = sweep_missing_objects(factory(), elsewhere, after=None, limit=10)
+    report = sweep(factory, target)
 
-    assert (report.checked, report.marked, report.storage_unreachable) == (0, 0, True)
+    assert (report.marked, report.storage_unreachable) == (0, True)
     assert state_of(factory, object_id) == ObjectState.COMMITTED
-    assert account_reserved(factory, owner) == 4
+    assert report.resume_after is None
+
+
+def lots_with_absent(
+    factory: sessionmaker[Session], storage: FileStorage, total: int, absent: int
+) -> uuid.UUID:
+    owner = create_user(factory, "a")
+    views = [ready_upload(factory, storage, owner, bytes([i])) for i in range(total)]
+    for view in views[:absent]:
+        storage.delete(object_of(factory, view.id)[1])
+    mark_mounted(storage)
+    return owner
+
+
+def test_lote_com_mais_da_metade_ausente_para_sem_marcar(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = lots_with_absent(factory, storage, total=10, absent=6)
+
+    report = sweep(factory, storage)
+
+    assert (report.checked, report.absent, report.marked) == (10, 6, 0)
+    assert report.governor_tripped is True
+    # O mesmo lote volta no próximo ciclo, até o administrador decidir.
+    assert report.resume_after is None
+    assert account_reserved(factory, owner) == 10
+
+
+def test_lote_com_metade_ausente_ainda_marca(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    lots_with_absent(factory, storage, total=10, absent=5)
+
+    report = sweep(factory, storage)
+
+    assert (report.absent, report.marked, report.governor_tripped) == (5, 5, False)
+
+
+def test_lote_pequeno_demais_para_o_limitador_marca_tudo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    lots_with_absent(
+        factory, storage, total=GOVERNOR_MIN_SAMPLE - 1, absent=GOVERNOR_MIN_SAMPLE - 1
+    )
+
+    report = sweep(factory, storage)
+
+    assert (report.marked, report.governor_tripped) == (GOVERNOR_MIN_SAMPLE - 1, False)
+
+
+def test_limitador_desligado_pelo_administrador_marca_o_lote_inteiro(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    lots_with_absent(factory, storage, total=10, absent=10)
+
+    report = sweep_missing_objects(factory(), storage, after=None, limit=50, max_absent_ratio=1.0)
+
+    assert (report.marked, report.governor_tripped) == (10, False)

@@ -19,7 +19,6 @@ from goblinshift.files.errors import (
     ObjectNotAvailableError,
 )
 from goblinshift.files.limits import ARTIFACT_TTL
-from goblinshift.files.missing import mark_missing
 from goblinshift.files.objects import hold, release, request_deletion_of_unreferenced
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind, ObjectState
 from goblinshift.files.tables import artifact, stored_object
@@ -49,7 +48,6 @@ class DownloadTicket:
 
     holder_id: uuid.UUID
     artifact_id: uuid.UUID
-    object_id: uuid.UUID
     storage_key: str
     size_bytes: int
     sha256: bytes
@@ -234,14 +232,7 @@ def open_for_download(
         # Artefato válido sobre objeto ausente (`missing`): para o dono, o conteúdo sumiu.
         raise ArtifactGoneError from None
     return DownloadTicket(
-        holder_id,
-        artifact_id,
-        object_id,
-        storage_key,
-        size_bytes,
-        sha256,
-        ArtifactRole(role),
-        file_name,
+        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role), file_name
     )
 
 
@@ -280,16 +271,6 @@ def open_preview(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
 def finish_download(session: Session, ticket: DownloadTicket) -> None:
     """Encerra o uso do download; repetir é no-op."""
     release(session, HolderKind.DOWNLOAD, ticket.holder_id)
-
-
-def finish_missing_download(session: Session, ticket: DownloadTicket) -> None:
-    """Encerra o download cujo arquivo sumiu do storage e marca o objeto `missing` (1.7).
-
-    Daí em diante o artefato aparece `missing`, e o próximo download já é recusado na abertura,
-    sem chegar ao disco. Repetir é no-op.
-    """
-    finish_download(session, ticket)
-    mark_missing(session, [ticket.object_id])
 
 
 def request_artifacts_deletion(

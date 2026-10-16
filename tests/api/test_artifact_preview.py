@@ -165,7 +165,7 @@ def test_vencido_antes_de_a_manutencao_marcar_responde_410(
     assert open_uses(factory) == 0
 
 
-def test_preview_sumido_do_disco_responde_410_e_fica_missing_sem_afetar_a_origem(
+def test_preview_sumido_do_disco_responde_410_sem_gravar_nada(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     owner, auth = new_account(factory)
@@ -181,6 +181,7 @@ def test_preview_sumido_do_disco_responde_410_e_fica_missing_sem_afetar_a_origem
     response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
 
     assert_problem(response, 410, "GONE")
-    assert client.get(f"{ARTIFACTS}/{preview}", headers=auth).json()["availability"] == "missing"
-    assert client.get(f"{ARTIFACTS}/{source}", headers=auth).json()["availability"] == "available"
+    for artifact_id in (preview, source):
+        details = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth).json()
+        assert details["availability"] == "available"
     assert open_uses(factory) == 0
