@@ -29,6 +29,8 @@ from tests.security.authz_matrix import MATRIX, Policy, Rule, entries
 _IMPLICIT_METHODS = {"HEAD"}
 _PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
 _ACCOUNT_NAME = "Conta de teste"
+# Parâmetros de caminho que não são UUID; os demais recebem um UUID novo.
+_NAMED_PATH_VALUES = {"provider": "google", "recipe_id": "csv-janitor", "version": "1"}
 
 
 def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
@@ -45,7 +47,7 @@ def _concrete(path: str) -> str:
     """Troca cada parâmetro do caminho por um valor que passa na validação do tipo."""
 
     def value(match: re.Match[str]) -> str:
-        return "google" if match["name"] == "provider" else str(uuid4())
+        return _NAMED_PATH_VALUES.get(match["name"]) or str(uuid4())
 
     return _PATH_PARAM.sub(value, path)
 

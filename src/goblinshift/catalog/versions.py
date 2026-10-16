@@ -14,6 +14,7 @@ import copy
 import dataclasses
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -62,6 +63,17 @@ class RecipeVersion:
     status: VersionStatus
     parameters_model: type[BaseModel]
     limits: Mapping[str, int]
+    # Data de desligamento (header `Sunset`, RFC 8594): obrigatória em `deprecated`, que continua
+    # aceita por pelo menos 90 dias (1.6); a retirada pode guardar a data em que saiu.
+    sunset_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.sunset_at is not None and self.sunset_at.tzinfo is None:
+            raise ValueError("sunset_at precisa de fuso horário")
+        if self.status is VersionStatus.DEPRECATED and self.sunset_at is None:
+            raise ValueError("versão deprecated exige sunset_at")
+        if self.status is VersionStatus.CURRENT and self.sunset_at is not None:
+            raise ValueError("versão current não tem sunset_at")
 
     def resolve(self, raw_params: object) -> dict[str, object]:
         """Parâmetros validados com os defaults da versão, em forma canônica.
