@@ -61,7 +61,12 @@ from goblinshift.identity.sessions import (
     start_session,
 )
 from goblinshift.identity.terms import CURRENT_TERMS_VERSION, TermsAcceptance, accept_terms
-from goblinshift.identity.users import ExternalIdentity, LoginRefused, resolve_login
+from goblinshift.identity.users import (
+    ExternalIdentity,
+    LoginRefusal,
+    LoginRefused,
+    resolve_login,
+)
 
 __all__ = [
     "ADMIN_ISSUER",
@@ -85,6 +90,7 @@ __all__ = [
     "IssuedKey",
     "IssuedSession",
     "KeySummary",
+    "LoginRefusal",
     "LoginRefused",
     "PresentedKey",
     "Principal",

@@ -1,8 +1,11 @@
 /*
- * Sistema visual do GoblinShift (plano de design web, D1–D13 e seção 7).
+ * Sistema visual do GoblinShift (plano de design web, D1–D13 e seção 7), na paleta Taverna escura
+ * (docs/adr/032-paleta-taverna-escura.md): madeira quase preta e cobre polido, âmbar só no foco e
+ * no aviso, verde só nas goblins.
  *
  * Três camadas:
- * 1. tons crus em @theme static (musgo, latão, pedra, brasa, pátina): só a arte e este arquivo os usam;
+ * 1. tons crus em @theme static (madeira, cobre, âmbar, brasa, pátina): só a arte e este arquivo os
+ *    usam;
  * 2. papéis semânticos em :root e [data-theme="dark"], com os pares de contraste medidos em
  *    contrast.test.ts;
  * 3. @theme inline, que transforma os papéis em utilitários (bg-surface, text-fg-muted, …).
@@ -30,71 +33,73 @@
 
   --color-white: oklch(1 0 0);
 
-  /* Musgo: primária. O matiz gira de 125° (claros, rumo ao amarelo) a 148° (escuros). */
-  --color-moss-50: oklch(0.975 0.03 125);
-  --color-moss-100: oklch(0.945 0.05 127);
-  --color-moss-200: oklch(0.895 0.08 130);
-  --color-moss-300: oklch(0.825 0.11 133);
-  --color-moss-400: oklch(0.735 0.13 136);
-  --color-moss-500: oklch(0.645 0.14 138);
-  --color-moss-600: oklch(0.555 0.13 140);
-  --color-moss-700: oklch(0.475 0.115 142);
-  --color-moss-800: oklch(0.405 0.095 144);
-  --color-moss-900: oklch(0.335 0.075 146);
-  --color-moss-950: oklch(0.265 0.055 148);
+  /* Madeira: neutros cinza-marrom. O matiz gira de 75° (claros, rumo ao creme) a 46° (escuros),
+     croma maior nos extremos. */
+  --color-wood-50: oklch(0.982 0.008 75);
+  --color-wood-100: oklch(0.958 0.012 72);
+  --color-wood-200: oklch(0.918 0.016 68);
+  --color-wood-300: oklch(0.862 0.02 64);
+  --color-wood-400: oklch(0.72 0.024 60);
+  --color-wood-500: oklch(0.575 0.026 56);
+  --color-wood-600: oklch(0.47 0.026 54);
+  --color-wood-700: oklch(0.385 0.026 52);
+  --color-wood-800: oklch(0.295 0.024 50);
+  --color-wood-900: oklch(0.222 0.021 48);
+  --color-wood-950: oklch(0.165 0.017 46);
 
-  /* Latão: acento, foco e aviso. */
-  --color-brass-50: oklch(0.975 0.034 92);
-  --color-brass-100: oklch(0.945 0.06 90);
-  --color-brass-200: oklch(0.895 0.1 87);
-  --color-brass-300: oklch(0.825 0.135 83);
-  --color-brass-400: oklch(0.735 0.153 78);
-  --color-brass-500: oklch(0.645 0.137 73);
-  --color-brass-600: oklch(0.555 0.122 67);
-  --color-brass-700: oklch(0.475 0.109 62);
-  --color-brass-800: oklch(0.405 0.096 58);
-  --color-brass-900: oklch(0.335 0.082 55);
-  --color-brass-950: oklch(0.265 0.065 52);
+  /* Cobre polido: primária, só do que se clica. Matiz de 70° (claros) a 42° (escuros). */
+  --color-copper-50: oklch(0.972 0.02 70);
+  --color-copper-100: oklch(0.94 0.041 66);
+  --color-copper-200: oklch(0.89 0.072 62);
+  --color-copper-300: oklch(0.82 0.102 59);
+  --color-copper-400: oklch(0.735 0.125 56);
+  --color-copper-500: oklch(0.65 0.135 53);
+  --color-copper-600: oklch(0.565 0.13 50);
+  --color-copper-700: oklch(0.485 0.115 48);
+  --color-copper-800: oklch(0.415 0.098 46);
+  --color-copper-900: oklch(0.345 0.08 44);
+  --color-copper-950: oklch(0.275 0.062 42);
 
-  /* Pedra: cinzas quentes, croma maior nos extremos. */
-  --color-stone-50: oklch(0.985 0.006 85);
-  --color-stone-100: oklch(0.962 0.009 85);
-  --color-stone-200: oklch(0.922 0.009 85);
-  --color-stone-300: oklch(0.868 0.011 82);
-  --color-stone-400: oklch(0.72 0.012 77);
-  --color-stone-500: oklch(0.575 0.011 73);
-  --color-stone-600: oklch(0.47 0.011 73);
-  --color-stone-700: oklch(0.385 0.013 76);
-  --color-stone-800: oklch(0.295 0.015 63);
-  --color-stone-900: oklch(0.225 0.015 57);
-  --color-stone-950: oklch(0.17 0.013 55);
+  /* Âmbar: só foco, aviso e seleção. Matiz de 90° a 50°. */
+  --color-amber-50: oklch(0.976 0.03 90);
+  --color-amber-100: oklch(0.948 0.059 87);
+  --color-amber-200: oklch(0.902 0.102 84);
+  --color-amber-300: oklch(0.845 0.145 80);
+  --color-amber-400: oklch(0.775 0.16 75);
+  --color-amber-500: oklch(0.695 0.151 69);
+  --color-amber-600: oklch(0.605 0.137 63);
+  --color-amber-700: oklch(0.515 0.117 58);
+  --color-amber-800: oklch(0.435 0.098 55);
+  --color-amber-900: oklch(0.36 0.08 52);
+  --color-amber-950: oklch(0.285 0.062 50);
 
-  /* Brasa: perigo. */
-  --color-ember-50: oklch(0.975 0.012 20);
-  --color-ember-100: oklch(0.945 0.027 20);
-  --color-ember-200: oklch(0.895 0.054 22);
-  --color-ember-300: oklch(0.825 0.097 24);
-  --color-ember-400: oklch(0.735 0.16 25);
-  --color-ember-500: oklch(0.645 0.19 26);
-  --color-ember-600: oklch(0.555 0.2 27);
-  --color-ember-700: oklch(0.475 0.18 27);
-  --color-ember-800: oklch(0.405 0.15 27);
-  --color-ember-900: oklch(0.335 0.11 26);
-  --color-ember-950: oklch(0.265 0.08 25);
+  /* Brasa carmim: perigo. Matiz de 16° a 22°, mais para o magenta que o cobre (42-70°). */
+  --color-ember-50: oklch(0.972 0.013 16);
+  --color-ember-100: oklch(0.942 0.029 16);
+  --color-ember-200: oklch(0.89 0.057 18);
+  --color-ember-300: oklch(0.82 0.101 20);
+  --color-ember-400: oklch(0.73 0.165 21);
+  --color-ember-500: oklch(0.64 0.2 22);
+  --color-ember-600: oklch(0.55 0.21 22);
+  --color-ember-700: oklch(0.47 0.189 22);
+  --color-ember-800: oklch(0.4 0.158 22);
+  --color-ember-900: oklch(0.33 0.118 21);
+  --color-ember-950: oklch(0.26 0.085 20);
 
-  /* Pátina: sucesso. Verde-azulado de cobre oxidado, matiz fixo em 180° (32° além do musgo
-     mais escuro), para o sucesso não parecer botão (PUI: a primária é só do que se clica). */
-  --color-patina-50: oklch(0.975 0.02 180);
-  --color-patina-100: oklch(0.945 0.035 180);
-  --color-patina-200: oklch(0.895 0.055 180);
-  --color-patina-300: oklch(0.825 0.075 180);
-  --color-patina-400: oklch(0.735 0.09 180);
-  --color-patina-500: oklch(0.645 0.095 180);
-  --color-patina-600: oklch(0.555 0.09 180);
-  --color-patina-700: oklch(0.475 0.08 180);
-  --color-patina-800: oklch(0.405 0.068 180);
-  --color-patina-900: oklch(0.335 0.055 180);
-  --color-patina-950: oklch(0.265 0.042 180);
+  /* Pátina: sucesso. Verdete do próprio cobre, matiz fixo em 190°: afastada do cobre (o sucesso
+     não parece botão; PUI: a primária é só do que se clica) e do verde das goblins (120-130° na
+     arte), que fica só nelas. */
+  --color-patina-50: oklch(0.975 0.018 190);
+  --color-patina-100: oklch(0.945 0.032 190);
+  --color-patina-200: oklch(0.895 0.051 190);
+  --color-patina-300: oklch(0.825 0.069 190);
+  --color-patina-400: oklch(0.735 0.083 190);
+  --color-patina-500: oklch(0.645 0.087 190);
+  --color-patina-600: oklch(0.555 0.083 190);
+  --color-patina-700: oklch(0.475 0.074 190);
+  --color-patina-800: oklch(0.405 0.063 190);
+  --color-patina-900: oklch(0.335 0.051 190);
+  --color-patina-950: oklch(0.265 0.039 190);
 
   /* Fontes auto-hospedadas (src/styles/fonts.css), nunca de CDN: a CSP só aceita 'self'. */
   --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
@@ -138,54 +143,56 @@
 :root {
   color-scheme: light;
 
-  --bg: var(--color-stone-50);
-  --surface: var(--color-white);
+  --bg: var(--color-wood-100);
+  --surface: var(--color-wood-50);
   --surface-raised: var(--color-white);
-  --surface-sunken: var(--color-stone-100);
+  --surface-sunken: var(--color-wood-200);
 
-  --fg: var(--color-stone-900);
-  --fg-muted: var(--color-stone-600);
-  --fg-subtle: var(--color-stone-500);
+  --fg: var(--color-wood-900);
+  --fg-muted: var(--color-wood-700);
+  --fg-subtle: var(--color-wood-500);
 
-  --border-ui: var(--color-stone-500);
-  --border-soft: var(--color-stone-200);
+  --border-ui: var(--color-wood-500);
+  --border-soft: var(--color-wood-300);
 
-  --primary: var(--color-moss-700);
-  --primary-hover: var(--color-moss-800);
+  --primary: var(--color-copper-700);
+  --primary-hover: var(--color-copper-800);
   --on-primary: var(--color-white);
-  --secondary-fg: var(--color-moss-800);
-  --link: var(--color-moss-700);
+  --secondary-fg: var(--color-copper-800);
+  --link: var(--color-copper-700);
   --destructive: var(--color-ember-700);
   --destructive-hover: var(--color-ember-800);
   --on-destructive: var(--color-white);
 
-  --ring: var(--color-brass-600);
-  --accent-band: var(--color-brass-400);
+  --ring: var(--color-amber-600);
+  --accent-band: var(--color-copper-500);
 
   --success-bg: var(--color-patina-50);
   --success-fg: var(--color-patina-800);
-  --warning-bg: var(--color-brass-50);
-  --warning-fg: var(--color-brass-800);
+  --warning-bg: var(--color-amber-50);
+  --warning-fg: var(--color-amber-800);
+  --warning-accent: var(--color-amber-600);
   --danger-bg: var(--color-ember-50);
   --danger-fg: var(--color-ember-700);
   --danger-accent: var(--color-ember-600);
-  --info-bg: var(--color-stone-100);
-  --info-fg: var(--color-stone-700);
+  --info-bg: var(--color-wood-200);
+  --info-fg: var(--color-wood-800);
 
   --progress-fill: var(--color-patina-600);
-  --progress-track: var(--color-stone-200);
-  --dropzone-active: var(--color-moss-50);
-  --selection-bg: var(--color-brass-200);
-  --selection-fg: var(--color-brass-900);
-  --hero-band: var(--color-moss-50);
-  --overlay: var(--color-stone-950);
+  --progress-track: var(--color-wood-200);
+  --dropzone-active: var(--color-copper-50);
+  --selection-bg: var(--color-amber-200);
+  --selection-fg: var(--color-amber-900);
+  --hero-band: var(--color-wood-200);
+  --overlay: var(--color-wood-950);
 
   /* Três níveis (spec 2026-10-15): cartão sobre a página, flutuante (menu, popover, arrasto) e
      diálogo. Duas partes, a luz vem de cima (RUI cap. 6); no diálogo a parte pequena some. */
-  --elevation-card: 0 2px 4px oklch(0.17 0.013 55 / 0.12), 0 1px 2px oklch(0.17 0.013 55 / 0.2);
-  --elevation-float: 0 10px 20px oklch(0.17 0.013 55 / 0.15), 0 3px 6px oklch(0.17 0.013 55 / 0.1);
-  --elevation-dialog: 0 20px 40px oklch(0.17 0.013 55 / 0.2);
-  --elevation-sunken: inset 0 2px 2px oklch(0.17 0.013 55 / 0.1);
+  --elevation-card: 0 2px 4px oklch(0.165 0.017 46 / 0.12), 0 1px 2px oklch(0.165 0.017 46 / 0.2);
+  --elevation-float:
+    0 10px 20px oklch(0.165 0.017 46 / 0.15), 0 3px 6px oklch(0.165 0.017 46 / 0.1);
+  --elevation-dialog: 0 20px 40px oklch(0.165 0.017 46 / 0.2);
+  --elevation-sunken: inset 0 2px 2px oklch(0.165 0.017 46 / 0.1);
 
   --duration-fast: 120ms;
   --duration-base: 200ms;
@@ -200,46 +207,47 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: var(--color-stone-950);
-  --surface: var(--color-stone-900);
-  --surface-raised: var(--color-stone-800);
-  --surface-sunken: var(--color-stone-950);
+  --bg: var(--color-wood-950);
+  --surface: var(--color-wood-900);
+  --surface-raised: var(--color-wood-800);
+  --surface-sunken: var(--color-wood-950);
 
-  --fg: var(--color-stone-50);
-  --fg-muted: var(--color-stone-400);
-  --fg-subtle: var(--color-stone-500);
+  --fg: var(--color-wood-50);
+  --fg-muted: var(--color-wood-400);
+  --fg-subtle: var(--color-wood-500);
 
-  --border-ui: var(--color-stone-500);
-  --border-soft: var(--color-stone-800);
+  --border-ui: var(--color-wood-500);
+  --border-soft: var(--color-wood-800);
 
-  --primary: var(--color-moss-400);
-  --primary-hover: var(--color-moss-300);
-  --on-primary: var(--color-moss-950);
-  --secondary-fg: var(--color-moss-200);
-  --link: var(--color-moss-300);
+  --primary: var(--color-copper-400);
+  --primary-hover: var(--color-copper-300);
+  --on-primary: var(--color-copper-950);
+  --secondary-fg: var(--color-copper-200);
+  --link: var(--color-copper-300);
   --destructive: var(--color-ember-400);
   --destructive-hover: var(--color-ember-300);
   --on-destructive: var(--color-ember-950);
 
-  --ring: var(--color-brass-300);
-  --accent-band: var(--color-brass-400);
+  --ring: var(--color-amber-400);
+  --accent-band: var(--color-copper-500);
 
   --success-bg: var(--color-patina-950);
   --success-fg: var(--color-patina-200);
-  --warning-bg: var(--color-brass-950);
-  --warning-fg: var(--color-brass-200);
+  --warning-bg: var(--color-amber-950);
+  --warning-fg: var(--color-amber-200);
+  --warning-accent: var(--color-amber-400);
   --danger-bg: var(--color-ember-950);
   --danger-fg: var(--color-ember-200);
   --danger-accent: var(--color-ember-400);
-  --info-bg: var(--color-stone-800);
-  --info-fg: var(--color-stone-200);
+  --info-bg: var(--color-wood-800);
+  --info-fg: var(--color-wood-200);
 
   --progress-fill: var(--color-patina-400);
-  --progress-track: var(--color-stone-700);
-  --dropzone-active: var(--color-stone-800);
-  --selection-bg: var(--color-brass-800);
-  --selection-fg: var(--color-brass-50);
-  --hero-band: var(--color-stone-900);
+  --progress-track: var(--color-wood-700);
+  --dropzone-active: var(--color-wood-800);
+  --selection-bg: var(--color-amber-800);
+  --selection-fg: var(--color-amber-50);
+  --hero-band: var(--color-wood-900);
   --overlay: oklch(0 0 0);
 
   --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
@@ -254,46 +262,47 @@
   :root:not([data-theme]) {
     color-scheme: dark;
 
-    --bg: var(--color-stone-950);
-    --surface: var(--color-stone-900);
-    --surface-raised: var(--color-stone-800);
-    --surface-sunken: var(--color-stone-950);
+    --bg: var(--color-wood-950);
+    --surface: var(--color-wood-900);
+    --surface-raised: var(--color-wood-800);
+    --surface-sunken: var(--color-wood-950);
 
-    --fg: var(--color-stone-50);
-    --fg-muted: var(--color-stone-400);
-    --fg-subtle: var(--color-stone-500);
+    --fg: var(--color-wood-50);
+    --fg-muted: var(--color-wood-400);
+    --fg-subtle: var(--color-wood-500);
 
-    --border-ui: var(--color-stone-500);
-    --border-soft: var(--color-stone-800);
+    --border-ui: var(--color-wood-500);
+    --border-soft: var(--color-wood-800);
 
-    --primary: var(--color-moss-400);
-    --primary-hover: var(--color-moss-300);
-    --on-primary: var(--color-moss-950);
-    --secondary-fg: var(--color-moss-200);
-    --link: var(--color-moss-300);
+    --primary: var(--color-copper-400);
+    --primary-hover: var(--color-copper-300);
+    --on-primary: var(--color-copper-950);
+    --secondary-fg: var(--color-copper-200);
+    --link: var(--color-copper-300);
     --destructive: var(--color-ember-400);
     --destructive-hover: var(--color-ember-300);
     --on-destructive: var(--color-ember-950);
 
-    --ring: var(--color-brass-300);
-    --accent-band: var(--color-brass-400);
+    --ring: var(--color-amber-400);
+    --accent-band: var(--color-copper-500);
 
     --success-bg: var(--color-patina-950);
     --success-fg: var(--color-patina-200);
-    --warning-bg: var(--color-brass-950);
-    --warning-fg: var(--color-brass-200);
+    --warning-bg: var(--color-amber-950);
+    --warning-fg: var(--color-amber-200);
+    --warning-accent: var(--color-amber-400);
     --danger-bg: var(--color-ember-950);
     --danger-fg: var(--color-ember-200);
     --danger-accent: var(--color-ember-400);
-    --info-bg: var(--color-stone-800);
-    --info-fg: var(--color-stone-200);
+    --info-bg: var(--color-wood-800);
+    --info-fg: var(--color-wood-200);
 
     --progress-fill: var(--color-patina-400);
-    --progress-track: var(--color-stone-700);
-    --dropzone-active: var(--color-stone-800);
-    --selection-bg: var(--color-brass-800);
-    --selection-fg: var(--color-brass-50);
-    --hero-band: var(--color-stone-900);
+    --progress-track: var(--color-wood-700);
+    --dropzone-active: var(--color-wood-800);
+    --selection-bg: var(--color-amber-800);
+    --selection-fg: var(--color-amber-50);
+    --hero-band: var(--color-wood-900);
     --overlay: oklch(0 0 0);
 
     --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
@@ -327,6 +336,7 @@
   --color-success-fg: var(--success-fg);
   --color-warning-bg: var(--warning-bg);
   --color-warning-fg: var(--warning-fg);
+  --color-warning-accent: var(--warning-accent);
   --color-danger-bg: var(--danger-bg);
   --color-danger-fg: var(--danger-fg);
   --color-danger-accent: var(--danger-accent);
