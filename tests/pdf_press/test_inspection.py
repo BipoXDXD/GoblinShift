@@ -315,3 +315,45 @@ def test_teto_de_objetos_usa_o_xref_real_e_nao_o_size_declarado(tmp_path: Path) 
     failure = refusal(tmp_path, data, limits=Limits(max_objects_per_document=3))
 
     assert failure.code is FailureCode.INPUT_LIMIT_EXCEEDED
+
+
+# Achado da revisão: a regra do qpdf é a presença de /Kids, não o /Type. Qualquer divergência
+# entre os dois é recusada antes de o `pdf.pages` rodar.
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        pytest.param(
+            b"<< /Type /Page /Parent 2 0 R /Kids [4 0 R 5 0 R] /Count 2 /MediaBox [0 0 9 9] >>",
+            id="page-com-kids",
+        ),
+        pytest.param(b"<< /Parent 2 0 R /Kids [4 0 R] /Count 1 >>", id="kids-sem-type"),
+        pytest.param(b"<< /Type /Pages /Parent 2 0 R /Count 0 >>", id="pages-sem-kids"),
+        pytest.param(b"<< /Parent 2 0 R /MediaBox [0 0 9 9] >>", id="folha-sem-type"),
+        pytest.param(
+            b"<< /Type /Pages /Parent 2 0 R /Kids 4 0 R /Count 1 >>", id="kids-que-nao-e-array"
+        ),
+    ],
+)
+def test_no_com_type_e_kids_divergentes_falha(tmp_path: Path, node: bytes) -> None:
+    failure = refusal(tmp_path, samples.page_tree_with_node(node))
+
+    assert failure.code is FailureCode.PDF_INVALID
+    assert "árvore de páginas" in failure.detail
+
+
+@pytest.mark.parametrize(
+    "root",
+    [
+        pytest.param(b"<< /Type /Page /Kids [3 0 R] /Count 1 >>", id="raiz-page-com-kids"),
+        pytest.param(b"<< /Kids [3 0 R] /Count 1 >>", id="raiz-sem-type"),
+        pytest.param(b"<< /Type /Pages /Count 1 >>", id="raiz-sem-kids"),
+        pytest.param(b"<< /Type /Page /MediaBox [0 0 9 9] >>", id="raiz-folha"),
+    ],
+)
+def test_raiz_que_nao_e_pages_com_kids_falha(tmp_path: Path, root: bytes) -> None:
+    failure = refusal(tmp_path, samples.page_tree_with_root(root))
+
+    assert failure.code is FailureCode.PDF_INVALID
+    assert "árvore de páginas" in failure.detail
