@@ -38,11 +38,11 @@ from goblinshift.entrypoints.api.problems import (
 from goblinshift.entrypoints.api.wide_event import record_run_accepted
 from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.limits import MAX_BATCH_FILES
-from goblinshift.files.states import ArtifactRole
+from goblinshift.files.states import ArtifactRole, Availability
 from goblinshift.identity import Principal, Scope
 from goblinshift.platform.settings import Settings
 from goblinshift.presets import PresetNotFoundError, get_preset
-from goblinshift.processing.recipe import ItemRejectionCode, ItemWarningCode
+from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
@@ -155,9 +155,13 @@ class RunItemResponse(BaseModel):
 
     position: int
     upload_id: UUID
+    # Nome do próprio upload, para a tela não ler upload a upload; nulo depois de 30 dias.
+    original_name: str | None
     status: ItemStatus
     error_code: ItemRejectionCode | None
     warnings: list[ItemWarningCode]
+    # Fatos que não são aviso e não mudam o estado (A2), como a conversão de Display P3.
+    notices: list[ItemNoticeCode]
     counts: dict[str, int]
     duplicate_of: int | None
 
@@ -188,6 +192,7 @@ class ResultReferenceResponse(BaseModel):
     logical_name: str
     role: ArtifactRole
     file_name: str
+    availability: Availability
 
 
 class RunResultsResponse(BaseModel):
@@ -446,9 +451,11 @@ def get_run_route(
             RunItemResponse(
                 position=item.position,
                 upload_id=item.upload_id,
+                original_name=item.original_name,
                 status=item.status,
                 error_code=item.error_code,
                 warnings=list(item.warnings),
+                notices=list(item.notices),
                 counts=item.counts,
                 duplicate_of=item.duplicate_of,
             )
@@ -479,6 +486,7 @@ def get_results_route(
                 logical_name=ref.logical_name,
                 role=ref.role,
                 file_name=ref.file_name,
+                availability=ref.availability,
             )
             for ref in results.references
         ],

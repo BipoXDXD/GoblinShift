@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+from goblinshift.processing.image_forge.color import ColorProfile
 from goblinshift.processing.image_forge.encoding import SaveFormat, encode
 from goblinshift.processing.image_forge.geometry import fit_size
 from goblinshift.processing.image_forge.limits import MAX_INPUTS, Limits
@@ -24,6 +25,7 @@ from goblinshift.processing.names import safe_stem
 from goblinshift.processing.recipe import (
     DetailValue,
     InputFile,
+    ItemNoticeCode,
     ItemOk,
     ItemRejected,
     OutputDir,
@@ -81,6 +83,7 @@ class ImageForgeV1:
             position=source.position,
             outputs=tuple(outputs),
             details=_details(source, prepared, resized, writer.save_format),
+            notices=_notices(prepared),
         )
 
 
@@ -107,6 +110,12 @@ class _Writer:
                 jpeg_background=self.params.jpeg_background,
             )
         return output.name
+
+
+def _notices(prepared: Prepared) -> tuple[ItemNoticeCode, ...]:
+    if prepared.color_profile is ColorProfile.DISPLAY_P3_CONVERTED:
+        return (ItemNoticeCode.IMAGE_P3_CONVERTED,)
+    return ()
 
 
 def _save_format(requested: OutputFormat, source_format: str) -> SaveFormat:

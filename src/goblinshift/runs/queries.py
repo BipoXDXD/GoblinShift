@@ -13,11 +13,12 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, Row, Select, and_, case, func, select, tuple_
 from sqlalchemy.orm import Session
 
-from goblinshift.files.states import ArtifactRole
-from goblinshift.files.tables import artifact
+from goblinshift.files.states import ArtifactRole, Availability
+from goblinshift.files.tables import artifact, upload
 from goblinshift.processing.recipe import (
     ITEM_COUNT_NAME,
     MAX_ITEM_COUNTS,
+    ItemNoticeCode,
     ItemRejectionCode,
     ItemWarningCode,
 )
@@ -79,9 +80,12 @@ class RunItem:
 
     position: int
     upload_id: UUID
+    # Do próprio upload, que é do dono; anulado pela retenção de 30 dias (1.7).
+    original_name: str | None
     status: ItemStatus
     error_code: ItemRejectionCode | None
     warnings: tuple[ItemWarningCode, ...]
+    notices: tuple[ItemNoticeCode, ...]
     counts: dict[str, int]
     duplicate_of: int | None
 
@@ -124,6 +128,7 @@ class ResultReference:
     role: ArtifactRole
     # Nome com que o download entrega o arquivo.
     file_name: str
+    availability: Availability
 
 
 @dataclass(frozen=True)
@@ -159,9 +164,14 @@ def get_run_detail(session: Session, owner_id: UUID, run_id: UUID) -> RunDetail:
         select(
             run_input.c.position,
             run_input.c.upload_id,
+            upload.c.original_name,
             run_input.c.outcome,
             run_input.c.error_code,
             run_input.c.details,
+        )
+        .join(
+            upload,
+            and_(upload.c.id == run_input.c.upload_id, upload.c.owner_id == run_input.c.owner_id),
         )
         .where(run_input.c.owner_id == owner_id, run_input.c.run_id == run_id)
         .order_by(run_input.c.position)
@@ -218,6 +228,8 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             artifact.c.role,
             artifact.c.file_name,
             artifact.c.expires_at,
+            artifact.c.deleted_at,
+            (artifact.c.expires_at <= func.now()).label("expired"),
         )
         .join(
             artifact,
@@ -230,7 +242,15 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
         .order_by(run_output.c.position)
     ).all()
     references = tuple(
-        ResultReference(row.artifact_id, row.logical_name, ArtifactRole(row.role), row.file_name)
+        ResultReference(
+            row.artifact_id,
+            row.logical_name,
+            ArtifactRole(row.role),
+            row.file_name,
+            Availability.of(
+                deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+            ),
+        )
         for row in rows
     )
     # Publicados na mesma transação, os artefatos vencem juntos; o mínimo é o prazo seguro.
@@ -365,13 +385,11 @@ def _item(row: Any) -> RunItem:
     return RunItem(
         position=row.position,
         upload_id=row.upload_id,
+        original_name=row.original_name,
         status=_item_status(row.outcome, duplicate_of),
         error_code=_catalog(ItemRejectionCode, row.error_code),
-        warnings=tuple(
-            code
-            for raw in _as_list(details.get("warnings"))
-            if (code := _catalog(ItemWarningCode, raw)) is not None
-        ),
+        warnings=_codes(ItemWarningCode, details.get("warnings")),
+        notices=_codes(ItemNoticeCode, details.get("notices")),
         counts=_counts(details.get("counts")),
         duplicate_of=duplicate_of,
     )
@@ -387,6 +405,11 @@ def _item_status(outcome: str | None, duplicate_of: int | None) -> ItemStatus:
 
 def _catalog[C: StrEnum](codes: type[C], raw: object) -> C | None:
     return codes(raw) if isinstance(raw, str) and raw in codes else None
+
+
+def _codes[C: StrEnum](codes: type[C], raw: object) -> tuple[C, ...]:
+    """Só os códigos da lista fechada, na ordem gravada; o resto é descartado."""
+    return tuple(code for item in _as_list(raw) if (code := _catalog(codes, item)) is not None)
 
 
 def _counts(raw: object) -> dict[str, int]:
