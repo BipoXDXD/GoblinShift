@@ -602,7 +602,7 @@ export interface components {
          *     arquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui.
          * @enum {string}
          */
-        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER";
+        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED";
         /** Limits */
         Limits: {
             /** Runs Per 24H */
@@ -2660,6 +2660,31 @@ export interface operations {
                          */
                         name_prefix?: string;
                     };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
+                    };
                 });
             };
         };
@@ -2985,6 +3010,31 @@ export interface operations {
                          * @default file
                          */
                         name_prefix?: string;
+                    };
+                } | {
+                    /** @constant */
+                    recipe_id: "pdf-press";
+                    /** @constant */
+                    recipe_version: 1;
+                    /** PdfPressV1Parameters */
+                    parameters: {
+                        /**
+                         * Operation
+                         * @default merge
+                         * @enum {string}
+                         */
+                        operation?: "merge" | "split" | "select";
+                        /** @default 1 */
+                        pages_per_document?: number;
+                        /** Select */
+                        select?: {
+                            /**
+                             * Upload Id
+                             * Format: uuid
+                             */
+                            upload_id: string;
+                            page_number: number;
+                        }[] | null;
                     };
                 });
             };
