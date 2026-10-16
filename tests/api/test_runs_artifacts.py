@@ -11,6 +11,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import publish_artifact
+from goblinshift.files.missing import mark_missing
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.platform.db import unit_of_work
@@ -180,3 +181,24 @@ def test_execucao_inexistente_responde_404(app: FastAPI, client: TestClient) -> 
     response = client.delete(f"{RUNS}/{uuid.uuid4()}/artifacts", headers=auth)
 
     assert_problem(response, 404, "NOT_FOUND")
+
+
+def test_objetos_ausentes_aparecem_missing_e_nao_anunciam_validade(
+    app: FastAPI, client: TestClient
+) -> None:
+    factory: sessionmaker[Session] = app.state.session_factory
+    owner, auth = new_account(factory)
+    finished = finished_run(app, owner)
+    with unit_of_work(factory) as session:
+        mark_missing(session, session.execute(select(stored_object.c.id)).scalars().all())
+
+    results = client.get(f"{RUNS}/{finished.run_id}/results", headers=auth).json()
+    detail = client.get(f"{RUNS}/{finished.run_id}", headers=auth).json()
+    source = client.get(f"/api/v1/uploads/{finished.upload_id}", headers=auth).json()
+
+    assert [a["availability"] for a in results["artifacts"]] == ["missing", "missing"]
+    assert (results["published"], results["expires_at"]) == (True, None)
+    assert detail["results_expire_at"] is None
+    assert source["availability"] == "missing"
+    download = client.get(f"/api/v1/artifacts/{finished.own_artifact}/download", headers=auth)
+    assert_problem(download, 410, "GONE")

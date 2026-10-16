@@ -76,7 +76,7 @@ export function ResultsAvailability({
   const availability = deletedHere ? "deleted" : artifact.data?.availability;
   return (
     <>
-      {availability === "deleted" || availability === "expired" ? (
+      {availability === "deleted" || availability === "expired" || availability === "missing" ? (
         <Unavailable reason={availability} expiresAt={results.expires_at} />
       ) : artifact.isPending ? (
         <p className="text-fg-muted">{T.checking}</p>
@@ -125,7 +125,7 @@ function Unconfirmed({ onRetry }: { readonly onRetry: () => void }): ReactElemen
 }
 
 interface UnavailableProps {
-  readonly reason: "deleted" | "expired";
+  readonly reason: "deleted" | "expired" | "missing";
   readonly expiresAt: string | null;
 }
 
@@ -134,6 +134,13 @@ function Unavailable({ reason, expiresAt }: UnavailableProps): ReactElement {
     return (
       <EmptyState title={T.deletedTitle} headingLevel={3}>
         <p>{T.deletedHint}</p>
+      </EmptyState>
+    );
+  }
+  if (reason === "missing") {
+    return (
+      <EmptyState title={T.missingTitle} headingLevel={3}>
+        <p>{T.missingHint}</p>
       </EmptyState>
     );
   }

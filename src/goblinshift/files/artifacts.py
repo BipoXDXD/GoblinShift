@@ -188,6 +188,7 @@ def get_artifact(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
             (artifact.c.expires_at <= func.now()).label("expired"),
             stored_object.c.size_bytes,
             stored_object.c.sha256,
+            stored_object.c.state,
         )
         .join(stored_object, stored_object.c.id == artifact.c.object_id)
         .where(artifact.c.id == artifact_id, artifact.c.owner_id == owner_id)
@@ -203,7 +204,10 @@ def get_artifact(session: Session, owner_id: uuid.UUID, artifact_id: uuid.UUID) 
         created_at=row.created_at,
         expires_at=row.expires_at,
         availability=Availability.of(
-            deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+            deleted_at=row.deleted_at,
+            expires_at=row.expires_at,
+            expired=row.expired,
+            object_missing=row.state == ObjectState.MISSING,
         ),
     )
 
