@@ -106,6 +106,11 @@ def test_aviso_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
         ReportWarning(code=code, detail="d")
 
 
+def test_nota_fora_da_lista_nao_existe() -> None:
+    with pytest.raises(ValueError, match="nota"):
+        ItemOk(0, outputs=("a.png",), notices=("QUALQUER",))  # type: ignore[arg-type]
+
+
 # --- Teto de entradas da versão: job acima dele é infraestrutura, não conteúdo ------------------
 
 
