@@ -105,7 +105,8 @@ def test_auditoria_sobrevive_a_purga_sem_identificar(factory: sessionmaker[Sessi
     assert event.user_id == user_id
     assert str(event.ip_prefix) == "203.0.113.0/24"
     # O evento não guarda nome nem identidade externa: sem `app_user`, o UUID não leva a ninguém.
-    # O `request_id` é aleatório por requisição e também não identifica ninguém.
+    # O `request_id` é aleatório por requisição e também não identifica ninguém; `details` só
+    # guarda números de limites (migração 0016).
     assert set(event._mapping) == {
         "id",
         "user_id",
@@ -114,6 +115,7 @@ def test_auditoria_sobrevive_a_purga_sem_identificar(factory: sessionmaker[Sessi
         "ip_prefix",
         "occurred_at",
         "request_id",
+        "details",
     }
 
 
