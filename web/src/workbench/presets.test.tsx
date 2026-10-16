@@ -7,6 +7,7 @@ import { axeViolations } from "../test/axe";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
+import { escapeIsBlocked, forceClose } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -156,11 +157,8 @@ describe("Bancada: Salvar preset", () => {
     await user.type(within(dialog).getByLabelText("Nome do preset"), "Clientes do mês");
     await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
     await within(dialog).findByRole("button", { name: "Salvando…" });
-    // O Chrome fecha o diálogo no segundo Esc mesmo com o cancel impedido.
-    if (!(dialog instanceof HTMLDialogElement)) {
-      throw new Error("o diálogo de salvar não é um <dialog>");
-    }
-    dialog.close();
+    expect(escapeIsBlocked(dialog)).toBe(true);
+    forceClose(dialog);
     expect(screen.queryByRole("dialog")).toBeNull();
     answer(problemResponse(409, "STATE_CONFLICT"));
 

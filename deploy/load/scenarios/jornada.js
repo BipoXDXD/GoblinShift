@@ -85,12 +85,22 @@ function createRun(token) {
   const response = http.post(`${API}/runs`, csvRunBody(uploadId), {
     headers: jsonHeaders(token, { 'Idempotency-Key': idempotencyKey() }),
     tags: { route: 'POST /runs' },
-    responseCallback: http.expectedStatuses(202, 503),
+    responseCallback: http.expectedStatuses(202, 429, 503),
   });
   if (response.status === 503) {
     check(response, {
       'fila cheia é QUEUE_FULL com Retry-After': (r) =>
         problemCode(r) === 'QUEUE_FULL' && r.headers['Retry-After'] !== undefined,
+    });
+    return null;
+  }
+  // As novas tentativas depois da fila cheia contam no limite de 10 POST /runs por minuto da
+  // conta (A2), então a conta pode bater nele. É recusa prevista, como a fila cheia, e o VU
+  // espera do mesmo jeito.
+  if (response.status === 429) {
+    check(response, {
+      'limite da conta é RATE_LIMITED com Retry-After': (r) =>
+        problemCode(r) === 'RATE_LIMITED' && r.headers['Retry-After'] !== undefined,
     });
     return null;
   }
