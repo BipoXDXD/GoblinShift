@@ -34,7 +34,7 @@ const LIMITS_KB = {
   threeDCastModel: 2400,
   /**
    * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
-   * Rúbia, a maior imagem estática dela em AVIF e as seis miniaturas do seletor. Medido: ~3530 KB.
+   * Rúbia, a maior imagem estática dela em AVIF e as cinco miniaturas do seletor. Medido: ~3530 KB.
    */
   threeDInitial: 3600,
   threeDPoster: 90,

@@ -133,7 +133,7 @@ describe("OficinaHero", () => {
     expect(img).not.toHaveAttribute("loading");
   });
 
-  it("o seletor tem as seis goblins, na ordem do elenco, com a Rúbia escolhida", () => {
+  it("o seletor tem as cinco goblins, na ordem do elenco, com a Rúbia escolhida", () => {
     render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
 
     const buttons = within(
@@ -144,12 +144,10 @@ describe("OficinaHero", () => {
       "Fagulha",
       "Ferrugem",
       "Jade",
-      "Lua",
       "Nyx",
     ]);
     expect(buttons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
       "true",
-      "false",
       "false",
       "false",
       "false",
@@ -214,9 +212,9 @@ describe("OficinaHero", () => {
     await renderReady(scene);
 
     await userEvent.click(castButton("Nyx"));
-    await userEvent.click(castButton("Lua"));
+    await userEvent.click(castButton("Fagulha"));
 
-    expect(scene.shows.map((call) => call.goblin)).toEqual(["rubia", "nyx", "lua"]);
+    expect(scene.shows.map((call) => call.goblin)).toEqual(["rubia", "nyx", "fagulha"]);
     expect(scene.shows[1]?.signal.aborted).toBe(true);
     expect(scene.shows[2]?.signal.aborted).toBe(false);
   });
@@ -231,7 +229,7 @@ describe("OficinaHero", () => {
     expect(heroState(container)).toBe("falhou");
     expect(screen.getByRole("img", { name: /^Jade, goblin/ })).toBeVisible();
 
-    await userEvent.click(castButton("Lua"));
+    await userEvent.click(castButton("Fagulha"));
     await settle(scene, 2);
     expect(heroState(container)).toBe("pronto");
   });
@@ -330,7 +328,7 @@ describe("OficinaHero", () => {
     });
 
     reduced = true;
-    await userEvent.click(castButton("Lua"));
+    await userEvent.click(castButton("Fagulha"));
 
     expect(screen.queryByRole("button", { name: TEXT.art.stage.spin })).toBeNull();
     expect(screen.getByRole("button", { name: TEXT.art.stage.reset })).toBeInTheDocument();
