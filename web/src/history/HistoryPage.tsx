@@ -24,6 +24,7 @@ import {
   toRunListQuery,
   type HistoryFilters,
 } from "./filters";
+import { RunHistoryExtras } from "./RunHistoryExtras";
 import { RunList as RunRows } from "./RunList";
 
 const T = TEXT.history;
@@ -47,6 +48,7 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
       <FocusHeading>{T.title}</FocusHeading>
       <HistoryResults
         query={toRunListQuery(filters, anchorMs)}
+        nowMs={anchorMs}
         filters={filters}
         onApplyFilters={(next) => {
           setSearchParams(filtersToSearchParams(next));
@@ -58,6 +60,8 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
 
 interface HistoryResultsProps {
   readonly query: RunListQuery;
+  /** Relógio da abertura da tela, para dizer se os resultados ainda valem. */
+  readonly nowMs: number;
   readonly filters: HistoryFilters;
   readonly onApplyFilters: (filters: HistoryFilters) => void;
 }
@@ -65,7 +69,12 @@ interface HistoryResultsProps {
 /** Sem cursor: a primeira página. */
 const FIRST_PAGE: string | null = null;
 
-function HistoryResults({ query, filters, onApplyFilters }: HistoryResultsProps): ReactElement {
+function HistoryResults({
+  query,
+  nowMs,
+  filters,
+  onApplyFilters,
+}: HistoryResultsProps): ReactElement {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [announcement, setAnnouncement] = useState<string | null>(null);
@@ -116,7 +125,10 @@ function HistoryResults({ query, filters, onApplyFilters }: HistoryResultsProps)
         <EmptyResults filtered={active} />
       ) : (
         <div className="flex flex-col gap-4">
-          <RunRows runs={items} />
+          <RunRows
+            runs={items}
+            renderExtras={(run) => <RunHistoryExtras run={run} nowMs={nowMs} />}
+          />
           {runs.isFetchNextPageError && !isCursorRejected(runs.error) && (
             <ProblemAlert failure={failureOf(runs.error)} />
           )}
