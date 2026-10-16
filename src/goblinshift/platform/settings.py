@@ -157,15 +157,6 @@ class Settings(BaseSettings):
             raise ValueError("use só esquema e host, como https://goblinshift.dev")
         return value
 
-    @property
-    def serves_api_docs(self) -> bool:
-        """Swagger UI e `/openapi.json` só fora de produção (3.6: docs fechados em produção).
-
-        Derivado do ambiente, sem variável própria: esquecer uma variável no deploy não reabre a
-        documentação. O contrato versionado sai de `app.openapi()`, que independe da rota.
-        """
-        return self.environment != "production"
-
     def web_identity(self) -> WebIdentityConfig:
         """Lê e valida a configuração do login; chamado na subida da API."""
         production = self.environment == "production"

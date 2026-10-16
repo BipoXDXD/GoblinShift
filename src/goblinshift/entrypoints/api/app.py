@@ -67,8 +67,8 @@ def create_app(
         title="GoblinShift",
         version=settings.service_version,
         lifespan=lifespan,
-        docs_url="/docs" if settings.serves_api_docs else None,
-        openapi_url="/openapi.json" if settings.serves_api_docs else None,
+        docs_url="/docs",
+        openapi_url="/openapi.json",
         # Uma documentação só, sem o redirect OAuth do Swagger, que nada usa: cada rota pública
         # a mais entra na allowlist da matriz de autorização.
         redoc_url=None,
