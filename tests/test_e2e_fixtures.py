@@ -24,6 +24,7 @@ from PIL import Image
 from goblinshift.processing.executor import execution
 from goblinshift.runs.worker.collection import collect_outputs
 from scripts import e2e_fixtures
+from tests.media_mill import media
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHECKER = REPO_ROOT / "scripts" / "e2e_check_package.py"
@@ -180,6 +181,73 @@ def test_pagina_txt_e_html(detox: tuple[Path, dict[str, Any]]) -> None:
     assert text.lstrip().casefold().startswith("<!doctype html")
 
 
+# Media Mill
+
+
+@pytest.fixture
+def mill(tmp_path: Path) -> Callable[[str], bytes]:
+    expected = generate("media-mill", tmp_path)
+    return lambda name: fixture_bytes(tmp_path, expected, name)
+
+
+def streams_of(data: bytes, tmp_path: Path) -> list[dict[str, Any]]:
+    """Faixas pelo ffprobe completo do ambiente (o mesmo que gerou os vídeos)."""
+    _, ffprobe = media.require_ffmpeg()
+    source = tmp_path / "probe.bin"
+    source.write_bytes(data)
+    completed = subprocess.run(  # noqa: S603 - argv montado aqui, sem shell
+        [ffprobe, "-v", "error", "-show_streams", "-of", "json", str(source)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    streams: list[dict[str, Any]] = json.loads(completed.stdout)["streams"]
+    return streams
+
+
+def codecs_of(data: bytes, tmp_path: Path) -> list[tuple[str, str]]:
+    return [(s["codec_type"], s["codec_name"]) for s in streams_of(data, tmp_path)]
+
+
+def test_media_mill_usa_o_teto_de_cinco_videos_por_lote(tmp_path: Path) -> None:
+    expected = generate("media-mill", tmp_path)
+
+    assert len(expected["inputs"]) == 5
+
+
+def test_mp4_e_h264_com_aac_e_leva_o_canario_nos_metadados(
+    mill: Callable[[str], bytes], tmp_path: Path
+) -> None:
+    data = mill("ferias.mp4")
+
+    assert data[4:8] == b"ftyp"
+    assert codecs_of(data, tmp_path) == [("video", "h264"), ("audio", "aac")]
+    assert media.CANARY.encode() in data
+
+
+def test_webm_e_vp9_com_opus(mill: Callable[[str], bytes], tmp_path: Path) -> None:
+    data = mill("clipe.webm")
+
+    assert data[:4] == b"\x1a\x45\xdf\xa3"
+    assert codecs_of(data, tmp_path) == [("video", "vp9"), ("audio", "opus")]
+
+
+def test_playlist_hls_disfarcada_de_mp4(mill: Callable[[str], bytes]) -> None:
+    assert mill("playlist.mp4").startswith(b"#EXTM3U")
+
+
+def test_surround_tem_seis_canais(mill: Callable[[str], bytes], tmp_path: Path) -> None:
+    audio = [s for s in streams_of(mill("surround.mp4"), tmp_path) if s["codec_type"] == "audio"]
+
+    assert [s["channels"] for s in audio] == [6]
+
+
+def test_mpeg4_esta_fora_da_allowlist_de_codecs(
+    mill: Callable[[str], bytes], tmp_path: Path
+) -> None:
+    assert ("video", "mpeg4") in codecs_of(mill("antigo.mp4"), tmp_path)
+
+
 # O executor real sobre as fixtures, conferido pelo mesmo conferente dos scripts.
 
 
@@ -290,6 +358,45 @@ def test_conferente_recusa_saida_com_bytes_diferentes_do_upload(tmp_path: Path) 
     )
 
     assert result.returncode != 0
+
+
+def rewritten_expected(fixtures: Path, **changes: Any) -> Path:
+    expected = json.loads((fixtures / "expected.json").read_text())
+    expected.update(changes)
+    target = fixtures / "alterado.json"
+    target.write_text(json.dumps(expected))
+    return target
+
+
+@pytest.fixture
+def mill_package(tmp_path: Path) -> tuple[Path, Path]:
+    fixtures = tmp_path / "fixtures"
+    expected = generate("media-mill", fixtures)
+    out = run_executor(fixtures, expected, tmp_path / "work")
+    return out / "media-mill.zip", fixtures
+
+
+def test_conferente_recusa_audio_com_taxa_diferente_da_esperada(
+    mill_package: tuple[Path, Path],
+) -> None:
+    package, fixtures = mill_package
+    expected = json.loads((fixtures / "expected.json").read_text())
+    audio = {path: {**spec, "sample_rate": 8000} for path, spec in expected["audio"].items()}
+
+    result = check(package, rewritten_expected(fixtures, audio=audio), fixtures)
+
+    assert result.returncode != 0
+    assert "8000" in result.stderr
+
+
+def test_conferente_recusa_texto_proibido_numa_saida(mill_package: tuple[Path, Path]) -> None:
+    package, fixtures = mill_package
+
+    # "fLaC" abre todo FLAC: com ele na lista, o conferente tem de apontar as saídas de áudio.
+    result = check(package, rewritten_expected(fixtures, absent_text=["fLaC"]), fixtures)
+
+    assert result.returncode != 0
+    assert "audio/ferias.flac" in result.stderr
 
 
 # --- Carga do Image Forge (medição na VPS: 100 imagens de 24 MP sob gVisor em 10 min) --------

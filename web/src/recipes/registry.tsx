@@ -46,6 +46,11 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly formFor: (version: CatalogVersion) => RecipeForm | null;
   /** Id do controle para um caminho relativo a `parameters`; `null` se não for um campo. */
   readonly fieldIdFor: (path: readonly string[]) => string | null;
+  /**
+   * Parâmetros que citam uploads da execução (o `select` do PDF Press): só valem com aqueles
+   * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
+   */
+  readonly uploadBoundParameters?: readonly string[];
 }
 
 interface FormParts<K extends RecipeId, S> {
@@ -129,6 +134,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       Fields: PdfPressFields,
     }),
     fieldIdFor: pdfPressFieldId,
+    uploadBoundParameters: ["select"],
   },
   "media-mill": {
     id: "media-mill",
@@ -144,6 +150,22 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
     fieldIdFor: mediaMillFieldId,
   },
 };
+
+/**
+ * Os parâmetros sem os que citam uploads, e se algum foi descartado (só conta o que tinha valor:
+ * `null` já é o default).
+ */
+export function withoutUploadBoundParameters(
+  recipe: RecipeModule,
+  parameters: Readonly<Record<string, unknown>>,
+): { readonly parameters: Record<string, unknown>; readonly dropped: boolean } {
+  const bound = new Set(recipe.uploadBoundParameters ?? []);
+  const kept = Object.entries(parameters).filter(([key]) => !bound.has(key));
+  const dropped = Object.entries(parameters).some(
+    ([key, value]) => bound.has(key) && value !== null,
+  );
+  return { parameters: Object.fromEntries(kept), dropped };
+}
 
 /** Receitas na ordem de exibição. */
 export const RECIPE_LIST: readonly RecipeModule[] = Object.values(RECIPES);

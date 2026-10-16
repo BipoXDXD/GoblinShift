@@ -6,7 +6,9 @@ import {
   API_ACCEPT,
   errorFromResponse,
   interpretResponse,
+  interpretTextResponse,
   JSON_MEDIA_TYPE,
+  TEXT_ACCEPT,
   type ApiResponse,
   type RawApiResponse,
 } from "./response";
@@ -28,9 +30,17 @@ export interface ApiRequest<T> {
   readonly body?: unknown;
   /** Chave da intenção (useIdempotencyKey) nos POST que a API deduplica. */
   readonly idempotencyKey?: string;
+  /** ETag da leitura, nas edições com controle de concorrência (presets: `"<revisão>"`). */
+  readonly ifMatch?: string;
   readonly signal?: AbortSignal;
   /** Schema do corpo de sucesso: a resposta só chega a quem chamou depois do parse. */
   readonly schema: z.ZodType<T>;
+}
+
+/** GET de um corpo que não é JSON (a amostra CSV do preview), lido como texto UTF-8. */
+export interface TextRequest {
+  readonly path: string;
+  readonly signal?: AbortSignal;
 }
 
 /** Imagem JPEG pequena derivada pelo próprio serviço, lida inteira para virar preview. */
@@ -44,6 +54,8 @@ export interface JpegRequest {
 
 export interface ApiClient {
   request<T>(request: ApiRequest<T>): Promise<ApiResponse<T>>;
+  /** Mesmo prazo, origem e tradução de falhas do `request`; o sucesso é o texto, sem parse. */
+  requestText(request: TextRequest): Promise<ApiResponse<string>>;
   /**
    * O cookie legível de CSRF existe. Ele nasce e morre junto do cookie da sessão (HttpOnly, que a
    * página não lê): sem ele não há sessão a consultar, e o `GET /me` só daria 401 no console.
@@ -81,6 +93,19 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         timeoutMs,
       });
       return interpretResponse(rawOf(response, body), request.schema, options.now());
+    },
+    async requestText({ path, signal }: TextRequest): Promise<ApiResponse<string>> {
+      const outgoing = {
+        method: "GET" as const,
+        path,
+        ...(signal === undefined ? {} : { signal }),
+      };
+      const { response, body } = await sendWithTimeout(options, outgoing, {
+        accept: TEXT_ACCEPT,
+        read: readText,
+        timeoutMs,
+      });
+      return interpretTextResponse(rawOf(response, body), options.now());
     },
     async requestJpeg({ path, maxBytes, signal }: JpegRequest): Promise<Blob> {
       const outgoing = {
@@ -215,6 +240,9 @@ function requestHeaders(
   }
   if (request.idempotencyKey !== undefined) {
     headers.set("Idempotency-Key", request.idempotencyKey);
+  }
+  if (request.ifMatch !== undefined) {
+    headers.set("If-Match", request.ifMatch);
   }
   if (!SAFE_METHODS.has(request.method)) {
     const token = options.csrfToken();

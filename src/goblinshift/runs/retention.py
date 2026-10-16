@@ -1,8 +1,12 @@
 """Retenção do histórico de execuções para o processo `maintenance` (docs/GoblinShiftPlan.md, 1.7).
 
-- Parâmetros (`run.parameters`) e código de rejeição por item (`run_input.error_code`) são
-  anulados 30 dias depois do término; a Run continua, com estado, contagens e datas. O desfecho
-  por item (`ok`/`rejected`) fica, porque só diz quantas entradas foram processadas.
+- Parâmetros (`run.parameters`), código de rejeição por item (`run_input.error_code`) e detalhe
+  por item (`run_input.details`: avisos e contagens) são anulados 30 dias depois do término; a
+  Run continua, com estado, contagens e datas. O desfecho por item (`ok`/`rejected`) fica, porque
+  só diz quantas entradas foram processadas.
+- Os nomes das saídas (`run_output.logical_name` e `artifact.file_name`) também saem aos 30 dias,
+  numa etapa própria e só quando o artefato já foi excluído (vence em 48 h): o download lê o nome
+  de artefato vivo. Quem lê um nome anulado usa `files.artifacts.generic_file_name`.
 - Run e Attempt são removidas 90 dias depois do término, com entradas, saídas e registros de
   idempotência (FK `CASCADE` a partir da Run).
 - `IdempotencyRecord` vencido é removido: a chave só vale 24 h (1.6).
@@ -22,12 +26,13 @@ dependem disso: a expiração deles é pela própria linha, e as linhas só saem
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnElement, Select, delete, exists, func, null, select, update
+from sqlalchemy import ColumnElement, Select, delete, exists, func, null, or_, select, update
 from sqlalchemy.orm import Session
 
 from goblinshift.files.objects import release
-from goblinshift.files.retention import HistoryReferences, attempts_with_unsettled_candidates
+from goblinshift.files.retention import HistoryReferences, has_unsettled_candidate
 from goblinshift.files.states import HolderKind
+from goblinshift.files.tables import artifact
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 
 ANONYMIZE_AFTER = timedelta(days=30)
@@ -47,7 +52,7 @@ HISTORY_REFERENCES = HistoryReferences(upload=_upload_in_history, artifact=_arti
 
 
 def anonymize_finished_runs(session: Session, now: datetime, limit: int) -> int:
-    """Anula parâmetros e códigos por item das Runs terminadas há 30 dias ou mais."""
+    """Anula parâmetros, códigos e detalhes por item das Runs terminadas há 30 dias ou mais."""
     chosen = list(
         session.execute(
             select(run.c.id)
@@ -67,34 +72,72 @@ def anonymize_finished_runs(session: Session, now: datetime, limit: int) -> int:
     session.execute(update(run).where(run.c.id.in_(chosen)).values(parameters=null()))
     session.execute(
         update(run_input)
-        .where(run_input.c.run_id.in_(chosen), run_input.c.error_code.is_not(None))
-        .values(error_code=None)
+        .where(
+            run_input.c.run_id.in_(chosen),
+            or_(run_input.c.error_code.is_not(None), run_input.c.details.is_not(None)),
+        )
+        .values(error_code=None, details=null())
     )
+    return len(chosen)
+
+
+def anonymize_output_names(session: Session, now: datetime, limit: int) -> int:
+    """Anula os nomes das saídas das Runs terminadas há 30 dias ou mais; devolve quantas saídas.
+
+    Não depende de `run.parameters`: as Runs anuladas antes da migração 0015 ficaram com os nomes.
+    A saída cujo artefato ainda não foi excluído espera os ciclos seguintes.
+    """
+    chosen = session.execute(
+        select(run_output.c.run_id, run_output.c.position, run_output.c.artifact_id)
+        .join(run, run.c.id == run_output.c.run_id)
+        .join(artifact, artifact.c.id == run_output.c.artifact_id)
+        .where(
+            run_output.c.logical_name.is_not(None),
+            run.c.finished_at.is_not(None),
+            run.c.finished_at <= now - ANONYMIZE_AFTER,
+            artifact.c.deleted_at.is_not(None),
+        )
+        .order_by(run.c.finished_at, run_output.c.run_id, run_output.c.position)
+        .limit(limit)
+        .with_for_update(skip_locked=True, of=(run_output, artifact))
+    ).all()
+    if not chosen:
+        return 0
+    artifact_ids = [row.artifact_id for row in chosen]
+    session.execute(
+        update(run_output)
+        .where(run_output.c.artifact_id.in_(artifact_ids))
+        .values(logical_name=None)
+    )
+    session.execute(update(artifact).where(artifact.c.id.in_(artifact_ids)).values(file_name=None))
     return len(chosen)
 
 
 def delete_old_runs(session: Session, now: datetime, limit: int) -> int:
     """Remove as Runs terminadas há 90 dias ou mais cujas tentativas não têm candidato pendente.
 
-    A Run que espera o descarte volta nos ciclos seguintes; o lote não a conta.
+    A Run que espera o descarte fica fora do próprio SELECT: o lote segue para as seguintes, em
+    vez de escolher de novo as mesmas mais antigas, e ela volta quando o descarte rodar.
     """
     chosen = list(
         session.execute(
             select(run.c.id)
-            .where(run.c.finished_at.is_not(None), run.c.finished_at <= now - DELETE_AFTER)
+            .where(
+                run.c.finished_at.is_not(None),
+                run.c.finished_at <= now - DELETE_AFTER,
+                ~_waiting_for_discard(run.c.id),
+            )
             .order_by(run.c.finished_at, run.c.id)
             .limit(limit)
             .with_for_update(skip_locked=True)
         ).scalars()
     )
-    waiting = _waiting_for_discard(session, chosen)
-    deletable = [run_id for run_id in chosen if run_id not in waiting]
-    for run_id in deletable:
+    for run_id in chosen:
         # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
         release(session, HolderKind.RUN, run_id)
-    if deletable:
-        session.execute(delete(run).where(run.c.id.in_(deletable)))
-    return len(deletable)
+    if chosen:
+        session.execute(delete(run).where(run.c.id.in_(chosen)))
+    return len(chosen)
 
 
 def delete_expired_idempotency_records(session: Session, now: datetime, limit: int) -> int:
@@ -134,6 +177,17 @@ def history_backlog(session: Session, now: datetime) -> dict[str, int]:
                 run.c.parameters.is_not(None), finished, run.c.finished_at <= now - ANONYMIZE_AFTER
             ),
         ),
+        "outputs_to_anonymize": _count(
+            session,
+            select(func.count())
+            .select_from(run_output)
+            .join(run, run.c.id == run_output.c.run_id)
+            .where(
+                run_output.c.logical_name.is_not(None),
+                finished,
+                run.c.finished_at <= now - ANONYMIZE_AFTER,
+            ),
+        ),
         "runs_to_delete": _count(
             session,
             select(func.count()).where(finished, run.c.finished_at <= now - DELETE_AFTER),
@@ -151,11 +205,5 @@ def _count(session: Session, query: Select[int]) -> int:
     return session.execute(query).scalar_one()
 
 
-def _waiting_for_discard(session: Session, run_ids: list[uuid.UUID]) -> set[uuid.UUID]:
-    if not run_ids:
-        return set()
-    attempts = session.execute(
-        select(attempt.c.id, attempt.c.run_id).where(attempt.c.run_id.in_(run_ids))
-    ).all()
-    unsettled = attempts_with_unsettled_candidates(session, [row.id for row in attempts])
-    return {row.run_id for row in attempts if row.id in unsettled}
+def _waiting_for_discard(run_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
+    return exists().where(attempt.c.run_id == run_id, has_unsettled_candidate(attempt.c.id))

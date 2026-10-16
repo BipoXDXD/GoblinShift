@@ -47,6 +47,7 @@ from goblinshift.processing.recipe import (
     InputFile,
     ItemOk,
     ItemRejected,
+    ItemWarningCode,
     OutputDir,
     OutputGroup,
     OutputRole,
@@ -68,7 +69,6 @@ THUMBNAIL_POINTS = {
     1: (Fraction(1, 10),),
     3: (Fraction(1, 10), Fraction(1, 2), Fraction(9, 10)),
 }
-THUMBNAIL_BEFORE_TARGET = "THUMBNAIL_BEFORE_TARGET"
 _AUDIO_EXTENSIONS = {AudioFormat.WAV: ".wav", AudioFormat.FLAC: ".flac"}
 
 
@@ -329,7 +329,7 @@ def _details(converted: _Converted, params: Params) -> dict[str, DetailValue]:
 
 def _warning(thumbnail: _Thumbnail) -> ReportWarning:
     return ReportWarning(
-        THUMBNAIL_BEFORE_TARGET,
+        ItemWarningCode.THUMBNAIL_BEFORE_TARGET,
         f"miniatura de {thumbnail.label}%: nenhum quadro em ou depois de "
         f"{thumbnail.requested_s:.3f} s; usado o último anterior, em {thumbnail.effective_s:.3f} s",
     )

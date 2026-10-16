@@ -13,8 +13,10 @@ from goblinshift.processing.recipe import (
     ItemDuplicate,
     ItemOk,
     ItemRejected,
+    Preview,
     RecipeFailure,
     Report,
+    ReportWarning,
 )
 
 JOB = Job(
@@ -119,6 +121,8 @@ def test_item_aceito_tem_exatamente_as_chaves_do_schema() -> None:
         "counts",
         "details",
         "warnings",
+        "previews",
+        "notices",
     }
     assert set(document) == {
         "schema_version",
@@ -130,6 +134,39 @@ def test_item_aceito_tem_exatamente_as_chaves_do_schema() -> None:
         "details",
     }
     assert document["schema_version"] == 1
+
+
+def test_aviso_com_contagem_por_coluna_leva_as_colunas_ao_relatorio() -> None:
+    formula = ReportWarning("CSV_FORMULA_CELLS", "d", columns=(("valor", 2), ("conta", 1)))
+    header = ReportWarning("CSV_FORMULA_HEADER", "h")
+    report = Report([ItemOk(0, ("a.csv",), warnings=(formula, header))])
+
+    document = _decoded(report, JOB)
+
+    assert document["items"][0]["warnings"] == [
+        {
+            "code": "CSV_FORMULA_CELLS",
+            "detail": "d",
+            "columns": [{"name": "valor", "cells": 2}, {"name": "conta", "cells": 1}],
+        },
+        {"code": "CSV_FORMULA_HEADER", "detail": "h"},
+    ]
+
+
+def test_previews_do_item_vao_para_o_relatorio_com_a_saida_de_origem() -> None:
+    report = Report(
+        [
+            ItemOk(
+                0,
+                outputs=("a.csv",),
+                previews=(Preview(path="previews/a.csv", of="a.csv"),),
+            )
+        ]
+    )
+
+    document = _decoded(report, JOB)
+
+    assert document["items"][0]["previews"] == [{"path": "previews/a.csv", "of": "a.csv"}]
 
 
 def test_tempos_gravados_com_versao_e_so_as_fases_medidas(tmp_path: Path) -> None:

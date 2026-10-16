@@ -7,8 +7,8 @@
 #   deploy/load/run-local.sh --check-target URL # só confere se o alvo é aceito (sai com 0 ou 2)
 #
 # Variáveis: GS_LOAD_TARGET (padrão http://nginx, na rede do Compose), GS_LOAD_PROJECT (projeto do
-# Compose, padrão goblinshift), GS_LOAD_RESULTS (pasta dos resumos JSON), GS_LOAD_RATE_LIMIT=1 e
-# GS_LOAD_AUTH=1 (cenários que esperam a A2 e a fatia 6).
+# Compose, padrão goblinshift), GS_LOAD_RESULTS (pasta dos resumos JSON), GS_LOAD_RATE_LIMIT=0 e
+# GS_LOAD_AUTH=0 (desligam os cenários do limite por conta e do limite de /auth/*).
 set -euo pipefail
 
 readonly DEFAULT_TARGET="http://nginx"
@@ -140,10 +140,10 @@ main() {
   run_queue_scenario
   run_scenario transferencias
   run_scenario jornada
-  if [[ "${GS_LOAD_RATE_LIMIT:-0}" == 1 ]]; then
+  if [[ "${GS_LOAD_RATE_LIMIT:-1}" != 0 ]]; then
     run_scenario limite-por-conta
   fi
-  if [[ "${GS_LOAD_AUTH:-0}" == 1 ]]; then
+  if [[ "${GS_LOAD_AUTH:-1}" != 0 ]]; then
     run_scenario limite-auth
   fi
 

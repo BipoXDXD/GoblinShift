@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
@@ -25,6 +25,8 @@ const publishedResults = {
       logical_name: "clientes",
       role: "output",
       file_name: "clientes.csv",
+      availability: "available",
+      source_artifact_id: null,
     },
   ],
 };
@@ -108,6 +110,8 @@ describe("Execução", () => {
               logical_name: "pacote",
               role: "package",
               file_name: "resultado.zip",
+              availability: "available",
+              source_artifact_id: null,
             },
           ],
         }),
@@ -211,18 +215,29 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
     published: true,
     expires_at: "2026-10-21T12:00:00Z",
     artifacts: [
-      { artifact_id: AUDIO, logical_name: "a", role: "output", file_name: "audio/férias.wav" },
+      {
+        artifact_id: AUDIO,
+        logical_name: "a",
+        role: "output",
+        file_name: "audio/férias.wav",
+        availability: "available",
+        source_artifact_id: null,
+      },
       {
         artifact_id: THUMB_10,
         logical_name: "b",
         role: "output",
         file_name: "thumbnails/férias-10pct.jpg",
+        availability: "available",
+        source_artifact_id: null,
       },
       {
         artifact_id: THUMB_90,
         logical_name: "c",
         role: "output",
         file_name: "thumbnails/férias-90pct.jpg",
+        availability: "available",
+        source_artifact_id: null,
       },
     ],
   };
@@ -248,7 +263,20 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
       () => jsonResponse(runBody({ recipe_id: "media-mill", status: "succeeded" })),
       () => jsonResponse(mediaResults),
       `/execucoes/${RUN_ID}`,
-      { [download(THUMB_10)]: jpeg, [download(THUMB_90)]: thumb90 },
+      {
+        // A disponibilidade dos resultados vem do primeiro artefato (ResultsAvailability).
+        [`GET /api/v1/artifacts/${AUDIO}`]: () =>
+          jsonResponse({
+            id: AUDIO,
+            role: "output",
+            size: 4,
+            sha256: "0".repeat(64),
+            expires_at: mediaResults.expires_at,
+            availability: "available",
+          }),
+        [download(THUMB_10)]: jpeg,
+        [download(THUMB_90)]: thumb90,
+      },
     );
   }
 
@@ -262,7 +290,7 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
     expect(within(previews).getByRole("img", { name: "Miniatura férias-10pct.jpg" })).toBeVisible();
     const downloads = screenRequests(api.requests)
       .map((request) => new URL(request.url).pathname)
-      .filter((pathname) => pathname.startsWith("/api/v1/artifacts/"));
+      .filter((pathname) => pathname.endsWith("/download"));
     expect(downloads).toEqual([
       `/api/v1/artifacts/${THUMB_10}/download`,
       `/api/v1/artifacts/${THUMB_90}/download`,
@@ -306,6 +334,236 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
   it("não tem violações do axe com as miniaturas", async () => {
     const { container } = setupMedia();
     await screen.findByRole("img", { name: "Miniatura férias-90pct.jpg" });
+
+    expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("pré-visualização dos resultados", () => {
+  const OUTPUT_ID = "7d3c2a1e-0000-4000-8000-0000000000b1";
+  const PREVIEW_ID = "7d3c2a1e-0000-4000-8000-0000000000b2";
+  const PREVIEW_ROUTE = `GET /api/v1/artifacts/${OUTPUT_ID}/preview`;
+
+  interface Pair {
+    readonly fileName: string;
+    readonly previewName: string;
+    readonly availability?: string;
+  }
+
+  function resultsWithPreview({ fileName, previewName, availability = "available" }: Pair) {
+    return {
+      ...publishedResults,
+      artifacts: [
+        {
+          artifact_id: OUTPUT_ID,
+          logical_name: fileName,
+          role: "output",
+          file_name: fileName,
+          availability,
+          source_artifact_id: null,
+        },
+        {
+          artifact_id: PREVIEW_ID,
+          logical_name: `previews/${previewName}`,
+          role: "preview",
+          file_name: previewName,
+          availability,
+          source_artifact_id: OUTPUT_ID,
+        },
+      ],
+    };
+  }
+
+  function setupPreview(pair: Pair, preview: Handler = () => null) {
+    return setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () => jsonResponse(resultsWithPreview(pair)),
+      `/execucoes/${RUN_ID}`,
+      { [PREVIEW_ROUTE]: preview },
+    );
+  }
+
+  function bytes(body: string): Response {
+    return new Response(body, { headers: { "Content-Type": "application/octet-stream" } });
+  }
+
+  it("o preview não aparece como download", async () => {
+    setupPreview({ fileName: "foto.png", previewName: "foto.jpg" });
+
+    await screen.findByRole("link", { name: "Baixar foto.png" });
+    expect(screen.getAllByRole("link", { name: /^Baixar / })).toHaveLength(1);
+    expect(screen.queryByText(/pré-visualização\)/)).toBeNull();
+  });
+
+  it("imagem: <img> de tamanho fixo pela rota de preview da saída", async () => {
+    setupPreview({ fileName: "foto.png", previewName: "foto.jpg" });
+
+    const image = await screen.findByRole("img", { name: "Pré-visualização de foto.png" });
+    expect(image).toHaveAttribute("src", `/api/v1/artifacts/${OUTPUT_ID}/preview`);
+    expect(image).toHaveClass("size-40", "object-contain");
+  });
+
+  it("imagem: mostra o carregamento até o load", async () => {
+    setupPreview({ fileName: "foto.png", previewName: "foto.jpg" });
+    const image = await screen.findByRole("img", { name: "Pré-visualização de foto.png" });
+    expect(screen.getByText("Carregando a pré-visualização.")).toBeInTheDocument();
+
+    fireEvent.load(image);
+
+    expect(screen.queryByText("Carregando a pré-visualização.")).toBeNull();
+    expect(image).toBeVisible();
+  });
+
+  it("imagem: falha ao carregar troca a imagem pelo aviso", async () => {
+    setupPreview({ fileName: "foto.png", previewName: "foto.jpg" });
+    const image = await screen.findByRole("img", { name: "Pré-visualização de foto.png" });
+
+    fireEvent.error(image);
+
+    expect(screen.getByText("Não foi possível carregar a pré-visualização.")).toBeVisible();
+    expect(screen.queryByRole("img", { name: "Pré-visualização de foto.png" })).toBeNull();
+  });
+
+  it("CSV: amostra em tabela com o cabeçalho como colunas", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("nome,email\nAna,ana@example.com\n"),
+    );
+
+    const table = await screen.findByRole("table", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["nome", "email"]);
+    expect(within(table).getByRole("cell", { name: "ana@example.com" })).toBeInTheDocument();
+  });
+
+  it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("nome,email\nAna,ana@example.com\n"),
+    );
+
+    const box = await screen.findByRole("region", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(box).toHaveAttribute("tabindex", "0");
+    expect(within(box).getByRole("table")).toBeInTheDocument();
+    expect(await axeViolations(box)).toEqual([]);
+  });
+
+  it("CSV: fórmula e HTML aparecem como texto, nunca como elemento", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes('nome,obs\n"\t=cmd|\' /C calc\'!A0","<img src=x onerror=alert(1)>"\n'),
+    );
+
+    const table = await screen.findByRole("table");
+    const [formula, html] = within(table).getAllByRole("cell");
+    expect(formula?.textContent).toBe("\t=cmd|' /C calc'!A0");
+    expect(html?.textContent).toBe("<img src=x onerror=alert(1)>");
+    expect(table.querySelector("img")).toBeNull();
+  });
+
+  it("CSV: carregando enquanto a amostra não chega", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" });
+
+    expect(await screen.findByText("Carregando a pré-visualização.")).toBeInTheDocument();
+  });
+
+  it("CSV: amostra expirada (410) diz que ela não existe mais", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      problemResponse(410, "GONE"),
+    );
+
+    expect(await screen.findByText("A pré-visualização expirou ou foi excluída.")).toBeVisible();
+  });
+
+  it("CSV malformado mostra a falha, sem tabela", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes('nome\n"sem fim\n'),
+    );
+
+    expect(await screen.findByText("Não foi possível carregar a pré-visualização.")).toBeVisible();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("PDF: mapa de páginas em ordem", async () => {
+    setupPreview({ fileName: "selecao.pdf", previewName: "selecao.json" }, () =>
+      bytes(
+        JSON.stringify({
+          schema_version: 1,
+          path: "selecao.pdf",
+          pages: [
+            { input_position: 1, page_number: 3 },
+            { input_position: 0, page_number: 1 },
+          ],
+        }),
+      ),
+    );
+
+    const list = await screen.findByRole("list", { name: "Páginas de selecao.pdf: 2 páginas" });
+    expect(
+      within(list)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["Página 3 do arquivo 2", "Página 1 do arquivo 1"]);
+  });
+
+  it("PDF: a caixa rolável do mapa recebe foco e tem o nome da legenda", async () => {
+    setupPreview({ fileName: "selecao.pdf", previewName: "selecao.json" }, () =>
+      bytes(
+        JSON.stringify({
+          schema_version: 1,
+          path: "selecao.pdf",
+          pages: [{ input_position: 0, page_number: 1 }],
+        }),
+      ),
+    );
+
+    const box = await screen.findByRole("region", { name: "Páginas de selecao.pdf: 1 página" });
+    expect(box).toHaveAttribute("tabindex", "0");
+    expect(within(box).getByRole("list")).toBeInTheDocument();
+    expect(await axeViolations(box)).toEqual([]);
+  });
+
+  it("PDF: mapa fora do formato mostra a falha", async () => {
+    setupPreview({ fileName: "selecao.pdf", previewName: "selecao.json" }, () =>
+      bytes(JSON.stringify({ pages: "todas" })),
+    );
+
+    expect(await screen.findByText("Não foi possível carregar a pré-visualização.")).toBeVisible();
+  });
+
+  it.each([
+    ["expired", "Pré-visualização indisponível: o arquivo expirou."],
+    ["deleted", "Pré-visualização indisponível: o arquivo foi excluído."],
+    ["missing", "Pré-visualização indisponível: o arquivo se perdeu."],
+  ])("indisponível (%s) diz o motivo sem pedir o preview", async (availability, message) => {
+    const { api } = setupPreview({
+      fileName: "clientes.csv",
+      previewName: "clientes.csv",
+      availability,
+    });
+
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(api.requests.some((request) => new URL(request.url).pathname.endsWith("/preview"))).toBe(
+      false,
+    );
+  });
+
+  it("preview de formato desconhecido não aparece", async () => {
+    const { api } = setupPreview({ fileName: "notas.txt", previewName: "notas.webp" });
+
+    await screen.findByRole("link", { name: "Baixar notas.txt" });
+    expect(screen.queryByText(/pré-visualização/i)).toBeNull();
+    expect(api.requests.some((request) => new URL(request.url).pathname.endsWith("/preview"))).toBe(
+      false,
+    );
+  });
+
+  it("não tem violações do axe com a amostra CSV", async () => {
+    const { container } = setupPreview(
+      { fileName: "clientes.csv", previewName: "clientes.csv" },
+      () => bytes("nome,email\nAna,ana@example.com\n"),
+    );
+    await screen.findByRole("table");
 
     expect(await axeViolations(container)).toEqual([]);
   });
