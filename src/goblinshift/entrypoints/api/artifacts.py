@@ -12,15 +12,17 @@ from functools import partial
 from pathlib import PurePosixPath
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.entrypoints.api.transfers import (
+    DOWNLOAD_PROTECTION_HEADERS,
     OCTET_STREAM,
     DownloadResponse,
+    content_disposition,
     timeouts_of,
     transfer_limit_problem,
 )
@@ -29,6 +31,7 @@ from goblinshift.files.artifacts import (
     finish_download,
     get_artifact,
     open_for_download,
+    open_preview,
 )
 from goblinshift.files.errors import (
     ArtifactGoneError,
@@ -44,6 +47,12 @@ from goblinshift.platform.db import unit_of_work
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["artifacts"])
+
+JPEG_MEDIA_TYPE = "image/jpeg"
+_JPEG_SUFFIX = ".jpg"
+# A coleta do worker já limita o preview a 512 KiB (JPEG) e 64 KiB (CSV); este teto só impede
+# carregar na memória algo maior que isso se o banco e o storage divergirem.
+PREVIEW_READ_MAX_BYTES = 1024 * 1024
 
 
 class ArtifactDetails(BaseModel):
@@ -121,6 +130,60 @@ def download_artifact(
         filename=PurePosixPath(ticket.file_name).name,
         timeouts=timeouts_of(request),
         on_close=finish,
+    )
+
+
+@router.get(
+    "/artifacts/{artifact_id}/preview",
+    operation_id="getArtifactPreview",
+    status_code=200,
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Imagem reduzida (`image/jpeg`) ou amostra CSV escapada, como bytes.",
+            "content": {
+                JPEG_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}},
+                OCTET_STREAM: {"schema": {"type": "string", "format": "binary"}},
+            },
+        },
+        **problem_responses(404, 410),
+    },
+)
+def get_artifact_preview(
+    artifact_id: UUID,
+    principal: ReadFiles,
+    session: DbSession,
+    storage: Storage,
+    request: Request,
+) -> Response:
+    """Preview de uma saída, quando a receita gerou um (2.2; 3.6).
+
+    Só derivados gerados pelo serviço chegam aqui: a imagem reduzida sai com o tipo real; a
+    amostra CSV, como bytes opacos. Os dois com `nosniff`, CSP `sandbox` e `attachment`. Sem vaga
+    de transferência: o preview tem no máximo 512 KiB e é lido inteiro antes de responder.
+    """
+    try:
+        with session.begin():
+            ticket = open_preview(session, principal.owner_id, artifact_id)
+    except FilesError as error:
+        raise _artifact_problem(error) from None
+    factory: sessionmaker[Session] = request.app.state.session_factory
+    try:
+        with storage.open(ticket.storage_key) as file:
+            content = file.read(PREVIEW_READ_MAX_BYTES + 1)
+    except ObjectMissingError:
+        logger.error("preview: objeto do artefato %s ausente do storage", ticket.artifact_id)
+        raise _artifact_problem(ArtifactGoneError()) from None
+    finally:
+        with unit_of_work(factory) as finishing:
+            finish_download(finishing, ticket)
+    if len(content) != ticket.size_bytes:
+        raise RuntimeError(f"preview {ticket.artifact_id} com tamanho diferente do registrado")
+    name = PurePosixPath(ticket.file_name).name
+    return Response(
+        content=content,
+        media_type=JPEG_MEDIA_TYPE if name.endswith(_JPEG_SUFFIX) else OCTET_STREAM,
+        headers={"Content-Disposition": content_disposition(name), **DOWNLOAD_PROTECTION_HEADERS},
     )
 
 

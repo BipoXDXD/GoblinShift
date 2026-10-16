@@ -1683,6 +1683,134 @@
         }
       }
     },
+    "/api/v1/artifacts/{artifact_id}/preview": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Get Artifact Preview",
+        "description": "Preview de uma saída, quando a receita gerou um (2.2; 3.6).\n\nSó derivados gerados pelo serviço chegam aqui: a imagem reduzida sai com o tipo real; a\namostra CSV, como bytes opacos. Os dois com `nosniff`, CSP `sandbox` e `attachment`. Sem vaga\nde transferência: o preview tem no máximo 512 KiB e é lido inteiro antes de responder.",
+        "operationId": "getArtifactPreview",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Imagem reduzida (`image/jpeg`) ou amostra CSV escapada, como bytes.",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Gone"
+          }
+        }
+      }
+    },
     "/api/v1/presets": {
       "get": {
         "tags": [
@@ -4099,7 +4227,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RunResponse"
+                  "$ref": "#/components/schemas/RunDetailResponse"
                 }
               }
             }
@@ -4588,6 +4716,42 @@
               }
             ]
           },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "results_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Expire At"
+          },
           "idempotency_expires_at": {
             "type": "string",
             "format": "date-time",
@@ -4607,6 +4771,9 @@
           "queue_expires_at",
           "deadline_at",
           "error",
+          "parameters",
+          "preset_id",
+          "results_expire_at",
           "idempotency_expires_at"
         ],
         "title": "AcceptedRunResponse"
@@ -4755,7 +4922,8 @@
           "output",
           "report",
           "manifest",
-          "package"
+          "package",
+          "preview"
         ],
         "title": "ArtifactRole"
       },
@@ -4957,6 +5125,48 @@
           "message"
         ],
         "title": "FieldError"
+      },
+      "ItemNoticeCode": {
+        "type": "string",
+        "enum": [
+          "IMAGE_P3_CONVERTED"
+        ],
+        "title": "ItemNoticeCode",
+        "description": "Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado\npara `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."
+      },
+      "ItemRejectionCode": {
+        "type": "string",
+        "enum": [
+          "UNSUPPORTED_FORMAT",
+          "UNSUPPORTED_BIT_DEPTH",
+          "UNSUPPORTED_COLOR_PROFILE",
+          "IMAGE_TOO_LARGE",
+          "CSV_STRUCTURE_INVALID",
+          "FIELD_LIMIT_EXCEEDED"
+        ],
+        "title": "ItemRejectionCode",
+        "description": "Códigos de rejeição por item do catálogo de 1.6: lista fechada.\n\nCada receita usa um subconjunto. A coleta do worker recusa no `report.json` qualquer outro\ncódigo, porque o relatório vem do sandbox e o código vai para o banco e para a API."
+      },
+      "ItemStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "ok",
+          "rejected",
+          "duplicate"
+        ],
+        "title": "ItemStatus"
+      },
+      "ItemWarningCode": {
+        "type": "string",
+        "enum": [
+          "CSV_ALL_RECORDS_FILTERED",
+          "CSV_FORMULA_CELLS",
+          "CSV_FORMULA_HEADER",
+          "INPUT_NOT_SELECTED"
+        ],
+        "title": "ItemWarningCode",
+        "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui."
       },
       "Limits": {
         "properties": {
@@ -5419,6 +5629,9 @@
           "file_name": {
             "type": "string",
             "title": "File Name"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
           }
         },
         "type": "object",
@@ -5426,9 +5639,146 @@
           "artifact_id",
           "logical_name",
           "role",
-          "file_name"
+          "file_name",
+          "availability"
         ],
         "title": "ResultReferenceResponse"
+      },
+      "RunDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/Progress"
+          },
+          "queue_ahead": {
+            "type": "integer",
+            "title": "Queue Ahead"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "queue_expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queue Expires At"
+          },
+          "deadline_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunErrorBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "results_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Expire At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "recipe_id",
+          "recipe_version",
+          "status",
+          "attempt",
+          "progress",
+          "queue_ahead",
+          "created_at",
+          "queue_expires_at",
+          "deadline_at",
+          "error",
+          "parameters",
+          "preset_id",
+          "results_expire_at",
+          "summary",
+          "items"
+        ],
+        "title": "RunDetailResponse"
       },
       "RunErrorBody": {
         "properties": {
@@ -5447,6 +5797,89 @@
           "message"
         ],
         "title": "RunErrorBody"
+      },
+      "RunItemResponse": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Upload Id"
+          },
+          "original_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ItemStatus"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemRejectionCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ItemWarningCode"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/ItemNoticeCode"
+            },
+            "type": "array",
+            "title": "Notices"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counts"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "upload_id",
+          "original_name",
+          "status",
+          "error_code",
+          "warnings",
+          "notices",
+          "counts",
+          "duplicate_of"
+        ],
+        "title": "RunItemResponse",
+        "description": "Desfecho de uma entrada: só códigos do catálogo e contagens, sem nome nem conteúdo."
       },
       "RunListResponse": {
         "properties": {
@@ -5536,6 +5969,42 @@
                 "type": "null"
               }
             ]
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "results_expire_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Expire At"
           }
         },
         "type": "object",
@@ -5550,7 +6019,10 @@
           "created_at",
           "queue_expires_at",
           "deadline_at",
-          "error"
+          "error",
+          "parameters",
+          "preset_id",
+          "results_expire_at"
         ],
         "title": "RunResponse"
       },
@@ -5587,6 +6059,39 @@
           "artifacts"
         ],
         "title": "RunResultsResponse"
+      },
+      "RunSummaryResponse": {
+        "properties": {
+          "inputs": {
+            "type": "integer",
+            "title": "Inputs"
+          },
+          "ok": {
+            "type": "integer",
+            "title": "Ok"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "duplicates": {
+            "type": "integer",
+            "title": "Duplicates"
+          },
+          "outputs": {
+            "type": "integer",
+            "title": "Outputs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inputs",
+          "ok",
+          "rejected",
+          "duplicates",
+          "outputs"
+        ],
+        "title": "RunSummaryResponse"
       },
       "Scope": {
         "type": "string",
