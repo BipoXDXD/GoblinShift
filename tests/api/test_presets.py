@@ -35,16 +35,6 @@ PRESET_KEYS = {
     "updated_at",
 }
 SUNSET = datetime(2027, 1, 15, 12, 30, tzinfo=UTC)
-CSV_DEFAULTS: dict[str, Any] = {
-    "case_rules": [],
-    "deduplicate_by": [],
-    "filters": [],
-    "formula_guard": "none",
-    "input_delimiter": ",",
-    "output_columns": None,
-    "output_delimiter": ",",
-    "trim_columns": [],
-}
 
 
 class Account:
@@ -139,7 +129,7 @@ def test_criar_responde_201_com_location_etag_e_o_corpo_do_contrato(
     assert response.headers["location"] == f"{PRESETS}/{body['id']}"
     assert response.headers["etag"] == '"1"'
     assert body["name"] == "Mensal"
-    assert body["parameters"] == {**CSV_DEFAULTS, "trim_columns": ["a"]}
+    assert body["parameters"] == {"trim_columns": ["a"]}
     assert body["revision"] == 1
     assert "sunset" not in response.headers
 
@@ -307,7 +297,7 @@ def test_substituir_sem_if_match_responde_428_sem_mudar(
     assert stored(factory, created["id"]) == {
         "name": "Mensal",
         "revision": 1,
-        "parameters": CSV_DEFAULTS,
+        "parameters": {},
     }
 
 
