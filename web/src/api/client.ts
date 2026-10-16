@@ -30,6 +30,11 @@ export interface ApiRequest<T> {
 
 export interface ApiClient {
   request<T>(request: ApiRequest<T>): Promise<ApiResponse<T>>;
+  /**
+   * O cookie legível de CSRF existe. Ele nasce e morre junto do cookie da sessão (HttpOnly, que a
+   * página não lê): sem ele não há sessão a consultar, e o `GET /me` só daria 401 no console.
+   */
+  hasSessionCookie(): boolean;
 }
 
 export interface ApiClientOptions {
@@ -58,6 +63,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         text,
       };
       return interpretResponse(raw, request.schema, options.now());
+    },
+    hasSessionCookie(): boolean {
+      return options.csrfToken() !== null;
     },
   };
 }

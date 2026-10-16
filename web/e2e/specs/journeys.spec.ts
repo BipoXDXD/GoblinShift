@@ -1,9 +1,15 @@
-// Jornadas principais das três receitas, de ponta a ponta pela interface: escolher os arquivos,
+// Jornadas principais das receitas, de ponta a ponta pela interface: escolher os arquivos,
 // reordenar só por botões (alternativa ao arrasto, WCAG 2.5.7), preencher parâmetros, executar,
 // acompanhar até concluir e baixar o pacote e um arquivo avulso.
 import { statSync } from "node:fs";
 
-import { CSV_FILES, DOWNLOADS_FILES, PNG_FILES, type InputFile } from "../fixtures/files";
+import {
+  CSV_FILES,
+  DOWNLOADS_FILES,
+  PDF_FILES,
+  PNG_FILES,
+  type InputFile,
+} from "../fixtures/files";
 import { BancadaPage, type RecipeId } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { expect, test } from "../support/test";
@@ -16,6 +22,8 @@ interface Journey {
   readonly fillParameters: (bancada: BancadaPage) => Promise<void>;
   /** Parâmetros que o POST /runs tem que levar depois do preenchimento. */
   readonly expectedParameters: Record<string, unknown>;
+  /** Saída avulsa a baixar; `null` quando o nome não vem da entrada (PDF Press: só o pacote). */
+  readonly singleDownload?: null;
 }
 
 const JOURNEYS: readonly Journey[] = [
@@ -46,6 +54,17 @@ const JOURNEYS: readonly Journey[] = [
     },
     expectedParameters: { name_mode: "indexed", name_prefix: "lote" },
   },
+  {
+    recipeId: "pdf-press",
+    files: PDF_FILES,
+    fillParameters: async (bancada) => {
+      await bancada.choose("O que fazer com os PDFs", "Montar um PDF com as páginas escolhidas");
+      await bancada.press("Adicionar página");
+      await bancada.choose("PDF da página 1", "contrato.pdf");
+    },
+    expectedParameters: { operation: "select", select: [{ page_number: 1 }] },
+    singleDownload: null,
+  },
 ];
 
 for (const journey of JOURNEYS) {
@@ -74,7 +93,9 @@ for (const journey of JOURNEYS) {
     }
 
     await expectDownload(page, execucao, `${journey.recipeId}.zip`);
-    await expectDownload(page, execucao, second.name);
+    if (journey.singleDownload !== null) {
+      await expectDownload(page, execucao, second.name);
+    }
   });
 }
 
