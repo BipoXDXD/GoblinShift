@@ -412,7 +412,12 @@ def list_runs_route(
     cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_CHARS)] = None,
 ) -> RunListResponse:
     settings: Settings = request.app.state.settings
-    filters = RunFilters(recipe_id, status, created_from, created_to)
+    filters = RunFilters(
+        recipe_id,
+        status,
+        _in_utc("created_from", created_from),
+        _in_utc("created_to", created_to),
+    )
     try:
         with session.begin():
             page = list_runs(
@@ -502,6 +507,25 @@ def get_results_route(
 def _add_deprecation_headers(response: Response, recipe_id: str, version: int) -> None:
     """`Sunset` quando a versão usada está `deprecated` (1.6); a aceitação já a encontrou."""
     response.headers.update(deprecation_headers(CATALOG.get_version(recipe_id, version)))
+
+
+def _in_utc(name: str, moment: datetime | None) -> datetime | None:
+    """Filtro de período em UTC; um instante válido com fuso pode cair fora da faixa do ano 1 a
+    9999 quando convertido, e isso é entrada inválida (422), não erro do servidor."""
+    if moment is None:
+        return None
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("query", name),
+                    "type": "value_error",
+                    "msg": "a data fica fora da faixa válida em UTC",
+                }
+            ]
+        ) from None
 
 
 def _validate(command: RunCommand, idempotency_key: str | None) -> ValidatedRunResponse:
