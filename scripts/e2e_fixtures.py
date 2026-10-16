@@ -5,11 +5,13 @@ os construtores de `tests/` sem mexer em `sys.path`):
 
     uv run python -m scripts.e2e_fixtures image-forge <dir>
     uv run python -m scripts.e2e_fixtures downloads-detox <dir>
+    uv run python -m scripts.e2e_fixtures pdf-press <dir>
 
 Grava cada entrada em `<dir>/inputs/<posição>/<nome do upload>` (um diretório por entrada,
 porque `Foto.png` e `foto.PNG` se sobrescreveriam num filesystem que ignora a caixa) e o
 `<dir>/expected.json`, que `scripts/e2e_check_package.py` usa para conferir o ZIP baixado. Os
-valores esperados são escritos à mão a partir de 1.2, 1.4 e 3.6, não recalculados pelas receitas.
+valores esperados são escritos à mão a partir de 1.2, 1.4, 1.5 e 3.6, não recalculados pelas
+receitas.
 
 Determinístico: nada é baixado, e os mesmos bytes saem a cada execução no mesmo ambiente (o
 Pillow do `uv.lock` grava o JPEG, o MPO e o PNG RGBA).
@@ -27,6 +29,7 @@ from PIL import Image, ImageChops
 
 from tests.downloads_detox import samples
 from tests.image_forge import icc, media
+from tests.pdf_press import samples as pdf_samples
 
 RECIPE_VERSION = 1
 SUCCEEDED_WITH_WARNINGS = "succeeded_with_warnings"
@@ -165,6 +168,36 @@ def downloads_detox() -> Scenario:
     )
 
 
+def pdf_press() -> Scenario:
+    """Split em partes de 2 páginas de dois PDFs sintéticos (1.5): 3 páginas viram 2 partes, 1
+    página vira 1 parte, e o mapa de páginas fica com a primeira entrada, antes dos PDFs dela.
+
+    O select cita uploads, que só existem depois do envio; por isso o cenário é o split.
+    """
+    fixtures = (
+        Fixture(
+            "contrato.pdf",
+            pdf_samples.document("contrato", pages=3),
+            ok("page-map.json", "contrato-p001-002.pdf", "contrato-p003.pdf"),
+        ),
+        Fixture("anexo.pdf", pdf_samples.document("anexo"), ok("anexo-p001.pdf")),
+    )
+    return Scenario(
+        recipe_id="pdf-press",
+        parameters={"operation": "split", "pages_per_document": 2},
+        fixtures=fixtures,
+        status="succeeded",
+        zip_entries=(
+            "page-map.json",
+            "contrato-p001-002.pdf",
+            "contrato-p003.pdf",
+            "anexo-p001.pdf",
+            "manifest.json",
+            "report.json",
+        ),
+    )
+
+
 # Pior caso do Image Forge para a medição na VPS (plano da fatia 5, item 9): o teto de entradas e
 # de pixels da v1, na conversão mais cara (Display P3, orientação 6 e miniatura).
 LOAD_COUNT = 100
@@ -217,7 +250,11 @@ def load_photo(size: tuple[int, int]) -> bytes:
     )
 
 
-_BUILDERS = {"image-forge": image_forge, "downloads-detox": downloads_detox}
+_BUILDERS = {
+    "image-forge": image_forge,
+    "downloads-detox": downloads_detox,
+    "pdf-press": pdf_press,
+}
 RECIPES = tuple(_BUILDERS)
 
 

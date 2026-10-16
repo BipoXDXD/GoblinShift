@@ -222,10 +222,15 @@ def test_schema_da_variante_fixa_receita_e_versao_e_recusa_campos_extras() -> No
 # --- Receitas da fatia 5 -------------------------------------------------------------------
 
 
-def test_catalogo_lista_as_tres_receitas_na_versao_1() -> None:
+def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
     keys = {(version.recipe_id, version.version) for version in CATALOG.list_versions()}
 
-    assert keys == {("csv-janitor", 1), ("image-forge", 1), ("downloads-detox", 1)}
+    assert keys == {
+        ("csv-janitor", 1),
+        ("image-forge", 1),
+        ("downloads-detox", 1),
+        ("pdf-press", 1),
+    }
 
 
 def test_image_forge_publica_os_limites_de_1_7() -> None:
@@ -321,3 +326,15 @@ def test_data_de_desligamento_sem_fuso_e_recusada() -> None:
 
     with pytest.raises(ValueError, match="fuso"):
         replace(current, status=VersionStatus.DEPRECATED, sunset_at=datetime(2027, 1, 15))
+
+
+def test_detox_aceita_com_preserve_o_name_prefix_default_enviado() -> None:
+    # A13 com o default: os parâmetros resolvidos voltam a resolver igual (repetir configuração).
+    resolved = CATALOG.resolve("downloads-detox", 1, {})
+
+    assert CATALOG.resolve("downloads-detox", 1, resolved) == resolved
+
+
+def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
+    with pytest.raises(InvalidParametersError):
+        CATALOG.resolve("downloads-detox", 1, {"name_mode": "preserve", "name_prefix": "doc"})
