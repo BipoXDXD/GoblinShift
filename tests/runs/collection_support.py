@@ -15,14 +15,16 @@ RECIPE = "csv-janitor"
 PACKAGE = "csv-janitor.zip"
 
 
-def ok_item(position: int, *outputs: str, warnings: int = 0) -> dict[str, Any]:
+def ok_item(
+    position: int, *outputs: str, warnings: int = 0, counts: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "position": position,
         "original_name": f"{position}.csv",
         "status": "ok",
         "outputs": list(outputs),
-        "counts": {},
-        "warnings": [{"code": "W", "detail": "d"}] * warnings,
+        "counts": counts or {},
+        "warnings": [{"code": "CSV_FORMULA_CELLS", "detail": "d"}] * warnings,
     }
 
 

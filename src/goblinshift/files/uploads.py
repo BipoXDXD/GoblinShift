@@ -169,6 +169,7 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
             *upload.c,
             stored_object.c.size_bytes,
             stored_object.c.sha256,
+            stored_object.c.state.label("object_state"),
             (upload.c.expires_at <= func.now()).label("expired"),
         )
         .join(stored_object, stored_object.c.id == upload.c.object_id)
@@ -181,7 +182,10 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
         size_bytes=row.size_bytes,
         sha256=row.sha256,
         availability=Availability.of(
-            deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+            deleted_at=row.deleted_at,
+            expires_at=row.expires_at,
+            expired=row.expired,
+            object_missing=row.object_state == ObjectState.MISSING,
         ),
     )
 

@@ -7,6 +7,7 @@ import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
+import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -345,6 +346,33 @@ describe("Acesso: chaves de API", () => {
     expect(await screen.findByRole("heading", { name: "Nenhuma chave de API" })).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+  it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: held.handler,
+    });
+    const revoke = await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" });
+    await user.click(revoke);
+    const dialog = screen.getByRole("dialog", { name: "Revogar a chave gsk_7Hq2?" });
+    await user.click(within(dialog).getByRole("button", { name: "Revogar chave" }));
+    await waitFor(() => {
+      expect(sent(api.requests, `DELETE /api/v1/api-keys/${KEY_ID}`)).toHaveLength(1);
+    });
+
+    expect(escapeIsBlocked(dialog)).toBe(true);
+    forceClose(dialog);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(revoke);
+    expect(screen.getByRole("dialog", { name: "Revogar a chave gsk_7Hq2?" })).toBeVisible();
+    held.answer(problemResponse(503, "SERVICE_UNAVAILABLE"));
+
+    expect(await within(await section("Chaves de API")).findByRole("alert")).toHaveTextContent(
+      "O serviço está indisponível no momento. Tente de novo mais tarde.",
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent(api.requests, `DELETE /api/v1/api-keys/${KEY_ID}`)).toHaveLength(1);
+  });
 });
 
 describe("Acesso: chave nova", () => {
@@ -575,6 +603,33 @@ describe("Acesso: excluir conta", () => {
     expect(await within(await section("Excluir conta")).findByRole("alert")).toHaveTextContent(
       "O serviço está indisponível no momento. Tente de novo mais tarde.",
     );
+  });
+
+  it("com a exclusão em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({ "DELETE /api/v1/me": held.handler });
+    const dialog = await openDialog(user);
+    await user.type(
+      within(dialog).getByLabelText("Digite “excluir minha conta”"),
+      "excluir minha conta",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    await waitFor(() => {
+      expect(sent(api.requests, "DELETE /api/v1/me")).toHaveLength(1);
+    });
+
+    expect(escapeIsBlocked(dialog)).toBe(true);
+    forceClose(dialog);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const reopened = await openDialog(user);
+    expect(reopened).toBeVisible();
+    held.answer(problemResponse(503, "SERVICE_UNAVAILABLE"));
+
+    expect(await within(await section("Excluir conta")).findByRole("alert")).toHaveTextContent(
+      "O serviço está indisponível no momento. Tente de novo mais tarde.",
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent(api.requests, "DELETE /api/v1/me")).toHaveLength(1);
   });
 
   it("não tem violações do axe com o diálogo aberto", async () => {

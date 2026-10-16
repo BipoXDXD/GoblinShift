@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Download } from "lucide-react";
-import { useId, type ReactElement, type ReactNode } from "react";
+import { useId, useRef, type ReactElement, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { z } from "zod";
 
@@ -22,10 +22,13 @@ import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import { CancelRun } from "./CancelRun";
-import type { RunResults as RunResultsData } from "./commands";
+import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { ThumbnailPreviews } from "./ThumbnailPreviews";
 import { thumbnailArtifacts } from "./thumbnails";
+import { ResultPreview } from "./preview/ResultPreview";
+import { ResultsAvailability } from "./ResultsAvailability";
+import { RunItems } from "./RunItems";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
@@ -70,12 +73,13 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       <LiveRegion message={announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
-      {/* No celular, os resultados sobem para antes do cartão de estado: a goblin em destaque
-          empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a do Tab, que só passa
-          pelos links dos resultados e pela nova execução) continua a mesma. */}
+      {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
+          a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
+          do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
       {run !== undefined && (
-        <div className="max-md:order-1">
+        <div className="flex flex-col gap-8 max-md:order-1">
           <RunDetails run={run} />
+          {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
       {run !== undefined && SUCCEEDED.has(run.status) && (
@@ -201,6 +205,7 @@ interface RunResultsProps {
 function RunResults({ runId, recipeId }: RunResultsProps): ReactElement {
   const client = useApiClient();
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const results = useQuery({
     queryKey: ["runs", runId, "results"] as const,
     queryFn: ({ signal }) => getRunResults(client, runId, signal),
@@ -208,7 +213,13 @@ function RunResults({ runId, recipeId }: RunResultsProps): ReactElement {
   });
   return (
     <Card as="section" aria-labelledby={headingId}>
-      <h2 id={headingId} className="mb-6 font-display text-xl font-semibold text-fg">
+      {/* tabIndex -1: recebe o foco quando Excluir resultados some com ele. */}
+      <h2
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="mb-6 font-display text-xl font-semibold text-fg"
+      >
         {T.results.heading}
       </h2>
       {/* Reserva a altura do Baixar com a data: no celular este cartão fica acima do de estado, e
@@ -216,10 +227,16 @@ function RunResults({ runId, recipeId }: RunResultsProps): ReactElement {
       {results.isPending && <p className="min-h-24 text-fg-muted">{T.results.loading}</p>}
       {results.error !== null && <ProblemAlert failure={failureOf(results.error)} />}
       {results.data !== undefined && (
-        <div className="flex flex-col gap-8">
-          {recipeId === MEDIA_MILL && <MediaMillPreviews results={results.data} />}
-          <ResultFiles results={results.data} />
-        </div>
+        <ResultsAvailability
+          runId={runId}
+          results={results.data}
+          onDeleted={() => heading.current?.focus()}
+        >
+          <div className="flex flex-col gap-8">
+            {recipeId === MEDIA_MILL && <MediaMillPreviews results={results.data} />}
+            <ResultFiles results={results.data} />
+          </div>
+        </ResultsAvailability>
       )}
     </Card>
   );
@@ -238,7 +255,11 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
     );
   }
   const packages = results.artifacts.filter((artifact) => artifact.role === "package");
-  const others = results.artifacts.filter((artifact) => artifact.role !== "package");
+  // O preview não é um resultado a baixar: aparece junto da saída de que deriva (ADR 037).
+  const others = results.artifacts.filter(
+    (artifact) => artifact.role !== "package" && artifact.role !== "preview",
+  );
+  const previews = previewsBySource(results.artifacts);
   return (
     <div className="flex flex-col gap-6">
       {packages.map((artifact) => (
@@ -259,19 +280,27 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
           {packages.length > 0 && (
             <h3 className="text-sm font-semibold text-fg-muted">{T.results.otherFiles}</h3>
           )}
-          <ul className="flex flex-col gap-2">
-            {others.map((artifact) => (
-              <li key={artifact.artifact_id} className="flex flex-wrap items-baseline gap-x-2">
-                <a
-                  href={artifactDownloadPath(artifact.artifact_id)}
-                  download={artifact.file_name}
-                  className="font-mono text-sm"
-                >
-                  {T.results.download(artifact.file_name)}
-                </a>
-                <span className="text-sm text-fg-muted">({T.results.roles[artifact.role]})</span>
-              </li>
-            ))}
+          <ul className={previews.size > 0 ? "flex flex-col gap-6" : "flex flex-col gap-2"}>
+            {others.map((artifact) => {
+              const preview = previews.get(artifact.artifact_id);
+              return (
+                <li key={artifact.artifact_id} className="flex flex-col gap-3">
+                  <span className="flex flex-wrap items-baseline gap-x-2">
+                    <a
+                      href={artifactDownloadPath(artifact.artifact_id)}
+                      download={artifact.file_name}
+                      className="font-mono text-sm"
+                    >
+                      {T.results.download(artifact.file_name)}
+                    </a>
+                    <span className="text-sm text-fg-muted">
+                      ({T.results.roles[artifact.role]})
+                    </span>
+                  </span>
+                  {preview !== undefined && <ResultPreview source={artifact} preview={preview} />}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -290,6 +319,20 @@ const MEDIA_MILL = "media-mill";
 function MediaMillPreviews({ results }: { readonly results: RunResultsData }): ReactElement | null {
   const thumbnails = results.published ? thumbnailArtifacts(results.artifacts) : [];
   return thumbnails.length === 0 ? null : <ThumbnailPreviews thumbnails={thumbnails} />;
+}
+
+/** O primeiro preview de cada saída, pelo id dela; os demais papéis não têm origem. */
+function previewsBySource(
+  artifacts: readonly ResultReference[],
+): ReadonlyMap<string, ResultReference> {
+  const previews = new Map<string, ResultReference>();
+  for (const artifact of artifacts) {
+    const source = artifact.source_artifact_id;
+    if (artifact.role === "preview" && source !== null && !previews.has(source)) {
+      previews.set(source, artifact);
+    }
+  }
+  return previews;
 }
 
 function NewRunLink({ recipeId }: { readonly recipeId: string }): ReactElement | null {

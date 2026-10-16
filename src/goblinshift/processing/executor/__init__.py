@@ -60,7 +60,8 @@ O executor escreve, sempre com criação exclusiva:
         {"position": 0, "original_name": "a.csv", "status": "ok",
          "outputs": ["a.csv"],        # caminhos relativos a out/ ("images/foto.jpg")
          "counts": {...}, "details": {...},
-         "warnings": [{"code": "…", "detail": "…"}]},
+         "warnings": [{"code": "…", "detail": "…",
+                       "columns": [{"name": "…", "cells": 2}]}]},  # só CSV_FORMULA_CELLS
         {"position": 1, "original_name": "b.csv", "status": "rejected",
          "code": "CSV_STRUCTURE_INVALID", "reason": "…"},
         {"position": 2, "original_name": "c.csv", "status": "duplicate",
@@ -70,7 +71,8 @@ O executor escreve, sempre com criação exclusiva:
       "details": {}                   # fatos da execução que não são aviso
     }
 
-`duplicates`, `details` e o item `duplicate` entraram na fatia 5 sem mudar a `schema_version`.
+`duplicates`, `details` e o item `duplicate` entraram na fatia 5 sem mudar a `schema_version`;
+`columns` no aviso, depois, do mesmo jeito: a coleta aceita o aviso sem ele.
 
 Relatório sem nenhum item `ok` sai com código 0: o worker decide `failed` com `NO_VALID_OUTPUTS`
 na publicação (3.5), e o relatório guarda o motivo de cada rejeição.

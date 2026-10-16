@@ -29,9 +29,9 @@ import hashlib
 import os
 import stat
 import unicodedata
-from collections.abc import Callable
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass, field
+from pathlib import Path, PurePosixPath
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
 from goblinshift.processing.names import has_unsafe_char
@@ -47,7 +47,15 @@ from goblinshift.processing.packaging import (
     PackageLimits,
     package_name_for,
 )
-from goblinshift.processing.recipe import ItemRejectionCode, OutputGroup
+from goblinshift.processing.recipe import (
+    ITEM_COUNT_NAME,
+    MAX_ITEM_COUNTS,
+    ItemNoticeCode,
+    ItemRejectionCode,
+    ItemWarningCode,
+    OutputGroup,
+)
+from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.package_check import (
     ManifestInput,
@@ -58,6 +66,20 @@ from goblinshift.runs.worker.package_check import (
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 _PACKAGE_LIMITS = PackageLimits()
+_PREVIEWS_PREFIX = f"{OutputGroup.PREVIEWS.value}/"
+_JPEG_EXTENSION = ".jpg"
+_CSV_EXTENSION = ".csv"
+_JSON_EXTENSION = ".json"
+_JPEG_MAGIC = b"\xff\xd8\xff"
+# Tetos dos previews (2.2): a amostra CSV tem no máximo 64 KiB; o JPEG de 512 x 512, bem menos.
+PREVIEW_IMAGE_MAX_BYTES = 512 * 1024
+PREVIEW_TABLE_MAX_BYTES = 64 * 1024
+_PREVIEW_MAX_BYTES = {
+    _JPEG_EXTENSION: PREVIEW_IMAGE_MAX_BYTES,
+    _CSV_EXTENSION: PREVIEW_TABLE_MAX_BYTES,
+    # Mapa de páginas de um documento do PDF Press: até 400 páginas, bem menos que 64 KiB.
+    _JSON_EXTENSION: PREVIEW_TABLE_MAX_BYTES,
+}
 READ_CHUNK_BYTES = 1024 * 1024
 _ITEM_OK = "ok"
 _ITEM_REJECTED = "rejected"
@@ -114,9 +136,20 @@ class ReportItem:
     outputs: tuple[str, ...]
     # Código da rejeição (catálogo de 1.6); `None` para item aceito.
     code: ItemRejectionCode | None
-    has_warnings: bool
+    # Códigos dos avisos do item, na ordem do relatório; o `detail` fica só no relatório.
+    warnings: tuple[ItemWarningCode, ...] = ()
     # Só na duplicata do Detox: posição da primeira ocorrência, que é um item aceito com saídas.
     duplicate_of: int | None = None
+    counts: Mapping[str, int] = field(default_factory=dict)
+    # (caminho em previews/, saída de conteúdo do próprio item de que deriva)
+    previews: tuple[tuple[str, str], ...] = ()
+    notices: tuple[ItemNoticeCode, ...] = ()
+    # Contagem por coluna de CSV_FORMULA_CELLS, já com os tetos; `None` sem o aviso ou sem colunas.
+    formula_cells: FormulaCells | None = None
+
+    @property
+    def has_warnings(self) -> bool:
+        return bool(self.warnings)
 
 
 @dataclass(frozen=True)
@@ -163,6 +196,13 @@ class ParsedReport:
 
 
 @dataclass(frozen=True)
+class CollectedPreview:
+    file: OutputFile
+    # Nome da saída de conteúdo de que o preview deriva.
+    of: str
+
+
+@dataclass(frozen=True)
 class Collected:
     # Conteúdo na ordem do relatório (entrada, depois saída dentro da entrada).
     outputs: tuple[OutputFile, ...]
@@ -171,6 +211,8 @@ class Collected:
     # Os dois juntos, ou nenhum (executor anterior à fatia 5).
     manifest_file: OutputFile | None = None
     package_file: OutputFile | None = None
+    # Fora do manifesto e do pacote; publicados com o papel `preview`.
+    previews: tuple[CollectedPreview, ...] = ()
 
 
 DEFAULT_LIMITS = OutputLimits()
@@ -205,12 +247,17 @@ def collect_outputs(
     report_data = _read_no_follow(report_found.path, limits.report_max_bytes)
     report = parse_report(report_data, input_count)
     cited = [name for item in report.items for name in item.outputs]
-    if len(set(cited)) != len(cited) or set(cited) != set(files):
+    cited_previews = [preview for item in report.items for preview in item.previews]
+    all_cited = cited + [path for path, _of in cited_previews]
+    if len(set(all_cited)) != len(all_cited) or set(all_cited) != set(files):
         raise CollectionError("os arquivos de out/ não batem com as saídas citadas no relatório")
     outputs = tuple(_digested(files[name], heartbeat) for name in cited)
+    previews = tuple(
+        CollectedPreview(_checked_preview(files[path]), of) for path, of in cited_previews
+    )
     report_file = _from_bytes(report_found, report_data)
     if manifest is None or package is None:
-        return Collected(outputs, report_file, report)
+        return Collected(outputs, report_file, report, previews=previews)
     manifest_data = _read_no_follow(manifest.path, limits.manifest_max_bytes)
     manifest_file = _from_bytes(manifest, manifest_data)
     package_file = _digested(package, heartbeat)
@@ -219,7 +266,44 @@ def collect_outputs(
         verify_zip(package.path, [*outputs, manifest_file, report_file], heartbeat)
     except PackageError as error:
         raise CollectionError(str(error)) from error
-    return Collected(outputs, report_file, report, manifest_file, package_file)
+    return Collected(outputs, report_file, report, manifest_file, package_file, previews)
+
+
+def _checked_preview(found: _Found) -> OutputFile:
+    """Só os dois formatos que as receitas geram, com tipo e tamanho conferidos pelo worker.
+
+    O preview de imagem é servido com o tipo real (`image/jpeg`): por isso precisa começar como
+    JPEG; a amostra CSV e o mapa de páginas (JSON), servidos como bytes opacos, só precisam ser
+    UTF-8 sem NUL e, o mapa, um objeto JSON estrito.
+    """
+    extension = PurePosixPath(found.name).suffix
+    limit = _PREVIEW_MAX_BYTES.get(extension)
+    if limit is None:
+        raise CollectionError(f"preview com extensão fora da lista: {found.name!r}")
+    if found.size > limit:
+        raise CollectionError(f"preview acima de {limit} bytes: {found.name!r}")
+    data = _read_no_follow(found.path, limit)
+    if extension == _JPEG_EXTENSION and not data.startswith(_JPEG_MAGIC):
+        raise CollectionError(f"preview que não é JPEG: {found.name!r}")
+    if extension == _CSV_EXTENSION and not _is_plain_utf8(data):
+        raise CollectionError(f"preview CSV fora de UTF-8 ou com NUL: {found.name!r}")
+    if extension == _JSON_EXTENSION and not _is_json_object(data):
+        raise CollectionError(f"preview JSON que não é objeto JSON aceito: {found.name!r}")
+    return _from_bytes(found, data)
+
+
+def _is_json_object(data: bytes) -> bool:
+    try:
+        return isinstance(parse_strict_json(data), dict)
+    except ValueError:
+        return False
+
+
+def _is_plain_utf8(data: bytes) -> bool:
+    try:
+        return "\0" not in data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
 
 
 def _manifest_inputs(report: ParsedReport) -> list[ManifestInput]:
@@ -409,15 +493,97 @@ def _item(raw: object) -> ReportItem:
     status = item.get("status")
     if status == _ITEM_OK:
         outputs = tuple(_text(name, "item.outputs[]") for name in _list(item.get("outputs"), "o"))
-        warnings = _list(item.get("warnings"), "item.warnings")
-        return ReportItem(position, True, outputs, None, bool(warnings))
+        raw_warnings = _list(item.get("warnings"), "item.warnings")
+        warnings = tuple(_warning_code(w) for w in raw_warnings)
+        counts = _counts(item.get("counts", {}))
+        previews = _previews(item.get("previews", []), outputs)
+        # Opcional: o executor anterior não escreve notas.
+        notices = tuple(_notice_code(n) for n in _list(item.get("notices", []), "item.notices"))
+        return ReportItem(
+            position,
+            True,
+            outputs,
+            None,
+            warnings,
+            counts=counts,
+            previews=previews,
+            notices=notices,
+            formula_cells=_formula_cells(raw_warnings),
+        )
     if status == _ITEM_REJECTED:
-        return ReportItem(position, False, (), _rejection_code(item.get("code")), False)
+        return ReportItem(position, False, (), _rejection_code(item.get("code")))
     if status == _ITEM_DUPLICATE:
         # Aceito, sem saídas e sem aviso: é o comportamento pedido pelo parâmetro do Detox (1.4).
         duplicate_of = _int(item.get("duplicate_of"), "item.duplicate_of")
-        return ReportItem(position, True, (), None, False, duplicate_of)
+        return ReportItem(position, True, (), None, duplicate_of=duplicate_of)
     raise CollectionError(f"item com status desconhecido: {status!r}")
+
+
+def _previews(raw: object, outputs: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+    """Cada preview em `previews/` e derivado de uma saída do próprio item."""
+    previews = []
+    for entry in _list(raw, "item.previews"):
+        preview = _mapping(entry, "item.previews[]")
+        path = _text(preview.get("path"), "item.previews[].path")
+        of = _text(preview.get("of"), "item.previews[].of")
+        if not path.startswith(_PREVIEWS_PREFIX) or of not in outputs:
+            raise CollectionError(f"preview fora de previews/ ou de saída alheia: {path!r}")
+        previews.append((path, of))
+    return tuple(previews)
+
+
+def _notice_code(raw: object) -> ItemNoticeCode:
+    if not isinstance(raw, str) or raw not in ItemNoticeCode:
+        raise CollectionError("item.notices: nota fora do catálogo de códigos")
+    return ItemNoticeCode(raw)
+
+
+def _warning_code(raw: object) -> ItemWarningCode:
+    code = raw.get("code") if isinstance(raw, dict) else None
+    if not isinstance(code, str) or code not in ItemWarningCode:
+        raise CollectionError("item.warnings: aviso fora do catálogo de códigos")
+    return ItemWarningCode(code)
+
+
+def _formula_cells(warnings: list[object]) -> FormulaCells | None:
+    """As colunas do aviso de fórmula; o executor anterior não as escreve, e isso não é erro."""
+    for warning in warnings:
+        entry = _mapping(warning, "item.warnings[]")
+        if entry.get("code") == ItemWarningCode.CSV_FORMULA_CELLS and "columns" in entry:
+            return FormulaCells.of(_formula_columns(entry["columns"]))
+    return None
+
+
+def _formula_columns(raw: object) -> list[tuple[str, int]]:
+    columns = _list(raw, "item.warnings[].columns")
+    if not columns:
+        raise CollectionError("item.warnings[].columns vazia")
+    parsed = []
+    for column in columns:
+        entry = _mapping(column, "item.warnings[].columns[]")
+        # Vazio é aceito: a coluna de cabeçalho vazio também tem contagem (`FormulaCells.of`).
+        name = entry.get("name")
+        if not isinstance(name, str):
+            raise CollectionError("item.warnings[].columns[].name deve ser texto")
+        cells = _int(entry.get("cells"), "item.warnings[].columns[].cells")
+        if cells < 1:
+            raise CollectionError("item.warnings[].columns[].cells abaixo de 1")
+        parsed.append((name, cells))
+    return parsed
+
+
+def _counts(raw: object) -> dict[str, int]:
+    counts = _mapping(raw, "item.counts")
+    if len(counts) > MAX_ITEM_COUNTS:
+        raise CollectionError(f"item.counts com mais de {MAX_ITEM_COUNTS} contagens")
+    parsed: dict[str, int] = {}
+    for name, value in counts.items():
+        if ITEM_COUNT_NAME.fullmatch(name) is None:
+            raise CollectionError("item.counts com nome de contagem fora do formato")
+        parsed[name] = _int(value, "item.counts[]")
+        if parsed[name] < 0:
+            raise CollectionError("item.counts com contagem negativa")
+    return parsed
 
 
 def _rejection_code(raw: object) -> ItemRejectionCode:

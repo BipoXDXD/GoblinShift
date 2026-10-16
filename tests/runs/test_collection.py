@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from goblinshift.processing.recipe import ItemRejectionCode
+from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
+from goblinshift.runs.formula_cells import ColumnCells, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
     CollectionError,
@@ -497,4 +498,278 @@ def test_nome_fora_das_regras_de_saida_e_recusado(tmp_path: Path, name: str) -> 
     write_out(out, [ok_item(0, name)], {name: b"1"})
 
     with pytest.raises(CollectionError, match="nome"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+# --- Avisos e contagens por item: só o que o catálogo e o formato admitem (1.1, 3.6) --------------
+
+
+def test_avisos_e_contagens_do_item_sao_coletados(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    counts = {"records_read": 3, "written": 2}
+    item = ok_item(0, "a.csv", counts=counts)
+    item["warnings"] = [
+        {"code": "CSV_FORMULA_CELLS", "detail": "célula =1+1 na coluna 'nome de pessoa'"},
+        {"code": "CSV_FORMULA_HEADER", "detail": "d"},
+    ]
+    write_out(out, [item, rejected_item(1)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=2)
+
+    first, second = collected.report.items
+    assert first.warnings == (ItemWarningCode.CSV_FORMULA_CELLS, ItemWarningCode.CSV_FORMULA_HEADER)
+    assert first.counts == counts
+    assert first.has_warnings
+    assert (second.warnings, second.counts) == ((), {})
+
+
+@pytest.mark.parametrize(
+    "warning",
+    [
+        pytest.param({"code": "INVENTADO", "detail": "d"}, id="codigo-fora-do-catalogo"),
+        pytest.param({"code": 1, "detail": "d"}, id="codigo-nao-texto"),
+        pytest.param("CSV_FORMULA_CELLS", id="aviso-nao-objeto"),
+    ],
+)
+def test_aviso_fora_do_catalogo_e_recusado(tmp_path: Path, warning: object) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [warning]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="aviso"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        pytest.param({"records_read": -1}, id="negativa"),
+        pytest.param({"records_read": "3"}, id="texto"),
+        pytest.param({"records_read": True}, id="booleano"),
+        pytest.param({"Nome Pessoal": 1}, id="chave-fora-do-formato"),
+        pytest.param({f"c{i}": 1 for i in range(17)}, id="chaves-demais"),
+        pytest.param([1], id="nao-objeto"),
+    ],
+)
+def test_contagem_fora_do_formato_e_recusada(tmp_path: Path, counts: object) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["counts"] = counts
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="counts"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_dezesseis_contagens_sao_aceitas(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    counts = {f"c{i}": i for i in range(16)}
+    write_out(out, [ok_item(0, "a.csv", counts=counts)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].counts == counts
+
+
+def formula_warning(columns: object) -> dict[str, Any]:
+    return {"code": "CSV_FORMULA_CELLS", "detail": "d", "columns": columns}
+
+
+def test_contagem_por_coluna_do_aviso_de_formula_e_coletada_com_teto(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    columns = [{"name": f"c{i}", "cells": i + 1} for i in range(11)]
+    item["warnings"] = [formula_warning(columns)]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    expected = tuple(ColumnCells(f"c{i}", i + 1) for i in range(10, 0, -1))
+    assert collected.report.items[0].formula_cells == FormulaCells(expected, 1)
+
+
+def test_coluna_de_cabecalho_vazio_e_coletada_sem_nome(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [formula_warning([{"name": "", "cells": 2}])]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].formula_cells == FormulaCells((ColumnCells(None, 2),), 0)
+
+
+def test_aviso_de_formula_sem_colunas_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv", warnings=1)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    [item] = collected.report.items
+    assert item.warnings == (ItemWarningCode.CSV_FORMULA_CELLS,)
+    assert item.formula_cells is None
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [
+        pytest.param({"a": 1}, id="nao-lista"),
+        pytest.param([], id="vazia"),
+        pytest.param(["a"], id="coluna-nao-objeto"),
+        pytest.param([{"name": 1, "cells": 1}], id="nome-nao-texto"),
+        pytest.param([{"cells": 1}], id="sem-nome"),
+        pytest.param([{"name": "a", "cells": 0}], id="zero-celulas"),
+        pytest.param([{"name": "a", "cells": "1"}], id="celulas-texto"),
+        pytest.param([{"name": "a", "cells": True}], id="celulas-booleano"),
+    ],
+)
+def test_contagem_por_coluna_fora_da_forma_e_recusada(tmp_path: Path, columns: object) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [formula_warning(columns)]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="columns"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+# --- Previews: fora do pacote, citados pelo item, com tipo e tamanho conferidos (3.6) -----------
+
+JPEG_PREVIEW = b"\xff\xd8\xff\xe0" + b"0" * 100
+CSV_PREVIEW = b"nome\r\nAna\r\n"
+
+
+def with_preview(path: str, of: str, output: str | None = None) -> dict[str, Any]:
+    item = ok_item(0, output or of)
+    item["previews"] = [{"path": path, "of": of}]
+    return item
+
+
+def test_previews_sao_coletados_a_parte_do_conteudo(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = with_preview("previews/a.jpg", "images/a.png")
+    write_out(out, [item], {"images/a.png": b"png", "previews/a.jpg": JPEG_PREVIEW})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert [f.name for f in collected.outputs] == ["images/a.png"]
+    [preview] = collected.previews
+    assert (preview.file.name, preview.of, preview.file.size) == (
+        "previews/a.jpg",
+        "images/a.png",
+        len(JPEG_PREVIEW),
+    )
+
+
+def test_amostra_csv_e_aceita(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(
+        out,
+        [with_preview("previews/a.csv", "a.csv")],
+        {"a.csv": b"x", "previews/a.csv": CSV_PREVIEW},
+    )
+
+    [preview] = collect_outputs(out, recipe_id=RECIPE, input_count=1).previews
+
+    assert preview.of == "a.csv"
+
+
+def test_mapa_de_paginas_em_json_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    page_map = b'{"schema_version": 1, "path": "a.pdf", "pages": []}'
+    write_out(
+        out,
+        [with_preview("previews/a.json", "a.pdf")],
+        {"a.pdf": b"%PDF", "previews/a.json": page_map},
+    )
+
+    [preview] = collect_outputs(out, recipe_id=RECIPE, input_count=1).previews
+
+    assert preview.of == "a.pdf"
+
+
+def test_relatorio_sem_previews_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"x"})
+
+    assert collect_outputs(out, recipe_id=RECIPE, input_count=1).previews == ()
+
+
+@pytest.mark.parametrize(
+    ("path", "content"),
+    [
+        pytest.param("previews/a.jpg", b"<svg onload=alert(1)>", id="jpg-que-nao-e-jpeg"),
+        pytest.param("previews/a.jpg", b"\xff\xd8\xff" + b"0" * (512 * 1024), id="jpg-grande"),
+        pytest.param("previews/a.csv", b"\xff\xfe", id="csv-fora-de-utf8"),
+        pytest.param("previews/a.csv", b"a\x00b", id="csv-com-nul"),
+        pytest.param("previews/a.csv", b"a" * (64 * 1024 + 1), id="csv-acima-de-64-kib"),
+        pytest.param("previews/a.html", b"<b>x</b>", id="extensao-fora-da-lista"),
+        pytest.param("previews/a.json", b"[1, 2]", id="json-que-nao-e-objeto"),
+        pytest.param("previews/a.json", b'{"a": 1, "a": 2}', id="json-com-chave-repetida"),
+        pytest.param("previews/a.json", b"{" * 10, id="json-malformado"),
+    ],
+)
+def test_preview_fora_do_formato_e_recusado(tmp_path: Path, path: str, content: bytes) -> None:
+    out = tmp_path / "out"
+    write_out(out, [with_preview(path, "a.csv")], {"a.csv": b"x", path: content})
+
+    with pytest.raises(CollectionError, match="preview"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+@pytest.mark.parametrize(
+    ("path", "of"),
+    [
+        pytest.param("images/a.jpg", "a.csv", id="fora-do-grupo"),
+        pytest.param("previews/a.jpg", "b.csv", id="de-saida-de-outro-item"),
+    ],
+)
+def test_preview_mal_citado_e_recusado(tmp_path: Path, path: str, of: str) -> None:
+    out = tmp_path / "out"
+    write_out(out, [with_preview(path, of, "a.csv")], {"a.csv": b"x", path: JPEG_PREVIEW})
+
+    with pytest.raises(CollectionError, match="preview"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_preview_nao_citado_e_recusado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"x", "previews/a.jpg": JPEG_PREVIEW})
+
+    with pytest.raises(CollectionError):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_previews_contam_no_teto_de_arquivos(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(
+        out,
+        [with_preview("previews/a.jpg", "a.csv")],
+        {"a.csv": b"x", "previews/a.jpg": JPEG_PREVIEW},
+    )
+
+    with pytest.raises(OutputLimitError):
+        collect_outputs(out, limits=OutputLimits(max_files=1), recipe_id=RECIPE, input_count=1)
+
+
+def test_notas_do_item_sao_coletadas_e_nao_viram_aviso(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["notices"] = ["IMAGE_P3_CONVERTED"]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].notices == (ItemNoticeCode.IMAGE_P3_CONVERTED,)
+    assert collected.report.outcome is PublishOutcome.SUCCEEDED
+
+
+def test_nota_fora_da_lista_e_recusada(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["notices"] = ["Ana <ana@x.com>"]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="nota"):
         collect_outputs(out, recipe_id=RECIPE, input_count=1)
