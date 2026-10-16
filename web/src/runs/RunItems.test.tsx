@@ -243,6 +243,30 @@ describe("Execução: detalhe por arquivo", () => {
       expect(entries[1]).not.toHaveTextContent("e mais");
     });
 
+    it("coluna de cabeçalho vazio aparece com rótulo próprio e a contagem", async () => {
+      setup({
+        summary,
+        items: [
+          formulaItem({
+            columns: [
+              { name: null, cells: 2 },
+              { name: "(sem nome)", cells: 1 },
+            ],
+            more_columns: 0,
+          }),
+        ],
+      });
+
+      const columns = within(await columnsList()).getAllByRole("listitem");
+      expect(columns.map((column) => column.textContent)).toEqual([
+        "coluna sem nome: 2 células",
+        "(sem nome): 1 célula",
+      ]);
+      // O rótulo é da interface, não do arquivo: em itálico, distinto de um nome real.
+      expect(columns[0]?.querySelector("em")).toHaveTextContent("coluna sem nome");
+      expect(columns[1]?.querySelector("em")).toBeNull();
+    });
+
     it("nome de coluna é texto, nunca HTML", async () => {
       setup({
         summary,

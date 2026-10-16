@@ -51,6 +51,14 @@ def test_controle_e_formato_invisivel_viram_caractere_de_substituicao(char: str)
     assert summary.columns[0].name == "a\ufffdb"
 
 
+@pytest.mark.parametrize("name", ["", " ", "\u3000 \t"])
+def test_coluna_sem_nome_vira_nome_nulo_e_a_contagem_fica(name: str) -> None:
+    summary = FormulaCells.of([(name, 2), ("conta", 1)])
+
+    assert summary.columns == (ColumnCells(None, 2), ColumnCells("conta", 1))
+    assert FormulaCells.from_json(summary.as_json()) == summary
+
+
 def test_ida_e_volta_pelo_json_do_banco() -> None:
     summary = FormulaCells.of([("valor", 2), ("conta", 1)])
 
@@ -74,6 +82,7 @@ def test_ida_e_volta_pelo_json_do_banco() -> None:
         pytest.param({"columns": [{"name": "a", "cells": True}], "more_columns": 0}, id="bool"),
         pytest.param({"columns": [{"name": 1, "cells": 1}], "more_columns": 0}, id="nome"),
         pytest.param({"columns": [{"name": "", "cells": 1}], "more_columns": 0}, id="vazio"),
+        pytest.param({"columns": [{"name": " ", "cells": 1}], "more_columns": 0}, id="espacos"),
         pytest.param({"columns": [{"name": "a", "cells": 1}], "more_columns": -1}, id="negativo"),
         pytest.param(
             {"columns": [{"name": "a", "cells": 1}] * 11, "more_columns": 0}, id="acima-do-teto"

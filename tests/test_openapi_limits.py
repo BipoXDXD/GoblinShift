@@ -104,6 +104,8 @@ def test_contagem_por_coluna_do_detalhe_publica_os_tetos() -> None:
     cells = schemas["FormulaColumnResponse"]["properties"]["cells"]
 
     assert (columns["minItems"], columns["maxItems"]) == (1, 10)
-    assert (name["minLength"], name["maxLength"]) == (1, 120)
+    [text, null] = name["anyOf"]
+    assert (text["minLength"], text["maxLength"]) == (1, 120)
+    assert null == {"type": "null"}
     assert cells["minimum"] == 1
     assert schemas["FormulaCellsResponse"]["properties"]["more_columns"]["minimum"] == 0

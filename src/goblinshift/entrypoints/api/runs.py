@@ -161,8 +161,9 @@ class RunSummaryResponse(BaseModel):
 
 
 class FormulaColumnResponse(BaseModel):
-    # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto.
-    name: str = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
+    # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto. Nulo
+    # quando o cabeçalho é vazio ou só de espaços (a tela dá o rótulo).
+    name: str | None = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
     cells: int = Field(ge=1)
 
 

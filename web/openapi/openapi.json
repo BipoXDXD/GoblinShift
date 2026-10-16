@@ -5154,9 +5154,16 @@
       "FormulaColumnResponse": {
         "properties": {
           "name": {
-            "type": "string",
-            "maxLength": 120,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name"
           },
           "cells": {

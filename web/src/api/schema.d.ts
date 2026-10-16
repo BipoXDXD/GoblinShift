@@ -586,7 +586,7 @@ export interface components {
         /** FormulaColumnResponse */
         FormulaColumnResponse: {
             /** Name */
-            name: string;
+            name: string | null;
             /** Cells */
             cells: number;
         };
