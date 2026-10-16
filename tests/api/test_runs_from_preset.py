@@ -33,12 +33,14 @@ def storage(tmp_path: Path) -> FileStorage:
     return FileStorage(tmp_path / "storage")
 
 
-def create_preset(client: TestClient, account: Account, **parameters: Any) -> dict[str, Any]:
+def create_preset(
+    client: TestClient, account: Account, recipe_id: str = "csv-janitor", **parameters: Any
+) -> dict[str, Any]:
     response = client.post(
         PRESETS,
         json={
             "name": f"p-{uuid.uuid4()}",
-            "recipe_id": "csv-janitor",
+            "recipe_id": recipe_id,
             "recipe_version": 1,
             "parameters": parameters,
         },
@@ -86,7 +88,29 @@ def test_aceita_com_202_e_a_configuracao_do_preset(
     assert (body["recipe_id"], body["recipe_version"]) == ("csv-janitor", 1)
     saved = stored_run(factory, body["id"])
     assert saved.preset_id == uuid.UUID(preset["id"])
-    assert saved.parameters == preset["parameters"]
+    assert saved.parameters["trim_columns"] == ["a"]
+    assert saved.parameters["formula_guard"] == "none"
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [{}, {"name_mode": "indexed", "name_prefix": "foto"}],
+    ids=["defaults", "indexed"],
+)
+def test_preset_do_detox_executa_com_os_parametros_guardados(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    parameters: dict[str, Any],
+) -> None:
+    # O default de `name_prefix` não pode voltar como "enviado" com `name_mode: preserve`.
+    account = Account(factory)
+    preset = create_preset(client, account, "downloads-detox", **parameters)
+
+    response = run_preset(client, account, preset["id"], ready_inputs(factory, storage, account.id))
+
+    assert response.status_code == 202, response.text
+    assert stored_run(factory, response.json()["id"]).recipe_id == "downloads-detox"
 
 
 def test_replay_com_a_mesma_chave_devolve_a_mesma_execucao(
