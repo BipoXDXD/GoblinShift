@@ -50,6 +50,7 @@ from goblinshift.processing.packaging import (
 from goblinshift.processing.recipe import (
     ITEM_COUNT_NAME,
     MAX_ITEM_COUNTS,
+    ItemNoticeCode,
     ItemRejectionCode,
     ItemWarningCode,
     OutputGroup,
@@ -125,6 +126,7 @@ class ReportItem:
     # Só na duplicata do Detox: posição da primeira ocorrência, que é um item aceito com saídas.
     duplicate_of: int | None = None
     counts: Mapping[str, int] = field(default_factory=dict)
+    notices: tuple[ItemNoticeCode, ...] = ()
 
     @property
     def has_warnings(self) -> bool:
@@ -423,7 +425,9 @@ def _item(raw: object) -> ReportItem:
         outputs = tuple(_text(name, "item.outputs[]") for name in _list(item.get("outputs"), "o"))
         warnings = tuple(_warning_code(w) for w in _list(item.get("warnings"), "item.warnings"))
         counts = _counts(item.get("counts", {}))
-        return ReportItem(position, True, outputs, None, warnings, counts=counts)
+        # Opcional: o executor anterior não escreve notas.
+        notices = tuple(_notice_code(n) for n in _list(item.get("notices", []), "item.notices"))
+        return ReportItem(position, True, outputs, None, warnings, counts=counts, notices=notices)
     if status == _ITEM_REJECTED:
         return ReportItem(position, False, (), _rejection_code(item.get("code")))
     if status == _ITEM_DUPLICATE:
@@ -431,6 +435,12 @@ def _item(raw: object) -> ReportItem:
         duplicate_of = _int(item.get("duplicate_of"), "item.duplicate_of")
         return ReportItem(position, True, (), None, duplicate_of=duplicate_of)
     raise CollectionError(f"item com status desconhecido: {status!r}")
+
+
+def _notice_code(raw: object) -> ItemNoticeCode:
+    if not isinstance(raw, str) or raw not in ItemNoticeCode:
+        raise CollectionError("item.notices: nota fora do catálogo de códigos")
+    return ItemNoticeCode(raw)
 
 
 def _warning_code(raw: object) -> ItemWarningCode:

@@ -8,6 +8,7 @@ from goblinshift.processing.csv_janitor.results import RejectionCode as CsvCode
 from goblinshift.processing.csv_janitor.results import WarningCode as CsvWarningCode
 from goblinshift.processing.downloads_detox.recipe import REJECTION_CODE as DETOX_CODE
 from goblinshift.processing.image_forge.rejection import RejectionCode as ImageCode
+from goblinshift.processing.pdf_press.recipe import NOT_SELECTED as PDF_NOT_SELECTED
 from goblinshift.processing.recipe import (
     InputContractError,
     InputFile,
@@ -97,13 +98,20 @@ def test_rejeicao_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
 
 
 def test_codigos_de_aviso_de_cada_receita_estao_no_catalogo() -> None:
-    assert {*CsvWarningCode} <= {code.value for code in ItemWarningCode}
+    used = {*CsvWarningCode, PDF_NOT_SELECTED.code}
+
+    assert used <= {code.value for code in ItemWarningCode}
 
 
 @pytest.mark.parametrize("code", ["W", "", "csv_formula_cells"])
 def test_aviso_com_codigo_fora_do_catalogo_nao_existe(code: str) -> None:
     with pytest.raises(ValueError, match="catálogo"):
         ReportWarning(code=code, detail="d")
+
+
+def test_nota_fora_da_lista_nao_existe() -> None:
+    with pytest.raises(ValueError, match="nota"):
+        ItemOk(0, outputs=("a.png",), notices=("QUALQUER",))  # type: ignore[arg-type]
 
 
 # --- Teto de entradas da versão: job acima dele é infraestrutura, não conteúdo ------------------

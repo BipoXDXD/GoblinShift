@@ -550,6 +550,13 @@ export interface components {
             message: string;
         };
         /**
+         * ItemNoticeCode
+         * @description Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
+         *     para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API.
+         * @enum {string}
+         */
+        ItemNoticeCode: "IMAGE_P3_CONVERTED";
+        /**
          * ItemRejectionCode
          * @description Códigos de rejeição por item do catálogo de 1.6: lista fechada.
          *
@@ -571,7 +578,7 @@ export interface components {
          *     arquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui.
          * @enum {string}
          */
-        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER";
+        ItemWarningCode: "CSV_ALL_RECORDS_FILTERED" | "CSV_FORMULA_CELLS" | "CSV_FORMULA_HEADER" | "INPUT_NOT_SELECTED";
         /** Limits */
         Limits: {
             /** Runs Per 24H */
@@ -769,6 +776,7 @@ export interface components {
             role: components["schemas"]["ArtifactRole"];
             /** File Name */
             file_name: string;
+            availability: components["schemas"]["Availability"];
         };
         /** RunDetailResponse */
         RunDetailResponse: {
@@ -831,10 +839,14 @@ export interface components {
              * Format: uuid
              */
             upload_id: string;
+            /** Original Name */
+            original_name: string | null;
             status: components["schemas"]["ItemStatus"];
             error_code: components["schemas"]["ItemRejectionCode"] | null;
             /** Warnings */
             warnings: components["schemas"]["ItemWarningCode"][];
+            /** Notices */
+            notices: components["schemas"]["ItemNoticeCode"][];
             /** Counts */
             counts: {
                 [key: string]: number;
