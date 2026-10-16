@@ -206,6 +206,29 @@ describe("Bancada aberta com um preset", () => {
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(",");
   });
 
+  it("preset do PDF Press com páginas escolhidas abre sem as páginas e pede para escolhê-las de novo", async () => {
+    setup(`/bancada/pdf-press?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(
+          presetBody({
+            recipe_id: "pdf-press",
+            parameters: {
+              operation: "select",
+              select: [{ upload_id: "0b9f6c1e-3a2d-4e5f-8a7b-6c5d4e3f2a1b", page_number: 2 }],
+            },
+          }),
+        ),
+    });
+
+    const notice = await screen.findByText(/Parâmetros do preset Clientes do mês\./);
+    expect(notice).toHaveTextContent("Parâmetros do preset Clientes do mês.");
+    expect(notice).toHaveTextContent(
+      "As páginas escolhidas dependem dos arquivos enviados; escolha-as de novo.",
+    );
+    expect(screen.queryByText(/Este preset é de outra receita/)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "O que fazer com os PDFs" })).toHaveValue("select");
+  });
+
   it("preset que não existe mostra a falha e a Bancada com os padrões", async () => {
     setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
       [`GET /api/v1/presets/${PRESET_ID}`]: () => problemResponse(404, "NOT_FOUND"),
