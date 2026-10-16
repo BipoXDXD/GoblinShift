@@ -397,10 +397,14 @@ export const TEXT = {
       expiredTitle: "Resultados expirados",
       expiredHint: "O prazo para baixar os resultados desta execução acabou.",
       expiredOn: (date: string) => `Os resultados expiraram em ${date}.`,
-      checking: "Verificando se os resultados ainda estão disponíveis…",
-      unconfirmed:
-        "Não deu para confirmar se os resultados ainda estão disponíveis; o download pode falhar.",
-      checkAgain: "Verificar de novo",
+      unavailableTitle: "Resultados indisponíveis",
+      unavailableHint:
+        "Os arquivos gerados por esta execução não estão mais disponíveis para baixar. Os que você enviou não mudam.",
+      fileExpired: "expirou",
+      fileExpiredOn: (date: string) => `expirou em ${date}`,
+      fileDeleted: "excluído",
+      fileMissing: "perdido",
+      fileUnavailable: "indisponível",
       remove: "Excluir resultados",
       removeTitle: "Excluir os resultados desta execução?",
       removeBody:
