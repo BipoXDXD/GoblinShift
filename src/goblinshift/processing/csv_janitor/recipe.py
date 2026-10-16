@@ -14,7 +14,12 @@ from goblinshift.processing.csv_janitor.janitor import clean_table
 from goblinshift.processing.csv_janitor.limits import Limits
 from goblinshift.processing.csv_janitor.params import Params
 from goblinshift.processing.csv_janitor.preview import table_preview
-from goblinshift.processing.csv_janitor.results import TableCleaned, TableRejected
+from goblinshift.processing.csv_janitor.results import (
+    TableCleaned,
+    TableRejected,
+    TableWarning,
+    WarningCode,
+)
 from goblinshift.processing.names import safe_stem
 from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
 from goblinshift.processing.recipe import (
@@ -71,13 +76,20 @@ class CsvJanitorV1:
                 return ItemOk(
                     position=table.position,
                     outputs=(output.name,),
-                    warnings=tuple(ReportWarning(w.code, w.detail) for w in cleaned.warnings),
+                    warnings=tuple(_report_warning(w, cleaned) for w in cleaned.warnings),
                     counts=asdict(cleaned.counts),
                 )
             case TableRejected() as rejected:
                 return ItemRejected(table.position, rejected.code, rejected.reason)
             case unreachable:
                 assert_never(unreachable)
+
+
+def _report_warning(warning: TableWarning, cleaned: TableCleaned) -> ReportWarning:
+    columns = (
+        tuple(cleaned.formula_cells.items()) if warning.code is WarningCode.FORMULA_CELLS else ()
+    )
+    return ReportWarning(warning.code, warning.detail, columns)
 
 
 def output_name(original_name: str) -> str:

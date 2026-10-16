@@ -93,8 +93,16 @@ def _item(item: ReportItem, original_name: str) -> dict[str, object]:
             assert_never(unreachable)
 
 
-def _warnings(warnings: Sequence[ReportWarning]) -> list[dict[str, str]]:
-    return [{"code": warning.code, "detail": warning.detail} for warning in warnings]
+def _warnings(warnings: Sequence[ReportWarning]) -> list[dict[str, object]]:
+    return [_warning(warning) for warning in warnings]
+
+
+def _warning(warning: ReportWarning) -> dict[str, object]:
+    """`columns` só aparece no aviso que conta por coluna: os demais mantêm a forma anterior."""
+    encoded: dict[str, object] = {"code": warning.code, "detail": warning.detail}
+    if warning.columns:
+        encoded["columns"] = [{"name": name, "cells": cells} for name, cells in warning.columns]
+    return encoded
 
 
 def write_timings(path: Path, timings: Mapping[str, int]) -> None:

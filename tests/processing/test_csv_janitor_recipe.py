@@ -160,6 +160,25 @@ def test_avisos_da_tabela_ficam_no_item(work: Workspace) -> None:
     assert [warning.code for warning in item.warnings] == ["CSV_FORMULA_CELLS"]
 
 
+def test_aviso_de_formula_leva_a_contagem_por_coluna_na_ordem_da_saida(work: Workspace) -> None:
+    work.add("a.csv", "conta,valor,nota\r\n=1,-2,ok\r\n@x,-3,ok\r\n")
+
+    [item] = work.run().items
+
+    assert isinstance(item, ItemOk)
+    [formula] = item.warnings
+    assert formula.columns == (("conta", 2), ("valor", 2))
+
+
+def test_aviso_que_nao_e_de_celulas_nao_leva_colunas(work: Workspace) -> None:
+    work.add("a.csv", "=conta\r\n1\r\n")
+
+    [item] = work.run().items
+
+    assert isinstance(item, ItemOk)
+    assert [(w.code, w.columns) for w in item.warnings] == [("CSV_FORMULA_HEADER", ())]
+
+
 def test_cinco_tabelas_sao_aceitas(work: Workspace) -> None:
     for index in range(MAX_TABLES):
         work.add(f"t{index}.csv", VALID)
