@@ -11,6 +11,9 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin list-users [--pending]
     gs-admin find-user --user-hash <hash>
     printf '%s' "$user_hash" | gs-admin find-user --user-hash -
+    gs-admin set-limits --user <id> [--runs-per-24h N|default] [--input-bytes-per-24h N|default]
+                        [--storage-bytes N|default]
+    gs-admin usage --user <id>
 
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
@@ -19,6 +22,11 @@ faltou. `list-users` imprime id, emissor, estado e criação separados por tab, 
 identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
 `find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso);
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
+`set-limits` sobrepõe, para uma conta, as cotas diárias das settings (`GS_QUOTA_*`) e o teto de
+armazenamento do livro-razão (1.7); `default` volta o item ao padrão, e o que não for citado
+fica como está. `usage` imprime, separados por tab, o consumo das últimas 24 h (execuções, bytes
+de entrada e tempo de executor), o armazenamento reservado e cada limite com a origem (`conta`
+ou `padrão`).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
 """
 
@@ -32,6 +40,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
@@ -44,6 +53,7 @@ from goblinshift.identity import (
     UnknownAccountError,
     block_account,
     create_admin_user,
+    find_account,
     issue_key,
     parse_scopes,
     record_audit_event,
@@ -60,6 +70,14 @@ from goblinshift.platform.db import make_engine, make_session_factory, unit_of_w
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.purge import cancel_active_run
+from goblinshift.runs.quotas import (
+    QuotaLimits,
+    daily_usage,
+    executor_time_ms,
+    quota_override,
+    set_account_quota,
+)
+from goblinshift.runs.store import db_now
 
 EXIT_OK = 0
 EXIT_NOT_FOUND = 1
@@ -69,6 +87,9 @@ _USER_HASH = re.compile(r"[0-9a-f]{64}")
 _FROM_STDIN = "-"
 # Um hash com folga para espaços e quebras de linha; o que passar disso é malformado.
 _MAX_STDIN_CHARS = 256
+# Valor de `set-limits` que volta o item ao padrão; ausente do argparse, o item não muda.
+_DEFAULT_WORD = "default"
+_UNCHANGED = object()
 
 
 @dataclass(frozen=True)
@@ -137,6 +158,24 @@ def _argument_parser() -> argparse.ArgumentParser:
         "--user-hash", required=True, help="o user.hash de um evento, ou - para ler da entrada"
     )
     find_user.set_defaults(command=_find_user)
+
+    set_limits = commands.add_parser(
+        "set-limits", help="sobrepõe as cotas e o teto de armazenamento de uma conta"
+    )
+    set_limits.add_argument("--user", type=UUID, required=True, help="id da conta")
+    for flag, what in (
+        ("--runs-per-24h", "execuções em 24 h"),
+        ("--input-bytes-per-24h", "bytes de entrada em 24 h"),
+        ("--storage-bytes", "teto de armazenamento, em bytes"),
+    ):
+        set_limits.add_argument(
+            flag, type=_limit_value, default=_UNCHANGED, help=f"{what}, ou {_DEFAULT_WORD}"
+        )
+    set_limits.set_defaults(command=_set_limits)
+
+    usage = commands.add_parser("usage", help="consumo e limites de uma conta")
+    usage.add_argument("--user", type=UUID, required=True, help="id da conta")
+    usage.set_defaults(command=_usage)
     return parser
 
 
@@ -227,6 +266,81 @@ def _find_user(args: argparse.Namespace, context: _Context) -> int:
         return _fail(EXIT_NOT_FOUND, "nenhuma conta tem esse user.hash")
     print(owner_id)
     return EXIT_OK
+
+
+def _limit_value(text: str) -> int | None:
+    """Inteiro positivo, ou `None` para `default`; o resto é erro de uso (saída 2)."""
+    if text == _DEFAULT_WORD:
+        return None
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"use um inteiro positivo ou {_DEFAULT_WORD}") from None
+    if value <= 0:
+        raise argparse.ArgumentTypeError("o limite precisa ser positivo")
+    return value
+
+
+def _set_limits(args: argparse.Namespace, context: _Context) -> int:
+    quota_given = {
+        name: getattr(args, name)
+        for name in ("runs_per_24h", "input_bytes_per_24h")
+        if getattr(args, name) is not _UNCHANGED
+    }
+    storage_given = args.storage_bytes is not _UNCHANGED
+    if not quota_given and not storage_given:
+        return _fail(EXIT_USAGE, "nada a mudar: informe ao menos um limite")
+    try:
+        with unit_of_work(context.factory) as session:
+            if find_account(session, args.user) is None:
+                return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+            if quota_given:
+                current = quota_override(session, args.user)
+                merged = {
+                    "runs_per_24h": current.runs_per_24h,
+                    "input_bytes_per_24h": current.input_bytes_per_24h,
+                    **quota_given,
+                }
+                set_account_quota(session, args.user, **merged)
+            if storage_given:
+                capacity.set_account_storage_max(session, args.user, args.storage_bytes)
+    except capacity.StorageBelowReservedError as error:
+        return _fail(EXIT_USAGE, str(error))
+    print(f"limites da conta {args.user} atualizados", file=sys.stderr)
+    return EXIT_OK
+
+
+def _usage(args: argparse.Namespace, context: _Context) -> int:
+    defaults = QuotaLimits.from_settings(context.settings)
+    with unit_of_work(context.factory) as session:
+        if find_account(session, args.user) is None:
+            return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+        now = db_now(session)
+        daily = daily_usage(session, args.user, now)
+        executor_ms = executor_time_ms(session, args.user, now)
+        storage = capacity.usage(session, args.user)
+        override = quota_override(session, args.user)
+    quota = override.over(defaults)
+    lines = [
+        ("runs_last_24h", daily.runs),
+        ("input_bytes_last_24h", daily.input_bytes),
+        ("executor_ms_last_24h", executor_ms),
+        ("storage_reserved_bytes", storage.storage_reserved_bytes),
+        ("runs_per_24h", quota.runs_per_24h, _origin(override.runs_per_24h)),
+        ("input_bytes_per_24h", quota.input_bytes_per_24h, _origin(override.input_bytes_per_24h)),
+        (
+            "storage_bytes",
+            storage.storage_max_bytes,
+            _origin(storage.storage_max_bytes, capacity.ACCOUNT_STORAGE_MAX_BYTES),
+        ),
+    ]
+    for line in lines:
+        print("\t".join(str(field) for field in line))
+    return EXIT_OK
+
+
+def _origin(value: int | None, default: int | None = None) -> str:
+    return "padrão" if value is None or value == default else "conta"
 
 
 def _user_hash_argument(value: str) -> str:
