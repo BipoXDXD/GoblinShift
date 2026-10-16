@@ -30,6 +30,8 @@ curl http://localhost/readyz
 
 A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/livez` e `/readyz` vão para a API, `robots.txt` e os assets do build são arquivos de verdade (o que faltar é 404), e qualquer outra rota cai no `index.html`. Texto (HTML, CSS, JS, JSON, SVG, manifest) sai com gzip. `/docs` (Swagger UI servido pela própria API, sem CDN e com CSP própria) e `/openapi.json` também vão para a API. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
 
+O worker local usa uma imagem própria, `goblinshift-worker-dev` ([`docker/worker-dev.Dockerfile`](docker/worker-dev.Dockerfile)): a imagem da aplicação mais o `ffmpeg` e o `ffprobe` copiados do estágio `ffmpeg` de `docker/executor.Dockerfile`, os mesmos binários da produção (FFmpeg 8.1.2 mínimo, só `mov`/`matroska` e `file`/`pipe`; [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)), para o Media Mill rodar com o `docker compose up` puro. O estágio vira o serviço `ffmpeg-minimo`, com zero réplicas: o Compose o constrói, mas não o executa. Sem cache, o primeiro `--build` compila o FFmpeg (alguns minutos); depois o cache do BuildKit, o mesmo da imagem do executor, resolve em segundos. A imagem de produção da aplicação continua sem FFmpeg (`tests/test_compose_dev_ffmpeg.py`).
+
 O OpenObserve fica em `http://127.0.0.1:5080`, com as credenciais do `.env`.
 
 ## Verificações (as mesmas da CI)
@@ -304,7 +306,7 @@ Contra a VPS, a URL é `https://goblinshift.dev`: a borda não encaminha o acess
 
 As fixtures do Image Forge, do Detox, do PDF Press e do Media Mill saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução (os vídeos do Media Mill exigem o FFmpeg completo no `PATH`, como os testes), junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 
-Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
+Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`), com o FFmpeg mínimo copiado da imagem do executor. Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
 ## Estrutura
 

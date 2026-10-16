@@ -94,6 +94,8 @@ export interface FakeApi {
    * resultados são essas saídas (e os previews delas) no lugar do pacote.
    */
   seedRun(overrides: RunOverrides, outputs?: readonly SeededOutput[]): string;
+  /** O prazo das saídas acaba: o /results passa a dizer `expired`, com o vencimento passado. */
+  expireResults(runId: string): void;
   /** Sessão, termos e chaves da conta (fakeAccount.ts). */
   readonly account: FakeAccount;
   /**
@@ -180,6 +182,7 @@ export async function installFakeApi(
     unhandled: state.unhandled,
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
     seedRun: (overrides, outputs) => state.seedRun(overrides, outputs),
+    expireResults: (runId) => state.runsWithExpiredOutputs.add(runId),
     account,
     signIn: (options) => account.signIn(new URL(E2E.baseUrl).origin, options),
   };
@@ -197,9 +200,9 @@ class FakeState {
   readonly uploads = new Map<string, StoredUpload>();
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
-  /** Execução de cada artefato publicado, para a disponibilidade e a exclusão das saídas. */
-  readonly artifactRuns = new Map<string, { runId: string; role: ArtifactReference["role"] }>();
+  /** Execuções cujas saídas foram excluídas ou venceram: o /results diz a disponibilidade. */
   readonly runsWithoutOutputs = new Set<string>();
+  readonly runsWithExpiredOutputs = new Set<string>();
   readonly presets = new Map<string, Preset>();
   readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
@@ -239,8 +242,6 @@ class FakeState {
       await this.results(route, id);
     } else if (method === "DELETE" && resource === "runs" && id && action === "artifacts") {
       await this.deleteRunArtifacts(route, id);
-    } else if (method === "GET" && resource === "artifacts" && id && segments.length === 2) {
-      await this.artifactDetails(route, id);
     } else if (method === "GET" && resource === "artifacts" && id && action === "download") {
       // O Chromium cancela download vindo do route.fulfill: segue para o servidor local, que
       // entrega o que publishArtifacts gravou (e2e/server/serve-dist.ts).
@@ -460,23 +461,6 @@ class FakeState {
     }
   }
 
-  private async artifactDetails(route: Route, id: string): Promise<void> {
-    const published = this.artifactRuns.get(id);
-    if (published === undefined) {
-      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
-      return;
-    }
-    const details: Schemas["ArtifactDetails"] = {
-      id,
-      role: published.role,
-      size: 0,
-      sha256: "0".repeat(64),
-      expires_at: LATER,
-      availability: this.runsWithoutOutputs.has(published.runId) ? "deleted" : "available",
-    };
-    await fulfillJson(route, details, { status: 200 });
-  }
-
   /**
    * Como runs/cancellation.py: a fila cancela na hora (200 `canceled`), o trabalho em curso passa a
    * `stopping` (202) e vira `canceled` na consulta seguinte; terminal devolve o que é (200).
@@ -510,20 +494,32 @@ class FakeState {
       await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
       return;
     }
+    const availability = this.availabilityOf(id);
     const artifacts =
       stored.outputs.length > 0
-        ? this.publishSeededOutputs(stored.outputs)
-        : this.publishArtifacts(stored);
+        ? this.publishSeededOutputs(stored.outputs, availability)
+        : this.publishArtifacts(stored, availability);
     const results: Schemas["RunResultsResponse"] = {
       published: true,
-      expires_at: LATER,
+      expires_at: this.runsWithExpiredOutputs.has(id) ? NOW : LATER,
       artifacts,
     };
     await fulfillJson(route, results, { status: 200 });
   }
 
+  /** Como a API: excluídas valem mais que vencidas; as saídas de uma execução andam juntas. */
+  private availabilityOf(runId: string): ArtifactReference["availability"] {
+    if (this.runsWithoutOutputs.has(runId)) {
+      return "deleted";
+    }
+    return this.runsWithExpiredOutputs.has(runId) ? "expired" : "available";
+  }
+
   /** Pacote `<receita>.zip` (nome da API real, packaging/spec.py) e um arquivo por entrada. */
-  private publishArtifacts(stored: StoredRun): ArtifactReference[] {
+  private publishArtifacts(
+    stored: StoredRun,
+    availability: ArtifactReference["availability"],
+  ): ArtifactReference[] {
     const recipeId = stored.run.recipe_id;
     const outputs = stored.inputIds.flatMap((uploadId) => {
       const upload = this.uploads.get(uploadId);
@@ -537,7 +533,6 @@ class FakeState {
     ];
     return files.map(({ role, name, body }) => {
       const artifactId = randomUUID();
-      this.artifactRuns.set(artifactId, { runId: stored.run.id, role });
       writeArtifact(this.#artifactsDir, artifactId, {
         fileName: name,
         body,
@@ -548,14 +543,17 @@ class FakeState {
         logical_name: name,
         role,
         file_name: name,
-        availability: "available" as const,
+        availability,
         source_artifact_id: null,
       };
     });
   }
 
   /** As saídas semeadas, cada uma seguida do seu preview, como a publicação do worker grava. */
-  private publishSeededOutputs(outputs: readonly SeededOutput[]): ArtifactReference[] {
+  private publishSeededOutputs(
+    outputs: readonly SeededOutput[],
+    availability: ArtifactReference["availability"],
+  ): ArtifactReference[] {
     return outputs.flatMap((output) => {
       const artifactId = randomUUID();
       writeArtifact(this.#artifactsDir, artifactId, {
@@ -568,7 +566,7 @@ class FakeState {
         logical_name: output.name,
         role: "output",
         file_name: output.name,
-        availability: "available",
+        availability,
         source_artifact_id: null,
       };
       if (output.preview === undefined) {
@@ -580,7 +578,7 @@ class FakeState {
         logical_name: `previews/${output.preview.name}`,
         role: "preview",
         file_name: output.preview.name,
-        availability: "available",
+        availability,
         source_artifact_id: artifactId,
       };
       return [reference, preview];
