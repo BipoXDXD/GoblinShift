@@ -12,10 +12,15 @@ interface ConfirmDialogProps {
   readonly confirmLabel: string;
   readonly cancelLabel: string;
   readonly onConfirm: () => void;
-  /** Cancelar, Esc ou o fechamento pelo navegador. */
+  /**
+   * Cancelar, Esc ou o fechamento pelo navegador. Quem chama fecha sempre (`open` false): o
+   * elemento já pode estar fechado, e o estado não pode divergir dele.
+   */
   readonly onCancel: () => void;
   /** A confirmação fica `aria-disabled` (digitação pendente, pedido em curso). */
   readonly confirmBlocked?: boolean;
+  /** Pedido em curso: o Esc não fecha, para a resposta aparecer no diálogo. */
+  readonly busy?: boolean;
   /** Vermelho só aqui, onde a ação destrutiva é a primária (RUI cap. 2). */
   readonly destructive?: boolean;
 }
@@ -34,6 +39,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   confirmBlocked = false,
+  busy = false,
   destructive = true,
 }: ConfirmDialogProps): ReactElement {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -58,6 +64,12 @@ export function ConfirmDialog({
       ref={dialog}
       aria-labelledby={titleId}
       aria-describedby={bodyId}
+      onCancel={(event) => {
+        // O Chrome ainda força o fechamento no Esc seguinte; aí o onClose avisa quem chamou.
+        if (busy) {
+          event.preventDefault();
+        }
+      }}
       onClose={onCancel}
       className="m-auto w-full max-w-md rounded-lg bg-surface-raised p-6 text-fg shadow-dialog"
     >

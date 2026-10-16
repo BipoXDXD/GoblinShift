@@ -25,6 +25,18 @@ const runResultsSchema = z.object({
   artifacts: z.array(resultReferenceSchema),
 });
 
+const artifactDetailsSchema = z.object({
+  id: z.uuid(),
+  role: z.enum(["output", "report", "manifest", "package", "preview"]),
+  size: z.number().int(),
+  sha256: z.string(),
+  expires_at: z.iso.datetime({ offset: true }),
+  availability: z.enum(["available", "expired", "deleted"]),
+});
+
+/** O 202 do DELETE chega sem corpo; só o status importa. */
+const acceptedSchema = z.unknown();
+
 // `status` é string na spec: o cancelamento devolve o estado real, e enum de saída pode crescer.
 const cancelOutcomeSchema = z.object({
   id: z.uuid(),
@@ -33,6 +45,7 @@ const cancelOutcomeSchema = z.object({
 });
 
 export type AcceptedRun = z.infer<typeof acceptedRunSchema>;
+export type ArtifactDetails = z.infer<typeof artifactDetailsSchema>;
 export type CancelOutcome = z.infer<typeof cancelOutcomeSchema>;
 export type RunResults = z.infer<typeof runResultsSchema>;
 
@@ -88,6 +101,33 @@ export async function getRunResults(
     ...(signal === undefined ? {} : { signal }),
   });
   return response.data;
+}
+
+/** GET /artifacts/{id}: metadados e disponibilidade (vencido ou excluído) de um artefato. */
+export async function getArtifact(
+  client: ApiClient,
+  artifactId: string,
+  signal?: AbortSignal,
+): Promise<ArtifactDetails> {
+  const response = await client.request({
+    method: "GET",
+    path: `/api/v1/artifacts/${encodeURIComponent(artifactId)}`,
+    schema: artifactDetailsSchema,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return response.data;
+}
+
+/**
+ * DELETE /runs/{id}/artifacts: exclui as saídas de uma execução terminal antes das 48 h (202),
+ * sem tocar nos originais. Execução que ainda não terminou responde 409.
+ */
+export async function deleteRunArtifacts(client: ApiClient, runId: string): Promise<void> {
+  await client.request({
+    method: "DELETE",
+    path: `/api/v1/runs/${encodeURIComponent(runId)}/artifacts`,
+    schema: acceptedSchema,
+  });
 }
 
 /**

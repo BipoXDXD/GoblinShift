@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { catalogVersion } from "../test/catalog";
-import { findRecipe, RECIPE_LIST } from "./registry";
+import {
+  findRecipe,
+  RECIPE_LIST,
+  withoutUploadBoundParameters,
+  type RecipeModule,
+} from "./registry";
 
 describe("findRecipe", () => {
   it.each([
@@ -50,5 +55,42 @@ describe("formFor", () => {
     const recipe = findRecipe("csv-janitor");
 
     expect(recipe?.formFor({ ...catalogVersion("csv-janitor"), ...override })).toBeNull();
+  });
+});
+
+function recipeOf(id: string): RecipeModule {
+  const recipe = findRecipe(id);
+  if (recipe === null) {
+    throw new Error(`receita ${id} ausente do registro`);
+  }
+  return recipe;
+}
+
+describe("withoutUploadBoundParameters", () => {
+  const page = { upload_id: "0b9f6c1e-3a2d-4e5f-8a7b-6c5d4e3f2a1b", page_number: 1 };
+
+  it("tira o select do PDF Press e avisa que descartou", () => {
+    expect(
+      withoutUploadBoundParameters(recipeOf("pdf-press"), { operation: "select", select: [page] }),
+    ).toEqual({ parameters: { operation: "select" }, dropped: true });
+  });
+
+  it.each([
+    ["select nulo", { operation: "merge", select: null }, { operation: "merge" }],
+    ["sem select", { operation: "split" }, { operation: "split" }],
+  ])("PDF Press com %s não avisa", (_case, parameters, expected) => {
+    expect(withoutUploadBoundParameters(recipeOf("pdf-press"), parameters)).toEqual({
+      parameters: expected,
+      dropped: false,
+    });
+  });
+
+  it("receita sem parâmetros ligados a uploads fica igual, até com um campo chamado select", () => {
+    const parameters = { output_delimiter: ";", select: [page] };
+
+    expect(withoutUploadBoundParameters(recipeOf("csv-janitor"), parameters)).toEqual({
+      parameters,
+      dropped: false,
+    });
   });
 });

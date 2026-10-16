@@ -136,20 +136,20 @@ describe("budgetViolations", () => {
   });
 
   describe("ilustrações dos estados (ADR 030)", () => {
-    it("cada AVIF ou WebP fora do 3D até 20 KB", () => {
+    it("cada AVIF ou WebP fora do 3D até 64 KB", () => {
       expect(
         budgetViolations(
           [
             ...WITHIN,
-            file("assets/lua-256w-x.avif", 20 * KB),
-            file("assets/lua-256w-x.webp", 20 * KB),
+            file("assets/lua-768w-x.avif", 64 * KB),
+            file("assets/lua-768w-x.webp", 64 * KB),
           ],
           INDEX,
         ),
       ).toEqual([]);
       expect(
-        budgetViolations([...WITHIN, file("assets/ada-256w-x.webp", 20 * KB + 1)], INDEX),
-      ).toEqual(["Ilustração (assets/ada-256w-x.webp): 20,0 KB passa do teto de 20 KB"]);
+        budgetViolations([...WITHIN, file("assets/nyx-768w-x.webp", 64 * KB + 1)], INDEX),
+      ).toEqual(["Ilustração (assets/nyx-768w-x.webp): 64,0 KB passa do teto de 64 KB"]);
     });
   });
 });
