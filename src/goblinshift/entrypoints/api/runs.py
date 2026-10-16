@@ -147,7 +147,7 @@ class RunResponse(BaseModel):
     # Preset de origem, se houve; nulo também quando o preset foi excluído.
     preset_id: UUID | None
     # Vencimento do primeiro resultado ainda disponível; nulo se não há resultado disponível
-    # (antes da publicação, sem saídas, excluídos ou vencidos pela manutenção).
+    # (antes da publicação, sem saídas, excluídos ou vencidos).
     results_expire_at: datetime | None
 
 
