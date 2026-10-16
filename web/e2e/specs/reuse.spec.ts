@@ -24,8 +24,8 @@ test("Histórico → Reusar configuração → Bancada com os parâmetros da exe
   });
   const historico = new HistoricoPage(page);
   await historico.open();
-  const [row] = await historico.rows().all();
-  if (row === undefined) throw new Error("sem linha no Histórico");
+  // all() não espera a lista chegar; o expect espera a primeira linha.
+  const row = historico.rows().first();
   await expect(row.getByText(/^Resultados até /)).toBeVisible();
 
   await row.getByRole("link", { name: /^Reusar configuração/ }).click();
