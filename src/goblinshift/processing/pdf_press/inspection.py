@@ -132,14 +132,17 @@ def _require_object_count(count: int, where: str, limits: Limits) -> None:
 def _bounded_page_count(pdf: pikepdf.Pdf, where: str, page_budget: int) -> int:
     """Conta as folhas da árvore de páginas andando-a à mão, com tetos que valem antes do qpdf.
 
-    Profundidade até `MAX_PAGE_TREE_DEPTH`; cada nó indireto visitado uma vez só (ciclo ou página
-    repetida é arquivo danificado); uma lista /Kids maior que o que resta do teto de páginas é
-    recusada antes de ser percorrida; o /Count da raiz tem de bater com as folhas contadas. Só
-    depois disso o `pdf.pages` do qpdf é usado, já sobre uma árvore conferida.
+    Segue a regra do qpdf, que decide pelo `/Kids` e não pelo `/Type`: nó com `/Kids` é
+    intermediário e tem de ser `/Pages`, com `/Kids` em array; nó sem `/Kids` é folha e tem de
+    ser `/Page`; a raiz é intermediária. Qualquer divergência é arquivo danificado, para a
+    contagem daqui nunca diferir da do qpdf. Profundidade até `MAX_PAGE_TREE_DEPTH`; cada nó
+    indireto visitado uma vez só (ciclo ou página repetida falham); uma lista /Kids maior que o
+    que resta do teto de páginas é recusada antes de ser percorrida; o /Count da raiz tem de bater.
+    Só depois disso o `pdf.pages` do qpdf roda, sobre uma árvore já conferida.
     """
     root = pdf.Root.get("/Pages")
-    if not isinstance(root, Dictionary) or not root.is_indirect:
-        raise _invalid(where, "árvore de páginas sem raiz")
+    if not isinstance(root, Dictionary) or "/Kids" not in root:
+        raise _invalid(where, "árvore de páginas sem raiz /Pages")
     leaves = 0
     visited: set[tuple[int, int]] = set()
     stack: list[tuple[pikepdf.Object, int]] = [(root, 0)]
@@ -150,26 +153,28 @@ def _bounded_page_count(pdf: pikepdf.Pdf, where: str, page_budget: int) -> int:
         if not isinstance(node, Dictionary) or not node.is_indirect or node.objgen in visited:
             raise _invalid(where, "árvore de páginas com ciclo, nó direto ou página repetida")
         visited.add(node.objgen)
-        if str(node.get("/Type", "")) == "/Page":
-            leaves += 1
-            if leaves > page_budget:
-                raise _page_limit(where)
+        if "/Kids" in node:
+            stack.extend((kid, depth + 1) for kid in _kids(node, where, page_budget - leaves))
             continue
-        stack.extend((kid, depth + 1) for kid in _kids(node, where, page_budget - leaves))
+        if str(node.get("/Type", "")) != "/Page":
+            raise _invalid(where, "árvore de páginas com folha que não é /Page")
+        leaves += 1
+        if leaves > page_budget:
+            raise _page_limit(where)
     _require_declared_count(root, leaves, where)
     if leaves == 0:
         raise _invalid(where, "documento sem páginas")
     if len(pdf.pages) != leaves:
-        raise _invalid(where, "árvore de páginas incoerente")
+        raise _invalid(where, "árvore de páginas incoerente com a do qpdf")
     return leaves
 
 
 def _kids(node: pikepdf.Object, where: str, room: int) -> list[pikepdf.Object]:
     if str(node.get("/Type", "")) != "/Pages":
-        raise _invalid(where, "árvore de páginas com nó que não é /Pages nem /Page")
+        raise _invalid(where, "árvore de páginas com nó intermediário que não é /Pages")
     kids = node.get("/Kids")
     if not isinstance(kids, Array):
-        raise _invalid(where, "árvore de páginas com /Kids inválido")
+        raise _invalid(where, "árvore de páginas com /Kids que não é array")
     # Cada filho leva ao menos uma página; mais filhos do que páginas restantes já estoura o teto.
     if len(kids) > room:
         raise _page_limit(where)

@@ -292,3 +292,20 @@ def page_tree_with_many_kids(count: int) -> bytes:
             3: _PAGE,
         }
     )
+
+
+def page_tree_with_node(node: bytes) -> bytes:
+    """Raiz com um filho só, o nó 3 dado, que pode trazer /Type e /Kids divergentes."""
+    return raw_pdf(
+        {
+            1: _catalog(),
+            2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            3: node,
+            4: _page(3),
+            5: _page(3),
+        }
+    )
+
+
+def page_tree_with_root(root: bytes) -> bytes:
+    return raw_pdf({1: _catalog(), 2: root, 3: _PAGE})
