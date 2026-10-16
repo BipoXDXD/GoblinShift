@@ -253,6 +253,20 @@ export const TEXT = {
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
+      deletedTitle: "Resultados excluídos",
+      deletedHint:
+        "Os arquivos gerados por esta execução foram excluídos. Os que você enviou não mudam.",
+      expiredTitle: "Resultados expirados",
+      expiredHint: "Os resultados ficam disponíveis por 48 horas depois do término da execução.",
+      remove: "Excluir resultados",
+      removeTitle: "Excluir os resultados desta execução?",
+      removeBody:
+        "Os arquivos gerados deixam de poder ser baixados na hora. Os arquivos que você enviou não são apagados. Não dá para desfazer.",
+      removeConfirm: "Excluir resultados",
+      removeCancel: "Cancelar",
+      removed: "Resultados excluídos.",
+      removeNotFinished:
+        "A execução ainda não terminou; os resultados só podem ser excluídos depois.",
     },
   },
   recipeFields: {
