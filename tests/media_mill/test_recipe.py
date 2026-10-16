@@ -41,6 +41,12 @@ def ok_item(workspace: Workspace, params: Params | None = None) -> ItemOk:
     return item
 
 
+def milliseconds(item: ItemOk, key: str) -> int:
+    value = item.details[key]
+    assert isinstance(value, int) and not isinstance(value, bool), (key, value)
+    return value
+
+
 def rejected_item(workspace: Workspace, params: Params | None = None) -> ItemRejected:
     report = workspace.run(params)
     item = report.items[0]
@@ -137,11 +143,14 @@ def test_miniatura_sem_quadro_depois_do_alvo_usa_o_ultimo_anterior_com_aviso(
     # Vídeo de 1 s num WebM de 3 s: os alvos de 50% (1,5 s) e 90% (2,7 s) passam do último quadro.
     assert len(item.outputs) == 3
     assert [w.code for w in item.warnings] == ["THUMBNAIL_BEFORE_TARGET"] * 2
-    # 10%: o primeiro quadro em ou depois de ~0,301 s é o de 10/30 s; 50% e 90% ficam no último
-    # quadro, 29/30 s. A duração do WebM vem do Opus (~3,008 s), então o alvo varia por encoder.
-    effective = [item.details[f"thumbnail_{p}_effective_ms"] for p in ("10", "50", "90")]
-    assert effective == [333, 967, 967]
-    assert item.details["thumbnail_90_requested_ms"] in range(2700, 2711)
+    # Os instantes exatos dependem do encoder do ambiente (timestamps do WebM em ms, duração vinda
+    # do Opus): o 10% cai no primeiro quadro em ou depois do alvo, a menos de um quadro (1/30 s);
+    # 50% e 90% caem no mesmo último quadro, antes de 1 s.
+    requested = [milliseconds(item, f"thumbnail_{p}_requested_ms") for p in ("10", "50", "90")]
+    effective = [milliseconds(item, f"thumbnail_{p}_effective_ms") for p in ("10", "50", "90")]
+    assert requested[0] <= effective[0] <= requested[0] + 34
+    assert effective[1] == effective[2]
+    assert 900 <= effective[2] < 1000 < requested[1]
 
 
 def test_miniatura_cabe_em_640_sem_distorcer(workspace: Workspace, clips: ClipLibrary) -> None:
