@@ -19,6 +19,10 @@ Fatia 5 (etapa 0, também aditiva):
   não um campo opcional do `ItemOk`, a "duplicata com saídas" não tem como ser representada.
 - `OutputDir.create` aceita um `OutputGroup`: a subpasta de `out/` e do ZIP (1.2 e 1.4), de uma
   lista fechada que a coleta do worker também impõe (ADR 019).
+
+PDF Press (ADR 035, aditivo):
+- `InputFile.upload_id` liga a entrada ao upload da Run, para a seleção de páginas do PDF Press
+  citar uploads como o contrato HTTP cita (1.5). Vem do `context.json`; `None` fora dele.
 """
 
 import re
@@ -36,6 +40,8 @@ class InputFile:
     original_name: str  # dado, nunca caminho
     size: int
     sha256: str
+    # UUID canônico do upload; None quando o worker não o escreveu no context.json (ADR 021).
+    upload_id: str | None = None
 
 
 class ItemWarningCode(StrEnum):
@@ -48,6 +54,15 @@ class ItemWarningCode(StrEnum):
     CSV_ALL_RECORDS_FILTERED = "CSV_ALL_RECORDS_FILTERED"
     CSV_FORMULA_CELLS = "CSV_FORMULA_CELLS"
     CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
+    # PDF Press: nenhuma página da entrada entrou na seleção.
+    INPUT_NOT_SELECTED = "INPUT_NOT_SELECTED"
+
+
+class ItemNoticeCode(StrEnum):
+    """Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
+    para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."""
+
+    IMAGE_P3_CONVERTED = "IMAGE_P3_CONVERTED"
 
 
 @dataclass(frozen=True)
@@ -94,6 +109,13 @@ class ItemOk:
     # Fatos registrados que não são aviso (não mudam o estado para succeeded_with_warnings):
     # dimensões, formato, perfil assumido ou convertido, quadros MPO descartados, tipo do Detox.
     details: Mapping[str, DetailValue] = field(default_factory=dict)
+    # Os fatos que a interface mostra por código (o detalhe da Run não lê `details`).
+    notices: Sequence[ItemNoticeCode] = ()
+
+    def __post_init__(self) -> None:
+        for notice in self.notices:
+            if notice not in ItemNoticeCode:
+                raise ValueError(f"{notice!r} não é nota do catálogo")
 
 
 class ItemRejectionCode(StrEnum):
@@ -157,6 +179,12 @@ class FailureCode(StrEnum):
     NO_VALID_OUTPUTS = "NO_VALID_OUTPUTS"
     OUTPUT_LIMIT_EXCEEDED = "OUTPUT_LIMIT_EXCEEDED"
     REPORT_LIMIT_EXCEEDED = "REPORT_LIMIT_EXCEEDED"
+    # Receitas que compõem um resultado de várias entradas (PDF Press, 1.5) falham a execução
+    # inteira em vez de rejeitar o item: uma composição incompleta não é sucesso (ADR 035).
+    INPUT_LIMIT_EXCEEDED = "INPUT_LIMIT_EXCEEDED"
+    PDF_INVALID = "PDF_INVALID"
+    PDF_UNSUPPORTED_FEATURE = "PDF_UNSUPPORTED_FEATURE"
+    PDF_PAGE_NOT_FOUND = "PDF_PAGE_NOT_FOUND"
 
 
 class RecipeFailure(Exception):  # noqa: N818 - nome fixado pelo plano (1.6 e 3.2)

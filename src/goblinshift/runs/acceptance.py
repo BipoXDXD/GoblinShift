@@ -92,6 +92,7 @@ RUN_OUTPUT_CEILING_BYTES = (
 # Versões que limitam a soma das entradas (o Detox copia cada entrada aceita para a saída).
 _MAX_TOTAL_INPUT_BYTES = "max_total_input_bytes"
 _MIN_RETRY_AFTER = timedelta(seconds=1)
+_NOT_AN_INPUT = "o upload não está entre as entradas da execução"
 _CANONICAL_SEPARATORS = (",", ":")
 
 
@@ -164,12 +165,10 @@ class ValidatedRun:
 
     @property
     def command_hash(self) -> bytes:
+        if self.preset_id is not None:
+            return preset_run_hash(self.preset_id, self.input_upload_ids)
         return command_hash(
-            self.recipe.recipe_id,
-            self.recipe.version,
-            self.parameters,
-            self.input_upload_ids,
-            preset_id=self.preset_id,
+            self.recipe.recipe_id, self.recipe.version, self.parameters, self.input_upload_ids
         )
 
 
@@ -193,23 +192,44 @@ def command_hash(
     recipe_version: int,
     parameters: object,
     input_upload_ids: Sequence[UUID],
-    *,
-    preset_id: UUID | None = None,
 ) -> bytes:
     """SHA-256 do JSON canônico: chaves ordenadas, sem espaços, listas na ordem recebida (1.6).
 
-    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`. O preset de
-    origem entra só quando existe, para o hash dos comandos sem preset continuar o mesmo: a
-    mesma chave com e sem preset é outro comando.
+    Só é estável porque os defaults nunca mudam dentro de uma `recipe_version`.
     """
-    document: dict[str, object] = {
-        "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
-        "parameters": parameters,
-        "recipe_id": recipe_id,
-        "recipe_version": recipe_version,
-    }
-    if preset_id is not None:
-        document["preset_id"] = str(preset_id)
+    return _canonical_hash(
+        {
+            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+            "parameters": parameters,
+            "recipe_id": recipe_id,
+            "recipe_version": recipe_version,
+        }
+    )
+
+
+def preset_run_hash(preset_id: UUID, input_upload_ids: Sequence[UUID]) -> bytes:
+    """Hash de `POST /presets/{id}/runs`: o comando do cliente é o preset e as entradas.
+
+    A configuração do preset fica de fora: editá-lo ou excluí-lo entre a chamada e o retry não
+    pode transformar o retry em outro comando (422) nem em 404; o retry repete a Run aceita.
+    """
+    return _canonical_hash(
+        {
+            "input_upload_ids": [str(upload_id) for upload_id in input_upload_ids],
+            "preset_id": str(preset_id),
+        }
+    )
+
+
+def find_replay(
+    session: Session, owner_id: UUID, idem_key: str | None, digest: bytes
+) -> Accepted | None:
+    """Run já aceita com esta chave vigente e o mesmo comando; outro comando levanta
+    `IdempotencyKeyReusedError`. Para quem precisa saber do replay antes de ler outro recurso."""
+    return _find_live_record(session, owner_id, parse_idempotency_key(idem_key), digest)
+
+
+def _canonical_hash(document: dict[str, object]) -> bytes:
     canonical = json.dumps(
         document,
         sort_keys=True,
@@ -239,6 +259,7 @@ def validate_run(command: RunCommand) -> ValidatedRun:
             [_under("parameters", field_error) for field_error in error.errors]
         ) from None
     _check_input_shape(command.input_upload_ids, recipe.limits["max_inputs"])
+    _check_upload_references(recipe, parameters, command.input_upload_ids)
     return ValidatedRun(recipe, command.input_upload_ids, parameters, command.preset_id)
 
 
@@ -305,6 +326,26 @@ def _check_input_shape(upload_ids: Sequence[UUID], max_inputs: int) -> None:
         _refuse("input_upload_ids", "a lista não aceita IDs repetidos")
     if len(upload_ids) > max_inputs:
         _refuse("input_upload_ids", f"a receita aceita no máximo {max_inputs} entradas")
+
+
+def _check_upload_references(
+    recipe: RecipeVersion, parameters: dict[str, object], upload_ids: Sequence[UUID]
+) -> None:
+    """Uploads citados nos parâmetros (o `select` do PDF Press) têm de estar entre as entradas.
+
+    Sem entradas (o `validate_only` não as exige) não há com o que comparar. A recusa é
+    `VALIDATION_FAILED` no campo, nunca 404: não revela se o upload existe (1.6).
+    """
+    if not upload_ids:
+        return
+    known = set(upload_ids)
+    errors = [
+        FieldError(f"parameters.{reference.location}", _NOT_AN_INPUT)
+        for reference in recipe.upload_references(parameters)
+        if reference.upload_id not in known
+    ]
+    if errors:
+        raise InvalidRunCommandError(errors)
 
 
 def _lock_idempotency_key(session: Session, owner_id: UUID, key: str) -> None:

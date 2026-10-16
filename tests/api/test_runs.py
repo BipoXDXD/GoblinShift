@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import CATALOG, Catalog, VersionStatus
@@ -59,7 +59,17 @@ RUN_KEYS = {
     "results_expire_at",
 }
 DETAIL_KEYS = RUN_KEYS | {"summary", "items"}
-ITEM_KEYS = {"position", "upload_id", "status", "error_code", "warnings", "counts", "duplicate_of"}
+ITEM_KEYS = {
+    "position",
+    "upload_id",
+    "original_name",
+    "status",
+    "error_code",
+    "warnings",
+    "notices",
+    "counts",
+    "duplicate_of",
+}
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
 
@@ -446,6 +456,59 @@ def test_detox_recusa_name_prefix_enviado_com_name_mode_preserve(
     assert_problem(response, 422, "VALIDATION_FAILED")
 
 
+@pytest.mark.parametrize("prefix", ["doc", "File", "file2"])
+def test_detox_recusa_com_preserve_prefixo_diferente_do_default(
+    client: TestClient, factory: sessionmaker[Session], prefix: str
+) -> None:
+    payload = {
+        "recipe_id": "downloads-detox",
+        "recipe_version": 1,
+        "parameters": {"name_mode": "preserve", "name_prefix": prefix},
+    }
+
+    response = post_run(client, Account(factory), payload, None, "?validate_only=true")
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [e["field"] for e in problem["errors"]] == ["body.parameters"]
+
+
+def test_reenviar_os_parametros_de_uma_execucao_do_detox_e_aceito(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A13: os parâmetros resolvidos trazem o `name_prefix` default mesmo com `preserve`;
+    # repetir a configuração (2.2, Histórico) não pode esbarrar nele.
+    account = Account(factory)
+    first = post_run(
+        client,
+        account,
+        {**body(ready_inputs(factory, storage, account.id)), "recipe_id": "downloads-detox"},
+        str(uuid.uuid4()),
+    )
+    resolved = client.get(f"{RUNS}/{first.json()['id']}", headers=account.headers).json()
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == uuid.UUID(first.json()["id"]))
+            .values(status="succeeded", finished_at=func.now())
+        )
+    assert resolved["parameters"]["name_prefix"] == "file"
+    assert resolved["parameters"]["name_mode"] == "preserve"
+
+    again = post_run(
+        client,
+        account,
+        {
+            **body(ready_inputs(factory, storage, account.id)),
+            "recipe_id": "downloads-detox",
+            "parameters": resolved["parameters"],
+        },
+        str(uuid.uuid4()),
+    )
+
+    assert again.status_code == 202, again.text
+    assert again.json()["parameters"] == resolved["parameters"]
+
+
 def test_validate_only_nao_confere_uploads_nem_exige_chave(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -497,6 +560,31 @@ def test_validate_only_com_parametro_invalido_responde_422(
     )
 
     assert_problem(response, 422, "VALIDATION_FAILED")
+
+
+def test_pdf_press_com_pagina_de_upload_fora_das_entradas_responde_422_no_campo(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # ADR 035: o select cita só uploads da execução; o erro aponta o campo, nunca 404 (1.6).
+    account = Account(factory)
+    entrada, alheio = uuid.uuid4(), uuid.uuid4()
+    payload = {
+        "recipe_id": "pdf-press",
+        "recipe_version": 1,
+        "input_upload_ids": [str(entrada)],
+        "parameters": {
+            "operation": "select",
+            "select": [{"upload_id": str(alheio), "page_number": 1}],
+        },
+    }
+
+    response = post_run(client, account, payload, None, "?validate_only=true")
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [error["field"] for error in response.json()["errors"]] == [
+        "body.parameters.select.0.upload_id"
+    ]
+    assert str(alheio) not in response.text
 
 
 def test_criar_exige_o_escopo_runs_write(
@@ -762,6 +850,24 @@ def test_cursor_vencido_responde_400(
     assert_problem(response, 400, "BAD_REQUEST")
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "created_from=0001-01-01T00:00:00%2B01:00",
+        "created_to=9999-12-31T23:59:59-01:00",
+    ],
+    ids=["antes-do-ano-1-em-utc", "depois-do-ano-9999-em-utc"],
+)
+def test_data_que_sai_da_faixa_em_utc_responde_422(
+    client: TestClient, factory: sessionmaker[Session], query: str
+) -> None:
+    account = Account(factory)
+
+    response = client.get(f"{RUNS}?{query}", headers=account.headers)
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+
+
 def test_data_sem_fuso_no_filtro_responde_422(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -806,12 +912,15 @@ def test_resultados_publicados_em_ordem_de_posicao(
             "logical_name": "dados.csv",
             "role": "output",
             "file_name": "output-final.dat",
+            # `publish` vence em BASE_TIME + 48 h, que já passou.
+            "availability": "expired",
         },
         {
             "artifact_id": str(report),
             "logical_name": "report.json",
             "role": "report",
             "file_name": "report-final.dat",
+            "availability": "expired",
         },
     ]
 
@@ -890,6 +999,7 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         "csv-janitor",
         "image-forge",
         "downloads-detox",
+        "pdf-press",
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
@@ -1001,7 +1111,12 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
     run_id = insert_finished_run(
         factory, account.id, BASE_TIME, status=Status.SUCCEEDED_WITH_WARNINGS
     )
-    ok = {"warnings": ["CSV_FORMULA_CELLS"], "counts": {"records_read": 2}, "duplicate_of": None}
+    ok = {
+        "warnings": ["CSV_FORMULA_CELLS"],
+        "notices": ["IMAGE_P3_CONVERTED"],
+        "counts": {"records_read": 2},
+        "duplicate_of": None,
+    }
     uploads = with_items(
         factory,
         storage,
@@ -1027,27 +1142,33 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
         {
             "position": 0,
             "upload_id": str(uploads[0]),
+            "original_name": "a.txt",
             "status": "ok",
             "error_code": None,
             "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": ["IMAGE_P3_CONVERTED"],
             "counts": {"records_read": 2},
             "duplicate_of": None,
         },
         {
             "position": 1,
             "upload_id": str(uploads[1]),
+            "original_name": "a.txt",
             "status": "rejected",
             "error_code": "CSV_STRUCTURE_INVALID",
             "warnings": [],
+            "notices": [],
             "counts": {},
             "duplicate_of": None,
         },
         {
             "position": 2,
             "upload_id": str(uploads[2]),
+            "original_name": "a.txt",
             "status": "duplicate",
             "error_code": None,
             "warnings": [],
+            "notices": [],
             "counts": {},
             "duplicate_of": 0,
         },
@@ -1075,6 +1196,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
     run_id = insert_finished_run(factory, account.id, BASE_TIME)
     tampered = {
         "warnings": ["CSV_FORMULA_CELLS", "Ana Souza <ana@x.com>"],
+        "notices": ["ana@x.com"],
         "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
         "duplicate_of": None,
         "original_name": "salarios-ana.csv",
@@ -1091,6 +1213,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
 
     [item] = response.json()["items"]
     assert item["warnings"] == ["CSV_FORMULA_CELLS"]
+    assert item["notices"] == []
     assert item["counts"] == {"records_read": 1}
     assert item["error_code"] is None
     assert "ana" not in response.text.lower()
@@ -1107,9 +1230,8 @@ def test_listagem_traz_parametros_e_validade_dos_resultados_sem_itens(
 
     assert listed.keys() == RUN_KEYS
     assert listed["parameters"] == {}
-    assert listed["results_expire_at"] == (BASE_TIME + timedelta(hours=48)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    # `publish` vence em BASE_TIME + 48 h, que já passou: nada disponível.
+    assert listed["results_expire_at"] is None
 
 
 def test_resultados_excluidos_deixam_a_validade_nula(
@@ -1124,3 +1246,78 @@ def test_resultados_excluidos_deixam_a_validade_nula(
     body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
 
     assert body["results_expire_at"] is None
+
+
+def test_resultados_trazem_a_disponibilidade_de_cada_artefato(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).where(artifact.c.id == table).values(deleted_at=BASE_TIME))
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == report)
+            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+
+    artifacts = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()["artifacts"]
+
+    assert [a["availability"] for a in artifacts] == ["deleted", "expired"]
+
+
+def test_item_mostra_o_nome_original_do_upload(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+
+    [item] = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()["items"]
+
+    assert item["original_name"] == "a.txt"
+
+
+def test_resultados_vencidos_deixam_a_validade_nula_antes_da_manutencao(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # `publish` vence em BASE_TIME + 48 h, já passado; a manutenção ainda não marcou nada.
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] is None
+
+
+def test_resultados_dentro_do_prazo_trazem_a_validade(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+    later = datetime(2099, 1, 1, tzinfo=UTC)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).values(expires_at=later))
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] == "2099-01-01T00:00:00Z"
+
+
+def test_contagens_finais_so_aparecem_em_execucao_terminal(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == uuid.UUID(created["id"]))
+            .values(summary={"inputs": 1, "ok": 1, "rejected": 0, "duplicates": 0, "outputs": 1})
+        )
+
+    body = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()
+
+    assert body["summary"] is None

@@ -4,7 +4,7 @@ import type { InputFile } from "../fixtures/files";
 
 const MOVE_UP = /^Mover para cima /;
 
-export type RecipeId = "csv-janitor" | "image-forge" | "downloads-detox";
+export type RecipeId = "csv-janitor" | "image-forge" | "downloads-detox" | "pdf-press";
 
 /**
  * A Bancada de uma receita, por ações de intenção. Os seletores são só papel e nome acessível: se
@@ -69,6 +69,11 @@ export class BancadaPage {
   /** Escolhe uma opção de um campo de escolha única pelo rótulo visível. */
   async choose(field: string, option: string): Promise<void> {
     await this.#page.getByLabel(field, { exact: true }).selectOption({ label: option });
+  }
+
+  /** Aciona um botão do formulário pelo nome acessível (Adicionar página, no PDF Press). */
+  async press(button: string): Promise<void> {
+    await this.#page.getByRole("button", { name: button, exact: true }).click();
   }
 
   async fill(field: string, value: string): Promise<void> {

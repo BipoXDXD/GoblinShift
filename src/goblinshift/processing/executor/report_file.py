@@ -1,7 +1,8 @@
-"""Serialização de `report.json` (schema documentado no pacote do executor)."""
+"""Serialização de `report.json` e de `telemetry.json` (schemas documentados no pacote do
+executor)."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import assert_never
 
@@ -20,6 +21,9 @@ from goblinshift.processing.recipe import (
 MIB = 1024 * 1024
 REPORT_SCHEMA_VERSION = 1
 REPORT_MAX_BYTES = 8 * MIB  # 1.7: 8 MiB para cada relatório ou manifesto
+TIMINGS_SCHEMA_VERSION = 1
+# Fases medidas pelo executor (3.7); o worker mede a coleta e a publicação.
+TIMING_PHASES = ("inspect_ms", "process_ms", "package_ms")
 
 
 def write_report(path: Path, report: Report, job: Job, max_bytes: int = REPORT_MAX_BYTES) -> None:
@@ -67,6 +71,7 @@ def _item(item: ReportItem, original_name: str) -> dict[str, object]:
                 "counts": dict(item.counts),
                 "details": dict(item.details),
                 "warnings": _warnings(item.warnings),
+                "notices": [notice.value for notice in item.notices],
             }
         case ItemRejected():
             return {
@@ -89,3 +94,14 @@ def _item(item: ReportItem, original_name: str) -> dict[str, object]:
 
 def _warnings(warnings: Sequence[ReportWarning]) -> list[dict[str, str]]:
     return [{"code": warning.code, "detail": warning.detail} for warning in warnings]
+
+
+def write_timings(path: Path, timings: Mapping[str, int]) -> None:
+    """Grava os tempos das fases medidas, em milissegundos, com criação exclusiva.
+
+    Fica na raiz da área de trabalho, fora de `out/`: é telemetria para o worker, não entra no
+    pacote nem no manifesto, e o pacote continua determinístico.
+    """
+    document = {"schema_version": TIMINGS_SCHEMA_VERSION, **timings}
+    with path.open("x", encoding="utf-8") as target:
+        json.dump(document, target)

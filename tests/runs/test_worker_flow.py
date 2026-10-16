@@ -147,6 +147,7 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
     assert details == [
         {
             "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": [],
             "counts": {
                 "blank_lines_ignored": 0,
                 "duplicates_removed": 0,
@@ -156,7 +157,7 @@ def test_detalhe_por_item_guarda_avisos_e_contagens_sem_texto_do_arquivo(
             },
             "duplicate_of": None,
         },
-        {"warnings": [], "counts": {}, "duplicate_of": None},
+        {"warnings": [], "notices": [], "counts": {}, "duplicate_of": None},
     ]
     assert "SEGREDO" not in str(details)
 
@@ -404,5 +405,11 @@ def test_preparacao_grava_o_contexto_com_a_imagem_fixada_na_run(
     worker.prepare(claimed)
 
     context = runner.work_dir(claimed.attempt_id) / "context.json"
-    assert json.loads(context.read_bytes()) == {"executor_image": LOCAL_EXECUTOR_IMAGE}
-    assert read_context(context) == ExecutionContext(executor_image=claimed.executor_image)
+    uploads = [str(upload_id) for upload_id in claimed.input_upload_ids]
+    assert json.loads(context.read_bytes()) == {
+        "executor_image": LOCAL_EXECUTOR_IMAGE,
+        "input_upload_ids": uploads,
+    }
+    assert read_context(context) == ExecutionContext(
+        executor_image=claimed.executor_image, input_upload_ids=tuple(uploads)
+    )

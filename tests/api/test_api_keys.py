@@ -104,7 +104,8 @@ def test_get_depois_do_post_nao_traz_segredo_nem_hash(
     assert set(listed) == SUMMARY_KEYS
     assert listed["id"] == created["id"]
     assert listed["public_id"] == created["public_id"]
-    secret = created["token"].rsplit("_", 1)[1]
+    # gsk_<public_id>_<secret>: o segredo pode conter "_", então divide só nos dois primeiros.
+    secret = created["token"].split("_", 2)[2]
     assert secret not in response.text
     assert "hash" not in response.text
 
