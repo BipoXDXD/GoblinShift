@@ -17,8 +17,8 @@ uma decisão própria.
 | Jornada | `scenarios/jornada.js` | 20 contas, cada uma enviando uma tabela, criando uma execução do csv-janitor, consultando `GET /runs/{id}` a cada 2 s e baixando o primeiro artefato. A rampa leva 20 s, sustenta 1m40s e desce em 10 s. | SLO de aceitação: `POST /runs` 202 com `p(99.5)<500` ms. SLO de execução: `gs_execucao_boa` `rate>=0.99`, em até 5 min. SLO de download: primeiro byte com `p(99.5)<1000` ms. Consulta: `p(99)<500` ms. Falhas abaixo de 0,5% e checks acima de 99,5%. |
 | Fila | `scenarios/fila.js` | Com o worker parado, 12 contas pedem uma execução ao mesmo tempo. Cabem 10 na fila global; as outras recebem `503 QUEUE_FULL` com `Retry-After`. | No máximo 10 aceitas, pelo menos 1 fila cheia, 0 respostas inesperadas. |
 | Transferências | `scenarios/transferencias.js` | Uma conta envia 3 arquivos de 24 MiB ao mesmo tempo, em 5 rodadas. Cabem 2 por conta; o terceiro recebe `429 RATE_LIMITED` com `Retry-After`. | Pelo menos 1 recusa, 0 respostas inesperadas, 0 falhas. |
-| Limite por conta | `scenarios/limite-por-conta.js` | 120 leituras, 60 comandos e 10 `POST /runs` por minuto passam; a requisição seguinte recebe `429 RATE_LIMITED` com `Retry-After`. | Tudo dentro do limite passa e tudo acima é recusado. **Espera a A2** (PR #26): desligado por padrão, liga com `GS_LOAD_RATE_LIMIT=1`. |
-| Limite de `/auth/*` | `scenarios/limite-auth.js` | O `limit_req` do Nginx deixa passar 11 seguidas (10/min com rajada de 10); a 12ª recebe 429. | Idem. **Espera a fatia 6** (PR #27): desligado por padrão, liga com `GS_LOAD_AUTH=1`. |
+| Limite por conta | `scenarios/limite-por-conta.js` | 120 leituras, 60 comandos e 10 `POST /runs` por minuto passam; a requisição seguinte recebe `429 RATE_LIMITED` com `Retry-After`. | Tudo dentro do limite passa e tudo acima é recusado. Liga por padrão; `GS_LOAD_RATE_LIMIT=0` desliga. |
+| Limite de `/auth/*` | `scenarios/limite-auth.js` | O `limit_req` do Nginx deixa passar 11 seguidas (10/min com rajada de 10); a 12ª recebe 429. | Idem. Liga por padrão; `GS_LOAD_AUTH=0` desliga. |
 
 Os números dos SLOs vêm de `deploy/openobserve` (`catalog.py` e `sql/*.eventos.sql`).
 `tests/test_load_script.py` lê esses arquivos e reprova se um threshold deixar de acompanhar o SLO.
@@ -36,8 +36,8 @@ arquivos maiores ou de mais rodadas.
 ```bash
 ./scripts/dev-secrets.sh
 docker compose up -d --build --wait     # a pilha local (compose.yaml + compose.override.yaml)
-deploy/load/run-local.sh                # de 3 a 4 min; sai com 0 só se todos os cenários passarem
-GS_LOAD_RATE_LIMIT=1 GS_LOAD_AUTH=1 deploy/load/run-local.sh   # depois da A2 e da fatia 6
+deploy/load/run-local.sh                # de 4 a 6 min; sai com 0 só se todos os cenários passarem
+GS_LOAD_RATE_LIMIT=0 GS_LOAD_AUTH=0 deploy/load/run-local.sh   # sem os cenários de limite
 ```
 
 O script:
@@ -49,7 +49,8 @@ O script:
    container do k6, e são **revogadas ao sair**, mesmo em caso de falha;
 3. para o worker e a manutenção, roda a fila e os religa. A manutenção vive no namespace de PIDs do worker
    e morreria com ele;
-4. roda as transferências e a jornada, e depois os cenários adiados, se ligados;
+4. roda as transferências, a jornada e os cenários de limite (por conta e de `/auth/*`), salvo os
+   desligados com `0`;
 5. grava o resumo de cada cenário em `deploy/load/results/<cenário>.json` (ignorado pelo git, ou no
    diretório de `GS_LOAD_RESULTS`).
 

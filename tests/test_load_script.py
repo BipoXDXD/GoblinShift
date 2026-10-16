@@ -2,7 +2,8 @@
 
 Não roda o k6: confere a estrutura dos cenários, que os thresholds seguem os SLOs de
 `deploy/openobserve` (se um SLO mudar, este teste aponta o cenário a ajustar), que os cenários do
-limite por conta ficam desligados até a A2 e que o script local recusa alvo fora da máquina.
+limite por conta e de `/auth/*` rodam por padrão (desligáveis com 0) e que o script local recusa
+alvo fora da máquina.
 """
 
 import re
@@ -19,7 +20,7 @@ LOAD_DIR = ROOT / "deploy" / "load"
 RUN_LOCAL = LOAD_DIR / "run-local.sh"
 SCENARIOS = LOAD_DIR / "scenarios"
 SCENARIO_NAMES = ("jornada", "fila", "transferencias", "limite-por-conta", "limite-auth")
-DEFERRED_SCENARIOS = ("limite-por-conta", "limite-auth")
+LIMIT_SCENARIOS = ("limite-por-conta", "limite-auth")
 SCRIPT_TIMEOUT_SECONDS = 10
 
 
@@ -90,15 +91,17 @@ def test_journey_polling_threshold_is_p99_below_500_ms() -> None:
     assert "'p(99)<500'" in _scenario("jornada")
 
 
-@pytest.mark.parametrize("name", DEFERRED_SCENARIOS)
-def test_deferred_scenarios_say_what_they_wait_for(name: str) -> None:
-    assert "Espera a A2" in _scenario(name) or "Espera a fatia 6" in _scenario(name)
+@pytest.mark.parametrize("name", LIMIT_SCENARIOS)
+def test_limit_scenarios_no_longer_wait_for_unmerged_work(name: str) -> None:
+    scenario = _scenario(name)
+    assert "Espera a A2" not in scenario
+    assert "Espera a fatia 6" not in scenario
 
 
-def test_deferred_scenarios_only_run_when_enabled() -> None:
+def test_limit_scenarios_run_by_default_and_can_be_disabled() -> None:
     script = RUN_LOCAL.read_text(encoding="utf-8")
-    assert 'if [[ "${GS_LOAD_RATE_LIMIT:-0}" == 1 ]]' in script
-    assert 'if [[ "${GS_LOAD_AUTH:-0}" == 1 ]]' in script
+    assert 'if [[ "${GS_LOAD_RATE_LIMIT:-1}" != 0 ]]' in script
+    assert 'if [[ "${GS_LOAD_AUTH:-1}" != 0 ]]' in script
 
 
 def test_default_target_is_local() -> None:
