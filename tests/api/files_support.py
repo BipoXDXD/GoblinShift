@@ -56,9 +56,17 @@ def storage_of(app: FastAPI) -> FileStorage:
 
 
 def publish(
-    app: FastAPI, owner: uuid.UUID, content: bytes, file_name: str = "saida.csv"
+    app: FastAPI,
+    owner: uuid.UUID,
+    content: bytes,
+    file_name: str = "saida.csv",
+    *,
+    preview_of: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """Artefato publicado pelo caminho do worker: candidato, gravação, confirmação, publicação."""
+    """Artefato publicado pelo caminho do worker: candidato, gravação, confirmação, publicação.
+
+    Com `preview_of`, publica um preview daquela saída (papel `preview`).
+    """
     factory: sessionmaker[Session] = app.state.session_factory
     with unit_of_work(factory) as session:
         candidate = create_candidate_object(session, owner, uuid.uuid4(), uuid.uuid4(), 1)
@@ -67,8 +75,9 @@ def publish(
     )
     with unit_of_work(factory) as session:
         commit_candidate(session, owner, candidate.object_id, sha256, size)
+        role = ArtifactRole.OUTPUT if preview_of is None else ArtifactRole.PREVIEW
         return publish_artifact(
-            session, owner, candidate.object_id, ArtifactRole.OUTPUT, file_name
+            session, owner, candidate.object_id, role, file_name, source_artifact_id=preview_of
         ).id
 
 

@@ -22,9 +22,14 @@ from goblinshift.processing.pdf_press.composition import (
 )
 from goblinshift.processing.pdf_press.inspection import InspectedDocument, inspect_document
 from goblinshift.processing.pdf_press.limits import MAX_INPUTS, RECIPE_ID, VERSION, Limits
-from goblinshift.processing.pdf_press.page_map import PAGE_MAP_NAME, encode_page_map
+from goblinshift.processing.pdf_press.page_map import (
+    PAGE_MAP_NAME,
+    encode_document_preview,
+    encode_page_map,
+)
 from goblinshift.processing.pdf_press.params import Operation, Params
 from goblinshift.processing.pdf_press.writing import write_document
+from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
 from goblinshift.processing.recipe import (
     InputContractError,
     InputFile,
@@ -43,6 +48,7 @@ __all__ = ["RECIPE_ID", "VERSION", "PdfPressV1"]
 NOT_SELECTED = ReportWarning("INPUT_NOT_SELECTED", "nenhuma página desta entrada foi selecionada")
 
 type _Written = tuple[str, PlannedDocument]
+PREVIEW_EXTENSION = ".json"
 
 
 class PdfPressV1:
@@ -65,7 +71,9 @@ class PdfPressV1:
         page_map = out.create(PAGE_MAP_NAME, OutputRole.CONTENT, inputs[0].position)
         with page_map.stream as sink:
             sink.write(encode_page_map(params.operation, documents, written))
-        return _report(params.operation, documents, written, versions, page_map.name)
+        report = _report(params.operation, documents, written, versions, page_map.name)
+        previews = write_previews(out, [_preview(path, planned) for path, planned in written])
+        return Report(attach_previews(report.items, previews), details=report.details)
 
     def _inspect_all(
         self, inputs: Sequence[InputFile], progress: Progress, stack: ExitStack
@@ -79,6 +87,17 @@ class PdfPressV1:
             page_budget -= document.page_count
             progress.item_done(entry.position)
         return opened
+
+
+def _preview(path: str, planned: PlannedDocument) -> PendingPreview:
+    """O mapa de páginas do documento, em `previews/<radical>.json` (2.2: PDF por mapa)."""
+    stem = path.rsplit(".", 1)[0]
+    return PendingPreview(
+        planned.source_position,
+        path,
+        stem + PREVIEW_EXTENSION,
+        encode_document_preview(path, planned),
+    )
 
 
 def _described(entry: InputFile, document: InspectedDocument) -> InputDocument:

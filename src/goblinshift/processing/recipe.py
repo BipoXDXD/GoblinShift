@@ -89,6 +89,21 @@ class OutputGroup(StrEnum):
     TABLES = "tables"
     TEXT = "text"
     ARCHIVES = "archives"
+    # Derivados para pré-visualização (imagem reduzida, amostra de tabela): publicados com o papel
+    # `preview`, fora do manifesto e do ZIP.
+    PREVIEWS = "previews"
+
+
+@dataclass(frozen=True)
+class Preview:
+    """Arquivo de pré-visualização em `previews/` e a saída de conteúdo de que ele deriva."""
+
+    path: str
+    of: str
+
+    def __post_init__(self) -> None:
+        if not self.path.startswith(f"{OutputGroup.PREVIEWS.value}/"):
+            raise ValueError(f"preview fora de {OutputGroup.PREVIEWS.value}/: {self.path!r}")
 
 
 # Contagens por item vão para o banco e para a API: nome de contador em snake_case, nunca dado do
@@ -109,10 +124,15 @@ class ItemOk:
     # Fatos registrados que não são aviso (não mudam o estado para succeeded_with_warnings):
     # dimensões, formato, perfil assumido ou convertido, quadros MPO descartados, tipo do Detox.
     details: Mapping[str, DetailValue] = field(default_factory=dict)
+    # Opcionais: a receita grava os que cabem nos tetos depois de todo o conteúdo.
+    previews: Sequence[Preview] = ()
     # Os fatos que a interface mostra por código (o detalhe da Run não lê `details`).
     notices: Sequence[ItemNoticeCode] = ()
 
     def __post_init__(self) -> None:
+        for preview in self.previews:
+            if preview.of not in self.outputs:
+                raise ValueError(f"preview de {preview.of!r}, que não é saída do item")
         for notice in self.notices:
             if notice not in ItemNoticeCode:
                 raise ValueError(f"{notice!r} não é nota do catálogo")
@@ -238,6 +258,10 @@ class OutputDir(Protocol):
         bytes e quantidade de 1.7, somados entre todos os grupos. Exceder um teto levanta
         `RecipeFailure(OUTPUT_LIMIT_EXCEEDED)`.
         """
+        ...
+
+    def room_for(self, size_bytes: int) -> bool:
+        """Se mais um arquivo de `size_bytes` cabe nos tetos; para saídas opcionais (previews)."""
         ...
 
 
