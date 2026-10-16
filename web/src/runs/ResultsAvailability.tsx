@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactElement, type ReactNode } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -10,7 +10,7 @@ import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatDateTime } from "../format";
 import { TEXT } from "../text";
-import { deleteRunArtifacts, getArtifact, type RunResults } from "./commands";
+import { deleteRunArtifacts, type RunResults } from "./commands";
 
 const T = TEXT.run.results;
 
@@ -24,15 +24,10 @@ interface ResultsAvailabilityProps {
 }
 
 /**
- * Os downloads só enquanto os resultados existem, e "Excluir resultados" terciária com
- * confirmação em vermelho. O /results lista os artefatos mesmo vencidos ou excluídos; as saídas
- * de uma execução nascem na mesma transação (mesmo vencimento) e só são excluídas juntas, então a
- * disponibilidade de uma basta (uma chamada só).
- *
- * Enquanto ela carrega, a tela diz que está verificando e não oferece os links. Se ela falhar, os
- * links ficam, com o aviso de que a disponibilidade não foi confirmada e um "Verificar de novo":
- * esconder o download por uma falha de leitura bloquearia quem ainda pode baixar, e o download
- * responde por si (410) se os resultados já não existem.
+ * Os downloads só enquanto há algo para baixar, e "Excluir resultados" terciária com confirmação
+ * em vermelho. A disponibilidade de cada referência vem do próprio /results (fonte única): sem
+ * nenhuma disponível, a seção mostra o estado vazio com o motivo; com alguma, quem chama mostra
+ * cada arquivo com o link ou com o motivo de não ter.
  */
 export function ResultsAvailability({
   runId,
@@ -46,21 +41,12 @@ export function ResultsAvailability({
   // O 202 do DELETE já deixa os resultados indisponíveis (1.6); a tela segue a resposta do
   // comando, não a releitura, que pode falhar ou chegar antes.
   const [deletedHere, setDeletedHere] = useState(false);
-  const firstId = results.published ? (results.artifacts[0]?.artifact_id ?? null) : null;
-  const artifactKey = ["artifacts", firstId] as const;
-  const artifact = useQuery({
-    queryKey: artifactKey,
-    queryFn: ({ signal }) => getArtifact(client, firstId ?? "", signal),
-    enabled: firstId !== null,
-    retry: false,
-  });
   const removal = useMutation({
     mutationFn: () => deleteRunArtifacts(client, runId),
     onSuccess: () => {
       setDeletedHere(true);
       setMessage(T.removed);
       onDeleted();
-      void queryClient.invalidateQueries({ queryKey: artifactKey });
       void queryClient.invalidateQueries({ queryKey: ["runs", runId] });
     },
     onError: (error) => {
@@ -70,25 +56,14 @@ export function ResultsAvailability({
       }
     },
   });
-  if (firstId === null) {
+  if (!results.published || results.artifacts.length === 0) {
     return <>{children}</>;
   }
-  const availability = deletedHere ? "deleted" : artifact.data?.availability;
+  const downloadable = !deletedHere && results.artifacts.some(isAvailable);
   return (
     <>
-      {availability === "deleted" || availability === "expired" || availability === "missing" ? (
-        <Unavailable reason={availability} expiresAt={results.expires_at} />
-      ) : artifact.isPending ? (
-        <p className="text-fg-muted">{T.checking}</p>
-      ) : (
+      {downloadable ? (
         <>
-          {artifact.isError && (
-            <Unconfirmed
-              onRetry={() => {
-                void artifact.refetch();
-              }}
-            />
-          )}
           {children}
           <DeleteResults
             pending={removal.isPending}
@@ -99,10 +74,32 @@ export function ResultsAvailability({
             }}
           />
         </>
+      ) : (
+        <Unavailable
+          reason={deletedHere ? "deleted" : sharedReason(results)}
+          expiresAt={results.expires_at}
+        />
       )}
       <LiveRegion message={message} visuallyHidden />
     </>
   );
+}
+
+type Reference = RunResults["artifacts"][number];
+type UnavailableReason = "deleted" | "expired" | "missing" | "other";
+
+function isAvailable(reference: Reference): boolean {
+  return reference.availability === "available";
+}
+
+/** O motivo comum a todas as referências, ou "other" se elas divergem (ou o motivo é novo). */
+function sharedReason(results: RunResults): UnavailableReason {
+  const reasons = new Set(results.artifacts.map((reference) => reference.availability));
+  const [only] = reasons;
+  if (reasons.size === 1 && (only === "deleted" || only === "expired" || only === "missing")) {
+    return only;
+  }
+  return "other";
 }
 
 function isNotFound(error: Error): boolean {
@@ -113,23 +110,19 @@ function isNotFound(error: Error): boolean {
   );
 }
 
-function Unconfirmed({ onRetry }: { readonly onRetry: () => void }): ReactElement {
-  return (
-    <div className="flex flex-col items-start gap-2">
-      <p className="text-warning-fg">{T.unconfirmed}</p>
-      <Button type="button" variant="tertiary" onClick={onRetry}>
-        {T.checkAgain}
-      </Button>
-    </div>
-  );
-}
-
 interface UnavailableProps {
-  readonly reason: "deleted" | "expired" | "missing";
+  readonly reason: UnavailableReason;
   readonly expiresAt: string | null;
 }
 
 function Unavailable({ reason, expiresAt }: UnavailableProps): ReactElement {
+  if (reason === "other") {
+    return (
+      <EmptyState title={T.unavailableTitle} headingLevel={3}>
+        <p>{T.unavailableHint}</p>
+      </EmptyState>
+    );
+  }
   if (reason === "deleted") {
     return (
       <EmptyState title={T.deletedTitle} headingLevel={3}>

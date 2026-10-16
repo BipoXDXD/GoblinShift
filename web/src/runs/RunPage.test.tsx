@@ -258,22 +258,12 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
   const jpeg = () =>
     new Response(JPEG, { headers: { "Content-Type": "application/octet-stream" } });
 
-  function setupMedia(thumb90: Handler = jpeg) {
+  function setupMedia(thumb90: Handler = jpeg, results: object = mediaResults) {
     return setup(
       () => jsonResponse(runBody({ recipe_id: "media-mill", status: "succeeded" })),
-      () => jsonResponse(mediaResults),
+      () => jsonResponse(results),
       `/execucoes/${RUN_ID}`,
       {
-        // A disponibilidade dos resultados vem do primeiro artefato (ResultsAvailability).
-        [`GET /api/v1/artifacts/${AUDIO}`]: () =>
-          jsonResponse({
-            id: AUDIO,
-            role: "output",
-            size: 4,
-            sha256: "0".repeat(64),
-            expires_at: mediaResults.expires_at,
-            availability: "available",
-          }),
         [download(THUMB_10)]: jpeg,
         [download(THUMB_90)]: thumb90,
       },
@@ -299,6 +289,24 @@ describe("Execução do Media Mill: miniaturas como preview", () => {
       "image/jpeg",
       "image/jpeg",
     ]);
+  });
+
+  it("miniatura indisponível no /results não é buscada nem mostrada", async () => {
+    const { api } = setupMedia(jpeg, {
+      ...mediaResults,
+      artifacts: mediaResults.artifacts.map((artifact) =>
+        artifact.artifact_id === THUMB_90 ? { ...artifact, availability: "missing" } : artifact,
+      ),
+    });
+
+    const previews = await screen.findByRole("region", { name: "Miniaturas" });
+    expect(
+      await within(previews).findByRole("img", { name: "Miniatura férias-10pct.jpg" }),
+    ).toBeVisible();
+    expect(within(previews).queryByRole("img", { name: "Miniatura férias-90pct.jpg" })).toBeNull();
+    expect(screenRequests(api.requests).some((request) => request.url.includes(THUMB_90))).toBe(
+      false,
+    );
   });
 
   it("corpo que não é JPEG fica como falha só daquela miniatura", async () => {
@@ -347,10 +355,17 @@ describe("pré-visualização dos resultados", () => {
   interface Pair {
     readonly fileName: string;
     readonly previewName: string;
+    /** Do preview; a saída fica em `sourceAvailability`. */
     readonly availability?: string;
+    readonly sourceAvailability?: string;
   }
 
-  function resultsWithPreview({ fileName, previewName, availability = "available" }: Pair) {
+  function resultsWithPreview({
+    fileName,
+    previewName,
+    availability = "available",
+    sourceAvailability = "available",
+  }: Pair) {
     return {
       ...publishedResults,
       artifacts: [
@@ -359,7 +374,7 @@ describe("pré-visualização dos resultados", () => {
           logical_name: fileName,
           role: "output",
           file_name: fileName,
-          availability,
+          availability: sourceAvailability,
           source_artifact_id: null,
         },
         {
@@ -535,14 +550,46 @@ describe("pré-visualização dos resultados", () => {
     ["expired", "Pré-visualização indisponível: o arquivo expirou."],
     ["deleted", "Pré-visualização indisponível: o arquivo foi excluído."],
     ["missing", "Pré-visualização indisponível: o arquivo se perdeu."],
-  ])("indisponível (%s) diz o motivo sem pedir o preview", async (availability, message) => {
-    const { api } = setupPreview({
+  ])(
+    "preview indisponível (%s) diz o motivo sem pedir o preview",
+    async (availability, message) => {
+      const { api } = setupPreview({
+        fileName: "clientes.csv",
+        previewName: "clientes.csv",
+        availability,
+      });
+
+      expect(await screen.findByText(message)).toBeVisible();
+      expect(
+        api.requests.some((request) => new URL(request.url).pathname.endsWith("/preview")),
+      ).toBe(false);
+    },
+  );
+
+  it("saída indisponível: o motivo aparece uma vez, na saída, e o preview não é pedido", async () => {
+    const packageRef = {
+      artifact_id: ARTIFACT_ID,
+      logical_name: "pacote",
+      role: "package",
+      file_name: "resultado.zip",
+      availability: "available",
+      source_artifact_id: null,
+    };
+    const pair = resultsWithPreview({
       fileName: "clientes.csv",
       previewName: "clientes.csv",
-      availability,
+      availability: "expired",
+      sourceAvailability: "expired",
     });
+    const { api } = setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () => jsonResponse({ ...pair, artifacts: [packageRef, ...pair.artifacts] }),
+    );
 
-    expect(await screen.findByText(message)).toBeVisible();
+    expect(await screen.findByRole("listitem")).toHaveTextContent(
+      "clientes.csv (arquivo processado): expirou em",
+    );
+    expect(screen.queryByText(/Pré-visualização indisponível/)).toBeNull();
     expect(api.requests.some((request) => new URL(request.url).pathname.endsWith("/preview"))).toBe(
       false,
     );
