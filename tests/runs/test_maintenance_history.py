@@ -63,7 +63,7 @@ def finished_long_ago(
                 stored_object.c.id
                 == select(upload.c.object_id).where(upload.c.id == upload_id).scalar_subquery()
             )
-            .values(state=ObjectState.DELETED)
+            .values(state=ObjectState.DELETED, created_at=ago)
         )
     return run_id, upload_id
 
