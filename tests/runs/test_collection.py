@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
+from goblinshift.runs.formula_cells import ColumnCells, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
     CollectionError,
@@ -569,6 +570,57 @@ def test_dezesseis_contagens_sao_aceitas(tmp_path: Path) -> None:
     collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
 
     assert collected.report.items[0].counts == counts
+
+
+def formula_warning(columns: object) -> dict[str, Any]:
+    return {"code": "CSV_FORMULA_CELLS", "detail": "d", "columns": columns}
+
+
+def test_contagem_por_coluna_do_aviso_de_formula_e_coletada_com_teto(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    columns = [{"name": f"c{i}", "cells": i + 1} for i in range(11)]
+    item["warnings"] = [formula_warning(columns)]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    expected = tuple(ColumnCells(f"c{i}", i + 1) for i in range(10, 0, -1))
+    assert collected.report.items[0].formula_cells == FormulaCells(expected, 1)
+
+
+def test_aviso_de_formula_sem_colunas_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv", warnings=1)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    [item] = collected.report.items
+    assert item.warnings == (ItemWarningCode.CSV_FORMULA_CELLS,)
+    assert item.formula_cells is None
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [
+        pytest.param({"a": 1}, id="nao-lista"),
+        pytest.param([], id="vazia"),
+        pytest.param(["a"], id="coluna-nao-objeto"),
+        pytest.param([{"name": 1, "cells": 1}], id="nome-nao-texto"),
+        pytest.param([{"name": "", "cells": 1}], id="nome-vazio"),
+        pytest.param([{"name": "a", "cells": 0}], id="zero-celulas"),
+        pytest.param([{"name": "a", "cells": "1"}], id="celulas-texto"),
+        pytest.param([{"name": "a", "cells": True}], id="celulas-booleano"),
+    ],
+)
+def test_contagem_por_coluna_fora_da_forma_e_recusada(tmp_path: Path, columns: object) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [formula_warning(columns)]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="columns"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
 
 
 # --- Previews: fora do pacote, citados pelo item, com tipo e tamanho conferidos (3.6) -----------
