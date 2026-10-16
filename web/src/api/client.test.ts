@@ -330,3 +330,79 @@ describe("createApiClient: prazo e cancelamento", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
+
+describe("createApiClient: requestJpeg", () => {
+  const PATH = "/api/v1/artifacts/a/download";
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
+
+  function bytesResponse(
+    bytes: Uint8Array<ArrayBuffer>,
+    contentType = "application/octet-stream",
+  ): Response {
+    return new Response(bytes, { status: 200, headers: { "Content-Type": contentType } });
+  }
+
+  it("devolve o JPEG como Blob image/jpeg, mesmo servido como octet-stream", async () => {
+    const { client, fetchMock } = setup(bytesResponse(JPEG));
+
+    const blob = await client.requestJpeg({ path: PATH, maxBytes: 1024 });
+
+    expect(blob.type).toBe("image/jpeg");
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(JPEG);
+    const sent = sentRequest(fetchMock);
+    expect(sent.method).toBe("GET");
+    expect(sent.headers.get("Accept")).toBe("image/jpeg, application/problem+json");
+  });
+
+  it("aceita o corpo exatamente no teto", async () => {
+    const { client } = setup(bytesResponse(JPEG));
+
+    await expect(
+      client.requestJpeg({ path: PATH, maxBytes: JPEG.byteLength }),
+    ).resolves.toBeInstanceOf(Blob);
+  });
+
+  it("acima do teto aborta como resposta inesperada", async () => {
+    const { client } = setup(bytesResponse(JPEG));
+
+    const failure = await failureOf(
+      client.requestJpeg({ path: PATH, maxBytes: JPEG.byteLength - 1 }),
+    );
+
+    expect(failure).toEqual({ kind: "unexpected-response", status: 200, retryAfterMs: null });
+  });
+
+  it.each([
+    ["HTML", new TextEncoder().encode("<svg onload=alert(1)>")],
+    ["vazio", new Uint8Array(0)],
+    ["PNG", new Uint8Array([0x89, 0x50, 0x4e, 0x47])],
+  ])("corpo que não começa com FF D8 FF (%s) é recusado", async (_, bytes) => {
+    const { client } = setup(bytesResponse(bytes, "image/jpeg"));
+
+    const failure = await failureOf(client.requestJpeg({ path: PATH, maxBytes: 1024 }));
+
+    expect(failure.kind).toBe("unexpected-response");
+  });
+
+  it("429 vira ApiError com o Retry-After", async () => {
+    const { client } = setup(problemResponse(rateLimited, { "Retry-After": "3" }));
+
+    const failure = await failureOf(client.requestJpeg({ path: PATH, maxBytes: 1024 }));
+
+    expect(failure).toEqual({
+      kind: "problem",
+      status: 429,
+      problem: rateLimited,
+      retryAfterMs: 3_000,
+    });
+  });
+
+  it("recusa caminho de outra origem antes de pedir", async () => {
+    const { client, fetchMock } = setup(bytesResponse(JPEG));
+
+    await expect(
+      client.requestJpeg({ path: "https://evil.example/x.jpg", maxBytes: 1024 }),
+    ).rejects.toBeInstanceOf(CrossOriginUrlError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

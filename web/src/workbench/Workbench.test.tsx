@@ -639,4 +639,80 @@ describe("Bancada", () => {
       parameters: { deduplicate: true, group_by: "kind", name_mode: "preserve" },
     });
   });
+
+  it("Media Mill: aceita só vídeos da allowlist e diz o teto por arquivo", async () => {
+    await setup({ recipe: "media-mill" });
+
+    const input = screen.getByLabelText("Escolher arquivos");
+    expect(input).toHaveAttribute("accept", ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm");
+    expect(input).toHaveAccessibleDescription(
+      /Até 5 arquivos por execução, somando no máximo 536,9 MB\. Cada arquivo com até 268,4 MB\./,
+    );
+  });
+
+  it("Media Mill: recusa no cliente o vídeo acima do teto por arquivo", async () => {
+    const version = catalogVersion("media-mill");
+    const { user, api } = await setup({
+      recipe: "media-mill",
+      catalog: catalogHandler(
+        withVersion("media-mill", {
+          ...version,
+          limits: { ...version.limits, max_input_bytes: 4 },
+        }),
+      ),
+    });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [
+      new File(["12345"], "ferias.mp4", { type: "video/mp4" }),
+    ]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "ferias.mp4 tem 5 bytes; o máximo por arquivo nesta receita é 4 bytes.",
+    );
+    expect(runRequests(api.requests)).toHaveLength(0);
+  });
+
+  it("Media Mill: cria a execução com os parâmetros explícitos e nenhum vídeo na tela", async () => {
+    const { user, api, container } = await setup({ recipe: "media-mill" });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [
+      new File(["x"], "ferias.mp4", { type: "video/mp4" }),
+    ]);
+    await waitUntilSent(1);
+    await user.click(screen.getByRole("radio", { name: "FLAC (compressão sem perdas)" }));
+    await user.click(screen.getByRole("radio", { name: "Três, em 10%, 50% e 90% da duração" }));
+    expect(container.querySelector("video, audio, img[src^='blob:']")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Execução" });
+    expect(await bodyOf(runRequests(api.requests)[0])).toMatchObject({
+      recipe_id: "media-mill",
+      parameters: {
+        extract_audio: true,
+        audio_format: "flac",
+        audio_stream_index: null,
+        thumbnail_count: 3,
+      },
+    });
+  });
+
+  it("Media Mill: sem nenhuma saída, o resumo aponta a extração e nada é enviado", async () => {
+    const { user, api } = await setup({ recipe: "media-mill" });
+    await user.upload(screen.getByLabelText("Escolher arquivos"), [
+      new File(["x"], "ferias.mp4", { type: "video/mp4" }),
+    ]);
+    await waitUntilSent(1);
+    await user.click(screen.getByRole("checkbox", { name: "Extrair o áudio" }));
+    await user.click(screen.getByRole("radio", { name: "Nenhuma" }));
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    expect(await screen.findByRole("link", { name: /Peça ao menos uma saída/ })).toHaveAttribute(
+      "href",
+      "#media-mill-extract_audio",
+    );
+    expect(runRequests(api.requests)).toHaveLength(0);
+  });
 });

@@ -134,6 +134,12 @@ export const SCREENS: readonly Screen[] = [
       await new BancadaPage(page).open("downloads-detox");
     },
   },
+  {
+    name: "Bancada (Media Mill)",
+    open: async (page: Page): Promise<void> => {
+      await new BancadaPage(page).open("media-mill");
+    },
+  },
   runScreen("Execução na fila", { status: "queued", queue_ahead: 2 }, "Na fila"),
   runScreen(
     "Execução em andamento",

@@ -1,5 +1,5 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
@@ -35,10 +35,12 @@ function setup(
   run: Handler,
   results: Handler = () => jsonResponse(publishedResults),
   path = `/execucoes/${RUN_ID}`,
+  extra: Readonly<Record<string, Handler>> = {},
 ) {
   const api = fakeApi({
     [`GET /api/v1/runs/${RUN_ID}`]: run,
     [`GET /api/v1/runs/${RUN_ID}/results`]: results,
+    ...extra,
   });
   return { ...renderRoutes({ routes: appRoutes(api.client), path, client: api.client }), api };
 }
@@ -195,6 +197,115 @@ describe("Execução", () => {
   it("não tem violações do axe", async () => {
     const { container } = setup(() => jsonResponse(runBody({ status: "succeeded" })));
     await screen.findByRole("link", { name: "Baixar clientes.csv" });
+
+    expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("Execução do Media Mill: miniaturas como preview", () => {
+  const THUMB_10 = "7d3c2a1e-0000-4000-8000-0000000000b1";
+  const THUMB_90 = "7d3c2a1e-0000-4000-8000-0000000000b2";
+  const AUDIO = "7d3c2a1e-0000-4000-8000-0000000000b3";
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
+  const mediaResults = {
+    published: true,
+    expires_at: "2026-10-21T12:00:00Z",
+    artifacts: [
+      { artifact_id: AUDIO, logical_name: "a", role: "output", file_name: "audio/férias.wav" },
+      {
+        artifact_id: THUMB_10,
+        logical_name: "b",
+        role: "output",
+        file_name: "thumbnails/férias-10pct.jpg",
+      },
+      {
+        artifact_id: THUMB_90,
+        logical_name: "c",
+        role: "output",
+        file_name: "thumbnails/férias-90pct.jpg",
+      },
+    ],
+  };
+  const createObjectURL = vi.fn((blob: Blob) => `blob:fake-${String(blob.size)}`);
+  const revokeObjectURL = vi.fn((url: string) => url);
+
+  beforeEach(() => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    createObjectURL.mockClear();
+    revokeObjectURL.mockClear();
+  });
+
+  const download = (id: string) => `GET /api/v1/artifacts/${id}/download`;
+  const jpeg = () =>
+    new Response(JPEG, { headers: { "Content-Type": "application/octet-stream" } });
+
+  function setupMedia(thumb90: Handler = jpeg) {
+    return setup(
+      () => jsonResponse(runBody({ recipe_id: "media-mill", status: "succeeded" })),
+      () => jsonResponse(mediaResults),
+      `/execucoes/${RUN_ID}`,
+      { [download(THUMB_10)]: jpeg, [download(THUMB_90)]: thumb90 },
+    );
+  }
+
+  it("mostra cada miniatura como imagem, buscando uma de cada vez", async () => {
+    const { api } = setupMedia();
+
+    const previews = await screen.findByRole("region", { name: "Miniaturas" });
+    expect(
+      await within(previews).findByRole("img", { name: "Miniatura férias-90pct.jpg" }),
+    ).toHaveAttribute("src", "blob:fake-8");
+    expect(within(previews).getByRole("img", { name: "Miniatura férias-10pct.jpg" })).toBeVisible();
+    const downloads = screenRequests(api.requests)
+      .map((request) => new URL(request.url).pathname)
+      .filter((pathname) => pathname.startsWith("/api/v1/artifacts/"));
+    expect(downloads).toEqual([
+      `/api/v1/artifacts/${THUMB_10}/download`,
+      `/api/v1/artifacts/${THUMB_90}/download`,
+    ]);
+    expect(createObjectURL.mock.calls.map(([blob]) => blob.type)).toEqual([
+      "image/jpeg",
+      "image/jpeg",
+    ]);
+  });
+
+  it("corpo que não é JPEG fica como falha só daquela miniatura", async () => {
+    setupMedia(() => new Response("<svg onload=alert(1)>", { status: 200 }));
+
+    const previews = await screen.findByRole("region", { name: "Miniaturas" });
+    expect(
+      await within(previews).findByText(/Não foi possível mostrar esta miniatura/),
+    ).toBeVisible();
+    expect(within(previews).getAllByRole("img")).toHaveLength(1);
+  });
+
+  it("revoga as URLs ao sair da tela", async () => {
+    const { unmount } = setupMedia();
+    await screen.findByRole("img", { name: "Miniatura férias-90pct.jpg" });
+
+    unmount();
+
+    expect(revokeObjectURL.mock.calls.map(([url]) => url)).toEqual(["blob:fake-8", "blob:fake-8"]);
+  });
+
+  it("outra receita não busca miniaturas", async () => {
+    const { api } = setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () => jsonResponse(mediaResults),
+    );
+
+    await screen.findByRole("link", { name: "Baixar thumbnails/férias-10pct.jpg" });
+    expect(screen.queryByRole("region", { name: "Miniaturas" })).toBeNull();
+    expect(screenRequests(api.requests).some((r) => r.url.includes("/download"))).toBe(false);
+  });
+
+  it("não tem violações do axe com as miniaturas", async () => {
+    const { container } = setupMedia();
+    await screen.findByRole("img", { name: "Miniatura férias-90pct.jpg" });
 
     expect(await axeViolations(container)).toEqual([]);
   });
