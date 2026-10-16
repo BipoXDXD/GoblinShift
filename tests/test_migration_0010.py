@@ -1,4 +1,4 @@
-"""Migração 0020: expand para a anulação de 30 dias (docs/GoblinShiftPlan.md, 1.7, "Retenção").
+"""Migração 0010: expand para a anulação de 30 dias (docs/GoblinShiftPlan.md, 1.7, "Retenção").
 
 `upload.original_name` e `run.parameters` passam a aceitar NULL, mas só depois do fim: o nome só
 sai de upload excluído, e os parâmetros só de Run terminal (os CHECKs protegem quem ainda os lê,
@@ -87,15 +87,15 @@ def new_run(conn: Connection, owner: UUID, *, finished: bool) -> UUID:
     return run_id
 
 
-def test_0020_torna_nome_e_parametros_anulaveis(db_settings: Settings, engine: Engine) -> None:
-    run_migrations(db_settings, "0020")
+def test_0010_torna_nome_e_parametros_anulaveis(db_settings: Settings, engine: Engine) -> None:
+    run_migrations(db_settings, "0010")
 
     assert nullable(engine, "upload", "original_name") is True
     assert nullable(engine, "run", "parameters") is True
 
 
 def test_nome_anulado_so_em_upload_excluido(db_settings: Settings, engine: Engine) -> None:
-    run_migrations(db_settings, "0020")
+    run_migrations(db_settings, "0010")
     with engine.begin() as conn:
         owner = new_user(conn)
         deleted = new_upload(conn, owner, deleted=True)
@@ -107,7 +107,7 @@ def test_nome_anulado_so_em_upload_excluido(db_settings: Settings, engine: Engin
 
 
 def test_parametros_anulados_so_em_run_terminal(db_settings: Settings, engine: Engine) -> None:
-    run_migrations(db_settings, "0020")
+    run_migrations(db_settings, "0010")
     with engine.begin() as conn:
         owner = new_user(conn)
         finished = new_run(conn, owner, finished=True)
@@ -125,7 +125,7 @@ def test_parametros_anulados_so_em_run_terminal(db_settings: Settings, engine: E
 
 
 def test_indices_parciais_cobrem_so_o_que_falta(db_settings: Settings, engine: Engine) -> None:
-    run_migrations(db_settings, "0020")
+    run_migrations(db_settings, "0010")
 
     runs = index_predicates(engine, "run")
     uploads = index_predicates(engine, "upload")
@@ -144,7 +144,7 @@ def test_indices_parciais_cobrem_so_o_que_falta(db_settings: Settings, engine: E
 def test_downgrade_preenche_o_anulado_e_volta_o_not_null(
     db_settings: Settings, engine: Engine
 ) -> None:
-    run_migrations(db_settings, "0020")
+    run_migrations(db_settings, "0010")
     with engine.begin() as conn:
         owner = new_user(conn)
         upload_id = new_upload(conn, owner, deleted=True)

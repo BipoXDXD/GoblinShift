@@ -65,7 +65,7 @@ upload = Table(
     Column("owner_id", Uuid, nullable=False),
     Column("object_id", Uuid, nullable=False, unique=True),
     # Dado do usuário, nunca caminho (3.6). Anulado 30 dias depois de criado, só depois da
-    # exclusão (1.7, "Retenção"; migração 0020).
+    # exclusão (1.7, "Retenção"; migração 0010).
     Column("original_name", Text),
     Column("expected_size", BigInteger, nullable=False),
     Column("state", Text, nullable=False, server_default="created"),
