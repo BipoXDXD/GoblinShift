@@ -16,7 +16,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
-from goblinshift.catalog import CATALOG, RecipeVersionRetiredError, VersionStatus
+from goblinshift.catalog import CATALOG, RecipeVersionRetiredError
 from goblinshift.entrypoints.api.capacity_problems import (
     account_storage_problem,
     daily_quota_problem,
@@ -26,6 +26,7 @@ from goblinshift.entrypoints.api.catalog import (
     MAX_RECIPE_ID_CHARS,
     RECIPE_ID_PATTERN,
     deprecation_headers,
+    recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
@@ -40,6 +41,7 @@ from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.states import ArtifactRole
 from goblinshift.identity import Principal, Scope
 from goblinshift.platform.settings import Settings
+from goblinshift.presets import PresetNotFoundError, get_preset
 from goblinshift.runs.acceptance import (
     IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
@@ -164,16 +166,7 @@ def _problem(*statuses: int) -> dict[int | str, dict[str, Any]]:
 
 
 def _create_run_openapi() -> dict[str, Any]:
-    """Corpo publicado como `allOf` (campos comuns) + `oneOf` das versões aceitas (1.6).
-
-    `unevaluatedProperties: false` fica no nível do `allOf`, o único em que o JSON Schema
-    2020-12 enxerga as propriedades avaliadas pelas duas partes (ver `catalog.versions`).
-    """
-    variants = [
-        version.variant_schema()
-        for version in CATALOG.list_versions()
-        if version.status is not VersionStatus.RETIRED
-    ]
+    """Corpo publicado como as variantes do catálogo, mais a lista de entradas (1.6)."""
     common = {
         "type": "object",
         "properties": {
@@ -187,7 +180,7 @@ def _create_run_openapi() -> dict[str, Any]:
             },
         },
     }
-    schema = {"allOf": [common, {"oneOf": variants}], "unevaluatedProperties": False}
+    schema = recipe_command_schema(common)
     idempotency_key = {
         "name": _IDEMPOTENCY_KEY_HEADER,
         "in": "header",
@@ -234,10 +227,96 @@ def create_run(
         validated = _validate(run_command, idempotency_key)
         _add_deprecation_headers(response, validated.recipe_id, validated.recipe_version)
         return validated
+    return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
+
+
+class NewPresetRun(BaseModel):
+    """Corpo de `POST /presets/{preset_id}/runs`: só as entradas; a configuração vem do preset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_upload_ids: list[UUID] = Field(max_length=MAX_BATCH_FILES)
+
+
+def _preset_run_openapi() -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "properties": {
+            "input_upload_ids": {
+                "description": "Uploads prontos, na ordem de processamento, sem repetição "
+                "(1 a max_inputs da versão do preset).",
+                "type": "array",
+                "items": {"type": "string", "format": "uuid"},
+                "uniqueItems": True,
+                "minItems": 1,
+                "maxItems": MAX_BATCH_FILES,
+            },
+        },
+        "required": ["input_upload_ids"],
+        "additionalProperties": False,
+    }
+    idempotency_key = {
+        "name": _IDEMPOTENCY_KEY_HEADER,
+        "in": "header",
+        "required": True,
+        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
+    }
+    return {
+        "parameters": [idempotency_key],
+        "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
+    }
+
+
+@router.post(
+    "/presets/{preset_id}/runs",
+    status_code=202,
+    operation_id="createRunFromPreset",
+    responses=_problem(400, 404, 409, 413, 415, 429, 503),
+    openapi_extra=_preset_run_openapi(),
+)
+def create_run_from_preset(
+    principal: Annotated[Principal, Depends(require_scope(Scope.RUNS_WRITE))],
+    _reader: Annotated[Principal, Depends(require_scope(Scope.PRESETS_READ))],
+    command: Annotated[NewPresetRun, Depends(json_command(NewPresetRun))],
+    session: DbSession,
+    request: Request,
+    response: Response,
+    preset_id: UUID,
+) -> AcceptedRunResponse:
+    """Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).
+
+    Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
+    A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
+    """
+    try:
+        with session.begin():
+            source = get_preset(session, principal.owner_id, preset_id)
+    except PresetNotFoundError:
+        raise _preset_not_found() from None
+    run_command = RunCommand(
+        recipe_id=source.recipe_id,
+        recipe_version=source.recipe_version,
+        input_upload_ids=tuple(command.input_upload_ids),
+        parameters=source.parameters,
+        preset_id=source.id,
+    )
+    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    return _accept(principal.owner_id, run_command, idempotency_key, session, request, response)
+
+
+def _accept(
+    owner_id: UUID,
+    run_command: RunCommand,
+    idempotency_key: str | None,
+    session: Session,
+    request: Request,
+    response: Response,
+) -> AcceptedRunResponse:
+    """Aceita e monta o `202`: `Location`, replay e `Sunset` da versão usada."""
     try:
         accepted = accept_run(
             session,
-            principal.owner_id,
+            owner_id,
             run_command,
             idempotency_key,
             _current_traceparent(),
@@ -245,8 +324,11 @@ def create_run(
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None
+    except PresetNotFoundError:
+        # Excluído entre a leitura e a aceitação: o mesmo 404 de quem não o encontrou.
+        raise _preset_not_found() from None
     except AccountCapacityExceededError:
-        raise account_storage_problem(session, principal.owner_id) from None
+        raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
     record_run_accepted(
@@ -255,7 +337,7 @@ def create_run(
         run_command.recipe_version,
         replayed=accepted.replayed,
     )
-    view = _read_run(session, principal.owner_id, accepted.run_id)
+    view = _read_run(session, owner_id, accepted.run_id)
     response.headers["Location"] = request.app.url_path_for(
         get_run_route.__name__, run_id=str(accepted.run_id)
     )
@@ -437,6 +519,10 @@ def _read_run(session: Session, owner_id: UUID, run_id: UUID) -> RunView:
 
 def _run_not_found() -> ApiProblem:
     return ApiProblem(ProblemCode.NOT_FOUND, "Execução não encontrada.")
+
+
+def _preset_not_found() -> ApiProblem:
+    return ApiProblem(ProblemCode.NOT_FOUND, "Preset não encontrado.")
 
 
 def _run_response(view: RunView) -> RunResponse:

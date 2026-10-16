@@ -634,13 +634,15 @@
                         "files:read",
                         "files:write",
                         "runs:read",
-                        "runs:write"
+                        "runs:write",
+                        "presets:read",
+                        "presets:write"
                       ],
                       "title": "Scope",
-                      "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\n`presets:*` entra com os presets; o banco guarda texto, então acrescentar um escopo\nnão exige migração."
+                      "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\nO banco guarda texto, então acrescentar um escopo não exige migração."
                     },
                     "type": "array",
-                    "maxItems": 4,
+                    "maxItems": 6,
                     "minItems": 1,
                     "title": "Scopes"
                   },
@@ -1681,6 +1683,1290 @@
         }
       }
     },
+    "/api/v1/presets": {
+      "get": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "List Presets Route",
+        "operationId": "listPresets",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Create Preset Route",
+        "operationId": "createPreset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1
+                      }
+                    },
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "recipe_id": {
+                            "const": "csv-janitor"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "properties": {
+                              "input_delimiter": {
+                                "type": "string",
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "default": ","
+                              },
+                              "output_delimiter": {
+                                "type": "string",
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "default": ","
+                              },
+                              "trim_columns": {
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Trim Columns"
+                              },
+                              "case_rules": {
+                                "items": {
+                                  "properties": {
+                                    "column": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "lower",
+                                        "upper"
+                                      ],
+                                      "title": "CaseMode"
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "column",
+                                    "mode"
+                                  ],
+                                  "title": "CaseRuleParameters"
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Case Rules"
+                              },
+                              "filters": {
+                                "items": {
+                                  "properties": {
+                                    "column": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "op": {
+                                      "type": "string",
+                                      "enum": [
+                                        "eq",
+                                        "ne",
+                                        "contains",
+                                        "is_empty"
+                                      ],
+                                      "title": "FilterOp"
+                                    },
+                                    "value": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Value"
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "column",
+                                    "op"
+                                  ],
+                                  "title": "FilterParameters"
+                                },
+                                "type": "array",
+                                "maxItems": 5,
+                                "title": "Filters"
+                              },
+                              "deduplicate_by": {
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "type": "array",
+                                "maxItems": 100,
+                                "title": "Deduplicate By"
+                              },
+                              "output_columns": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "type": "array",
+                                    "maxItems": 100,
+                                    "minItems": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Output Columns"
+                              },
+                              "formula_guard": {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "tab_prefix"
+                                ],
+                                "title": "FormulaGuard",
+                                "default": "none"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "CsvJanitorV1Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "csv-janitor v1"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
+                            "const": "image-forge"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "properties": {
+                              "max_width": {
+                                "type": "integer",
+                                "maximum": 4096.0,
+                                "minimum": 16.0,
+                                "default": 1600
+                              },
+                              "max_height": {
+                                "type": "integer",
+                                "maximum": 4096.0,
+                                "minimum": 16.0,
+                                "default": 1600
+                              },
+                              "output_format": {
+                                "type": "string",
+                                "enum": [
+                                  "preserve",
+                                  "jpeg",
+                                  "png"
+                                ],
+                                "title": "OutputFormat",
+                                "default": "preserve"
+                              },
+                              "jpeg_quality": {
+                                "type": "integer",
+                                "maximum": 95.0,
+                                "minimum": 60.0,
+                                "title": "Jpeg Quality",
+                                "default": 85
+                              },
+                              "jpeg_background": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "title": "Jpeg Background",
+                                "default": "#FFFFFF"
+                              },
+                              "make_thumbnails": {
+                                "type": "boolean",
+                                "title": "Make Thumbnails",
+                                "default": false
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "ImageForgeV1Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "image-forge v1"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
+                            "const": "downloads-detox"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "properties": {
+                              "deduplicate": {
+                                "type": "boolean",
+                                "title": "Deduplicate",
+                                "default": true
+                              },
+                              "group_by": {
+                                "type": "string",
+                                "enum": [
+                                  "kind",
+                                  "none"
+                                ],
+                                "title": "GroupBy",
+                                "default": "kind"
+                              },
+                              "name_mode": {
+                                "type": "string",
+                                "enum": [
+                                  "preserve",
+                                  "indexed"
+                                ],
+                                "title": "NameMode",
+                                "default": "preserve"
+                              },
+                              "name_prefix": {
+                                "type": "string",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "title": "Name Prefix",
+                                "default": "file"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "DownloadsDetoxV1Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "downloads-detox v1"
+                      }
+                    ]
+                  }
+                ],
+                "unevaluatedProperties": false
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Preset criado.",
+            "headers": {
+              "ETag": {
+                "description": "Revisão entre aspas (`\"3\"`); envie-a em `If-Match` para alterar.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/presets/{preset_id}": {
+      "get": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Get Preset Route",
+        "operationId": "getPreset",
+        "parameters": [
+          {
+            "name": "preset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Preset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Revisão entre aspas (`\"3\"`); envie-a em `If-Match` para alterar.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Replace Preset Route",
+        "operationId": "replacePreset",
+        "parameters": [
+          {
+            "name": "preset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Preset Id"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "ETag da leitura (`\"3\"`); ausente → 428, de outra revisão → 412.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\"([1-9][0-9]{0,8})\"$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresetResponse"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Revisão entre aspas (`\"3\"`); envie-a em `If-Match` para alterar.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      }
+                    },
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "title": "csv-janitor v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "csv-janitor"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "input_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "output_delimiter": {
+                                "enum": [
+                                  ",",
+                                  ";",
+                                  "\t"
+                                ],
+                                "title": "Delimiter",
+                                "type": "string",
+                                "default": ","
+                              },
+                              "trim_columns": {
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Trim Columns",
+                                "type": "array"
+                              },
+                              "case_rules": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "mode": {
+                                      "enum": [
+                                        "lower",
+                                        "upper"
+                                      ],
+                                      "title": "CaseMode",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "mode"
+                                  ],
+                                  "title": "CaseRuleParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 100,
+                                "title": "Case Rules",
+                                "type": "array"
+                              },
+                              "filters": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "column": {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "op": {
+                                      "enum": [
+                                        "eq",
+                                        "ne",
+                                        "contains",
+                                        "is_empty"
+                                      ],
+                                      "title": "FilterOp",
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Value"
+                                    }
+                                  },
+                                  "required": [
+                                    "column",
+                                    "op"
+                                  ],
+                                  "title": "FilterParameters",
+                                  "type": "object"
+                                },
+                                "maxItems": 5,
+                                "title": "Filters",
+                                "type": "array"
+                              },
+                              "deduplicate_by": {
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 100,
+                                "title": "Deduplicate By",
+                                "type": "array"
+                              },
+                              "output_columns": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "maxItems": 100,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Output Columns"
+                              },
+                              "formula_guard": {
+                                "enum": [
+                                  "none",
+                                  "tab_prefix"
+                                ],
+                                "title": "FormulaGuard",
+                                "type": "string",
+                                "default": "none"
+                              }
+                            },
+                            "title": "CsvJanitorV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "image-forge v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "image-forge"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "max_width": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "max_height": {
+                                "maximum": 4096,
+                                "minimum": 16,
+                                "type": "integer",
+                                "default": 1600
+                              },
+                              "output_format": {
+                                "enum": [
+                                  "preserve",
+                                  "jpeg",
+                                  "png"
+                                ],
+                                "title": "OutputFormat",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "jpeg_quality": {
+                                "default": 85,
+                                "maximum": 95,
+                                "minimum": 60,
+                                "title": "Jpeg Quality",
+                                "type": "integer"
+                              },
+                              "jpeg_background": {
+                                "default": "#FFFFFF",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "title": "Jpeg Background",
+                                "type": "string"
+                              },
+                              "make_thumbnails": {
+                                "default": false,
+                                "title": "Make Thumbnails",
+                                "type": "boolean"
+                              }
+                            },
+                            "title": "ImageForgeV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "downloads-detox v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "downloads-detox"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "deduplicate": {
+                                "default": true,
+                                "title": "Deduplicate",
+                                "type": "boolean"
+                              },
+                              "group_by": {
+                                "enum": [
+                                  "kind",
+                                  "none"
+                                ],
+                                "title": "GroupBy",
+                                "type": "string",
+                                "default": "kind"
+                              },
+                              "name_mode": {
+                                "enum": [
+                                  "preserve",
+                                  "indexed"
+                                ],
+                                "title": "NameMode",
+                                "type": "string",
+                                "default": "preserve"
+                              },
+                              "name_prefix": {
+                                "default": "file",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "title": "Name Prefix",
+                                "type": "string"
+                              }
+                            },
+                            "title": "DownloadsDetoxV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "unevaluatedProperties": false
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "presets"
+        ],
+        "summary": "Delete Preset Route",
+        "operationId": "deletePreset",
+        "parameters": [
+          {
+            "name": "preset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Preset Id"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "ETag da leitura (`\"3\"`); ausente → 428, de outra revisão → 412.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\"([1-9][0-9]{0,8})\"$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          }
+        }
+      }
+    },
     "/api/v1/runs": {
       "post": {
         "tags": [
@@ -2358,6 +3644,207 @@
               }
             },
             "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/api/v1/presets/{preset_id}/runs": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Create Run From Preset",
+        "description": "Nova execução com a receita, a versão e os parâmetros guardados no preset (1.1).\n\nExige também `presets:read`, porque a configuração do preset passa a aparecer na execução.\nA Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.",
+        "operationId": "createRunFromPreset",
+        "parameters": [
+          {
+            "name": "preset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Preset Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedRunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Segundos até poder repetir a requisição.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9]+$"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {},
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input_upload_ids": {
+                    "description": "Uploads prontos, na ordem de processamento, sem repetição (1 a max_inputs da versão do preset).",
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "input_upload_ids"
+                ],
+                "additionalProperties": false
+              }
+            }
           }
         }
       }
@@ -3246,6 +4733,74 @@
         "title": "Phase",
         "description": "Fase dentro de `running`; nos demais estados a fase é `None`."
       },
+      "PresetListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PresetResponse"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "PresetListResponse"
+      },
+      "PresetResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "recipe_id": {
+            "type": "string",
+            "title": "Recipe Id"
+          },
+          "recipe_version": {
+            "type": "integer",
+            "title": "Recipe Version"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "recipe_id",
+          "recipe_version",
+          "parameters",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PresetResponse"
+      },
       "ProblemCode": {
         "type": "string",
         "enum": [
@@ -3265,12 +4820,14 @@
           "IDEMPOTENCY_IN_PROGRESS",
           "ACTIVE_RUN_LIMIT",
           "GONE",
+          "PRECONDITION_FAILED",
           "BODY_TOO_LARGE",
           "UNSUPPORTED_MEDIA_TYPE",
           "VALIDATION_FAILED",
           "IDEMPOTENCY_KEY_REUSED",
           "INPUT_NOT_AVAILABLE",
           "RECIPE_VERSION_RETIRED",
+          "PRECONDITION_REQUIRED",
           "QUOTA_EXCEEDED",
           "RATE_LIMITED",
           "INTERNAL_ERROR",
@@ -3278,7 +4835,7 @@
           "SERVICE_UNAVAILABLE"
         ],
         "title": "ProblemCode",
-        "description": "Códigos HTTP do catálogo de 1.6, mais os genéricos que o catálogo não nomeia.\n\nOs genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,\n`FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`,\n`GONE`, `UNSUPPORTED_MEDIA_TYPE`, `INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os\nstatus da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de\nexecução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com\nquem os produz."
+        "description": "Códigos HTTP do catálogo de 1.6, mais os genéricos que o catálogo não nomeia.\n\nOs genéricos (`BAD_REQUEST`, `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`,\n`FORBIDDEN`, `NOT_FOUND`, `METHOD_NOT_ALLOWED`, `REQUEST_TIMEOUT`, `STATE_CONFLICT`,\n`GONE`, `PRECONDITION_FAILED`, `UNSUPPORTED_MEDIA_TYPE`, `PRECONDITION_REQUIRED`,\n`INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`) cobrem os\nstatus da tabela de erros de 1.6 que não tinham código próprio. Os códigos de item e de\nexecução (`UNSUPPORTED_FORMAT`, `QUEUE_EXPIRED`...) não são respostas HTTP e ficam com\nquem os produz."
       },
       "ProblemDetails": {
         "properties": {
@@ -3699,10 +5256,12 @@
           "files:read",
           "files:write",
           "runs:read",
-          "runs:write"
+          "runs:write",
+          "presets:read",
+          "presets:write"
         ],
         "title": "Scope",
-        "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\n`presets:*` entra com os presets; o banco guarda texto, então acrescentar um escopo\nnão exige migração."
+        "description": "Escopos de chave de API da tabela de rotas de 1.6.\n\nO banco guarda texto, então acrescentar um escopo não exige migração."
       },
       "Status": {
         "type": "string",

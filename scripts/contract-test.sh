@@ -71,7 +71,7 @@ curl -fsS --max-time 1 "http://127.0.0.1:${PORT}/readyz" >/dev/null ||
 
 user_id="$(uv run gs-admin create-user --display-name "Contrato")"
 key="$(uv run gs-admin issue-key --user "$user_id" \
-  --scopes files:read,files:write,runs:read,runs:write --days 1 2>/dev/null)"
+  --scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write --days 1 2>/dev/null)"
 
 uv run gs-export-openapi "$WORK/openapi.json"
 # O gerador do Schemathesis não suporta `unevaluatedProperties` (corpo de POST /runs); a derivação

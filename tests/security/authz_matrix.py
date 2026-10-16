@@ -73,6 +73,14 @@ MATRIX: dict[tuple[str, str], Rule] = {
     ("DELETE", f"{API}/uploads/{{upload_id}}"): _scope(Scope.FILES_WRITE, "upload_id"),
     ("GET", f"{API}/artifacts/{{artifact_id}}"): _scope(Scope.FILES_READ, "artifact_id"),
     ("GET", f"{API}/artifacts/{{artifact_id}}/download"): _scope(Scope.FILES_READ, "artifact_id"),
+    # Presets.
+    ("GET", f"{API}/presets"): _scope(Scope.PRESETS_READ),
+    ("POST", f"{API}/presets"): _scope(Scope.PRESETS_WRITE),
+    ("GET", f"{API}/presets/{{preset_id}}"): _scope(Scope.PRESETS_READ, "preset_id"),
+    ("PUT", f"{API}/presets/{{preset_id}}"): _scope(Scope.PRESETS_WRITE, "preset_id"),
+    ("DELETE", f"{API}/presets/{{preset_id}}"): _scope(Scope.PRESETS_WRITE, "preset_id"),
+    # Também exige `presets:read` (tests/api/test_runs_from_preset.py).
+    ("POST", f"{API}/presets/{{preset_id}}/runs"): _scope(Scope.RUNS_WRITE, "preset_id"),
     # Execuções.
     ("POST", f"{API}/runs"): _scope(Scope.RUNS_WRITE),
     ("GET", f"{API}/runs"): _scope(Scope.RUNS_READ),
