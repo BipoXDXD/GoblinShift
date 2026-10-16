@@ -11,6 +11,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import NoReturn
 
@@ -24,6 +25,9 @@ GIB = 1024**3
 # Tetos de 1.7; gravados no pool quando ele nasce (o global pela migração 0006).
 GLOBAL_STORAGE_MAX_BYTES = 20 * GIB
 ACCOUNT_STORAGE_MAX_BYTES = 4 * GIB
+
+# Reservas liberadas ficam como trilha do livro-razão pelo mesmo prazo do histórico (1.7).
+RELEASED_RETENTION = timedelta(days=90)
 
 _GLOBAL = "global"
 _ACCOUNT = "account"
@@ -240,6 +244,43 @@ def usage(session: Session, owner_id: uuid.UUID) -> CapacityUsage:
     if row is None:
         return CapacityUsage(storage_reserved_bytes=0, storage_max_bytes=ACCOUNT_STORAGE_MAX_BYTES)
     return CapacityUsage(storage_reserved_bytes=row.reserved, storage_max_bytes=row.max_amount)
+
+
+@dataclass(frozen=True)
+class GlobalUsage:
+    storage_reserved_bytes: int
+    storage_max_bytes: int
+
+
+def global_usage(session: Session) -> GlobalUsage:
+    """Armazenamento reservado no ambiente e o teto, para o alerta de capacidade (3.7)."""
+    reserved, max_amount = session.execute(
+        select(capacity_pool.c.reserved, capacity_pool.c.max_amount).where(
+            global_pool(Resource.STORAGE_BYTES)
+        )
+    ).one()
+    return GlobalUsage(storage_reserved_bytes=reserved, storage_max_bytes=max_amount)
+
+
+def delete_released_reservations(session: Session, now: datetime, limit: int) -> int:
+    """Apaga até `limit` reservas liberadas há 90 dias ou mais; as vivas nunca.
+
+    O pool não muda: ele soma só as vivas, e a reconciliação recalcula a partir delas.
+    """
+    chosen = (
+        select(resource_reservation.c.id)
+        .where(resource_reservation.c.released_at <= now - RELEASED_RETENTION)
+        .order_by(resource_reservation.c.released_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+    removed = session.execute(
+        delete(resource_reservation)
+        .where(resource_reservation.c.id.in_(chosen))
+        .returning(resource_reservation.c.id)
+    ).all()
+    return len(removed)
 
 
 def has_live_reservation(
