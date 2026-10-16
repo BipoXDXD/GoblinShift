@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   browserEnvironment,
@@ -10,6 +10,7 @@ import {
 function environment(overrides: Partial<Environment3D> = {}): Environment3D {
   return {
     prefersReducedMotion: () => false,
+    subscribeReducedMotion: () => () => undefined,
     savesData: () => false,
     supportsWebGL2: () => true,
     ...overrides,
@@ -35,6 +36,27 @@ describe("shouldLoad3D", () => {
     shouldLoad3D(environment({ prefersReducedMotion: () => true, supportsWebGL2 }));
 
     expect(supportsWebGL2).not.toHaveBeenCalled();
+  });
+});
+
+describe("browserEnvironment.subscribeReducedMotion", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("avisa quando a preferência de movimento muda e para de avisar ao cancelar", () => {
+    const query = new EventTarget();
+    const matchMedia = vi.fn(() => query);
+    vi.stubGlobal("matchMedia", matchMedia);
+    const onChange = vi.fn();
+
+    const unsubscribe = browserEnvironment.subscribeReducedMotion(onChange);
+    query.dispatchEvent(new Event("change"));
+    unsubscribe();
+    query.dispatchEvent(new Event("change"));
+
+    expect(matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    expect(onChange).toHaveBeenCalledOnce();
   });
 });
 

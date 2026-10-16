@@ -10,11 +10,36 @@ import { keyTurn } from "./pose";
 
 const READY: Environment3D = {
   prefersReducedMotion: () => false,
+  subscribeReducedMotion: () => () => undefined,
   savesData: () => false,
   supportsWebGL2: () => true,
 };
 
 const REDUCED_MOTION: Environment3D = { ...READY, prefersReducedMotion: () => true };
+
+/** Ambiente pronto em que a pessoa liga o movimento reduzido no meio do caminho. */
+function reducibleMotion(): { readonly environment: Environment3D; readonly reduce: () => void } {
+  let reduced = false;
+  const listeners = new Set<() => void>();
+  return {
+    environment: {
+      ...READY,
+      prefersReducedMotion: () => reduced,
+      subscribeReducedMotion: (onChange) => {
+        listeners.add(onChange);
+        return () => {
+          listeners.delete(onChange);
+        };
+      },
+    },
+    reduce: () => {
+      reduced = true;
+      listeners.forEach((onChange) => {
+        onChange();
+      });
+    },
+  };
+}
 
 function runNow(run: () => void): () => void {
   run();
@@ -46,6 +71,7 @@ interface FakeScene {
     readonly turn: ReturnType<typeof vi.fn>;
     readonly resetPose: ReturnType<typeof vi.fn>;
     readonly setSpinning: ReturnType<typeof vi.fn>;
+    readonly setReducedMotion: ReturnType<typeof vi.fn>;
     readonly dispose: ReturnType<typeof vi.fn>;
   };
 }
@@ -60,6 +86,7 @@ function fakeScene(): FakeScene {
     turn: vi.fn(),
     resetPose: vi.fn(),
     setSpinning: vi.fn(),
+    setReducedMotion: vi.fn(),
     dispose: vi.fn(),
   };
   const sceneHandle: SceneHandle = {
@@ -110,9 +137,9 @@ async function settle(scene: FakeScene, index: number, error?: Error): Promise<v
 }
 
 /** Monta com a cena falsa e conclui a carga da Rúbia. */
-async function renderReady(scene: FakeScene) {
+async function renderReady(scene: FakeScene, environment: Environment3D = READY) {
   const view = render(
-    <OficinaHero environment={READY} whenPageIdle={runNow} loadScene={scene.loadScene} />,
+    <OficinaHero environment={environment} whenPageIdle={runNow} loadScene={scene.loadScene} />,
   );
   await waitFor(() => {
     expect(scene.shows).toHaveLength(1);
@@ -228,10 +255,33 @@ describe("OficinaHero", () => {
 
     expect(heroState(container)).toBe("falhou");
     expect(screen.getByRole("img", { name: /^Jade, goblin/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: TEXT.art.stage.spin })).toBeNull();
+    expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
+    expect(scene.host()).not.toHaveClass("cursor-grab");
+    expect(scene.host()).not.toHaveClass("touch-pan-y");
 
     await userEvent.click(castButton("Fagulha"));
     await settle(scene, 2);
     expect(heroState(container)).toBe("pronto");
+  });
+
+  it("com a cena mostrada, o palco aceita arrasto e tem Girar e Pose inicial", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    expect(scene.host()).toHaveClass("cursor-grab", "touch-pan-y");
+    expect(screen.getByRole("button", { name: TEXT.art.stage.spin })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: TEXT.art.stage.reset })).toBeInTheDocument();
+  });
+
+  it("enquanto a próxima goblin carrega, o palco não aceita arrasto nem mostra os controles", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    await userEvent.click(castButton("Nyx"));
+
+    expect(scene.host()).not.toHaveClass("cursor-grab");
+    expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
   });
 
   it("se o chunk da cena falhar, fica a imagem estática", async () => {
@@ -259,6 +309,20 @@ describe("OficinaHero", () => {
 
     expect(heroState(container)).toBe("falhou");
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
+  });
+
+  it("se o contexto WebGL se perder girando, libera a cena na hora, e só uma vez", async () => {
+    const scene = fakeScene();
+    const { unmount } = await renderReady(scene);
+    await userEvent.click(screen.getByRole("button", { name: TEXT.art.stage.spin }));
+
+    act(() => {
+      scene.options()?.onContextLost();
+    });
+
+    expect(scene.handle.dispose).toHaveBeenCalledOnce();
+    unmount();
+    expect(scene.handle.dispose).toHaveBeenCalledOnce();
   });
 
   it.each(["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"])(
@@ -316,22 +380,28 @@ describe("OficinaHero", () => {
     expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(false);
   });
 
-  it("Girar some se a pessoa passou a pedir movimento reduzido depois da carga", async () => {
+  it("girando e então reduz o movimento: o giro para, o Girar some e a cena fica sem entrada", async () => {
     const scene = fakeScene();
-    let reduced = false;
-    const environment: Environment3D = { ...READY, prefersReducedMotion: () => reduced };
-    render(
-      <OficinaHero environment={environment} whenPageIdle={runNow} loadScene={scene.loadScene} />,
-    );
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: TEXT.art.stage.spin })).toBeInTheDocument();
+    const motion = reducibleMotion();
+    await renderReady(scene, motion.environment);
+    await userEvent.click(screen.getByRole("button", { name: TEXT.art.stage.spin }));
+    expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(true);
+
+    act(() => {
+      motion.reduce();
     });
 
-    reduced = true;
-    await userEvent.click(castButton("Fagulha"));
-
+    expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(false);
+    expect(scene.handle.setReducedMotion).toHaveBeenLastCalledWith(true);
     expect(screen.queryByRole("button", { name: TEXT.art.stage.spin })).toBeNull();
     expect(screen.getByRole("button", { name: TEXT.art.stage.reset })).toBeInTheDocument();
+  });
+
+  it("sem movimento reduzido, a cena sabe que pode tocar a entrada", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    expect(scene.handle.setReducedMotion).toHaveBeenLastCalledWith(false);
   });
 
   it("Pose inicial volta a goblin e para o giro", async () => {

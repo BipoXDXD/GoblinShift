@@ -27,6 +27,7 @@ import type { CastId } from "./cast";
 import { attachGestures } from "./gestures";
 import type { MountOptions, SceneHandle } from "./OficinaHero";
 import { REST_POSE, turned, type Pose } from "./pose";
+import { ShowOrder } from "./show-order";
 
 const FIELD_OF_VIEW_DEGREES = 22;
 /** Folga em volta da goblin, para o cabelo não encostar na borda do quadro. */
@@ -108,27 +109,25 @@ export function mountScene(host: HTMLElement, options: MountOptions): SceneHandl
     },
     render: () => {
       renderer.render(scene, camera);
+      markGpuMemory(host, renderer);
     },
   });
   /** Só a troca mais recente vale: uma carga mais antiga que termina depois é descartada. */
-  let latestShow = 0;
-
-  let shown: CastId | null = null;
+  const order = new ShowOrder<CastId>();
 
   const show = async (goblin: CastId, signal: AbortSignal): Promise<void> => {
-    latestShow += 1;
-    if (goblin === shown) {
+    const ticket = order.begin(goblin);
+    if (ticket === null) {
       // Voltou para a goblin que já está no palco antes de a outra chegar: nada a baixar.
       return;
     }
-    const ticket = latestShow;
     const gltf = await loader.parseAsync(await fetchModel(modelUrlOf(goblin), signal), "");
-    const superseded = (): boolean => ticket !== latestShow || signal.aborted;
+    const superseded = (): boolean => !order.isCurrent(ticket) || signal.aborted;
     if (superseded()) {
       disposeTree(gltf.scene);
       return;
     }
-    shown = null;
+    order.cleared();
     turntable.children.forEach(disposeTree);
     turntable.clear();
     lights.children.forEach(disposeTree);
@@ -143,7 +142,7 @@ export function mountScene(host: HTMLElement, options: MountOptions): SceneHandl
     if (superseded()) {
       return;
     }
-    shown = goblin;
+    order.shown(ticket, goblin);
     host.dataset["goblin"] = goblin;
     stage.playIntro();
   };
@@ -189,18 +188,34 @@ export function mountScene(host: HTMLElement, options: MountOptions): SceneHandl
     setSpinning: (spinning) => {
       stage.setSpinning(spinning);
     },
+    setReducedMotion: (reduced) => {
+      stage.setReducedMotion(reduced);
+    },
     dispose: () => {
-      latestShow += 1;
+      order.cancelAll();
       stage.stop();
       stopGestures();
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("webglcontextlost", onLost);
       scene.environment?.dispose();
       disposeTree(scene);
+      // Devolve o contexto ao navegador na hora, sem esperar o coletor de lixo; o listener de
+      // perda já saiu, então isto não volta como falha da cena.
+      renderer.forceContextLoss();
       renderer.dispose();
       renderer.domElement.remove();
     },
   };
+}
+
+/**
+ * Geometrias e texturas que o renderer mantém na GPU, para o E2E conferir que trocar de goblin e
+ * voltar não deixa sobra (`data-geometrias`, `data-texturas`).
+ */
+function markGpuMemory(host: HTMLElement, renderer: WebGLRenderer): void {
+  const { geometries, textures } = renderer.info.memory;
+  host.dataset["geometrias"] = String(geometries);
+  host.dataset["texturas"] = String(textures);
 }
 
 function modelUrlOf(goblin: CastId): string {
@@ -296,9 +311,9 @@ interface StageView {
 type Motion = "entrada" | "girando" | "parado";
 
 /**
- * A pose da goblin e o que a mexe: a entrada (uma vez, até 3,5 s), a auto-rotação do botão
- * Girar, o arrasto e as setas. O laço de animação só roda com entrada ou giro; fora disso o canvas
- * redesenha só quando a pose muda, sem gastar bateria. Marca `data-movimento`, `data-giro` e
+ * A pose da goblin e o que a mexe: a entrada (uma vez, até 3,5 s, nunca com movimento reduzido), a
+ * auto-rotação do botão Girar, o arrasto e as setas. O laço de animação só roda com entrada ou
+ * giro; fora disso o canvas redesenha só quando a pose muda, sem gastar bateria. Marca `data-movimento`, `data-giro` e
  * `data-inclinacao` (graus) no host para o E2E.
  */
 class Stage {
@@ -309,6 +324,7 @@ class Stage {
   #introStart: number | null = null;
   #introRunning = false;
   #spinning = false;
+  #reducedMotion = false;
   #lastFrame: number | null = null;
 
   constructor(host: HTMLElement, renderer: WebGLRenderer, view: StageView) {
@@ -323,6 +339,13 @@ class Stage {
   }
 
   playIntro(): void {
+    if (this.#reducedMotion) {
+      // Sem a entrada, a goblin chega já na pose de repouso.
+      this.#pose = REST_POSE;
+      this.#apply();
+      this.#loop();
+      return;
+    }
     this.#pose = { yaw: INTRO_FROM_RADIANS, pitch: REST_POSE.pitch };
     this.#introStart = null;
     this.#introRunning = true;
@@ -354,6 +377,17 @@ class Stage {
       this.#introRunning = false;
     }
     this.#loop();
+  }
+
+  setReducedMotion(reduced: boolean): void {
+    this.#reducedMotion = reduced;
+    if (reduced && this.#introRunning) {
+      // A entrada interrompida termina onde terminaria, sem animar o resto.
+      this.#introRunning = false;
+      this.#pose = { ...this.#pose, yaw: REST_POSE.yaw };
+      this.#apply();
+      this.#loop();
+    }
   }
 
   stop(): void {

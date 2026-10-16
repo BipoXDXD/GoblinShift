@@ -1,5 +1,13 @@
 import { RotateCcw, RotateCw } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type ReactElement,
+} from "react";
 
 import { Button } from "../components/ui/Button";
 import { TEXT } from "../text";
@@ -21,6 +29,8 @@ export interface SceneHandle {
   readonly turn: (by: Pose) => void;
   readonly resetPose: () => void;
   readonly setSpinning: (spinning: boolean) => void;
+  /** Com movimento reduzido, a cena não toca a entrada de cada goblin e para a que está tocando. */
+  readonly setReducedMotion: (reduced: boolean) => void;
   readonly dispose: () => void;
 }
 
@@ -73,6 +83,10 @@ export function OficinaHero({
   const [selected, setSelected] = useState<CastId>(FIRST_ON_STAGE);
   const [model, setModel] = useState<ModelResult | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const reducedMotion = useSyncExternalStore(
+    environment.subscribeReducedMotion,
+    environment.prefersReducedMotion,
+  );
 
   useEffect(() => {
     const host = hostRef.current;
@@ -92,6 +106,10 @@ export function OficinaHero({
       }
       mounted = scene.mountScene(host, {
         onContextLost: () => {
+          // Sem contexto não há o que desenhar: libera a cena (o que também para o giro e a
+          // entrada) já, e o cleanup não a libera de novo.
+          mounted?.dispose();
+          mounted = null;
           setHandle(null);
           setMount("falhou");
         },
@@ -131,16 +149,19 @@ export function OficinaHero({
     };
   }, [handle, selected]);
 
+  // O giro automático é movimento que a pessoa liga; com movimento reduzido nem a cena carrega, e
+  // a preferência ligada depois da carga para o giro e a entrada.
+  const spinAllowed = !reducedMotion;
   useEffect(() => {
-    handle?.setSpinning(spinning);
-  }, [handle, spinning]);
+    handle?.setReducedMotion(reducedMotion);
+  }, [handle, reducedMotion]);
+  useEffect(() => {
+    handle?.setSpinning(spinning && spinAllowed);
+  }, [handle, spinning, spinAllowed]);
 
   const state = heroStateOf(mount, model, selected);
   const member = castMember(selected);
   const sceneShown = state === "pronto";
-  // O giro automático é movimento que a pessoa liga; com movimento reduzido nem a cena carrega,
-  // e a checagem aqui cobre a preferência ligada depois da carga.
-  const canSpin = handle !== null && !environment.prefersReducedMotion();
 
   const onStageKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (handle === null) {
@@ -191,13 +212,13 @@ export function OficinaHero({
         <div
           ref={hostRef}
           aria-hidden="true"
-          className={`absolute inset-0 cursor-grab touch-pan-y active:cursor-grabbing motion-safe:transition-opacity ${sceneShown ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 motion-safe:transition-opacity ${sceneShown ? "cursor-grab touch-pan-y opacity-100 active:cursor-grabbing" : "opacity-0"}`}
         />
       </div>
-      {handle === null ? null : (
+      {handle === null || !sceneShown ? null : (
         <>
           <div className="flex flex-wrap justify-center gap-2">
-            {canSpin ? (
+            {spinAllowed ? (
               <Button
                 type="button"
                 variant="secondary"
