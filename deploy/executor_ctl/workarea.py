@@ -64,6 +64,10 @@ class WorkDirMissingError(Exception):
     """O diretório da tentativa (ou inputs/, out/) não existe ou não é um diretório real."""
 
 
+class WorkDirModeError(RuntimeError):
+    """O kernel não aplicou o modo pedido; no host, falta CAP_FSETID para manter o setgid."""
+
+
 class UnsafeRemovalError(RuntimeError):
     """A plataforma não tem o rmtree resistente a symlink; o root não apaga sem ele."""
 
@@ -185,6 +189,12 @@ def _take_ownership(fd: int, owner: int, group: int, mode: int) -> None:
     os.fchown(fd, owner, group)
     # Depois do chown: trocar o dono pode limpar setgid e sticky.
     os.fchmod(fd, mode)
+    # Sem CAP_FSETID, o root fora do grupo do arquivo perde o setgid sem erro do kernel.
+    applied = stat.S_IMODE(os.fstat(fd).st_mode)
+    if applied != mode:
+        raise WorkDirModeError(
+            f"modo {applied:o} em vez de {mode:o}; o executor-ctl precisa de CAP_FSETID"
+        )
 
 
 def _take_input_files(inputs_fd: int, owner: int, group: int, area_dev: int) -> None:
