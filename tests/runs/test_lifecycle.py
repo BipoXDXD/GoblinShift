@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from goblinshift.processing.recipe import FailureCode
 from goblinshift.runs.lifecycle import (
+    DETERMINISTIC_CODES,
     CancelRequested,
     Claim,
     DeadlineExceeded,
@@ -676,3 +678,14 @@ def test_snapshot_incoerente_e_rejeitado(
 ) -> None:
     with pytest.raises(InconsistentRunStateError, match=message):
         replace(base, **changes)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "code", [code for code in FailureCode if code is not FailureCode.NO_VALID_OUTPUTS]
+)
+def test_toda_falha_que_o_executor_relata_e_deterministica_no_ciclo_de_vida(
+    code: FailureCode,
+) -> None:
+    # O worker só aceita do failure.json os códigos de DETERMINISTIC_CODES; um código novo de
+    # receita fora daqui viraria falha de infraestrutura, com retentativa inútil.
+    assert ErrorCode(code.value) in DETERMINISTIC_CODES

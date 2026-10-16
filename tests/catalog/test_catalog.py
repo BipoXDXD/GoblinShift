@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -221,10 +222,15 @@ def test_schema_da_variante_fixa_receita_e_versao_e_recusa_campos_extras() -> No
 # --- Receitas da fatia 5 -------------------------------------------------------------------
 
 
-def test_catalogo_lista_as_tres_receitas_na_versao_1() -> None:
+def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
     keys = {(version.recipe_id, version.version) for version in CATALOG.list_versions()}
 
-    assert keys == {("csv-janitor", 1), ("image-forge", 1), ("downloads-detox", 1)}
+    assert keys == {
+        ("csv-janitor", 1),
+        ("image-forge", 1),
+        ("downloads-detox", 1),
+        ("pdf-press", 1),
+    }
 
 
 def test_image_forge_publica_os_limites_de_1_7() -> None:
@@ -278,3 +284,45 @@ def test_receita_nova_recusa_campo_desconhecido_no_campo(recipe_id: str) -> None
         CATALOG.resolve(recipe_id, 1, {"inventado": 1})
 
     assert [field.location for field in error.value.errors] == ["inventado"]
+
+
+# Data de desligamento (1.6: `deprecated` aceita por pelo menos 90 dias, com `Sunset`).
+
+SUNSET = datetime(2027, 1, 15, tzinfo=UTC)
+
+
+def test_versao_deprecated_carrega_a_data_de_desligamento() -> None:
+    current = CATALOG.get_version("csv-janitor", 1)
+
+    deprecated = replace(current, status=VersionStatus.DEPRECATED, sunset_at=SUNSET)
+
+    assert deprecated.sunset_at == SUNSET
+
+
+def test_versao_deprecated_sem_data_de_desligamento_e_recusada() -> None:
+    current = CATALOG.get_version("csv-janitor", 1)
+
+    with pytest.raises(ValueError, match="sunset_at"):
+        replace(current, status=VersionStatus.DEPRECATED)
+
+
+def test_versao_atual_nao_tem_data_de_desligamento() -> None:
+    current = CATALOG.get_version("csv-janitor", 1)
+
+    with pytest.raises(ValueError, match="sunset_at"):
+        replace(current, sunset_at=SUNSET)
+
+
+def test_versao_retirada_pode_guardar_a_data_em_que_saiu() -> None:
+    current = CATALOG.get_version("csv-janitor", 1)
+
+    retired = replace(current, status=VersionStatus.RETIRED, sunset_at=SUNSET)
+
+    assert retired.sunset_at == SUNSET
+
+
+def test_data_de_desligamento_sem_fuso_e_recusada() -> None:
+    current = CATALOG.get_version("csv-janitor", 1)
+
+    with pytest.raises(ValueError, match="fuso"):
+        replace(current, status=VersionStatus.DEPRECATED, sunset_at=datetime(2027, 1, 15))
