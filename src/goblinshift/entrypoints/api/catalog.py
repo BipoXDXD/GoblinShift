@@ -98,6 +98,20 @@ def version_detail_response(version: RecipeVersion) -> RecipeVersionDetailRespon
     )
 
 
+def recipe_command_schema(common: dict[str, Any]) -> dict[str, Any]:
+    """Corpo de `POST /runs` e dos presets: `allOf` (campos comuns) + `oneOf` das versões (1.6).
+
+    `unevaluatedProperties: false` fica no nível do `allOf`, o único em que o JSON Schema
+    2020-12 enxerga as propriedades avaliadas pelas duas partes (ver `catalog.versions`).
+    """
+    variants = [
+        version.variant_schema()
+        for version in CATALOG.list_versions()
+        if version.status is not VersionStatus.RETIRED
+    ]
+    return {"allOf": [common, {"oneOf": variants}], "unevaluatedProperties": False}
+
+
 def deprecation_headers(version: RecipeVersion) -> dict[str, str]:
     """`Sunset` em HTTP-date (RFC 8594) nas respostas que usam uma versão `deprecated`."""
     if version.status is not VersionStatus.DEPRECATED or version.sunset_at is None:

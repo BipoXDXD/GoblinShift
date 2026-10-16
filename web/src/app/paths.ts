@@ -26,6 +26,22 @@ export function workbenchPath(recipeId: RecipeId): string {
   return generatePath(PATHS.workbench, { recipeId });
 }
 
+/** Parâmetro da Bancada com o id do preset que pré-preenche os parâmetros. */
+export const PRESET_PARAM = "preset";
+
+export function workbenchPresetPath(recipeId: RecipeId, presetId: string): string {
+  const query = new URLSearchParams({ [PRESET_PARAM]: presetId }).toString();
+  return `${workbenchPath(recipeId)}?${query}`;
+}
+
+/** Parâmetro da Bancada com o id da execução cuja configuração se reusa (Histórico). */
+export const RUN_PARAM = "execucao";
+
+export function workbenchFromRunPath(recipeId: RecipeId, runId: string): string {
+  const query = new URLSearchParams({ [RUN_PARAM]: runId }).toString();
+  return `${workbenchPath(recipeId)}?${query}`;
+}
+
 export function runPath(runId: string): string {
   return generatePath(PATHS.run, { runId });
 }

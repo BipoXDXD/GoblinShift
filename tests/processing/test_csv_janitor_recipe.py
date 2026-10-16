@@ -1,6 +1,7 @@
 """Receita csv-janitor v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.1, 1.3 e 1.7)."""
 
 import hashlib
+import shutil
 import unicodedata
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from goblinshift.processing.recipe import (
     InputFile,
     ItemOk,
     ItemRejected,
+    Preview,
     Report,
 )
 from goblinshift.processing.registry import RECIPES
@@ -53,7 +55,8 @@ class Workspace:
         )
 
     def output_names(self) -> list[str]:
-        return sorted(path.name for path in self.out_dir.iterdir())
+        """Saídas de conteúdo na raiz de out/; os previews ficam no grupo próprio."""
+        return sorted(path.name for path in self.out_dir.iterdir() if path.is_file())
 
 
 @pytest.fixture
@@ -78,6 +81,7 @@ def test_tabela_valida_gera_um_csv_limpo_com_contagens(work: Workspace) -> None:
                 "written": 1,
                 "blank_lines_ignored": 0,
             },
+            previews=(Preview("previews/clientes.csv", "clientes.csv"),),
         )
     ]
     assert (work.out_dir / "clientes.csv").read_bytes() == VALID.encode()
@@ -141,8 +145,8 @@ def test_tabela_um_byte_acima_do_tamanho_e_rejeitada(work: Workspace) -> None:
     at_limit = work.run(recipe=CsvJanitorV1(limits=Limits(table_bytes=size)))
 
     assert isinstance(at_limit.items[0], ItemOk)
-    for path in work.out_dir.iterdir():
-        path.unlink()
+    shutil.rmtree(work.out_dir)
+    work.out_dir.mkdir()
     above = work.run(recipe=CsvJanitorV1(limits=Limits(table_bytes=size - 1)))
     assert isinstance(above.items[0], ItemRejected)
 
@@ -154,6 +158,35 @@ def test_avisos_da_tabela_ficam_no_item(work: Workspace) -> None:
 
     assert isinstance(item, ItemOk)
     assert [warning.code for warning in item.warnings] == ["CSV_FORMULA_CELLS"]
+
+
+def test_aviso_de_formula_leva_a_contagem_por_coluna_na_ordem_da_saida(work: Workspace) -> None:
+    work.add("a.csv", "conta,valor,nota\r\n=1,-2,ok\r\n@x,-3,ok\r\n")
+
+    [item] = work.run().items
+
+    assert isinstance(item, ItemOk)
+    [formula] = item.warnings
+    assert formula.columns == (("conta", 2), ("valor", 2))
+
+
+def test_cabecalho_so_de_espacos_com_formula_entra_na_contagem(work: Workspace) -> None:
+    # Cabeçalho vazio rejeita a tabela (1.3); só de espaços é nome válido e chega ao relatório.
+    work.add("a.csv", "conta, \r\nok,=1\r\n")
+
+    [item] = work.run().items
+
+    assert isinstance(item, ItemOk)
+    assert item.warnings[0].columns == ((" ", 1),)
+
+
+def test_aviso_que_nao_e_de_celulas_nao_leva_colunas(work: Workspace) -> None:
+    work.add("a.csv", "=conta\r\n1\r\n")
+
+    [item] = work.run().items
+
+    assert isinstance(item, ItemOk)
+    assert [(w.code, w.columns) for w in item.warnings] == [("CSV_FORMULA_HEADER", ())]
 
 
 def test_cinco_tabelas_sao_aceitas(work: Workspace) -> None:

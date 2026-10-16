@@ -29,6 +29,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.files.candidates import attempts_with_loose_candidates, discard_candidates
 from goblinshift.files.limits import EXPIRY_BATCH_SIZE
+from goblinshift.files.missing import (
+    DEFAULT_MAX_ABSENT_RATIO,
+    MissingSweep,
+    sweep_missing_objects,
+)
 from goblinshift.files.objects import holders_with_open_uses
 from goblinshift.files.retention import (
     anonymize_deleted_uploads,
@@ -56,6 +61,7 @@ from goblinshift.runs.lifecycle import (
 from goblinshift.runs.retention import (
     HISTORY_REFERENCES,
     anonymize_finished_runs,
+    anonymize_output_names,
     delete_expired_idempotency_records,
     delete_old_runs,
     history_backlog,
@@ -89,6 +95,11 @@ class MaintenanceConfig:
     batch_size: int = DEFAULT_BATCH_SIZE
     # Lote de cada etapa da retenção longa (1.7): linhas simples, transação curta.
     retention_batch_size: int = EXPIRY_BATCH_SIZE
+    # Objetos `committed` conferidos no disco por ciclo (um `stat` cada), em rodízio pelo ID.
+    missing_sweep_batch_size: int = EXPIRY_BATCH_SIZE
+    # Fração do lote ausente acima da qual nada é marcado (files/missing.py); 1.0 desliga o
+    # limitador, para o administrador depois de restaurar de propósito um backup antigo (3.8).
+    missing_max_absent_ratio: float = DEFAULT_MAX_ABSENT_RATIO
     stop_grace: timedelta = timedelta(seconds=10)
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
@@ -115,6 +126,9 @@ class Maintenance:
         self._runner = runner
         self._config = config
         self._on_finished = on_finished
+        # Onde a varredura de ausentes parou. Só em memória: reiniciar o processo recomeça do
+        # primeiro objeto, o que custa uma volta a mais e nada mais.
+        self._missing_resume_after: uuid.UUID | None = None
 
     def run_cycle(self) -> dict[str, int]:
         """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
@@ -127,6 +141,7 @@ class Maintenance:
             "candidates_discarded": self.discard_stale_candidates(),
             "work_areas_removed": self.sweep_work_areas(),
             **self.apply_retention(),
+            **self.mark_missing_objects(),
             **self.measure(),
         }
         fields: dict[str, object] = {"main": True, **counts}
@@ -342,6 +357,60 @@ class Maintenance:
         counts["purge_limit_reached"] = int(report.limit_reached)
         return {**counts, **self.apply_history_retention()}
 
+    def mark_missing_objects(self) -> dict[str, int]:
+        """Um lote da varredura de objetos sem arquivo no disco (1.7, 3.8: `missing`).
+
+        Isolada do resto do ciclo: uma falha dela (disco, banco) fica no log e na contagem
+        `missing_sweep_failed`, e a retenção e os medidores seguem. A reconciliação de capacidade
+        do ciclo seguinte já vê as reservas liberadas aqui.
+        """
+        try:
+            sweep = sweep_missing_objects(
+                self._new_session(),
+                self._storage,
+                after=self._missing_resume_after,
+                limit=self._config.missing_sweep_batch_size,
+                max_absent_ratio=self._config.missing_max_absent_ratio,
+            )
+        except Exception:
+            # Não engole: registra com o traceback e conta; o cursor fica, e o lote volta.
+            logger.exception(
+                "varredura de ausentes falhou",
+                extra={"fields": {"alert": "missing_sweep_failed"}},
+            )
+            return {**_sweep_counts(MissingSweep.idle()), "missing_sweep_failed": 1}
+        self._missing_resume_after = sweep.resume_after
+        self._report_sweep(sweep)
+        return {**_sweep_counts(sweep), "missing_sweep_failed": 0}
+
+    def _report_sweep(self, sweep: MissingSweep) -> None:
+        if sweep.storage_unreachable:
+            # Sem a sentinela de montagem: filesystem do storage desmontado ou trocado.
+            logger.warning(
+                "storage sem a sentinela de montagem; varredura de ausentes suspensa",
+                extra={"fields": {"alert": "storage_unreachable"}},
+            )
+        if sweep.governor_tripped:
+            # Ausentes demais num lote: storage errado ou backup antigo restaurado (3.8); o
+            # administrador confere antes de liberar (`missing_max_absent_ratio`).
+            logger.warning(
+                "limitador de ausentes acionado; nada marcado",
+                extra={
+                    "fields": {
+                        "alert": "missing_governor",
+                        "checked": sweep.checked,
+                        "absent": sweep.absent,
+                        "unreadable": sweep.unreadable,
+                    }
+                },
+            )
+        if sweep.marked:
+            # Esperado depois de restaurar o banco de um backup (3.8); fora disso, investigar.
+            logger.warning(
+                "objetos ausentes do storage marcados missing",
+                extra={"fields": {"alert": "objects_missing", "objects": sweep.marked}},
+            )
+
     def apply_history_retention(self) -> dict[str, int]:
         """Retenção longa (1.7), cada etapa um lote numa transação própria.
 
@@ -354,6 +423,7 @@ class Maintenance:
                 s, now, batch
             ),
             "runs_anonymized": lambda s, now: anonymize_finished_runs(s, now, batch),
+            "outputs_anonymized": lambda s, now: anonymize_output_names(s, now, batch),
             "uploads_anonymized": lambda s, now: anonymize_deleted_uploads(s, now, batch),
             "runs_deleted": lambda s, now: delete_old_runs(s, now, batch),
             "file_rows_deleted": lambda s, now: delete_old_file_rows(
@@ -457,6 +527,18 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _sweep_counts(sweep: MissingSweep) -> dict[str, int]:
+    """As contagens da varredura no evento do ciclo."""
+    return {
+        "objects_missing_checked": sweep.checked,
+        "objects_missing_absent": sweep.absent,
+        "objects_missing_unreadable": sweep.unreadable,
+        "objects_marked_missing": sweep.marked,
+        "missing_sweep_skipped": int(sweep.storage_unreachable),
+        "missing_governor_tripped": int(sweep.governor_tripped),
+    }
 
 
 def _discard_locked(session: Session, run_id: uuid.UUID, attempt_id: uuid.UUID) -> list[str] | None:

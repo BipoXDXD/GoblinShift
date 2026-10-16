@@ -340,3 +340,21 @@ def test_sufixo_de_colisao_entra_antes_da_ultima_extensao(
     write(out, name, 0)
 
     assert write(out, name, 1) == expected
+
+
+# --- Espaço para saídas opcionais (previews): consultado antes de criar, nunca estoura o teto ----
+
+
+def test_ha_espaco_enquanto_cabem_um_arquivo_e_os_bytes(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path, max_files=2, max_bytes=10)
+    write(out, "a.csv", 0, b"12345")
+
+    assert out.room_for(5) is True
+    assert out.room_for(6) is False
+
+
+def test_sem_espaco_quando_o_numero_de_arquivos_chegou_ao_teto(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path, max_files=1, max_bytes=10)
+    write(out, "a.csv", 0, b"1")
+
+    assert out.room_for(0) is False

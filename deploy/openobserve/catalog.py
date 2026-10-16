@@ -131,6 +131,9 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_accounts_deletion_overdue",
     "maintenance_storage_global_reserved_bytes",
     "maintenance_storage_global_max_bytes",
+    "maintenance_missing_sweep_skipped",
+    "maintenance_missing_governor_tripped",
+    "maintenance_objects_marked_missing",
 )
 
 
@@ -178,6 +181,30 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         "Veja o runbook em deploy/openobserve/README.md.",
         period_minutes=15,
         silence_minutes=240,
+        destination=DestinationKey.WARNING,
+    ),
+    _MaintenanceCause(
+        "causa-storage-sem-sentinela",
+        "Varredura de objetos ausentes suspensa: falta a sentinela de montagem na raiz do "
+        "storage, quase sempre o filesystem desmontado. Veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _MaintenanceCause(
+        "causa-limitador-de-ausentes",
+        "Limitador da varredura de objetos ausentes acionado: arquivos demais sumidos num lote e "
+        "nada marcado. Storage errado ou backup antigo restaurado; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _MaintenanceCause(
+        "causa-objetos-ausentes",
+        "Objetos marcados missing: o arquivo sumiu do storage montado. Esperado depois de "
+        "restaurar o banco de um backup; fora disso, investigue. Veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
 )

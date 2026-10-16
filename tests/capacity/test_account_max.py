@@ -38,6 +38,17 @@ def test_conta_sem_pool_ganha_o_teto_pedido(factory: sessionmaker[Session]) -> N
     assert storage_max(factory, owner) == 8 * MIB
 
 
+def test_devolve_o_teto_anterior_para_a_auditoria(factory: sessionmaker[Session]) -> None:
+    owner = new_owner(factory)
+
+    with unit_of_work(factory) as session:
+        first = set_account_storage_max(session, owner, 8 * MIB)
+    with unit_of_work(factory) as session:
+        second = set_account_storage_max(session, owner, None)
+
+    assert (first, second) == (ACCOUNT_STORAGE_MAX_BYTES, 8 * MIB)
+
+
 def test_teto_menor_passa_a_recusar_reserva_maior(factory: sessionmaker[Session]) -> None:
     owner = new_owner(factory)
     with unit_of_work(factory) as session:

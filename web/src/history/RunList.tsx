@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { Link } from "react-router";
 
 import { runPath } from "../app/paths";
@@ -14,17 +14,24 @@ const T = TEXT.history;
  * Execuções em linhas, das mais novas para as mais antigas: receita, quando foi criada e o estado
  * (texto, ícone e cor). O link cobre a linha inteira (card-link) e leva à tela da execução.
  */
-export function RunList({ runs }: { readonly runs: readonly Run[] }): ReactElement {
+export function RunList({
+  runs,
+  renderExtras,
+}: {
+  readonly runs: readonly Run[];
+  /** O que a tela acrescenta a cada linha, abaixo do estado (o Histórico, por exemplo). */
+  readonly renderExtras?: (run: Run) => ReactNode;
+}): ReactElement {
   return (
     <ul aria-label={T.listLabel} className="flex flex-col gap-3">
       {runs.map((run) => (
-        <RunRow key={run.id} run={run} />
+        <RunRow key={run.id} run={run} extras={renderExtras?.(run) ?? null} />
       ))}
     </ul>
   );
 }
 
-function RunRow({ run }: { readonly run: Run }): ReactElement {
+function RunRow({ run, extras }: { readonly run: Run; readonly extras: ReactNode }): ReactElement {
   const createdAt = formatDateTime(run.created_at);
   // Receita que saiu do registro da interface ainda aparece, pelo id que a API devolve.
   const title = findRecipe(run.recipe_id)?.title ?? run.recipe_id;
@@ -38,6 +45,7 @@ function RunRow({ run }: { readonly run: Run }): ReactElement {
         <p className="text-sm text-fg-muted">{T.createdAt(createdAt)}</p>
       </div>
       <StatusBadge status={run.status} />
+      {extras}
     </li>
   );
 }
