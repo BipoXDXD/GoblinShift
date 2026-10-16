@@ -6,7 +6,7 @@ As goblins do site são **ilustrações e modelos 3D gerados com IA e editados**
 
 | Goblin | Onde | Modelo 3D (Hyper3D Rodin) |
 |---|---|---|
-| Rúbia | Cena 3D da abertura e a imagem estática dela | [`e1c79f67`](https://hyper3d.ai/workspace/rodin/e1c79f67-dafb-4f23-89ea-f4324beca492) |
+| Rúbia | Cena 3D da abertura e a imagem estática dela | [`9f030f3c`](https://hyper3d.ai/workspace/rodin/9f030f3c-868c-4e55-a44e-71d6a3323265) (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
 | Lua | Estado vazio | [`81ae6621`](https://hyper3d.ai/workspace/rodin/81ae6621-dbb6-48b0-acb0-04918bfdb393) |
 | Ada | Estado carregando | [`417f7fe0`](https://hyper3d.ai/workspace/rodin/417f7fe0-23a6-4fec-922a-33fbb3c69032) |
 | Nyx | Estado de erro | [`19a1ddba`](https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9) |
