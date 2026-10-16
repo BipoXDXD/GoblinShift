@@ -7,7 +7,16 @@ services:
   # Runner local (subprocesso, sem sandbox): só existe fora de produção. O executor roda no
   # container do worker, daí o `init` que colhe os órfãos; a manutenção consulta e para esses
   # executores pelo grupo de processos, daí o namespace de PIDs e a área de trabalho do worker.
+  # Só o worker roda receitas com o Runner local: a imagem dele leva o FFmpeg mínimo do executor
+  # (docker/worker-dev.Dockerfile, ADR 036). Nome próprio, para não sobrescrever a imagem da
+  # aplicação que a api, o migrate e a manutenção usam.
   worker:
+    image: goblinshift-worker-dev:${GS_IMAGE_TAG:-dev}
+    build:
+      dockerfile: docker/worker-dev.Dockerfile
+      additional_contexts:
+        app: service:api
+        ffmpeg: service:ffmpeg-minimo
     init: true
     environment:
       GS_RUNNER: local
@@ -23,6 +32,17 @@ services:
     depends_on:
       worker:
         condition: service_started
+
+  # Só existe para o build: o estágio `ffmpeg` da imagem do executor, que o worker copia. Com
+  # zero réplicas, o `docker compose up --build` o constrói, mas não o executa (um perfil
+  # inativo não serve: o Compose recusa `service:` apontando para serviço fora da pilha).
+  ffmpeg-minimo:
+    image: goblinshift-ffmpeg-minimo:${GS_IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: docker/executor.Dockerfile
+      target: ffmpeg
+    scale: 0
 
 volumes:
   work:
