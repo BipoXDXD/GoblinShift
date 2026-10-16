@@ -8,6 +8,7 @@ from alembic import context
 import goblinshift.capacity.tables
 import goblinshift.files.tables
 import goblinshift.identity.tables
+import goblinshift.presets.tables
 import goblinshift.runs.tables  # noqa: F401
 from goblinshift.platform.db import make_engine, metadata
 from goblinshift.platform.settings import Settings

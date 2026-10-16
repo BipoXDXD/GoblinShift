@@ -48,10 +48,20 @@ run = Table(
     Column("error_code", Text),
     Column("traceparent", Text),
     Column("summary", JSONB),
+    # Preset de origem, só para o histórico: excluir o preset anula a coluna e não muda a Run.
+    Column("preset_id", Uuid),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("started_at", DateTime(timezone=True)),
     Column("finished_at", DateTime(timezone=True)),
     UniqueConstraint("owner_id", "id"),
+    # FK composta com o dono: o banco impede apontar para preset de outra conta. Só `preset_id`
+    # vira nulo na exclusão; `owner_id` continua (PostgreSQL 15+).
+    ForeignKeyConstraint(
+        ["owner_id", "preset_id"],
+        ["preset.owner_id", "preset.id"],
+        ondelete="SET NULL (preset_id)",
+    ),
+    Index("run_preset_id_idx", "preset_id", postgresql_where=text("preset_id IS NOT NULL")),
     Index("run_owner_history_idx", "owner_id", text("created_at DESC"), text("id DESC")),
     # Fila: só as linhas que um claim pode pegar, na ordem do claim.
     Index(
