@@ -65,7 +65,6 @@ function fakeClient(outcomes: readonly (() => Outcome)[]) {
     request,
     requestText: () => Promise.reject(new Error("a execução não lê texto")),
     hasSessionCookie: () => true,
-    requestJpeg: () => Promise.reject(new Error("o polling não busca imagens")),
   };
   return { client, requestCount: () => served };
 }
