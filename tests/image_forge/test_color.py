@@ -3,6 +3,7 @@
 import pytest
 from PIL import ImageCms
 
+from goblinshift.processing.recipe import ItemNoticeCode
 from tests.image_forge import icc, media
 from tests.image_forge.conftest import Workspace, only_ok
 from tests.image_forge.test_inspection import code_for
@@ -30,7 +31,9 @@ def pixel(work: Workspace, name: str) -> tuple[int, ...]:
 
 def test_sem_perfil_assume_srgb_e_registra(work: Workspace) -> None:
     work.add("a.png", orange_png())
-    assert only_ok(work.run()).details["color_profile"] == "assumed-srgb"
+    item = only_ok(work.run())
+    assert item.details["color_profile"] == "assumed-srgb"
+    assert item.notices == ()
     assert pixel(work, "images/a.png") == P3_ORANGE
 
 
@@ -62,6 +65,9 @@ def test_display_p3_e_convertido_para_srgb(work: Workspace) -> None:
     item = only_ok(work.run())
 
     assert item.details["color_profile"] == "display-p3-converted"
+    # Fato, não aviso (A2): sai como nota para o detalhe da Run, sem mudar o estado.
+    assert item.notices == (ItemNoticeCode.IMAGE_P3_CONVERTED,)
+    assert item.warnings == ()
     converted = pixel(work, "images/a.png")
     assert all(
         abs(got - want) <= TOLERANCE

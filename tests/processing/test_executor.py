@@ -132,6 +132,7 @@ def test_sucesso_com_rejeicao_grava_saidas_relatorio_e_progresso(tmp_path: Path)
                 },
                 "details": {},
                 "warnings": [],
+                "notices": [],
             },
             {
                 "position": 1,

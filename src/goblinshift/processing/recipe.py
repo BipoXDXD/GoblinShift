@@ -54,6 +54,15 @@ class ItemWarningCode(StrEnum):
     CSV_ALL_RECORDS_FILTERED = "CSV_ALL_RECORDS_FILTERED"
     CSV_FORMULA_CELLS = "CSV_FORMULA_CELLS"
     CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
+    # PDF Press: nenhuma página da entrada entrou na seleção.
+    INPUT_NOT_SELECTED = "INPUT_NOT_SELECTED"
+
+
+class ItemNoticeCode(StrEnum):
+    """Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado
+    para `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."""
+
+    IMAGE_P3_CONVERTED = "IMAGE_P3_CONVERTED"
 
 
 @dataclass(frozen=True)
@@ -100,6 +109,13 @@ class ItemOk:
     # Fatos registrados que não são aviso (não mudam o estado para succeeded_with_warnings):
     # dimensões, formato, perfil assumido ou convertido, quadros MPO descartados, tipo do Detox.
     details: Mapping[str, DetailValue] = field(default_factory=dict)
+    # Os fatos que a interface mostra por código (o detalhe da Run não lê `details`).
+    notices: Sequence[ItemNoticeCode] = ()
+
+    def __post_init__(self) -> None:
+        for notice in self.notices:
+            if notice not in ItemNoticeCode:
+                raise ValueError(f"{notice!r} não é nota do catálogo")
 
 
 class ItemRejectionCode(StrEnum):

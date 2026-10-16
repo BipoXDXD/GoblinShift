@@ -4997,6 +4997,14 @@
         ],
         "title": "FieldError"
       },
+      "ItemNoticeCode": {
+        "type": "string",
+        "enum": [
+          "IMAGE_P3_CONVERTED"
+        ],
+        "title": "ItemNoticeCode",
+        "description": "Fatos sobre o item que a interface mostra, mas que não são aviso (A2: não mudam o estado\npara `succeeded_with_warnings`). Lista fechada: vão para o banco e para a API."
+      },
       "ItemRejectionCode": {
         "type": "string",
         "enum": [
@@ -5025,7 +5033,8 @@
         "enum": [
           "CSV_ALL_RECORDS_FILTERED",
           "CSV_FORMULA_CELLS",
-          "CSV_FORMULA_HEADER"
+          "CSV_FORMULA_HEADER",
+          "INPUT_NOT_SELECTED"
         ],
         "title": "ItemWarningCode",
         "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui."
@@ -5491,6 +5500,9 @@
           "file_name": {
             "type": "string",
             "title": "File Name"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
           }
         },
         "type": "object",
@@ -5498,7 +5510,8 @@
           "artifact_id",
           "logical_name",
           "role",
-          "file_name"
+          "file_name",
+          "availability"
         ],
         "title": "ResultReferenceResponse"
       },
@@ -5667,6 +5680,17 @@
             "format": "uuid",
             "title": "Upload Id"
           },
+          "original_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Name"
+          },
           "status": {
             "$ref": "#/components/schemas/ItemStatus"
           },
@@ -5686,6 +5710,13 @@
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/ItemNoticeCode"
+            },
+            "type": "array",
+            "title": "Notices"
           },
           "counts": {
             "additionalProperties": {
@@ -5710,9 +5741,11 @@
         "required": [
           "position",
           "upload_id",
+          "original_name",
           "status",
           "error_code",
           "warnings",
+          "notices",
           "counts",
           "duplicate_of"
         ],
