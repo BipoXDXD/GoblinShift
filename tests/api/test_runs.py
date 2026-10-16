@@ -927,6 +927,34 @@ def test_resultados_publicados_em_ordem_de_posicao(
     ]
 
 
+def test_resultados_com_nomes_anulados_trazem_o_nome_generico(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    """Aos 30 dias a retenção anula os nomes (1.7); a resposta não muda de forma."""
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id.in_([report, table]))
+            .values(deleted_at=func.now(), file_name=None)
+        )
+        session.execute(
+            update(run_output).where(run_output.c.run_id == run_id).values(logical_name=None)
+        )
+
+    response = client.get(f"{RUNS}/{run_id}/results", headers=account.headers)
+
+    assert response.status_code == 200
+    assert [
+        (a["logical_name"], a["file_name"], a["availability"]) for a in response.json()["artifacts"]
+    ] == [
+        (f"output-{table}", f"output-{table}", "expired"),
+        (f"report-{report}", f"report-{report}", "expired"),
+    ]
+
+
 def test_publicado_sem_saidas_e_published_true(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:

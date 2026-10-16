@@ -5674,14 +5674,16 @@
           },
           "logical_name": {
             "type": "string",
-            "title": "Logical Name"
+            "title": "Logical Name",
+            "description": "Nome da saída dentro da execução. Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como `<role>-<artifact_id>`."
           },
           "role": {
             "$ref": "#/components/schemas/ArtifactRole"
           },
           "file_name": {
             "type": "string",
-            "title": "File Name"
+            "title": "File Name",
+            "description": "Nome com que o download entrega o arquivo. Trinta dias depois do término da execução o nome é anulado (retenção de 1.7) e vem como `<role>-<artifact_id>`."
           },
           "availability": {
             "$ref": "#/components/schemas/Availability"
