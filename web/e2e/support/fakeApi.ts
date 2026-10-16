@@ -50,7 +50,11 @@ type RunListQuery = z.infer<typeof runListQuerySchema>;
 export type RunCommand = z.infer<typeof runCommandSchema>;
 
 /** Execução com os campos que a matriz de estados troca (status, progresso, erro…). */
-export type RunOverrides = Partial<Omit<Run, "id">>;
+type RunDetail = Schemas["RunDetailResponse"];
+type RunDetailParts = Pick<RunDetail, "summary" | "items">;
+
+/** Execução com os campos que a matriz de estados troca (status, progresso, erro, itens…). */
+export type RunOverrides = Partial<Omit<Run, "id"> & RunDetailParts>;
 
 export interface FakeApi {
   /** Corpo de cada POST /runs aceito, na ordem. */
@@ -86,6 +90,8 @@ interface StoredUpload {
 
 interface StoredRun {
   run: Run;
+  /** Resumo e itens da semeada; a criada por POST /runs os deriva das entradas. */
+  readonly detail?: RunDetailParts;
   /** Execução criada por POST /runs anda a cada consulta; a semeada fica parada. */
   readonly advances: boolean;
   readonly inputIds: readonly string[];
@@ -191,8 +197,9 @@ class FakeState {
 
   seedRun(overrides: RunOverrides): string {
     const id = randomUUID();
-    const run = { ...runBody(id, "csv-janitor"), ...overrides };
-    this.runs.set(id, { run, advances: false, inputIds: [] });
+    const { summary = null, items = [], ...runOverrides } = overrides;
+    const run = { ...runBody(id, "csv-janitor"), ...runOverrides };
+    this.runs.set(id, { run, detail: { summary, items }, advances: false, inputIds: [] });
     return id;
   }
 
@@ -298,7 +305,8 @@ class FakeState {
     const headers: Record<string, string> = isTerminal(stored.run)
       ? {}
       : { "Retry-After": POLL_RETRY_AFTER_SECONDS };
-    await fulfillJson(route, stored.run, { status: 200, headers });
+    const detail: RunDetail = { ...stored.run, ...(stored.detail ?? derivedDetail(stored)) };
+    await fulfillJson(route, detail, { status: 200, headers });
   }
 
   private async results(route: Route, id: string): Promise<void> {
@@ -341,6 +349,28 @@ class FakeState {
       return { artifact_id: artifactId, logical_name: name, role, file_name: name };
     });
   }
+}
+
+/** Como o worker: itens pendentes enquanto roda; ao concluir, todos ok e o resumo. */
+function derivedDetail({ run, inputIds }: StoredRun): RunDetailParts {
+  if (run.status === "queued") {
+    return { summary: null, items: [] };
+  }
+  const done = isTerminal(run);
+  const items = inputIds.map((uploadId, index) => ({
+    position: index + 1,
+    upload_id: uploadId,
+    status: done ? ("ok" as const) : ("pending" as const),
+    error_code: null,
+    warnings: [],
+    counts: {},
+    duplicate_of: null,
+  }));
+  const count = inputIds.length;
+  const summary = done
+    ? { inputs: count, ok: count, rejected: 0, duplicates: 0, outputs: count }
+    : null;
+  return { summary, items };
 }
 
 function isReceived(upload: StoredUpload | undefined): boolean {

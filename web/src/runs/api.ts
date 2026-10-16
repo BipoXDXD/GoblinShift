@@ -36,7 +36,50 @@ export const runSchema = z.object({
   results_expire_at: z.iso.datetime({ offset: true }).nullable(),
 });
 
+// Códigos fechados da spec; um código novo chega como desconhecido e a tela o trata assim.
+const ITEM_STATUSES = ["pending", "ok", "rejected", "duplicate"] as const;
+const ITEM_REJECTIONS = [
+  "UNSUPPORTED_FORMAT",
+  "UNSUPPORTED_BIT_DEPTH",
+  "UNSUPPORTED_COLOR_PROFILE",
+  "IMAGE_TOO_LARGE",
+  "CSV_STRUCTURE_INVALID",
+  "FIELD_LIMIT_EXCEEDED",
+] as const;
+const ITEM_WARNINGS = [
+  "CSV_ALL_RECORDS_FILTERED",
+  "CSV_FORMULA_CELLS",
+  "CSV_FORMULA_HEADER",
+] as const;
+
+const runItemSchema = z.object({
+  position: z.number().int(),
+  upload_id: z.uuid(),
+  status: z.enum(ITEM_STATUSES),
+  error_code: z.enum(ITEM_REJECTIONS).nullable(),
+  warnings: z.array(z.enum(ITEM_WARNINGS)),
+  counts: z.record(z.string(), z.number().int()),
+  duplicate_of: z.number().int().nullable(),
+});
+
+const runSummarySchema = z.object({
+  inputs: z.number().int(),
+  ok: z.number().int(),
+  rejected: z.number().int(),
+  duplicates: z.number().int(),
+  outputs: z.number().int(),
+});
+
+/** GET /runs/{id}: a execução, o resumo depois da publicação e o desfecho de cada entrada. */
+const runDetailSchema = runSchema.extend({
+  summary: runSummarySchema.nullable(),
+  items: z.array(runItemSchema),
+});
+
 export type Run = z.infer<typeof runSchema>;
+export type RunDetail = z.infer<typeof runDetailSchema>;
+export type RunItem = RunDetail["items"][number];
+export type RunSummary = NonNullable<RunDetail["summary"]>;
 export type RunStatus = Run["status"];
 export type RunPhase = NonNullable<Run["progress"]["phase"]>;
 
@@ -45,11 +88,11 @@ export function getRun(
   client: ApiClient,
   runId: string,
   signal?: AbortSignal,
-): Promise<ApiResponse<Run>> {
+): Promise<ApiResponse<RunDetail>> {
   return client.request({
     method: "GET",
     path: `/api/v1/runs/${encodeURIComponent(runId)}`,
-    schema: runSchema,
+    schema: runDetailSchema,
     ...(signal === undefined ? {} : { signal }),
   });
 }

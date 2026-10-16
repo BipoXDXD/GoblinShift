@@ -223,6 +223,57 @@ export const TEXT = {
     stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
+    items: {
+      heading: "Arquivos da execução",
+      listLabel: "Arquivos, na ordem de entrada",
+      entry: (position: number) => `Arquivo ${String(position)}`,
+      summary: (parts: {
+        inputs: string;
+        ok: string;
+        rejected: string;
+        duplicates: string;
+        outputs: string;
+      }) =>
+        `${parts.inputs}: ${parts.ok}, ${parts.rejected}, ${parts.duplicates}. ${parts.outputs}.`,
+      nouns: {
+        inputs: ["arquivo", "arquivos"],
+        ok: ["processado", "processados"],
+        rejected: ["rejeitado", "rejeitados"],
+        duplicates: ["repetido", "repetidos"],
+        outputs: ["arquivo gerado", "arquivos gerados"],
+      },
+      statuses: {
+        pending: "Aguardando",
+        ok: "Processado",
+        rejected: "Rejeitado",
+        duplicate: "Repetido",
+      },
+      okWithWarnings: "Processado com aviso",
+      rejections: {
+        UNSUPPORTED_FORMAT: "O formato do arquivo não é aceito por esta receita.",
+        UNSUPPORTED_BIT_DEPTH: "A profundidade de cor da imagem não é aceita.",
+        UNSUPPORTED_COLOR_PROFILE: "O perfil de cor da imagem não é aceito; só sRGB e Display P3.",
+        IMAGE_TOO_LARGE: "A imagem passa de 24 megapixels ou de 8192 px num dos lados.",
+        CSV_STRUCTURE_INVALID: "A estrutura do CSV é inválida (aspas, colunas ou codificação).",
+        FIELD_LIMIT_EXCEEDED:
+          "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
+      },
+      warnings: {
+        CSV_ALL_RECORDS_FILTERED: "Os filtros tiraram todos os registros desta tabela.",
+        CSV_FORMULA_CELLS:
+          "Há células que parecem fórmulas de planilha. Abra a saída com cuidado, ou use a opção de prefixar.",
+        CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
+      },
+      duplicateOf: (position: number) =>
+        `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
+      counts: {
+        records_read: (n: string) => `${n} registros lidos`,
+        filtered_out: (n: string) => `${n} filtrados`,
+        duplicates_removed: (n: string) => `${n} duplicatas removidas`,
+        written: (n: string) => `${n} gravados`,
+        blank_lines_ignored: (n: string) => `${n} linhas vazias ignoradas`,
+      },
+    },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
     flavor: {
       queued: "Os goblins pegam este lote assim que uma bancada vagar.",
