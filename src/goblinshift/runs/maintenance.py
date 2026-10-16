@@ -56,6 +56,7 @@ from goblinshift.runs.lifecycle import (
 from goblinshift.runs.retention import (
     HISTORY_REFERENCES,
     anonymize_finished_runs,
+    anonymize_output_names,
     delete_expired_idempotency_records,
     delete_old_runs,
     history_backlog,
@@ -354,6 +355,7 @@ class Maintenance:
                 s, now, batch
             ),
             "runs_anonymized": lambda s, now: anonymize_finished_runs(s, now, batch),
+            "outputs_anonymized": lambda s, now: anonymize_output_names(s, now, batch),
             "uploads_anonymized": lambda s, now: anonymize_deleted_uploads(s, now, batch),
             "runs_deleted": lambda s, now: delete_old_runs(s, now, batch),
             "file_rows_deleted": lambda s, now: delete_old_file_rows(
