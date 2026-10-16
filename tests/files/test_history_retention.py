@@ -57,7 +57,9 @@ def deleted_upload(
             select(upload.c.object_id).where(upload.c.id == view.id)
         ).scalar_one()
         session.execute(
-            update(stored_object).where(stored_object.c.id == object_id).values(state=object_state)
+            update(stored_object)
+            .where(stored_object.c.id == object_id)
+            .values(state=object_state, created_at=created_at)
         )
     return view.id
 

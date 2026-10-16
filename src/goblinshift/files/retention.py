@@ -224,8 +224,8 @@ def delete_old_file_rows(
     Ordem segura: a linha só sai depois do arquivo (`deleted` ou `missing`), nunca antes, para
     nenhum arquivo ficar no disco sem registro. Upload e artefato saem aos 90 dias da criação e só
     sem `run_input`/`run_output` apontando para eles, isto é, depois da remoção da Run
-    (`runs.retention.delete_old_runs`). Usos encerrados há 90 dias saem no mesmo lote. Devolve
-    quantos objetos foram apagados.
+    (`runs.retention.delete_old_runs`); o objeto também precisa ter 90 dias. Usos encerrados há
+    90 dias saem no mesmo lote. Devolve quantos objetos foram apagados.
     """
     cutoff = now - FILE_ROWS_AFTER
     _delete_old_ended_uses(session, cutoff, limit)
@@ -251,6 +251,8 @@ def delete_old_file_rows(
             select(stored_object.c.id)
             .where(
                 stored_object.c.state.in_(_GONE_FROM_DISK),
+                # Também o candidato que nunca virou artefato fica os 90 dias, como o resto.
+                stored_object.c.created_at <= cutoff,
                 ~any_use,
                 ~blocking_upload,
                 ~blocking_artifact,
