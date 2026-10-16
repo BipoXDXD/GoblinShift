@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { ApiClient } from "../api/client";
+import { ApiError } from "../api/response";
 
 // Espelhos em runtime dos schemas da spec; api.test.ts trava a igualdade com os tipos gerados.
 const UPLOAD_STATES = ["created", "receiving", "ready", "failed"] as const;
@@ -52,4 +53,40 @@ export async function createUploads(
     ...(signal === undefined ? {} : { signal }),
   });
   return response.data.items;
+}
+
+/** O 202 do DELETE chega sem corpo; só o status importa. */
+const acceptedSchema = z.unknown();
+/** Inexistente, de outra conta (404) ou já removido (410): o estado final pedido já vale. */
+const ALREADY_GONE: ReadonlySet<number> = new Set([404, 410]);
+
+/**
+ * DELETE /uploads/{id}: a API bloqueia novos usos na hora e apaga quando nada mais o usa. Upload que
+ * já não existe conta como excluído; outras falhas chegam a quem chamou.
+ */
+export async function deleteUpload(
+  client: ApiClient,
+  uploadId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    await client.request({
+      method: "DELETE",
+      path: `/api/v1/uploads/${encodeURIComponent(uploadId)}`,
+      schema: acceptedSchema,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error: unknown) {
+    if (!isAlreadyGone(error)) {
+      throw error;
+    }
+  }
+}
+
+function isAlreadyGone(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.failure.kind === "problem" &&
+    ALREADY_GONE.has(error.failure.status)
+  );
 }
