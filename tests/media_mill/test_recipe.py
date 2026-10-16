@@ -15,11 +15,13 @@ from PIL import Image
 from goblinshift.processing.media_mill import AudioFormat, Params
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.media_mill.tools import Tools
+from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
     FailureCode,
     InputContractError,
     ItemOk,
     ItemRejected,
+    Preview,
     RecipeFailure,
 )
 from tests.media_mill.conftest import ClipLibrary, Workspace
@@ -62,7 +64,11 @@ def test_mp4_vira_wav_16_bits_na_taxa_e_canais_de_origem_e_uma_miniatura(
     item = ok_item(workspace)
 
     assert item.outputs == ("audio/férias.wav", "thumbnails/férias-10pct.jpg")
-    assert workspace.files() == ["audio/férias.wav", "thumbnails/férias-10pct.jpg"]
+    assert workspace.files() == [
+        "audio/férias.wav",
+        "previews/férias-10pct.jpg",
+        "thumbnails/férias-10pct.jpg",
+    ]
     wav = probe(workspace.path("audio/férias.wav"))
     assert (wav["codec_name"], wav["sample_rate"], wav["channels"]) == ("pcm_s16le", "44100", "2")
 
@@ -131,6 +137,68 @@ def test_tres_miniaturas_em_10_50_e_90_por_cento(workspace: Workspace, clips: Cl
     assert requested == [200, 1000, 1800]
     assert effective == [200, 1000, 1800]
     assert item.warnings == ()
+
+
+# --- Preview: cada miniatura é também o preview dela, depois de todo o conteúdo (2.2, 3.6).
+
+
+def test_cada_miniatura_vira_preview_com_os_mesmos_bytes(
+    workspace: Workspace, clips: ClipLibrary
+) -> None:
+    workspace.add("clip.mp4", clips.bytes("mp4"))
+
+    item = ok_item(workspace, Params(extract_audio=False, thumbnail_count=3))
+
+    assert item.previews == tuple(
+        Preview(f"previews/clip-{p}pct.jpg", f"thumbnails/clip-{p}pct.jpg") for p in (10, 50, 90)
+    )
+    for point in (10, 50, 90):
+        preview = workspace.path(f"previews/clip-{point}pct.jpg").read_bytes()
+        assert preview == workspace.path(f"thumbnails/clip-{point}pct.jpg").read_bytes()
+
+
+def test_sem_miniaturas_nao_ha_preview(workspace: Workspace, clips: ClipLibrary) -> None:
+    workspace.add("clip.mp4", clips.bytes("mp4"))
+
+    item = ok_item(workspace, Params(thumbnail_count=0))
+
+    assert item.previews == ()
+    assert workspace.files() == ["audio/clip.wav"]
+
+
+def test_previews_vem_depois_das_saidas_de_todos_os_videos(
+    workspace: Workspace, clips: ClipLibrary
+) -> None:
+    workspace.add("a.mp4", clips.bytes("mp4"))
+    workspace.add("b.mp4", clips.bytes("mp4"))
+    out = FileSystemOutputDir(workspace.out_dir)
+
+    MediaMillV1().run(Params(), workspace.inputs, out, workspace.progress)
+
+    assert [name for name, _role in out.created] == [
+        "audio/a.wav",
+        "thumbnails/a-10pct.jpg",
+        "audio/b.wav",
+        "thumbnails/b-10pct.jpg",
+        "previews/a-10pct.jpg",
+        "previews/b-10pct.jpg",
+    ]
+
+
+def test_sem_espaco_o_preview_some_e_a_miniatura_fica(
+    workspace: Workspace, clips: ClipLibrary
+) -> None:
+    workspace.add("clip.mp4", clips.bytes("mp4"))
+    one_file = FileSystemOutputDir(workspace.out_dir, max_files=1)
+
+    report = MediaMillV1().run(
+        Params(extract_audio=False), workspace.inputs, one_file, workspace.progress
+    )
+
+    [item] = report.items
+    assert isinstance(item, ItemOk)
+    assert (item.outputs, item.previews) == (("thumbnails/clip-10pct.jpg",), ())
+    assert workspace.files() == ["thumbnails/clip-10pct.jpg"]
 
 
 def test_miniatura_sem_quadro_depois_do_alvo_usa_o_ultimo_anterior_com_aviso(

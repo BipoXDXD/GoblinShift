@@ -369,12 +369,6 @@ export const TEXT = {
         preview: "pré-visualização",
       },
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
-      thumbnails: {
-        heading: "Miniaturas",
-        alt: (fileName: string) => `Miniatura ${fileName}`,
-        loading: "Carregando a miniatura.",
-        failed: "Não foi possível mostrar esta miniatura; ela continua no pacote para baixar.",
-      },
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
       preview: {

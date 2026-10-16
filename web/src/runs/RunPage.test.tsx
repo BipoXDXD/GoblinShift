@@ -206,142 +206,121 @@ describe("Execução", () => {
   });
 });
 
-describe("Execução do Media Mill: miniaturas como preview", () => {
+describe("Execução do Media Mill: miniaturas pelo preview genérico", () => {
   const THUMB_10 = "7d3c2a1e-0000-4000-8000-0000000000b1";
   const THUMB_90 = "7d3c2a1e-0000-4000-8000-0000000000b2";
   const AUDIO = "7d3c2a1e-0000-4000-8000-0000000000b3";
-  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
-  const mediaResults = {
+  const PREVIEW_10 = "7d3c2a1e-0000-4000-8000-0000000000b4";
+  const PREVIEW_90 = "7d3c2a1e-0000-4000-8000-0000000000b5";
+  const output = (artifact_id: string, file_name: string) => ({
+    artifact_id,
+    logical_name: file_name,
+    role: "output",
+    file_name,
+    availability: "available",
+    source_artifact_id: null,
+  });
+  const preview = (artifact_id: string, file_name: string, source_artifact_id: string) => ({
+    artifact_id,
+    logical_name: `previews/${file_name}`,
+    role: "preview",
+    file_name,
+    availability: "available",
+    source_artifact_id,
+  });
+  const outputs = [
+    output(AUDIO, "audio/férias.wav"),
+    output(THUMB_10, "thumbnails/férias-10pct.jpg"),
+    output(THUMB_90, "thumbnails/férias-90pct.jpg"),
+  ];
+  const withPreviews = {
     published: true,
     expires_at: "2026-10-21T12:00:00Z",
     artifacts: [
-      {
-        artifact_id: AUDIO,
-        logical_name: "a",
-        role: "output",
-        file_name: "audio/férias.wav",
-        availability: "available",
-        source_artifact_id: null,
-      },
-      {
-        artifact_id: THUMB_10,
-        logical_name: "b",
-        role: "output",
-        file_name: "thumbnails/férias-10pct.jpg",
-        availability: "available",
-        source_artifact_id: null,
-      },
-      {
-        artifact_id: THUMB_90,
-        logical_name: "c",
-        role: "output",
-        file_name: "thumbnails/férias-90pct.jpg",
-        availability: "available",
-        source_artifact_id: null,
-      },
+      ...outputs,
+      preview(PREVIEW_10, "férias-10pct.jpg", THUMB_10),
+      preview(PREVIEW_90, "férias-90pct.jpg", THUMB_90),
     ],
   };
+  const PREVIEW_ALT = /^Pré-visualização de /;
   const createObjectURL = vi.fn((blob: Blob) => `blob:fake-${String(blob.size)}`);
-  const revokeObjectURL = vi.fn((url: string) => url);
 
   beforeEach(() => {
-    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL }));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     createObjectURL.mockClear();
-    revokeObjectURL.mockClear();
   });
 
-  const download = (id: string) => `GET /api/v1/artifacts/${id}/download`;
-  const jpeg = () =>
-    new Response(JPEG, { headers: { "Content-Type": "application/octet-stream" } });
-
-  function setupMedia(thumb90: Handler = jpeg, results: object = mediaResults) {
+  function setupMedia(results: unknown) {
     return setup(
       () => jsonResponse(runBody({ recipe_id: "media-mill", status: "succeeded" })),
       () => jsonResponse(results),
-      `/execucoes/${RUN_ID}`,
-      {
-        [download(THUMB_10)]: jpeg,
-        [download(THUMB_90)]: thumb90,
-      },
     );
   }
 
-  it("mostra cada miniatura como imagem, buscando uma de cada vez", async () => {
-    const { api } = setupMedia();
+  function downloadsFetched(requests: readonly Request[]): boolean {
+    return screenRequests(requests).some((request) =>
+      new URL(request.url).pathname.endsWith("/download"),
+    );
+  }
 
-    const previews = await screen.findByRole("region", { name: "Miniaturas" });
+  it("cada miniatura vira <img> na rota de preview dela, sem fetch nem Blob", async () => {
+    const { api } = setupMedia(withPreviews);
+
+    const image10 = await screen.findByRole("img", {
+      name: "Pré-visualização de thumbnails/férias-10pct.jpg",
+    });
+    expect(image10).toHaveAttribute("src", `/api/v1/artifacts/${THUMB_10}/preview`);
     expect(
-      await within(previews).findByRole("img", { name: "Miniatura férias-90pct.jpg" }),
-    ).toHaveAttribute("src", "blob:fake-8");
-    expect(within(previews).getByRole("img", { name: "Miniatura férias-10pct.jpg" })).toBeVisible();
-    const downloads = screenRequests(api.requests)
-      .map((request) => new URL(request.url).pathname)
-      .filter((pathname) => pathname.endsWith("/download"));
-    expect(downloads).toEqual([
-      `/api/v1/artifacts/${THUMB_10}/download`,
-      `/api/v1/artifacts/${THUMB_90}/download`,
-    ]);
-    expect(createObjectURL.mock.calls.map(([blob]) => blob.type)).toEqual([
-      "image/jpeg",
-      "image/jpeg",
-    ]);
+      screen.getByRole("img", { name: "Pré-visualização de thumbnails/férias-90pct.jpg" }),
+    ).toHaveAttribute("src", `/api/v1/artifacts/${THUMB_90}/preview`);
+    expect(screen.getAllByRole("img", { name: PREVIEW_ALT })).toHaveLength(2);
+    expect(downloadsFetched(api.requests)).toBe(false);
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 
-  it("miniatura indisponível no /results não é buscada nem mostrada", async () => {
-    const { api } = setupMedia(jpeg, {
-      ...mediaResults,
-      artifacts: mediaResults.artifacts.map((artifact) =>
-        artifact.artifact_id === THUMB_90 ? { ...artifact, availability: "missing" } : artifact,
+  it("miniatura indisponível no /results não vira preview nem é buscada", async () => {
+    const { api } = setupMedia({
+      ...withPreviews,
+      artifacts: withPreviews.artifacts.map((artifact) =>
+        artifact.artifact_id === THUMB_90 || artifact.artifact_id === PREVIEW_90
+          ? { ...artifact, availability: "missing" }
+          : artifact,
       ),
     });
 
-    const previews = await screen.findByRole("region", { name: "Miniaturas" });
     expect(
-      await within(previews).findByRole("img", { name: "Miniatura férias-10pct.jpg" }),
+      await screen.findByRole("img", { name: "Pré-visualização de thumbnails/férias-10pct.jpg" }),
     ).toBeVisible();
-    expect(within(previews).queryByRole("img", { name: "Miniatura férias-90pct.jpg" })).toBeNull();
+    expect(screen.getAllByRole("img", { name: PREVIEW_ALT })).toHaveLength(1);
     expect(screenRequests(api.requests).some((request) => request.url.includes(THUMB_90))).toBe(
       false,
     );
+    // A lista já diz o motivo ao lado do nome; o preview não o repete.
+    expect(screen.queryByText(/^Pré-visualização indisponível/)).toBeNull();
   });
 
-  it("corpo que não é JPEG fica como falha só daquela miniatura", async () => {
-    setupMedia(() => new Response("<svg onload=alert(1)>", { status: 200 }));
-
-    const previews = await screen.findByRole("region", { name: "Miniaturas" });
-    expect(
-      await within(previews).findByText(/Não foi possível mostrar esta miniatura/),
-    ).toBeVisible();
-    expect(within(previews).getAllByRole("img")).toHaveLength(1);
-  });
-
-  it("revoga as URLs ao sair da tela", async () => {
-    const { unmount } = setupMedia();
-    await screen.findByRole("img", { name: "Miniatura férias-90pct.jpg" });
-
-    unmount();
-
-    expect(revokeObjectURL.mock.calls.map(([url]) => url)).toEqual(["blob:fake-8", "blob:fake-8"]);
-  });
-
-  it("outra receita não busca miniaturas", async () => {
-    const { api } = setup(
-      () => jsonResponse(runBody({ status: "succeeded" })),
-      () => jsonResponse(mediaResults),
-    );
+  it("os previews não aparecem como download", async () => {
+    setupMedia(withPreviews);
 
     await screen.findByRole("link", { name: "Baixar thumbnails/férias-10pct.jpg" });
-    expect(screen.queryByRole("region", { name: "Miniaturas" })).toBeNull();
-    expect(screenRequests(api.requests).some((r) => r.url.includes("/download"))).toBe(false);
+    expect(screen.getAllByRole("link", { name: /^Baixar / })).toHaveLength(3);
+  });
+
+  it("execução publicada sem previews mostra só os downloads, sem buscar as miniaturas", async () => {
+    const { api } = setupMedia({ ...withPreviews, artifacts: outputs });
+
+    await screen.findByRole("link", { name: "Baixar thumbnails/férias-10pct.jpg" });
+    expect(screen.queryAllByRole("img", { name: PREVIEW_ALT })).toEqual([]);
+    expect(downloadsFetched(api.requests)).toBe(false);
   });
 
   it("não tem violações do axe com as miniaturas", async () => {
-    const { container } = setupMedia();
-    await screen.findByRole("img", { name: "Miniatura férias-90pct.jpg" });
+    const { container } = setupMedia(withPreviews);
+    await screen.findByRole("img", { name: "Pré-visualização de thumbnails/férias-90pct.jpg" });
 
     expect(await axeViolations(container)).toEqual([]);
   });
