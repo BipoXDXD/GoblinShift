@@ -1,8 +1,9 @@
 """Retenção do histórico de execuções para o processo `maintenance` (docs/GoblinShiftPlan.md, 1.7).
 
-- Parâmetros (`run.parameters`) e código de rejeição por item (`run_input.error_code`) são
-  anulados 30 dias depois do término; a Run continua, com estado, contagens e datas. O desfecho
-  por item (`ok`/`rejected`) fica, porque só diz quantas entradas foram processadas.
+- Parâmetros (`run.parameters`), código de rejeição por item (`run_input.error_code`) e detalhe
+  por item (`run_input.details`: avisos e contagens) são anulados 30 dias depois do término; a
+  Run continua, com estado, contagens e datas. O desfecho por item (`ok`/`rejected`) fica, porque
+  só diz quantas entradas foram processadas.
 - Run e Attempt são removidas 90 dias depois do término, com entradas, saídas e registros de
   idempotência (FK `CASCADE` a partir da Run).
 - `IdempotencyRecord` vencido é removido: a chave só vale 24 h (1.6).
@@ -22,7 +23,7 @@ dependem disso: a expiração deles é pela própria linha, e as linhas só saem
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnElement, Select, delete, exists, func, null, select, update
+from sqlalchemy import ColumnElement, Select, delete, exists, func, null, or_, select, update
 from sqlalchemy.orm import Session
 
 from goblinshift.files.objects import release
@@ -47,7 +48,7 @@ HISTORY_REFERENCES = HistoryReferences(upload=_upload_in_history, artifact=_arti
 
 
 def anonymize_finished_runs(session: Session, now: datetime, limit: int) -> int:
-    """Anula parâmetros e códigos por item das Runs terminadas há 30 dias ou mais."""
+    """Anula parâmetros, códigos e detalhes por item das Runs terminadas há 30 dias ou mais."""
     chosen = list(
         session.execute(
             select(run.c.id)
@@ -67,8 +68,11 @@ def anonymize_finished_runs(session: Session, now: datetime, limit: int) -> int:
     session.execute(update(run).where(run.c.id.in_(chosen)).values(parameters=null()))
     session.execute(
         update(run_input)
-        .where(run_input.c.run_id.in_(chosen), run_input.c.error_code.is_not(None))
-        .values(error_code=None)
+        .where(
+            run_input.c.run_id.in_(chosen),
+            or_(run_input.c.error_code.is_not(None), run_input.c.details.is_not(None)),
+        )
+        .values(error_code=None, details=null())
     )
     return len(chosen)
 

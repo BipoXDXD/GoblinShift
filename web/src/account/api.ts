@@ -5,7 +5,14 @@ import type { operations } from "../api/schema";
 
 // Espelhos em runtime dos schemas da conta na spec; api.test.ts trava a igualdade com os tipos
 // gerados. As rotas de /auth ficam fora do OpenAPI (auth_session.py) e respondem 204 sem corpo.
-export const SCOPES = ["files:read", "files:write", "runs:read", "runs:write"] as const;
+export const SCOPES = [
+  "files:read",
+  "files:write",
+  "runs:read",
+  "runs:write",
+  "presets:read",
+  "presets:write",
+] as const;
 const instant = z.iso.datetime({ offset: true });
 
 const meSchema = z.object({
