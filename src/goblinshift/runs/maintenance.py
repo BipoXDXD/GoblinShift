@@ -20,18 +20,23 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import partial
 
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.files.candidates import attempts_with_loose_candidates, discard_candidates
+from goblinshift.files.limits import EXPIRY_BATCH_SIZE
 from goblinshift.files.objects import holders_with_open_uses
 from goblinshift.files.retention import (
+    anonymize_deleted_uploads,
+    delete_old_file_rows,
     expire_artifacts,
     expire_incomplete_uploads,
     expire_unused_uploads,
+    file_backlog,
     purge_deleted_objects,
     reconcile_capacity,
 )
@@ -48,6 +53,13 @@ from goblinshift.runs.lifecycle import (
     Status,
     decide_transition,
 )
+from goblinshift.runs.retention import (
+    HISTORY_REFERENCES,
+    anonymize_finished_runs,
+    delete_expired_idempotency_records,
+    delete_old_runs,
+    history_backlog,
+)
 from goblinshift.runs.store import (
     ACTIVE_STATUSES,
     Applied,
@@ -56,6 +68,7 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
+    db_now,
     load_run,
     release_run_holds,
     run_transaction,
@@ -67,11 +80,15 @@ from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 50
+# Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
+STUCK_STOPPING_AFTER = timedelta(minutes=10)
 
 
 @dataclass(frozen=True)
 class MaintenanceConfig:
     batch_size: int = DEFAULT_BATCH_SIZE
+    # Lote de cada etapa da retenção longa (1.7): linhas simples, transação curta.
+    retention_batch_size: int = EXPIRY_BATCH_SIZE
     stop_grace: timedelta = timedelta(seconds=10)
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
@@ -110,6 +127,7 @@ class Maintenance:
             "candidates_discarded": self.discard_stale_candidates(),
             "work_areas_removed": self.sweep_work_areas(),
             **self.apply_retention(),
+            **self.measure(),
         }
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
@@ -321,7 +339,55 @@ class Maintenance:
         reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)
         counts["capacity_pools_corrected"] = reconciled.pools_corrected
         counts["capacity_objects_adopted"] = reconciled.objects_adopted
-        return counts
+        counts["purge_limit_reached"] = int(report.limit_reached)
+        return {**counts, **self.apply_history_retention()}
+
+    def apply_history_retention(self) -> dict[str, int]:
+        """Retenção longa (1.7), cada etapa um lote numa transação própria.
+
+        A ordem importa: a Run sai antes das linhas de arquivos que o histórico dela referencia,
+        e as linhas de arquivos só saem depois do arquivo no disco (`delete_old_file_rows`).
+        """
+        batch = self._config.retention_batch_size
+        steps: dict[str, Callable[[Session, datetime], int]] = {
+            "idempotency_records_removed": lambda s, now: delete_expired_idempotency_records(
+                s, now, batch
+            ),
+            "runs_anonymized": lambda s, now: anonymize_finished_runs(s, now, batch),
+            "uploads_anonymized": lambda s, now: anonymize_deleted_uploads(s, now, batch),
+            "runs_deleted": lambda s, now: delete_old_runs(s, now, batch),
+            "file_rows_deleted": lambda s, now: delete_old_file_rows(
+                s, now, batch, HISTORY_REFERENCES
+            ),
+            "reservations_removed": lambda s, now: capacity.delete_released_reservations(
+                s, now, batch
+            ),
+        }
+        return {name: self._at_db_now(step) for name, step in steps.items()}
+
+    def measure(self) -> dict[str, int]:
+        """Medidores do evento do ciclo: o tamanho do que acumula e o que os alertas leem."""
+        with self._factory() as session, session.begin():
+            now = db_now(session)
+            stuck: int = session.execute(
+                select(func.count()).where(
+                    run.c.status == Status.STOPPING,
+                    func.least(run.c.cancel_requested_at, run.c.deadline_at)
+                    <= now - STUCK_STOPPING_AFTER,
+                )
+            ).scalar_one()
+            storage = capacity.global_usage(session)
+            return {
+                **history_backlog(session, now),
+                **file_backlog(session, now),
+                "runs_stuck_stopping": stuck,
+                "storage_global_reserved_bytes": storage.storage_reserved_bytes,
+                "storage_global_max_bytes": storage.storage_max_bytes,
+            }
+
+    def _at_db_now(self, step: Callable[[Session, datetime], int]) -> int:
+        with self._factory() as session, session.begin():
+            return step(session, db_now(session))
 
     # Comum -----------------------------------------------------------------------------
 

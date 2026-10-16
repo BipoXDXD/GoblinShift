@@ -354,6 +354,15 @@ class SpanWriter:
             attributes["run.duration_ms"] = run_duration_ms
         self.span("run.finished", age_s, attributes, 1.0)
 
+    def maintenance_cycle(self, *, age_s: float = 60.0, **counts: int) -> None:
+        """O evento de uma volta da manutenção, com as contagens prefixadas por `maintenance.`."""
+        attributes: dict[str, AttributeValue] = {
+            "main": True,
+            "maintenance.failed_cycles": 0,
+            **{f"maintenance.{key}": value for key, value in counts.items()},
+        }
+        self.span("maintenance.cycle", age_s, attributes, 5.0)
+
     def flush(self) -> None:
         """Exporta tudo e espera o OpenObserve devolver todos os spans nas consultas."""
         self.provider.force_flush()
