@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { provenanceViolations, type ArtFile } from "./check-provenance";
+import { isPublicArt, provenanceViolations, type ArtFile } from "./check-provenance";
 
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
@@ -82,6 +82,62 @@ describe("provenanceViolations", () => {
     );
   });
 
+  describe("direito e upstream da geração", () => {
+    const rights = [
+      { id: "rodin", vendor: "hyper3d", basis: [], status: "termos lidos" },
+      { id: "tripo-openai", vendor: "tripo", upstream: "GPT Image 2.5", basis: [], status: "x" },
+      { id: "tripo-google", vendor: "tripo", upstream: "Banana Pro", basis: [], status: "x" },
+    ];
+
+    function withTwoD(generation: Record<string, unknown>): unknown {
+      return doc({
+        rights,
+        generations: {
+          "lua-2d": { tool: "Tripo", inputs: [], ...generation },
+          "lua-3d": { tool: "Rodin", generation_id: "81ae", inputs: ["lua-2d"], rights: "rodin" },
+        },
+      });
+    }
+
+    it("upstream que contém o declarado no direito: aceita", () => {
+      const ok = withTwoD({ upstream: "GPT Image 2.5 (via Tripo)", rights: "tripo-openai" });
+
+      expect(provenanceViolations(FILES, ok)).toEqual([]);
+    });
+
+    it("direito de outro upstream: recusa", () => {
+      const wrong = withTwoD({ upstream: "GPT Image 2.5 (via Tripo)", rights: "tripo-google" });
+
+      expect(provenanceViolations(FILES, wrong)).toContain(
+        'goblins/lua-128w.avif: lua-2d tem upstream "GPT Image 2.5 (via Tripo)", mas cita o direito tripo-google, que vale para "Banana Pro"',
+      );
+    });
+
+    it("upstream declarado com direito que não distingue upstream: recusa", () => {
+      const generic = withTwoD({ upstream: "GPT Image 2.5 (via Tripo)", rights: "rodin" });
+
+      expect(provenanceViolations(FILES, generic)).toContain(
+        'goblins/lua-128w.avif: lua-2d tem upstream "GPT Image 2.5 (via Tripo)", mas cita o direito rodin, que não declara upstream',
+      );
+    });
+
+    it("upstream declarado sem direito: recusa", () => {
+      const bare = withTwoD({ upstream: "GPT Image 2.5 (via Tripo)" });
+
+      expect(provenanceViolations(FILES, bare)).toContain(
+        'goblins/lua-128w.avif: lua-2d tem upstream "GPT Image 2.5 (via Tripo)", mas não cita direito',
+      );
+    });
+
+    it("direito por upstream em geração sem upstream declarado: recusa", () => {
+      const silent = withTwoD({ rights: "tripo-openai" });
+
+      expect(provenanceViolations(FILES, silent)).toContain(
+        'goblins/lua-128w.avif: lua-2d cita o direito tripo-openai, que vale para "GPT Image 2.5", mas não declara upstream',
+      );
+    });
+  });
+
   it("goblin excluída por proveniência não entra no site", () => {
     const tainted = doc({
       generations: {
@@ -157,4 +213,22 @@ describe("provenanceViolations", () => {
       "PROVENANCE.json fora do formato esperado",
     ]);
   });
+});
+
+// Os ícones e a imagem de compartilhamento ficam em public/ (URL fixa, sem hash): também são arte
+// e entram no registro, com o prefixo `public/`.
+describe("isPublicArt", () => {
+  it.each(["favicon.svg", "favicon.ico", "apple-touch-icon.png", "icon-512.png", "og-image.jpg"])(
+    "%s é arte",
+    (name) => {
+      expect(isPublicArt(name)).toBe(true);
+    },
+  );
+
+  it.each(["theme-init.js", "manifest.webmanifest", ".well-known/security.txt", "robots.txt"])(
+    "%s não é arte",
+    (name) => {
+      expect(isPublicArt(name)).toBe(false);
+    },
+  );
 });

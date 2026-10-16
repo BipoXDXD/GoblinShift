@@ -12,48 +12,48 @@ O modelo bruto do Rodin tem 30,5 MB: 500 mil triângulos e três texturas PNG de
 
 ### Motor
 
-| Opção                                                                  | Prós                                                                                                                                                                                             | Contras                                                                                                                                                                                                                                                                                                       |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<model-viewer>` 4.4, auto-hospedado                                   | Pronto e mantido; poster, carga preguiçosa e controles de câmera de graça                                                                                                                        | ~289 KB gzip, o dobro do three sozinho; aponta os decoders Draco e KTX2 para `www.gstatic.com` por padrão (precisa reconfigurar para não ir a CDN); controles de câmera capturam setas e arrasto, e desligá-los tira quase tudo o que ele oferece; estilos em shadow DOM a conferir contra `style-src 'self'` |
-| **three.js mínimo** (`WebGLRenderer`, `GLTFLoader`, `RoomEnvironment`) | 162 KB gzip medidos no build, já com o decoder Meshopt embutido; nenhuma URL de terceiro; controle total do que mexe (entrada de 3,5 s, arrasto horizontal, render só sob demanda) e do descarte | ~200 linhas nossas: laço de render, redimensionamento, perda de contexto, descarte de GPU; mais uma dependência grande para atualizar                                                                                                                                                                         |
-| Vídeo ou imagem pré-renderizada (giro em MP4/WebM, ou só o PNG)        | Nenhum JS de 3D; funciona em qualquer aparelho; CSP intacta                                                                                                                                      | Não é 3D: nada de girar com o dedo, que é o que o usuário pediu; vídeo em laço é movimento automático além de 5 s (WCAG 2.2.2) ou precisa de botão de pausa; um giro de 3 s em boa qualidade pesa 1 a 2 MB, como o GLB                                                                                        |
+| Opção | Prós | Contras |
+|---|---|---|
+| `<model-viewer>` 4.4, auto-hospedado | Pronto e mantido; poster, carga preguiçosa e controles de câmera de graça | ~289 KB gzip, o dobro do three sozinho; aponta os decoders Draco e KTX2 para `www.gstatic.com` por padrão (precisa reconfigurar para não ir a CDN); controles de câmera capturam setas e arrasto, e desligá-los tira quase tudo o que ele oferece; estilos em shadow DOM a conferir contra `style-src 'self'` |
+| **three.js mínimo** (`WebGLRenderer`, `GLTFLoader`, `RoomEnvironment`) | 162 KB gzip medidos no build, já com o decoder Meshopt embutido; nenhuma URL de terceiro; controle total do que mexe (entrada de 3,5 s, arrasto horizontal, render só sob demanda) e do descarte | ~200 linhas nossas: laço de render, redimensionamento, perda de contexto, descarte de GPU; mais uma dependência grande para atualizar |
+| Vídeo ou imagem pré-renderizada (giro em MP4/WebM, ou só o PNG) | Nenhum JS de 3D; funciona em qualquer aparelho; CSP intacta | Não é 3D: nada de girar com o dedo, que é o que o usuário pediu; vídeo em laço é movimento automático além de 5 s (WCAG 2.2.2) ou precisa de botão de pausa; um giro de 3 s em boa qualidade pesa 1 a 2 MB, como o GLB |
 
 ### Redução e compressão do modelo
 
 As UVs do Rodin são picotadas em milhares de ilhas pequenas, e isso decide o resto. Medido na Rúbia:
 
-| Opção                                                                                                                    | Peso             | Qualidade                                                                                                          | CSP                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Decimate do Blender para 30 mil triângulos + quantização + WebP                                                          | 912 KB           | **Pintas brancas e pretas** no cabelo e na pele: triângulos atravessam as costuras e amostram o vão entre as ilhas | Só `blob:` em `connect-src`                                                   |
-| Malha de 30 a 50 mil triângulos com UVs novas e textura reassada da original (Cycles, "selected to active")              | ~1 MB (estimado) | Pior: manchas pretas onde os raios acertam camadas de cabelo e o rosto perde definição                             | Só `blob:` em `connect-src`                                                   |
-| `simplify` do meshoptimizer (para em ~120 mil triângulos, porque respeita as costuras) + quantização + WebP, sem Meshopt | 4,8 MB           | Igual à bruta no tamanho exibido                                                                                   | Só `blob:` em `connect-src`                                                   |
-| **O mesmo, com compressão Meshopt (`EXT_meshopt_compression`)**                                                          | **1,87 MB**      | **Igual à bruta no tamanho exibido**                                                                               | `blob:` em `connect-src` e `'wasm-unsafe-eval'` em `script-src`               |
-| O mesmo, com Draco ou KTX2                                                                                               | menor            | Igual                                                                                                              | `'wasm-unsafe-eval'` e `worker-src 'self' blob:` (decoder num Worker de Blob) |
+| Opção | Peso | Qualidade | CSP |
+|---|---|---|---|
+| Decimate do Blender para 30 mil triângulos + quantização + WebP | 912 KB | **Pintas brancas e pretas** no cabelo e na pele: triângulos atravessam as costuras e amostram o vão entre as ilhas | Só `blob:` em `connect-src` |
+| Malha de 30 a 50 mil triângulos com UVs novas e textura reassada da original (Cycles, "selected to active") | ~1 MB (estimado) | Pior: manchas pretas onde os raios acertam camadas de cabelo e o rosto perde definição | Só `blob:` em `connect-src` |
+| `simplify` do meshoptimizer (para em ~120 mil triângulos, porque respeita as costuras) + quantização + WebP, sem Meshopt | 4,8 MB | Igual à bruta no tamanho exibido | Só `blob:` em `connect-src` |
+| **O mesmo, com compressão Meshopt (`EXT_meshopt_compression`)** | **1,87 MB** | **Igual à bruta no tamanho exibido** | `blob:` em `connect-src` e `'wasm-unsafe-eval'` em `script-src` |
+| O mesmo, com Draco ou KTX2 | menor | Igual | `'wasm-unsafe-eval'` e `worker-src 'self' blob:` (decoder num Worker de Blob) |
 
-Texturas de 2048 px custam +350 KB sem diferença na tela (a cena aparece com no máximo 320 × 400 px CSS). _Superado pela seção abaixo: de perto, 2048 px fazem diferença._
+Texturas de 2048 px custam +350 KB sem diferença na tela (a cena aparece com no máximo 320 × 400 px CSS). *Superado pela seção abaixo: de perto, 2048 px fazem diferença.*
 
 ### Defeitos da primeira versão
 
 O usuário viu no site três defeitos que o bruto aprovado não tem: a íris vermelha do olho esquerdo quase some, a bochecha tem uma deformação e há um risco vermelho atrás da coxa esquerda. Diagnóstico com closes no three (a mesma luz e câmera para todos) e no Blender, isolando cada passo do `optimize`:
 
-| Variante                                      | Olho esquerdo     | Bochecha     | Coxa               |
-| --------------------------------------------- | ----------------- | ------------ | ------------------ |
-| Só textura de 1024 px (com e sem WebP)        | igual             | igual        | igual              |
-| Só quantização (12 bits de UV, 14 de posição) | igual             | igual        | igual              |
-| Só Meshopt (quantização incluída)             | igual             | igual        | igual              |
-| **Só `simplify`**                             | **íris corroída** | **facetada** | **risco vermelho** |
+| Variante | Olho esquerdo | Bochecha | Coxa |
+|---|---|---|---|
+| Só textura de 1024 px (com e sem WebP) | igual | igual | igual |
+| Só quantização (12 bits de UV, 14 de posição) | igual | igual | igual |
+| Só Meshopt (quantização incluída) | igual | igual | igual |
+| **Só `simplify`** | **íris corroída** | **facetada** | **risco vermelho** |
 
 A causa dos três é o `simplify` do gltf-transform, que só mede o desvio de **posição** (erro de 1% do raio). Ele respeita as costuras de UV, mas dentro de cada ilha colapsa o que é plano: a bochecha vira poucos triângulos grandes, cujas normais interpoladas fazem facetas; a malha do olho perde vértices e o UV da íris escorrega; e na coxa um triângulo esticado passa a cobrir, no espaço de UV, um canto côncavo da ilha onde está pintado o cabelo. Travar as bordas (`--lock-border`) não muda nada (121.524 triângulos nos dois casos), e baixar o erro só de posição até 0,0001 ainda deixava facetas na bochecha.
 
 A correção é o simplify **com atributos** do meshoptimizer (`simplifyWithAttributes`), que soma ao erro o desvio da normal (peso 1) e do UV (peso 16): `web/scripts/simplificar-glb.ts`, com teste que reproduz o modo de falha num plano (o simplify só de posição distorce o UV em mais de 0,02; o novo fica abaixo de 0,002). Os closes da Rúbia nova (1 milhão de triângulos), comparados ao bruto pela SSIM (dissimilaridade, menor é melhor):
 
-| Erro aceito                             | Triângulos  | GLB         | Rosto     | Olho de frente | Olho em 3/4 | Coxa      |
-| --------------------------------------- | ----------- | ----------- | --------- | -------------- | ----------- | --------- |
-| 0,01, só posição, textura 1024 (antigo) | —           | 2,66 MB     | 0,106     | 0,098          | 0,096       | 0,062     |
-| 0,003                                   | 198 mil     | 3,08 MB     | 0,056     | 0,063          | 0,058       | 0,027     |
-| 0,002                                   | 219 mil     | 3,22 MB     | 0,050     | 0,058          | 0,054       | 0,021     |
-| **0,0015**                              | **241 mil** | **3,36 MB** | **0,032** | **0,039**      | **0,037**   | **0,018** |
-| 0,001                                   | 285 mil     | 3,65 MB     | 0,026     | 0,035          | 0,032       | 0,014     |
+| Erro aceito | Triângulos | GLB | Rosto | Olho de frente | Olho em 3/4 | Coxa |
+|---|---|---|---|---|---|---|
+| 0,01, só posição, textura 1024 (antigo) | — | 2,66 MB | 0,106 | 0,098 | 0,096 | 0,062 |
+| 0,003 | 198 mil | 3,08 MB | 0,056 | 0,063 | 0,058 | 0,027 |
+| 0,002 | 219 mil | 3,22 MB | 0,050 | 0,058 | 0,054 | 0,021 |
+| **0,0015** | **241 mil** | **3,36 MB** | **0,032** | **0,039** | **0,037** | **0,018** |
+| 0,001 | 285 mil | 3,65 MB | 0,026 | 0,035 | 0,032 | 0,014 |
 
 A textura pesa: na Rúbia antiga, sem mudar a malha, 2048 px em vez de 1024 px baixam a dissimilaridade dos closes de 0,034 para 0,021, por ~320 KB. A fonte nova tem texturas de 2048 px, então o site usa 2048 px (4096 px seria só aumentar a imagem). O UV vai em 14 bits em vez de 12 (+3 KB), para não dar passos de texel se um dia vier textura de 4096 px.
 
@@ -69,15 +69,14 @@ A textura pesa: na Rúbia antiga, sem mudar a malha, 2048 px em vez de 1024 px b
 7. **Tetos no CI** (`web/scripts/check-budget.ts`): GLB até **3400 KB** (era 500 KB no 027 e 2048 KB na primeira versão; a Rúbia nova mede 3283 KB, e um erro de simplificação maior já tirava relevo do rosto), chunk do 3D até 300 KB gzip e fora do `index.html`, imagem estática até 90 KB, e cada ilustração de goblin até 64 KB (era 20 KB com a caixa de 128 × 160; subiu com as goblins em destaque, item 8). Total da abertura com o 3D: ~3,5 MB (chunk 162 KB gzip + GLB 3283 KB + imagem 41 KB), acima da meta inicial de 2 a 3 MB: é o preço de a Rúbia ficar igual ao bruto, e tudo chega depois do `load`.
 8. **Goblins nos estados**, como imagens 2D (render no Blender de cada GLB bruto, `scripts/arte/gerar-imagens.sh`), AVIF e WebP de 256, 384, 512 e 768 px de largura com `srcset` e `sizes`, numa caixa 4:5 reservada de 192 × 240 px no celular e 256 × 320 px a partir de 768 px (em 2026-10-15 o usuário achou as de 128 × 160 "muito pequeninas" e pediu destaque), com texto alternativo que diz quem é a goblin (o estado já está no texto ao lado). Cada estado tem as suas goblins, para a pessoa associar a personagem à situação:
 
-   | Estado     | Goblins                                                                                                        | Onde aparece                                 |
-   | ---------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-   | Vazio      | Lua (calma, sininho) e Jade (casual, de jeans)                                                                 | Bancada sem arquivos; Histórico vazio        |
+   | Estado | Goblins | Onde aparece |
+   |---|---|---|
+   | Vazio | Lua (calma, sininho) e Jade (casual, de jeans) | Bancada sem arquivos; Histórico vazio |
    | Carregando | Rúbia (a mascote da oficina, mesmo render da imagem estática da abertura) e Fagulha (couro e luvas de oficina) | Execução na fila, em andamento ou cancelando |
-   | Erro       | Nyx (sombria)                                                                                                  | Execução que falhou; página não encontrada   |
-   | Sucesso    | Ferrugem (a mais expansiva)                                                                                    | Execução concluída, com ou sem avisos        |
+   | Erro | Nyx (sombria) | Execução que falhou; página não encontrada |
+   | Sucesso | Ferrugem (a mais expansiva) | Execução concluída, com ou sem avisos |
 
    No máximo uma goblin por tela: na Oficina é a Rúbia, e o vazio das execuções recentes fica só em texto. Alertas de formulário e de leitura (`role="alert"`) não ganham goblin. São seis goblins para quatro estados, e a página de créditos apresenta as seis com o nome: onde há duas, a escolha é uma **rotação estável** (FNV-1a de 32 bits sobre uma chave da situação, módulo o número de goblins do estado). A chave é o id da execução, a receita da Bancada ou um nome fixo da tela (Histórico, 404). A mesma situação mostra sempre a mesma goblin, sem trocar a cada render nem a cada polling, e situações diferentes se espalham entre as duas.
-
 9. **Proveniência travada no CI** (`web/scripts/check-provenance.ts`): todo arquivo de `web/src/assets/art/` tem entrada no `PROVENANCE.json`, com sha256 conferido, a cadeia de gerações até a ferramenta resolvida e um direito registrado; nada pode derivar de uma goblin excluída, e geração de origem de terceiros ou não verificável (`third_party`) só passa com uma decisão em `exceptions` que diga quem decidiu, quando e por quê.
 10. **Direitos e exclusões.** Os termos do Hyper3D Rodin e da Tripo permitem publicar as saídas num site público nos planos pagos, e o usuário é assinante dos dois, além de ter saldo pago na API da Tripo (informado em 2026-10-15); com isso, a dúvida sobre a carteira da API contar como "Paid User" deixa de importar (detalhe e links em `docs/art/LICENSE-ART.md`). As publicadas de cadeia própria (Rúbia, Ferrugem, Nyx e Lua) partem só de texto no Seedream e de renders nossos. As outras duas entram **por decisão do usuário em 2026-10-15**, registrada em `exceptions` no `PROVENANCE.json`:
     - a **Jade** (`3c7aa397`) deriva do modelo `cab576c8`, que é byte a byte o 3D gerado da `referencias-usuario/ref2-jeans.png`, imagem de terceiros; o usuário assume o risco de publicá-la;
