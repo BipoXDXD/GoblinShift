@@ -8,6 +8,7 @@ describe("findRecipe", () => {
     ["csv-janitor", "CSV Janitor"],
     ["image-forge", "Image Forge"],
     ["downloads-detox", "Downloads Detox"],
+    ["pdf-press", "PDF Press"],
   ] as const)("encontra %s", (id, title) => {
     expect(findRecipe(id)?.title).toBe(title);
   });

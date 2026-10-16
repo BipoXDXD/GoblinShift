@@ -30,6 +30,8 @@ from tests.security.authz_matrix import MATRIX, Policy, Rule, entries
 _IMPLICIT_METHODS = {"HEAD"}
 _PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
 _ACCOUNT_NAME = "Conta de teste"
+
+
 def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
     routes: set[tuple[str, str]] = set()
     for context in iter_route_contexts(app.routes):
@@ -180,14 +182,22 @@ def test_rota_nao_publica_sem_credencial_401(
     assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
 
 
+def _scope_cases() -> list[object]:
+    """Uma linha por escopo exigido: faltar qualquer um deles dá 403."""
+    return [
+        pytest.param(method, path, missing, id=f"{method} {path} sem {missing.value}")
+        for method, path, rule in entries(Policy.SCOPE)
+        for missing in sorted(rule.required_scopes)
+    ]
+
+
 @pytest.mark.integration
-@pytest.mark.parametrize(("method", "path", "rule"), _cases(Policy.SCOPE))
+@pytest.mark.parametrize(("method", "path", "missing"), _scope_cases())
 def test_chave_sem_escopo_403_insufficient_scope(
-    client: TestClient, factory: sessionmaker[Session], method: str, path: str, rule: Rule
+    client: TestClient, factory: sessionmaker[Session], method: str, path: str, missing: Scope
 ) -> None:
-    assert rule.scope is not None
     owner = new_user(factory)
-    issued = new_key(factory, owner, scopes=ALL_SCOPES - {rule.scope})
+    issued = new_key(factory, owner, scopes=ALL_SCOPES - {missing})
 
     response = _send(client, method, path, issued.token)
 
