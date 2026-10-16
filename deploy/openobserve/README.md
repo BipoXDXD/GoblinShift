@@ -12,13 +12,17 @@ Todos os nomes começam com `gs-`. O que tem esse prefixo e saiu do catálogo é
 | `gs-slo-<slo>-urgente` | `queima.sql` sobre `<slo>.eventos.sql`, taxa 4x | 60 min / a cada 5 min | `gs-urgente` |
 | `gs-causa-fila-cheia` | `causa-fila-cheia.sql` | 15 min / a cada 5 min | `gs-urgente` |
 | `gs-causa-disco` | `causa-disco.sql` (stream de métricas) | 10 min / a cada 5 min | `gs-urgente` |
+| `gs-causa-execucao-presa` | `causa-execucao-presa.sql` (span da manutenção) | 10 min / a cada 5 min | `gs-urgente` |
+| `gs-causa-limitador-de-exclusoes` | `causa-limitador-de-exclusoes.sql` (span da manutenção) | 10 min / a cada 5 min | `gs-aviso` |
+| `gs-causa-exclusao-de-conta-atrasada` | `causa-exclusao-de-conta-atrasada.sql` (span da manutenção) | 10 min / a cada 5 min | `gs-urgente` |
+| `gs-causa-capacidade-global` | `causa-capacidade-global.sql` (span da manutenção) | 15 min / a cada 5 min | `gs-aviso` |
 | `gs-heartbeat` | `heartbeat.sql`, sempre verdadeiro (stream de métricas) | 60 min / a cada 60 min | `gs-heartbeat` |
 
 `<slo>` é `aceitacao` (meta 99,5%), `execucao` (99%) ou `download` (99,5%). Os critérios de elegível e bom estão comentados em cada `<slo>.eventos.sql`.
 
 **Queima em duas janelas.** O alerta dispara quando a última hora **e** os últimos 15 minutos queimam o orçamento a 2x (aviso) ou 4x (urgente) o ritmo permitido. Com meta `1 - 1/N`, isso é `ruins * N >= taxa * elegíveis` em cada janela, em inteiros. Cada janela só conta com um mínimo de elegíveis (aceitação e download: 101 na hora e 26 nos 15 min; execução: 51 e 13), escolhido para que **uma falha isolada nunca dispare** (`tests/openobserve/test_catalog.py` confere isso para cada SLO e nível). Com pouco tráfego, a queima simplesmente não dispara: é o comportamento pedido em 3.7.
 
-**Silêncio.** Depois de notificar, o urgente fica quieto por 60 min e o aviso por 180 min; a fila cheia por 60 min e o disco por 240 min.
+**Silêncio.** Depois de notificar, o urgente fica quieto por 60 min e o aviso por 180 min; a fila cheia por 60 min e o disco por 240 min. Das causas da manutenção: execução presa e exclusão atrasada, 60 min; limitador, 180 min; capacidade global, 240 min.
 
 ### O evento de término da Run
 
@@ -34,6 +38,32 @@ O SLO de execução lê o span `run.finished`, que o worker e a manutenção emi
 | `run.state` | estado final (`succeeded`, `failed`, `canceled`, …) |
 | `run.attempts`, `run.queue_wait_ms`, `run.input_count` | claims, espera na fila até o primeiro claim (ausente se nunca começou) e número de entradas |
 | `run_id`, `recipe_id`, `recipe_version`, `user.hash` | identificação, sem PII: a conta só pelo HMAC do `owner_id` |
+
+### O evento por volta da manutenção
+
+As quatro causas da manutenção leem o span `maintenance.cycle` (`goblinshift.entrypoints.maintenance.run_cycles`), emitido a cada volta (30 s) com as contagens dos dois ciclos, o de execuções e arquivos e o de contas. Contrato, conferido por `tests/runs/test_maintenance_cycle_event.py` e `tests/runs/test_maintenance_history.py`:
+
+| Atributo | Valor |
+|---|---|
+| nome do span | `maintenance.cycle`, do começo ao fim da volta |
+| `main` | `true` |
+| `maintenance.failed_cycles` | ciclos que falharam na volta (o span fica com status de erro; a mensagem só no log) |
+| `maintenance.runs_stuck_stopping` | Runs em `stopping` desde antes de 10 min (o primeiro entre o cancelamento e o prazo) |
+| `maintenance.purge_limit_reached` | `1` se o limitador cortou o expurgo da volta, `0` se não |
+| `maintenance.accounts_deletion_overdue` | contas com `DELETE /me` pedido há 20 h ou mais |
+| `maintenance.storage_global_reserved_bytes`, `maintenance.storage_global_max_bytes` | o pool global do livro-razão (ADR 024) |
+| `maintenance.runs_to_anonymize`, `maintenance.runs_to_delete`, `maintenance.idempotency_records_expired`, `maintenance.uploads_to_anonymize`, `maintenance.uploads_to_delete` | o que a retenção de 1.7 ainda deve: tamanho do acúmulo depois da volta |
+| `maintenance.<etapa>` | o que cada etapa fez na volta (`runs_deleted`, `runs_anonymized`, `file_rows_deleted`, `objects_purged`, `leases_reconciled`, …) |
+| `duration_ms` | duração da volta |
+
+Sem PII: só contagens e bytes.
+
+### Roteiro das causas da manutenção
+
+- **Execução presa em `stopping`.** O executor não confirmou a parada. Na VPS: `sudo systemctl status goblinshift-executor-ctl` e o log da manutenção (`executor sem inspeção` ou `executor não confirmou a parada`, com o `run_id` e o `attempt_id`). Com o `executor-ctl` de pé, `docker ps --filter name=gs-` mostra o container; a manutenção para e remove sozinha quando o Runner responde. Não apague linhas à mão: a Run termina pela reconciliação.
+- **Limitador de exclusões.** Mais de 500 objetos ou 2 GiB pedidos para exclusão de uma vez. Legítimo depois de um `DELETE /me` grande ou de um dia de muito tráfego vencendo junto: as voltas seguintes terminam o serviço. Suspeito se não houver causa: pare a manutenção (`docker compose stop maintenance`) e investigue antes de deixar apagar.
+- **Exclusão de conta atrasada.** A purga não termina em 20 h, quase sempre porque a conta tem Run não terminal (a purga espera) ou um ciclo de contas falhando (log `ciclo de manutenção falhou` com `cycle = contas`). Resolva antes das 24 h prometidas no aviso de privacidade.
+- **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`, depois que existir) e o disco do storage; se o uso é legítimo, suba o teto do pool global com cuidado com o disco real.
 
 ### Span `attempt`
 
@@ -62,8 +92,6 @@ O worker emite um span `attempt` por tentativa (`goblinshift.runs.worker.attempt
 | Backup diário que falhou | healthchecks.io (ping do `pg-backup.sh`) |
 | Certificado TLS a menos de 14 dias | workflow tls-check + healthchecks.io (certificado TLS, 1 dia / 6 h) |
 | Teste de aceitação do ambiente falhando | healthchecks.io (ping do `deploy/acceptance/scheduled.sh`, pelo timer semanal) |
-| Execução presa em `stopping` por mais de 10 min | falta o evento por ciclo da manutenção |
-| Limitador de exclusões acionado | falta o evento por ciclo da manutenção |
 
 ### Monitores externos
 
@@ -199,4 +227,4 @@ uv run pytest tests/openobserve -m "not openobserve"   # catálogo, segredos e r
 uv run pytest -m openobserve                           # OpenObserve e Collector reais (Testcontainers)
 ```
 
-Os testes com Docker (também na CI, no job paralelo "SLOs e alertas (OpenObserve)", fora do orçamento do commit stage; o cenário do agendador leva cerca de 2 min) sobem a mesma imagem do OpenObserve e do Collector do `compose.yaml`, com a configuração real do Collector, e provam: o SLI de cada consulta com valores calculados à mão; os limites da queima (exatamente 4x dispara, logo abaixo não; mínimo de eventos em cada janela; queima que já parou); a fila cheia sustentada; o disco acima de 85% só no ponto de montagem cheio; e, com o agendador de verdade, que a queima e a causa notificam sob erro e que o tráfego normal só produz o heartbeat. Só nos testes o OpenObserve roda com `ZO_SKIP_SSRF_CHECKS`, porque o receptor de webhooks está num IP privado.
+Os testes com Docker (também na CI, no job paralelo "SLOs e alertas (OpenObserve)", fora do orçamento do commit stage; o cenário do agendador leva cerca de 2 min) sobem a mesma imagem do OpenObserve e do Collector do `compose.yaml`, com a configuração real do Collector, e provam: o SLI de cada consulta com valores calculados à mão; os limites da queima (exatamente 4x dispara, logo abaixo não; mínimo de eventos em cada janela; queima que já parou); a fila cheia sustentada; o disco acima de 85% só no ponto de montagem cheio; as quatro causas lidas do span da manutenção (execução presa, limitador, exclusão atrasada e capacidade global acima de 85% o período todo); e, com o agendador de verdade, que a queima e a causa notificam sob erro e que o tráfego normal só produz o heartbeat. Só nos testes o OpenObserve roda com `ZO_SKIP_SSRF_CHECKS`, porque o receptor de webhooks está num IP privado.
