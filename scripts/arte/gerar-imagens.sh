@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Imagens 2D das goblins para o site (ADR 030): render de cada GLB bruto no Blender, recorte em
 # 4:5 com fundo transparente e AVIF + WebP nas larguras que a interface pede.
-#   - estados (vazio, carregando, erro, sucesso): 128 e 256 px de largura (1× e 2× da caixa de
-#     128×160 px CSS), em web/src/assets/art/goblins/;
+#   - estados (vazio, carregando, erro, sucesso) e elenco dos créditos: 256, 384, 512 e 768 px de
+#     largura (a caixa vai de 192 a 256 px CSS, em telas de 1× a 3×), em web/src/assets/art/goblins/;
 #   - imagem estática da cena 3D da Rúbia (placeholder e fallback): 192, 384 e 640 px, em
-#     web/src/assets/art/oficina-3d/, com o prefixo que o check-budget reconhece.
+#     web/src/assets/art/oficina-3d/, com o prefixo que o check-budget reconhece. A Rúbia sai de um
+#     render só: a mesma imagem vira a estática da cena e a goblin dos estados.
 # Os PNGs intermediários ficam numa pasta temporária: os brutos e renders continuam fora do Git.
 #
 # Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/gerar-imagens.sh [ID...]
@@ -15,7 +16,7 @@ set -euo pipefail
 ARTE="${ARTE:-$HOME/Documents/GoblinShift-arte}"
 RENDER_PX=1400
 YAW_DEGREES=20
-STATE_WIDTHS=(128 256)
+STATE_WIDTHS=(256 384 512 768)
 POSTER_WIDTHS=(192 384 640)
 AVIF_QUALITY=60
 AVIF_ALPHA_QUALITY=80
@@ -84,6 +85,7 @@ while IFS=$'\t' read -r id glb _; do
     # um sol), o dos renders que o usuário aprovou para elas.
     render_framed "$ARTE/$glb" "$work/$id.png" --realista
     export_sizes "$work/$id.png" "$art/oficina-3d/oficina-3d-rubia" "${POSTER_WIDTHS[@]}"
+    export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
   else
     render_framed "$ARTE/$glb" "$work/$id.png"
     export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"

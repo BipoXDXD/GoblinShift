@@ -87,6 +87,7 @@ describe("getRunResults", () => {
           logical_name: "clientes",
           role: "output",
           file_name: "clientes.csv",
+          availability: "available",
         },
       ],
     };

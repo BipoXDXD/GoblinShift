@@ -1,8 +1,9 @@
 """Retenção do histórico de execuções (docs/GoblinShiftPlan.md, 1.7, "Retenção").
 
-Parâmetros e detalhes por item anulados 30 dias depois do término, Run e Attempt removidas aos
-90, `IdempotencyRecord` vencido removido. Cada função recebe o instante e o teto do lote, então
-as fronteiras são testadas sem relógio real: `on point` no prazo exato e `off point` 1 s antes.
+Parâmetros, códigos e detalhes por item (`run_input.details`) anulados 30 dias depois do
+término, Run e Attempt removidas aos 90, `IdempotencyRecord` vencido removido. Cada função recebe
+o instante e o teto do lote, então as fronteiras são testadas sem relógio real: `on point` no
+prazo exato e `off point` 1 s antes.
 """
 
 import uuid
@@ -12,7 +13,13 @@ import pytest
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.artifacts import create_candidate_object
+from goblinshift.files.artifacts import (
+    CandidateObject,
+    commit_candidate,
+    create_candidate_object,
+    publish_artifact,
+)
+from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.retention import (
@@ -31,6 +38,8 @@ pytestmark = pytest.mark.integration
 
 SECOND = timedelta(seconds=1)
 LIMIT = 10
+REJECTED_DETAILS = {"warnings": ["ENCODING_GUESSED"], "rows_read": 3}
+ACCEPTED_DETAILS = {"warnings": [], "rows_read": 7, "rows_written": 7}
 
 
 def now_of(factory: sessionmaker[Session]) -> datetime:
@@ -44,9 +53,10 @@ def finished_run(
     finished_at: datetime,
     owner: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """Run terminada em `finished_at`, com uma entrada rejeitada, tentativa e idempotência."""
+    """Run terminada em `finished_at`, com uma entrada rejeitada e outra aceita, ambas com
+    detalhe por item, uma tentativa e um registro de idempotência."""
     owner = owner or new_owner(factory)
-    [upload_id] = ready_inputs(factory, storage, owner)
+    upload_id, accepted_id = ready_inputs(factory, storage, owner, count=2)
     run_id = insert_finished_run(factory, owner, finished_at - timedelta(minutes=1))
     with unit_of_work(factory) as session:
         session.execute(
@@ -62,6 +72,18 @@ def finished_run(
                 upload_id=upload_id,
                 outcome="rejected",
                 error_code="CSV_STRUCTURE_INVALID",
+                details=REJECTED_DETAILS,
+            )
+        )
+        # Aceita: sem código, mas com detalhe; a anulação não pode depender do código.
+        session.execute(
+            insert(run_input).values(
+                run_id=run_id,
+                position=1,
+                owner_id=owner,
+                upload_id=accepted_id,
+                outcome="ok",
+                details=ACCEPTED_DETAILS,
             )
         )
         session.execute(
@@ -87,15 +109,32 @@ def finished_run(
     return run_id
 
 
+def add_candidate(
+    factory: sessionmaker[Session], run_id: uuid.UUID
+) -> tuple[uuid.UUID, CandidateObject]:
+    """Candidato pendente na tentativa da Run, como o worker deixa antes de confirmar a saída."""
+    with unit_of_work(factory) as session:
+        attempt_id, owner = session.execute(
+            select(attempt.c.id, run.c.owner_id)
+            .join(run, run.c.id == attempt.c.run_id)
+            .where(run.c.id == run_id)
+        ).one()
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
+    return owner, candidate
+
+
 def run_details(factory: sessionmaker[Session], run_id: uuid.UUID) -> tuple[object, ...]:
+    """Parâmetros da Run e, por entrada em ordem, (desfecho, código, detalhe é NULL de SQL?)."""
     with factory() as session:
         parameters = session.execute(
             select(run.c.parameters).where(run.c.id == run_id)
         ).scalar_one()
-        outcome, code = session.execute(
-            select(run_input.c.outcome, run_input.c.error_code).where(run_input.c.run_id == run_id)
-        ).one()
-    return parameters, outcome, code
+        inputs = session.execute(
+            select(run_input.c.outcome, run_input.c.error_code, run_input.c.details)
+            .where(run_input.c.run_id == run_id)
+            .order_by(run_input.c.position)
+        ).all()
+    return parameters, [tuple(row) for row in inputs]
 
 
 def exists(factory: sessionmaker[Session], run_id: uuid.UUID) -> bool:
@@ -112,7 +151,7 @@ def count(factory: sessionmaker[Session], table_name: str) -> int:
 # --- Anulação aos 30 dias ---------------------------------------------------------------------
 
 
-def test_run_terminada_ha_30_dias_perde_parametros_e_codigo_por_item(
+def test_run_terminada_ha_30_dias_perde_parametros_codigo_e_detalhe_por_item(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     now = now_of(factory)
@@ -123,12 +162,17 @@ def test_run_terminada_ha_30_dias_perde_parametros_e_codigo_por_item(
 
     assert anonymized == 1
     # O desfecho (ok/rejected) fica: só diz quantas entradas foram processadas, sem detalhe.
-    assert run_details(factory, run_id) == (None, "rejected", None)
+    assert run_details(factory, run_id) == (None, [("rejected", None, None), ("ok", None, None)])
     with factory() as session:
-        sql_null = session.execute(
-            select(run.c.parameters.is_(None)).where(run.c.id == run_id)
-        ).scalar_one()
-    assert sql_null is True  # NULL de SQL, não o JSON `null`
+        sql_nulls = session.execute(
+            select(
+                run.c.parameters.is_(None),
+                select(func.bool_and(run_input.c.details.is_(None)))
+                .where(run_input.c.run_id == run_id)
+                .scalar_subquery(),
+            ).where(run.c.id == run_id)
+        ).one()
+    assert tuple(sql_nulls) == (True, True)  # NULL de SQL, não o JSON `null`
     assert exists(factory, run_id)
 
 
@@ -144,8 +188,10 @@ def test_run_terminada_1_s_antes_dos_30_dias_fica_intacta(
     assert anonymized == 0
     assert run_details(factory, run_id) == (
         {"filters": [{"column": "cpf"}]},
-        "rejected",
-        "CSV_STRUCTURE_INVALID",
+        [
+            ("rejected", "CSV_STRUCTURE_INVALID", REJECTED_DETAILS),
+            ("ok", None, ACCEPTED_DETAILS),
+        ],
     )
 
 
@@ -182,7 +228,7 @@ def test_run_terminada_ha_90_dias_sai_com_tentativas_entradas_e_idempotencia(
     assert deleted == 1
     assert not exists(factory, old)
     assert exists(factory, recent)
-    assert (count(factory, "attempt"), count(factory, "run_input")) == (1, 1)
+    assert (count(factory, "attempt"), count(factory, "run_input")) == (1, 2)
     assert count(factory, "idempotency") == 1
 
 
@@ -210,19 +256,65 @@ def test_run_com_candidato_ainda_no_disco_espera_o_descarte(
     """Apagar a tentativa antes do descarte deixaria o arquivo do candidato sem quem o remova."""
     now = now_of(factory)
     run_id = finished_run(factory, storage, now - DELETE_AFTER - timedelta(days=1))
-    with unit_of_work(factory) as session:
-        attempt_id, owner = session.execute(
-            select(attempt.c.id, run.c.owner_id)
-            .join(run, run.c.id == attempt.c.run_id)
-            .where(run.c.id == run_id)
-        ).one()
-        create_candidate_object(session, owner, run_id, attempt_id, 1)
+    add_candidate(factory, run_id)
 
     with unit_of_work(factory) as session:
         deleted = delete_old_runs(session, now, LIMIT)
 
     assert deleted == 0
     assert exists(factory, run_id)
+
+
+def test_run_com_candidato_confirmado_sem_referencia_espera_o_descarte(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - DELETE_AFTER - timedelta(days=1))
+    owner, candidate = add_candidate(factory, run_id)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, b"\x00" * 32, 1)
+
+    with unit_of_work(factory) as session:
+        deleted = delete_old_runs(session, now, LIMIT)
+
+    assert deleted == 0
+    assert exists(factory, run_id)
+
+
+def test_run_com_candidato_publicado_como_artefato_sai(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """O artefato tem expiração própria: a Run não precisa esperar por ele."""
+    now = now_of(factory)
+    run_id = finished_run(factory, storage, now - DELETE_AFTER - timedelta(days=1))
+    owner, candidate = add_candidate(factory, run_id)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, b"\x00" * 32, 1)
+        publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv")
+
+    with unit_of_work(factory) as session:
+        deleted = delete_old_runs(session, now, LIMIT)
+
+    assert deleted == 1
+    assert not exists(factory, run_id)
+
+
+def test_lote_pula_as_runs_que_esperam_o_descarte(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """As mais antigas esperando o descarte não podem ocupar o lote inteiro a cada ciclo."""
+    now = now_of(factory)
+    waiting = [finished_run(factory, storage, now - timedelta(days=days)) for days in (95, 94)]
+    for run_id in waiting:
+        add_candidate(factory, run_id)
+    eligible = finished_run(factory, storage, now - timedelta(days=93))
+
+    with unit_of_work(factory) as session:
+        deleted = delete_old_runs(session, now, 2)
+
+    assert deleted == 1
+    assert not exists(factory, eligible)
+    assert all(exists(factory, run_id) for run_id in waiting)
 
 
 def test_remocao_respeita_o_lote(factory: sessionmaker[Session], storage: FileStorage) -> None:
