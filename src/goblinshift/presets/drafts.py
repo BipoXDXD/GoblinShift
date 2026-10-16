@@ -49,7 +49,9 @@ def parse_draft(
 ) -> PresetDraft:
     """Valida tudo de uma vez e devolve todos os erros juntos; versão retirada é recusa própria."""
     errors: list[FieldError] = []
-    normalized_name = unicodedata.normalize("NFC", name)
+    # Aparado antes de validar e de gravar: "Foo" e "Foo " seriam o mesmo nome para quem lê a
+    # lista, e a chave natural (dono, nome) precisa recusar o segundo.
+    normalized_name = unicodedata.normalize("NFC", name).strip()
     name_error = _name_error(normalized_name)
     if name_error is not None:
         errors.append(FieldError("name", name_error))
@@ -78,7 +80,7 @@ def _under_parameters(error: FieldError) -> FieldError:
 
 
 def _name_error(name: str) -> str | None:
-    if not name.strip():
+    if not name:
         return "informe um nome"
     if len(name) > MAX_NAME_CHARS:
         return f"o nome tem no máximo {MAX_NAME_CHARS} caracteres"
