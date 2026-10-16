@@ -29,7 +29,7 @@ export const test = base.extend<Fixtures & Options>({
         E2E.artifactsDir === null
           ? null
           : await installFakeApi(context, E2E.apiKey, E2E.artifactsDir);
-      if (auth === "api-key") {
+      if (auth === "api-key" && E2E.hasAccount) {
         await injectApiKey(context, E2E.apiKey, E2E.baseUrl);
       }
       await use(fake);
