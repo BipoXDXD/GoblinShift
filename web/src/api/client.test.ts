@@ -437,3 +437,48 @@ describe("createApiClient: requestJpeg", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("createApiClient: corpo em texto", () => {
+  const csv = "nome,formula\nAna,\t=cmd\n";
+
+  it("devolve o corpo como texto, sem parse de JSON", async () => {
+    const { client } = setup(
+      new Response(csv, { headers: { "Content-Type": "application/octet-stream" } }),
+    );
+
+    const response = await client.requestText({ path: "/api/v1/artifacts/a/preview" });
+
+    expect(response.data).toBe(csv);
+    expect(response.status).toBe(200);
+  });
+
+  it("pede bytes ou problem+json, num GET sem CSRF", async () => {
+    const { client, fetchMock } = setup(new Response(csv), "token-csrf");
+
+    await client.requestText({ path: "/api/v1/artifacts/a/preview" });
+
+    const request = sentRequest(fetchMock);
+    expect(request.method).toBe("GET");
+    expect(request.headers.get("Accept")).toBe(
+      "application/octet-stream, application/problem+json",
+    );
+    expect(request.headers.get("X-CSRF-Token")).toBeNull();
+  });
+
+  it("traduz problem+json em ApiError, como no JSON", async () => {
+    const { client } = setup(problemResponse(rateLimited));
+
+    const failure = await failureOf(client.requestText({ path: "/api/v1/artifacts/a/preview" }));
+
+    expect(failure).toMatchObject({ kind: "problem", status: 429 });
+  });
+
+  it("recusa caminho de outra origem antes de chamar a API", async () => {
+    const { client, fetchMock } = setup(new Response(csv));
+
+    await expect(client.requestText({ path: "https://outro.example/x" })).rejects.toBeInstanceOf(
+      CrossOriginUrlError,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
