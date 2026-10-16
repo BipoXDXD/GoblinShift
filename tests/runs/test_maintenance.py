@@ -1,5 +1,6 @@
 """Reconciliação da manutenção com PostgreSQL real (docs/GoblinShiftPlan.md, 3.4 e 3.5)."""
 
+import errno
 import logging
 import uuid
 from datetime import timedelta
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object
 from goblinshift.files.missing import GOVERNOR_MIN_SAMPLE
 from goblinshift.files.states import Availability, ObjectState
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, ObjectStat
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.files.uploads import get_upload
 from goblinshift.platform.db import unit_of_work
@@ -354,3 +355,55 @@ def test_lote_com_ausentes_demais_aciona_o_limitador_e_alerta(
     assert alert_fields(caplog, "missing_governor") == [
         {"alert": "missing_governor", "checked": 10, "absent": 10}
     ]
+
+
+class EioStorage(FileStorage):
+    """Storage montado cujo disco devolve EIO em todo `stat`."""
+
+    def stat(self, key: str) -> ObjectStat:
+        raise OSError(errno.EIO, "erro de entrada e saída", key)
+
+
+class BrokenSweepStorage(FileStorage):
+    """Storage em que até conferir a sentinela falha: a varredura inteira levanta."""
+
+    def is_mounted(self) -> bool:
+        raise OSError(errno.EIO, "erro de entrada e saída")
+
+
+def test_disco_com_eio_nao_trava_a_manutencao_e_o_cursor_anda(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    for _ in range(2):
+        ready_upload(factory, storage, create_user(factory, f"conta-{uuid.uuid4()}"), b"abc")
+    mark_mounted(storage)
+    config = MaintenanceConfig(
+        stop_grace=timedelta(seconds=2), jitter=lambda: MIN_RETRY_JITTER, missing_sweep_batch_size=1
+    )
+    cycles = Maintenance(factory, EioStorage(storage.root), local_runner(work_root), config)
+
+    first, second, third = (cycles.run_cycle() for _ in range(3))
+
+    assert [c["objects_missing_unreadable"] for c in (first, second, third)] == [1, 1, 0]
+    assert [c["objects_marked_missing"] for c in (first, second)] == [0, 0]
+    assert {"capacity_pools_corrected", "runs_deleted", "storage_global_max_bytes"} <= (
+        first.keys()
+    )
+
+
+def test_falha_da_varredura_nao_leva_as_outras_etapas(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ready_upload(factory, storage, create_user(factory), b"abc")
+    cycles = maintenance(factory, BrokenSweepStorage(storage.root), local_runner(work_root))
+
+    with caplog.at_level(logging.ERROR, logger="goblinshift.runs.maintenance"):
+        counts = cycles.run_cycle()
+
+    assert counts["missing_sweep_failed"] == 1
+    assert {"objects_purged", "capacity_pools_corrected", "runs_deleted"} <= counts.keys()
+    assert "storage_global_max_bytes" in counts
+    assert any(r.exc_info for r in caplog.records)

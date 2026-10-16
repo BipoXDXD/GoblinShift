@@ -64,6 +64,6 @@ def pass_expiry_after_deletion(factory: sessionmaker[Session], upload_id: uuid.U
 
 
 def mark_mounted(storage: FileStorage) -> None:
-    """A sentinela que o `storage-init` grava no filesystem montado (deploy/release.sh)."""
+    """A sentinela que o `storage-mark` grava no filesystem montado (deploy/storage-mark.sh)."""
     storage.root.mkdir(parents=True, exist_ok=True)
     (storage.root / MOUNT_MARKER).touch()
