@@ -1,4 +1,4 @@
-// Orçamento de peso do build (plano de design, P8; ADR 027 e 030 para o 3D da abertura e as goblins). Roda depois do
+// Orçamento de peso do build (plano de design, P8; ADR 027, 030 e 038 para o 3D da abertura e as goblins). Roda depois do
 // `vite build` no job `web` do CI: `node scripts/check-budget.ts` sai com 1 se algum teto passar.
 // JS e CSS contam gzip (o que trafega); fontes, imagens e modelos já vêm comprimidos e contam o
 // tamanho do arquivo.
@@ -27,6 +27,16 @@ const LIMITS_KB = {
    * WebP e Meshopt, mede 3283 KB; reduzir mais já tirava relevo do rosto.
    */
   threeDModel: 3400,
+  /**
+   * ADR 038: cada uma das outras cinco goblins, na mesma configuração da Rúbia, mede de 1492 KB
+   * (Nyx) a 2247 KB (Jade); só baixa quando a pessoa a escolhe no seletor.
+   */
+  threeDCastModel: 2400,
+  /**
+   * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
+   * Rúbia, a maior imagem estática dela em AVIF e as seis miniaturas do seletor. Medido: ~3530 KB.
+   */
+  threeDInitial: 3600,
   threeDPoster: 90,
   /**
    * Goblin de um estado ou do elenco, cada arquivo (AVIF ou WebP, de 256 a 768 px). Era 20 KB
@@ -39,6 +49,11 @@ const LIMITS_KB = {
 
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */
 const THREE_D_PREFIX = "assets/oficina-3d";
+/** A goblin que abre a página (ADR 038): o modelo dela tem teto próprio e entra no 3D inicial. */
+const FIRST_MODEL = /^assets\/oficina-3d-rubia-[^/]*\.glb$/;
+const FIRST_POSTER = /^assets\/oficina-3d-rubia-640w-[^/]*\.avif$/;
+const THUMBNAIL = /^assets\/oficina-3d-[a-z]+-192w-[^/]*\.avif$/;
+const THREE_D_CHUNK = /^assets\/oficina-3d-[^/]*\.js$/;
 
 /** A fonte do título da primeira tela: a única com preload (CSSD 12.5); o resto chega por swap. */
 export const FONT_PRELOAD = /bricolage-grotesque-latin-wght-normal-[^/]*\.woff2$/;
@@ -72,6 +87,7 @@ export function budgetViolations(files: readonly BuiltFile[], indexHtml: string)
   if (!hasFontPreload(indexHtml)) {
     violations.push("index.html sem preload da fonte do título (bricolage-grotesque latin)");
   }
+  violations.push(...initialThreeDViolations(files));
   for (const file of files) {
     violations.push(
       chunkRawViolation(file),
@@ -114,7 +130,7 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
       overLimit({
         what: `Modelo 3D (${file.path})`,
         bytes: file.bytes,
-        limitKb: LIMITS_KB.threeDModel,
+        limitKb: FIRST_MODEL.test(file.path) ? LIMITS_KB.threeDModel : LIMITS_KB.threeDCastModel,
         unit: "KB",
       }),
     ];
@@ -140,6 +156,34 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
       what: `Imagem estática do 3D (${file.path})`,
       bytes: file.bytes,
       limitKb: LIMITS_KB.threeDPoster,
+      unit: "KB",
+    }),
+  ];
+}
+
+/**
+ * O 3D que a abertura baixa sem a pessoa pedir (ADR 038): só vale com modelos no build, e a
+ * Rúbia tem de estar entre eles. As outras goblins não contam: o modelo delas vem sob demanda.
+ */
+function initialThreeDViolations(files: readonly BuiltFile[]): (string | null)[] {
+  if (!files.some((file) => file.path.endsWith(".glb"))) {
+    return [];
+  }
+  const firstModel = files.filter((file) => FIRST_MODEL.test(file.path));
+  if (firstModel.length === 0) {
+    return ["3D inicial: falta o modelo da Rúbia (assets/oficina-3d-rubia-*.glb)"];
+  }
+  const bytes = (pattern: RegExp, field: "bytes" | "gzipBytes"): number =>
+    files.filter((file) => pattern.test(file.path)).reduce((total, file) => total + file[field], 0);
+  return [
+    overLimit({
+      what: "3D inicial (chunk, Rúbia, imagem estática e miniaturas)",
+      bytes:
+        bytes(THREE_D_CHUNK, "gzipBytes") +
+        bytes(FIRST_MODEL, "bytes") +
+        bytes(FIRST_POSTER, "bytes") +
+        bytes(THUMBNAIL, "bytes"),
+      limitKb: LIMITS_KB.threeDInitial,
       unit: "KB",
     }),
   ];
