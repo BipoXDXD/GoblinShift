@@ -23,9 +23,11 @@ O worker prepara, o executor só lê:
       ]
     }
 
-- `context.json` (opcional, fatia 5, ADR 021): `{"executor_image": "<repo>@sha256:<hex>"}`, a
-  imagem fixada na Run, só para o manifesto. Ausente é a janela de deploy (`null` no manifesto);
-  chaves desconhecidas são ignoradas, ao contrário do `job.json`.
+- `context.json` (opcional, fatia 5, ADR 021): `{"executor_image": "<repo>@sha256:<hex>",
+  "input_upload_ids": ["<uuid>", …]}`, a imagem fixada na Run, só para o manifesto, e o upload de
+  cada entrada na ordem das posições, para o `select` do PDF Press (ADR 035; ausente num worker
+  anterior). Ausente é a janela de deploy (`null` no manifesto); chaves desconhecidas são
+  ignoradas, ao contrário do `job.json`.
 - `inputs/`: as entradas, conferidas por tamanho e SHA-256 antes de qualquer processamento.
 
 O executor escreve, sempre com criação exclusiva:
@@ -37,6 +39,12 @@ O executor escreve, sempre com criação exclusiva:
 - `progress.jsonl`: uma linha `{"position": n}` por entrada avaliada (aceita ou rejeitada), na
   ordem de conclusão; o worker conta as linhas para `progress.processed`.
 - `failure.json`: só na falha determinística, `{"code": "<código de 1.6>", "detail": "…"}`.
+- `telemetry.json` (fatia 8, 3.7): os tempos das fases que terminaram, em milissegundos pelo
+  relógio monotônico, `{"schema_version": 1, "inspect_ms": n, "process_ms": n, "package_ms": n}`.
+  `inspect_ms` é ler o job e conferir as entradas; `process_ms`, a receita e o `report.json`;
+  `package_ms`, o manifesto e o ZIP. Fase interrompida não aparece. Fica fora de `out/` para não
+  entrar no pacote; é gravado no fim de toda execução, mas só como telemetria: falhar ao
+  gravá-lo (disco cheio) não muda o código de saída, e o worker o lê como dado não confiável.
 
 `out/report.json` (`schema_version` 1; mudanças só aditivas)::
 
@@ -73,6 +81,8 @@ Códigos de saída do processo (`ExitCode`)
   stderr).
 - 5, `INTEGRITY`: entrada ausente, que não é arquivo regular, ou com tamanho ou SHA-256
   diferente do job.
+- 6, `NO_SPACE`: o disco da área de trabalho encheu (`ENOSPC`). É o limite de disco de 1.6, uma
+  falha determinística (`RESOURCE_LIMIT_EXCEEDED`), sem `failure.json`.
 
 Qualquer outro código (o 1 de uma exceção que escapou, morte por sinal) também é infraestrutura.
 

@@ -37,7 +37,7 @@ describe("/creditos", () => {
     expect(main).toHaveTextContent("Blender");
   });
 
-  it("apresenta as seis goblins do elenco, cada uma com o nome", async () => {
+  it("apresenta as cinco goblins do elenco, cada uma com o nome", async () => {
     setup("/creditos");
     await expectHeadingFocused("Créditos");
 

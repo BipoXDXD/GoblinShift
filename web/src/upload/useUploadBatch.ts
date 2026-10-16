@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ApiClient } from "../api/client";
 import { ApiError, type ApiFailure } from "../api/response";
-import { createUploads, type CreatedUpload } from "./api";
+import { createUploads, deleteUpload, type CreatedUpload } from "./api";
 import {
   createLimiter,
   MAX_CONCURRENT_UPLOADS,
@@ -29,6 +29,13 @@ export interface UploadEntry {
   readonly state: UploadEntryState;
 }
 
+/** Upload que saiu do lote, mas cujo DELETE falhou: a pessoa pode tentar de novo. */
+export interface FailedDeletion {
+  readonly uploadId: string;
+  readonly name: string;
+  readonly failure: UploadFailure;
+}
+
 export interface UploadServices {
   readonly client: ApiClient;
   readonly uploader: ContentUploader;
@@ -45,7 +52,13 @@ interface UploadBatch {
   readonly remove: (localId: string) => void;
   /** Tira todos os arquivos do lote, abortando os envios em curso. */
   readonly removeAll: () => void;
+  /** Exclusões no servidor que falharam; o arquivo já saiu do lote. */
+  readonly failedDeletions: readonly FailedDeletion[];
+  readonly retryDeletions: () => void;
 }
+
+/** O que excluir no servidor: o id da intenção e o nome, para a mensagem de falha. */
+type ServerUpload = Omit<FailedDeletion, "failure">;
 
 const ACTIVE_STATUSES: ReadonlySet<UploadEntryState["status"]> = new Set([
   "waiting",
@@ -56,11 +69,18 @@ const ACTIVE_STATUSES: ReadonlySet<UploadEntryState["status"]> = new Set([
 /**
  * Lote de uploads da Bancada: cria as intenções (POST /uploads), envia no máximo dois arquivos por
  * vez, repete o 429 RATE_LIMITED pelo Retry-After e segura a saída da página enquanto houver envio.
+ *
+ * Remover tira o arquivo do lote na hora (ele deixa de ser entrada) e exclui o upload no servidor
+ * (DELETE /uploads/{id}), inclusive a intenção de um envio interrompido; a falha do DELETE fica em
+ * `failedDeletions`, com o nome, para a pessoa tentar de novo.
  */
 export function useUploadBatch(services: UploadServices): UploadBatch {
   const [entries, setEntries] = useState<readonly UploadEntry[]>([]);
   const [limit] = useState(() => createLimiter(MAX_CONCURRENT_UPLOADS));
   const controllers = useRef(new Map<string, AbortController>());
+  /** Intenção criada no servidor para cada arquivo do lote, pelo localId. */
+  const serverUploads = useRef(new Map<string, ServerUpload>());
+  const [failedDeletions, setFailedDeletions] = useState<readonly FailedDeletion[]>([]);
   const servicesRef = useRef(services);
   useEffect(() => {
     servicesRef.current = services;
@@ -71,6 +91,8 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
       current.map((entry) => (entry.localId === localId ? { ...entry, state } : entry)),
     );
   }, []);
+
+  const deleteOnServer = useDeleteOnServer(servicesRef, setFailedDeletions);
 
   const send = useCallback(
     (batch: readonly Pick<UploadEntry, "localId" | "file">[]) => {
@@ -86,6 +108,13 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
               setState(entry.localId, { status: "failed", failure: { kind: "internal" } });
               return;
             }
+            const created = { uploadId: intent.id, name: entry.file.name };
+            if (signal.aborted) {
+              // Removido ou cancelado enquanto a intenção vinha: não envia e não deixa sobra.
+              deleteOnServer([created]);
+              return;
+            }
+            serverUploads.current.set(entry.localId, created);
             void limit(() =>
               sendOne({ ...entry, intent, signal, services: servicesRef.current, setState }),
             );
@@ -100,7 +129,7 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
         },
       );
     },
-    [limit, setState],
+    [limit, setState, deleteOnServer],
   );
 
   const add = useCallback(
@@ -135,19 +164,36 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
     [setState],
   );
 
-  const remove = useCallback((localId: string) => {
-    controllers.current.get(localId)?.abort();
-    controllers.current.delete(localId);
-    setEntries((current) => current.filter((entry) => entry.localId !== localId));
-  }, []);
+  const remove = useCallback(
+    (localId: string) => {
+      controllers.current.get(localId)?.abort();
+      controllers.current.delete(localId);
+      const created = serverUploads.current.get(localId);
+      serverUploads.current.delete(localId);
+      setEntries((current) => current.filter((entry) => entry.localId !== localId));
+      if (created !== undefined) {
+        deleteOnServer([created]);
+      }
+    },
+    [deleteOnServer],
+  );
 
   const removeAll = useCallback(() => {
     for (const controller of controllers.current.values()) {
       controller.abort();
     }
     controllers.current.clear();
+    const created = [...serverUploads.current.values()];
+    serverUploads.current.clear();
     setEntries([]);
-  }, []);
+    deleteOnServer(created);
+  }, [deleteOnServer]);
+
+  const retryDeletions = useCallback(() => {
+    // Saem da lista já; uma falha nova os traz de volta. Repetir o DELETE é seguro (202).
+    setFailedDeletions([]);
+    deleteOnServer(failedDeletions);
+  }, [deleteOnServer, failedDeletions]);
 
   const uploading = entries.some((entry) => ACTIVE_STATUSES.has(entry.state.status));
   useEffect(() => {
@@ -172,7 +218,42 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
     };
   }, []);
 
-  return { entries, add, retry, cancel, remove, removeAll };
+  return { entries, add, retry, cancel, remove, removeAll, failedDeletions, retryDeletions };
+}
+
+/** Uma exclusão por vez a menos que o limite: o DELETE conta na cota de comandos por minuto. */
+const MAX_CONCURRENT_DELETIONS = 2;
+
+/**
+ * Exclui uploads no servidor, dois por vez, repetindo o 429 pelo Retry-After. O que falhar vai
+ * para a lista de falhas, sem repetir o mesmo id.
+ */
+function useDeleteOnServer(
+  servicesRef: { readonly current: UploadServices },
+  setFailedDeletions: (update: (current: readonly FailedDeletion[]) => FailedDeletion[]) => void,
+): (targets: readonly ServerUpload[]) => void {
+  const [limit] = useState(() => createLimiter(MAX_CONCURRENT_DELETIONS));
+  return useCallback(
+    (targets: readonly ServerUpload[]) => {
+      for (const target of targets) {
+        const { client, rateLimit } = servicesRef.current;
+        void limit(() =>
+          retryOnRateLimit(() => deleteUpload(client, target.uploadId), rateLimit),
+        ).then(
+          () => undefined,
+          (error: unknown) => {
+            const failure: UploadFailure =
+              error instanceof ApiError ? error.failure : { kind: "internal" };
+            setFailedDeletions((current) => [
+              ...current.filter((failed) => failed.uploadId !== target.uploadId),
+              { ...target, failure },
+            ]);
+          },
+        );
+      }
+    },
+    [limit, servicesRef, setFailedDeletions],
+  );
 }
 
 function renewController(controllers: Map<string, AbortController>, localId: string): AbortSignal {

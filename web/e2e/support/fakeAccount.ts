@@ -17,7 +17,7 @@ const SESSION_COOKIE = "__Host-gs_session";
 const CSRF_COOKIE = "__Host-gs_csrf";
 const CSRF_HEADER = "x-csrf-token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const TERMS_VERSION = "v2-rascunho";
+const TERMS_VERSION = "v3-rascunho";
 const MAX_ACTIVE_KEYS = 5;
 const NOW = "2026-10-14T12:00:00Z";
 // Os mesmos de auth_login.py: só caminho local, até 512 caracteres.
@@ -209,6 +209,13 @@ export class FakeAccount {
         await fulfillProblem(route, principal);
         return true;
       }
+      // Sem sessão válida, como na API: só com o par cookie e header de CSRF.
+      const withSession = !isRefusal(principal) && principal?.via === "session";
+      if (!withSession && !(await csrfPairMatches(request))) {
+        this.csrfFailures.push("POST /auth/logout");
+        await fulfillProblem(route, { status: 403, code: "CSRF_FAILED" });
+        return true;
+      }
       await this.#signOut(route);
       return true;
     }
@@ -293,6 +300,7 @@ export class FakeAccount {
         storage_reserved_bytes: 40_000_000,
         active_run_id: null,
         daily_quota_resets_at: "2026-10-15T09:30:00Z",
+        executor_ms_last_24h: 95_000,
       },
       terms: {
         current_version: TERMS_VERSION,
@@ -426,6 +434,13 @@ function unauthenticated(): Refusal {
     code: "AUTHENTICATION_REQUIRED",
     headers: { "WWW-Authenticate": "Bearer" },
   };
+}
+
+/** Header de CSRF presente e igual ao cookie: o que a API exige de um logout sem sessão. */
+async function csrfPairMatches(request: Request): Promise<boolean> {
+  const cookie = parseCookies(await request.headerValue("cookie")).get(CSRF_COOKIE);
+  const header = await request.headerValue(CSRF_HEADER);
+  return cookie !== undefined && header === cookie;
 }
 
 function parseCookies(header: string | null): Map<string, string> {

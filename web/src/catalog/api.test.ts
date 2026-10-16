@@ -22,6 +22,7 @@ describe("getCatalog", () => {
       "csv-janitor",
       "image-forge",
       "downloads-detox",
+      "pdf-press",
     ]);
     expect(requests[0]?.method).toBe("GET");
   });

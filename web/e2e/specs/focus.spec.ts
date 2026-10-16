@@ -74,7 +74,10 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Abrir a Bancada da CSV Janitor",
     "Abrir a Bancada da Image Forge",
     "Abrir a Bancada da Downloads Detox",
+    "Abrir a Bancada da PDF Press",
     // O rodapé vem depois de todo o conteúdo.
+    "Termos de Uso",
+    "Aviso de Privacidade",
     "Créditos",
   ]);
 });
@@ -105,9 +108,11 @@ test("Bancada: arquivos → lista → parâmetros → Executar, e o foco segue o
   const positions = order.map((name) => names.indexOf(name));
   expect(positions, `paradas: ${names.join(" | ")}`).not.toContain(-1);
   expect(positions).toEqual([...positions].sort((a, b) => a - b));
-  // Executar fecha o conteúdo; depois dele, só o link do rodapé.
-  expect(names.slice(-2), "Executar é a última parada do conteúdo").toEqual([
+  // Executar fecha o conteúdo; depois dele, só os links do rodapé.
+  expect(names.slice(-4), "Executar é a última parada do conteúdo").toEqual([
     "Executar",
+    "Termos de Uso",
+    "Aviso de Privacidade",
     "Créditos",
   ]);
 

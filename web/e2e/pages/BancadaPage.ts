@@ -4,7 +4,7 @@ import type { InputFile } from "../fixtures/files";
 
 const MOVE_UP = /^Mover para cima /;
 
-export type RecipeId = "csv-janitor" | "image-forge" | "downloads-detox";
+export type RecipeId = "csv-janitor" | "image-forge" | "downloads-detox" | "pdf-press";
 
 /**
  * A Bancada de uma receita, por ações de intenção. Os seletores são só papel e nome acessível: se
@@ -23,11 +23,21 @@ export class BancadaPage {
     await expect(this.runButton()).toBeVisible();
   }
 
-  /** Escolhe os arquivos pelo input e espera cada um terminar de enviar. */
+  /**
+   * Escolhe os arquivos pelo input e espera cada um terminar de enviar. Conta por nome: com um nome
+   * repetido, o item antigo já "Enviado" não pode responder pelo novo.
+   */
   async addFiles(files: readonly InputFile[]): Promise<void> {
-    await this.#page.getByLabel("Escolher arquivos").setInputFiles([...files]);
+    const expected = new Map<string, number>();
     for (const file of files) {
-      await expect(this.entry(file.name).getByText("Enviado", { exact: true })).toBeVisible();
+      expected.set(file.name, (expected.get(file.name) ?? 0) + 1);
+    }
+    for (const [name, added] of expected) {
+      expected.set(name, added + (await this.entry(name).count()));
+    }
+    await this.#page.getByLabel("Escolher arquivos").setInputFiles([...files]);
+    for (const [name, total] of expected) {
+      await expect(this.entry(name).getByText("Enviado", { exact: true })).toHaveCount(total);
     }
   }
 
@@ -69,6 +79,11 @@ export class BancadaPage {
   /** Escolhe uma opção de um campo de escolha única pelo rótulo visível. */
   async choose(field: string, option: string): Promise<void> {
     await this.#page.getByLabel(field, { exact: true }).selectOption({ label: option });
+  }
+
+  /** Aciona um botão do formulário pelo nome acessível (Adicionar página, no PDF Press). */
+  async press(button: string): Promise<void> {
+    await this.#page.getByRole("button", { name: button, exact: true }).click();
   }
 
   async fill(field: string, value: string): Promise<void> {

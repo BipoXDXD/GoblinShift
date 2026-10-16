@@ -18,7 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.app import create_app
-from goblinshift.identity import Scope
+from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, CSRF_HEADER
+from goblinshift.identity import Scope, issue_csrf_token
 from goblinshift.identity.tables import audit_event
 from goblinshift.platform.settings import Settings
 from tests.api.support import assert_problem
@@ -41,11 +42,21 @@ def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
+# Parâmetros que não são ids: um valor da allowlist da própria rota.
+# Parâmetros de caminho que não são UUID; os demais recebem um UUID novo.
+_NAMED_VALUES = {
+    "provider": "google",
+    "name": "swagger-init.js",
+    "recipe_id": "csv-janitor",
+    "version": "1",
+}
+
+
 def _concrete(path: str) -> str:
     """Troca cada parâmetro do caminho por um valor que passa na validação do tipo."""
 
     def value(match: re.Match[str]) -> str:
-        return "google" if match["name"] == "provider" else str(uuid4())
+        return _NAMED_VALUES.get(match["name"]) or str(uuid4())
 
     return _PATH_PARAM.sub(value, path)
 
@@ -87,11 +98,17 @@ def test_allowlist_publica_e_a_esperada() -> None:
         ("GET", "/livez"),
         ("GET", "/readyz"),
         ("GET", "/docs"),
+        ("GET", "/docs/assets/{name}"),
         ("GET", "/openapi.json"),
         ("GET", "/auth/login/{provider}"),
         ("GET", "/auth/callback/{provider}"),
-        ("POST", "/auth/logout"),
     }
+
+
+def test_so_o_logout_dispensa_credencial_mas_exige_o_par_csrf() -> None:
+    assert [(method, path) for method, path, _ in entries(Policy.CSRF_ONLY)] == [
+        ("POST", "/auth/logout")
+    ]
 
 
 def test_toda_rota_com_recurso_declara_o_parametro_do_caminho() -> None:
@@ -136,6 +153,19 @@ def test_rota_publica_responde_sem_credencial(
     response = _send(client, method, path)
 
     # 404 e 405 mostram que a rota não existe; 401 e 403, que ela pediu credencial.
+    assert response.status_code not in {401, 403, 404, 405}, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("method", "path", "rule"), _cases(Policy.CSRF_ONLY))
+def test_rota_so_com_csrf_recusa_sem_o_par_e_aceita_com_ele(
+    client: TestClient, method: str, path: str, rule: Rule
+) -> None:
+    token = issue_csrf_token(b"k" * 32, uuid4())
+    with_pair = {"Cookie": f"{CSRF_COOKIE}={token}", CSRF_HEADER: token}
+
+    assert_problem(_send(client, method, path), 403, "CSRF_FAILED")
+    response = client.request(method, _concrete(path), headers=with_pair)
     assert response.status_code not in {401, 403, 404, 405}, response.text
 
 

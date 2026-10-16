@@ -187,6 +187,7 @@ describe("Acesso: uso e cotas", () => {
               input_bytes_last_24h: 0,
               storage_reserved_bytes: 0,
               daily_quota_resets_at: null,
+              executor_ms_last_24h: 0,
             },
           }),
         ),
@@ -267,6 +268,15 @@ describe("Acesso: chaves de API", () => {
     ]);
     expect(within(list).getAllByRole("button", { name: /^Revogar/ })).toHaveLength(1);
     expect(within(list).getByRole("button", { name: "Revogar a chave gsk_ativa" })).toBeVisible();
+  });
+
+  it("a seção de chaves leva ao guia da API", async () => {
+    setup();
+
+    const keys = await section("Chaves de API");
+    expect(
+      within(keys).getByRole("link", { name: "Como usar a chave: guia da API" }),
+    ).toHaveAttribute("href", "/acesso/guia-da-api");
   });
 
   it("revogar pede confirmação; cancelar não chama a API", async () => {
