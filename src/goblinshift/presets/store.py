@@ -114,6 +114,9 @@ def replace_preset(
 ) -> Preset:
     """Atualização integral na revisão lida; a revisão sobe 1."""
     _lock_owner(session, owner_id)
+    # A revisão antes do nome: quem leu uma versão velha recebe 412 e relê, em vez de um 409 que
+    # talvez nem valha para a versão atual.
+    _require_revision(session, owner_id, preset_id, expected_revision)
     _require_free_name(session, owner_id, draft.name, keep=preset_id)
     row = session.execute(
         update(preset)
@@ -155,6 +158,18 @@ def _lock_owner(session: Session, owner_id: UUID) -> None:
     session.execute(
         select(func.pg_advisory_xact_lock(func.hashtext(f"{_LOCK_NAMESPACE}.{owner_id}")))
     )
+
+
+def _require_revision(
+    session: Session, owner_id: UUID, preset_id: UUID, expected_revision: int
+) -> None:
+    current = session.execute(
+        select(preset.c.revision).where(preset.c.owner_id == owner_id, preset.c.id == preset_id)
+    ).scalar_one_or_none()
+    if current is None:
+        raise PresetNotFoundError
+    if current != expected_revision:
+        raise StaleRevisionError
 
 
 def _require_free_name(session: Session, owner_id: UUID, name: str, keep: UUID | None) -> None:
