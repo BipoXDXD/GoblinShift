@@ -1,6 +1,6 @@
 // Limite de requisições por conta e classe de rota (docs/GoblinShiftPlan.md, 1.7; plano 2.5).
-// Espera a A2: o limite está no PR #26 (fatia-8-ratelimit, sobre a fatia 6) e ainda não existe
-// na main. O run-local.sh só roda este cenário com GS_LOAD_RATE_LIMIT=1.
+// O limite veio com a A2 (PR #26). O run-local.sh roda este cenário por padrão; GS_LOAD_RATE_LIMIT=0
+// o desliga.
 //
 // Uma conta por classe, todas ao mesmo tempo: 120 leituras, 60 comandos e 10 POST /runs passam
 // no minuto, e a requisição seguinte recebe 429 RATE_LIMITED com Retry-After. A janela é fixa,

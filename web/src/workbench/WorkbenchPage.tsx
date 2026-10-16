@@ -1,14 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ReactElement } from "react";
-import { useParams } from "react-router";
+import type { ReactElement, ReactNode } from "react";
+import { useParams, useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { NotFoundPage } from "../app/NotFoundPage";
-import { CATALOG_QUERY_KEY, findCatalogVersion, getCatalog } from "../catalog/api";
+import {
+  CATALOG_QUERY_KEY,
+  findCatalogVersion,
+  getCatalog,
+  type CatalogVersion,
+} from "../catalog/api";
 import { FailureNotice } from "../components/feedback/FailureNotice";
-import { findRecipe, type RecipeModule } from "../recipes/registry";
+import {
+  findRecipe,
+  withoutUploadBoundParameters,
+  type RecipeForm,
+  type RecipeModule,
+} from "../recipes/registry";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
+import {
+  sourceFromSearch,
+  useParameterSource,
+  type ParameterSource,
+  type SourceRef,
+} from "./parameterSource";
 import { Workbench, WorkbenchHeader } from "./Workbench";
 
 interface WorkbenchPageProps {
@@ -18,15 +34,26 @@ interface WorkbenchPageProps {
 /** Rota da Bancada: a receita vem da URL e só segue se existir no registro. */
 export function WorkbenchPage({ uploadServices }: WorkbenchPageProps): ReactElement {
   const recipe = findRecipe(useParams()["recipeId"] ?? "");
+  const [search] = useSearchParams();
+  const source = sourceFromSearch(search);
   if (recipe === null) {
     return <NotFoundPage />;
   }
-  // A key recria a Bancada ao trocar de receita, sem herdar arquivos nem parâmetros da anterior.
-  return <CatalogGate key={recipe.id} recipe={recipe} uploadServices={uploadServices} />;
+  // A key recria a Bancada ao trocar de receita ou de origem, sem herdar arquivos nem parâmetros.
+  return (
+    <CatalogGate
+      key={`${recipe.id}:${source?.kind ?? ""}:${source?.id ?? ""}`}
+      recipe={recipe}
+      source={source}
+      uploadServices={uploadServices}
+    />
+  );
 }
 
 interface CatalogGateProps {
   readonly recipe: RecipeModule;
+  /** Preset (`?preset=`) ou execução (`?execucao=`) que pré-preenche os parâmetros. */
+  readonly source: SourceRef | null;
   readonly uploadServices: UploadServices;
 }
 
@@ -34,19 +61,27 @@ interface CatalogGateProps {
  * Defaults e limites da receita vêm de GET /catalog (2.2): a Bancada só abre com a versão do
  * formulário presente no catálogo e no formato que ele conhece.
  */
-function CatalogGate({ recipe, uploadServices }: CatalogGateProps): ReactElement {
+function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): ReactElement {
   const client = useApiClient();
+  const loaded = useParameterSource(source);
   const catalog = useQuery({
     queryKey: CATALOG_QUERY_KEY,
     queryFn: ({ signal }) => getCatalog(client, signal),
     // Muda só com um deploy; o navegador revalida pelo ETag a cada carga da página.
     staleTime: Infinity,
   });
-  if (catalog.data === undefined) {
+  const sourcePending = source !== null && loaded.isPending;
+  if (catalog.data === undefined || sourcePending) {
     return (
       <div className="flex flex-col gap-8">
         <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
-        <CatalogPending error={catalog.error} />
+        {catalog.data === undefined ? (
+          <CatalogPending error={catalog.error} />
+        ) : (
+          <p className="text-fg-muted">
+            {source?.kind === "run" ? TEXT.history.loadingRun : TEXT.presets.loadingPreset}
+          </p>
+        )}
       </div>
     );
   }
@@ -65,7 +100,82 @@ function CatalogGate({ recipe, uploadServices }: CatalogGateProps): ReactElement
       </div>
     );
   }
-  return <Workbench recipe={recipe} form={form} uploadServices={uploadServices} />;
+  const prefilled =
+    source === null || version === null
+      ? { form, notice: null }
+      : prefilledForm({
+          recipe,
+          version,
+          fallback: form,
+          source: loaded.data ?? null,
+          error: loaded.error,
+        });
+  return (
+    <Workbench
+      recipe={recipe}
+      form={prefilled.form}
+      notice={prefilled.notice}
+      uploadServices={uploadServices}
+    />
+  );
+}
+
+interface PrefillSources {
+  readonly recipe: RecipeModule;
+  readonly version: CatalogVersion;
+  /** O formulário com os defaults do catálogo, para quando a origem não abre. */
+  readonly fallback: RecipeForm;
+  readonly source: ParameterSource | null;
+  readonly error: Error | null;
+}
+
+/**
+ * O formulário com os parâmetros da origem no lugar dos defaults do catálogo, e o aviso de onde
+ * vieram. Origem que não abre (falha, outra receita, parâmetros apagados pela retenção, formato
+ * desconhecido) deixa os padrões, com o motivo.
+ */
+function prefilledForm({ recipe, version, fallback, source, error }: PrefillSources): {
+  readonly form: RecipeForm;
+  readonly notice: ReactNode;
+} {
+  if (source === null) {
+    return { form: fallback, notice: error === null ? null : <FailureNotice error={error} /> };
+  }
+  const sameRecipe = source.recipeId === recipe.id && source.recipeVersion === recipe.version;
+  if (!sameRecipe) {
+    return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
+  }
+  if (source.stored.kind === "gone") {
+    return { form: fallback, notice: <SourceNotice>{source.stored.notice}</SourceNotice> };
+  }
+  const reusable = withoutUploadBoundParameters(recipe, source.stored.parameters);
+  const form = recipe.formFor({
+    ...version,
+    defaults: { ...version.defaults, ...reusable.parameters },
+  });
+  if (form === null) {
+    return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
+  }
+  return {
+    form,
+    notice: (
+      <SourceNotice>
+        {source.loadedNotice}
+        {reusable.dropped && ` ${TEXT.workbench.uploadBoundDropped}`}
+      </SourceNotice>
+    ),
+  };
+}
+
+/**
+ * Status (WCAG 4.1.3): o aviso chega depois do carregamento da origem, no lugar do "carregando".
+ */
+function SourceNotice({ children }: { readonly children: ReactNode }): ReactElement {
+  return (
+    <p role="status" className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">
+      {children}
+    </p>
+  );
 }
 
 /** Enquanto não há catálogo: carregando, sem login (aviso, não erro) ou a falha em texto. */

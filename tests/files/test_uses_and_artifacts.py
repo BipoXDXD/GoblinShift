@@ -15,6 +15,7 @@ from goblinshift.files.artifacts import (
     get_artifact,
     open_for_download,
     publish_artifact,
+    request_artifacts_deletion,
 )
 from goblinshift.files.errors import (
     ArtifactGoneError,
@@ -414,3 +415,40 @@ def test_upload_excluido_reaproveitado_como_artefato_some_das_entradas_mas_nao_d
         ticket = open_for_download(session, owner, shared.id)
     with storage.open(ticket.storage_key) as stream:
         assert stream.read() == b"compartilhado"
+
+
+def test_excluir_artefatos_ignora_os_de_outra_conta(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner, other = create_user(factory, "dona"), create_user(factory, "outra")
+    mine = published_artifact(factory, storage, owner, b"meu")
+    theirs = published_artifact(factory, storage, other, b"deles")
+
+    with unit_of_work(factory) as session:
+        request_artifacts_deletion(session, owner, [mine, theirs])
+
+    with factory() as session:
+        assert get_artifact(session, owner, mine).availability is Availability.DELETED
+        assert get_artifact(session, other, theirs).availability is Availability.AVAILABLE
+
+
+def test_excluir_artefatos_ja_excluidos_mantem_a_data_da_exclusao(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "dona")
+    mine = published_artifact(factory, storage, owner, b"meu")
+    with unit_of_work(factory) as session:
+        request_artifacts_deletion(session, owner, [mine])
+    first = _deleted_at(factory, mine)
+
+    with unit_of_work(factory) as session:
+        request_artifacts_deletion(session, owner, [mine])
+
+    assert _deleted_at(factory, mine) == first
+
+
+def _deleted_at(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> object:
+    with factory() as session:
+        return session.execute(
+            select(artifact.c.deleted_at).where(artifact.c.id == artifact_id)
+        ).scalar_one()

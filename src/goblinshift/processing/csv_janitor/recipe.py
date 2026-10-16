@@ -13,8 +13,15 @@ from typing import assert_never
 from goblinshift.processing.csv_janitor.janitor import clean_table
 from goblinshift.processing.csv_janitor.limits import Limits
 from goblinshift.processing.csv_janitor.params import Params
-from goblinshift.processing.csv_janitor.results import TableCleaned, TableRejected
+from goblinshift.processing.csv_janitor.preview import table_preview
+from goblinshift.processing.csv_janitor.results import (
+    TableCleaned,
+    TableRejected,
+    TableWarning,
+    WarningCode,
+)
 from goblinshift.processing.names import safe_stem
+from goblinshift.processing.previews import PendingPreview, attach_previews, write_previews
 from goblinshift.processing.recipe import (
     InputFile,
     ItemOk,
@@ -44,12 +51,15 @@ class CsvJanitorV1:
     ) -> Report:
         require_max_inputs(inputs, self._max_tables, "tabelas")
         items: list[ItemOk | ItemRejected] = []
+        pending: list[PendingPreview] = []
         for table in inputs:
-            items.append(self._clean_one(table, params, out))
+            items.append(self._clean_one(table, params, out, pending))
             progress.item_done(table.position)
-        return Report(items)
+        return Report(attach_previews(items, write_previews(out, pending)))
 
-    def _clean_one(self, table: InputFile, params: Params, out: OutputDir) -> ItemOk | ItemRejected:
+    def _clean_one(
+        self, table: InputFile, params: Params, out: OutputDir, pending: list[PendingPreview]
+    ) -> ItemOk | ItemRejected:
         with table.path.open("rb") as source:
             # Um byte além do limite basta para a biblioteca rejeitar a tabela pelo tamanho.
             data = source.read(self._limits.table_bytes + 1)
@@ -60,16 +70,26 @@ class CsvJanitorV1:
                 )
                 with output.stream as stream:
                     stream.write(cleaned.content)
+                sample = table_preview(cleaned.content, params.output_delimiter, self._limits)
+                if sample is not None:
+                    pending.append(PendingPreview(table.position, output.name, output.name, sample))
                 return ItemOk(
                     position=table.position,
                     outputs=(output.name,),
-                    warnings=tuple(ReportWarning(w.code, w.detail) for w in cleaned.warnings),
+                    warnings=tuple(_report_warning(w, cleaned) for w in cleaned.warnings),
                     counts=asdict(cleaned.counts),
                 )
             case TableRejected() as rejected:
                 return ItemRejected(table.position, rejected.code, rejected.reason)
             case unreachable:
                 assert_never(unreachable)
+
+
+def _report_warning(warning: TableWarning, cleaned: TableCleaned) -> ReportWarning:
+    columns = (
+        tuple(cleaned.formula_cells.items()) if warning.code is WarningCode.FORMULA_CELLS else ()
+    )
+    return ReportWarning(warning.code, warning.detail, columns)
 
 
 def output_name(original_name: str) -> str:

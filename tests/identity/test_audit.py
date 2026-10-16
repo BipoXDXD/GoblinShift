@@ -58,6 +58,7 @@ def test_tipos_de_evento_do_plano() -> None:
         "ACCOUNT_BLOCKED",
         "ACCOUNT_UNBLOCKED",
         "TERMS_ACCEPTED",
+        "ACCOUNT_LIMITS_CHANGED",
     }
 
 

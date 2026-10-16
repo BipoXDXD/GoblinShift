@@ -5,8 +5,11 @@ import {
   ApiError,
   API_ACCEPT,
   interpretResponse,
+  interpretTextResponse,
   JSON_MEDIA_TYPE,
+  TEXT_ACCEPT,
   type ApiResponse,
+  type RawApiResponse,
 } from "./response";
 import { sameOriginUrl } from "./sameOrigin";
 
@@ -23,13 +26,23 @@ export interface ApiRequest<T> {
   readonly body?: unknown;
   /** Chave da intenção (useIdempotencyKey) nos POST que a API deduplica. */
   readonly idempotencyKey?: string;
+  /** ETag da leitura, nas edições com controle de concorrência (presets: `"<revisão>"`). */
+  readonly ifMatch?: string;
   readonly signal?: AbortSignal;
   /** Schema do corpo de sucesso: a resposta só chega a quem chamou depois do parse. */
   readonly schema: z.ZodType<T>;
 }
 
+/** GET de um corpo que não é JSON (a amostra CSV do preview), lido como texto UTF-8. */
+export interface TextRequest {
+  readonly path: string;
+  readonly signal?: AbortSignal;
+}
+
 export interface ApiClient {
   request<T>(request: ApiRequest<T>): Promise<ApiResponse<T>>;
+  /** Mesmo prazo, origem e tradução de falhas do `request`; o sucesso é o texto, sem parse. */
+  requestText(request: TextRequest): Promise<ApiResponse<string>>;
   /**
    * O cookie legível de CSRF existe. Ele nasce e morre junto do cookie da sessão (HttpOnly, que a
    * página não lê): sem ele não há sessão a consultar, e o `GET /me` só daria 401 no console.
@@ -56,13 +69,16 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return {
     async request<T>(request: ApiRequest<T>): Promise<ApiResponse<T>> {
-      const { response, text } = await sendWithTimeout(options, request, timeoutMs);
-      const raw = {
-        status: response.status,
-        header: (name: string) => response.headers.get(name),
-        text,
-      };
+      const raw = await sendWithTimeout(options, request, timeoutMs);
       return interpretResponse(raw, request.schema, options.now());
+    },
+    async requestText(request: TextRequest): Promise<ApiResponse<string>> {
+      const raw = await sendWithTimeout(
+        options,
+        { ...request, method: "GET", accept: TEXT_ACCEPT },
+        timeoutMs,
+      );
+      return interpretTextResponse(raw, options.now());
     },
     hasSessionCookie(): boolean {
       return options.csrfToken() !== null;
@@ -70,11 +86,22 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   };
 }
 
+/** O pedido como sai pela rede: o que `request` e `requestText` têm em comum. */
+interface OutgoingRequest {
+  readonly method: HttpMethod;
+  readonly path: string;
+  readonly body?: unknown;
+  readonly idempotencyKey?: string;
+  readonly ifMatch?: string;
+  readonly signal?: AbortSignal;
+  readonly accept?: string;
+}
+
 async function sendWithTimeout(
   options: ApiClientOptions,
-  request: ApiRequest<unknown>,
+  request: OutgoingRequest,
   timeoutMs: number,
-): Promise<{ response: Response; text: string }> {
+): Promise<RawApiResponse> {
   request.signal?.throwIfAborted();
   const url = sameOriginUrl(request.path, window.location.origin);
   const controller = new AbortController();
@@ -96,7 +123,8 @@ async function sendWithTimeout(
       signal: controller.signal,
     });
     // O prazo cobre também a leitura do corpo, que pode parar no meio.
-    return { response, text: await response.text() };
+    const text = await response.text();
+    return { status: response.status, header: (name) => response.headers.get(name), text };
   } catch {
     // Cancelamento de quem chamou sai com o motivo original, para o TanStack Query reconhecê-lo.
     request.signal?.throwIfAborted();
@@ -107,13 +135,16 @@ async function sendWithTimeout(
   }
 }
 
-function requestHeaders(options: ApiClientOptions, request: ApiRequest<unknown>): Headers {
-  const headers = new Headers({ Accept: API_ACCEPT });
+function requestHeaders(options: ApiClientOptions, request: OutgoingRequest): Headers {
+  const headers = new Headers({ Accept: request.accept ?? API_ACCEPT });
   if (request.body !== undefined) {
     headers.set("Content-Type", JSON_MEDIA_TYPE);
   }
   if (request.idempotencyKey !== undefined) {
     headers.set("Idempotency-Key", request.idempotencyKey);
+  }
+  if (request.ifMatch !== undefined) {
+    headers.set("If-Match", request.ifMatch);
   }
   if (!SAFE_METHODS.has(request.method)) {
     const token = options.csrfToken();

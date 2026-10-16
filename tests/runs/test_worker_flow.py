@@ -89,6 +89,7 @@ def test_fluxo_feliz_publica_saidas_e_relatorio(
     }
     assert outputs_of(factory, run_id) == [
         ("clientes.csv", "output"),
+        ("previews/clientes.csv", "preview"),
         ("report.json", "report"),
         ("manifest.json", "manifest"),
         ("csv-janitor.zip", "package"),
@@ -124,6 +125,73 @@ def test_artefato_publicado_tem_o_conteudo_limpo_na_chave_da_geracao(
         assert content.read() == VALID
 
 
+def test_detalhe_por_item_guarda_avisos_e_contagens_sem_valor_de_celula(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    formula = b"nome,cidade\r\n=SEGREDO(1),Recife\r\n"
+    run_id = queue_run(
+        factory, storage, create_user(factory), [("a.csv", formula), ("b.csv", INVALID)]
+    )
+
+    coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
+
+    with factory() as session:
+        details = (
+            session.execute(
+                select(run_input.c.details)
+                .where(run_input.c.run_id == run_id)
+                .order_by(run_input.c.position)
+            )
+            .scalars()
+            .all()
+        )
+    assert details == [
+        {
+            "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": [],
+            "counts": {
+                "blank_lines_ignored": 0,
+                "duplicates_removed": 0,
+                "filtered_out": 0,
+                "records_read": 1,
+                "written": 1,
+            },
+            "duplicate_of": None,
+            # O nome da coluna vai para a tela (1.3); o valor da célula, nunca.
+            "formula_cells": {"columns": [{"name": "nome", "cells": 1}], "more_columns": 0},
+        },
+        {
+            "warnings": [],
+            "notices": [],
+            "counts": {},
+            "duplicate_of": None,
+            "formula_cells": None,
+        },
+    ]
+    assert "SEGREDO" not in str(details)
+
+
+def test_amostra_da_tabela_e_publicada_como_preview_da_saida(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory), [("clientes.csv", VALID)])
+
+    coordinator(factory, storage, local_runner(work_root)).run(claim(factory, storage))
+
+    with factory() as session:
+        rows = session.execute(
+            select(artifact.c.id, artifact.c.role, artifact.c.source_artifact_id)
+            .join(run_output, run_output.c.artifact_id == artifact.c.id)
+            .where(run_output.c.run_id == run_id)
+            .order_by(run_output.c.position)
+        ).all()
+    roles = [row.role for row in rows]
+    assert roles == ["output", "preview", "report", "manifest", "package"]
+    output, preview = rows[0], rows[1]
+    assert preview.source_artifact_id == output.id
+    assert all(row.source_artifact_id is None for row in rows if row.role != "preview")
+
+
 def test_tabela_rejeitada_termina_com_avisos(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
@@ -137,6 +205,7 @@ def test_tabela_rejeitada_termina_com_avisos(
     assert input_outcomes(factory, run_id) == [("ok", None), ("rejected", "CSV_STRUCTURE_INVALID")]
     assert outputs_of(factory, run_id) == [
         ("a.csv", "output"),
+        ("previews/a.csv", "preview"),
         ("report.json", "report"),
         ("manifest.json", "manifest"),
         ("csv-janitor.zip", "package"),

@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { RecentRuns } from "../history/RecentRuns";
 import { OficinaHero } from "../oficina3d/OficinaHero";
+import { PresetsSection } from "../presets/PresetsSection";
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
@@ -56,6 +57,7 @@ export function HomePage(): ReactElement {
           ))}
         </ul>
       </section>
+      <PresetsSection />
       <RecentRuns />
     </div>
   );
