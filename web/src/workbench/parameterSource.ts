@@ -18,12 +18,18 @@ export interface SourceRef {
 export interface ParameterSource {
   readonly recipeId: string;
   readonly recipeVersion: number;
-  /** `null` quando a origem já não guarda os parâmetros (retenção de 30 dias da execução). */
-  readonly parameters: Readonly<Record<string, unknown>> | null;
+  readonly stored: StoredParameters;
   readonly loadedNotice: string;
-  readonly goneNotice: string;
   readonly wrongRecipeNotice: string;
 }
+
+/**
+ * Os parâmetros guardados, ou o aviso de por que já não estão. Só a execução os perde (retenção de
+ * 30 dias); o preset sempre os tem, então não carrega um aviso que nunca aparece.
+ */
+export type StoredParameters =
+  | { readonly kind: "kept"; readonly parameters: Readonly<Record<string, unknown>> }
+  | { readonly kind: "gone"; readonly notice: string };
 
 const idSchema = z.uuid();
 
@@ -62,9 +68,8 @@ function presetSource(preset: Awaited<ReturnType<typeof getPreset>>): ParameterS
   return {
     recipeId: preset.recipe_id,
     recipeVersion: preset.recipe_version,
-    parameters: preset.parameters,
+    stored: { kind: "kept", parameters: preset.parameters },
     loadedNotice: TEXT.presets.loaded(preset.name),
-    goneNotice: TEXT.presets.wrongRecipe,
     wrongRecipeNotice: TEXT.presets.wrongRecipe,
   };
 }
@@ -73,9 +78,11 @@ function runSource(run: Awaited<ReturnType<typeof getRun>>["data"]): ParameterSo
   return {
     recipeId: run.recipe_id,
     recipeVersion: run.recipe_version,
-    parameters: run.parameters,
+    stored:
+      run.parameters === null
+        ? { kind: "gone", notice: TEXT.history.reuseGone }
+        : { kind: "kept", parameters: run.parameters },
     loadedNotice: TEXT.history.reuseLoaded(formatDateTime(run.created_at)),
-    goneNotice: TEXT.history.reuseGone,
     wrongRecipeNotice: TEXT.history.reuseWrongRecipe,
   };
 }
