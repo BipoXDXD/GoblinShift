@@ -31,7 +31,9 @@ export async function injectApiKey(
       sameSite: "Strict",
     },
   ]);
-  await context.route("**/api/v1/**", async (route) => {
+  // Só a origem configurada: um pedido da página a outro host nunca leva a chave. No modo VPS com
+  // chave, env.ts exige que essa origem seja a produção.
+  await context.route(`${new URL(baseUrl).origin}/api/v1/**`, async (route) => {
     const request = route.request();
     const cookies = (await request.headerValue("cookie")) ?? "";
     if (SESSION_COOKIE.test(cookies)) {
