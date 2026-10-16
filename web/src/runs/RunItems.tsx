@@ -1,10 +1,18 @@
-import { Ban, CircleAlert, CircleCheck, Clock, Copy, type LucideIcon } from "lucide-react";
+import {
+  Ban,
+  CircleAlert,
+  CircleCheck,
+  CircleHelp,
+  Clock,
+  Copy,
+  type LucideIcon,
+} from "lucide-react";
 import { useId, type ReactElement } from "react";
 
 import { Card } from "../components/ui/Card";
 import { formatCount } from "../format";
 import { TEXT } from "../text";
-import type { RunItem, RunSummary } from "./api";
+import type { Coded, RunItem, RunSummary } from "./api";
 
 const T = TEXT.run.items;
 type CountName = keyof typeof T.counts;
@@ -13,7 +21,9 @@ type Noun = keyof typeof T.nouns;
 /**
  * Desfecho de cada entrada, na ordem em que foram enviadas (1.1): rejeição com o motivo,
  * avisos, contagens e repetidos. A API não traz o nome do arquivo (só o `upload_id`, sem PII no
- * detalhe), então cada entrada é identificada pela posição, a mesma ordem da Bancada.
+ * detalhe), então cada entrada é identificada pela posição, a mesma ordem da Bancada. A API conta
+ * a partir de 0 e a tela, a partir de 1. Código que a interface ainda não conhece aparece como
+ * desconhecido, com o código original.
  */
 export function RunItems({
   items,
@@ -60,21 +70,23 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
   return (
     <li className="flex flex-col gap-2 rounded-lg bg-surface-sunken p-4">
       <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <span className="font-semibold text-fg">{T.entry(item.position)}</span>
+        <span className="font-semibold text-fg">{T.entry(displayPosition(item.position))}</span>
         <ItemStatus item={item} />
       </p>
       {item.error_code !== null && (
-        <p className="text-danger-fg">{T.rejections[item.error_code]}</p>
+        <p className="text-danger-fg">
+          {codeText(item.error_code, T.rejections, T.unknownRejection)}
+        </p>
       )}
       {item.duplicate_of !== null && (
-        <p className="text-fg-muted">{T.duplicateOf(item.duplicate_of)}</p>
+        <p className="text-fg-muted">{T.duplicateOf(displayPosition(item.duplicate_of))}</p>
       )}
       {item.warnings.length > 0 && (
         <ul className="flex flex-col gap-1">
-          {item.warnings.map((warning) => (
-            <li key={warning} className="flex items-start gap-2 text-warning-fg">
+          {item.warnings.map((warning, index) => (
+            <li key={index} className="flex items-start gap-2 text-warning-fg">
               <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
-              <span>{T.warnings[warning]}</span>
+              <span>{codeText(warning, T.warnings, T.unknownWarning)}</span>
             </li>
           ))}
         </ul>
@@ -84,7 +96,9 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
   );
 }
 
-const STATUS_ICONS: Readonly<Record<RunItem["status"], LucideIcon>> = {
+type KnownStatus = keyof typeof T.statuses;
+
+const STATUS_ICONS: Readonly<Record<KnownStatus, LucideIcon>> = {
   pending: Clock,
   ok: CircleCheck,
   rejected: Ban,
@@ -93,16 +107,37 @@ const STATUS_ICONS: Readonly<Record<RunItem["status"], LucideIcon>> = {
 
 /** Estado com ícone e texto: a cor nunca é o único sinal (WCAG 1.4.1). */
 function ItemStatus({ item }: { readonly item: RunItem }): ReactElement {
-  const Icon =
-    item.status === "ok" && item.warnings.length > 0 ? CircleAlert : STATUS_ICONS[item.status];
-  const label =
-    item.status === "ok" && item.warnings.length > 0 ? T.okWithWarnings : T.statuses[item.status];
+  const { Icon, label } = statusLook(item);
   return (
     <span className="inline-flex items-center gap-1 text-sm font-semibold text-fg-muted">
       <Icon aria-hidden="true" className="size-4" />
       {label}
     </span>
   );
+}
+
+function statusLook({ status, warnings }: RunItem): { Icon: LucideIcon; label: string } {
+  if (typeof status !== "string") {
+    return { Icon: CircleHelp, label: T.unknownStatus };
+  }
+  if (status === "ok" && warnings.length > 0) {
+    return { Icon: CircleAlert, label: T.okWithWarnings };
+  }
+  return { Icon: STATUS_ICONS[status], label: T.statuses[status] };
+}
+
+/** Texto de um código da lista fechada; o desconhecido mostra o código como veio. */
+function codeText<K extends string>(
+  code: Coded<K>,
+  texts: Readonly<Record<K, string>>,
+  unknown: (raw: string) => string,
+): string {
+  return typeof code === "string" ? texts[code] : unknown(code.raw);
+}
+
+/** A API numera as entradas a partir de 0; a pessoa conta a partir de 1. */
+function displayPosition(position: number): number {
+  return position + 1;
 }
 
 /** Só as contagens que a interface sabe nomear; uma chave nova da API fica de fora. */

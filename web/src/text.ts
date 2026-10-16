@@ -249,6 +249,9 @@ export const TEXT = {
         duplicate: "Repetido",
       },
       okWithWarnings: "Processado com aviso",
+      unknownStatus: "Estado desconhecido",
+      unknownRejection: (code: string) => `Motivo desconhecido (${code}).`,
+      unknownWarning: (code: string) => `Aviso desconhecido (${code}).`,
       rejections: {
         UNSUPPORTED_FORMAT: "O formato do arquivo não é aceito por esta receita.",
         UNSUPPORTED_BIT_DEPTH: "A profundidade de cor da imagem não é aceita.",
