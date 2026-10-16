@@ -16,7 +16,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from openobserve.catalog import SLOS, Alert, DestinationKey
+from openobserve.catalog import CAUSE_COLUMNS, SLOS, Alert, DestinationKey
 from openobserve.client import OpenObserve, OpenObserveError
 
 SEED_SPAN_NAME = "goblinshift.schema-seed"
@@ -31,7 +31,9 @@ TEMPLATE_BODY = (
     '"content": "[GoblinShift] {alert_name}: {alert_description}", '
     '"alert": "{alert_name}"}'
 )
-TRACE_COLUMNS = tuple(sorted({column for slo in SLOS for column in slo.columns}))
+TRACE_COLUMNS = tuple(
+    sorted({column for slo in SLOS for column in slo.columns} | set(CAUSE_COLUMNS))
+)
 
 
 class ProvisionError(Exception):
@@ -84,7 +86,7 @@ def _check_destinations(
 def declare_columns(
     api: OpenObserve, stream: str, log: Callable[[str], None] = lambda _line: None
 ) -> None:
-    """Garante no stream de traces todas as colunas que as consultas dos SLOs leem."""
+    """Garante no stream de traces as colunas que as consultas dos SLOs e das causas leem."""
     missing = set(TRACE_COLUMNS) - api.stream_fields(stream, "traces")
     if not missing:
         return

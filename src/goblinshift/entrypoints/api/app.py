@@ -42,6 +42,7 @@ from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.schema import read_code_revisions
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher, configure_logging, configure_tracing
+from goblinshift.runs.quotas import QuotaLimits
 
 API_PREFIX = "/api/v1"
 
@@ -82,6 +83,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.executor_image = executor_image
+    app.state.quota_defaults = QuotaLimits.from_settings(settings)
     app.state.web_identity = web_identity
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
