@@ -29,7 +29,11 @@ export class AcessoPage {
     return this.#page.getByRole("dialog", { name: "Sair de todos os dispositivos?" });
   }
 
-  /** Cria uma chave com os escopos pelo rótulo visível; devolve a seção da chave criada. */
+  /**
+   * Cria uma chave com os escopos pelo rótulo visível; devolve a seção da chave criada. Só volta
+   * depois da resposta do POST, qualquer que seja o status, para a spec ler o estado da API falsa
+   * (token emitido, chave guardada) já gravado, e não o de antes do clique.
+   */
   async createKey(scopeLabels: readonly string[]): Promise<Locator> {
     const keys = this.section("Chaves de API");
     await keys.getByRole("button", { name: "Nova chave" }).click();
@@ -37,7 +41,13 @@ export class AcessoPage {
     for (const label of scopeLabels) {
       await form.getByLabel(label).check();
     }
+    const created = this.#page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname.endsWith("/api-keys"),
+    );
     await form.getByRole("button", { name: "Criar chave" }).click();
+    await created;
     return this.#page.getByRole("region", { name: /^Chave criada: / });
   }
 
