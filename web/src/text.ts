@@ -216,6 +216,17 @@ export const TEXT = {
     stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
+    cancel: {
+      open: "Cancelar execução",
+      title: "Cancelar esta execução?",
+      body: "A execução para e não publica resultados. Os arquivos enviados continuam na sua conta até expirarem.",
+      confirm: "Cancelar execução",
+      keepGoing: "Continuar a execução",
+      requested:
+        "Cancelamento pedido. A execução para assim que o trabalho em curso for interrompido.",
+      canceled: "Execução cancelada.",
+      alreadyFinished: "A execução já tinha terminado; não havia o que cancelar.",
+    },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
     flavor: {
       queued: "Os goblins pegam este lote assim que uma bancada vagar.",
