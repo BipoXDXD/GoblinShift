@@ -30,7 +30,8 @@ preset = Table(
     Column("name", Text, nullable=False),
     Column("recipe_id", Text, nullable=False),
     Column("recipe_version", Integer, nullable=False),
-    # Parâmetros com os defaults da versão aplicados, na forma canônica do catálogo.
+    # Parâmetros como o cliente os enviou, já validados pela versão; os defaults são aplicados
+    # de novo a cada execução (ver `presets.drafts`).
     Column("parameters", JSONB, nullable=False),
     # Controle otimista: o ETag é derivado daqui, e cada substituição soma 1.
     Column("revision", Integer, nullable=False, server_default="1"),
