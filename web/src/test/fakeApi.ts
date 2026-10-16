@@ -117,6 +117,9 @@ export function runBody(overrides: Record<string, unknown> = {}): Record<string,
     queue_expires_at: "2026-10-14T13:00:00Z",
     deadline_at: null,
     error: null,
+    parameters: {},
+    preset_id: null,
+    results_expire_at: null,
     ...overrides,
   };
 }

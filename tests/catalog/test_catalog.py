@@ -326,3 +326,15 @@ def test_data_de_desligamento_sem_fuso_e_recusada() -> None:
 
     with pytest.raises(ValueError, match="fuso"):
         replace(current, status=VersionStatus.DEPRECATED, sunset_at=datetime(2027, 1, 15))
+
+
+def test_detox_aceita_com_preserve_o_name_prefix_default_enviado() -> None:
+    # A13 com o default: os parâmetros resolvidos voltam a resolver igual (repetir configuração).
+    resolved = CATALOG.resolve("downloads-detox", 1, {})
+
+    assert CATALOG.resolve("downloads-detox", 1, resolved) == resolved
+
+
+def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
+    with pytest.raises(InvalidParametersError):
+        CATALOG.resolve("downloads-detox", 1, {"name_mode": "preserve", "name_prefix": "doc"})
