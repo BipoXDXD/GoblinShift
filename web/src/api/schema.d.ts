@@ -715,8 +715,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Name */
-            name: string;
+            /**
+             * Name
+             * @description Nulo 30 dias depois do envio, só em upload já excluído (retenção de 1.7).
+             */
+            name: string | null;
             /** Size */
             size: number;
             state: components["schemas"]["UploadState"];
