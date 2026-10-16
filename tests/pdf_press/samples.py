@@ -215,3 +215,80 @@ def with_orphan_object(data: bytes, body: bytes) -> bytes:
     trailer = b"trailer << /Root 1 0 R /Size %d /Prev %s >>\n" % (number + 1, previous[-1])
     table = b"xref\n%d 1\n%010d 00000 n \n" % (number, len(data))
     return data + obj + table + trailer + b"startxref\n%d\n%%%%EOF\n" % xref
+
+
+# --- árvores de páginas hostis, montadas byte a byte ----------------------------------------
+# O pikepdf não salva uma árvore com ciclo nem uma de 10 mil níveis; aqui o xref é calculado à mão.
+
+_PAGE = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 9 9] /Resources << >> >>"
+
+
+def _page(parent: int) -> bytes:
+    return b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 9 9] /Resources << >> >>" % parent
+
+
+def raw_pdf(objects: dict[int, bytes]) -> bytes:
+    """PDF com os objetos dados (o 1 é o catálogo) e um xref clássico com os offsets reais."""
+    body = bytearray(b"%PDF-1.4\n")
+    offsets: dict[int, int] = {}
+    for number in sorted(objects):
+        offsets[number] = len(body)
+        body += b"%d 0 obj\n%s\nendobj\n" % (number, objects[number])
+    size = max(objects) + 1
+    xref = len(body)
+    body += b"xref\n0 %d\n0000000000 65535 f \n" % size
+    for number in range(1, size):
+        if number in offsets:
+            body += b"%010d 00000 n \n" % offsets[number]
+        else:
+            body += b"0000000000 65535 f \n"
+    body += b"trailer << /Root 1 0 R /Size %d >>\nstartxref\n%d\n%%%%EOF\n" % (size, xref)
+    return bytes(body)
+
+
+def _catalog() -> bytes:
+    return b"<< /Type /Catalog /Pages 2 0 R >>"
+
+
+def page_tree_with_cycle() -> bytes:
+    """O nó 2 tem como filho o nó 4, que tem como filho o próprio 2."""
+    return raw_pdf(
+        {
+            1: _catalog(),
+            2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            3: _PAGE,
+            4: b"<< /Type /Pages /Parent 2 0 R /Kids [2 0 R] /Count 1 >>",
+        }
+    )
+
+
+def deep_page_tree(depth: int) -> bytes:
+    """Uma página no fundo de uma cadeia de `depth` nós /Pages."""
+    objects = {1: _catalog()}
+    for level in range(depth):
+        number = 2 + level
+        parent = b"" if level == 0 else b" /Parent %d 0 R" % (number - 1)
+        objects[number] = b"<< /Type /Pages /Kids [%d 0 R] /Count 1%s >>" % (number + 1, parent)
+    objects[2 + depth] = _page(1 + depth)
+    return raw_pdf(objects)
+
+
+def page_tree_with_count(declared: int, pages: int = 1) -> bytes:
+    """`pages` páginas reais com um /Count declarado que pode mentir."""
+    kids = b" ".join(b"%d 0 R" % (3 + n) for n in range(pages))
+    objects = {1: _catalog(), 2: b"<< /Type /Pages /Kids [%s] /Count %d >>" % (kids, declared)}
+    for n in range(pages):
+        objects[3 + n] = _PAGE
+    return raw_pdf(objects)
+
+
+def page_tree_with_many_kids(count: int) -> bytes:
+    """Um nó /Pages com `count` filhos, todos apontando para a mesma página."""
+    kids = b"3 0 R " * count
+    return raw_pdf(
+        {
+            1: _catalog(),
+            2: b"<< /Type /Pages /Kids [%s] /Count %d >>" % (kids, count),
+            3: _PAGE,
+        }
+    )
