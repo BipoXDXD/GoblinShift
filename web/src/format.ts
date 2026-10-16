@@ -27,3 +27,8 @@ export function formatDateTime(isoInstant: string): string {
     new Date(isoInstant),
   );
 }
+
+/** Contagem com separador de milhar do idioma da interface ("1.200"). */
+export function formatCount(count: number): string {
+  return new Intl.NumberFormat(TEXT.locale).format(count);
+}
