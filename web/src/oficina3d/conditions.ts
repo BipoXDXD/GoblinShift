@@ -1,6 +1,8 @@
 /** O que o navegador diz sobre a pessoa e o aparelho, lido só quando a decisão precisa. */
 export interface Environment3D {
   readonly prefersReducedMotion: () => boolean;
+  /** Avisa quando a preferência de movimento muda; devolve o cancelamento. */
+  readonly subscribeReducedMotion: (onChange: () => void) => () => void;
   /** `Save-Data` do navegador (Network Information API, só no Chromium). */
   readonly savesData: () => boolean;
   /** WebGL 2 acelerado por GPU; WebGL só em software conta como ausente. */
@@ -22,8 +24,17 @@ interface NetworkInformationLike {
   readonly saveData?: boolean;
 }
 
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
 export const browserEnvironment: Environment3D = {
-  prefersReducedMotion: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  prefersReducedMotion: () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+  subscribeReducedMotion: (onChange) => {
+    const query = window.matchMedia(REDUCED_MOTION_QUERY);
+    query.addEventListener("change", onChange);
+    return () => {
+      query.removeEventListener("change", onChange);
+    };
+  },
   savesData: () =>
     (navigator as Navigator & { readonly connection?: NetworkInformationLike }).connection
       ?.saveData === true,
