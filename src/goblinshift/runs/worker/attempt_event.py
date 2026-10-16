@@ -25,6 +25,11 @@ TIMINGS_FILE = "telemetry.json"
 # O documento válido tem menos de 100 bytes; o teto só protege o worker de um arquivo hostil.
 TIMINGS_MAX_BYTES = 4096
 TIMINGS_SCHEMA_VERSION = 1
+# Nenhuma fase passa do teto da tentativa (1.7: 10 min); o minuto de folga cobre o relógio do
+# executor parado pelo `stop` depois do teto. Acima disso o documento é forjado e sai inteiro.
+_ATTEMPT_CEILING_MS = 10 * 60 * 1000
+_PHASE_SLACK_MS = 60 * 1000
+MAX_PHASE_MS = _ATTEMPT_CEILING_MS + _PHASE_SLACK_MS
 EXECUTOR_PHASES = frozenset({"inspect_ms", "process_ms", "package_ms"})
 _SCHEMA_KEY = "schema_version"
 _PROPAGATOR = TraceContextTextMapPropagator()
@@ -65,7 +70,7 @@ def record(attributes: dict[str, AttributeValue]) -> None:
 
 def _is_duration(value: object) -> bool:
     # `bool` é subclasse de `int` em Python: `true` não é duração.
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_PHASE_MS
 
 
 def _read_regular_file(path: Path, max_bytes: int) -> bytes | None:

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from goblinshift.runs.worker.attempt_event import (
+    MAX_PHASE_MS,
     TIMINGS_MAX_BYTES,
     links_to_acceptance,
     read_executor_timings,
@@ -44,6 +45,17 @@ def test_le_so_as_fases_presentes(tmp_path: Path) -> None:
     assert read_executor_timings(path) == {"inspect_ms": 7}
 
 
+def test_teto_da_fase_e_o_prazo_da_tentativa_com_um_minuto_de_folga() -> None:
+    assert MAX_PHASE_MS == 660_000
+
+
+@pytest.mark.parametrize("value", [0, 660_000], ids=["zero", "no-teto"])
+def test_duracao_dentro_da_faixa_e_aceita(tmp_path: Path, value: int) -> None:
+    path = write(tmp_path / "telemetry.json", {"schema_version": 1, "process_ms": value})
+
+    assert read_executor_timings(path) == {"process_ms": value}
+
+
 def test_arquivo_ausente_nao_tem_tempos(tmp_path: Path) -> None:
     assert read_executor_timings(tmp_path / "telemetry.json") == {}
 
@@ -52,6 +64,8 @@ def test_arquivo_ausente_nao_tem_tempos(tmp_path: Path) -> None:
     "document",
     [
         {"schema_version": 1, "inspect_ms": -1},
+        {"schema_version": 1, "inspect_ms": 660_001},
+        {"schema_version": 1, "inspect_ms": 10**30},
         {"schema_version": 1, "inspect_ms": 1.5},
         {"schema_version": 1, "inspect_ms": True},
         {"schema_version": 1, "inspect_ms": "12"},
@@ -60,7 +74,18 @@ def test_arquivo_ausente_nao_tem_tempos(tmp_path: Path) -> None:
         {"inspect_ms": 3},
         [1, 2, 3],
     ],
-    ids=["negativo", "fracao", "booleano", "texto", "chave-extra", "versao", "sem-versao", "lista"],
+    ids=[
+        "negativo",
+        "acima-do-teto",
+        "gigante",
+        "fracao",
+        "booleano",
+        "texto",
+        "chave-extra",
+        "versao",
+        "sem-versao",
+        "lista",
+    ],
 )
 def test_documento_fora_do_schema_e_descartado_inteiro(tmp_path: Path, document: object) -> None:
     path = write(tmp_path / "telemetry.json", document)
