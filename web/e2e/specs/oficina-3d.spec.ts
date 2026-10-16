@@ -8,6 +8,13 @@ import type { Page, Request } from "@playwright/test";
 import { E2E } from "../support/env";
 import { expect, test } from "../support/test";
 
+declare global {
+  interface Window {
+    /** Desenha um quadro segurado; só existe depois de {@link holdFrames}. */
+    e2eNextFrame?: () => void;
+  }
+}
+
 const HERO = "[data-oficina-3d]";
 const CHUNK_OR_MODEL = /\/assets\/oficina-3d[^/]*\.js$|\.glb(\?|$)/;
 const MODEL = /\/assets\/oficina-3d-([a-z]+)-[^/]*\.glb$/;
@@ -77,23 +84,24 @@ async function holdFrames(page: Page): Promise<void> {
     window.cancelAnimationFrame = (id: number): void => {
       queued.delete(id);
     };
-    Object.assign(window, {
-      e2eNextFrame: (): void => {
-        clock += stepMs;
-        const callbacks = [...queued.values()];
-        queued.clear();
-        for (const callback of callbacks) {
-          callback(clock);
-        }
-      },
-    });
+    window.e2eNextFrame = (): void => {
+      clock += stepMs;
+      const callbacks = [...queued.values()];
+      queued.clear();
+      for (const callback of callbacks) {
+        callback(clock);
+      }
+    };
   }, FRAME_STEP_MS);
 }
 
 /** Desenha um quadro segurado por {@link holdFrames}. */
 async function nextFrame(page: Page): Promise<void> {
   await page.evaluate(() => {
-    (window as unknown as { e2eNextFrame: () => void }).e2eNextFrame();
+    if (window.e2eNextFrame === undefined) {
+      throw new Error("os quadros não estão segurados: chame holdFrames antes");
+    }
+    window.e2eNextFrame();
   });
 }
 
@@ -358,6 +366,54 @@ test.describe("com GPU", () => {
     await spin.click();
     await expect(spin).toHaveAttribute("aria-pressed", "false");
     await expect(host).toHaveAttribute("data-movimento", "parado");
+    // Desligado, nenhum quadro a mais mexe a goblin.
+    const stopped = await host.getAttribute("data-giro");
+    await nextFrame(page);
+    await nextFrame(page);
+    await expect(host).toHaveAttribute("data-giro", stopped ?? "");
+  });
+
+  test("movimento reduzido ligado depois da carga: some o Girar e a próxima goblin chega sem entrada", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await waitSceneStill(page);
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(page.getByRole("button", { name: "Girar" })).toHaveCount(0);
+    await castButton(page, "Nyx").click();
+
+    await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "pronto", {
+      timeout: SCENE_READY_MS,
+    });
+    const host = sceneHost(page);
+    await expect(host).toHaveAttribute("data-goblin", "nyx");
+    // Com a entrada, a goblin chegaria girando a partir de 52°; sem ela, já na pose de repouso.
+    await expect(host).toHaveAttribute("data-movimento", "parado");
+    await expect(host).toHaveAttribute("data-giro", "-20");
+  });
+
+  test("trocar de goblin e voltar devolve a GPU ao mesmo número de geometrias e texturas", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await waitSceneStill(page);
+    const host = sceneHost(page);
+    const gpuMemory = async () => ({
+      geometries: await host.getAttribute("data-geometrias"),
+      textures: await host.getAttribute("data-texturas"),
+    });
+    const withRubia = await gpuMemory();
+    expect(Number(withRubia.geometries)).toBeGreaterThan(0);
+
+    await castButton(page, "Nyx").click();
+    await expect(host).toHaveAttribute("data-goblin", "nyx", { timeout: SCENE_READY_MS });
+    await waitSceneStill(page);
+    await castButton(page, "Rúbia").click();
+    await expect(host).toHaveAttribute("data-goblin", "rubia", { timeout: SCENE_READY_MS });
+    await waitSceneStill(page);
+
+    expect(await gpuMemory()).toEqual(withRubia);
   });
 
   test("com a cena montada, o canvas fica fora do leitor de tela, o palco entra no Tab com nome, e o axe passa", async ({
