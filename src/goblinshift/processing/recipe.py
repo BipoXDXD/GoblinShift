@@ -19,6 +19,10 @@ Fatia 5 (etapa 0, também aditiva):
   não um campo opcional do `ItemOk`, a "duplicata com saídas" não tem como ser representada.
 - `OutputDir.create` aceita um `OutputGroup`: a subpasta de `out/` e do ZIP (1.2 e 1.4), de uma
   lista fechada que a coleta do worker também impõe (ADR 019).
+
+PDF Press (ADR 035, aditivo):
+- `InputFile.upload_id` liga a entrada ao upload da Run, para a seleção de páginas do PDF Press
+  citar uploads como o contrato HTTP cita (1.5). Vem do `context.json`; `None` fora dele.
 """
 
 import re
@@ -36,6 +40,8 @@ class InputFile:
     original_name: str  # dado, nunca caminho
     size: int
     sha256: str
+    # UUID canônico do upload; None quando o worker não o escreveu no context.json (ADR 021).
+    upload_id: str | None = None
 
 
 class ItemWarningCode(StrEnum):
@@ -191,6 +197,12 @@ class FailureCode(StrEnum):
     NO_VALID_OUTPUTS = "NO_VALID_OUTPUTS"
     OUTPUT_LIMIT_EXCEEDED = "OUTPUT_LIMIT_EXCEEDED"
     REPORT_LIMIT_EXCEEDED = "REPORT_LIMIT_EXCEEDED"
+    # Receitas que compõem um resultado de várias entradas (PDF Press, 1.5) falham a execução
+    # inteira em vez de rejeitar o item: uma composição incompleta não é sucesso (ADR 035).
+    INPUT_LIMIT_EXCEEDED = "INPUT_LIMIT_EXCEEDED"
+    PDF_INVALID = "PDF_INVALID"
+    PDF_UNSUPPORTED_FEATURE = "PDF_UNSUPPORTED_FEATURE"
+    PDF_PAGE_NOT_FOUND = "PDF_PAGE_NOT_FOUND"
 
 
 class RecipeFailure(Exception):  # noqa: N818 - nome fixado pelo plano (1.6 e 3.2)

@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 RUNS_CHANNEL = "goblinshift_runs"
 # Execuções venenosas encerradas num mesmo pedido de claim antes de desistir até a próxima vez.
 _MAX_POISON_PER_CLAIM = 10
+_MILLISECOND = timedelta(milliseconds=1)
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,9 @@ class ClaimedAttempt:
     # Uploads de entrada, na ordem das posições.
     input_upload_ids: tuple[uuid.UUID, ...]
     traceparent: str | None
+    # Da elegibilidade da Run (`eligible_at`, que na retentativa já inclui o jitter) ao início da
+    # tentativa, os dois pelo relógio do banco na transação do claim (3.7).
+    queue_wait_ms: int
 
 
 def claim_next(
@@ -119,6 +123,7 @@ def _claim_one(session: Session, lease: timedelta) -> ClaimedAttempt | Applied |
         parameters=dict(details.parameters),
         input_upload_ids=tuple(inputs),
         traceparent=details.traceparent,
+        queue_wait_ms=max((loaded.now - loaded.state.eligible_at) // _MILLISECOND, 0),
     )
 
 
