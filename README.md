@@ -2,7 +2,7 @@
 
 API de processamento de arquivos por receitas — imagens, tabelas CSV, lotes de downloads e PDFs — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
 
-> Em construção. Fatias 0 a 4 (fundação e deploy, sandbox, CSV Janitor, fluxo durável e executor real sob gVisor) concluídas; **5 — Image Forge e Downloads Detox** em revisão. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
+> Em construção. Fatias 0 a 6 (fundação e deploy, sandbox, CSV Janitor, fluxo durável, executor real sob gVisor, Image Forge e Downloads Detox, identidade e segurança web) concluídas; as fatias 7 a 10 (interface, abertura pública, PDF Press e Media Mill) estão na `main` com pendências que dependem da VPS ou de decisão do dono. O serviço segue fechado a cadastros ([ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)). O estado de cada fatia está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
 
 ## Documentos
 
@@ -47,7 +47,7 @@ Depois de mexer no worker, na manutenção ou no Runner, `./scripts/stress-runs.
 
 ### Interface web (`web/`)
 
-Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas), Bancada (arquivos e parâmetros) e Execução (estado e downloads).
+Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas, presets e execuções recentes), Bancada (arquivos e parâmetros), Execução (estado, pré-visualizações e downloads), Histórico e Acesso.
 
 Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: paleta Taverna escura, com madeira, cobre, âmbar, brasa e pátina em OKLCH, [ADR 032](docs/adr/032-paleta-taverna-escura.md); papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A abertura tem a Rúbia em 3D (three.js, carregada depois do conteúdo, só com GPU e sem movimento reduzido, com a imagem estática como fallback) e as outras goblins aparecem nos estados vazio, carregando, erro e sucesso ([ADR 027](docs/adr/027-3d-na-abertura.md) e [ADR 030](docs/adr/030-motor-e-asset-do-3d-da-abertura.md)). A arte é gerada por `scripts/arte/` a partir dos brutos fora do repositório, com proveniência e licença em [`docs/art/LICENSE-ART.md`](docs/art/LICENSE-ART.md), conferidas no CI.
 
@@ -113,6 +113,22 @@ Cada tabela aceita vira `limpas/<nome>.csv` (UTF-8 sem BOM, CRLF, aspas só quan
 | `media-mill` | 1 | Extrai uma faixa de áudio em WAV ou FLAC de 16 bits, na taxa e nos canais de origem, e gera 0, 1 ou 3 miniaturas JPEG de até 640 px em `thumbnails/`, de MP4/MOV (H.264 + AAC/PCM) e WebM (VP8/VP9 + Opus/Vorbis) conferidos por assinatura e ffprobe ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)) | 5 vídeos de até 256 MiB (512 MiB por lote), 300 s, 1920 × 1080, 60 fps, 48 kHz e estéreo |
 
 Toda execução publica, além do conteúdo, o `report.json`, o `manifest.json` (entradas, hashes, parâmetros, digest da imagem do executor, duplicatas e rejeições) e o ZIP determinístico `<receita>.zip`, montados pelo empacotador comum no executor ([ADR 019](docs/adr/019-layout-de-out-pacote-e-papeis.md)). Uma saída idêntica a uma entrada não ocupa espaço de novo: o artefato aponta para o objeto do upload ([ADR 020](docs/adr/020-detox-reaproveita-o-objeto-da-entrada.md)). A versão de cada receita e os limites efetivos estão no OpenAPI de `POST /runs`.
+
+## Presets, pré-visualizações e remoção de resultados
+
+**Presets** ([plano, 1.6](docs/GoblinShiftPlan.md#s1-6)) são configurações privadas da conta: receita, versão e parâmetros, sem arquivos. `POST /api/v1/presets` (`201`, com `Location` e `ETag`), `GET /presets` (todos, em ordem de nome), `GET /presets/{id}`, `PUT /presets/{id}` (substituição integral) e `DELETE /presets/{id}` (`204`) usam os escopos `presets:read` e `presets:write`. O corpo é o de `POST /runs` sem `input_upload_ids` e com `name`; campo desconhecido é recusado e os parâmetros passam pela validação da versão pedida, como numa execução (`422 VALIDATION_FAILED` por campo, sob `parameters.`; versão retirada dá `422 RECIPE_VERSION_RETIRED`). O preset guarda os parâmetros como enviados, e os defaults são resolvidos de novo a cada execução.
+
+- *Nome:* aparado e normalizado em NFC antes de validar, de 1 a 100 caracteres, sem caracteres de controle nem de formato invisível, e único na conta (a chave natural é `(dono, nome)`: repetir dá `409`, também depois de aparado).
+- *Limite:* 100 presets por conta; o 101º dá `409`.
+- *Revisão:* o `ETag` é a revisão entre aspas (`"3"`) e cada `PUT` soma 1. `PUT` e `DELETE` exigem `If-Match` com ele: ausente ou `*` → `428`; revisão que não é a atual → `412`, sem gravar nada; fora do formato → `400`. A revisão é conferida antes do nome, então quem leu uma versão velha recebe `412` e relê.
+- *Dono:* preset de outra conta e inexistente dão o mesmo `404`. Excluir a conta remove os presets.
+- *Executar:* `POST /presets/{id}/runs` recebe só `input_upload_ids`, exige `Idempotency-Key`, os escopos `runs:write` e `presets:read` e devolve `202`. A execução guarda o `preset_id` e uma cópia da configuração: editar ou excluir o preset depois não a altera (a referência vira nula).
+
+Na interface, a Bancada tem "Salvar preset", que pede o nome e guarda os parâmetros do formulário, e a Oficina lista os presets (só com sessão) com "Abrir na Bancada", que pré-preenche os parâmetros (`?preset=<id>`), e "Excluir", com confirmação. Revisão vencida na exclusão (`412`) vira aviso e a lista é relida. A edição (`PUT`) existe só na API.
+
+**Pré-visualizações** ([ADR 037](docs/adr/037-previews-em-grupo-e-papel-proprios.md)) são derivados pequenos que a receita grava em `previews/`, com o papel `preview`, depois de todo o conteúdo e só enquanto cabem nos tetos (faltar espaço nunca falha a execução). Ficam fora do manifesto e do ZIP. O CSV Janitor gera uma amostra CSV (cabeçalho e até 100 registros, até 64 KiB, fórmulas escapadas), o Image Forge um JPEG de até 512 × 512 e o PDF Press o trecho do `page-map.json` de cada documento; o Downloads Detox e o Media Mill não geram. `GET /runs/{id}/results` lista os previews com `source_artifact_id` apontando a saída de origem, e `GET /api/v1/artifacts/{id}/preview` (escopo `files:read`) recebe o id da **saída** e entrega o preview dela, como `image/jpeg` para a imagem e como bytes opacos para o resto, sempre com `attachment`, `nosniff`, CSP `sandbox` e `no-store`. Sem preview, ou de outra conta, é `404`; saída excluída ou vencida, `410`. A Execução mostra o preview ao lado do download da saída.
+
+**Remoção de resultados:** `DELETE /api/v1/runs/{id}/artifacts` (escopo `files:write`) apaga antes das 48 h as saídas, o relatório, o manifesto, o pacote e os previews de uma execução terminal. Responde `202` e repetir também é `202`: os artefatos ficam indisponíveis na hora e a manutenção remove os arquivos quando nenhum download aberto os usa. Execução que ainda não terminou dá `409`; inexistente ou de outra conta, `404`. Os originais enviados não mudam. Na Execução, "Excluir resultados" pede confirmação.
 
 ## Contas e chaves de API (administrador)
 
@@ -298,12 +314,12 @@ Em desenvolvimento, o worker roda a receita num subprocesso do próprio containe
 src/goblinshift/
   entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin, gs-csv-janitor e gs-export-openapi
   platform/          configuração, banco, telemetria e compatibilidade de schema
-  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/, pdf_press/), empacotador e executor
+  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/, pdf_press/, media_mill/), empacotador e executor
   runs/              ciclo de vida da execução: aceitação, fila, fencing, worker, manutenção
   files/             storage, uploads, artefatos, usos, transferências e retenção
   catalog/           receitas e versões publicadas, schemas e defaults
   identity/          contas e chaves de API
-  presets/           presets (próximas fatias)
+  presets/           presets privados da conta, com revisão (criar, listar, substituir, excluir)
 migrations/          Alembic (expand/contract)
 docker/              imagens da aplicação, do executor e do Nginx com a SPA; OpenTelemetry Collector
 deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco, SLOs e alertas e teste de aceitação do ambiente
