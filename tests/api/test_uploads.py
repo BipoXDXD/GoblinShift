@@ -11,11 +11,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.retention import expire_unused_uploads
+from goblinshift.files.retention import NAME_AFTER, anonymize_deleted_uploads, expire_unused_uploads
 from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import upload
 from goblinshift.identity import Scope
 from goblinshift.platform.db import unit_of_work
+from goblinshift.runs.store import db_now
 from tests.api.files_support import (
     OCTET_STREAM,
     UPLOADS,
@@ -125,6 +126,31 @@ def test_upload_vencido_pela_manutencao_aparece_expirado_e_nao_excluido(
     response = client.get(upload_url(item), headers=auth)
 
     assert response.json()["availability"] == "expired"
+
+
+def test_upload_anonimizado_pela_retencao_aparece_sem_nome(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    """1.7: o nome sai 30 dias depois, só de upload excluído; o resto do registro fica."""
+    _, auth = new_account(factory)
+    item = create_upload(client, auth)
+    send_content(client, auth, item, b"abc")
+    client.delete(upload_url(item), headers=auth)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == uuid.UUID(item["id"]))
+            .values(created_at=func.now() - NAME_AFTER)
+        )
+    with unit_of_work(factory) as session:
+        assert anonymize_deleted_uploads(session, db_now(session), 10) == 1
+
+    response = client.get(upload_url(item), headers=auth)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.keys() == DETAIL_KEYS
+    assert (body["name"], body["availability"], body["size"]) == (None, "deleted", 3)
 
 
 def test_upload_sem_conteudo_aparece_sem_hash(

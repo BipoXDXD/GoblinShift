@@ -272,6 +272,13 @@ export const SCREENS: readonly Screen[] = [
     },
   },
   {
+    name: "Guia da API",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/acesso/guia-da-api");
+      await expect(page.getByRole("list", { name: "Passo a passo" })).toBeVisible();
+    },
+  },
+  {
     name: "Créditos",
     open: async (page: Page): Promise<void> => {
       await page.goto("/creditos");

@@ -6,6 +6,7 @@ import pytest
 
 from openobserve.catalog import (
     BURN_LEVELS,
+    CAUSE_COLUMNS,
     SLOS,
     Alert,
     DestinationKey,
@@ -13,6 +14,7 @@ from openobserve.catalog import (
     alerts,
     slo_named,
 )
+from openobserve.provision import TRACE_COLUMNS
 
 PREFIX = "gs-"
 
@@ -55,6 +57,10 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-slo-download-urgente",
         "gs-causa-fila-cheia",
         "gs-causa-disco",
+        "gs-causa-execucao-presa",
+        "gs-causa-limitador-de-exclusoes",
+        "gs-causa-exclusao-de-conta-atrasada",
+        "gs-causa-capacidade-global",
         "gs-heartbeat",
     }
 
@@ -122,3 +128,24 @@ def test_prefixo_nomeia_todos_os_alertas() -> None:
 def test_descricao_cabe_no_json_do_template_sem_escape(alert: Alert) -> None:
     # O template do webhook põe a descrição dentro de uma string JSON, sem escapar.
     assert not set(alert.description) & {'"', "\\", "\n", "\r", "\t"}
+
+
+def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> None:
+    names = {
+        "gs-causa-execucao-presa",
+        "gs-causa-limitador-de-exclusoes",
+        "gs-causa-exclusao-de-conta-atrasada",
+        "gs-causa-capacidade-global",
+    }
+    chosen = [a for a in alerts(stream="s", prefix=PREFIX) if a.name in names]
+
+    assert len(chosen) == len(names)
+    for alert in chosen:
+        assert (alert.stream_type, alert.stream_name) == ("traces", "s"), alert.name
+        assert "operation_name = 'maintenance.cycle'" in alert.sql, alert.name
+
+
+def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
+    for column in CAUSE_COLUMNS:
+        assert column in TRACE_COLUMNS
+    assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
