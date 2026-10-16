@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GLBs da cena 3D da abertura (ADR 030 e 033): lê o bruto do Rodin de cada goblin do elenco
+# GLBs da cena 3D da abertura (ADR 030 e 038): lê o bruto do Rodin de cada goblin do elenco
 # (elenco.tsv) fora do repositório e grava o otimizado em
 # web/src/assets/art/oficina-3d/oficina-3d-ID.glb. Todas usam a mesma configuração da Rúbia.
 #
