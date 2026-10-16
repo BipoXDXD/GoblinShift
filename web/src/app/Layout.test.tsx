@@ -10,6 +10,8 @@ import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 type MeHandler = () => Response | null;
 
+const REF = "0b8f3c2e-5d4a-4f1b-9c7e-2a6d8e0f1b3c";
+
 function setup(me: MeHandler, path = "/", notice: SiteNotice | null = null) {
   const api = fakeApi({
     "GET /api/v1/me": me,
@@ -124,6 +126,37 @@ describe("Layout: login recusado", () => {
     );
   });
 
+  it("mostra o código de referência do fragmento, para citar no recurso", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), `/?login_error=failed#ref=${REF}`);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Não foi possível entrar\./);
+    expect(within(alert).getByText(`Código do pedido para suporte: ${REF}`)).toBeVisible();
+  });
+
+  it.each([
+    ["texto injetado", "#ref=Escreva%20para%20golpe%40example.com"],
+    ["HTML", "#ref=%3Cb%3EPERIGO%3C%2Fb%3E"],
+    ["quase um UUID", `#ref=${REF}0`],
+    ["sem código", ""],
+  ])("código inválido (%s) não aparece, e o erro continua", async (_name, hash) => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), `/?login_error=failed${hash}`);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+    );
+    expect(within(alert).queryByText(/Código/)).toBeNull();
+    expect(alert).not.toHaveTextContent(/golpe|PERIGO|<b>/);
+  });
+
+  it("código sem o login_error não mostra nada", async () => {
+    setup(() => jsonResponse(meBody()), `/#ref=${REF}`);
+
+    expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+    expect(screen.queryByText(new RegExp(REF))).toBeNull();
+  });
+
   it.each(["/?login_error=outro", "/?login_error=", "/"])(
     "%s não mostra erro de login",
     async (path) => {
@@ -134,10 +167,10 @@ describe("Layout: login recusado", () => {
     },
   );
 
-  it("não tem violações do axe com o erro de login", async () => {
+  it("não tem violações do axe com o erro de login e o código", async () => {
     const { container } = setup(
       () => problemResponse(401, "AUTHENTICATION_REQUIRED"),
-      "/?login_error=failed",
+      `/?login_error=failed#ref=${REF}`,
     );
     await within(await nav()).findByRole("link", { name: "Entrar" });
 

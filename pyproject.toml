@@ -63,6 +63,7 @@ target-version = "py314"
 # Rodam no Python do host (3.12 no Ubuntu 24.04), fora da imagem da aplicação.
 "deploy/executor_ctl/**" = "py312"
 "deploy/acceptance/**" = "py312"
+"deploy/backup/**" = "py312"
 "deploy/openobserve/**" = "py312"
 "deploy/tls_check/**" = "py312"
 
