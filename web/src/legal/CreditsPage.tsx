@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 
+import { GoblinCast } from "../art/GoblinIllustration";
 import sealAvif128 from "../assets/art/marca/selo-oficina-128h.avif";
 import sealWebp128 from "../assets/art/marca/selo-oficina-128h.webp";
 import sealAvif256 from "../assets/art/marca/selo-oficina-256h.avif";
@@ -27,6 +28,7 @@ export function CreditsPage(): ReactElement {
           <p key={paragraph}>{paragraph}</p>
         ))}
       </section>
+      <GoblinCast />
       <section
         aria-labelledby={BRAND_HEADING_ID}
         className="flex max-w-prose flex-col gap-4 md:flex-row md:items-start md:gap-6"

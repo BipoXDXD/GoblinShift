@@ -1,6 +1,6 @@
 # ADR 018. Pillow fixado na imagem do executor, instalado do lock por um estágio de build
 
-- **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14) e implementado na fatia 5 (estágio de build, testes da imagem com Image Forge e Detox sob `runsc`); pendente de revisão do usuário no PR da fatia e da medição do pior caso na VPS
+- **Estado:** aceito na etapa 0 da fatia 5 (2026-10-14) e implementado na fatia 5 (estágio de build, testes da imagem com Image Forge e Detox sob `runsc`); pior caso medido na VPS em 193 s (ver Consequências)
 - **Plano:** [1.2](../GoblinShiftPlan.md#s1-2), [1.7](../GoblinShiftPlan.md#s1-7), [2.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 010](010-python-3-14.md)
 
@@ -30,6 +30,7 @@ O Image Forge decodifica, converte e grava JPEG e PNG, com perfis de cor e EXIF.
 - O grupo `executor` não entra no `uv sync` padrão: só o Dockerfile o usa.
 - O executor chama `image_forge.inspection.configure_pillow()` uma vez no `main`: `MAX_IMAGE_PIXELS` em 24 MP e `DecompressionBombWarning` como erro, segunda barreira atrás da validação do cabeçalho.
 - Pior caso (100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas, `scripts/measure-image-forge.sh`): referência local de 133 s (Mac, worker com Runner local, sem gVisor nem limite de CPU, 2026-10-14). A medição que vale, sob gVisor e 1 vCPU, é feita na VPS antes do merge da fatia 5 com `sudo python3 -B -m acceptance.image_forge_load` (perfil de produção, sem passar pela API, porque o deploy só implanta a `main`) e, depois do deploy, com `scripts/measure-image-forge.sh`. Se não couber nos 10 min da tentativa, o `max_inputs` da v1 do Image Forge cai antes de a versão chegar à `main`, e o número medido é registrado aqui.
+  **Medido na VPS, sob gVisor (1 vCPU, 2 GiB, sem rede):** 100 imagens de 24 MP em **193 s**, contra o teto de 600 s da tentativa, então o `max_inputs` de 100 ficou. O número vem da revisão do [PR #14](https://github.com/BipoXDXD/GoblinShift/pull/14), mergeado em 2026-10-14. A rodada de `scripts/measure-image-forge.sh` pela API depois do deploy não tem registro.
 
 ## Como verificar
 
