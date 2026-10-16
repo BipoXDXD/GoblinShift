@@ -230,6 +230,8 @@ class ResultReferenceResponse(BaseModel):
         description="Nome com que o download entrega o arquivo." + _ANONYMIZED_NAME_NOTE
     )
     availability: Availability
+    # Só no papel `preview`: a saída que ele mostra, para a interface pôr os dois juntos (2.2).
+    source_artifact_id: UUID | None
 
 
 class RunResultsResponse(BaseModel):
@@ -545,6 +547,7 @@ def get_results_route(
                 role=ref.role,
                 file_name=ref.file_name,
                 availability=ref.availability,
+                source_artifact_id=ref.source_artifact_id,
             )
             for ref in results.references
         ],

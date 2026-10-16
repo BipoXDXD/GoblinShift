@@ -826,6 +826,8 @@ export interface components {
              */
             file_name: string;
             availability: components["schemas"]["Availability"];
+            /** Source Artifact Id */
+            source_artifact_id: string | null;
         };
         /** RunDetailResponse */
         RunDetailResponse: {
