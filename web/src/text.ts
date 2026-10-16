@@ -302,6 +302,27 @@ export const TEXT = {
         page: (pageNumber: number, inputPosition: number) =>
           `Página ${String(pageNumber)} do arquivo ${String(inputPosition + 1)}`,
       },
+      deletedTitle: "Resultados excluídos",
+      deletedHint:
+        "Os arquivos gerados por esta execução foram excluídos. Os que você enviou não mudam.",
+      expiredTitle: "Resultados expirados",
+      expiredHint: "O prazo para baixar os resultados desta execução acabou.",
+      expiredOn: (date: string) => `Os resultados expiraram em ${date}.`,
+      checking: "Verificando se os resultados ainda estão disponíveis…",
+      unconfirmed:
+        "Não deu para confirmar se os resultados ainda estão disponíveis; o download pode falhar.",
+      checkAgain: "Verificar de novo",
+      remove: "Excluir resultados",
+      removeTitle: "Excluir os resultados desta execução?",
+      removeBody:
+        "Os arquivos gerados deixam de poder ser baixados na hora. Os arquivos que você enviou não são apagados. Não dá para desfazer.",
+      removeConfirm: "Excluir resultados",
+      removeCancel: "Cancelar",
+      removing: "Excluindo resultados…",
+      removed: "Resultados excluídos.",
+      removeRunGone: "Esta execução não existe mais; a tela foi atualizada.",
+      removeNotFinished:
+        "A execução ainda não terminou; os resultados só podem ser excluídos depois.",
     },
   },
   recipeFields: {
