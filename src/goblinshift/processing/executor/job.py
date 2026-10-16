@@ -4,6 +4,7 @@ O job vem do worker, que é confiável, mas atravessa a fronteira do sandbox: qu
 contrato é tratado como defeito de infraestrutura, nunca adivinhado.
 """
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ JOB_MAX_BYTES = 1 * MIB
 CONTEXT_MAX_BYTES = 64 * 1024
 HASH_CHUNK_BYTES = 1 * MIB
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_CANONICAL_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _JOB_KEYS = frozenset({"recipe_id", "recipe_version", "parameters", "inputs"})
 _INPUT_KEYS = frozenset({"position", "path", "original_name", "size", "sha256"})
 
@@ -73,6 +75,9 @@ class ExecutionContext:
     # Imagem fixada na Run ("<repo>@sha256:<hex>", ou "local-dev" fora de produção). None quando
     # o worker ainda não escreve o context.json, na janela de deploy (ADR 021).
     executor_image: str | None
+    # Upload de cada entrada, na ordem das posições (ADR 035): é por eles que o select do PDF
+    # Press cita as páginas. None quando o worker é anterior à chave.
+    input_upload_ids: tuple[str, ...] | None = None
 
 
 def read_context(path: Path) -> ExecutionContext:
@@ -96,7 +101,36 @@ def read_context(path: Path) -> ExecutionContext:
     context = _object(_parsed(data, "context.json"), None, "context.json")
     if "executor_image" not in context:
         raise JobError("context.json sem executor_image")
-    return ExecutionContext(executor_image=_image(context["executor_image"]))
+    return ExecutionContext(
+        executor_image=_image(context["executor_image"]),
+        input_upload_ids=_upload_ids(context.get("input_upload_ids")),
+    )
+
+
+def with_upload_ids(
+    inputs: Sequence[InputFile], upload_ids: Sequence[str] | None
+) -> list[InputFile]:
+    """Liga cada entrada ao seu upload, pela ordem; sem a lista, as entradas ficam como estão."""
+    if upload_ids is None:
+        return list(inputs)
+    if len(upload_ids) != len(inputs):
+        raise JobError(f"input_upload_ids tem {len(upload_ids)} ids para {len(inputs)} entradas")
+    return [
+        dataclasses.replace(entry, upload_id=upload_id)
+        for entry, upload_id in zip(inputs, upload_ids, strict=True)
+    ]
+
+
+def _upload_ids(raw: object) -> tuple[str, ...] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(
+        isinstance(item, str) and _CANONICAL_UUID.fullmatch(item) for item in raw
+    ):
+        raise JobError("input_upload_ids deve ser uma lista de UUIDs na forma canônica")
+    if len(set(raw)) != len(raw):
+        raise JobError("input_upload_ids não aceita ids repetidos")
+    return tuple(raw)
 
 
 def _image(raw: object) -> str | None:
