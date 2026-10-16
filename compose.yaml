@@ -77,8 +77,8 @@ services:
 
   # Sentinela de montagem (files/storage.py, MOUNT_MARKER): sem ela a manutenção não marca objeto
   # nenhum como `missing`. Fora do `up` (perfil próprio), para um `up` com o filesystem
-  # desmontado não a recriar no disco do sistema: o deploy/release.sh a grava só depois de
-  # conferir a montagem. No desenvolvimento: `docker compose run --rm storage-mark`.
+  # desmontado não a recriar no disco do sistema: na VPS, só pelo deploy/storage-mark.sh, que
+  # confere a montagem antes. No desenvolvimento: `docker compose run --rm storage-mark`.
   storage-mark:
     <<: *app
     user: "0"

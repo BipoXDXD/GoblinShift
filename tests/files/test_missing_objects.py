@@ -407,3 +407,14 @@ def test_lote_so_com_ilegiveis_nao_aciona_o_limitador_e_o_cursor_anda(
 
     assert (report.unreadable, report.marked, report.governor_tripped) == (2, 0, False)
     assert report.resume_after == objects[1][0]
+
+
+def test_limitador_desligado_tambem_vale_para_o_lote_pequeno(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # O fim da volta depois de um restore proposital: sem isso a volta nunca terminaria.
+    lots_with_absent(factory, storage, total=3, absent=3)
+
+    report = sweep_missing_objects(factory(), storage, after=None, limit=50, max_absent_ratio=1.0)
+
+    assert (report.marked, report.governor_tripped) == (3, False)

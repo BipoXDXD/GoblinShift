@@ -21,14 +21,13 @@ executor_image=$(deploy/executor-image.sh "$tag" "$ROOT/executor/images.json")
 deploy/release-env.sh "$ROOT/secrets/release.env" "$tag" "$executor_image"
 compose=(deploy/compose.sh)
 
+# O storage é um filesystem próprio (3.8); sem montagem o deploy para antes de qualquer mudança.
+deploy/storage-mark.sh check
 "${compose[@]}" pull --quiet
 # Migração (expand) antes da API nova; a velha continua atendendo com o schema compatível.
 "${compose[@]}" run --rm --no-TTY migrate
-# O storage é um filesystem próprio (3.8); desmontado, a pasta seria recriada no disco do
-# sistema e a manutenção veria todos os objetos ausentes. Sem montagem o deploy para aqui.
-mountpoint -q "$ROOT/storage" || { echo "storage não montado em $ROOT/storage" >&2; exit 1; }
 "${compose[@]}" run --rm --no-TTY storage-init
-"${compose[@]}" run --rm --no-TTY storage-mark
+deploy/storage-mark.sh
 # API sem queda (deploy/rollout-api.sh); o resto só é recriado se a configuração mudou. O Nginx
 # (imagem goblinshift-web, com o build da SPA e a configuração) muda a cada tag e é recriado no
 # `up`: a borda repete a conexão enquanto ele volta (lb_try_duration em deploy/edge/conf.d).
