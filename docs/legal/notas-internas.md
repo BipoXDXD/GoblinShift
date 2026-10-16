@@ -144,7 +144,10 @@ Nenhuma pendência; o provedor de e-mail foi decidido (ver "Decisões aplicadas"
 - **J-22**, base legal do registro do aceite: execução de contrato ou exercício regular de
   direitos (item 4).
 - **J-23 a J-25**, avaliações de legítimo interesse (LIA) da auditoria e do antiabuso, da
-  telemetria e do backup (item 4).
+  telemetria e do backup (item 4). Rascunhos para o revisor, cada um com as perguntas no fim:
+  [J-23](lia-j23-auditoria-e-antiabuso.md), [J-24](lia-j24-telemetria.md) e
+  [J-25](lia-j25-backup.md). Como estas notas, ficam fora do build da SPA
+  (`tests/test_legal_texts.py` falha se a interface importar outro arquivo de `docs/legal/`).
 - **Base legal das mensagens por e-mail** (item 4, linha nova de 2026-10-15, sem id no
   levantamento): proposta para levar, obrigação legal (inciso II) nos pedidos de titulares e
   legítimo interesse (inciso IX) no contato geral e nas denúncias.

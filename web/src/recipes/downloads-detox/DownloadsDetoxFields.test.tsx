@@ -16,7 +16,12 @@ function setup(errors: ReadonlyMap<string, string> = new Map()) {
   const onDraftChange = vi.fn<(draft: RecipeDraft<"downloads-detox">) => void>();
   const user = userEvent.setup();
   render(
-    <DownloadsDetoxFields settings={SETTINGS} errors={errors} onDraftChange={onDraftChange} />,
+    <DownloadsDetoxFields
+      settings={SETTINGS}
+      errors={errors}
+      onDraftChange={onDraftChange}
+      inputs={[]}
+    />,
   );
   const lastDraft = (): RecipeDraft<"downloads-detox"> => {
     const draft = onDraftChange.mock.lastCall?.[0];
