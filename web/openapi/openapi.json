@@ -5399,7 +5399,8 @@
           "CSV_ALL_RECORDS_FILTERED",
           "CSV_FORMULA_CELLS",
           "CSV_FORMULA_HEADER",
-          "INPUT_NOT_SELECTED"
+          "INPUT_NOT_SELECTED",
+          "THUMBNAIL_BEFORE_TARGET"
         ],
         "title": "ItemWarningCode",
         "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. A exceção é a contagem por coluna de `CSV_FORMULA_CELLS`\n(`ReportWarning.columns`): nomes de coluna, nunca valores de célula, vão para a API com teto\n(1.3; ADR 039). Receita que avisa algo novo acrescenta o código aqui."

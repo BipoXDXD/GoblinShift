@@ -58,6 +58,8 @@ class ItemWarningCode(StrEnum):
     CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
     # PDF Press: nenhuma página da entrada entrou na seleção.
     INPUT_NOT_SELECTED = "INPUT_NOT_SELECTED"
+    # Media Mill: sem quadro em ou depois do ponto pedido; a miniatura usa o último anterior.
+    THUMBNAIL_BEFORE_TARGET = "THUMBNAIL_BEFORE_TARGET"
 
 
 class ItemNoticeCode(StrEnum):

@@ -56,6 +56,7 @@ export const ITEM_WARNINGS = [
   "CSV_FORMULA_CELLS",
   "CSV_FORMULA_HEADER",
   "INPUT_NOT_SELECTED",
+  "THUMBNAIL_BEFORE_TARGET",
 ] as const;
 export const ITEM_NOTICES = ["IMAGE_P3_CONVERTED"] as const;
 
