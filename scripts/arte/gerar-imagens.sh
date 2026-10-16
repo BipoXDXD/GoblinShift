@@ -4,7 +4,7 @@
 #   - estados (vazio, carregando, erro, sucesso) e elenco dos créditos: 256, 384, 512 e 768 px de
 #     largura (a caixa vai de 192 a 256 px CSS, em telas de 1× a 3×), em web/src/assets/art/goblins/;
 #   - imagem estática da cena 3D de cada goblin (placeholder, miniatura do seletor e fallback;
-#     ADR 033): 192, 384 e 640 px, em web/src/assets/art/oficina-3d/, com o prefixo que o
+#     ADR 038): 192, 384 e 640 px, em web/src/assets/art/oficina-3d/, com o prefixo que o
 #     check-budget reconhece, e com a luz realista que a cena imita. A Rúbia sai de um render só:
 #     a mesma imagem vira a estática da cena e a goblin dos estados.
 # Os PNGs intermediários ficam numa pasta temporária: os brutos e renders continuam fora do Git.
