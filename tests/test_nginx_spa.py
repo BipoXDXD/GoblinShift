@@ -9,6 +9,7 @@ Docker, os de integração são pulados. O IP real e o limite de `/auth`
 borda, têm testes próprios.
 """
 
+import gzip
 import json
 import re
 import shutil
@@ -51,6 +52,18 @@ SPA_CSP = (
 )
 IMMUTABLE = "public, max-age=31536000, immutable"
 SECURITY_TXT = ROOT / "web" / "public" / ".well-known" / "security.txt"
+ROBOTS_TXT = ROOT / "web" / "public" / "robots.txt"
+NGINX_TEMPLATE = ROOT / "docker" / "nginx" / "templates" / "default.conf.template"
+GZIP = {"Accept-Encoding": "gzip"}
+# Texto que comprime bem. Imagens, GLB, fontes e ZIP já vêm comprimidos: o gzip só gastaria CPU.
+GZIP_TYPES = {
+    "text/css",
+    "application/javascript",
+    "application/json",
+    "application/problem+json",
+    "image/svg+xml",
+    "application/manifest+json",
+}
 
 
 def _yaml(path: Path) -> Any:
@@ -102,6 +115,20 @@ def test_ci_publica_a_imagem_web_antes_do_deploy() -> None:
         "tags"
     ].split("\n")
     assert "web-image" in jobs["deploy"]["needs"]
+
+
+def test_gzip_so_para_tipos_de_texto() -> None:
+    # O text/html o Nginx sempre comprime com o gzip ligado; os demais são só estes.
+    match = re.search(r"^\s*gzip_types\s+([^;]+);", NGINX_TEMPLATE.read_text(), re.MULTILINE)
+    assert match
+    assert set(match.group(1).split()) == GZIP_TYPES
+
+
+def test_robots_txt_fecha_backend_e_documentacao() -> None:
+    lines = ROBOTS_TXT.read_text().splitlines()
+
+    assert "User-agent: *" in lines
+    assert {"Disallow: /api/", "Disallow: /auth/", "Disallow: /docs"} <= set(lines)
 
 
 # Integração com a imagem -------------------------------------------------------------------
@@ -180,9 +207,19 @@ class Response:
 @dataclass(frozen=True)
 class Stack:
     base_url: str
+    nginx_container: str
 
-    def get(self, path: str, *, method: str = "GET", data: bytes | None = None) -> Response:
-        request = urllib.request.Request(self.base_url + path, data=data, method=method)  # noqa: S310
+    def get(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        request = urllib.request.Request(  # noqa: S310
+            self.base_url + path, data=data, method=method, headers=headers or {}
+        )
         try:
             with urllib.request.urlopen(request, timeout=RUN_TIMEOUT_SECONDS) as response:  # noqa: S310
                 return Response(response.status, _lower(response.headers), response.read())
@@ -220,7 +257,7 @@ def stack() -> Iterator[Stack]:
         docker_ok(*common, nginx, "--network", network, "--ip", NGINX_IP,
                   "--publish", "127.0.0.1::80", IMAGE)  # fmt: skip
         port = docker_ok("port", nginx, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
-        current = Stack(f"http://127.0.0.1:{port}")
+        current = Stack(f"http://127.0.0.1:{port}", nginx)
         _wait_until_ready(current)
         yield current
     finally:
@@ -240,6 +277,14 @@ def _wait_until_ready(stack: Stack) -> None:
     pytest.fail("o Nginx e a API falsa não ficaram prontos")
 
 
+def _built_asset(stack: Stack, extension: str) -> str:
+    """Um arquivo do build com a extensão, inclusive os que só os chunks JS referenciam."""
+    listing = docker_ok("exec", stack.nginx_container, "ls", "/usr/share/nginx/html/assets")
+    names = sorted(name for name in listing.split() if name.endswith(f".{extension}"))
+    assert names, listing
+    return f"/assets/{names[0]}"
+
+
 def _first_asset(stack: Stack, extension: str) -> str:
     index = stack.get("/").body.decode()
     match = re.search(rf'"(/assets/[^"]+\.{extension})"', index)
@@ -252,6 +297,7 @@ def _assert_spa_security_headers(response: Response) -> None:
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert response.headers["cross-origin-opener-policy"] == "same-origin"
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
     assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
 
 
@@ -293,6 +339,8 @@ class TestSpa:
         assert response.status == 404
         assert b'<div id="root">' not in response.body
         assert response.headers["x-content-type-options"] == "nosniff"
+        # Cache longo só em 2xx/304: um 404 imutável ficaria preso no navegador e nos proxies.
+        assert "immutable" not in response.headers.get("cache-control", "")
 
     def test_servidor_nao_anuncia_a_versao(self, stack: Stack) -> None:
         assert stack.get("/").headers["server"] == "nginx"
@@ -301,6 +349,70 @@ class TestSpa:
         response = stack.get("/qualquer-rota", method="POST", data=b"{}")
 
         assert response.status == 405
+
+
+class TestCompressao:
+    pytestmark = pytestmark_integration
+
+    @pytest.mark.parametrize("extension", ["js", "css"])
+    def test_asset_de_texto_sai_comprimido(self, stack: Stack, extension: str) -> None:
+        response = stack.get(_first_asset(stack, extension), headers=GZIP)
+
+        assert response.status == 200
+        assert response.headers["content-encoding"] == "gzip"
+        assert response.headers["vary"] == "Accept-Encoding"
+        assert response.headers["cache-control"] == IMMUTABLE
+
+    def test_index_sai_comprimido(self, stack: Stack) -> None:
+        response = stack.get("/", headers=GZIP)
+
+        assert response.headers["content-encoding"] == "gzip"
+        assert gzip.decompress(response.body) == stack.get("/").body
+
+    def test_json_da_api_sai_comprimido(self, stack: Stack) -> None:
+        # A borda acrescenta Via ao pedido: sem gzip_proxied, nada atrás dela seria comprimido.
+        response = stack.get("/api/v1/runs?limit=5", headers={**GZIP, "Via": "1.1 Caddy"})
+
+        assert response.headers["content-encoding"] == "gzip"
+        assert json.loads(gzip.decompress(response.body))["served_by"] == "api"
+
+    @pytest.mark.parametrize("extension", ["glb", "avif", "webp", "woff2"])
+    def test_binario_ja_comprimido_sai_como_esta(self, stack: Stack, extension: str) -> None:
+        response = stack.get(_built_asset(stack, extension), headers=GZIP)
+
+        assert response.status == 200
+        assert "content-encoding" not in response.headers
+
+    def test_sem_accept_encoding_sai_sem_compressao(self, stack: Stack) -> None:
+        response = stack.get(_first_asset(stack, "js"))
+
+        assert "content-encoding" not in response.headers
+
+    def test_glb_sai_com_o_tipo_do_gltf_binario(self, stack: Stack) -> None:
+        response = stack.get(_built_asset(stack, "glb"))
+
+        assert response.headers["content-type"] == "model/gltf-binary"
+        assert response.body[:4] == b"glTF"
+
+
+class TestRobots:
+    pytestmark = pytestmark_integration
+
+    def test_robots_txt_sai_como_texto_e_nao_como_o_index(self, stack: Stack) -> None:
+        response = stack.get("/robots.txt")
+
+        assert response.status == 200
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert response.body == ROBOTS_TXT.read_bytes()
+        assert response.headers["cache-control"] == "no-cache"
+        _assert_spa_security_headers(response)
+
+    @pytest.mark.parametrize("path", ["/sitemap.xml", "/ads.txt", "/feed.xml"])
+    def test_txt_ou_xml_inexistente_e_404_e_nao_o_index(self, stack: Stack, path: str) -> None:
+        response = stack.get(path)
+
+        assert response.status == 404
+        assert b'<div id="root">' not in response.body
 
 
 class TestSecurityTxt:
@@ -331,8 +443,6 @@ class TestApi:
             "/api/v1/runs?limit=5",
             "/api/v1/rota-que-nao-existe",
             "/auth/login/google",
-            "/docs",
-            "/openapi.json",
             "/livez",
             "/readyz",
         ],
@@ -344,8 +454,16 @@ class TestApi:
         assert response.json()["served_by"] == "api"
         assert response.json()["path"] == path
 
+    @pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
+    def test_documentacao_da_api_nao_e_encaminhada(self, stack: Stack, path: str) -> None:
+        # Fechada em produção (3.6): sem location própria, cai na SPA como qualquer rota.
+        response = stack.get(path)
+
+        assert b'"served_by"' not in response.body
+        assert response.body == stack.get("/").body
+
     def test_resposta_da_api_nao_recebe_a_csp_da_spa(self, stack: Stack) -> None:
-        # A API define a própria CSP (downloads com sandbox); a /docs carrega o Swagger UI.
+        # A API define a própria CSP (downloads com sandbox).
         response = stack.get("/api/v1/me")
 
         assert "content-security-policy" not in response.headers
