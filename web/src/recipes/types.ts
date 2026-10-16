@@ -19,12 +19,20 @@ export type RecipeDraft<K extends RecipeId> =
   | { readonly ok: true; readonly command: RecipeCommandFor<K> }
   | { readonly ok: false; readonly issues: readonly FormIssue[] };
 
+/** Arquivo enviado e pronto, na ordem da lista: o que um formulário pode citar (PDF Press). */
+export interface RecipeInput {
+  readonly uploadId: string;
+  readonly name: string;
+}
+
 /** O que a Bancada passa ao formulário de qualquer receita. */
 export interface RecipeFormProps<K extends RecipeId> {
   /** Erro de cada controle, pelo id; já filtrado para mostrar só depois de uma tentativa de envio. */
   readonly errors: ReadonlyMap<string, string>;
   /** Chamado a cada mudança, com o comando válido ou os erros do formulário inteiro. */
   readonly onDraftChange: (draft: RecipeDraft<K>) => void;
+  /** Arquivos prontos, na ordem da lista; só o PDF Press os usa, para escolher páginas. */
+  readonly inputs: readonly RecipeInput[];
 }
 
 /** Props do formulário de uma receita: as da Bancada mais os defaults e limites do catálogo. */

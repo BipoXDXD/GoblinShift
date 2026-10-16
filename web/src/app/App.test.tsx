@@ -45,6 +45,7 @@ describe("App", () => {
       ["Abrir a Bancada da CSV Janitor", "/bancada/csv-janitor"],
       ["Abrir a Bancada da Image Forge", "/bancada/image-forge"],
       ["Abrir a Bancada da Downloads Detox", "/bancada/downloads-detox"],
+      ["Abrir a Bancada da PDF Press", "/bancada/pdf-press"],
     ]);
   });
 
