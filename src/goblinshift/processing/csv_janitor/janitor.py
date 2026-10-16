@@ -65,7 +65,7 @@ def _clean(data: bytes, params: Params, limits: Limits) -> TableCleaned:
     output = [_Record(r.position, tuple(r.fields[i] for i in projection)) for r in survivors]
     formula_cells = _count_formula_cells(output_header, output)
     # O nome da coluna também é uma célula da planilha.
-    formula_header = tuple(name for name in output_header if _looks_like_formula(name))
+    formula_header = tuple(name for name in output_header if looks_like_formula(name))
     if params.formula_guard is FormulaGuard.TAB_PREFIX:
         output_header = tuple(map(_guard, output_header))
         output = [_Record(r.position, tuple(map(_guard, r.fields))) for r in output]
@@ -135,18 +135,18 @@ def _deduplicate(records: list[_Record], key: Sequence[int]) -> list[_Record]:
 
 def _count_formula_cells(header: Sequence[str], records: list[_Record]) -> Mapping[str, int]:
     counts = {
-        name: sum(_looks_like_formula(record.fields[i]) for record in records)
+        name: sum(looks_like_formula(record.fields[i]) for record in records)
         for i, name in enumerate(header)
     }
     return {name: count for name, count in counts.items() if count}
 
 
-def _looks_like_formula(value: str) -> bool:
+def looks_like_formula(value: str) -> bool:
     return value.startswith(FORMULA_PREFIXES)
 
 
 def _guard(value: str) -> str:
-    return FORMULA_GUARD_PREFIX + value if _looks_like_formula(value) else value
+    return FORMULA_GUARD_PREFIX + value if looks_like_formula(value) else value
 
 
 def _serialize(

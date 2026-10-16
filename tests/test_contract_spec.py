@@ -77,6 +77,25 @@ def test_flattens_allof_with_unevaluated_properties_into_closed_variants() -> No
     }
 
 
+def test_required_common_fields_join_each_variant_required() -> None:
+    common = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "required": ["name"],
+    }
+    spec = _spec(
+        {"allOf": [common, {"oneOf": [VARIANT_A, VARIANT_B]}], "unevaluatedProperties": False}
+    )
+
+    variants = _body(contract_spec.derive(spec))["oneOf"]
+
+    assert [variant["required"] for variant in variants] == [
+        ["name", "recipe_id", "parameters"],
+        ["name", "recipe_id"],
+    ]
+    assert all(variant["properties"]["name"] == {"type": "string"} for variant in variants)
+
+
 def test_does_not_mutate_the_input_spec() -> None:
     spec = _spec({"allOf": [COMMON, {"oneOf": [VARIANT_A]}], "unevaluatedProperties": False})
     before = copy.deepcopy(spec)
@@ -100,7 +119,7 @@ def test_leaves_a_spec_without_unevaluated_properties_unchanged() -> None:
         {"allOf": [COMMON, {"anyOf": [VARIANT_A]}], "unevaluatedProperties": False},
         {"allOf": [COMMON, {"oneOf": [VARIANT_A]}], "unevaluatedProperties": True},
         {
-            "allOf": [{**COMMON, "required": ["input_upload_ids"]}, {"oneOf": [VARIANT_A]}],
+            "allOf": [{**COMMON, "minProperties": 1}, {"oneOf": [VARIANT_A]}],
             "unevaluatedProperties": False,
         },
         {
@@ -113,7 +132,7 @@ def test_leaves_a_spec_without_unevaluated_properties_unchanged() -> None:
         "allOf-sem-variantes",
         "variantes-em-anyOf",
         "unevaluated-true",
-        "comum-com-required",
+        "comum-com-chave-desconhecida",
         "campo-comum-repetido-na-variante",
     ],
 )
