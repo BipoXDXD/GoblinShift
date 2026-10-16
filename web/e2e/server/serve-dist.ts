@@ -44,11 +44,13 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".woff2": "font/woff2",
   ".glb": "model/gltf-binary",
   ".ico": "image/x-icon",
-  ".txt": "text/plain",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 const BACKEND_PREFIXES = ["/api/", "/auth/"];
-const BACKEND_PATHS = new Set(["/docs", "/openapi.json", "/livez", "/readyz"]);
+const BACKEND_PATHS = new Set(["/livez", "/readyz"]);
+/** robots.txt e outro .txt ou .xml na raiz: arquivo real ou 404, nunca o index.html. */
+const ROOT_TEXT_FILE = /^\/[^/]+\.(?:txt|xml)$/;
 
 const server = createServer((request, response) => {
   const path = pathOf(request);
@@ -68,8 +70,14 @@ const server = createServer((request, response) => {
     return;
   }
   if (path.startsWith("/assets/")) {
-    // location /assets/: try_files $uri =404, cache imutável.
-    sendFile(response, fileIn(path), "public, max-age=31536000, immutable");
+    // location /assets/: try_files $uri =404, cache imutável só no 200 (add_header sem always).
+    const file = fileIn(path);
+    sendFile(response, file, file === null ? null : "public, max-age=31536000, immutable");
+    return;
+  }
+  if (ROOT_TEXT_FILE.test(path)) {
+    // location ~ ^/[^/]+\.(txt|xml)$: try_files $uri =404, sem cache.
+    sendFile(response, fileIn(path), "no-cache");
     return;
   }
   // location /: try_files $uri /index.html, sem cache.
@@ -107,9 +115,15 @@ function fileIn(path: string): string | null {
   }
 }
 
-function sendFile(response: ServerResponse, file: string | null, cacheControl: string): void {
+function sendFile(
+  response: ServerResponse,
+  file: string | null,
+  cacheControl: string | null,
+): void {
   const headers: Record<string, string> = { ...Object.fromEntries(SPA_HEADERS) };
-  headers["Cache-Control"] = cacheControl;
+  if (cacheControl !== null) {
+    headers["Cache-Control"] = cacheControl;
+  }
   if (file === null) {
     response.writeHead(404, { ...headers, "Content-Type": "text/html" }).end("Not Found");
     return;
