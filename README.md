@@ -281,11 +281,12 @@ GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost      # saída l
 GS_API_KEY=gsk_… ./scripts/e2e-image-forge.sh http://localhost      # P3, orientação, MPO, 16 bits, bomba
 GS_API_KEY=gsk_… ./scripts/e2e-downloads-detox.sh http://localhost  # colisão de nomes, JAR, cópia, HTML
 GS_API_KEY=gsk_… ./scripts/e2e-pdf-press.sh http://localhost        # split em partes, mapa de páginas
+GS_API_KEY=gsk_… ./scripts/e2e-media-mill.sh http://localhost       # FLAC, miniaturas, HLS, 5.1, MPEG-4
 ```
 
 Contra a VPS, a URL é `https://goblinshift.dev`: a borda não encaminha o acesso pelo IP ao GoblinShift, para a chave não trafegar em texto claro ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)).
 
-As fixtures do Image Forge, do Detox e do PDF Press saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução, junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
+As fixtures do Image Forge, do Detox, do PDF Press e do Media Mill saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução (os vídeos do Media Mill exigem o FFmpeg completo no `PATH`, como os testes), junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 
 Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
