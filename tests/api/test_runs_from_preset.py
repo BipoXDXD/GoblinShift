@@ -287,7 +287,7 @@ def test_retry_depois_de_editar_o_preset_repete_a_mesma_execucao(
     inputs = ready_inputs(factory, storage, account.id)
     key = str(uuid.uuid4())
     first = run_preset(client, account, preset["id"], inputs, key)
-    client.put(
+    edited = client.put(
         f"{PRESETS}/{preset['id']}",
         json={
             "name": "Editado",
@@ -297,6 +297,7 @@ def test_retry_depois_de_editar_o_preset_repete_a_mesma_execucao(
         },
         headers={**account.headers, "If-Match": '"1"'},
     )
+    assert edited.status_code == 200, edited.text
 
     again = run_preset(client, account, preset["id"], inputs, key)
 
@@ -313,7 +314,10 @@ def test_retry_depois_de_excluir_o_preset_repete_a_mesma_execucao(
     inputs = ready_inputs(factory, storage, account.id)
     key = str(uuid.uuid4())
     first = run_preset(client, account, preset["id"], inputs, key)
-    client.delete(f"{PRESETS}/{preset['id']}", headers={**account.headers, "If-Match": '"1"'})
+    deleted = client.delete(
+        f"{PRESETS}/{preset['id']}", headers={**account.headers, "If-Match": '"1"'}
+    )
+    assert deleted.status_code == 204, deleted.text
 
     again = run_preset(client, account, preset["id"], inputs, key)
 
