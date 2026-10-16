@@ -58,16 +58,16 @@ function previewKindOf(logicalName: string): PreviewKind | null {
   return KIND_OF_EXTENSION[extension] ?? null;
 }
 
-/** O preview só existe enquanto a saída existe; excluído pesa mais que vencido. */
+/** Motivos na ordem da API (1.7): excluído pesa mais que vencido, e os dois mais que perdido. */
+const UNAVAILABLE_REASONS = ["deleted", "expired", "missing"] as const;
+
+/** O preview só existe enquanto a saída existe; vale o motivo mais forte entre os dois. */
 function unavailabilityOf(
   source: ResultReference,
   preview: ResultReference,
-): "expired" | "deleted" | null {
+): (typeof UNAVAILABLE_REASONS)[number] | null {
   const states = [source.availability, preview.availability];
-  if (states.includes("deleted")) {
-    return "deleted";
-  }
-  return states.includes("expired") ? "expired" : null;
+  return UNAVAILABLE_REASONS.find((reason) => states.includes(reason)) ?? null;
 }
 
 type ImageState = "loading" | "loaded" | "failed";

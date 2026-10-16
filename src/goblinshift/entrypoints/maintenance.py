@@ -33,7 +33,7 @@ from goblinshift.platform.db import make_engine, make_session_factory, unit_of_w
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
 from goblinshift.runs import purge as runs_purge
-from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.runner import Runner
 
 logger = logging.getLogger("goblinshift.maintenance")
@@ -80,7 +80,11 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     try:
         with run_finished_reporter(settings, factory, "goblinshift-maintenance") as finished:
             maintenance = Maintenance(
-                factory, FileStorage(settings.storage_root), runner, on_finished=finished.report
+                factory,
+                FileStorage(settings.storage_root),
+                runner,
+                MaintenanceConfig(missing_max_absent_ratio=settings.missing_sweep_max_absent_ratio),
+                on_finished=finished.report,
             )
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")

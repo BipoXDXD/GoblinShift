@@ -385,6 +385,7 @@ export const TEXT = {
         unavailable: {
           expired: "Pré-visualização indisponível: o arquivo expirou.",
           deleted: "Pré-visualização indisponível: o arquivo foi excluído.",
+          missing: "Pré-visualização indisponível: o arquivo se perdeu.",
         },
         tableCaption: (fileName: string, rows: number) =>
           `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
@@ -396,6 +397,9 @@ export const TEXT = {
       deletedTitle: "Resultados excluídos",
       deletedHint:
         "Os arquivos gerados por esta execução foram excluídos. Os que você enviou não mudam.",
+      missingTitle: "Resultados perdidos",
+      missingHint:
+        "Os arquivos gerados por esta execução se perderam e não podem mais ser baixados. Os que você enviou não mudam.",
       expiredTitle: "Resultados expirados",
       expiredHint: "O prazo para baixar os resultados desta execução acabou.",
       expiredOn: (date: string) => `Os resultados expiraram em ${date}.`,
