@@ -1,5 +1,6 @@
 """`GET /api/v1/me`: a conta da credencial, os limites, o consumo das cotas e o aceite dos termos
-(1.6, 1.7 e 1.8).
+(1.6, 1.7 e 1.8). Os limites são os da conta: o padrão das settings com o override do
+administrador; o consumo inclui o tempo de executor (1.8).
 
 Leitura numa transação só, com o relógio do banco, o mesmo da aceitação: o consumo mostrado é
 o que a próxima aceitação vai contar. Saída por allowlist de campos, só da conta da credencial.
@@ -9,8 +10,8 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel, Field
 
 from goblinshift import capacity
 from goblinshift.entrypoints.api.dependencies import CurrentPrincipal, DbSession, terms_version
@@ -24,10 +25,11 @@ from goblinshift.files.limits import (
 )
 from goblinshift.identity import Scope, find_account
 from goblinshift.runs.quotas import (
-    MAX_INPUT_BYTES_PER_WINDOW,
-    MAX_RUNS_PER_WINDOW,
+    QuotaLimits,
     active_run_id,
     daily_usage,
+    executor_time_ms,
+    quota_for,
 )
 from goblinshift.runs.store import db_now
 
@@ -58,6 +60,9 @@ class Usage(BaseModel):
     active_run_id: UUID | None
     # Quando a execução mais antiga sai da janela de 24 h; nulo sem execuções na janela.
     daily_quota_resets_at: datetime | None
+    executor_ms_last_24h: int = Field(
+        description="Tempo de executor das tentativas que começaram nas últimas 24 h (1.8)."
+    )
 
 
 class Terms(BaseModel):
@@ -81,15 +86,20 @@ class MeResponse(BaseModel):
 
 @router.get("/me", operation_id="getMe")
 def get_me(
+    request: Request,
     principal: CurrentPrincipal,
     session: DbSession,
     current_version: Annotated[str, Depends(terms_version)],
 ) -> MeResponse:
     owner_id = principal.owner_id
+    defaults: QuotaLimits = request.app.state.quota_defaults
     with session.begin():
+        now = db_now(session)
         account = find_account(session, owner_id)
         storage = capacity.usage(session, owner_id)
-        daily = daily_usage(session, owner_id, db_now(session))
+        daily = daily_usage(session, owner_id, now)
+        quota = quota_for(session, owner_id, defaults)
+        executor_ms = executor_time_ms(session, owner_id, now)
         active = active_run_id(session, owner_id)
     # A conta não é apagada com chave ativa (FK RESTRICT); se sumir entre as duas
     # transações, a credencial deixou de valer.
@@ -101,8 +111,8 @@ def get_me(
         scopes=sorted(principal.scopes),
         via=principal.via,
         limits=Limits(
-            runs_per_24h=MAX_RUNS_PER_WINDOW,
-            input_bytes_per_24h=MAX_INPUT_BYTES_PER_WINDOW,
+            runs_per_24h=quota.runs_per_24h,
+            input_bytes_per_24h=quota.input_bytes_per_24h,
             storage_bytes=storage.storage_max_bytes,
             active_runs=ACTIVE_RUNS_PER_ACCOUNT,
             file_bytes=MAX_FILE_BYTES,
@@ -118,6 +128,7 @@ def get_me(
             storage_reserved_bytes=storage.storage_reserved_bytes,
             active_run_id=active,
             daily_quota_resets_at=daily.resets_at(),
+            executor_ms_last_24h=executor_ms,
         ),
         terms=Terms(
             current_version=current_version,

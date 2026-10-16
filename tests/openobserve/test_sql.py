@@ -290,3 +290,88 @@ def test_heartbeat_devolve_uma_linha_mesmo_num_periodo_sem_dados(telemetry: Tele
     )
 
     assert len(rows) == 1
+
+
+# --- Causas lidas do span da manutenção --------------------------------------------------------
+
+
+@pytest.mark.parametrize(("stuck", "fires"), [(0, False), (1, True)])
+def test_execucao_presa_em_stopping(telemetry: Telemetry, stuck: int, fires: bool) -> None:
+    stream = unique_stream("presa")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(runs_stuck_stopping=stuck, age_s=MINUTE_S)
+    traces.maintenance_cycle(runs_stuck_stopping=0, age_s=3 * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-execucao-presa", stream)) is fires
+
+
+@pytest.mark.parametrize(("reached", "fires"), [(0, False), (1, True)])
+def test_limitador_de_exclusoes_acionado(telemetry: Telemetry, reached: int, fires: bool) -> None:
+    stream = unique_stream("limitador")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(purge_limit_reached=reached)
+    traces.maintenance_cycle(purge_limit_reached=0, age_s=2 * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-limitador-de-exclusoes", stream)) is fires
+
+
+@pytest.mark.parametrize(("overdue", "fires"), [(0, False), (2, True)])
+def test_exclusao_de_conta_atrasada(telemetry: Telemetry, overdue: int, fires: bool) -> None:
+    stream = unique_stream("exclusao")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(accounts_deletion_overdue=overdue)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-exclusao-de-conta-atrasada", stream)) is fires
+
+
+@pytest.mark.parametrize(
+    ("reserved", "fires"),
+    [
+        ((86, 90), True),  # acima de 85% o período todo
+        ((85, 90), False),  # 85% exatos não é "acima"
+        ((86, 50), False),  # caiu abaixo no período: pico, não falta de capacidade
+    ],
+)
+def test_capacidade_global_perto_do_teto(
+    telemetry: Telemetry, reserved: tuple[int, int], fires: bool
+) -> None:
+    stream = unique_stream("capacidade")
+    traces = telemetry.traces(stream)
+    for age_min, percent in zip((2, 7), reserved, strict=True):
+        traces.maintenance_cycle(
+            storage_global_reserved_bytes=percent,
+            storage_global_max_bytes=100,
+            age_s=age_min * MINUTE_S,
+        )
+    # Um evento sem o teto (de outro processo ou de uma versão antiga) não derruba a consulta.
+    traces.maintenance_cycle(runs_deleted=1, age_s=4 * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-capacidade-global", stream)) is fires
+
+
+def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Telemetry) -> None:
+    stream = unique_stream("outro")
+    traces = telemetry.traces(stream)
+    traces.span(
+        "outra.coisa",
+        60,
+        {
+            "main": True,
+            "maintenance.runs_stuck_stopping": 3,
+            "maintenance.purge_limit_reached": 1,
+            "maintenance.accounts_deletion_overdue": 1,
+        },
+        1.0,
+    )
+    traces.flush()
+
+    for name in (
+        "causa-execucao-presa",
+        "causa-limitador-de-exclusoes",
+        "causa-exclusao-de-conta-atrasada",
+    ):
+        assert not cause_rows(telemetry, name, stream), name

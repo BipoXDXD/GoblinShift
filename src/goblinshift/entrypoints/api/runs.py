@@ -22,6 +22,11 @@ from goblinshift.entrypoints.api.capacity_problems import (
     daily_quota_problem,
     environment_storage_problem,
 )
+from goblinshift.entrypoints.api.catalog import (
+    MAX_RECIPE_ID_CHARS,
+    RECIPE_ID_PATTERN,
+    deprecation_headers,
+)
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
 from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
 from goblinshift.entrypoints.api.problems import (
@@ -72,9 +77,6 @@ POLL_RETRY_AFTER_SECONDS = 2
 IN_PROGRESS_RETRY_AFTER_SECONDS = 1
 # Uma execução ocupa o executor por minutos (1.7); tentar antes disso só gasta a cota.
 QUEUE_FULL_RETRY_AFTER_SECONDS = 60
-MAX_RECIPE_ID_CHARS = 64
-# Formato dos ids do catálogo (`csv-janitor`): o filtro da listagem só aceita ids nesse formato.
-_RECIPE_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 MAX_CURSOR_CHARS = 1024
 _IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 _REPLAYED_HEADER = "Idempotency-Replayed"
@@ -235,7 +237,9 @@ def create_run(
     idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
     if validate_only:
         response.status_code = 200
-        return _validate(run_command, idempotency_key)
+        validated = _validate(run_command, idempotency_key)
+        _add_deprecation_headers(response, validated.recipe_id, validated.recipe_version)
+        return validated
     try:
         accepted = accept_run(
             session,
@@ -244,6 +248,7 @@ def create_run(
             idempotency_key,
             _current_traceparent(),
             executor_image=request.app.state.executor_image,
+            quota_defaults=request.app.state.quota_defaults,
         )
     except _REFUSALS as error:
         raise _refusal_problem(error) from None
@@ -263,6 +268,7 @@ def create_run(
     )
     if accepted.replayed:
         response.headers[_REPLAYED_HEADER] = "true"
+    _add_deprecation_headers(response, view.recipe_id, view.recipe_version)
     return AcceptedRunResponse(
         **_run_response(view).model_dump(),
         idempotency_expires_at=_utc(accepted.idempotency_expires_at),
@@ -276,7 +282,7 @@ def list_runs_route(
     request: Request,
     now: Now,
     recipe_id: Annotated[
-        str | None, Query(max_length=MAX_RECIPE_ID_CHARS, pattern=_RECIPE_ID_PATTERN)
+        str | None, Query(max_length=MAX_RECIPE_ID_CHARS, pattern=RECIPE_ID_PATTERN)
     ] = None,
     status: Status | None = None,
     created_from: AwareDatetime | None = None,
@@ -285,7 +291,12 @@ def list_runs_route(
     cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_CHARS)] = None,
 ) -> RunListResponse:
     settings: Settings = request.app.state.settings
-    filters = RunFilters(recipe_id, status, created_from, created_to)
+    filters = RunFilters(
+        recipe_id,
+        status,
+        _in_utc("created_from", created_from),
+        _in_utc("created_to", created_to),
+    )
     try:
         with session.begin():
             page = list_runs(
@@ -347,6 +358,30 @@ def get_results_route(
             for ref in results.references
         ],
     )
+
+
+def _add_deprecation_headers(response: Response, recipe_id: str, version: int) -> None:
+    """`Sunset` quando a versão usada está `deprecated` (1.6); a aceitação já a encontrou."""
+    response.headers.update(deprecation_headers(CATALOG.get_version(recipe_id, version)))
+
+
+def _in_utc(name: str, moment: datetime | None) -> datetime | None:
+    """Filtro de período em UTC; um instante válido com fuso pode cair fora da faixa do ano 1 a
+    9999 quando convertido, e isso é entrada inválida (422), não erro do servidor."""
+    if moment is None:
+        return None
+    try:
+        return moment.astimezone(UTC)
+    except OverflowError:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("query", name),
+                    "type": "value_error",
+                    "msg": "a data fica fora da faixa válida em UTC",
+                }
+            ]
+        ) from None
 
 
 def _validate(command: RunCommand, idempotency_key: str | None) -> ValidatedRunResponse:

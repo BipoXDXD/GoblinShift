@@ -11,7 +11,8 @@ entradas e o hash canônico do comando. Numa transação curta, na ordem de lock
 3. Capacidade global: `pg_advisory_xact_lock` numa chave constante serializa as aceitações antes
    de contar a fila, para que duas réplicas não vejam 9 aguardando e entrem as duas (contar e
    inserir sem trava seria write skew). A espera obedece ao `lock_timeout` da conexão. As cotas
-   diárias da conta (30 execuções e 2 GiB de entrada em 24 h) são contadas sob a mesma trava.
+   diárias da conta (por padrão 30 execuções e 2 GiB de entrada em 24 h, com override por conta)
+   são contadas sob a mesma trava.
 4. Capacidade da conta: o `INSERT` da Run com `ON CONFLICT DO NOTHING` sobre o índice único
    parcial `run_one_active_per_owner_idx`; sem linha devolvida, já há uma execução ativa.
 5. Uploads (`FOR SHARE`), bytes de entrada contra a cota diária, `run_input` na ordem e usos dos
@@ -57,10 +58,11 @@ from goblinshift.processing.output_dir import DEFAULT_MAX_BYTES
 from goblinshift.processing.packaging import PackageLimits
 from goblinshift.runs.lifecycle import QUEUE_WINDOW, Status
 from goblinshift.runs.quotas import (
-    MAX_INPUT_BYTES_PER_WINDOW,
-    MAX_RUNS_PER_WINDOW,
+    DEFAULT_QUOTA,
     DailyUsage,
+    QuotaLimits,
     daily_usage,
+    quota_for,
 )
 from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import idempotency_record, run, run_input
@@ -240,12 +242,14 @@ def accept_run(
     traceparent: str | None,
     *,
     executor_image: str,
+    quota_defaults: QuotaLimits = DEFAULT_QUOTA,
 ) -> Accepted:
     """Aceita e enfileira a execução, ou devolve a já aceita com a mesma chave (replay).
 
     `executor_image` é a imagem do executor deste deploy (`GS_EXECUTOR_IMAGE`), fixada na Run
-    para que todas as tentativas usem a mesma, mesmo depois de um deploy novo. Abre e confirma
-    a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
+    para que todas as tentativas usem a mesma, mesmo depois de um deploy novo. `quota_defaults`
+    são as cotas diárias das settings (`GS_QUOTA_*`), que o override da conta sobrepõe. Abre e
+    confirma a própria transação: quando devolve, a Run e o NOTIFY já estão confirmados.
 
     Sem espaço para o teto de saída levanta `capacity.AccountCapacityExceededError` ou
     `capacity.GlobalCapacityExceededError`, com a transação desfeita.
@@ -263,10 +267,11 @@ def accept_run(
         _lock_global_queue(session)
         now = db_now(session)
         usage = daily_usage(session, owner_id, now)
-        _check_run_quota(usage, now)
+        quota = quota_for(session, owner_id, quota_defaults)
+        _check_run_quota(usage, quota, now)
         run_id = _insert_run(session, owner_id, validated, traceparent, executor_image)
         uploads = lock_ready_uploads(session, owner_id, validated.input_upload_ids)
-        _check_input_bytes(validated.recipe, uploads, usage, now)
+        _check_input_bytes(validated.recipe, uploads, usage, quota, now)
         session.execute(
             insert(run_input),
             [
@@ -368,8 +373,8 @@ def _lock_global_queue(session: Session) -> None:
         raise QueueFullError("fila global cheia")
 
 
-def _check_run_quota(usage: DailyUsage, now: datetime) -> None:
-    if usage.runs >= MAX_RUNS_PER_WINDOW:
+def _check_run_quota(usage: DailyUsage, quota: QuotaLimits, now: datetime) -> None:
+    if usage.runs >= quota.runs_per_24h:
         raise DailyQuotaExceededError(
             f"a conta já criou {usage.runs} execuções nas últimas 24 h",
             _until_window_frees(usage, now),
@@ -377,7 +382,11 @@ def _check_run_quota(usage: DailyUsage, now: datetime) -> None:
 
 
 def _check_input_bytes(
-    recipe: RecipeVersion, uploads: Sequence[ReadyUpload], usage: DailyUsage, now: datetime
+    recipe: RecipeVersion,
+    uploads: Sequence[ReadyUpload],
+    usage: DailyUsage,
+    quota: QuotaLimits,
+    now: datetime,
 ) -> None:
     """Teto da versão e cota diária de entrada; uma execução maior que a cota é inválida."""
     file_max = recipe.limits[_MAX_INPUT_BYTES]
@@ -387,12 +396,12 @@ def _check_input_bytes(
     version_max = recipe.limits.get(_MAX_TOTAL_INPUT_BYTES)
     if version_max is not None and incoming > version_max:
         _refuse("input_upload_ids", f"as entradas somam mais de {version_max} bytes")
-    if incoming > MAX_INPUT_BYTES_PER_WINDOW:
+    if incoming > quota.input_bytes_per_24h:
         _refuse(
             "input_upload_ids",
-            f"as entradas somam mais que a cota diária de {MAX_INPUT_BYTES_PER_WINDOW} bytes",
+            f"as entradas somam mais que a cota diária de {quota.input_bytes_per_24h} bytes",
         )
-    if usage.input_bytes + incoming > MAX_INPUT_BYTES_PER_WINDOW:
+    if usage.input_bytes + incoming > quota.input_bytes_per_24h:
         raise DailyQuotaExceededError(
             "a entrada passa da cota diária de bytes", _until_window_frees(usage, now)
         )

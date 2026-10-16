@@ -34,19 +34,24 @@ import os
 import random
 import stat
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import BinaryIO
 
-from sqlalchemy import insert, update
+from opentelemetry.context import Context
+from opentelemetry.trace import NoOpTracer, Tracer
+from opentelemetry.util.types import AttributeValue
+from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.storage import FileStorage, StorageError
+from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
     MAX_RETRY_JITTER,
@@ -80,6 +85,7 @@ from goblinshift.runs.store import (
     run_transaction,
 )
 from goblinshift.runs.tables import attempt, run, run_input, run_output
+from goblinshift.runs.worker import attempt_event
 from goblinshift.runs.worker.candidate_writer import CandidateWriter, StoredCandidate
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import (
@@ -94,6 +100,10 @@ logger = logging.getLogger(__name__)
 
 EXIT_SUCCEEDED = 0
 EXIT_RECIPE_FAILURE = 3
+# `ExitCode.NO_SPACE` do executor: o disco da área de trabalho encheu (limite de recurso, 1.6). O
+# worker não importa o laço do executor, que carrega todas as receitas.
+EXIT_NO_SPACE = 6
+_MILLISECOND = timedelta(milliseconds=1)
 COPY_CHUNK_BYTES = 1024 * 1024
 FAILURE_MAX_BYTES = 64 * 1024
 # Uma linha `{"position": n}` por entrada avaliada: 1 MiB sobra para qualquer lote de 1.7.
@@ -168,6 +178,8 @@ class Coordinator:
         config: CoordinatorConfig,
         *,
         on_finished: RunFinishedHook | None = None,
+        tracer: Tracer | None = None,
+        user_hasher: UserHasher | None = None,
     ) -> None:
         self._factory = factory
         self._storage = storage
@@ -175,20 +187,53 @@ class Coordinator:
         self._config = config
         self._on_finished = on_finished
         self._candidates = CandidateWriter(factory, storage)
+        self._tracer: Tracer = tracer if tracer is not None else NoOpTracer()
+        self._user_hasher = user_hasher
 
     def run(self, claimed: ClaimedAttempt) -> Applied | None:
-        """Leva a tentativa até um estado decidido; `None` se o fencing foi perdido."""
+        """Leva a tentativa até um estado decidido; `None` se o fencing foi perdido.
+
+        Tudo acontece dentro do span `attempt` (3.7): raiz do próprio trace (`Context()` vazio),
+        com link para a aceitação. Os passos acrescentam atributos ao span em curso.
+        """
+        with self._tracer.start_as_current_span(
+            attempt_event.SPAN_NAME,
+            context=Context(),
+            links=attempt_event.links_to_acceptance(claimed.traceparent),
+            attributes=self._identity_attributes(claimed),
+        ):
+            return self._run_traced(claimed)
+
+    def _run_traced(self, claimed: ClaimedAttempt) -> Applied | None:
         started = time.monotonic()
         try:
             applied = self._drive(claimed)
         except LostFencing as lost:
+            _record_end(started, "lost_fencing", error=None)
             _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
             self._abandon(claimed)
             return None
         complete_after_commit(self._factory, self._storage, applied, self._on_finished)
         self.remove_work(claimed)
+        _record_end(started, applied.state.status, error=applied.state.error_code)
         _log_attempt(claimed, applied.state.status, started, error=applied.state.error_code)
         return applied
+
+    def _identity_attributes(self, claimed: ClaimedAttempt) -> dict[str, AttributeValue]:
+        attributes: dict[str, AttributeValue] = {
+            "main": True,
+            "run_id": str(claimed.run_id),
+            "attempt_id": str(claimed.attempt_id),
+            "attempt.number": claimed.number,
+            "attempt.generation": claimed.generation,
+            "recipe_id": claimed.recipe_id,
+            "recipe_version": claimed.recipe_version,
+            "attempt.inputs": len(claimed.input_upload_ids),
+            "queue_wait_ms": claimed.queue_wait_ms,
+        }
+        if self._user_hasher is not None:
+            attributes["user.hash"] = self._user_hasher.hash(claimed.owner_id)
+        return attributes
 
     def _drive(self, claimed: ClaimedAttempt) -> Applied:
         try:
@@ -392,9 +437,10 @@ class Coordinator:
     # 4. Desfecho -----------------------------------------------------------------------
 
     def finish(self, claimed: ClaimedAttempt, status: ExecutorStatus) -> Applied:
-        if status.oom_killed or status.timed_out:
-            # 1.6: memória estourada e os 10 min da tentativa são limite de recurso; repetir
-            # daria o mesmo resultado.
+        self._record_executor(claimed, status)
+        if status.oom_killed or status.timed_out or status.exit_code == EXIT_NO_SPACE:
+            # 1.6: memória estourada, disco cheio e os 10 min da tentativa são limite de
+            # recurso; repetir daria o mesmo resultado.
             return self._conclude(
                 claimed,
                 lambda _loaded: DeterministicFailure(
@@ -418,10 +464,23 @@ class Coordinator:
         except _StopRequested:
             return self.conclude_stop(claimed)
 
+    def _record_executor(self, claimed: ClaimedAttempt, status: ExecutorStatus) -> None:
+        attributes: dict[str, AttributeValue] = {
+            "executor.oom_killed": status.oom_killed,
+            "executor.timed_out": status.timed_out,
+            "executor.enospc": status.exit_code == EXIT_NO_SPACE,
+        }
+        if status.exit_code is not None:
+            attributes["executor.exit_code"] = status.exit_code
+        timings_path = self._runner.work_dir(claimed.attempt_id) / attempt_event.TIMINGS_FILE
+        attributes.update(attempt_event.read_executor_timings(timings_path))
+        attempt_event.record(attributes)
+
     def _package_and_publish(self, claimed: ClaimedAttempt) -> Applied:
         self.reach_phase(claimed, Phase.PACKAGING)
         out_dir = self._runner.work_dir(claimed.attempt_id) / "out"
         keeper = self._lease_keeper(claimed)
+        collect_started = time.monotonic()
         try:
             collected = collect_outputs(
                 out_dir,
@@ -444,14 +503,20 @@ class Coordinator:
         except (StorageError, OSError) as error:
             logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
+        attempt_event.record(
+            {"collect_ms": _elapsed_ms(collect_started), **_output_attributes(collected)}
+        )
         self.reach_phase(claimed, Phase.FINALIZING)
+        publish_started = time.monotonic()
         try:
-            return self.publish(claimed, collected, stored)
+            applied = self.publish(claimed, collected, stored)
         except ObjectNotAvailableError:
             # O dono excluiu uma entrada reaproveitada depois da gravação dos candidatos; a
             # retentativa a encontra `delete_requested` e grava a cópia (ADR 020).
             logger.warning("objeto reaproveitado indisponível", extra={"fields": _ids(claimed)})
             return self.fail_transiently(claimed)
+        attempt_event.record({"publish_ms": _elapsed_ms(publish_started)})
+        return applied
 
     def store_candidates(
         self, claimed: ClaimedAttempt, collected: Collected
@@ -590,6 +655,7 @@ class Coordinator:
         if isinstance(decision, Refused):
             raise LostFencing(f"parada não confirmada: {decision.reason}")
         reason = loaded.state.stop_reason
+        _record_stop(session, loaded, reason)
         return apply_transition(session, loaded, decision, attempt_error=reason)
 
     def _apply_event(self, session: Session, loaded: LoadedRun, event: Event) -> Applied:
@@ -654,6 +720,49 @@ def _ids(claimed: ClaimedAttempt, error: Exception | None = None) -> dict[str, o
     if error is not None:
         fields["error"] = str(error)
     return fields
+
+
+def _elapsed_ms(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
+
+
+def _output_attributes(collected: Collected) -> dict[str, AttributeValue]:
+    """Quantidade e bytes das saídas de conteúdo e rejeições; nunca os nomes."""
+    attributes: dict[str, AttributeValue] = {
+        "attempt.outputs": len(collected.outputs),
+        "attempt.output_bytes": sum(output.size for output in collected.outputs),
+        "attempt.rejected": collected.report.summary.rejected,
+    }
+    # Um atributo por código: a coleta só aceita códigos do catálogo fechado `ItemRejectionCode`,
+    # então a cardinalidade é a do catálogo.
+    codes = Counter(item.code for item in collected.report.items if item.code is not None)
+    for code, count in sorted(codes.items()):
+        attributes[f"attempt.rejected.{code.value}"] = count
+    return attributes
+
+
+def _record_stop(session: Session, loaded: LoadedRun, reason: ErrorCode | None) -> None:
+    """Razão da parada e, no cancelamento, a latência até esta confirmação (relógio do banco)."""
+    if reason is None:
+        return
+    attributes: dict[str, AttributeValue] = {"attempt.stop_reason": reason.value}
+    if reason is ErrorCode.CANCELED:
+        requested_at = session.execute(
+            select(run.c.cancel_requested_at).where(run.c.id == loaded.run_id)
+        ).scalar_one()
+        if requested_at is not None:
+            attributes["attempt.cancel_latency_ms"] = (loaded.now - requested_at) // _MILLISECOND
+    attempt_event.record(attributes)
+
+
+def _record_end(started: float, outcome: str, *, error: str | None) -> None:
+    attributes: dict[str, AttributeValue] = {
+        "attempt.outcome": outcome,
+        "duration_ms": _elapsed_ms(started),
+    }
+    if error is not None:
+        attributes["error.code"] = error
+    attempt_event.record(attributes)
 
 
 def _log_attempt(
