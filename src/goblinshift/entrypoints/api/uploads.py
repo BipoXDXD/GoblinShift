@@ -116,7 +116,9 @@ class ReceivedContent(BaseModel):
 
 class UploadDetails(BaseModel):
     id: UUID
-    name: str
+    name: str | None = Field(
+        description="Nulo 30 dias depois do envio, só em upload já excluído (retenção de 1.7)."
+    )
     size: int
     state: UploadState
     availability: Availability
@@ -235,6 +237,9 @@ def delete_upload(upload_id: UUID, principal: WriteFiles, session: DbSession) ->
 
 
 def _created(view: UploadView, request: Request) -> CreatedUpload:
+    if view.original_name is None:
+        # A intenção acabou de nascer com o nome; só a retenção o anula, 30 dias depois.
+        raise RuntimeError(f"upload {view.id} recém-criado sem nome")
     return CreatedUpload(
         id=view.id,
         name=view.original_name,
