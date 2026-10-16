@@ -15,8 +15,14 @@ override". A conta-alvo é o `user_id` do evento, como no bloqueio. Só números
 de dado pessoal, então a linha sai inteira aos 90 dias, sem anulação própria (1.7).
 
 O CHECK `audit_event_details_check` amarra os dois: o tipo novo sempre tem detalhe, como objeto, e
-os outros nunca. A auditoria guarda 90 dias de eventos, poucos o bastante para validar o CHECK de
-uma vez, sem `NOT VALID`.
+os outros nunca.
+
+Os dois CHECKs (o do tipo, recriado, e o de `details`) varrem a tabela sob `ACCESS EXCLUSIVE`, sem
+`NOT VALID` + `VALIDATE`, de propósito: `audit_event` só guarda 90 dias de eventos de quem tem
+credencial válida (a manutenção apaga o resto), poucos milhares de linhas numa VPS, e a varredura
+leva milissegundos. O `env.py` usa o `make_engine`, com `lock_timeout` de 2 s: se uma transação
+longa segurar a tabela, a migração falha alto em vez de enfileirar logins e requisições atrás do
+`ACCESS EXCLUSIVE`, e basta rodá-la de novo.
 
 O downgrade apaga os eventos do tipo novo, que o CHECK antigo recusaria, e depois a coluna.
 """

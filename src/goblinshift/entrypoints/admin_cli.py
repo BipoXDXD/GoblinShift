@@ -34,7 +34,7 @@ Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
 import argparse
 import re
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -51,13 +51,11 @@ from goblinshift.identity import (
     InvalidDisplayNameError,
     InvalidKeyLifetimeError,
     InvalidScopesError,
-    LimitChange,
     UnknownAccountError,
     block_account,
     create_admin_user,
     find_account,
     issue_key,
-    limits_changed_details,
     parse_scopes,
     record_audit_event,
     revoke_key,
@@ -72,13 +70,13 @@ from goblinshift.identity.accounts import (
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
+from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
     QuotaLimits,
     daily_usage,
     executor_time_ms,
     quota_override,
-    set_account_quota,
 )
 from goblinshift.runs.store import db_now
 
@@ -285,41 +283,16 @@ def _limit_value(text: str) -> int | None:
 
 
 def _set_limits(args: argparse.Namespace, context: _Context) -> int:
-    quota_given = {
-        name: getattr(args, name)
-        for name in ("runs_per_24h", "input_bytes_per_24h")
-        if getattr(args, name) is not _UNCHANGED
+    limits = {
+        name: getattr(args, name) for name in LIMIT_ITEMS if getattr(args, name) is not _UNCHANGED
     }
-    storage_given = args.storage_bytes is not _UNCHANGED
-    if not quota_given and not storage_given:
+    if not limits:
         return _fail(EXIT_USAGE, "nada a mudar: informe ao menos um limite")
     try:
         with unit_of_work(context.factory) as session:
             if find_account(session, args.user) is None:
                 return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-            changes: dict[str, LimitChange] = {}
-            if quota_given:
-                current = quota_override(session, args.user)
-                previous = {
-                    "runs_per_24h": current.runs_per_24h,
-                    "input_bytes_per_24h": current.input_bytes_per_24h,
-                }
-                set_account_quota(session, args.user, **{**previous, **quota_given})
-                changes |= {
-                    name: LimitChange(previous[name], new) for name, new in quota_given.items()
-                }
-            if storage_given:
-                old_max = capacity.set_account_storage_max(session, args.user, args.storage_bytes)
-                new_max = capacity.usage(session, args.user).storage_max_bytes
-                changes["storage_bytes"] = LimitChange(old_max, new_max)
-            # Na mesma transação: a mudança e o seu registro entram juntos ou nenhum dos dois.
-            _audit(
-                session,
-                AuditEventType.ACCOUNT_LIMITS_CHANGED,
-                args.user,
-                datetime.now(UTC),
-                details=limits_changed_details(changes),
-            )
+            change_account_limits(session, args.user, limits, datetime.now(UTC))
     except capacity.StorageBelowReservedError as error:
         return _fail(EXIT_USAGE, str(error))
     print(f"limites da conta {args.user} atualizados", file=sys.stderr)
@@ -370,23 +343,10 @@ def _listing_line(account: AccountListing) -> str:
     return "\t".join(fields)
 
 
-def _audit(
-    session: Session,
-    event: AuditEventType,
-    user_id: UUID,
-    now: datetime,
-    *,
-    details: Mapping[str, object] | None = None,
-) -> None:
+def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime) -> None:
     # Ação do administrador no servidor: não há IP de cliente a registrar.
     record_audit_event(
-        session,
-        event=event,
-        user_id=user_id,
-        ip=None,
-        outcome=AuditOutcome.SUCCESS,
-        now=now,
-        details=details,
+        session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
     )
 
 
