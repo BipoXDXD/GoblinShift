@@ -23,8 +23,8 @@ interface KindLook {
   readonly dismissible: boolean;
 }
 
-// Latão (aviso) para encerramento e mudança, brasa (perigo) para incidente (ADR 031).
-const WARNING_BAND = "border-accent-band bg-warning-bg text-warning-fg";
+// Âmbar (aviso) para encerramento e mudança, brasa (perigo) para incidente (ADR 031).
+const WARNING_BAND = "border-warning-accent bg-warning-bg text-warning-fg";
 const DANGER_BAND = "border-danger-accent bg-danger-bg text-danger-fg";
 
 const LOOKS: Record<NoticeKind, KindLook> = {

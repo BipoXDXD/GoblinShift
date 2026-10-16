@@ -23,7 +23,7 @@ Refinar o sistema visual que já existe em `web/src/styles/tokens.css`, sem rede
 
 Ficam como estão, por decisão anterior ou desta rodada:
 
-- paleta musgo/latão/pedra/brasa em OKLCH;
+- paleta musgo/latão/pedra/brasa em OKLCH (substituída depois pela Taverna escura, ver nota abaixo);
 - cinzas quentes;
 - raio único de 8 px;
 - fontes Bricolage Grotesque e Atkinson Hyperlegible Next (variável, 200–800);
@@ -32,6 +32,8 @@ Ficam como estão, por decisão anterior ou desta rodada:
 - alvo de toque de 44 px;
 - escala de espaço atual (4–128 px);
 - "Carregar mais" por cursor no histórico.
+
+> **Nota (2026-10-15, depois desta spec):** a paleta musgo/latão/pedra foi substituída pela "Taverna escura" ([ADR 032](../../adr/032-paleta-taverna-escura.md)), por decisão do usuário. Onde esta spec diz musgo, leia cobre (a cor do que se clica); latão vira âmbar (foco, aviso e seleção); pedra vira madeira (neutros). A pátina foi para o matiz 190° e a regra "papel de estado nunca na cor interativa" passa a recusar o cobre. O restante das decisões vale como está.
 
 ## Decisões
 

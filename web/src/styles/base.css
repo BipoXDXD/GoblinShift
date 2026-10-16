@@ -29,7 +29,7 @@
     text-decoration-thickness: 2px;
   }
 
-  /* Foco: um anel só, em latão, com 3:1 contra todas as superfícies (contrast.test.ts). */
+  /* Foco: um anel só, em âmbar, com 3:1 contra todas as superfícies (contrast.test.ts). */
   :focus-visible {
     outline: 3px solid var(--ring);
     outline-offset: 2px;
