@@ -108,9 +108,14 @@ def test_sucesso_com_rejeicao_grava_saidas_relatorio_e_progresso(tmp_path: Path)
         "clientes.csv",
         "csv-janitor.zip",
         "manifest.json",
+        "previews",
         "report.json",
     ]
     assert (work / "out" / "clientes.csv").read_bytes() == VALID
+    # A amostra fica fora do pacote: o ZIP tem só o conteúdo e os dois relatórios.
+    assert (work / "out" / "previews" / "clientes.csv").read_bytes() == VALID
+    with zipfile.ZipFile(work / "out" / "csv-janitor.zip") as package:
+        assert package.namelist() == ["clientes.csv", "manifest.json", "report.json"]
     report = json.loads((work / "out" / "report.json").read_text(encoding="utf-8"))
     assert report == {
         "schema_version": 1,
@@ -132,6 +137,8 @@ def test_sucesso_com_rejeicao_grava_saidas_relatorio_e_progresso(tmp_path: Path)
                 },
                 "details": {},
                 "warnings": [],
+                "previews": [{"path": "previews/clientes.csv", "of": "clientes.csv"}],
+                "notices": [],
             },
             {
                 "position": 1,
