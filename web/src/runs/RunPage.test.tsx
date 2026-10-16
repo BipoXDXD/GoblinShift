@@ -401,6 +401,7 @@ describe("pré-visualização dos resultados", () => {
   it.each([
     ["expired", "Pré-visualização indisponível: o arquivo expirou."],
     ["deleted", "Pré-visualização indisponível: o arquivo foi excluído."],
+    ["missing", "Pré-visualização indisponível: o arquivo se perdeu."],
   ])("indisponível (%s) diz o motivo sem pedir o preview", async (availability, message) => {
     const { api } = setupPreview({
       fileName: "clientes.csv",
