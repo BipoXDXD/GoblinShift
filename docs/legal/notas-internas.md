@@ -46,6 +46,11 @@ Texto que abria o arquivo público até sair do build:
 - **J-20**, procedimento para abuso sexual infantil e conteúdo ilegal grave: autoridades,
   preservação, prazos e a expiração de 48 h (item 7). Este procedimento não é escrito por IA.
 - **J-21**, foro em relação de consumo (item 13).
+- **Direitos sobre a arte e a marca** (item 9; J-13), sem id novo: o que fica para advogado está
+  em `docs/art/LICENSE-ART.md`, seção "Termos dos fornecedores". Cadeia de cessão do logo
+  (OpenAI, Tripo, usuário); saída de IA possivelmente não protegível e não exclusiva, o que afeta o
+  registro da marca; "Paid User" indefinido nos termos da Tripo; retroatividade do plano do Rodin;
+  indenizações e limites de responsabilidade dos fornecedores; jurisdição estrangeira.
 
 ### Marcações a definir: id e texto original
 
