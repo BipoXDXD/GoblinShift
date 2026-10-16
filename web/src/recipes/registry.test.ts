@@ -14,9 +14,12 @@ describe("findRecipe", () => {
     expect(findRecipe(id)?.title).toBe(title);
   });
 
-  it.each(["receita-inexistente", "", "__proto__", "toString", "constructor"])("não encontra %j", (id) => {
-    expect(findRecipe(id)).toBeNull();
-  });
+  it.each(["receita-inexistente", "", "__proto__", "toString", "constructor"])(
+    "não encontra %j",
+    (id) => {
+      expect(findRecipe(id)).toBeNull();
+    },
+  );
 
   it("Media Mill aceita só os contêineres de vídeo da allowlist", () => {
     expect(findRecipe("media-mill")?.accept).toBe(
