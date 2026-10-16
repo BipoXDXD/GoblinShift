@@ -61,14 +61,16 @@ server {
     # Teto padrão dos comandos JSON (docs/GoblinShiftPlan.md, 1.7).
     client_max_body_size 64k;
 
-    # Compressão só do que é texto (o text/html entra sempre). Imagens, GLB, fontes e ZIP já
-    # chegam comprimidos. `gzip_proxied any`: a borda acrescenta Via aos pedidos, e sem isto nada
-    # atrás dela seria comprimido; vale também para o JSON da API.
+    # Compressão só do que é texto estático (o text/html entra sempre). Imagens, GLB, fontes e ZIP
+    # já chegam comprimidos. O JSON da API fica de fora: ele leva segredos (a chave de API mostrada
+    # uma vez) ao lado de texto que o cliente controla, a receita do BREACH, e é pequeno.
+    # `gzip_proxied any`: a borda acrescenta Via aos pedidos, e sem isto nada atrás dela seria
+    # comprimido.
     gzip on;
     gzip_vary on;
     gzip_proxied any;
     gzip_comp_level 5;
-    gzip_types text/css application/javascript application/json application/problem+json image/svg+xml application/manifest+json;
+    gzip_types text/css application/javascript image/svg+xml application/manifest+json;
 
     # SPA: arquivo existente ou o index.html, que o React Router resolve no navegador. Sem
     # cache: um deploy novo vale na próxima navegação.
