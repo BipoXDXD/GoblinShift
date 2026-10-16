@@ -55,6 +55,20 @@ class DownloadTicket:
     file_name: str
 
 
+def generic_file_name(role: ArtifactRole, artifact_id: uuid.UUID) -> str:
+    """Nome que substitui o nome de saída anulado pela retenção de 30 dias (1.7).
+
+    `<papel>-<id do artefato>`: só ASCII, sem caminho nem extensão, único por artefato (portanto
+    por Run) e sem nada do conteúdo do usuário. A migração 0015 usa a mesma fórmula no downgrade.
+    """
+    return f"{role.value}-{artifact_id}"
+
+
+def file_name_of(name: str | None, role: ArtifactRole, artifact_id: uuid.UUID) -> str:
+    """O nome gravado, ou o genérico quando a retenção já o anulou."""
+    return name if name is not None else generic_file_name(role, artifact_id)
+
+
 def create_candidate_object(
     session: Session,
     owner_id: uuid.UUID,
@@ -231,8 +245,16 @@ def open_for_download(
     except ObjectNotAvailableError:
         # Artefato válido sobre objeto ausente (`missing`): para o dono, o conteúdo sumiu.
         raise ArtifactGoneError from None
+    # O CHECK `artifact_name_until_deleted` só deixa o nome nulo em artefato excluído, que não
+    # chega aqui; `file_name_of` mantém o tipo honesto sem depender disso.
     return DownloadTicket(
-        holder_id, artifact_id, storage_key, size_bytes, sha256, ArtifactRole(role), file_name
+        holder_id,
+        artifact_id,
+        storage_key,
+        size_bytes,
+        sha256,
+        ArtifactRole(role),
+        file_name_of(file_name, ArtifactRole(role), artifact_id),
     )
 
 
