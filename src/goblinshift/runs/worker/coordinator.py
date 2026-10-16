@@ -230,9 +230,13 @@ class Coordinator:
         }
         with _create_for_executor(work_dir / "job.json") as target:
             target.write(json.dumps(job, ensure_ascii=False).encode("utf-8"))
-        # Só o manifesto usa a imagem; num arquivo à parte, o executor anterior à fatia 5, que
-        # recusa chaves desconhecidas no job.json, continua aceitando o job (ADR 021).
-        context = {"executor_image": claimed.executor_image}
+        # Num arquivo à parte, o executor anterior à fatia 5, que recusa chaves desconhecidas no
+        # job.json, continua aceitando o job (ADR 021). Os uploads, na ordem das posições, são
+        # como o select do PDF Press cita as páginas (ADR 035); executores anteriores os ignoram.
+        context = {
+            "executor_image": claimed.executor_image,
+            "input_upload_ids": [str(upload_id) for upload_id in claimed.input_upload_ids],
+        }
         with _create_for_executor(work_dir / "context.json") as target:
             target.write(json.dumps(context, ensure_ascii=False).encode("utf-8"))
 
