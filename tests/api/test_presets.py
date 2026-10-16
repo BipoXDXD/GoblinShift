@@ -181,6 +181,41 @@ def test_nome_repetido_responde_409(client: TestClient, factory: sessionmaker[Se
     assert count_presets(factory) == 1
 
 
+@pytest.mark.parametrize("repeated", ["Mensal ", " Mensal", "  Mensal  "])
+def test_nome_que_so_difere_por_espacos_nas_pontas_responde_409(
+    client: TestClient, factory: sessionmaker[Session], repeated: str
+) -> None:
+    account = Account(factory)
+    create(client, account, "Mensal")
+
+    response = client.post(PRESETS, json=preset_body(repeated), headers=account.headers)
+
+    assert_problem(response, 409, "STATE_CONFLICT")
+    assert count_presets(factory) == 1
+
+
+def test_substituir_por_nome_ocupado_com_espacos_nas_pontas_responde_409_sem_mudar(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    create(client, account, "Ocupado")
+    created = create(client, account, "Livre")
+
+    response = put(client, account, created["id"], preset_body(" Ocupado "), '"1"')
+
+    assert_problem(response, 409, "STATE_CONFLICT")
+    assert stored(factory, created["id"]) == {"name": "Livre", "revision": 1, "parameters": {}}
+
+
+def test_nome_e_gravado_sem_os_espacos_das_pontas(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    created = create(client, Account(factory), "  Mensal  ")
+
+    assert created["name"] == "Mensal"
+    assert stored(factory, created["id"])["name"] == "Mensal"  # type: ignore[index]
+
+
 def test_centesimo_primeiro_preset_responde_409(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -335,11 +370,17 @@ def test_put_vencido_com_nome_em_conflito_responde_412(
     account = Account(factory)
     create(client, account, "Ocupado")
     created = create(client, account, "Livre")
-    put(client, account, created["id"], preset_body("Renomeado"), '"1"')
+    renamed = put(client, account, created["id"], preset_body("Renomeado"), '"1"')
+    assert renamed.status_code == 200, renamed.text
 
     response = put(client, account, created["id"], preset_body("Ocupado"), '"1"')
 
     assert_problem(response, 412, "PRECONDITION_FAILED")
+    assert stored(factory, created["id"]) == {
+        "name": "Renomeado",
+        "revision": 2,
+        "parameters": {},
+    }
 
 
 def test_dois_put_com_o_mesmo_etag_o_segundo_recebe_412(
