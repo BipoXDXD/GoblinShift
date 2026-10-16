@@ -24,8 +24,6 @@ import type { Run, RunStatus } from "./api";
 import { CancelRun } from "./CancelRun";
 import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
-import { ThumbnailPreviews } from "./ThumbnailPreviews";
-import { thumbnailArtifacts } from "./thumbnails";
 import { ResultPreview } from "./preview/ResultPreview";
 import { ResultsAvailability } from "./ResultsAvailability";
 import { RunItems } from "./RunItems";
@@ -82,9 +80,7 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
           {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
-      {run !== undefined && SUCCEEDED.has(run.status) && (
-        <RunResults runId={run.id} recipeId={run.recipe_id} />
-      )}
+      {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
       {run !== undefined && (
         <div className="max-md:order-2">
           <NewRunLink recipeId={run.recipe_id} />
@@ -197,12 +193,7 @@ function flavorOf(status: RunStatus): string | null {
   return SUCCEEDED.has(status) ? T.flavor.succeeded : null;
 }
 
-interface RunResultsProps {
-  readonly runId: string;
-  readonly recipeId: string;
-}
-
-function RunResults({ runId, recipeId }: RunResultsProps): ReactElement {
+function RunResults({ runId }: { readonly runId: string }): ReactElement {
   const client = useApiClient();
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -232,10 +223,7 @@ function RunResults({ runId, recipeId }: RunResultsProps): ReactElement {
           results={results.data}
           onDeleted={() => heading.current?.focus()}
         >
-          <div className="flex flex-col gap-8">
-            {recipeId === MEDIA_MILL && <MediaMillPreviews results={results.data} />}
-            <ResultFiles results={results.data} />
-          </div>
+          <ResultFiles results={results.data} />
         </ResultsAvailability>
       )}
     </Card>
@@ -311,14 +299,6 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
       )}
     </div>
   );
-}
-
-const MEDIA_MILL = "media-mill";
-
-/** As miniaturas que o Media Mill gerou, como preview; o resto continua só para baixar. */
-function MediaMillPreviews({ results }: { readonly results: RunResultsData }): ReactElement | null {
-  const thumbnails = results.published ? thumbnailArtifacts(results.artifacts) : [];
-  return thumbnails.length === 0 ? null : <ThumbnailPreviews thumbnails={thumbnails} />;
 }
 
 /** O primeiro preview de cada saída, pelo id dela; os demais papéis não têm origem. */

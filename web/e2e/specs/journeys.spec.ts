@@ -126,9 +126,14 @@ test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ve
     },
     MP4_FILES.map((file) => file.name),
   );
+  // Pelo preview genérico (ADR 037): `<img>` na rota de preview, nunca fetch → Blob.
   await expect
-    .poll(() => execucao.thumbnails())
-    .toEqual(["Miniatura ferias-10pct.jpg", "Miniatura aniversario-10pct.jpg"]);
+    .poll(() => execucao.imagePreviews())
+    .toEqual([
+      "Pré-visualização de thumbnails/ferias-10pct.jpg",
+      "Pré-visualização de thumbnails/aniversario-10pct.jpg",
+    ]);
+  await expect(page.locator("img[src^='blob:']")).toHaveCount(0);
 
   await expectDownload(page, execucao, "media-mill.zip");
 });

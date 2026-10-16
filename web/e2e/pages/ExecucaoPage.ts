@@ -19,9 +19,9 @@ export class ExecucaoPage {
     await expect(this.#page.getByText(status, { exact: true })).toBeVisible({ timeout: 10_000 });
   }
 
-  /** Miniaturas mostradas como preview (Media Mill), já carregadas e decodificadas. */
-  async thumbnails(): Promise<string[]> {
-    const previews = this.#page.getByRole("region", { name: "Miniaturas" }).getByRole("img");
+  /** Imagens de preview das saídas, já carregadas e decodificadas, pelo texto alternativo. */
+  async imagePreviews(): Promise<string[]> {
+    const previews = this.#page.getByRole("img", { name: /^Pré-visualização de / });
     await expect(previews.first()).toBeVisible();
     return previews.evaluateAll((images) =>
       images

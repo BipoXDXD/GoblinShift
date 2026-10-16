@@ -65,7 +65,7 @@ export function interpretResponse<T>(
 }
 
 /** `ApiError` de uma resposta fora de 2xx, com o problem+json do catálogo e o Retry-After. */
-export function errorFromResponse(raw: RawApiResponse, nowMs: number): ApiError {
+function errorFromResponse(raw: RawApiResponse, nowMs: number): ApiError {
   const retryAfterMs = parseRetryAfterMs(raw.header("Retry-After"), nowMs);
   return new ApiError(failureFrom(raw, parseJsonBody(raw.text), retryAfterMs));
 }

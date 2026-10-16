@@ -525,17 +525,17 @@ class FakeState {
   /** Pacote `<receita>.zip` (nome da API real, packaging/spec.py) e um arquivo por entrada. */
   private publishArtifacts(stored: StoredRun): ArtifactReference[] {
     const recipeId = stored.run.recipe_id;
-    const outputs = stored.inputIds.flatMap((uploadId) => {
+    const outputs: SeededOutput[] = stored.inputIds.flatMap((uploadId) => {
       const upload = this.uploads.get(uploadId);
       return upload?.content ? [{ name: upload.name, body: upload.content }] : [];
     });
-    const files = [
-      { role: "package" as const, name: `${recipeId}.zip`, body: EMPTY_ZIP },
+    const files: (SeededOutput & { readonly role: "package" | "output" })[] = [
+      { role: "package", name: `${recipeId}.zip`, body: EMPTY_ZIP },
       ...(recipeId === "media-mill" ? outputs.flatMap(mediaMillOutputs) : outputs).map(
         (output) => ({ role: "output" as const, ...output }),
       ),
     ];
-    return files.map(({ role, name, body }) => {
+    return files.flatMap(({ role, name, body, preview }) => {
       const artifactId = randomUUID();
       this.artifactRuns.set(artifactId, { runId: stored.run.id, role });
       writeArtifact(this.#artifactsDir, artifactId, {
@@ -543,14 +543,17 @@ class FakeState {
         body,
         contentType: role === "package" ? "application/zip" : "application/octet-stream",
       });
-      return {
+      const reference: ArtifactReference = {
         artifact_id: artifactId,
         logical_name: name,
         role,
         file_name: name,
-        availability: "available" as const,
+        availability: "available",
         source_artifact_id: null,
       };
+      return preview === undefined
+        ? [reference]
+        : [reference, this.publishPreview(artifactId, preview)];
     });
   }
 
@@ -571,20 +574,23 @@ class FakeState {
         availability: "available",
         source_artifact_id: null,
       };
-      if (output.preview === undefined) {
-        return [reference];
-      }
-      this.previews.set(artifactId, output.preview);
-      const preview: ArtifactReference = {
-        artifact_id: randomUUID(),
-        logical_name: `previews/${output.preview.name}`,
-        role: "preview",
-        file_name: output.preview.name,
-        availability: "available",
-        source_artifact_id: artifactId,
-      };
-      return [reference, preview];
+      return output.preview === undefined
+        ? [reference]
+        : [reference, this.publishPreview(artifactId, output.preview)];
     });
+  }
+
+  /** Preview de uma saída, com papel `preview` e o id da saída de origem (ADR 037). */
+  private publishPreview(sourceId: string, preview: SeededPreview): ArtifactReference {
+    this.previews.set(sourceId, preview);
+    return {
+      artifact_id: randomUUID(),
+      logical_name: `previews/${preview.name}`,
+      role: "preview",
+      file_name: preview.name,
+      availability: "available",
+      source_artifact_id: sourceId,
+    };
   }
 
   /** GET /artifacts/{id}/preview: recebe o id da saída; sem preview, 404 como na API. */
@@ -606,12 +612,20 @@ class FakeState {
   }
 }
 
-/** Media Mill: um áudio e uma miniatura por vídeo, nos grupos de `out/` da API real (ADR 036). */
-function mediaMillOutputs({ name }: { readonly name: string }): { name: string; body: Buffer }[] {
+/**
+ * Media Mill: um áudio e uma miniatura por vídeo, nos grupos de `out/` da API real (ADR 036); a
+ * miniatura é também o preview dela (ADR 037).
+ */
+function mediaMillOutputs({ name }: { readonly name: string }): SeededOutput[] {
   const stem = name.replace(/\.[^.]*$/, "");
+  const thumbnail = `${stem}-10pct.jpg`;
   return [
     { name: `audio/${stem}.wav`, body: Buffer.from("RIFF") },
-    { name: `thumbnails/${stem}-10pct.jpg`, body: THUMBNAIL_JPEG },
+    {
+      name: `thumbnails/${thumbnail}`,
+      body: THUMBNAIL_JPEG,
+      preview: { name: thumbnail, body: THUMBNAIL_JPEG, contentType: "image/jpeg" },
+    },
   ];
 }
 
