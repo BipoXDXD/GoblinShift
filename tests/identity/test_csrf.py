@@ -10,7 +10,12 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from goblinshift.identity import cross_site_request, csrf_token_matches, issue_csrf_token
+from goblinshift.identity import (
+    cross_site_request,
+    csrf_pair_matches,
+    csrf_token_matches,
+    issue_csrf_token,
+)
 
 KEY = b"k" * 32
 OTHER_KEY = b"q" * 32
@@ -136,3 +141,35 @@ def test_mesma_origem_nao_e_cross_site(sec_fetch_site: str | None, origin: str |
 )
 def test_outra_origem_e_cross_site(sec_fetch_site: str | None, origin: str | None) -> None:
     assert cross_site_request(sec_fetch_site, origin, ORIGIN)
+
+
+# --- Par sem sessão (POST /auth/logout sem sessão válida) -------------------------------------
+
+
+def test_par_igual_e_bem_formado_confere_sem_sessao() -> None:
+    token = issue_csrf_token(KEY, SESSION_ID)
+
+    assert csrf_pair_matches(token, token)
+
+
+@pytest.mark.parametrize(
+    ("cookie", "header"),
+    [
+        pytest.param(None, KNOWN_TOKEN, id="sem-cookie"),
+        pytest.param(KNOWN_TOKEN, None, id="sem-header"),
+        pytest.param(None, None, id="sem-os-dois"),
+        pytest.param(KNOWN_TOKEN, "B" * 43 + KNOWN_TOKEN[43:], id="divergente"),
+        pytest.param("x", "x", id="fora-do-formato"),
+        pytest.param(KNOWN_TOKEN + "\n", KNOWN_TOKEN + "\n", id="quebra-de-linha"),
+        pytest.param(KNOWN_TOKEN, KNOWN_TOKEN[:-1] + "é", id="header-nao-ascii"),
+    ],
+)
+def test_par_ausente_divergente_ou_malformado_nao_confere(
+    cookie: str | None, header: str | None
+) -> None:
+    assert not csrf_pair_matches(cookie, header)
+
+
+@given(st.text(max_size=200), st.text(max_size=200))
+def test_par_qualquer_nunca_levanta(cookie: str, header: str) -> None:
+    csrf_pair_matches(cookie, header)

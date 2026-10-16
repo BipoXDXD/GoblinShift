@@ -26,7 +26,14 @@ const SETTINGS: CsvJanitorSettings = {
 function setup(errors: ReadonlyMap<string, string> = new Map()) {
   const onDraftChange = vi.fn<(draft: RecipeDraft<"csv-janitor">) => void>();
   const user = userEvent.setup();
-  render(<CsvJanitorFields settings={SETTINGS} errors={errors} onDraftChange={onDraftChange} />);
+  render(
+    <CsvJanitorFields
+      settings={SETTINGS}
+      errors={errors}
+      onDraftChange={onDraftChange}
+      inputs={[]}
+    />,
+  );
   const lastDraft = (): RecipeDraft<"csv-janitor"> => {
     const draft = onDraftChange.mock.lastCall?.[0];
     if (draft === undefined) {

@@ -1,6 +1,6 @@
 # Aviso de Privacidade do GoblinShift
 
-- **Versão:** v2-rascunho
+- **Versão:** v3-rascunho
 - **Vigência:** 2026-10-15
 - **Endereço do serviço:** https://goblinshift.dev
 
@@ -27,8 +27,9 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
   momento.
 - Usamos só **cookies estritamente necessários**. Não há publicidade, rastreadores nem
   analytics de terceiros.
-- O servidor fica no Brasil. A única cópia que sai do país é o **backup cifrado do banco de
-  dados**, guardado nos Estados Unidos por 30 dias.
+- O servidor fica no Brasil. Ficam fora do país o **backup cifrado do banco de dados**, guardado
+  nos Estados Unidos por 30 dias, e, se você nos escrever, a **mensagem de e-mail**, que passa
+  pelo ImprovMX e chega a uma caixa de e-mail do Google (Gmail), em local que não controlamos.
 
 ## 3. Que dados tratamos
 
@@ -110,6 +111,9 @@ para responder e tratar o seu pedido, e não os juntamos à sua conta: como não
 na conta, não temos como ligar uma mensagem a uma conta, a não ser pelo que você mesmo
 informar. Guardamos a conversa por 12 meses depois do fim dela.
 
+Esses endereços não são caixas de correio próprias: o ImprovMX recebe a mensagem e a encaminha
+para uma caixa de e-mail do Google (Gmail) do controlador, onde ela fica guardada (item 6).
+
 ## 4. Para que usamos e com que base legal
 
 | Finalidade | Dados | Base legal (LGPD, art. 7º) |
@@ -166,7 +170,8 @@ apenas no necessário para a sua função.
 | **GitHub** | Provedor de login (se você entra com GitHub) | O GitHub sabe que você entrou no GoblinShift; nos devolve o `id` e o nome de usuário públicos | Conforme a política do GitHub |
 | **GitHub (Actions)** | Teste mensal de restauração do backup | Uma vez por mês, a cópia mais recente do banco é decifrada e restaurada num servidor temporário do GitHub Actions, para provar que o backup funciona; o servidor é descartado ao fim | Infraestrutura do GitHub, fora do controle de localização do GoblinShift [[A DEFINIR: confirmar localização e mencionar como transferência internacional]] |
 | **Backblaze (B2)** | Armazenamento do backup do banco de dados | Cópia diária do banco, **cifrada antes de sair do servidor**; o Backblaze não tem a chave para decifrá-la | Estados Unidos |
-| **Provedor de e-mail** | Recebe e guarda as mensagens enviadas aos nossos endereços | O que você nos escrever (item 3.6) | [[A DEFINIR: provedor e local]] |
+| **ImprovMX** | Encaminhamento dos e-mails enviados a contato@, abuso@ e privacidade@goblinshift.dev para a nossa caixa de entrada | O que você nos escrever (item 3.6): seu endereço de e-mail, a mensagem e os anexos, enquanto a mensagem é encaminhada | Conforme a política do ImprovMX; fora do controle de localização do GoblinShift |
+| **Google (Gmail)** | Caixa de entrada que recebe e guarda as mensagens encaminhadas | O que você nos escrever (item 3.6) | Conforme a política do Google; fora do controle de localização do GoblinShift |
 
 A telemetria fica no próprio servidor, sem envio a terceiros. O serviço de monitoramento do
 backup (healthchecks.io) recebe só um sinal de "backup feito" ou "falhou", sem dados pessoais.
@@ -176,13 +181,16 @@ de conteúdo de abuso sexual infantil (item 7 dos Termos de Uso).
 
 ## 7. Transferência internacional
 
-O servidor principal fica no Brasil. Saem do país:
+O servidor principal fica no Brasil. Saem do país, ou podem sair:
 
 1. **O backup do banco de dados**, guardado no Backblaze B2, nos Estados Unidos, por 30 dias. Ele
    é cifrado no nosso servidor antes do envio, com uma chave cuja parte privada não fica nem no
    servidor nem no Backblaze; a chave que o servidor usa para enviar só pode gravar, não pode
    ler nem apagar backups. O banco contém os dados das seções 3.1 a 3.3 (não contém arquivos).
 2. **A restauração mensal de teste** desse backup, feita no GitHub Actions (item 6).
+3. **As mensagens que você nos envia por e-mail** (item 3.6), que passam pelo ImprovMX e ficam
+   numa caixa de e-mail do Google (Gmail). Não controlamos em que país esses dois fornecedores
+   tratam a mensagem.
 
 [[A DEFINIR: mecanismo de transferência do art. 33 da LGPD (por exemplo,
 cláusulas-padrão contratuais aprovadas pela ANPD, ou outro) para o Backblaze e para o GitHub
@@ -266,3 +274,4 @@ texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](htt
 |---|---|---|
 | `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
 | `v2-rascunho` | 2026-10-15 | Identificação do controlador; domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |
+| `v3-rascunho` | 2026-10-15 | Provedor dos endereços de e-mail identificado: ImprovMX (encaminhamento) e Google/Gmail (caixa de entrada), nos itens 2, 3.6, 6 e 7 |

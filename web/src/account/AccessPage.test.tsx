@@ -270,6 +270,15 @@ describe("Acesso: chaves de API", () => {
     expect(within(list).getByRole("button", { name: "Revogar a chave gsk_ativa" })).toBeVisible();
   });
 
+  it("a seção de chaves leva ao guia da API", async () => {
+    setup();
+
+    const keys = await section("Chaves de API");
+    expect(
+      within(keys).getByRole("link", { name: "Como usar a chave: guia da API" }),
+    ).toHaveAttribute("href", "/acesso/guia-da-api");
+  });
+
   it("revogar pede confirmação; cancelar não chama a API", async () => {
     const { api, user } = setup({
       "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
