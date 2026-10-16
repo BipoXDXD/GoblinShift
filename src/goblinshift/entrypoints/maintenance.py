@@ -2,8 +2,10 @@
 
 Um ciclo a cada `GS_MAINTENANCE_INTERVAL_S` (30 s): o de execuções e arquivos (`Maintenance`) e o
 de contas (`AccountJobs`: purga das contas em exclusão, retenção da identidade, 1.8, e limpeza das
-janelas do limite de requisições, ADR 028). Cada ciclo é uma unidade de trabalho com um evento de
-log estruturado; a falha de um ciclo é registrada e o seguinte tenta de novo. Os lotes usam
+janelas do limite de requisições, ADR 028). Cada volta é um span `maintenance.cycle` com
+`main = true` (3.7), com as contagens dos dois ciclos, que os alertas de causa de
+`deploy/openobserve` leem; cada ciclo também registra seu evento de log. A falha de um ciclo é
+registrada e o seguinte tenta de novo. Os lotes usam
 `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
 SIGTERM e SIGINT terminam o ciclo em andamento e saem.
@@ -13,12 +15,13 @@ import logging
 import signal
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import FrameType
 from uuid import UUID
 
+from opentelemetry.trace import NoOpTracer, Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
@@ -28,7 +31,7 @@ from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import configure_logging
+from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
 from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.worker.runner import Runner
@@ -39,6 +42,10 @@ EXIT_OK = 0
 EXIT_CONFIGURATION = 2
 
 type _Clock = Callable[[], datetime]
+type Cycle = tuple[str, Callable[[], Mapping[str, int]]]
+
+CYCLE_SPAN = "maintenance.cycle"
+_ATTRIBUTE_PREFIX = "maintenance."
 
 
 def main() -> int:
@@ -68,6 +75,8 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     )
     engine = make_engine(batch_settings)
     factory = make_session_factory(engine)
+    provider = make_tracer_provider(settings, "goblinshift-maintenance")
+    tracer: Tracer = provider.get_tracer(__name__) if provider is not None else NoOpTracer()
     try:
         with run_finished_reporter(settings, factory, "goblinshift-maintenance") as finished:
             maintenance = Maintenance(
@@ -75,24 +84,47 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             )
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")
+            cycles: tuple[Cycle, ...] = (
+                ("execuções", maintenance.run_cycle),
+                ("contas", account_jobs.run_cycle),
+            )
             while not shutdown.is_set():
-                # Ciclos independentes: a falha de um não impede o outro.
-                for name, cycle in (
-                    ("execuções", maintenance.run_cycle),
-                    ("contas", account_jobs.run_cycle),
-                ):
-                    try:
-                        cycle()
-                    except Exception:
-                        # Fronteira do processo: o ciclo seguinte recomeça do banco, sem estado
-                        # em memória.
-                        logger.exception(
-                            "ciclo de manutenção falhou", extra={"fields": {"cycle": name}}
-                        )
+                run_cycles(tracer, cycles)
                 shutdown.wait(settings.maintenance_interval_s)
     finally:
         engine.dispose()
+        if provider is not None:
+            provider.shutdown()
     logger.info("manutenção encerrada")
+
+
+def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
+    """Uma volta: roda os ciclos em sequência dentro de um span `maintenance.cycle`.
+
+    Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
+    com o prefixo `maintenance.`, e quantos falharam; a mensagem da exceção fica só no log, porque
+    pode trazer valores do banco (3.7).
+    """
+    started = time.monotonic()
+    with tracer.start_as_current_span(
+        CYCLE_SPAN, record_exception=False, set_status_on_exception=False
+    ) as span:
+        failed = 0
+        for name, cycle in cycles:
+            try:
+                counts = cycle()
+            except Exception:
+                # Fronteira do processo: o ciclo seguinte recomeça do banco, sem estado em memória.
+                logger.exception("ciclo de manutenção falhou", extra={"fields": {"cycle": name}})
+                failed += 1
+                continue
+            for key, value in counts.items():
+                span.set_attribute(f"{_ATTRIBUTE_PREFIX}{key}", value)
+        span.set_attribute("main", True)
+        span.set_attribute(f"{_ATTRIBUTE_PREFIX}failed_cycles", failed)
+        span.set_attribute("duration_ms", round((time.monotonic() - started) * 1000))
+        if failed:
+            span.set_status(Status(StatusCode.ERROR, "ciclo de manutenção falhou"))
 
 
 @dataclass(frozen=True)
