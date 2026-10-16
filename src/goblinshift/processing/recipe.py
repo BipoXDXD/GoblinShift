@@ -54,6 +54,8 @@ class ItemWarningCode(StrEnum):
     CSV_ALL_RECORDS_FILTERED = "CSV_ALL_RECORDS_FILTERED"
     CSV_FORMULA_CELLS = "CSV_FORMULA_CELLS"
     CSV_FORMULA_HEADER = "CSV_FORMULA_HEADER"
+    # PDF Press: nenhuma página da entrada entrou na seleção.
+    INPUT_NOT_SELECTED = "INPUT_NOT_SELECTED"
 
 
 class ItemNoticeCode(StrEnum):

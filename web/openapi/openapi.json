@@ -2068,6 +2068,81 @@
                           "parameters"
                         ],
                         "title": "downloads-detox v1"
+                      },
+                      {
+                        "properties": {
+                          "recipe_id": {
+                            "const": "pdf-press"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "properties": {
+                              "operation": {
+                                "type": "string",
+                                "enum": [
+                                  "merge",
+                                  "split",
+                                  "select"
+                                ],
+                                "title": "Operation",
+                                "default": "merge"
+                              },
+                              "pages_per_document": {
+                                "type": "integer",
+                                "maximum": 200.0,
+                                "minimum": 1.0,
+                                "default": 1
+                              },
+                              "select": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "properties": {
+                                        "upload_id": {
+                                          "type": "string",
+                                          "format": "uuid",
+                                          "title": "Upload Id"
+                                        },
+                                        "page_number": {
+                                          "type": "integer",
+                                          "maximum": 200.0,
+                                          "minimum": 1.0
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "type": "object",
+                                      "required": [
+                                        "upload_id",
+                                        "page_number"
+                                      ],
+                                      "title": "PageSelectionParameters",
+                                      "description": "Uma página escolhida: o upload da execução e o número da página, a partir de 1."
+                                    },
+                                    "type": "array",
+                                    "maxItems": 400,
+                                    "minItems": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Select"
+                              }
+                            },
+                            "additionalProperties": false,
+                            "type": "object",
+                            "title": "PdfPressV1Parameters"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ],
+                        "title": "pdf-press v1"
                       }
                     ]
                   }
@@ -2805,6 +2880,81 @@
                               }
                             },
                             "title": "DownloadsDetoxV1Parameters",
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "recipe_id",
+                          "recipe_version",
+                          "parameters"
+                        ]
+                      },
+                      {
+                        "title": "pdf-press v1",
+                        "type": "object",
+                        "properties": {
+                          "recipe_id": {
+                            "const": "pdf-press"
+                          },
+                          "recipe_version": {
+                            "const": 1
+                          },
+                          "parameters": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "operation": {
+                                "enum": [
+                                  "merge",
+                                  "split",
+                                  "select"
+                                ],
+                                "title": "Operation",
+                                "type": "string",
+                                "default": "merge"
+                              },
+                              "pages_per_document": {
+                                "maximum": 200,
+                                "minimum": 1,
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "select": {
+                                "anyOf": [
+                                  {
+                                    "items": {
+                                      "additionalProperties": false,
+                                      "description": "Uma página escolhida: o upload da execução e o número da página, a partir de 1.",
+                                      "properties": {
+                                        "upload_id": {
+                                          "format": "uuid",
+                                          "title": "Upload Id",
+                                          "type": "string"
+                                        },
+                                        "page_number": {
+                                          "maximum": 200,
+                                          "minimum": 1,
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": [
+                                        "upload_id",
+                                        "page_number"
+                                      ],
+                                      "title": "PageSelectionParameters",
+                                      "type": "object"
+                                    },
+                                    "maxItems": 400,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Select"
+                              }
+                            },
+                            "title": "PdfPressV1Parameters",
                             "type": "object"
                           }
                         },
@@ -4883,7 +5033,8 @@
         "enum": [
           "CSV_ALL_RECORDS_FILTERED",
           "CSV_FORMULA_CELLS",
-          "CSV_FORMULA_HEADER"
+          "CSV_FORMULA_HEADER",
+          "INPUT_NOT_SELECTED"
         ],
         "title": "ItemWarningCode",
         "description": "Códigos de aviso das receitas: lista fechada, como a das rejeições.\n\nO código vai para o banco e para a API (detalhe da Run); o `detail`, que pode citar valores do\narquivo, fica só no `report.json`. Receita que avisa algo novo acrescenta o código aqui."
