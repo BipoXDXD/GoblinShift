@@ -27,6 +27,7 @@ EXAMPLE_VALUES = {
     "owner_id": "019a0000-0000-7000-8000-000000000001",
     "run_id": "019a0000-0000-7000-8000-000000000002",
     "public_id": "0123456789abcdef",
+    "ref": "4f1c2b7e-9a3d-4e5f-8b6a-0c1d2e3f4a5b",
 }
 
 
@@ -49,7 +50,7 @@ def test_o_roteiro_tem_os_blocos_sql_esperados() -> None:
     blocks = psql_blocks(markdown)
 
     assert len(blocks) == markdown.count("<<'SQL'")
-    assert len(blocks) == 4  # os quatro blocos do roteiro, contados à mão
+    assert len(blocks) == 6  # os seis blocos do roteiro, contados à mão
     assert all(variables for variables, _ in blocks)
 
 

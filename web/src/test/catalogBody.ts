@@ -89,5 +89,47 @@ export const CATALOG_BODY = {
         },
       ],
     },
+    {
+      recipe_id: "pdf-press",
+      versions: [
+        {
+          version: 1,
+          status: "current",
+          limits: {
+            max_inputs: 20,
+            max_total_input_bytes: 268435456,
+            max_input_pages: 200,
+            max_output_pages: 400,
+            max_output_documents: 200,
+          },
+          defaults: { operation: "merge", pages_per_document: 1, select: null },
+          parameters_schema: {
+            type: "object",
+            properties: {
+              operation: { type: "string", enum: ["merge", "split", "select"], default: "merge" },
+              pages_per_document: { type: "integer", minimum: 1, maximum: 200, default: 1 },
+              select: {
+                anyOf: [
+                  {
+                    type: "array",
+                    minItems: 1,
+                    maxItems: 400,
+                    items: {
+                      type: "object",
+                      properties: {
+                        upload_id: { type: "string", format: "uuid" },
+                        page_number: { type: "integer", minimum: 1, maximum: 200 },
+                      },
+                    },
+                  },
+                  { type: "null" },
+                ],
+                default: null,
+              },
+            },
+          },
+        },
+      ],
+    },
   ],
 } as const;

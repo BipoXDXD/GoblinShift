@@ -25,6 +25,7 @@ from goblinshift.processing.executor.job import (
     read_context,
     read_job,
     verified_inputs,
+    with_upload_ids,
 )
 from goblinshift.processing.executor.report_file import write_report, write_timings
 from goblinshift.processing.image_forge.inspection import configure_pillow
@@ -128,7 +129,7 @@ def _inspect(work: _WorkDir) -> tuple[RegisteredRecipe, Sequence[InputFile], Pac
     recipe = RECIPES.get((job.recipe_id, job.recipe_version))
     if recipe is None:
         raise JobError(f"receita desconhecida: {job.recipe_id} v{job.recipe_version}")
-    inputs = verified_inputs(work.inputs, job.inputs)
+    inputs = with_upload_ids(verified_inputs(work.inputs, job.inputs), context.input_upload_ids)
     spec = PackageSpec(
         recipe_id=job.recipe_id,
         recipe_version=job.recipe_version,

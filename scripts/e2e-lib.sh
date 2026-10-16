@@ -1,6 +1,7 @@
 # shellcheck shell=bash
-# Funções comuns dos scripts de ponta a ponta (e2e-csv-janitor.sh, e2e-image-forge.sh e
-# e2e-downloads-detox.sh). Não roda sozinho: cada script faz `source` e chama `e2e_setup`.
+# Funções comuns dos scripts de ponta a ponta (e2e-csv-janitor.sh, e2e-image-forge.sh,
+# e2e-downloads-detox.sh e e2e-pdf-press.sh). Não roda sozinho: cada script faz `source` e
+# chama `e2e_setup`.
 #
 # Só curl e o python3 do host com -I (biblioteca padrão, sem o ambiente do projeto), exceto na
 # geração das fixtures, que usa o `uv` do repositório (o Pillow do uv.lock).
