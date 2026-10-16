@@ -305,6 +305,17 @@ describe("pré-visualização dos resultados", () => {
     expect(within(table).getByRole("cell", { name: "ana@example.com" })).toBeInTheDocument();
   });
 
+  it("CSV: a caixa rolável da amostra recebe foco e tem o nome da legenda", async () => {
+    setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
+      bytes("nome,email\nAna,ana@example.com\n"),
+    );
+
+    const box = await screen.findByRole("region", { name: "Amostra de clientes.csv: 1 registro" });
+    expect(box).toHaveAttribute("tabindex", "0");
+    expect(within(box).getByRole("table")).toBeInTheDocument();
+    expect(await axeViolations(box)).toEqual([]);
+  });
+
   it("CSV: fórmula e HTML aparecem como texto, nunca como elemento", async () => {
     setupPreview({ fileName: "clientes.csv", previewName: "clientes.csv" }, () =>
       bytes('nome,obs\n"\t=cmd|\' /C calc\'!A0","<img src=x onerror=alert(1)>"\n'),
@@ -360,6 +371,23 @@ describe("pré-visualização dos resultados", () => {
         .getAllByRole("listitem")
         .map((li) => li.textContent),
     ).toEqual(["Página 3 do arquivo 2", "Página 1 do arquivo 1"]);
+  });
+
+  it("PDF: a caixa rolável do mapa recebe foco e tem o nome da legenda", async () => {
+    setupPreview({ fileName: "selecao.pdf", previewName: "selecao.json" }, () =>
+      bytes(
+        JSON.stringify({
+          schema_version: 1,
+          path: "selecao.pdf",
+          pages: [{ input_position: 0, page_number: 1 }],
+        }),
+      ),
+    );
+
+    const box = await screen.findByRole("region", { name: "Páginas de selecao.pdf: 1 página" });
+    expect(box).toHaveAttribute("tabindex", "0");
+    expect(within(box).getByRole("list")).toBeInTheDocument();
+    expect(await axeViolations(box)).toEqual([]);
   });
 
   it("PDF: mapa fora do formato mostra a falha", async () => {
