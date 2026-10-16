@@ -302,7 +302,11 @@ test.describe("com GPU", () => {
     const before = await host.getAttribute("data-giro");
     await expect(host).not.toHaveAttribute("data-giro", before ?? "");
 
-    await spin.click();
+    // Girando, o SwiftShader desenha um quadro atrás do outro e o Chromium não confirma o evento de
+    // mouse do CDP até sobrar um quadro livre: o click real espera mais que o actionTimeout (run
+    // 38866217252). O clique real já foi provado acima, com a cena parada; aqui basta o evento de
+    // clique no botão, que roda entre os quadros como qualquer script da página.
+    await spin.dispatchEvent("click");
     await expect(spin).toHaveAttribute("aria-pressed", "false");
     await expect(host).toHaveAttribute("data-movimento", "parado");
   });
