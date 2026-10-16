@@ -123,9 +123,10 @@ RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
 UMask=0077
 
-# Hardening: root só para o Docker e para apagar arquivos do UID 61000 na área.
+# Hardening: root só para o Docker e para apagar arquivos do UID 61000 na área. CAP_FSETID mantém
+# o setgid dos modos 3770/2750/2770 do start, que o kernel tira de quem não é do grupo gs-exec.
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
 ProtectSystem=strict
 ReadWritePaths=${WORK_AREA}
 ProtectHome=yes
