@@ -122,6 +122,66 @@ class Alert:
 
 DISK_STREAM = "system_filesystem_utilization"
 
+# Atributos do span `maintenance.cycle` que as causas abaixo leem, com os nomes do OpenObserve
+# ("." vira "_"); o provisionamento os declara no stream junto com os dos SLOs.
+CAUSE_COLUMNS: tuple[str, ...] = (
+    "main",
+    "maintenance_runs_stuck_stopping",
+    "maintenance_purge_limit_reached",
+    "maintenance_accounts_deletion_overdue",
+    "maintenance_storage_global_reserved_bytes",
+    "maintenance_storage_global_max_bytes",
+)
+
+
+@dataclass(frozen=True)
+class _MaintenanceCause:
+    """Causa lida do span por volta da manutenção: um arquivo SQL e a política de aviso."""
+
+    name: str
+    description: str
+    period_minutes: int
+    silence_minutes: int
+    destination: DestinationKey
+
+
+# Avaliadas a cada 5 min; a manutenção emite um span a cada 30 s.
+_MAINTENANCE_FREQUENCY_MINUTES = 5
+MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
+    _MaintenanceCause(
+        "causa-execucao-presa",
+        "Execução presa em stopping há mais de 10 min: o executor não confirmou a parada e a "
+        "Run segura a vaga da tentativa. Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _MaintenanceCause(
+        "causa-limitador-de-exclusoes",
+        "Limitador de exclusões da manutenção acionado: havia mais de 500 objetos ou 2 GiB a "
+        "remover numa volta. Confira se a exclusão em massa é legítima; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _MaintenanceCause(
+        "causa-exclusao-de-conta-atrasada",
+        "Exclusão de conta pedida há 20 h ou mais e ainda não concluída; o prazo do DELETE /me é "
+        "24 h. Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _MaintenanceCause(
+        "causa-capacidade-global",
+        "Armazenamento reservado no ambiente acima de 85% do teto global nos últimos 15 min. "
+        "Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=15,
+        silence_minutes=240,
+        destination=DestinationKey.WARNING,
+    ),
+)
+
 
 def alerts(stream: str, prefix: str) -> list[Alert]:
     """Todos os alertas: queima por SLO e nível, causas conhecidas e o heartbeat."""
@@ -159,6 +219,7 @@ def alerts(stream: str, prefix: str) -> list[Alert]:
             silence_minutes=240,
             destination=DestinationKey.URGENT,
         ),
+        *(_maintenance_alert(cause, stream, prefix) for cause in MAINTENANCE_CAUSES),
         Alert(
             name=f"{prefix}heartbeat",
             description="Heartbeat dos alertas: pinga o healthchecks.io a cada hora.",
@@ -171,6 +232,20 @@ def alerts(stream: str, prefix: str) -> list[Alert]:
             destination=DestinationKey.HEARTBEAT,
         ),
     ]
+
+
+def _maintenance_alert(cause: _MaintenanceCause, stream: str, prefix: str) -> Alert:
+    return Alert(
+        name=f"{prefix}{cause.name}",
+        description=cause.description,
+        stream_type="traces",
+        stream_name=stream,
+        sql=_render(f"{cause.name}.sql", stream=stream),
+        period_minutes=cause.period_minutes,
+        frequency_minutes=_MAINTENANCE_FREQUENCY_MINUTES,
+        silence_minutes=cause.silence_minutes,
+        destination=cause.destination,
+    )
 
 
 def _burn_alert(slo: Slo, level: DestinationKey, burn_rate: int, stream: str, prefix: str) -> Alert:
