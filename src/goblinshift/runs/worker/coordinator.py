@@ -34,6 +34,7 @@ import os
 import random
 import stat
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
@@ -43,7 +44,7 @@ from typing import BinaryIO
 from opentelemetry.context import Context
 from opentelemetry.trace import NoOpTracer, Tracer
 from opentelemetry.util.types import AttributeValue
-from sqlalchemy import insert, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import publish_artifact
@@ -102,6 +103,7 @@ EXIT_RECIPE_FAILURE = 3
 # `ExitCode.NO_SPACE` do executor: o disco da área de trabalho encheu (limite de recurso, 1.6). O
 # worker não importa o laço do executor, que carrega todas as receitas.
 EXIT_NO_SPACE = 6
+_MILLISECOND = timedelta(milliseconds=1)
 COPY_CHUNK_BYTES = 1024 * 1024
 FAILURE_MAX_BYTES = 64 * 1024
 # Uma linha `{"position": n}` por entrada avaliada: 1 MiB sobra para qualquer lote de 1.7.
@@ -227,6 +229,7 @@ class Coordinator:
             "recipe_id": claimed.recipe_id,
             "recipe_version": claimed.recipe_version,
             "attempt.inputs": len(claimed.input_upload_ids),
+            "queue_wait_ms": claimed.queue_wait_ms,
         }
         if self._user_hasher is not None:
             attributes["user.hash"] = self._user_hasher.hash(claimed.owner_id)
@@ -648,6 +651,7 @@ class Coordinator:
         if isinstance(decision, Refused):
             raise LostFencing(f"parada não confirmada: {decision.reason}")
         reason = loaded.state.stop_reason
+        _record_stop(session, loaded, reason)
         return apply_transition(session, loaded, decision, attempt_error=reason)
 
     def _apply_event(self, session: Session, loaded: LoadedRun, event: Event) -> Applied:
@@ -720,11 +724,31 @@ def _elapsed_ms(started: float) -> int:
 
 def _output_attributes(collected: Collected) -> dict[str, AttributeValue]:
     """Quantidade e bytes das saídas de conteúdo e rejeições; nunca os nomes."""
-    return {
+    attributes: dict[str, AttributeValue] = {
         "attempt.outputs": len(collected.outputs),
         "attempt.output_bytes": sum(output.size for output in collected.outputs),
         "attempt.rejected": collected.report.summary.rejected,
     }
+    # Um atributo por código: a coleta só aceita códigos do catálogo fechado `ItemRejectionCode`,
+    # então a cardinalidade é a do catálogo.
+    codes = Counter(item.code for item in collected.report.items if item.code is not None)
+    for code, count in sorted(codes.items()):
+        attributes[f"attempt.rejected.{code.value}"] = count
+    return attributes
+
+
+def _record_stop(session: Session, loaded: LoadedRun, reason: ErrorCode | None) -> None:
+    """Razão da parada e, no cancelamento, a latência até esta confirmação (relógio do banco)."""
+    if reason is None:
+        return
+    attributes: dict[str, AttributeValue] = {"attempt.stop_reason": reason.value}
+    if reason is ErrorCode.CANCELED:
+        requested_at = session.execute(
+            select(run.c.cancel_requested_at).where(run.c.id == loaded.run_id)
+        ).scalar_one()
+        if requested_at is not None:
+            attributes["attempt.cancel_latency_ms"] = (loaded.now - requested_at) // _MILLISECOND
+    attempt_event.record(attributes)
 
 
 def _record_end(started: float, outcome: str, *, error: str | None) -> None:

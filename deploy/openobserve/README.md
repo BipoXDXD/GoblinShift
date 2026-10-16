@@ -49,6 +49,10 @@ O worker emite um span `attempt` por tentativa (`goblinshift.runs.worker.attempt
 | `inspect_ms`, `process_ms`, `package_ms` | fases medidas pelo executor (`telemetry.json`); ausentes se a fase não terminou ou se o arquivo fugiu do schema |
 | `collect_ms`, `publish_ms` | coleta e gravação dos candidatos, e a transação de publicação, medidas pelo worker |
 | `attempt.inputs`, `attempt.outputs`, `attempt.output_bytes`, `attempt.rejected` | entradas, saídas de conteúdo (quantidade e bytes) e rejeições do relatório; nunca nomes |
+| `attempt.rejected.<CODE>` | rejeições por código, um atributo por código do catálogo fechado `ItemRejectionCode` presente no relatório |
+| `queue_wait_ms` | da elegibilidade da Run (`eligible_at`, que na retentativa inclui o jitter) ao início da tentativa, pelo relógio do banco |
+| `attempt.stop_reason` | razão de parada persistida quando a tentativa termina por parada (`CANCELED`, `DEADLINE_EXCEEDED`) |
+| `attempt.cancel_latency_ms` | só no cancelamento: do `cancel_requested_at` até o coordenador confirmar a parada, pelo relógio do banco |
 | `duration_ms` | duração da tentativa no worker |
 
 ### Fora do OpenObserve, por enquanto
