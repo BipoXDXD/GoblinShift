@@ -30,7 +30,12 @@ from goblinshift.identity.accounts import (
 )
 from goblinshift.identity.audit import AuditEventType, AuditOutcome, truncate_ip
 from goblinshift.identity.audit import record as record_audit_event
-from goblinshift.identity.csrf import cross_site_request, csrf_token_matches, issue_csrf_token
+from goblinshift.identity.csrf import (
+    cross_site_request,
+    csrf_pair_matches,
+    csrf_token_matches,
+    issue_csrf_token,
+)
 from goblinshift.identity.keys import (
     DEFAULT_KEY_DAYS,
     KEY_PREFIX,
@@ -106,6 +111,7 @@ __all__ = [
     "count_request",
     "create_admin_user",
     "cross_site_request",
+    "csrf_pair_matches",
     "csrf_token_matches",
     "find_account",
     "generate_key",

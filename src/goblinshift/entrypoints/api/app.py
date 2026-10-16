@@ -5,12 +5,14 @@ Executada com `uvicorn goblinshift.entrypoints.api.app:create_app --factory`.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from importlib.metadata import version
 
 from fastapi import APIRouter, FastAPI
 from opentelemetry.sdk.trace.export import SpanExporter
 from starlette.middleware.sessions import SessionMiddleware
 
 from goblinshift.entrypoints.api import (
+    api_docs,
     api_keys,
     artifacts,
     auth_login,
@@ -66,12 +68,15 @@ def create_app(
 
     app = FastAPI(
         title="GoblinShift",
-        version=settings.service_version,
+        # A versão do contrato é a do pacote, a mesma do arquivo versionado (gs-export-openapi),
+        # e não a do deploy: o commit em produção não aparece no /openapi.json público.
+        version=version("goblinshift"),
         lifespan=lifespan,
-        docs_url="/docs",
+        # A /docs é a do api_docs.py (Swagger UI da própria origem, com CSP). Uma documentação
+        # só, sem o redirect OAuth do Swagger, que nada usa: cada rota pública a mais entra na
+        # allowlist da matriz de autorização.
+        docs_url=None,
         openapi_url="/openapi.json",
-        # Uma documentação só, sem o redirect OAuth do Swagger, que nada usa: cada rota pública
-        # a mais entra na allowlist da matriz de autorização.
         redoc_url=None,
         swagger_ui_oauth2_redirect_url=None,
     )
@@ -108,6 +113,7 @@ def create_app(
     auth_login.install(app, web_identity)
 
     app.include_router(health.router)
+    app.include_router(api_docs.router)
     app.include_router(auth_login.router)
     app.include_router(auth_session.router)
     api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
