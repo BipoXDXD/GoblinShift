@@ -149,8 +149,13 @@ function presetForm({ recipe, version, fallback, preset, error }: PresetFormSour
   return { form, notice: <PresetNotice>{TEXT.presets.loaded(preset.name)}</PresetNotice> };
 }
 
+/** Status (WCAG 4.1.3): o aviso chega depois do carregamento do preset, no lugar do "carregando". */
 function PresetNotice({ children }: { readonly children: ReactNode }): ReactElement {
-  return <p className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">{children}</p>;
+  return (
+    <p role="status" className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">
+      {children}
+    </p>
+  );
 }
 
 /** Enquanto não há catálogo: carregando, sem login (aviso, não erro) ou a falha em texto. */
