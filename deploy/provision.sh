@@ -69,6 +69,8 @@ fi
 
 note "Usuário de sistema ${APP_USER} (só a chave da CI, presa ao deploy)"
 id "$APP_USER" >/dev/null 2>&1 || adduser --disabled-password --gecos "" "$APP_USER"
+# Grupo docker = root no host, inclusive sobre o outro projeto da VPS: risco aceito no ADR 034
+# (o deploy e o backup precisam do daemon; o Compose de produção passa pelo fitness test de lá).
 usermod -aG docker "$APP_USER"
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" "/home/$APP_USER/.ssh"
 cat > "/home/$APP_USER/.ssh/authorized_keys" <<EOF
