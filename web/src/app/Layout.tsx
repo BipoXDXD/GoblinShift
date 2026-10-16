@@ -8,6 +8,7 @@ import type { SiteNotice } from "../notice/notice";
 import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
+import { BrandLink } from "./BrandLink";
 import { acceptTermsPath, PATHS, signInPath } from "./paths";
 
 const T = TEXT.layout;
@@ -60,13 +61,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         {/* Com Histórico, Acesso e o tema, a barra não cabe em 400 px: a navegação desce para uma
             segunda linha em vez de empurrar a página para o lado (WCAG 1.4.10). */}
         <div className="mx-auto flex min-h-16 w-full max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2 md:px-8">
-          <Link
-            to={PATHS.home}
-            aria-label={T.brandLink}
-            className="inline-flex min-h-11 items-center font-display text-xl font-semibold text-fg no-underline"
-          >
-            {T.brand}
-          </Link>
+          <BrandLink />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <nav aria-label={T.navLabel} className="flex items-center gap-4">
               <NavLink to={PATHS.history} className={NAV_LINK}>
