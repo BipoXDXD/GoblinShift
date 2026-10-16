@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import CATALOG, Catalog, VersionStatus
@@ -454,6 +454,59 @@ def test_detox_recusa_name_prefix_enviado_com_name_mode_preserve(
     response = post_run(client, account, payload, None, "?validate_only=true")
 
     assert_problem(response, 422, "VALIDATION_FAILED")
+
+
+@pytest.mark.parametrize("prefix", ["doc", "File", "file2"])
+def test_detox_recusa_com_preserve_prefixo_diferente_do_default(
+    client: TestClient, factory: sessionmaker[Session], prefix: str
+) -> None:
+    payload = {
+        "recipe_id": "downloads-detox",
+        "recipe_version": 1,
+        "parameters": {"name_mode": "preserve", "name_prefix": prefix},
+    }
+
+    response = post_run(client, Account(factory), payload, None, "?validate_only=true")
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [e["field"] for e in problem["errors"]] == ["body.parameters"]
+
+
+def test_reenviar_os_parametros_de_uma_execucao_do_detox_e_aceito(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A13: os parâmetros resolvidos trazem o `name_prefix` default mesmo com `preserve`;
+    # repetir a configuração (2.2, Histórico) não pode esbarrar nele.
+    account = Account(factory)
+    first = post_run(
+        client,
+        account,
+        {**body(ready_inputs(factory, storage, account.id)), "recipe_id": "downloads-detox"},
+        str(uuid.uuid4()),
+    )
+    resolved = client.get(f"{RUNS}/{first.json()['id']}", headers=account.headers).json()
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == uuid.UUID(first.json()["id"]))
+            .values(status="succeeded", finished_at=func.now())
+        )
+    assert resolved["parameters"]["name_prefix"] == "file"
+    assert resolved["parameters"]["name_mode"] == "preserve"
+
+    again = post_run(
+        client,
+        account,
+        {
+            **body(ready_inputs(factory, storage, account.id)),
+            "recipe_id": "downloads-detox",
+            "parameters": resolved["parameters"],
+        },
+        str(uuid.uuid4()),
+    )
+
+    assert again.status_code == 202, again.text
+    assert again.json()["parameters"] == resolved["parameters"]
 
 
 def test_validate_only_nao_confere_uploads_nem_exige_chave(
