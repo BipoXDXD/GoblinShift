@@ -432,3 +432,111 @@ def test_find_user_com_entrada_padrao_vazia_ou_malformada_sai_com_erro_de_uso(
     assert exit_code == EXIT_USAGE
     assert out == ""
     assert "64 caracteres hexadecimais" in err
+
+
+# --- set-limits e usage (1.7 e 1.8) ----------------------------------------------------------
+
+
+def usage_lines(capsys: pytest.CaptureFixture[str], user_id: str) -> dict[str, list[str]]:
+    exit_code, out, _ = run(capsys, "usage", "--user", user_id)
+    assert exit_code == EXIT_OK
+    lines = [line.split("\t") for line in out.strip().splitlines()]
+    return {fields[0]: fields[1:] for fields in lines}
+
+
+def test_usage_de_conta_nova_mostra_consumo_zero_e_limites_padrao(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    user_id = create_user(capsys)
+
+    found = usage_lines(capsys, user_id)
+
+    assert found == {
+        "runs_last_24h": ["0"],
+        "input_bytes_last_24h": ["0"],
+        "executor_ms_last_24h": ["0"],
+        "storage_reserved_bytes": ["0"],
+        "runs_per_24h": ["30", "padrão"],
+        "input_bytes_per_24h": [str(2 * 1024**3), "padrão"],
+        "storage_bytes": [str(4 * 1024**3), "padrão"],
+    }
+
+
+def test_set_limits_sobrepoe_e_default_desfaz(capsys: pytest.CaptureFixture[str]) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, out, err = run(
+        capsys,
+        "set-limits",
+        "--user",
+        user_id,
+        "--runs-per-24h",
+        "5",
+        "--storage-bytes",
+        "1048576",
+    )
+    changed = usage_lines(capsys, user_id)
+    run(capsys, "set-limits", "--user", user_id, "--runs-per-24h", "default")
+    restored = usage_lines(capsys, user_id)
+
+    assert (exit_code, out) == (EXIT_OK, "")
+    assert user_id in err
+    assert changed["runs_per_24h"] == ["5", "conta"]
+    assert changed["storage_bytes"] == ["1048576", "conta"]
+    assert changed["input_bytes_per_24h"] == [str(2 * 1024**3), "padrão"]
+    assert restored["runs_per_24h"] == ["30", "padrão"]
+    assert restored["storage_bytes"] == ["1048576", "conta"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--runs-per-24h", "0"),
+        ("--runs-per-24h", "-3"),
+        ("--input-bytes-per-24h", "muito"),
+        ("--storage-bytes", "0"),
+    ],
+)
+def test_set_limits_recusa_valor_invalido_sem_mudar_nada(
+    capsys: pytest.CaptureFixture[str], args: tuple[str, ...]
+) -> None:
+    user_id = create_user(capsys)
+    before = usage_lines(capsys, user_id)
+
+    with pytest.raises(SystemExit) as usage_error:
+        main(["set-limits", "--user", user_id, *args])
+    capsys.readouterr()
+
+    assert usage_error.value.code == EXIT_USAGE
+    assert usage_lines(capsys, user_id) == before
+
+
+def test_set_limits_sem_nada_a_mudar_sai_com_2(capsys: pytest.CaptureFixture[str]) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, _, err = run(capsys, "set-limits", "--user", user_id)
+
+    assert exit_code == EXIT_USAGE
+    assert "nada a mudar" in err
+
+
+def test_set_limits_abaixo_do_reservado_sai_com_2(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    owner = new_user(factory)
+    queue_run(factory, FileStorage(tmp_path), owner)  # entrada de alguns bytes reservada
+
+    exit_code, _, err = run(capsys, "set-limits", "--user", str(owner), "--storage-bytes", "1")
+
+    assert exit_code == EXIT_USAGE
+    assert "reservou" in err
+
+
+@pytest.mark.parametrize("command", ["usage", "set-limits"])
+def test_conta_inexistente_sai_com_1(capsys: pytest.CaptureFixture[str], command: str) -> None:
+    extra = ["--runs-per-24h", "5"] if command == "set-limits" else []
+
+    exit_code, _, err = run(capsys, command, "--user", str(uuid7()), *extra)
+
+    assert exit_code == EXIT_NOT_FOUND
+    assert "não existe" in err

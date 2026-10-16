@@ -69,6 +69,14 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         {
+          path: PATHS.apiGuide,
+          handle: titled(TEXT.apiGuide.title),
+          lazy: async () => {
+            const { ApiGuidePage } = await import("../account/ApiGuidePage");
+            return { Component: ApiGuidePage };
+          },
+        },
+        {
           path: PATHS.accountDeleted,
           handle: titled(TEXT.account.deletion.doneTitle),
           lazy: async () => {
