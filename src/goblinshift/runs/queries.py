@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, Row, Select, and_, case, func, select, tuple_
 from sqlalchemy.orm import Session
 
+from goblinshift.files.artifacts import file_name_of
 from goblinshift.files.states import ArtifactRole, Availability
 from goblinshift.files.tables import artifact, upload
 from goblinshift.processing.recipe import (
@@ -126,6 +127,9 @@ class RunPage:
 
 @dataclass(frozen=True)
 class ResultReference:
+    """Uma saída publicada. Depois da retenção de 30 dias (1.7) os dois nomes são o genérico
+    `<papel>-<id do artefato>` (`files.artifacts.generic_file_name`)."""
+
     artifact_id: UUID
     logical_name: str
     role: ArtifactRole
@@ -250,9 +254,9 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
     references = tuple(
         ResultReference(
             row.artifact_id,
-            row.logical_name,
+            file_name_of(row.logical_name, ArtifactRole(row.role), row.artifact_id),
             ArtifactRole(row.role),
-            row.file_name,
+            file_name_of(row.file_name, ArtifactRole(row.role), row.artifact_id),
             Availability.of(
                 deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
             ),

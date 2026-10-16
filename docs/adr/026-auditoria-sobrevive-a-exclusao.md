@@ -11,6 +11,7 @@
 
 - `audit_event.user_id` **não tem FK** para `app_user`. A purga apaga a conta e os eventos ficam até completar 90 dias, quando a manutenção os remove em lotes.
 - O evento guarda só tipo, resultado, momento, `user_id` e o IP truncado (/24 em IPv4, /48 em IPv6, imposto por CHECK no banco). Nada de nome de arquivo, conteúdo, token ou nome de exibição.
+  - Complemento (migração 0016): o `ACCOUNT_LIMITS_CHANGED` do `gs-admin set-limits` guarda também `details`, com os valores antigos e novos dos limites citados. Só números e nomes fixos; um CHECK impede `details` nos outros tipos, e a linha sai inteira aos 90 dias, sem anulação própria.
 - Só são auditados eventos de quem tem credencial válida, além do login, já limitado por IP no Nginx; um atacante sem credencial cai no 401 e não inunda a tabela.
 
 ## Alternativas descartadas
@@ -30,3 +31,4 @@
 - `tests/test_schema_fatia_6.py`: evento de conta inexistente é aceito; apagar a conta mantém os eventos; IP fora de /24 ou /48 é recusado.
 - `tests/identity/test_audit.py`: `truncate_ip` (IPv4, IPv6, IPv4 mapeado, inválido) e `record`.
 - Frente C: `test_auditoria_sobrevive_a_purga_sem_identificar`.
+- `tests/test_migration_0016.py` e `tests/identity/test_admin_cli.py`: `details` só no `ACCOUNT_LIMITS_CHANGED`, sempre objeto; `set-limits` grava antes e depois na mesma transação da mudança.
