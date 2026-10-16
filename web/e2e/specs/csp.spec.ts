@@ -1,49 +1,12 @@
 // CSP de produção sem violação (P9; GoblinShiftPlan 3.6). A política vem do snippet do Nginx, não
 // de uma cópia: o servidor local a lê de lá, e esta spec confere que é ela que chega ao navegador.
-import type { Page } from "@playwright/test";
-
 import { CSV_FILES } from "../fixtures/files";
 import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
+import { watchCsp } from "../support/cspWatch";
 import { productionCsp } from "../support/nginxHeaders";
 import { SCREENS } from "../support/screens";
 import { expect, test, THEMES, useTheme } from "../support/test";
-
-interface Violation {
-  readonly directive: string;
-  readonly blocked: string;
-  readonly sample: string;
-}
-
-/** Junta, desde antes do primeiro script, cada `securitypolicyviolation` e erro de CSP no console. */
-async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
-  const consoleErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error" && /Content Security Policy/i.test(message.text())) {
-      consoleErrors.push(message.text());
-    }
-  });
-  await page.addInitScript(() => {
-    const violations: Violation[] = [];
-    Object.defineProperty(window, "__cspViolations", { value: violations });
-    document.addEventListener("securitypolicyviolation", (event) => {
-      violations.push({
-        directive: event.effectiveDirective,
-        blocked: event.blockedURI,
-        sample: event.sample,
-      });
-    });
-  });
-  return async () => {
-    const violations = await page.evaluate(
-      () => (window as unknown as { __cspViolations: Violation[] }).__cspViolations,
-    );
-    return [
-      ...violations.map((v) => `${v.directive}: ${v.blocked} ${v.sample}`.trim()),
-      ...consoleErrors,
-    ];
-  };
-}
 
 test("o documento e os assets chegam com a CSP do snippet de produção", async ({ page }) => {
   const csp = productionCsp();
