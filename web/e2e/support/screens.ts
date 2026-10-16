@@ -150,6 +150,44 @@ export const SCREENS: readonly Screen[] = [
     "Concluída",
   ),
   runScreen(
+    "Execução concluída com avisos e rejeição (detalhe por arquivo)",
+    {
+      status: "succeeded_with_warnings",
+      progress: { phase: null, processed: 3, total: 3 },
+      summary: { inputs: 3, ok: 2, rejected: 1, duplicates: 0, outputs: 2 },
+      items: [
+        {
+          position: 1,
+          upload_id: "7d3c2a1e-0000-4000-8000-000000000001",
+          status: "ok",
+          error_code: null,
+          warnings: ["CSV_FORMULA_CELLS"],
+          counts: { records_read: 1200, filtered_out: 3, written: 1197 },
+          duplicate_of: null,
+        },
+        {
+          position: 2,
+          upload_id: "7d3c2a1e-0000-4000-8000-000000000002",
+          status: "rejected",
+          error_code: "CSV_STRUCTURE_INVALID",
+          warnings: [],
+          counts: {},
+          duplicate_of: null,
+        },
+        {
+          position: 3,
+          upload_id: "7d3c2a1e-0000-4000-8000-000000000003",
+          status: "ok",
+          error_code: null,
+          warnings: [],
+          counts: { records_read: 10, written: 10 },
+          duplicate_of: null,
+        },
+      ],
+    },
+    "Arquivo 2",
+  ),
+  runScreen(
     "Execução que falhou",
     {
       status: "failed",

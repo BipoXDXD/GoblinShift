@@ -23,6 +23,7 @@ import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import type { RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
+import { RunItems } from "./RunItems";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
@@ -68,6 +69,9 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
       {run !== undefined && <RunDetails run={run} />}
+      {run !== undefined && run.items.length > 0 && (
+        <RunItems items={run.items} summary={run.summary} />
+      )}
       {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
       {run !== undefined && <NewRunLink recipeId={run.recipe_id} />}
     </div>
