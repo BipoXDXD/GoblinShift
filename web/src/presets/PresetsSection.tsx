@@ -52,6 +52,7 @@ export function PresetsSection(): ReactElement | null {
         confirmLabel={T.removeConfirm}
         cancelLabel={T.cancel}
         confirmBlocked={removal.pending}
+        busy={removal.pending}
         onCancel={removal.cancel}
         onConfirm={removal.confirm}
       >
@@ -172,15 +173,17 @@ function useRemoval(): Removal {
     pending: mutation.isPending,
     failure,
     message,
+    // Reaberto com o pedido em voo (o navegador fechou o <dialog>), a resposta ainda tem de chegar.
     ask: (preset) => {
-      mutation.reset();
-      setMessage(null);
+      if (!mutation.isPending) {
+        mutation.reset();
+        setMessage(null);
+      }
       setTarget(preset);
     },
+    // Fecha sempre: o <dialog> pode já ter fechado, e o estado não pode divergir dele.
     cancel: () => {
-      if (!mutation.isPending) {
-        setTarget(null);
-      }
+      setTarget(null);
     },
     confirm: () => {
       if (target !== null && !mutation.isPending) {

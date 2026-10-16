@@ -69,10 +69,10 @@ export function CancelRun({ runId, status }: CancelRunProps): ReactElement {
         confirmLabel={T.confirm}
         cancelLabel={T.keepGoing}
         confirmBlocked={mutation.isPending}
+        busy={mutation.isPending}
+        // Fecha sempre: o <dialog> pode já ter fechado, e o estado não pode divergir dele.
         onCancel={() => {
-          if (!mutation.isPending) {
-            setAsking(false);
-          }
+          setAsking(false);
         }}
         onConfirm={() => {
           if (!mutation.isPending) {
