@@ -26,6 +26,7 @@ import { createRun } from "../runs/commands";
 import { TEXT } from "../text";
 import { useUploadBatch, type UploadEntry, type UploadServices } from "../upload/useUploadBatch";
 import { orderEntries, runInputs, uploadAnnouncement, type RunInputs } from "./inputs";
+import { DeletionFailures } from "./DeletionFailures";
 import { UploadEntryView } from "./UploadEntryView";
 
 const FILES_FIELD_ID = "bancada-arquivos";
@@ -197,6 +198,7 @@ export function Workbench({ recipe, form, uploadServices }: WorkbenchProps): Rea
                 )}
               </>
             )}
+            <DeletionFailures failures={batch.failedDeletions} onRetry={batch.retryDeletions} />
             <LiveRegion message={announcement} visuallyHidden />
           </section>
           <div className="flex flex-col gap-6 lg:w-112 lg:flex-none">
