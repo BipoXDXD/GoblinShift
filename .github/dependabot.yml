@@ -25,3 +25,9 @@ updates:
         patterns: ["vitest", "@vitest/*"]
       tailwind:
         patterns: ["tailwindcss", "@tailwindcss/*"]
+  # As actions vão fixadas por SHA completo com a versão no comentário (`@<sha> # vX.Y.Z`); o
+  # Dependabot reconhece esse formato e propõe o novo SHA junto com o comentário atualizado.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

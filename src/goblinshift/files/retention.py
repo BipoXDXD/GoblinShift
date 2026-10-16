@@ -12,7 +12,7 @@ relatório, não são engolidas.
 """
 
 import uuid
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -285,27 +285,18 @@ def file_backlog(session: Session, now: datetime) -> dict[str, int]:
     return {"uploads_to_anonymize": to_anonymize, "uploads_to_delete": to_delete}
 
 
-def attempts_with_unsettled_candidates(
-    session: Session, attempt_ids: Collection[uuid.UUID]
-) -> set[uuid.UUID]:
-    """Tentativas com candidato que o descarte ainda precisa achar pela tentativa.
+def has_unsettled_candidate(attempt_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
+    """A tentativa tem candidato que o descarte ainda precisa achar por ela.
 
     Pendente (sem conteúdo confirmado) ou confirmado sem upload nem artefato válido. Quem já foi
-    pedido para exclusão segue pelo expurgo, que não depende da tentativa.
+    pedido para exclusão segue pelo expurgo, que não depende da tentativa. É um predicado, e não
+    uma consulta, para quem escolhe o lote filtrar no próprio SELECT.
     """
-    if not attempt_ids:
-        return set()
     unsettled = or_(
         stored_object.c.state == ObjectState.PENDING,
         (stored_object.c.state == ObjectState.COMMITTED) & ~has_valid_reference(),
     )
-    return set(
-        session.execute(
-            select(stored_object.c.attempt_id)
-            .where(stored_object.c.attempt_id.in_(attempt_ids), unsettled)
-            .distinct()
-        ).scalars()
-    )
+    return exists().where(stored_object.c.attempt_id == attempt_id, unsettled)
 
 
 def next_storage_release_in(session: Session, owner_id: uuid.UUID) -> timedelta | None:
