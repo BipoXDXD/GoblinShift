@@ -5,18 +5,26 @@ import type { SiteNotice } from "../notice/notice";
 import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
-import { fakeApi, jsonResponse, problemResponse } from "../test/fakeApi";
+import { fakeApi, jsonResponse, problemResponse, TEST_CSRF_TOKEN } from "../test/fakeApi";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 type MeHandler = () => Response | null;
 
 const REF = "0b8f3c2e-5d4a-4f1b-9c7e-2a6d8e0f1b3c";
 
-function setup(me: MeHandler, path = "/", notice: SiteNotice | null = null) {
-  const api = fakeApi({
-    "GET /api/v1/me": me,
-    "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
-  });
+function setup(
+  me: MeHandler,
+  path = "/",
+  notice: SiteNotice | null = null,
+  csrfToken: string | null = TEST_CSRF_TOKEN,
+) {
+  const api = fakeApi(
+    {
+      "GET /api/v1/me": me,
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+    },
+    { csrfToken },
+  );
   const view = renderRoutes({
     routes: appRoutes(api.client, { notice }),
     path,
@@ -75,6 +83,15 @@ describe("Layout: conta no cabeçalho", () => {
       "/entrar?volta=%2Fhistorico%3Festado%3Dfailed",
     );
     expect(within(await nav()).queryByRole("link", { name: "Acesso" })).toBeNull();
+  });
+
+  it("sem o cookie de sessão, mostra Entrar sem chamar o /me", async () => {
+    const { api } = setup(() => jsonResponse(meBody()), "/", null, null);
+
+    expect(await within(await nav()).findByRole("link", { name: "Entrar" })).toBeVisible();
+    expect(api.requests.map((request) => new URL(request.url).pathname)).not.toContain(
+      "/api/v1/me",
+    );
   });
 
   it("enquanto o /me carrega, mostra Acesso (sem pular quando a resposta chega)", async () => {
@@ -253,5 +270,22 @@ describe("Layout: aviso global", () => {
     await screen.findByRole("heading", { level: 1, name: "Histórico" });
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("Layout: rodapé", () => {
+  it("leva aos Termos, à Privacidade e aos Créditos, com alvo de 44 px", async () => {
+    setup(() => jsonResponse(meBody()));
+
+    const footer = await screen.findByRole("contentinfo");
+    const links = within(footer).getAllByRole("link");
+    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["Termos de Uso", "/termos"],
+      ["Aviso de Privacidade", "/privacidade"],
+      ["Créditos", "/creditos"],
+    ]);
+    for (const link of links) {
+      expect(link).toHaveClass("min-h-11");
+    }
   });
 });
