@@ -1,6 +1,6 @@
 # Arte do site: origem, direitos e licença
 
-As goblins do site são **ilustrações e modelos 3D gerados com IA e editados**. Este arquivo registra de onde vieram, com base em quais termos estão no site e sob qual licença está a parte humana do trabalho. O registro arquivo a arquivo, com sha256 e a cadeia de gerações, fica em [`web/src/assets/art/PROVENANCE.json`](../../web/src/assets/art/PROVENANCE.json), conferido no CI por `web/scripts/check-provenance.ts` ([ADR 030](../adr/030-motor-e-asset-do-3d-da-abertura.md)).
+As goblins do site e a marca são **ilustrações e modelos 3D gerados com IA e editados**, com exceção do ícone da aba, desenhado à mão. Este arquivo registra de onde vieram, com base em quais termos estão no site e sob qual licença está a parte humana do trabalho. O registro arquivo a arquivo, com sha256 e a cadeia de gerações, fica em [`web/src/assets/art/PROVENANCE.json`](../../web/src/assets/art/PROVENANCE.json), conferido no CI por `web/scripts/check-provenance.ts` ([ADR 030](../adr/030-motor-e-asset-do-3d-da-abertura.md)).
 
 ## O que está no site
 
@@ -20,6 +20,20 @@ Cadeia da Rúbia, da Lua, da Ada, da Nyx e da Ferrugem (detalhe no `PROVENANCE.j
 2. Versão frontal e versão semi-realista por image-to-image (Seedream e Banana Pro, do Google, pela Tripo), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do Rodin.
 3. Modelo 3D no Hyper3D Rodin Gen-2.5 a partir da imagem do passo 2.
 4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
+
+## A marca
+
+Escolhida pelo usuário em 2026-10-15, na rodada r1 da logo:
+
+| Peça | Onde | Origem |
+|---|---|---|
+| Emblema a1 (escudo da Rúbia com chave inglesa e martelo) | Cabeçalho, ao lado do nome em texto; `apple-touch-icon.png` e os ícones de 192 e 512 px do manifest | Tripo, modelo `chat_image_2.5_sunburst` (GPT Image 2.5), **só por texto**, tarefa `6a4e850a` |
+| Selo b1 ("GOBLINSHIFT · OFICINA"), marca secundária | Página de créditos e imagem de compartilhamento (`og-image.jpg`) | Mesmo modelo, só por texto, tarefa `81de143f` |
+| Ícone da aba (`favicon.svg` e `favicon.ico`) | Aba do navegador | **Obra própria**: a cabeça da Rúbia desenhada à mão em SVG, na grade de 32 px, sem IA |
+
+Edição humana do a1 e do b1 (`scripts/arte/gerar-marca.sh`): limpeza do alfa (o platô opaco vinha com 249 a 254 e os pixels transparentes carregavam cor escura, que vazava como halo ao reduzir), recorte justo, conversão AVIF e WebP por altura, os ícones quadrados sobre madeira e a composição da imagem de compartilhamento com o título na Bricolage Grotesque (`scripts/arte/render-marca.mjs`). A ilustração continua raster: não foi vetorizada.
+
+**A marca não é licenciada** (decisão J-13; Termos de Uso, item 9): o nome GoblinShift, o emblema, o selo, o ícone da aba e os nomes dos personagens ficam reservados, inclusive a parte humana do trabalho sobre eles. A CC BY 4.0 da seção "Direito autoral e licença" não os alcança.
 
 ## Jade e Fagulha: publicadas por decisão do usuário
 
@@ -50,8 +64,8 @@ A Jade e a Fagulha seguem outra cadeia: um modelo gerado pelo usuário direto no
 
 O US Copyright Office (relatório *Copyright and Artificial Intelligence, Part 2*, 29 de janeiro de 2025) conclui que prompt sozinho não faz de ninguém autor. A saída bruta do Rodin, da Tripo e dos modelos de imagem pode não ser protegível, e este repositório não afirma autoria exclusiva sobre ela.
 
-A **contribuição humana** (seleção, renders, enquadramento, recorte e otimização dos modelos) fica sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), **exceto Jade e Fagulha** (seção anterior), sem garantia de que a saída gerada por IA seja protegível por direito autoral. Crédito sugerido: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0".
+A **contribuição humana** (seleção, renders, enquadramento, recorte e otimização dos modelos) fica sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), **exceto Jade e Fagulha** (seção anterior) **e a marca** (seção "A marca"), sem garantia de que a saída gerada por IA seja protegível por direito autoral. Crédito sugerido: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0".
 
-O nome GoblinShift, o logotipo e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.
+O nome GoblinShift, o logotipo (o emblema, o selo e o ícone da aba, seção "A marca") e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.
 
-O código, inclusive os scripts de `scripts/arte/`, segue a [Apache License 2.0](../../LICENSE) do repositório. Essa licença não cobre `web/src/assets/art/`, `docs/art/` nem os modelos 3D (arquivo [`NOTICE`](../../NOTICE)). Os Termos de Uso dizem o mesmo no item 9.
+O código, inclusive os scripts de `scripts/arte/`, segue a [Apache License 2.0](../../LICENSE) do repositório. Essa licença não cobre `web/src/assets/art/`, os ícones e a imagem de compartilhamento de `web/public/`, `docs/art/` nem os modelos 3D (arquivo [`NOTICE`](../../NOTICE)). Os Termos de Uso dizem o mesmo no item 9.

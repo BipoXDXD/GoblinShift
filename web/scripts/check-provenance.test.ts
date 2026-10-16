@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { provenanceViolations, type ArtFile } from "./check-provenance";
+import { isPublicArt, provenanceViolations, type ArtFile } from "./check-provenance";
 
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
@@ -157,4 +157,22 @@ describe("provenanceViolations", () => {
       "PROVENANCE.json fora do formato esperado",
     ]);
   });
+});
+
+// Os ícones e a imagem de compartilhamento ficam em public/ (URL fixa, sem hash): também são arte
+// e entram no registro, com o prefixo `public/`.
+describe("isPublicArt", () => {
+  it.each(["favicon.svg", "favicon.ico", "apple-touch-icon.png", "icon-512.png", "og-image.jpg"])(
+    "%s é arte",
+    (name) => {
+      expect(isPublicArt(name)).toBe(true);
+    },
+  );
+
+  it.each(["theme-init.js", "manifest.webmanifest", ".well-known/security.txt", "robots.txt"])(
+    "%s não é arte",
+    (name) => {
+      expect(isPublicArt(name)).toBe(false);
+    },
+  );
 });

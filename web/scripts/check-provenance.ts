@@ -1,4 +1,5 @@
-// Proveniência da arte do site (ADR 030): todo arquivo de src/assets/art/ tem entrada no
+// Proveniência da arte do site (ADR 030): todo arquivo de src/assets/art/ e toda imagem de public/
+// (ícones e imagem de compartilhamento, com o prefixo `public/`) tem entrada no
 // PROVENANCE.json com o sha256 certo, a cadeia de gerações até a ferramenta resolve, cada geração
 // cita um direito registrado, nada deriva de uma goblin excluída e geração de origem de terceiros
 // (ou não verificável) só passa com decisão registrada em `exceptions`: quem, quando e por quê.
@@ -43,6 +44,13 @@ const provenanceSchema = z.object({
 type Provenance = z.infer<typeof provenanceSchema>;
 
 const MANIFEST = "PROVENANCE.json";
+const PUBLIC_PREFIX = "public/";
+const IMAGE = /\.(avif|ico|jpe?g|png|svg|webp)$/;
+
+/** Imagem de `public/` (ícones, imagem de compartilhamento): também é arte do site. */
+export function isPublicArt(path: string): boolean {
+  return IMAGE.test(path);
+}
 
 /** Cada problema em texto para o log do CI; lista vazia quando está tudo certo. */
 export function provenanceViolations(files: readonly ArtFile[], document: unknown): string[] {
@@ -108,7 +116,7 @@ function chainViolations(provenance: Provenance, start: string): string[] {
   return violations;
 }
 
-function artFiles(dir: string): ArtFile[] {
+function filesIn(dir: string): ArtFile[] {
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name !== MANIFEST)
     .map((entry) => {
@@ -122,8 +130,12 @@ function artFiles(dir: string): ArtFile[] {
 
 function main(): void {
   const dir = fileURLToPath(new URL("../src/assets/art", import.meta.url));
+  const publicDir = fileURLToPath(new URL("../public", import.meta.url));
+  const publicArt = filesIn(publicDir)
+    .filter((file) => isPublicArt(file.path))
+    .map((file) => ({ ...file, path: PUBLIC_PREFIX + file.path }));
   const document: unknown = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8"));
-  const violations = provenanceViolations(artFiles(dir), document);
+  const violations = provenanceViolations([...filesIn(dir), ...publicArt], document);
   for (const violation of violations) {
     console.error(violation);
   }
