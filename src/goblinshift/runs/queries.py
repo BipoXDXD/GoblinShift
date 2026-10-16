@@ -136,6 +136,8 @@ class ResultReference:
     # Nome com que o download entrega o arquivo.
     file_name: str
     availability: Availability
+    # Só no papel `preview`: a saída de que ele deriva (ADR 037).
+    source_artifact_id: UUID | None
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,7 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             run_output.c.logical_name,
             artifact.c.role,
             artifact.c.file_name,
+            artifact.c.source_artifact_id,
             artifact.c.expires_at,
             artifact.c.deleted_at,
             (artifact.c.expires_at <= func.now()).label("expired"),
@@ -260,6 +263,7 @@ def get_results(session: Session, owner_id: UUID, run_id: UUID) -> RunResults:
             Availability.of(
                 deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
             ),
+            row.source_artifact_id,
         )
         for row in rows
     )

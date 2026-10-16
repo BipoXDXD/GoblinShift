@@ -22,10 +22,11 @@ import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import { CancelRun } from "./CancelRun";
-import type { RunResults as RunResultsData } from "./commands";
+import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
 import { ThumbnailPreviews } from "./ThumbnailPreviews";
 import { thumbnailArtifacts } from "./thumbnails";
+import { ResultPreview } from "./preview/ResultPreview";
 import { ResultsAvailability } from "./ResultsAvailability";
 import { RunItems } from "./RunItems";
 import { useRunPolling } from "./useRunPolling";
@@ -254,7 +255,11 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
     );
   }
   const packages = results.artifacts.filter((artifact) => artifact.role === "package");
-  const others = results.artifacts.filter((artifact) => artifact.role !== "package");
+  // O preview não é um resultado a baixar: aparece junto da saída de que deriva (ADR 037).
+  const others = results.artifacts.filter(
+    (artifact) => artifact.role !== "package" && artifact.role !== "preview",
+  );
+  const previews = previewsBySource(results.artifacts);
   return (
     <div className="flex flex-col gap-6">
       {packages.map((artifact) => (
@@ -275,19 +280,27 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
           {packages.length > 0 && (
             <h3 className="text-sm font-semibold text-fg-muted">{T.results.otherFiles}</h3>
           )}
-          <ul className="flex flex-col gap-2">
-            {others.map((artifact) => (
-              <li key={artifact.artifact_id} className="flex flex-wrap items-baseline gap-x-2">
-                <a
-                  href={artifactDownloadPath(artifact.artifact_id)}
-                  download={artifact.file_name}
-                  className="font-mono text-sm"
-                >
-                  {T.results.download(artifact.file_name)}
-                </a>
-                <span className="text-sm text-fg-muted">({T.results.roles[artifact.role]})</span>
-              </li>
-            ))}
+          <ul className={previews.size > 0 ? "flex flex-col gap-6" : "flex flex-col gap-2"}>
+            {others.map((artifact) => {
+              const preview = previews.get(artifact.artifact_id);
+              return (
+                <li key={artifact.artifact_id} className="flex flex-col gap-3">
+                  <span className="flex flex-wrap items-baseline gap-x-2">
+                    <a
+                      href={artifactDownloadPath(artifact.artifact_id)}
+                      download={artifact.file_name}
+                      className="font-mono text-sm"
+                    >
+                      {T.results.download(artifact.file_name)}
+                    </a>
+                    <span className="text-sm text-fg-muted">
+                      ({T.results.roles[artifact.role]})
+                    </span>
+                  </span>
+                  {preview !== undefined && <ResultPreview source={artifact} preview={preview} />}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -306,6 +319,20 @@ const MEDIA_MILL = "media-mill";
 function MediaMillPreviews({ results }: { readonly results: RunResultsData }): ReactElement | null {
   const thumbnails = results.published ? thumbnailArtifacts(results.artifacts) : [];
   return thumbnails.length === 0 ? null : <ThumbnailPreviews thumbnails={thumbnails} />;
+}
+
+/** O primeiro preview de cada saída, pelo id dela; os demais papéis não têm origem. */
+function previewsBySource(
+  artifacts: readonly ResultReference[],
+): ReadonlyMap<string, ResultReference> {
+  const previews = new Map<string, ResultReference>();
+  for (const artifact of artifacts) {
+    const source = artifact.source_artifact_id;
+    if (artifact.role === "preview" && source !== null && !previews.has(source)) {
+      previews.set(source, artifact);
+    }
+  }
+  return previews;
 }
 
 function NewRunLink({ recipeId }: { readonly recipeId: string }): ReactElement | null {

@@ -95,6 +95,7 @@ describe("getRunResults", () => {
           role: "output",
           file_name: "clientes.csv",
           availability: "available",
+          source_artifact_id: null,
         },
       ],
     };

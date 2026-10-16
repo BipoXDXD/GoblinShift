@@ -5876,6 +5876,18 @@
           },
           "availability": {
             "$ref": "#/components/schemas/Availability"
+          },
+          "source_artifact_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Artifact Id"
           }
         },
         "type": "object",
@@ -5884,7 +5896,8 @@
           "logical_name",
           "role",
           "file_name",
-          "availability"
+          "availability",
+          "source_artifact_id"
         ],
         "title": "ResultReferenceResponse"
       },
