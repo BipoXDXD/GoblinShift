@@ -1,9 +1,8 @@
 // Presets de ponta a ponta: salvar os parâmetros na Bancada, achar o preset na Oficina, abrir a
 // Bancada pré-preenchida e excluir com confirmação.
-import type { Route } from "@playwright/test";
-
 import { BancadaPage } from "../pages/BancadaPage";
 import { fulfillProblem } from "../support/fakeAccount";
+import { holdRequest } from "../support/held";
 import { expect, test } from "../support/test";
 
 test("salvar na Bancada, abrir pela Oficina já preenchido e excluir", async ({ page, fakeApi }) => {
@@ -44,21 +43,15 @@ test("Esc com o salvamento em voo não esconde o 409, e o diálogo reabre depois
   const bancada = new BancadaPage(page);
   await bancada.open("csv-janitor");
   // Segura o POST até o Esc: o 409 chega com o pedido já em voo.
-  const held = new Promise<Route>((resolve) => {
-    void page.route("**/api/v1/presets", async (route) => {
-      if (route.request().method() === "POST") {
-        resolve(route);
-      } else {
-        await route.fallback();
-      }
-    });
-  });
+  const held = holdRequest(page, "**/api/v1/presets", "POST");
 
   await page.getByRole("button", { name: "Salvar preset" }).click();
   const dialog = page.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
   await dialog.getByLabel("Nome do preset").fill("Clientes do mês");
   await dialog.getByRole("button", { name: "Salvar preset" }).click();
   const save = await held;
+  // O Esc só depois de a tela mostrar o pedido em voo.
+  await expect(dialog.getByRole("button", { name: "Salvando…" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeVisible();
   await fulfillProblem(save, { code: "STATE_CONFLICT", status: 409 });
