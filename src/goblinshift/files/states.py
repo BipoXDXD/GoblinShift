@@ -30,6 +30,8 @@ class ArtifactRole(StrEnum):
     # Fatia 5 (ADR 019): `manifest.json` e `<recipe_id>.zip` do empacotador comum.
     MANIFEST = "manifest"
     PACKAGE = "package"
+    # Derivado para pré-visualização (amostra CSV, imagem reduzida), fora do pacote.
+    PREVIEW = "preview"
 
 
 class Availability(StrEnum):

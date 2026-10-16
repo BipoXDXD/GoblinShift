@@ -69,12 +69,21 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       <LiveRegion message={announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
-      {run !== undefined && <RunDetails run={run} />}
-      {run !== undefined && run.items.length > 0 && (
-        <RunItems items={run.items} summary={run.summary} />
+      {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
+          a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
+          do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
+      {run !== undefined && (
+        <div className="flex flex-col gap-8 max-md:order-1">
+          <RunDetails run={run} />
+          {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
+        </div>
       )}
       {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
-      {run !== undefined && <NewRunLink recipeId={run.recipe_id} />}
+      {run !== undefined && (
+        <div className="max-md:order-2">
+          <NewRunLink recipeId={run.recipe_id} />
+        </div>
+      )}
     </div>
   );
 }
@@ -195,7 +204,9 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
       <h2 id={headingId} className="mb-6 font-display text-xl font-semibold text-fg">
         {T.results.heading}
       </h2>
-      {results.isPending && <p className="text-fg-muted">{T.results.loading}</p>}
+      {/* Reserva a altura do Baixar com a data: no celular este cartão fica acima do de estado, e
+          crescer depois empurraria tudo o que vem embaixo (CLS). */}
+      {results.isPending && <p className="min-h-24 text-fg-muted">{T.results.loading}</p>}
       {results.error !== null && <ProblemAlert failure={failureOf(results.error)} />}
       {results.data !== undefined && <ResultFiles results={results.data} />}
     </Card>
