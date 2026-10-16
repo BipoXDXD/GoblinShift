@@ -55,6 +55,8 @@ export type RunOverrides = Partial<Omit<Run, "id">>;
 export interface FakeApi {
   /** Corpo de cada POST /runs aceito, na ordem. */
   readonly createdRuns: readonly RunCommand[];
+  /** Nome de cada upload excluído por DELETE /uploads/{id}, na ordem. */
+  readonly deletedUploads: readonly string[];
   /** Pedido que nenhuma rota da API falsa reconhece; o fixture exige lista vazia ao fim. */
   readonly unhandled: readonly string[];
   /** Nome do upload pelo id, para conferir a ordem das entradas de uma execução. */
@@ -132,6 +134,7 @@ export async function installFakeApi(
   });
   return {
     createdRuns: state.createdRuns,
+    deletedUploads: state.deletedUploads,
     unhandled: state.unhandled,
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
     seedRun: (overrides) => state.seedRun(overrides),
@@ -152,6 +155,7 @@ class FakeState {
   readonly uploads = new Map<string, StoredUpload>();
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
+  readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
   readonly #artifactsDir: string;
 
@@ -171,6 +175,8 @@ class FakeState {
       await this.createUploads(route, request);
     } else if (method === "PUT" && resource === "uploads" && action === "content" && id) {
       await this.receiveContent(route, request, id);
+    } else if (method === "DELETE" && resource === "uploads" && id && segments.length === 2) {
+      await this.deleteUpload(route, id);
     } else if (method === "POST" && path === "/runs") {
       await this.createRun(route, request);
     } else if (method === "GET" && path === "/runs") {
@@ -238,6 +244,17 @@ class FakeState {
       sha256: createHash("sha256").update(content).digest("hex"),
     };
     await fulfillJson(route, received, { status: 200 });
+  }
+
+  /** Como a API: 202 para o próprio upload (repetir também) e 404 para o que nunca existiu. */
+  private async deleteUpload(route: Route, id: string): Promise<void> {
+    const upload = this.uploads.get(id);
+    if (upload === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    this.deletedUploads.push(upload.name);
+    await route.fulfill({ status: 202 });
   }
 
   private async createRun(route: Route, request: Request): Promise<void> {

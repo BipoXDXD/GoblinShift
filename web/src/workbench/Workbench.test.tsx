@@ -31,6 +31,8 @@ interface SetupOptions {
   readonly autoResolve?: boolean;
   readonly recipe?: string;
   readonly catalog?: () => Response | null;
+  /** DELETE /uploads/{id} de qualquer upload; por padrão, 202. */
+  readonly deleteUpload?: () => Response;
 }
 
 function renderWorkbench({
@@ -38,8 +40,13 @@ function renderWorkbench({
   autoResolve = true,
   recipe = "csv-janitor",
   catalog = catalogHandler(),
+  deleteUpload = () => new Response(null, { status: 202 }),
 }: SetupOptions = {}) {
+  const deletions = Object.fromEntries(
+    [1, 2, 3].map((sequence) => [`DELETE /api/v1/uploads/${uploadIdFor(sequence)}`, deleteUpload]),
+  );
   const api = fakeApi({
+    ...deletions,
     "GET /api/v1/catalog": catalog,
     "POST /api/v1/uploads": uploadIntentsHandler(),
     "POST /api/v1/runs": runs,
@@ -66,6 +73,12 @@ async function waitUntilSent(count: number) {
   await waitFor(() => {
     expect(screen.getAllByText("Enviado")).toHaveLength(count);
   });
+}
+
+function deleteRequests(requests: readonly Request[]): string[] {
+  return requests
+    .filter((request) => request.method === "DELETE")
+    .map((request) => new URL(request.url).pathname);
 }
 
 function runRequests(requests: readonly Request[]): Request[] {
@@ -361,6 +374,76 @@ describe("Bancada", () => {
     expect(list).not.toHaveTextContent("b.csv");
     expect(list).toHaveTextContent("a.csv");
     expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
+  });
+
+  it("remover exclui o upload no servidor, com o CSRF de qualquer mutação", async () => {
+    const { user, api } = await setup();
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    await waitFor(() => {
+      expect(deleteRequests(api.requests)).toEqual([`/api/v1/uploads/${uploadIdFor(1)}`]);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("exclusão que falha avisa com o nome e deixa tentar de novo", async () => {
+    let deleteStatus = 500;
+    const { user, api } = await setup({
+      deleteUpload: () =>
+        deleteStatus === 202
+          ? new Response(null, { status: 202 })
+          : problemResponse(deleteStatus, "INTERNAL_ERROR"),
+    });
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Remover b.csv" }));
+    await user.click(screen.getByRole("button", { name: "Remover" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Não foi possível excluir b.csv do servidor.");
+    expect(alert).toHaveTextContent("O arquivo já saiu do lote e não entra na execução.");
+    expect(screen.getByRole("list", { name: "Ordem de processamento" })).not.toHaveTextContent(
+      "b.csv",
+    );
+    expect(await axeViolations(document.body)).toEqual([]);
+
+    deleteStatus = 202;
+    await user.click(within(alert).getByRole("button", { name: "Tentar excluir de novo" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    expect(deleteRequests(api.requests)).toEqual([
+      `/api/v1/uploads/${uploadIdFor(2)}`,
+      `/api/v1/uploads/${uploadIdFor(2)}`,
+    ]);
+  });
+
+  it("Remover todos que falha conta os arquivos no aviso", async () => {
+    const { user } = await setup({
+      deleteUpload: () => problemResponse(503, "SERVICE_UNAVAILABLE"),
+    });
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Remover todos" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Remover todos" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Não foi possível excluir 2 arquivos do servidor.",
+      );
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("a.csv");
+    expect(screen.getByRole("alert")).toHaveTextContent("b.csv");
+    expect(screen.getByRole("alert")).toHaveTextContent("Os arquivos já saíram do lote");
   });
 
   it("cancelar a remoção mantém o arquivo", async () => {
