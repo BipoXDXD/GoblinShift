@@ -1,6 +1,7 @@
 // Arrasto no palco 3D (ADR 038): o mouse e a caneta giram e inclinam; um dedo só gira, porque o
-// arrasto vertical com um dedo é a rolagem da página (`touch-action: pan-y` no palco); dois dedos
-// subindo ou descendo juntos inclinam. Sem three: só traduz ponteiros em giros da pose.
+// arrasto vertical com um dedo é a rolagem da página (`touch-action: pan-y pinch-zoom` no palco); dois dedos
+// subindo ou descendo juntos inclinam enquanto o navegador não assumir pan/zoom.
+// A navegação nativa tem prioridade; pointercancel/lostpointercapture encerram o arrasto.
 import { dragTurn, twoFingerTilt, type Pose } from "./pose";
 
 export interface GestureHandlers {
@@ -43,24 +44,18 @@ export function attachGestures(host: HTMLElement, handlers: GestureHandlers): ()
   const onEnd = (event: PointerEvent): void => {
     pressed.delete(event.pointerId);
   };
-  // Com dois dedos, o gesto é da cena: a página não rola nem dá zoom. Com um, nada muda aqui.
-  const onTouchMove = (event: TouchEvent): void => {
-    if (event.touches.length >= TWO_FINGERS && event.cancelable) {
-      event.preventDefault();
-    }
-  };
-
   host.addEventListener("pointerdown", onDown);
   host.addEventListener("pointermove", onMove);
   host.addEventListener("pointerup", onEnd);
   host.addEventListener("pointercancel", onEnd);
-  host.addEventListener("touchmove", onTouchMove, { passive: false });
+  host.addEventListener("lostpointercapture", onEnd);
   return () => {
     host.removeEventListener("pointerdown", onDown);
     host.removeEventListener("pointermove", onMove);
     host.removeEventListener("pointerup", onEnd);
     host.removeEventListener("pointercancel", onEnd);
-    host.removeEventListener("touchmove", onTouchMove);
+    host.removeEventListener("lostpointercapture", onEnd);
+    pressed.clear();
   };
 }
 

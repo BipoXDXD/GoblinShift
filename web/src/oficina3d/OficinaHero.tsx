@@ -1,4 +1,4 @@
-import { RotateCcw, RotateCw } from "lucide-react";
+import { ChevronDown, ChevronUp, RotateCcw, RotateCw } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -212,7 +212,7 @@ export function OficinaHero({
         <div
           ref={hostRef}
           aria-hidden="true"
-          className={`absolute inset-0 motion-safe:transition-opacity ${sceneShown ? "cursor-grab touch-pan-y opacity-100 active:cursor-grabbing" : "opacity-0"}`}
+          className={`absolute inset-0 motion-safe:transition-opacity ${sceneShown ? "cursor-grab touch-pan-y touch-pinch-zoom opacity-100 active:cursor-grabbing" : "opacity-0"}`}
         />
       </div>
       {handle === null || !sceneShown ? null : (
@@ -242,6 +242,37 @@ export function OficinaHero({
               <RotateCcw aria-hidden="true" className="size-4" />
               {T.reset}
             </Button>
+          </div>
+          <div
+            role="group"
+            aria-label={T.tiltLabel}
+            className="flex items-center gap-1 text-sm text-fg-muted"
+          >
+            <span aria-hidden="true">{T.tiltLabel}</span>
+            <button
+              type="button"
+              aria-label={T.tiltUp}
+              title={T.tiltUp}
+              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
+              onClick={() => {
+                const turn = keyTurn("ArrowUp");
+                if (turn !== null) handle.turn(turn);
+              }}
+            >
+              <ChevronUp aria-hidden="true" className="size-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={T.tiltDown}
+              title={T.tiltDown}
+              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
+              onClick={() => {
+                const turn = keyTurn("ArrowDown");
+                if (turn !== null) handle.turn(turn);
+              }}
+            >
+              <ChevronDown aria-hidden="true" className="size-4" />
+            </button>
           </div>
           <p id={hintId} className="text-center text-sm text-fg-muted">
             {T.hint}
