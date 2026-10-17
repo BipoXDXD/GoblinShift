@@ -115,7 +115,7 @@ describe("budgetViolations", () => {
       );
     });
 
-    it("cada GLB até 3400 KB (ADR 030) e a imagem estática até 90 KB", () => {
+    it("o GLB da Rúbia até 3400 KB (ADR 030) e a imagem estática até 90 KB", () => {
       const within = [
         ...WITHIN,
         file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3400 * KB),
@@ -135,14 +135,65 @@ describe("budgetViolations", () => {
     });
   });
 
+  describe("elenco em 3D (ADR 038)", () => {
+    const RUBIA = file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3000 * KB);
+
+    it("cada GLB das outras goblins até 2400 KB", () => {
+      expect(
+        budgetViolations(
+          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 2400 * KB)],
+          INDEX,
+        ),
+      ).toEqual([]);
+      expect(
+        budgetViolations(
+          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 2400 * KB + 1)],
+          INDEX,
+        ),
+      ).toEqual(["Modelo 3D (assets/oficina-3d-jade-x.glb): 2400,0 KB passa do teto de 2400 KB"]);
+    });
+
+    it("o 3D inicial soma o chunk, a Rúbia, a imagem estática dela e as miniaturas, até 3600 KB", () => {
+      const initial = [
+        ...WITHIN,
+        file("assets/oficina-3d-x.js", 160 * KB),
+        RUBIA,
+        file("assets/oficina-3d-rubia-640w-x.avif", 40 * KB),
+        file("assets/oficina-3d-rubia-640w-x.webp", 50 * KB),
+        ...["rubia", "fagulha", "ferrugem", "jade", "nyx"].map((id) =>
+          file(`assets/oficina-3d-${id}-192w-x.avif`, 80 * KB),
+        ),
+        // Os modelos das outras goblins só vêm quando a pessoa as escolhe: não contam.
+        file("assets/oficina-3d-nyx-x.glb", 1 * KB, 2000 * KB),
+      ];
+      expect(budgetViolations(initial, INDEX)).toEqual([]);
+
+      const heavier = initial.map((built) =>
+        built.path === "assets/oficina-3d-nyx-192w-x.avif" ? file(built.path, 81 * KB) : built,
+      );
+      expect(budgetViolations(heavier, INDEX)).toEqual([
+        "3D inicial (chunk, Rúbia, imagem estática e miniaturas): 3601,0 KB passa do teto de 3600 KB",
+      ]);
+    });
+
+    it("com modelos no build, a Rúbia precisa estar entre eles: é ela que abre a página", () => {
+      expect(
+        budgetViolations(
+          [...WITHIN, file("assets/oficina-3d-nyx-x.glb", 1 * KB, 2000 * KB)],
+          INDEX,
+        ),
+      ).toEqual(["3D inicial: falta o modelo da Rúbia (assets/oficina-3d-rubia-*.glb)"]);
+    });
+  });
+
   describe("ilustrações dos estados (ADR 030)", () => {
     it("cada AVIF ou WebP fora do 3D até 64 KB", () => {
       expect(
         budgetViolations(
           [
             ...WITHIN,
-            file("assets/lua-768w-x.avif", 64 * KB),
-            file("assets/lua-768w-x.webp", 64 * KB),
+            file("assets/jade-768w-x.avif", 64 * KB),
+            file("assets/jade-768w-x.webp", 64 * KB),
           ],
           INDEX,
         ),
