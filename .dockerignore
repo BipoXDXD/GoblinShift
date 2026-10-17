@@ -1,9 +1,0 @@
-*
-!pyproject.toml
-!uv.lock
-!LICENSE
-!NOTICE
-!src/
-!alembic.ini
-!migrations/
-**/__pycache__

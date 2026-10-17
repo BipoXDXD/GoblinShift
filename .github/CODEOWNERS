@@ -1,6 +1,0 @@
-# Caminhos que controlam o host da VPS compartilhada (ADR 034): quem muda o deploy, o Compose de
-# produção ou os workflows tem, na prática, root na VPS. Toda mudança aqui pede revisão do dono.
-/deploy/ @BipoXDXD
-/compose*.yaml @BipoXDXD
-/.github/workflows/ @BipoXDXD
-/.github/CODEOWNERS @BipoXDXD
