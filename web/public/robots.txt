@@ -1,5 +1,0 @@
-# Só a interface pública interessa aos buscadores; backend e documentação ficam de fora.
-User-agent: *
-Disallow: /api/
-Disallow: /auth/
-Disallow: /docs

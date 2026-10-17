@@ -1,8 +1,0 @@
-# Política de divulgação de vulnerabilidades do GoblinShift (RFC 9116).
-# Security disclosure policy for GoblinShift (RFC 9116).
-Contact: https://github.com/BipoXDXD/GoblinShift/security/advisories/new
-Contact: mailto:abuso@goblinshift.dev
-Expires: 2027-10-01T00:00:00Z
-Preferred-Languages: pt, en
-Canonical: https://goblinshift.dev/.well-known/security.txt
-Policy: https://github.com/BipoXDXD/GoblinShift/blob/main/SECURITY.md

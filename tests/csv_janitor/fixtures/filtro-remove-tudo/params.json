@@ -1,9 +1,0 @@
-{
-  "filters": [
-    {
-      "column": "status",
-      "op": "eq",
-      "value": "erro"
-    }
-  ]
-}
