@@ -418,6 +418,10 @@ test.describe("com GPU", () => {
     await expect
       .poll(() => page.evaluate(() => window.visualViewport?.scale ?? 1))
       .toBeGreaterThan(1);
+    // O Chromium mantém o zoom ao recarregar. Restaura-o só depois de comprovar a pinça,
+    // para que as coordenadas CSS do próximo gesto correspondam ao viewport de toque.
+    await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
+    await expect.poll(() => page.evaluate(() => window.visualViewport?.scale)).toBe(1);
     await page.reload();
     await waitSceneStill(page);
     await page.getByRole("button", { name: "Pose inicial" }).tap();
