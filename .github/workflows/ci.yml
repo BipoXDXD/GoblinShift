@@ -148,6 +148,14 @@ jobs:
         run: npm run build
       - name: Specs (desktop e celular, só Chromium)
         run: npm run e2e
+      - name: Capturas dos controles 3D para aprovação visual
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: controles-inclinacao-3d
+          path: web/test-results/**/controles-inclinacao.png
+          if-no-files-found: ignore
+          retention-days: 14
       # Segundo build, com o aviso de e2e/fixtures/notice.json (ADR 031): a faixa em toda tela,
       # sem layout shift e com contraste. O notice.json do repositório começa sem aviso.
       - name: Build com o aviso global

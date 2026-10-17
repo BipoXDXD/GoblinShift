@@ -257,6 +257,7 @@ describe("OficinaHero", () => {
     expect(screen.getByRole("img", { name: /^Jade, goblin/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: TEXT.art.stage.spin })).toBeNull();
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
+    expect(screen.queryByRole("group", { name: TEXT.art.stage.tiltLabel })).toBeNull();
     expect(scene.host()).not.toHaveClass("cursor-grab");
     expect(scene.host()).not.toHaveClass("touch-pan-y");
 
@@ -269,7 +270,7 @@ describe("OficinaHero", () => {
     const scene = fakeScene();
     await renderReady(scene);
 
-    expect(scene.host()).toHaveClass("cursor-grab", "touch-pan-y");
+    expect(scene.host()).toHaveClass("cursor-grab", "touch-pan-y", "touch-pinch-zoom");
     expect(screen.getByRole("button", { name: TEXT.art.stage.spin })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: TEXT.art.stage.reset })).toBeInTheDocument();
   });
@@ -282,6 +283,7 @@ describe("OficinaHero", () => {
 
     expect(scene.host()).not.toHaveClass("cursor-grab");
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
+    expect(screen.queryByRole("group", { name: TEXT.art.stage.tiltLabel })).toBeNull();
   });
 
   it("se o chunk da cena falhar, fica a imagem estática", async () => {
@@ -309,6 +311,7 @@ describe("OficinaHero", () => {
 
     expect(heroState(container)).toBe("falhou");
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
+    expect(screen.queryByRole("group", { name: TEXT.art.stage.tiltLabel })).toBeNull();
   });
 
   it("se o contexto WebGL se perder girando, libera a cena na hora, e só uma vez", async () => {
@@ -337,6 +340,22 @@ describe("OficinaHero", () => {
       expect(scene.handle.turn).toHaveBeenCalledExactlyOnceWith(keyTurn(key));
     },
   );
+
+  it.each([
+    [TEXT.art.stage.tiltUp, "ArrowUp"],
+    [TEXT.art.stage.tiltDown, "ArrowDown"],
+  ])("%s reutiliza a pose com clique, Enter e Espaço", async (label, key) => {
+    const scene = fakeScene();
+    await renderReady(scene);
+    const button = screen.getByRole("button", { name: label });
+    await userEvent.click(button);
+    await userEvent.keyboard("{Enter} ");
+    expect(scene.handle.turn).toHaveBeenCalledTimes(3);
+    expect(scene.handle.turn).toHaveBeenNthCalledWith(1, keyTurn(key));
+    expect(scene.handle.turn).toHaveBeenNthCalledWith(2, keyTurn(key));
+    expect(scene.handle.turn).toHaveBeenNthCalledWith(3, keyTurn(key));
+    expect(button).toHaveFocus();
+  });
 
   it("Home volta à pose inicial e para o giro", async () => {
     const scene = fakeScene();

@@ -48,7 +48,7 @@ export function keyTurn(key: string): Pose | null {
 
 /**
  * O giro de um arrasto de um ponteiro. Com um dedo, só a horizontal conta: o arrasto vertical é
- * da página (`touch-action: pan-y`), e a inclinação por toque fica para os dois dedos.
+ * da página (`touch-action: pan-y pinch-zoom`). Botões também inclinam sem arrastar.
  */
 export function dragTurn(pointerType: string, moved: { dx: number; dy: number }): Pose {
   return {

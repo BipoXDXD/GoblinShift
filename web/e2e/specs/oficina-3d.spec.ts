@@ -347,6 +347,114 @@ test.describe("com GPU", () => {
     await expect(host).toHaveAttribute("data-inclinacao", "11");
   });
 
+  test("botões inclinam sem arrasto dentro dos limites", async ({ page, isMobile }, testInfo) => {
+    await page.goto("/");
+    await waitSceneStill(page);
+    const host = sceneHost(page);
+    const up = page.getByRole("button", { name: "Inclinar para ver de cima" });
+    const down = page.getByRole("button", { name: "Inclinar para ver de baixo" });
+    await page.getByRole("button", { name: "Pose inicial" }).click();
+    for (const button of [up, down]) {
+      const box = await button.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+    for (let step = 0; step < 5; step += 1) {
+      if (isMobile) await up.tap();
+      else await up.click();
+    }
+    await expect(host).toHaveAttribute("data-inclinacao", "35");
+    await expect(host).toHaveAttribute("data-giro", "-20");
+    for (let step = 0; step < 6; step += 1) {
+      if (isMobile) await down.tap();
+      else await down.click();
+    }
+    await expect(host).toHaveAttribute("data-inclinacao", "-15");
+    await page.getByRole("button", { name: "Pose inicial" }).click();
+    await expect(host).toHaveAttribute("data-inclinacao", "0");
+    await up.focus();
+    await page.keyboard.press("Enter");
+    await expect(host).toHaveAttribute("data-inclinacao", "10");
+    await page.keyboard.press("Space");
+    await expect(host).toHaveAttribute("data-inclinacao", "20");
+    await expect(up).toBeFocused();
+    await expect(up).toHaveCSS("outline-style", "solid");
+    await expect(up).toHaveCSS("outline-width", "3px");
+    await page.keyboard.press("Tab");
+    await expect(down).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(up).toBeFocused();
+    await page.screenshot({
+      path: testInfo.outputPath("controles-inclinacao.png"),
+      fullPage: true,
+    });
+  });
+
+  test("pinça no palco amplia a página; um dedo gira e rola", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "Pinça nativa exige viewport móvel");
+    await page.goto("/");
+    await waitSceneStill(page);
+    const host = sceneHost(page);
+    await host.scrollIntoViewIfNeeded();
+    await expect(host).toHaveCSS("touch-action", "pan-y pinch-zoom");
+    const box = await host.boundingBox();
+    if (box === null) throw new Error("palco sem caixa");
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const cdp = await page.context().newCDPSession(page);
+    const point = (id: number, px: number, py: number) => ({ id, x: px, y: py });
+    // Passa pelo reconhecedor de gestos nativo; não usa dispatchEvent.
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [point(1, x - 30, y), point(2, x + 30, y)],
+    });
+    for (let distance = 35; distance <= 85; distance += 5) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [point(1, x - distance, y), point(2, x + distance, y)],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(() => page.evaluate(() => window.visualViewport?.scale ?? 1))
+      .toBeGreaterThan(1);
+    await page.reload();
+    await waitSceneStill(page);
+    await page.getByRole("button", { name: "Pose inicial" }).tap();
+    await host.scrollIntoViewIfNeeded();
+    const fresh = await host.boundingBox();
+    if (fresh === null) throw new Error("palco sem caixa");
+    const cx = fresh.x + fresh.width / 2;
+    const cy = fresh.y + fresh.height / 2;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [point(1, cx, cy)],
+    });
+    for (let delta = 5; delta <= 40; delta += 5) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [point(1, cx + delta, cy)],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect(host).not.toHaveAttribute("data-giro", "-20");
+    await expect(host).toHaveAttribute("data-inclinacao", "0");
+    const before = await page.evaluate(() => window.scrollY);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [point(1, cx, cy)],
+    });
+    for (let delta = 10; delta <= 90; delta += 10) {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [point(1, cx, cy - delta)],
+      });
+    }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+    await cdp.detach();
+  });
+
   test("Girar liga e desliga a auto-rotação", async ({ page }) => {
     await page.goto("/");
     await waitSceneStill(page);

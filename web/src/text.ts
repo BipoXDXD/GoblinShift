@@ -116,8 +116,11 @@ export const TEXT = {
     // Palco 3D da abertura (ADR 038): uma goblin por vez, escolhida no seletor.
     stage: {
       label: (name: string) => `${name} em 3D`,
-      hint: "Arraste para girar. Com o foco aqui, as setas giram e inclinam, e Home volta à pose inicial. No celular, dois dedos inclinam.",
+      hint: "Arraste para girar. Com o foco aqui, as setas giram e inclinam, e Home volta à pose inicial. No celular, use os botões para inclinar; a pinça amplia a página.",
       castLabel: "Escolha a goblin",
+      tiltLabel: "Inclinar",
+      tiltUp: "Inclinar para ver de cima",
+      tiltDown: "Inclinar para ver de baixo",
       spin: "Girar",
       reset: "Pose inicial",
     },

@@ -61,13 +61,16 @@ describe("attachGestures", () => {
     expect(turns).toEqual([]);
   });
 
-  it.each(["pointerup", "pointercancel"])("depois de %s o movimento não gira mais", (end) => {
-    pointer("pointerdown", 1, 100, 100);
-    pointer(end, 1, 100, 100);
-    pointer("pointermove", 1, 150, 120);
+  it.each(["pointerup", "pointercancel", "lostpointercapture"])(
+    "depois de %s o movimento não gira mais",
+    (end) => {
+      pointer("pointerdown", 1, 100, 100);
+      pointer(end, 1, 100, 100);
+      pointer("pointermove", 1, 150, 120);
 
-    expect(turns).toEqual([]);
-  });
+      expect(turns).toEqual([]);
+    },
+  );
 
   it("um dedo só gira", () => {
     pointer("pointerdown", 1, 100, 100, "touch");
@@ -89,9 +92,23 @@ describe("attachGestures", () => {
     expect(turns[1]?.pitch).toBeCloseTo(0.2);
   });
 
-  it("com dois dedos, a página não rola; com um, rola", () => {
-    expect(touchMove(2).defaultPrevented).toBe(true);
+  it("não cancela rolagem nem pinça, com um, dois ou três dedos", () => {
+    expect(touchMove(2).defaultPrevented).toBe(false);
+    expect(touchMove(3).defaultPrevented).toBe(false);
     expect(touchMove(1).defaultPrevented).toBe(false);
+  });
+
+  it("o navegador assume a pinça, limpa os ponteiros e um novo arrasto não herda dedos", () => {
+    pointer("pointerdown", 1, 100, 100, "touch");
+    pointer("pointerdown", 2, 200, 100, "touch");
+    pointer("pointercancel", 1, 100, 100, "touch");
+    pointer("pointercancel", 2, 200, 100, "touch");
+    pointer("pointermove", 1, 90, 120, "touch");
+    pointer("pointermove", 2, 210, 120, "touch");
+    expect(turns).toEqual([]);
+    pointer("pointerdown", 3, 100, 100, "touch");
+    pointer("pointermove", 3, 130, 120, "touch");
+    expect(turns).toEqual([{ yaw: 0.3, pitch: 0 }]);
   });
 
   it("ao soltar, para de ouvir", () => {
