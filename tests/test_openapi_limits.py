@@ -46,11 +46,14 @@ def test_nome_do_upload_publica_tamanho_e_caracteres_proibidos() -> None:
     assert name["pattern"] == UPLOAD_NAME_PATTERN
 
 
-def test_tamanho_do_upload_publica_de_0_a_32_mib() -> None:
+def test_tamanho_do_upload_publica_de_0_ao_teto_do_video() -> None:
+    # 256 MiB é o teto do vídeo (1.7, ADR 036); o do arquivo comum (32 MiB) depende do nome e está
+    # na descrição, aplicado no serviço e na aceitação pelo `max_input_bytes` da receita.
     size = _json_body("/api/v1/uploads", "post")["properties"]["items"]["items"]["properties"]
     size = size["size"]
 
-    assert (size["minimum"], size["maximum"]) == (0, 32 * 1024 * 1024)
+    assert (size["minimum"], size["maximum"]) == (0, 256 * 1024 * 1024)
+    assert "32 MiB" in size["description"]
 
 
 def test_padrao_do_nome_recusa_exatamente_separadores_e_controles() -> None:
@@ -95,3 +98,17 @@ def test_comandos_json_publicam_erros_do_decodificador_compartilhado() -> None:
             content = operation.get("requestBody", {}).get("content", {})
             if "application/json" in content:
                 assert {"400", "413", "415"} <= operation["responses"].keys()
+
+
+def test_contagem_por_coluna_do_detalhe_publica_os_tetos() -> None:
+    schemas = SPEC["components"]["schemas"]
+    columns = schemas["FormulaCellsResponse"]["properties"]["columns"]
+    name = schemas["FormulaColumnResponse"]["properties"]["name"]
+    cells = schemas["FormulaColumnResponse"]["properties"]["cells"]
+
+    assert (columns["minItems"], columns["maxItems"]) == (1, 10)
+    [text, null] = name["anyOf"]
+    assert (text["minLength"], text["maxLength"]) == (1, 120)
+    assert null == {"type": "null"}
+    assert cells["minimum"] == 1
+    assert schemas["FormulaCellsResponse"]["properties"]["more_columns"]["minimum"] == 0

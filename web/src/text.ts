@@ -44,6 +44,7 @@ export const TEXT = {
       ACTIVE_RUN_LIMIT:
         "Você já tem uma execução em andamento. Espere ela terminar para começar outra.",
       GONE: "Isto expirou e não está mais disponível.",
+      PRECONDITION_FAILED: "Isto foi alterado em outro lugar. Atualize a página e tente de novo.",
       BODY_TOO_LARGE: "O arquivo ou o pedido passa do tamanho permitido.",
       UNSUPPORTED_MEDIA_TYPE: "O tipo de conteúdo enviado não é aceito.",
       VALIDATION_FAILED: "Alguns valores foram recusados. Confira os erros indicados.",
@@ -53,6 +54,7 @@ export const TEXT = {
         "Algum arquivo de entrada não está mais disponível. Envie os arquivos de novo.",
       RECIPE_VERSION_RETIRED:
         "Esta versão da receita foi retirada. Recarregue a página para usar a atual.",
+      PRECONDITION_REQUIRED: "O pedido foi recusado. Recarregue a página e tente de novo.",
       QUOTA_EXCEEDED: "Você atingiu a cota da conta. Libere espaço ou espere a cota renovar.",
       RATE_LIMITED: "Muitos pedidos em pouco tempo. Aguarde um pouco e tente de novo.",
       INTERNAL_ERROR: "Erro interno no servidor. Tente de novo em instantes.",
@@ -73,7 +75,6 @@ export const TEXT = {
     navLabel: "Principal",
     skipToContent: "Pular para o conteúdo",
     brand: "GoblinShift",
-    editorialNote: "Ilustrações geradas com processamento externo e editadas.",
     creditsLink: "Créditos",
     footerNavLabel: "Rodapé",
   },
@@ -107,6 +108,8 @@ export const TEXT = {
         "Organiza uma pasta bagunçada: tira os repetidos, separa por tipo e renomeia em ordem.",
       "pdf-press":
         "Junta, separa ou escolhe páginas de PDFs, com o mapa de cada página, sem abrir o arquivo no navegador.",
+      "media-mill":
+        "Tira o áudio de vídeos curtos em WAV ou FLAC e gera miniaturas, sem editar o vídeo.",
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
@@ -158,16 +161,22 @@ export const TEXT = {
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:
       "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e os goblins começam.",
-    limitsHint: (maxInputs: number, maxTotal: string | null) =>
-      maxTotal === null
-        ? `Até ${String(maxInputs)} arquivos por execução.`
-        : `Até ${String(maxInputs)} arquivos por execução, somando no máximo ${maxTotal}.`,
+    limitsHint: (maxInputs: number, maxTotal: string | null, maxFile: string | null) =>
+      [
+        maxTotal === null
+          ? `Até ${String(maxInputs)} arquivos por execução.`
+          : `Até ${String(maxInputs)} arquivos por execução, somando no máximo ${maxTotal}.`,
+        maxFile === null ? null : `Cada arquivo com até ${maxFile}.`,
+      ]
+        .filter((sentence) => sentence !== null)
+        .join(" "),
     parametersHeading: "Parâmetros",
     run: "Executar",
     creatingRun: "Criando a execução.",
     loadingCatalog: "Carregando a receita.",
     recipeUnavailable:
       "Esta receita não está disponível no momento. Recarregue a página ou tente mais tarde.",
+    uploadBoundDropped: "As páginas escolhidas dependem dos arquivos enviados; escolha-as de novo.",
     upload: {
       waiting: "Na fila de envio",
       sending: (percent: number) => `Enviando: ${String(percent)}%`,
@@ -223,6 +232,8 @@ export const TEXT = {
       tooManyFiles: (max: number) => `Use no máximo ${String(max)} arquivos.`,
       tooManyBytes: (total: string, max: string) =>
         `Os arquivos somam ${total}; o máximo por execução é ${max}.`,
+      fileTooLarge: (name: string, size: string, max: string) =>
+        `${name} tem ${size}; o máximo por arquivo nesta receita é ${max}.`,
     },
   },
   run: {
@@ -246,6 +257,82 @@ export const TEXT = {
     stepDone: "(concluída)",
     failureReason: "Motivo",
     newRun: "Nova execução nesta receita",
+    items: {
+      heading: "Arquivos da execução",
+      listLabel: "Arquivos, na ordem de entrada",
+      entry: (position: number) => `Arquivo ${String(position)}`,
+      summary: (parts: {
+        inputs: string;
+        ok: string;
+        rejected: string;
+        duplicates: string;
+        outputs: string;
+      }) =>
+        `${parts.inputs}: ${parts.ok}, ${parts.rejected}, ${parts.duplicates}. ${parts.outputs}.`,
+      nouns: {
+        inputs: ["arquivo", "arquivos"],
+        ok: ["processado", "processados"],
+        rejected: ["rejeitado", "rejeitados"],
+        duplicates: ["repetido", "repetidos"],
+        outputs: ["arquivo gerado", "arquivos gerados"],
+      },
+      statuses: {
+        pending: "Aguardando",
+        ok: "Processado",
+        rejected: "Rejeitado",
+        duplicate: "Repetido",
+      },
+      okWithWarnings: "Processado com aviso",
+      unknownStatus: "Estado desconhecido",
+      unknownRejection: (code: string) => `Motivo desconhecido (${code}).`,
+      unknownWarning: (code: string) => `Aviso desconhecido (${code}).`,
+      rejections: {
+        UNSUPPORTED_FORMAT: "O formato do arquivo não é aceito por esta receita.",
+        UNSUPPORTED_BIT_DEPTH: "A profundidade de cor da imagem não é aceita.",
+        UNSUPPORTED_COLOR_PROFILE: "O perfil de cor da imagem não é aceito; só sRGB e Display P3.",
+        IMAGE_TOO_LARGE: "A imagem passa de 24 megapixels ou de 8192 px num dos lados.",
+        CSV_STRUCTURE_INVALID: "A estrutura do CSV é inválida (aspas, colunas ou codificação).",
+        FIELD_LIMIT_EXCEEDED:
+          "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
+        MEDIA_TOO_LARGE:
+          "O vídeo passa de 300 s, de 1920 × 1080 ou de 60 fps, ou demorou demais para processar.",
+        AUDIO_LIMIT_EXCEEDED: "A faixa de áudio passa de 48 kHz ou de 2 canais.",
+        AUDIO_STREAM_NOT_FOUND: "O vídeo não tem a faixa de áudio pedida.",
+      },
+      warnings: {
+        CSV_ALL_RECORDS_FILTERED: "Os filtros tiraram todos os registros desta tabela.",
+        CSV_FORMULA_CELLS:
+          "Há células que parecem fórmulas de planilha. Abra a saída com cuidado, ou use a opção de prefixar.",
+        CSV_FORMULA_HEADER: "O cabeçalho tem nomes que parecem fórmulas de planilha.",
+        INPUT_NOT_SELECTED: "Nenhuma página deste PDF foi escolhida; ele não entrou no resultado.",
+        THUMBNAIL_BEFORE_TARGET:
+          "Não havia quadro no ponto pedido do vídeo; a miniatura usa o último quadro anterior.",
+      },
+      formulaCells: {
+        columnsLabel: "Células que parecem fórmulas, por coluna",
+        cellsOf: (cells: string) => `: ${cells}`,
+        unnamedColumn: "coluna sem nome",
+        cells: ["célula", "células"],
+        more: (columns: string) => `e mais ${columns}.`,
+        columns: ["coluna", "colunas"],
+        minusNote:
+          "Valores que começam com “-”, como números negativos, também entram nesta conta; muitos são falsos positivos.",
+      },
+      notices: {
+        IMAGE_P3_CONVERTED: "A imagem estava em Display P3 e foi convertida para sRGB.",
+      },
+      unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
+      duplicateOf: (position: number) =>
+        `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
+      // Singular e plural, como em `nouns`.
+      counts: {
+        records_read: ["registro lido", "registros lidos"],
+        filtered_out: ["filtrado", "filtrados"],
+        duplicates_removed: ["duplicata removida", "duplicatas removidas"],
+        written: ["gravado", "gravados"],
+        blank_lines_ignored: ["linha vazia ignorada", "linhas vazias ignoradas"],
+      },
+    },
     cancel: {
       open: "Cancelar execução",
       title: "Cancelar esta execução?",
@@ -288,10 +375,56 @@ export const TEXT = {
         report: "relatório",
         manifest: "manifesto",
         package: "pacote com todos os arquivos",
+        preview: "pré-visualização",
       },
       availableUntil: (date: string) => `Disponíveis até ${date}.`,
       empty: "Nenhum arquivo para baixar",
       emptyHint: "Esta execução não publicou arquivos, ou eles já expiraram.",
+      preview: {
+        imageAlt: (fileName: string) => `Pré-visualização de ${fileName}`,
+        loading: "Carregando a pré-visualização.",
+        failed: "Não foi possível carregar a pré-visualização.",
+        gone: "A pré-visualização expirou ou foi excluída.",
+        unavailable: {
+          expired: "Pré-visualização indisponível: o arquivo expirou.",
+          deleted: "Pré-visualização indisponível: o arquivo foi excluído.",
+          missing: "Pré-visualização indisponível: o arquivo se perdeu.",
+        },
+        tableCaption: (fileName: string, rows: number) =>
+          `Amostra de ${fileName}: ${rows === 1 ? "1 registro" : `${String(rows)} registros`}`,
+        pagesCaption: (fileName: string, pages: number) =>
+          `Páginas de ${fileName}: ${pages === 1 ? "1 página" : `${String(pages)} páginas`}`,
+        page: (pageNumber: number, inputPosition: number) =>
+          `Página ${String(pageNumber)} do arquivo ${String(inputPosition + 1)}`,
+      },
+      deletedTitle: "Resultados excluídos",
+      deletedHint:
+        "Os arquivos gerados por esta execução foram excluídos. Os que você enviou não mudam.",
+      missingTitle: "Resultados perdidos",
+      missingHint:
+        "Os arquivos gerados por esta execução se perderam e não podem mais ser baixados. Os que você enviou não mudam.",
+      expiredTitle: "Resultados expirados",
+      expiredHint: "O prazo para baixar os resultados desta execução acabou.",
+      expiredOn: (date: string) => `Os resultados expiraram em ${date}.`,
+      unavailableTitle: "Resultados indisponíveis",
+      unavailableHint:
+        "Os arquivos gerados por esta execução não estão mais disponíveis para baixar. Os que você enviou não mudam.",
+      fileExpired: "expirou",
+      fileExpiredOn: (date: string) => `expirou em ${date}`,
+      fileDeleted: "excluído",
+      fileMissing: "perdido",
+      fileUnavailable: "indisponível",
+      remove: "Excluir resultados",
+      removeTitle: "Excluir os resultados desta execução?",
+      removeBody:
+        "Os arquivos gerados deixam de poder ser baixados na hora. Os arquivos que você enviou não são apagados. Não dá para desfazer.",
+      removeConfirm: "Excluir resultados",
+      removeCancel: "Cancelar",
+      removing: "Excluindo resultados…",
+      removed: "Resultados excluídos.",
+      removeRunGone: "Esta execução não existe mais; a tela foi atualizada.",
+      removeNotFinished:
+        "A execução ainda não terminou; os resultados só podem ser excluídos depois.",
     },
   },
   recipeFields: {
@@ -429,7 +562,50 @@ export const TEXT = {
       tooManyPages: (max: number) => `Escolha no máximo ${String(max)} páginas.`,
     },
   },
+  mediaMill: {
+    title: "Media Mill",
+    extractAudio: "Extrair o áudio",
+    extractAudioHint: (maxRateKhz: string, maxChannels: number) =>
+      `Uma faixa de áudio por vídeo, na taxa e nos canais de origem: sem reamostrar nem misturar canais. Vídeo com áudio acima de ${maxRateKhz} kHz ou de ${String(maxChannels)} canais é recusado.`,
+    audioFormat: "Formato do áudio",
+    audioFormatHint:
+      "Os dois saem com amostras de 16 bits, uma conversão declarada: o FLAC não recupera qualidade que o vídeo já perdeu.",
+    audioFormats: {
+      wav: "WAV (PCM, sem compressão)",
+      flac: "FLAC (compressão sem perdas)",
+    },
+    audioDisabledHint: "Marque Extrair o áudio para escolher o formato e a faixa.",
+    audioStreamIndex: "Faixa de áudio",
+    audioStreamIndexHint: (max: number) =>
+      `Deixe vazio para usar a primeira faixa de cada vídeo. Para outra, informe o número de 0 a ${String(max)}, contando só as faixas de áudio a partir de 0.`,
+    thumbnailCount: "Miniaturas",
+    thumbnailCountHint: (maxSide: number) =>
+      `JPEGs de até ${String(maxSide)} pixels no maior lado, sem ampliar vídeos pequenos.`,
+    thumbnailCounts: {
+      0: "Nenhuma",
+      1: "Uma, em 10% da duração",
+      3: "Três, em 10%, 50% e 90% da duração",
+    },
+    errors: {
+      streamIndex: (max: number) =>
+        `Deixe vazio ou informe um número inteiro de 0 a ${String(max)}.`,
+      noOutput: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
+    },
+  },
   history: {
+    reuse: "Reusar configuração",
+    reuseOf: (recipe: string, date: string) => `da execução de ${recipe} em ${date}`,
+    availability: {
+      until: (date: string) => `Resultados até ${date}`,
+      expired: "Resultados expirados",
+      unavailable: "Resultados indisponíveis",
+    },
+    reuseLoaded: (date: string) => `Parâmetros da execução de ${date}.`,
+    reuseGone:
+      "Os parâmetros desta execução não estão mais guardados (ficam 30 dias). A Bancada abriu com os parâmetros padrão.",
+    reuseWrongRecipe:
+      "Esta execução é de outra receita ou de uma versão que a Bancada não conhece. A Bancada abriu com os parâmetros padrão.",
+    loadingRun: "Carregando a execução.",
     title: "Histórico",
     navLink: "Histórico",
     filters: "Filtros",
@@ -509,6 +685,7 @@ export const TEXT = {
       activeRun: "Execução em andamento",
       limitsHeading: "Limites por lote",
       fileBytes: "Por arquivo",
+      videoFileBytes: "Por vídeo",
       batchFiles: "Arquivos por lote",
       batchBytes: "Por lote",
       concurrentUploads: "Envios simultâneos",
@@ -528,6 +705,8 @@ export const TEXT = {
         "files:write": "Enviar arquivos",
         "runs:read": "Ver execuções",
         "runs:write": "Criar e cancelar execuções",
+        "presets:read": "Ver presets",
+        "presets:write": "Salvar e excluir presets",
       },
       scopesRequired: "Escolha pelo menos um escopo.",
       days: "Validade, em dias",
@@ -577,6 +756,40 @@ export const TEXT = {
         "A sua sessão terminou e as chaves foram revogadas. Os arquivos, resultados e dados da conta são apagados em até 24 horas.",
       backHome: "Voltar à Oficina",
     },
+  },
+  presets: {
+    heading: "Presets",
+    loading: "Carregando os presets.",
+    empty: "Nenhum preset salvo",
+    emptyHint: "Na Bancada, “Salvar preset” guarda os parâmetros de uma receita para usar de novo.",
+    listLabel: "Presets da conta",
+    open: "Abrir na Bancada",
+    openOf: (name: string) => `o preset ${name}`,
+    remove: "Excluir",
+    removeOf: (name: string) => `o preset ${name}`,
+    removeTitle: (name: string) => `Excluir o preset ${name}?`,
+    removeBody: "As execuções feitas com ele não mudam. Não dá para desfazer.",
+    removeConfirm: "Excluir preset",
+    cancel: "Cancelar",
+    removed: (name: string) => `Preset ${name} excluído.`,
+    changedElsewhere:
+      "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira antes de excluir.",
+    updatedAt: (date: string) => `Atualizado em ${date}`,
+    save: "Salvar preset",
+    saveTitle: "Salvar os parâmetros como preset",
+    saveBody: "Só os parâmetros desta receita entram no preset; os arquivos, não.",
+    nameLabel: "Nome do preset",
+    nameHint: "Até 100 caracteres, diferente dos outros presets da conta.",
+    nameRequired: "Dê um nome ao preset.",
+    nameTooLong: "Use até 100 caracteres.",
+    saving: "Salvando…",
+    saved: (name: string) => `Preset ${name} salvo.`,
+    saveConflict: "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",
+    invalidParameters: "Corrija os parâmetros antes de salvar o preset.",
+    loadingPreset: "Carregando o preset.",
+    loaded: (name: string) => `Parâmetros do preset ${name}.`,
+    wrongRecipe:
+      "Este preset é de outra receita ou de uma versão que a Bancada não conhece. A Bancada abriu com os parâmetros padrão.",
   },
   // Guia da API (texto literal: é página de consulta, sem a voz temática). Trechos entre crases
   // viram <code> na tela.
@@ -686,12 +899,12 @@ export const TEXT = {
     title: "Créditos",
     artHeading: "As goblins",
     art: [
-      "As goblins da oficina foram geradas com processamento externo e editadas à mão. Os conceitos em 2D saíram da fonte externa (com os modelos fonte externa e fonte externa), os modelos 3D do fonte externa fonte externa, e os renders, recortes e a otimização da cena 3D foram feitos no Blender e no glTF Transform.",
-      "A saída bruta de processamento externo pode não ser protegível por direito autoral; a parte humana (seleção, renders, edição e os scripts) fica sob a licença CC BY 4.0.",
+      "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no registro de licenças da arte.",
+      "A contribuição de seleção, renders e edição está sob CC BY 4.0, exceto Jade, Fagulha e a marca. A licença não concede direitos sobre conteúdo de terceiros nem garante proteção autoral ou exclusividade sobre os arquivos de origem.",
     ],
     brandHeading: "A marca",
     brand: [
-      "O emblema do cabeçalho e o selo da oficina mostram a Rúbia e foram gerados com processamento externo só a partir de texto, no fonte externa, e depois limpos e recortados à mão. O ícone da aba é outro desenho: a cabeça da Rúbia desenhada à mão em SVG, com processamento determinístico.",
+      "O emblema do cabeçalho e o selo da oficina mostram a Rúbia. O ícone da aba usa uma versão própria em SVG.",
       "O nome GoblinShift, o emblema, o selo e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.",
     ],
     sealAlt:

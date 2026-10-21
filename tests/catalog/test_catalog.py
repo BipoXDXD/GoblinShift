@@ -16,6 +16,8 @@ from goblinshift.catalog import (
     VersionStatus,
 )
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
+from goblinshift.catalog.versions import COMMON_MAX_INPUT_BYTES
+from goblinshift.files.limits import MAX_FILE_BYTES
 from goblinshift.processing import downloads_detox, image_forge
 from goblinshift.processing.csv_janitor import (
     CaseMode,
@@ -190,12 +192,23 @@ def test_versao_atual_publica_limites_efetivos() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 5,
+        "max_input_bytes": 32 * 1024 * 1024,
         "table_bytes": 8 * 1024 * 1024,
         "records": 20_000,
         "columns": 100,
         "record_bytes": 1024 * 1024,
         "field_bytes": 64 * 1024,
     }
+
+
+def test_toda_versao_declara_o_teto_por_entrada() -> None:
+    # A aceitação aplica `max_input_bytes` a cada entrada; o envio só olha o nome (ADR 036).
+    for version in CATALOG.list_versions():
+        assert version.limits["max_input_bytes"] >= MAX_FILE_BYTES
+
+
+def test_teto_comum_do_catalogo_e_o_do_envio() -> None:
+    assert COMMON_MAX_INPUT_BYTES == MAX_FILE_BYTES
 
 
 def test_toda_versao_nao_retirada_tem_implementacao_no_registro() -> None:
@@ -230,6 +243,7 @@ def test_catalogo_lista_as_receitas_implementadas_na_versao_1() -> None:
         ("image-forge", 1),
         ("downloads-detox", 1),
         ("pdf-press", 1),
+        ("media-mill", 1),
     }
 
 
@@ -239,6 +253,7 @@ def test_image_forge_publica_os_limites_de_1_7() -> None:
     assert version.status is VersionStatus.CURRENT
     assert version.limits == {
         "max_inputs": 100,
+        "max_input_bytes": 32 * 1024 * 1024,
         "max_pixels": 24_000_000,
         "max_axis_px": 8192,
         "thumbnail_box_px": 320,
@@ -249,7 +264,11 @@ def test_downloads_detox_publica_o_teto_do_lote_abaixo_do_teto_de_saidas() -> No
     version = CATALOG.get_version("downloads-detox", 1)
 
     assert version.status is VersionStatus.CURRENT
-    assert version.limits == {"max_inputs": 100, "max_total_input_bytes": 480 * 1024 * 1024}
+    assert version.limits == {
+        "max_inputs": 100,
+        "max_input_bytes": 32 * 1024 * 1024,
+        "max_total_input_bytes": 480 * 1024 * 1024,
+    }
 
 
 def test_image_forge_resolve_os_defaults_e_vira_os_params_da_biblioteca() -> None:
@@ -326,3 +345,15 @@ def test_data_de_desligamento_sem_fuso_e_recusada() -> None:
 
     with pytest.raises(ValueError, match="fuso"):
         replace(current, status=VersionStatus.DEPRECATED, sunset_at=datetime(2027, 1, 15))
+
+
+def test_detox_aceita_com_preserve_o_name_prefix_default_enviado() -> None:
+    # A13 com o default: os parâmetros resolvidos voltam a resolver igual (repetir configuração).
+    resolved = CATALOG.resolve("downloads-detox", 1, {})
+
+    assert CATALOG.resolve("downloads-detox", 1, resolved) == resolved
+
+
+def test_detox_recusa_com_preserve_outro_name_prefix() -> None:
+    with pytest.raises(InvalidParametersError):
+        CATALOG.resolve("downloads-detox", 1, {"name_mode": "preserve", "name_prefix": "doc"})

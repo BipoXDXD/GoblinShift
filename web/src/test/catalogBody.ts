@@ -11,6 +11,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 5,
+            max_input_bytes: 33554432,
             table_bytes: 8388608,
             records: 20000,
             columns: 100,
@@ -44,6 +45,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 100,
+            max_input_bytes: 33554432,
             max_pixels: 24000000,
             max_axis_px: 8192,
             thumbnail_box_px: 320,
@@ -73,7 +75,7 @@ export const CATALOG_BODY = {
         {
           version: 1,
           status: "current",
-          limits: { max_inputs: 100, max_total_input_bytes: 503316480 },
+          limits: { max_inputs: 100, max_input_bytes: 33554432, max_total_input_bytes: 503316480 },
           defaults: {
             deduplicate: true,
             group_by: "kind",
@@ -97,6 +99,7 @@ export const CATALOG_BODY = {
           status: "current",
           limits: {
             max_inputs: 20,
+            max_input_bytes: 33554432,
             max_total_input_bytes: 268435456,
             max_input_pages: 200,
             max_output_pages: 400,
@@ -126,6 +129,43 @@ export const CATALOG_BODY = {
                 ],
                 default: null,
               },
+            },
+          },
+        },
+      ],
+    },
+    {
+      recipe_id: "media-mill",
+      versions: [
+        {
+          version: 1,
+          status: "current",
+          limits: {
+            max_inputs: 5,
+            max_input_bytes: 268435456,
+            max_total_input_bytes: 536870912,
+            max_duration_s: 300,
+            max_long_side_px: 1920,
+            max_short_side_px: 1080,
+            max_fps: 60,
+            max_audio_sample_rate_hz: 48000,
+            max_audio_channels: 2,
+            thumbnail_max_side_px: 640,
+          },
+          defaults: {
+            audio_format: "wav",
+            audio_stream_index: null,
+            extract_audio: true,
+            thumbnail_count: 1,
+          },
+          parameters_schema: {
+            type: "object",
+            properties: {
+              audio_stream_index: {
+                anyOf: [{ type: "integer", minimum: 0, maximum: 15 }, { type: "null" }],
+                default: null,
+              },
+              thumbnail_count: { type: "integer", enum: [0, 1, 3], default: 1 },
             },
           },
         },

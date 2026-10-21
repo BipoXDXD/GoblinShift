@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GLBs da cena 3D da abertura (ADR 030 e 038): lê o bruto do fonte externa de cada goblin do elenco
+# GLBs da cena 3D da abertura (ADR 030 e 038): lê o modelo de origem de cada goblin do elenco
 # (elenco.tsv) fora do repositório e grava o otimizado em
 # web/src/assets/art/oficina-3d/oficina-3d-ID.glb. Todas usam a mesma configuração da Rúbia.
 #
@@ -15,7 +15,7 @@
 #   4. Meshopt (EXT_meshopt_compression) sobre a malha quantizada (KHR_mesh_quantization), com UV
 #      em 14 bits: o padrão de 12 bits dá passos de 1 texel numa textura de 4096 px.
 #
-# Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/otimizar-glb.sh [ID...]
+# Uso: ARTE=/caminho/arte RUBIA_SOURCE=/caminho/bruto.glb scripts/arte/otimizar-glb.sh [ID...]
 #      Sem ID, otimiza todas; com IDs do elenco.tsv (como `nyx`), só essas.
 #      FONTE=/caminho/bruto.glb TEXTURE_PX=4096 scripts/arte/otimizar-glb.sh ID   (um ID só)
 # Requer: Node e `npm ci` em web/ (o CLI do gltf-transform vem fixado pelo npx).
@@ -71,5 +71,9 @@ optimize() {
 while IFS=$'\t' read -r -u 3 id glb _; do
   [[ -z "$id" || "$id" == \#* ]] && continue
   selected "$id" "$@" || continue
-  optimize "${FONTE:-$ARTE/$glb}" "$out_dir/oficina-3d-$id.glb"
+  source="${FONTE:-$ARTE/$glb}"
+  if [[ "$id" == "rubia" ]]; then
+    source="${FONTE:-${RUBIA_SOURCE:?Defina FONTE ou RUBIA_SOURCE com o caminho do GLB de origem registrado}}"
+  fi
+  optimize "$source" "$out_dir/oficina-3d-$id.glb"
 done 3<"$here/elenco.tsv"

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, Download } from "lucide-react";
-import { useId, type ReactElement, type ReactNode } from "react";
+import { useId, useRef, type ReactElement, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { z } from "zod";
 
@@ -22,8 +22,12 @@ import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
 import type { Run, RunStatus } from "./api";
 import { CancelRun } from "./CancelRun";
-import type { RunResults as RunResultsData } from "./commands";
+import type { ResultReference, RunResults as RunResultsData } from "./commands";
 import { artifactDownloadPath, getRunResults } from "./commands";
+import { unavailableReason } from "./availability";
+import { ResultPreview } from "./preview/ResultPreview";
+import { ResultsAvailability } from "./ResultsAvailability";
+import { RunItems } from "./RunItems";
 import { useRunPolling } from "./useRunPolling";
 
 const T = TEXT.run;
@@ -68,12 +72,13 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       <LiveRegion message={announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
-      {/* No celular, os resultados sobem para antes do cartão de estado: a goblin em destaque
-          empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a do Tab, que só passa
-          pelos links dos resultados e pela nova execução) continua a mesma. */}
+      {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
+          a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
+          do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
       {run !== undefined && (
-        <div className="max-md:order-1">
+        <div className="flex flex-col gap-8 max-md:order-1">
           <RunDetails run={run} />
+          {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
       {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
@@ -192,6 +197,7 @@ function flavorOf(status: RunStatus): string | null {
 function RunResults({ runId }: { readonly runId: string }): ReactElement {
   const client = useApiClient();
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const results = useQuery({
     queryKey: ["runs", runId, "results"] as const,
     queryFn: ({ signal }) => getRunResults(client, runId, signal),
@@ -199,14 +205,28 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
   });
   return (
     <Card as="section" aria-labelledby={headingId}>
-      <h2 id={headingId} className="mb-6 font-display text-xl font-semibold text-fg">
+      {/* tabIndex -1: recebe o foco quando Excluir resultados some com ele. */}
+      <h2
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="mb-6 font-display text-xl font-semibold text-fg"
+      >
         {T.results.heading}
       </h2>
       {/* Reserva a altura do Baixar com a data: no celular este cartão fica acima do de estado, e
           crescer depois empurraria tudo o que vem embaixo (CLS). */}
       {results.isPending && <p className="min-h-24 text-fg-muted">{T.results.loading}</p>}
       {results.error !== null && <ProblemAlert failure={failureOf(results.error)} />}
-      {results.data !== undefined && <ResultFiles results={results.data} />}
+      {results.data !== undefined && (
+        <ResultsAvailability
+          runId={runId}
+          results={results.data}
+          onDeleted={() => heading.current?.focus()}
+        >
+          <ResultFiles results={results.data} />
+        </ResultsAvailability>
+      )}
     </Card>
   );
 }
@@ -224,49 +244,114 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
     );
   }
   const packages = results.artifacts.filter((artifact) => artifact.role === "package");
-  const others = results.artifacts.filter((artifact) => artifact.role !== "package");
+  // O preview não é um resultado a baixar: aparece junto da saída de que deriva (ADR 037).
+  const others = results.artifacts.filter(
+    (artifact) => artifact.role !== "package" && artifact.role !== "preview",
+  );
+  const previews = previewsBySource(results.artifacts);
   return (
     <div className="flex flex-col gap-6">
-      {packages.map((artifact) => (
-        <a
-          key={artifact.artifact_id}
-          href={artifactDownloadPath(artifact.artifact_id)}
-          download={artifact.file_name}
-          className={buttonClassName({ variant: "primary", size: "lg" })}
-        >
-          <Download aria-hidden="true" className="size-6" />
-          {T.results.download(artifact.file_name)}
-          {/* Espaço fora do sr-only, que fora do fluxo perde o espaço inicial (HomePage). */}{" "}
-          <span className="sr-only">({T.results.roles[artifact.role]})</span>
-        </a>
-      ))}
+      {packages.map((artifact) => {
+        const reason = unavailableReason(artifact.availability, results.expires_at);
+        return reason === null ? (
+          <a
+            key={artifact.artifact_id}
+            href={artifactDownloadPath(artifact.artifact_id)}
+            download={artifact.file_name}
+            className={buttonClassName({ variant: "primary", size: "lg" })}
+          >
+            <Download aria-hidden="true" className="size-6" />
+            {T.results.download(artifact.file_name)}
+            {/* Espaço fora do sr-only, que fora do fluxo perde o espaço inicial (HomePage). */}{" "}
+            <span className="sr-only">({T.results.roles[artifact.role]})</span>
+          </a>
+        ) : (
+          <p key={artifact.artifact_id}>
+            <UnavailableFile reference={artifact} reason={reason} />
+          </p>
+        );
+      })}
       {others.length > 0 && (
         <div className="flex flex-col gap-2">
           {packages.length > 0 && (
             <h3 className="text-sm font-semibold text-fg-muted">{T.results.otherFiles}</h3>
           )}
-          <ul className="flex flex-col gap-2">
-            {others.map((artifact) => (
-              <li key={artifact.artifact_id} className="flex flex-wrap items-baseline gap-x-2">
-                <a
-                  href={artifactDownloadPath(artifact.artifact_id)}
-                  download={artifact.file_name}
-                  className="font-mono text-sm"
-                >
-                  {T.results.download(artifact.file_name)}
-                </a>
-                <span className="text-sm text-fg-muted">({T.results.roles[artifact.role]})</span>
-              </li>
-            ))}
+          <ul className={previews.size > 0 ? "flex flex-col gap-6" : "flex flex-col gap-2"}>
+            {others.map((artifact) => {
+              const reason = unavailableReason(artifact.availability, results.expires_at);
+              const preview = previews.get(artifact.artifact_id);
+              return (
+                <li key={artifact.artifact_id} className="flex flex-col gap-3">
+                  <span className="flex flex-wrap items-baseline gap-x-2">
+                    {reason === null ? (
+                      <>
+                        <a
+                          href={artifactDownloadPath(artifact.artifact_id)}
+                          download={artifact.file_name}
+                          className="font-mono text-sm"
+                        >
+                          {T.results.download(artifact.file_name)}
+                        </a>
+                        <span className="text-sm text-fg-muted">
+                          ({T.results.roles[artifact.role]})
+                        </span>
+                      </>
+                    ) : (
+                      <UnavailableFile reference={artifact} reason={reason} />
+                    )}
+                  </span>
+                  {/* Saída indisponível já diz o motivo; o preview dela só o repetiria. */}
+                  {reason === null && preview !== undefined && (
+                    <ResultPreview source={artifact} preview={preview} />
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
-      {results.expires_at !== null && (
+      {results.expires_at !== null && !hasExpired(results) && (
         <p className="text-sm text-fg-muted">
           {T.results.availableUntil(formatDateTime(results.expires_at))}
         </p>
       )}
     </div>
+  );
+}
+
+/** O primeiro preview de cada saída, pelo id dela; os demais papéis não têm origem. */
+function previewsBySource(
+  artifacts: readonly ResultReference[],
+): ReadonlyMap<string, ResultReference> {
+  const previews = new Map<string, ResultReference>();
+  for (const artifact of artifacts) {
+    const source = artifact.source_artifact_id;
+    if (artifact.role === "preview" && source !== null && !previews.has(source)) {
+      previews.set(source, artifact);
+    }
+  }
+  return previews;
+}
+
+/** Com uma referência já expirada, o prazo passou: "Disponíveis até" contradiria o motivo. */
+function hasExpired(results: RunResultsData): boolean {
+  return results.artifacts.some((artifact) => artifact.availability === "expired");
+}
+
+interface UnavailableFileProps {
+  readonly reference: RunResultsData["artifacts"][number];
+  readonly reason: string;
+}
+
+/** Arquivo que não pode mais ser baixado: o nome, sem link, com o motivo. */
+function UnavailableFile({ reference, reason }: UnavailableFileProps): ReactElement {
+  return (
+    <>
+      <span className="font-mono text-sm text-fg-muted">{reference.file_name}</span>{" "}
+      <span className="text-sm text-fg-muted">
+        ({T.results.roles[reference.role]}): {reason}.
+      </span>
+    </>
   );
 }
 

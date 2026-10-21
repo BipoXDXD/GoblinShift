@@ -30,9 +30,9 @@ from goblinshift.files.limits import (
     INCOMPLETE_UPLOAD_TTL,
     MAX_BATCH_BYTES,
     MAX_BATCH_FILES,
-    MAX_FILE_BYTES,
     MAX_NAME_CHARS,
     READY_UPLOAD_TTL,
+    max_file_bytes_for,
 )
 from goblinshift.files.objects import request_deletion_of_unreferenced
 from goblinshift.files.states import Availability, ObjectState, UploadState
@@ -169,6 +169,7 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
             *upload.c,
             stored_object.c.size_bytes,
             stored_object.c.sha256,
+            stored_object.c.state.label("object_state"),
             (upload.c.expires_at <= func.now()).label("expired"),
         )
         .join(stored_object, stored_object.c.id == upload.c.object_id)
@@ -181,7 +182,10 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
         size_bytes=row.size_bytes,
         sha256=row.sha256,
         availability=Availability.of(
-            deleted_at=row.deleted_at, expires_at=row.expires_at, expired=row.expired
+            deleted_at=row.deleted_at,
+            expires_at=row.expires_at,
+            expired=row.expired,
+            object_missing=row.object_state == ObjectState.MISSING,
         ),
     )
 
@@ -268,9 +272,10 @@ def _parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
         name_problem = _name_problem(intent.name)
         if name_problem is not None:
             raise InvalidUploadRequestError(f"items[{index}].name", name_problem)
-        if not 0 <= intent.expected_size <= MAX_FILE_BYTES:
+        max_bytes = max_file_bytes_for(intent.name)
+        if not 0 <= intent.expected_size <= max_bytes:
             raise InvalidUploadRequestError(
-                f"items[{index}].expected_size", f"deve estar entre 0 e {MAX_FILE_BYTES} bytes"
+                f"items[{index}].expected_size", f"deve estar entre 0 e {max_bytes} bytes"
             )
     if sum(intent.expected_size for intent in intents) > MAX_BATCH_BYTES:
         raise InvalidUploadRequestError("items", f"o lote passa de {MAX_BATCH_BYTES} bytes")

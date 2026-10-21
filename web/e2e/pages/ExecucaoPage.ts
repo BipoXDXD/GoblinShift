@@ -19,6 +19,17 @@ export class ExecucaoPage {
     await expect(this.#page.getByText(status, { exact: true })).toBeVisible({ timeout: 10_000 });
   }
 
+  /** Imagens de preview das saídas, já carregadas e decodificadas, pelo texto alternativo. */
+  async imagePreviews(): Promise<string[]> {
+    const previews = this.#page.getByRole("img", { name: /^Pré-visualização de / });
+    await expect(previews.first()).toBeVisible();
+    return previews.evaluateAll((images) =>
+      images
+        .filter((image) => image instanceof HTMLImageElement && image.naturalWidth > 0)
+        .map((image) => image.getAttribute("alt") ?? ""),
+    );
+  }
+
   /** Baixa pelo link "Baixar <arquivo>" e devolve o download já concluído. */
   async download(fileName: string): Promise<Download> {
     const link = this.#page.getByRole("link", { name: new RegExp(`^Baixar ${fileName}`) });

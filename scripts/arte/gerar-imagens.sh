@@ -9,7 +9,7 @@
 #     a mesma imagem vira a estática da cena e a goblin dos estados.
 # Os PNGs intermediários ficam numa pasta temporária: os brutos e renders continuam fora do Git.
 #
-# Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/gerar-imagens.sh [ID...]
+# Uso: ARTE=/caminho/arte RUBIA_SOURCE=/caminho/bruto.glb scripts/arte/gerar-imagens.sh [ID...]
 #      Sem ID, gera todas; com IDs do elenco.tsv (como `rubia`), só essas.
 #      ALVO=cena gera só as imagens da cena 3D; ALVO=estados, só as dos estados (padrão: as duas).
 #      Gerar de novo muda os bytes: atualize o sha256 no PROVENANCE.json.
@@ -90,12 +90,16 @@ wants() { [[ "$ALVO" == "tudo" || "$ALVO" == "$1" ]]; }
 while IFS=$'\t' read -r -u 3 id glb _; do
   [[ -z "$id" || "$id" == \#* ]] && continue
   selected "$id" "$@" || continue
+  source="$ARTE/$glb"
+  if [[ "$id" == "rubia" ]]; then
+    source="${RUBIA_SOURCE:?Defina RUBIA_SOURCE com o caminho do GLB de origem registrado}"
+  fi
   # A imagem da cena usa a luz realista (Cycles, três luzes, tom Standard), a mesma que a cena do
   # three imita (ADR 030). As goblins dos estados ficam no modo padrão (EEVEE, tom AgX, um sol), o
   # dos renders que o usuário aprovou para elas; a Rúbia é a exceção, com o render realista nos
   # dois lugares.
   if wants cena || [[ "$id" == "rubia" ]]; then
-    render_framed "$ARTE/$glb" "$work/$id-realista.png" --realista
+    render_framed "$source" "$work/$id-realista.png" --realista
   fi
   if wants cena; then
     export_sizes "$work/$id-realista.png" "$art/oficina-3d/oficina-3d-$id" "${POSTER_WIDTHS[@]}"
@@ -104,7 +108,7 @@ while IFS=$'\t' read -r -u 3 id glb _; do
     if [[ "$id" == "rubia" ]]; then
       cp "$work/$id-realista.png" "$work/$id.png"
     else
-      render_framed "$ARTE/$glb" "$work/$id.png"
+      render_framed "$source" "$work/$id.png"
     fi
     export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
   fi

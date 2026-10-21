@@ -14,8 +14,10 @@ const acceptedRunSchema = runSchema.extend({
 const resultReferenceSchema = z.object({
   artifact_id: z.uuid(),
   logical_name: z.string(),
-  role: z.enum(["output", "report", "manifest", "package"]),
+  role: z.enum(["output", "report", "manifest", "package", "preview"]),
   file_name: z.string(),
+  availability: z.enum(["available", "expired", "deleted", "missing"]),
+  source_artifact_id: z.uuid().nullable(),
 });
 
 const runResultsSchema = z.object({
@@ -23,6 +25,9 @@ const runResultsSchema = z.object({
   expires_at: z.iso.datetime({ offset: true }).nullable(),
   artifacts: z.array(resultReferenceSchema),
 });
+
+/** O 202 do DELETE chega sem corpo; só o status importa. */
+const acceptedSchema = z.unknown();
 
 // `status` é string na spec: o cancelamento devolve o estado real, e enum de saída pode crescer.
 const cancelOutcomeSchema = z.object({
@@ -34,6 +39,7 @@ const cancelOutcomeSchema = z.object({
 export type AcceptedRun = z.infer<typeof acceptedRunSchema>;
 export type CancelOutcome = z.infer<typeof cancelOutcomeSchema>;
 export type RunResults = z.infer<typeof runResultsSchema>;
+export type ResultReference = RunResults["artifacts"][number];
 
 interface CreateRunRequest {
   readonly command: RunCommand;
@@ -87,6 +93,18 @@ export async function getRunResults(
     ...(signal === undefined ? {} : { signal }),
   });
   return response.data;
+}
+
+/**
+ * DELETE /runs/{id}/artifacts: exclui as saídas de uma execução terminal antes das 48 h (202),
+ * sem tocar nos originais. Execução que ainda não terminou responde 409.
+ */
+export async function deleteRunArtifacts(client: ApiClient, runId: string): Promise<void> {
+  await client.request({
+    method: "DELETE",
+    path: `/api/v1/runs/${encodeURIComponent(runId)}/artifacts`,
+    schema: acceptedSchema,
+  });
 }
 
 /**

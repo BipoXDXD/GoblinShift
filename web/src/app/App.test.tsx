@@ -46,6 +46,7 @@ describe("App", () => {
       ["Abrir a Bancada da Image Forge", "/bancada/image-forge"],
       ["Abrir a Bancada da Downloads Detox", "/bancada/downloads-detox"],
       ["Abrir a Bancada da PDF Press", "/bancada/pdf-press"],
+      ["Abrir a Bancada da Media Mill", "/bancada/media-mill"],
     ]);
   });
 

@@ -2,7 +2,7 @@
 
 API de processamento de arquivos por receitas — imagens, tabelas CSV, lotes de downloads e PDFs — com resultados privados, manifesto e execução isolada. Projeto de portfólio e serviço aberto.
 
-> Em construção. Fatias 0 a 4 (fundação e deploy, sandbox, CSV Janitor, fluxo durável e executor real sob gVisor) concluídas; **5 — Image Forge e Downloads Detox** em revisão. A ordem completa está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
+> Em construção. Fatias 0 a 6 (fundação e deploy, sandbox, CSV Janitor, fluxo durável, executor real sob gVisor, Image Forge e Downloads Detox, identidade e segurança web) concluídas; as fatias 7 a 10 (interface, abertura pública, PDF Press e Media Mill) estão na `main` com pendências que dependem da VPS ou de decisão do dono. O serviço segue fechado a cadastros ([ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)). O estado de cada fatia está em [docs/GoblinShiftPlan.md](docs/GoblinShiftPlan.md#s3-9).
 
 ## Documentos
 
@@ -18,7 +18,7 @@ Python 3.14 · FastAPI · PostgreSQL 18 (também como fila) · SQLAlchemy 2 · A
 
 ## Desenvolvimento local
 
-Requisitos: [uv](https://docs.astral.sh/uv/) e Docker com Compose.
+Requisitos: [uv](https://docs.astral.sh/uv/), Docker com Compose e o FFmpeg completo no `PATH` (`brew install ffmpeg` ou `apt install ffmpeg`), que os testes do Media Mill usam para gerar vídeos sintéticos.
 
 ```bash
 uv sync                       # ambiente e dependências
@@ -29,6 +29,8 @@ curl http://localhost/readyz
 ```
 
 A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/livez` e `/readyz` vão para a API, `robots.txt` e os assets do build são arquivos de verdade (o que faltar é 404), e qualquer outra rota cai no `index.html`. Texto (HTML, CSS, JS, JSON, SVG, manifest) sai com gzip. `/docs` (Swagger UI servido pela própria API, sem CDN e com CSP própria) e `/openapi.json` também vão para a API. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), contado pelo IP real que só a borda pode informar (ADR 014). Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
+
+O worker local usa uma imagem própria, `goblinshift-worker-dev` ([`docker/worker-dev.Dockerfile`](docker/worker-dev.Dockerfile)): a imagem da aplicação mais o `ffmpeg` e o `ffprobe` copiados do estágio `ffmpeg` de `docker/executor.Dockerfile`, os mesmos binários da produção (FFmpeg 8.1.2 mínimo, só `mov`/`matroska` e `file`/`pipe`; [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)), para o Media Mill rodar com o `docker compose up` puro. O estágio vira o serviço `ffmpeg-minimo`, com zero réplicas: o Compose o constrói, mas não o executa. Sem cache, o primeiro `--build` compila o FFmpeg (alguns minutos); depois o cache do BuildKit, o mesmo da imagem do executor, resolve em segundos. A imagem de produção da aplicação continua sem FFmpeg (`tests/test_compose_dev_ffmpeg.py`).
 
 O OpenObserve fica em `http://127.0.0.1:5080`, com as credenciais do `.env`.
 
@@ -45,7 +47,7 @@ Depois de mexer no worker, na manutenção ou no Runner, `./scripts/stress-runs.
 
 ### Interface web (`web/`)
 
-Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas), Bancada (arquivos e parâmetros) e Execução (estado e downloads).
+Requisitos: Node 24 (versão em `web/.nvmrc`). Telas: Oficina (receitas, presets e execuções recentes), Bancada (arquivos e parâmetros), Execução (estado, pré-visualizações e downloads), Histórico e Acesso.
 
 Sistema visual em `web/src/styles/`: tokens em CSS custom properties (`tokens.css`: paleta Taverna escura, com madeira, cobre, âmbar, brasa e pátina em OKLCH, [ADR 032](docs/adr/032-paleta-taverna-escura.md); papéis semânticos nos temas claro e escuro), fontes auto-hospedadas sob OFL-1.1 ([`web/LICENCAS-FONTES.md`](web/LICENCAS-FONTES.md)) e base global (foco, controles, progresso, movimento reduzido). O tema segue o sistema, com escolha manual no cabeçalho; `public/theme-init.js` aplica o tema antes da primeira pintura, sem script inline. Testes travam o sistema: contraste WCAG de cada par nos dois temas (`contrast.test.ts`), só valores da escala e nenhum estilo inline (`classScale.test.ts`). A abertura tem as cinco goblins em 3D, uma por vez num seletor, com giro livre e inclinação por arrasto, setas e botão Girar (three.js, a Rúbia carregada depois do conteúdo e as outras só quando escolhidas, só com GPU e sem movimento reduzido, com a imagem estática como fallback), e as goblins também aparecem nos estados vazio, carregando, erro e sucesso ([ADR 027](docs/adr/027-3d-na-abertura.md), [ADR 030](docs/adr/030-motor-e-asset-do-3d-da-abertura.md) e [ADR 038](docs/adr/038-elenco-em-3d-na-abertura.md)). A arte é gerada por `scripts/arte/` a partir dos brutos fora do repositório, com proveniência e licença em [`docs/art/LICENSE-ART.md`](docs/art/LICENSE-ART.md), conferidas no CI.
 
@@ -108,8 +110,25 @@ Cada tabela aceita vira `limpas/<nome>.csv` (UTF-8 sem BOM, CRLF, aspas só quan
 | `image-forge` | 1 | Redimensiona JPEG e PNG sem ampliar, aplica a orientação EXIF, converte Display P3 para sRGB, usa o quadro principal do MPO, remove metadados e gera miniaturas opcionais em `thumbnails/` ([1.2](docs/GoblinShiftPlan.md#s1-2)) | 100 imagens, 24 MP e 8192 px por eixo, conferidos antes de decodificar |
 | `downloads-detox` | 1 | Classifica por assinatura em `images/`, `tables/`, `text/` e `archives/`, deduplica por SHA-256 e tamanho, renomeia e recusa executáveis, scripts, HTML e SVG ([1.4](docs/GoblinShiftPlan.md#s1-4)) | 100 arquivos, 480 MiB por lote |
 | `pdf-press` | 1 | Junta (`merge`), separa em partes (`split`) ou monta um PDF com páginas escolhidas, repetições incluídas (`select`), com o qpdf; publica o `page-map.json` com cada página. Recusa senha, formulário, assinatura, anexo e conteúdo ativo, e falha a execução inteira em PDF danificado ou página inexistente ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 035](docs/adr/035-pdf-press-com-pikepdf.md)) | 20 PDFs, 256 MiB, 200 páginas de entrada, 400 de saída e 200 documentos |
+| `media-mill` | 1 | Extrai uma faixa de áudio em WAV ou FLAC de 16 bits, na taxa e nos canais de origem, e gera 0, 1 ou 3 miniaturas JPEG de até 640 px em `thumbnails/`, de MP4/MOV (H.264 + AAC/PCM) e WebM (VP8/VP9 + Opus/Vorbis) conferidos por assinatura e ffprobe ([1.5](docs/GoblinShiftPlan.md#s1-5), [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)) | 5 vídeos de até 256 MiB (512 MiB por lote), 300 s, 1920 × 1080, 60 fps, 48 kHz e estéreo |
 
 Toda execução publica, além do conteúdo, o `report.json`, o `manifest.json` (entradas, hashes, parâmetros, digest da imagem do executor, duplicatas e rejeições) e o ZIP determinístico `<receita>.zip`, montados pelo empacotador comum no executor ([ADR 019](docs/adr/019-layout-de-out-pacote-e-papeis.md)). Uma saída idêntica a uma entrada não ocupa espaço de novo: o artefato aponta para o objeto do upload ([ADR 020](docs/adr/020-detox-reaproveita-o-objeto-da-entrada.md)). A versão de cada receita e os limites efetivos estão no OpenAPI de `POST /runs`.
+
+## Presets, pré-visualizações e remoção de resultados
+
+**Presets** ([plano, 1.6](docs/GoblinShiftPlan.md#s1-6)) são configurações privadas da conta: receita, versão e parâmetros, sem arquivos. `POST /api/v1/presets` (`201`, com `Location` e `ETag`), `GET /presets` (todos, em ordem de nome), `GET /presets/{id}`, `PUT /presets/{id}` (substituição integral) e `DELETE /presets/{id}` (`204`) usam os escopos `presets:read` e `presets:write`. O corpo é o de `POST /runs` sem `input_upload_ids` e com `name`; campo desconhecido é recusado e os parâmetros passam pela validação da versão pedida, como numa execução (`422 VALIDATION_FAILED` por campo, sob `parameters.`; versão retirada dá `422 RECIPE_VERSION_RETIRED`). O preset guarda os parâmetros como enviados, e os defaults são resolvidos de novo a cada execução.
+
+- *Nome:* aparado e normalizado em NFC antes de validar, de 1 a 100 caracteres, sem caracteres de controle nem de formato invisível, e único na conta (a chave natural é `(dono, nome)`: repetir dá `409`, também depois de aparado).
+- *Limite:* 100 presets por conta; o 101º dá `409`.
+- *Revisão:* o `ETag` é a revisão entre aspas (`"3"`) e cada `PUT` soma 1. `PUT` e `DELETE` exigem `If-Match` com ele: ausente ou `*` → `428`; revisão que não é a atual → `412`, sem gravar nada; fora do formato → `400`. A revisão é conferida antes do nome, então quem leu uma versão velha recebe `412` e relê.
+- *Dono:* preset de outra conta e inexistente dão o mesmo `404`. Excluir a conta remove os presets.
+- *Executar:* `POST /presets/{id}/runs` recebe só `input_upload_ids`, exige `Idempotency-Key`, os escopos `runs:write` e `presets:read` e devolve `202`. A execução guarda o `preset_id` e uma cópia da configuração: editar ou excluir o preset depois não a altera (a referência vira nula).
+
+Na interface, a Bancada tem "Salvar preset", que pede o nome e guarda os parâmetros do formulário, e a Oficina lista os presets (só com sessão) com "Abrir na Bancada", que pré-preenche os parâmetros (`?preset=<id>`), e "Excluir", com confirmação. Revisão vencida na exclusão (`412`) vira aviso e a lista é relida. A edição (`PUT`) existe só na API.
+
+**Pré-visualizações** ([ADR 037](docs/adr/037-previews-em-grupo-e-papel-proprios.md)) são derivados pequenos que a receita grava em `previews/`, com o papel `preview`, depois de todo o conteúdo e só enquanto cabem nos tetos (faltar espaço nunca falha a execução). Ficam fora do manifesto e do ZIP. O CSV Janitor gera uma amostra CSV (cabeçalho e até 100 registros, até 64 KiB, fórmulas escapadas), o Image Forge um JPEG de até 512 × 512, o PDF Press o trecho do `page-map.json` de cada documento e o Media Mill usa cada miniatura (JPEG de até 640 px) como o preview dela; o Downloads Detox não gera. Preview acima do teto do formato (512 KiB o JPEG, 64 KiB a amostra e o mapa) é pulado, como quando falta espaço. `GET /runs/{id}/results` lista os previews com `source_artifact_id` apontando a saída de origem, e `GET /api/v1/artifacts/{id}/preview` (escopo `files:read`) recebe o id da **saída** e entrega o preview dela, como `image/jpeg` para a imagem e como bytes opacos para o resto, sempre com `attachment`, `nosniff`, CSP `sandbox` e `no-store`. Sem preview, ou de outra conta, é `404`; saída excluída ou vencida, `410`. A Execução mostra o preview ao lado do download da saída, sempre pelo `<img>` na rota de preview ou pela leitura do corpo pequeno, nunca `fetch` → Blob do download.
+
+**Remoção de resultados:** `DELETE /api/v1/runs/{id}/artifacts` (escopo `files:write`) apaga antes das 48 h as saídas, o relatório, o manifesto, o pacote e os previews de uma execução terminal. Responde `202` e repetir também é `202`: os artefatos ficam indisponíveis na hora e a manutenção remove os arquivos quando nenhum download aberto os usa. Execução que ainda não terminou dá `409`; inexistente ou de outra conta, `404`. Os originais enviados não mudam. Na Execução, "Excluir resultados" pede confirmação.
 
 ## Contas e chaves de API (administrador)
 
@@ -179,7 +198,7 @@ Rotação:
 
 ## Imagem do executor
 
-Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, e o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)): nada de banco, web nem outras dependências de terceiros. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
+Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)) e o FFmpeg 8.1.2 compilado do fonte oficial (conferido por SHA-256) só com os demuxers `mov` e `matroska` e os protocolos `file` e `pipe`, sem componentes GPL ([ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)): nada de banco, web nem outras dependências de terceiros. Sem cache, construir a imagem leva alguns minutos por causa do FFmpeg; por isso os testes `executor_image` rodam na CI só no job `gvisor`. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
 
 No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`, gravada pelo `deploy/release-env.sh` no `release.env` do host.
 
@@ -213,7 +232,7 @@ sudo systemctl start goblinshift-acceptance.service   # roda já; resultado em j
 
 O serviço roda como root, então não executa nada do checkout nem lê nada de `/srv/goblinshift/secrets`, que pertencem ao usuário `goblinshift`: quem controlasse esses caminhos rodaria código como root. O instalador copia `deploy/acceptance`, `deploy/executor_ctl` e `deploy/backup/lib.sh` para `/usr/local/lib/goblinshift` (do root, sem escrita para outros) recusa diretório de destino que outro usuário grave ou que seja symlink e lê o checkout com os privilégios do `goblinshift`, para que um symlink plantado ali não copie um arquivo que só o root lê. Por isso uma mudança na aceitação só chega ao timer quando o `install.sh` roda de novo, como no executor-ctl; rode-o a partir de um checkout conferido (`git status` limpo, no commit implantado). A unit tem o sistema de arquivos somente leitura fora da área de trabalho e só as capabilities que as sondas usam (`systemd-analyze security goblinshift-acceptance.service`).
 
-Não rode o teste de caos nem o do Image Forge no horário do timer: os três usam a mesma área de trabalho.
+Não rode o teste de caos nem os do Image Forge e do Media Mill no horário do timer: todos usam a mesma área de trabalho.
 
 ### Pior caso do Image Forge (na VPS, antes de publicar uma versão)
 
@@ -221,6 +240,16 @@ Mede 100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas numa tenta
 
 ```bash
 cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.image_forge_load   # PASSOU só dentro de 600 s
+```
+
+### Pior caso do Media Mill (na VPS, antes de publicar a versão)
+
+A VPS não tem FFmpeg e a imagem do executor só tem o build mínimo, que não codifica H.264: os vídeos saem de uma máquina com o FFmpeg completo e vão para a VPS. Mede 5 vídeos de 300 s em 1080p60 com keyframe a cada 10 s, FLAC e 3 miniaturas numa tentativa com o perfil de produção, sem passar pela API, com a manutenção parada ([ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)). Rode com o worker parado:
+
+```bash
+./scripts/media-mill-worst-case.sh /tmp/pior-caso            # na máquina com FFmpeg (~375 MiB)
+scp /tmp/pior-caso/*.mp4 stillon:/tmp/pior-caso/
+cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.media_mill_load /tmp/pior-caso   # PASSOU só dentro de 600 s
 ```
 
 ### Teste de caos do worker (na VPS)
@@ -270,13 +299,14 @@ GS_API_KEY=gsk_… ./scripts/e2e-csv-janitor.sh http://localhost      # saída l
 GS_API_KEY=gsk_… ./scripts/e2e-image-forge.sh http://localhost      # P3, orientação, MPO, 16 bits, bomba
 GS_API_KEY=gsk_… ./scripts/e2e-downloads-detox.sh http://localhost  # colisão de nomes, JAR, cópia, HTML
 GS_API_KEY=gsk_… ./scripts/e2e-pdf-press.sh http://localhost        # split em partes, mapa de páginas
+GS_API_KEY=gsk_… ./scripts/e2e-media-mill.sh http://localhost       # FLAC, miniaturas, HLS, 5.1, MPEG-4
 ```
 
 Contra a VPS, a URL é `https://goblinshift.dev`: a borda não encaminha o acesso pelo IP ao GoblinShift, para a chave não trafegar em texto claro ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)).
 
-As fixtures do Image Forge, do Detox e do PDF Press saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução, junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
+As fixtures do Image Forge, do Detox, do PDF Press e do Media Mill saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução (os vídeos do Media Mill exigem o FFmpeg completo no `PATH`, como os testes), junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 
-Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`). Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
+Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`), com o FFmpeg mínimo copiado da imagem do executor. Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).
 
 ## Estrutura
 
@@ -284,12 +314,12 @@ Em desenvolvimento, o worker roda a receita num subprocesso do próprio containe
 src/goblinshift/
   entrypoints/       API (/api/v1), processos gs-worker e gs-maintenance, CLIs gs-admin, gs-csv-janitor e gs-export-openapi
   platform/          configuração, banco, telemetria e compatibilidade de schema
-  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/, pdf_press/), empacotador e executor
+  processing/        receitas (csv_janitor/, image_forge/, downloads_detox/, pdf_press/, media_mill/), empacotador e executor
   runs/              ciclo de vida da execução: aceitação, fila, fencing, worker, manutenção
   files/             storage, uploads, artefatos, usos, transferências e retenção
   catalog/           receitas e versões publicadas, schemas e defaults
   identity/          contas e chaves de API
-  presets/           presets (próximas fatias)
+  presets/           presets privados da conta, com revisão (criar, listar, substituir, excluir)
 migrations/          Alembic (expand/contract)
 docker/              imagens da aplicação, do executor e do Nginx com a SPA; OpenTelemetry Collector
 deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco, SLOs e alertas e teste de aceitação do ambiente

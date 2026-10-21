@@ -23,11 +23,19 @@ from pydantic import BaseModel, ValidationError
 from goblinshift.catalog.csv_janitor_v1 import CsvJanitorV1Parameters
 from goblinshift.catalog.downloads_detox_v1 import DownloadsDetoxV1Parameters
 from goblinshift.catalog.image_forge_v1 import ImageForgeV1Parameters
+from goblinshift.catalog.media_mill_v1 import MediaMillV1Parameters
 from goblinshift.catalog.pdf_press_v1 import PdfPressV1Parameters, upload_references
 from goblinshift.catalog.references import UploadReference, no_upload_references
-from goblinshift.processing import downloads_detox, image_forge, pdf_press
+from goblinshift.processing import downloads_detox, image_forge, media_mill, pdf_press
 from goblinshift.processing.csv_janitor import Limits
 from goblinshift.processing.csv_janitor import recipe as csv_janitor
+
+MIB = 1024 * 1024
+# 1.7: "arquivo comum, 32 MiB". Toda versão declara `max_input_bytes` e a aceitação o aplica a cada
+# entrada pelo tamanho guardado, nunca pelo nome: o envio dá 256 MiB a um nome terminado em .mp4,
+# e só a versão que declara esse teto (Media Mill) aceita a entrada maior (ADR 036). O teste do
+# catálogo confere que o valor é o mesmo `MAX_FILE_BYTES` de `files.limits`.
+COMMON_MAX_INPUT_BYTES = 32 * MIB
 
 
 class VersionStatus(StrEnum):
@@ -140,7 +148,11 @@ CSV_JANITOR_V1 = RecipeVersion(
     version=csv_janitor.VERSION,
     status=VersionStatus.CURRENT,
     parameters_model=CsvJanitorV1Parameters,
-    limits={"max_inputs": csv_janitor.MAX_TABLES, **dataclasses.asdict(Limits())},
+    limits={
+        "max_inputs": csv_janitor.MAX_TABLES,
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
+        **dataclasses.asdict(Limits()),
+    },
 )
 
 _IMAGE_LIMITS = image_forge.Limits()
@@ -152,6 +164,7 @@ IMAGE_FORGE_V1 = RecipeVersion(
     parameters_model=ImageForgeV1Parameters,
     limits={
         "max_inputs": image_forge.MAX_INPUTS,
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
         "max_pixels": _IMAGE_LIMITS.max_pixels,
         "max_axis_px": _IMAGE_LIMITS.max_axis,
         "thumbnail_box_px": _IMAGE_LIMITS.thumbnail_box,
@@ -167,7 +180,30 @@ DOWNLOADS_DETOX_V1 = RecipeVersion(
     parameters_model=DownloadsDetoxV1Parameters,
     limits={
         "max_inputs": downloads_detox.MAX_INPUTS,
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
         "max_total_input_bytes": downloads_detox.MAX_TOTAL_INPUT_BYTES,
+    },
+)
+
+_MEDIA_LIMITS = media_mill.Limits()
+
+# `max_input_bytes` sobe o teto por arquivo de 32 MiB para os 256 MiB de vídeo (1.7, ADR 036).
+MEDIA_MILL_V1 = RecipeVersion(
+    recipe_id=media_mill.RECIPE_ID,
+    version=media_mill.VERSION,
+    status=VersionStatus.CURRENT,
+    parameters_model=MediaMillV1Parameters,
+    limits={
+        "max_inputs": media_mill.MAX_INPUTS,
+        "max_input_bytes": media_mill.MAX_INPUT_BYTES,
+        "max_total_input_bytes": media_mill.MAX_TOTAL_INPUT_BYTES,
+        "max_duration_s": _MEDIA_LIMITS.max_duration_s,
+        "max_long_side_px": _MEDIA_LIMITS.max_long_side_px,
+        "max_short_side_px": _MEDIA_LIMITS.max_short_side_px,
+        "max_fps": _MEDIA_LIMITS.max_fps,
+        "max_audio_sample_rate_hz": _MEDIA_LIMITS.max_sample_rate_hz,
+        "max_audio_channels": _MEDIA_LIMITS.max_channels,
+        "thumbnail_max_side_px": _MEDIA_LIMITS.thumbnail_max_side_px,
     },
 )
 
@@ -180,6 +216,8 @@ PDF_PRESS_V1 = RecipeVersion(
     parameters_model=PdfPressV1Parameters,
     limits={
         "max_inputs": pdf_press.MAX_INPUTS,
+        # PDF é arquivo comum para o envio (32 MiB); o lote soma até 256 MiB.
+        "max_input_bytes": COMMON_MAX_INPUT_BYTES,
         "max_total_input_bytes": pdf_press.MAX_TOTAL_INPUT_BYTES,
         "max_input_pages": pdf_press.MAX_INPUT_PAGES,
         "max_output_pages": pdf_press.MAX_OUTPUT_PAGES,
@@ -188,7 +226,7 @@ PDF_PRESS_V1 = RecipeVersion(
     upload_references=upload_references,
 )
 
-CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1])
+CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS_V1, MEDIA_MILL_V1])
 
 
 def _field_errors(error: ValidationError) -> list[FieldError]:

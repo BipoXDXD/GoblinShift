@@ -1,5 +1,7 @@
 """Receita pdf-press v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.5 e 1.7; ADR 035)."""
 
+import json
+
 import pikepdf
 import pytest
 
@@ -10,6 +12,7 @@ from goblinshift.processing.recipe import (
     FailureCode,
     InputContractError,
     ItemOk,
+    Preview,
     RecipeFailure,
     ReportWarning,
 )
@@ -41,6 +44,7 @@ def test_merge_concatena_as_entradas_na_ordem(work: Workspace) -> None:
             ("page-map.json", "merged.pdf"),
             counts={"pages": 2, "output_pages": 2},
             details={"pdf_version": "1.4"},
+            previews=(Preview("previews/merged.json", "merged.pdf"),),
         ),
         ItemOk(1, (), counts={"pages": 1, "output_pages": 1}, details={"pdf_version": "1.4"}),
     ]
@@ -72,7 +76,13 @@ def test_split_de_nomes_iguais_nao_sobrescreve(work: Workspace) -> None:
 
     work.run(Params(operation=Operation.SPLIT))
 
-    assert work.output_paths() == ["a-p001.pdf", "a-p001_1.pdf", "page-map.json"]
+    assert work.output_paths() == [
+        "a-p001.pdf",
+        "a-p001_1.pdf",
+        "page-map.json",
+        "previews/a-p001.json",
+        "previews/a-p001_1.json",
+    ]
     assert samples.markers(work.read("a-p001_1.pdf")) == ["b:1"]
 
 
@@ -239,3 +249,37 @@ def test_select_sem_upload_id_das_entradas_e_job_fora_do_contrato(work: Workspac
 
     with pytest.raises(InputContractError):
         work.run(select((UPLOAD_C, 1)))
+
+
+# --- Preview: o mapa de páginas de cada documento, sem renderizar PDF (2.2; ADR 037) -----------
+
+
+def test_cada_documento_tem_o_proprio_mapa_de_paginas_como_preview(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=3))
+
+    report = work.run(Params(operation=Operation.SPLIT, pages_per_document=2))
+
+    [item] = report.items
+    assert isinstance(item, ItemOk)
+    assert item.previews == (
+        Preview("previews/a-p001-002.json", "a-p001-002.pdf"),
+        Preview("previews/a-p003.json", "a-p003.pdf"),
+    )
+    assert json.loads(work.read("previews/a-p003.json")) == {
+        "schema_version": 1,
+        "path": "a-p003.pdf",
+        "pages": [{"input_position": 0, "page_number": 3}],
+    }
+
+
+def test_preview_do_select_segue_a_ordem_e_as_repeticoes(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2), upload_id=UPLOAD_A)
+    work.add("b.pdf", samples.document("b", pages=1), upload_id=UPLOAD_B)
+
+    work.run(select((UPLOAD_B, 1), (UPLOAD_A, 2), (UPLOAD_B, 1)))
+
+    assert json.loads(work.read("previews/selection.json"))["pages"] == [
+        {"input_position": 1, "page_number": 1},
+        {"input_position": 0, "page_number": 2},
+        {"input_position": 1, "page_number": 1},
+    ]

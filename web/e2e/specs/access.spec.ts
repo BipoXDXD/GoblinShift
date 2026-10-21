@@ -1,6 +1,8 @@
 // Acesso com sessão (T16–T18): chave de API mostrada uma vez e fora do storage, revogação com
 // confirmação, reautenticação pelo provedor e exclusão da conta com a frase digitada.
 import { AcessoPage } from "../pages/AcessoPage";
+import { fulfillProblem } from "../support/fakeAccount";
+import { holdRequest } from "../support/held";
 import { expect, test } from "../support/test";
 
 test.use({ auth: "none" });
@@ -67,6 +69,36 @@ test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista m
   expect(stored?.key.revoked_at).not.toBeNull();
 });
 
+test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reabre", async ({
+  page,
+  fakeApi,
+}) => {
+  await fakeApi.signIn();
+  const acesso = new AcessoPage(page);
+  await acesso.open();
+  await acesso.createKey(["Ler arquivos (files:read)"]);
+  await page.getByRole("button", { name: "Já copiei" }).click();
+  const [stored] = [...fakeApi.account.keys.values()];
+  const publicId = stored?.key.public_id ?? "";
+  const held = holdRequest(page, "**/api/v1/api-keys/*", "DELETE");
+
+  const dialog = await acesso.askRevoke(publicId);
+  const confirm = dialog.getByRole("button", { name: "Revogar chave" });
+  await confirm.click();
+  const revoke = await held;
+  // O Esc só depois de a tela mostrar o pedido em voo.
+  await expect(confirm).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await fulfillProblem(revoke, { code: "SERVICE_UNAVAILABLE", status: 503 });
+
+  await expect(acesso.section("Chaves de API").getByRole("alert")).toContainText(
+    "O serviço está indisponível",
+  );
+  await expect(dialog).toBeHidden();
+  await expect(await acesso.askRevoke(publicId)).toBeVisible();
+});
+
 test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Acesso", async ({
   page,
   fakeApi,
@@ -115,4 +147,31 @@ test("excluir a conta só age com a frase; depois, a exclusão pedida e nenhuma 
   await expect(page.getByRole("heading", { level: 1, name: "Exclusão pedida" })).toBeFocused();
   expect(fakeApi.account.deleted).toBe(true);
   expect(await context.cookies()).toEqual([]);
+});
+
+test("Esc com a exclusão da conta em voo não fecha; a falha aparece e o diálogo reabre", async ({
+  page,
+  fakeApi,
+}) => {
+  await fakeApi.signIn();
+  const acesso = new AcessoPage(page);
+  await acesso.open();
+  const held = holdRequest(page, "**/api/v1/me", "DELETE");
+
+  const dialog = await acesso.askDeleteAccount();
+  await dialog.getByLabel("Digite “excluir minha conta”").fill("excluir minha conta");
+  await dialog.getByRole("button", { name: "Excluir conta" }).click();
+  const deletion = await held;
+  // O Esc só depois de a tela mostrar o pedido em voo.
+  await expect(dialog.getByRole("button", { name: "Excluindo…" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await fulfillProblem(deletion, { code: "SERVICE_UNAVAILABLE", status: 503 });
+
+  await expect(acesso.section("Excluir conta").getByRole("alert")).toContainText(
+    "O serviço está indisponível",
+  );
+  await expect(dialog).toBeHidden();
+  await expect(await acesso.askDeleteAccount()).toBeVisible();
+  expect(fakeApi.account.deleted).toBe(false);
 });

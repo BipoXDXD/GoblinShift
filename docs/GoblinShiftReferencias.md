@@ -1,6 +1,6 @@
 # GoblinShift — referências
 
-> Livros e documentação oficial que embasam o [GoblinShiftPlan](GoblinShiftPlan.md). O plano cita cada fonte pelo ID (B01–B30, D01–D30), com link para cá. Os livros também estão na biblioteca técnica global (`~/.fonte externa/referencias/livros/`).
+> Livros e documentação oficial que embasam o [GoblinShiftPlan](GoblinShiftPlan.md). O plano cita cada fonte pelo ID (B01–B30, D01–D30), com link para cá. Os livros também estão na biblioteca técnica global (registros locais do responsável).
 
 <a id="sumario"></a>
 ## Sumário

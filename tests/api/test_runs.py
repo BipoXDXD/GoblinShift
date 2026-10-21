@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import CATALOG, Catalog, VersionStatus
@@ -28,7 +28,8 @@ from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.runs import acceptance
 from goblinshift.runs.acceptance import MAX_QUEUED_RUNS
 from goblinshift.runs.lifecycle import Status
-from goblinshift.runs.tables import run, run_output
+from goblinshift.runs.tables import run, run_input, run_output
+from tests.api.files_support import create_upload, send_content
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, prepare_database
 from tests.runs.support import (
@@ -54,6 +55,22 @@ RUN_KEYS = {
     "queue_expires_at",
     "deadline_at",
     "error",
+    "parameters",
+    "preset_id",
+    "results_expire_at",
+}
+DETAIL_KEYS = RUN_KEYS | {"summary", "items"}
+ITEM_KEYS = {
+    "position",
+    "upload_id",
+    "original_name",
+    "status",
+    "error_code",
+    "warnings",
+    "notices",
+    "counts",
+    "duplicate_of",
+    "formula_cells",
 }
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
@@ -132,6 +149,9 @@ def test_aceita_com_202_location_e_o_corpo_do_contrato(
     assert created["queue_ahead"] == 0
     assert created["deadline_at"] is None
     assert created["error"] is None
+    assert created["parameters"]["formula_guard"] == "none"
+    assert created["preset_id"] is None
+    assert created["results_expire_at"] is None
     created_at = datetime.fromisoformat(created["created_at"])
     assert datetime.fromisoformat(created["queue_expires_at"]) - created_at == timedelta(hours=2)
     assert created["created_at"].endswith("Z")
@@ -219,6 +239,35 @@ def test_upload_repetido_responde_422_no_campo(
 
     problem = assert_problem(response, 422, "VALIDATION_FAILED")
     assert [e["field"] for e in problem["errors"]] == ["body.input_upload_ids"]
+
+
+@pytest.mark.parametrize(
+    ("recipe_id", "status"),
+    [("csv-janitor", 422), ("image-forge", 422), ("downloads-detox", 422), ("media-mill", 202)],
+)
+def test_arquivo_de_40_mib_com_nome_de_video_so_entra_no_media_mill(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    recipe_id: str,
+    status: int,
+) -> None:
+    # A extensão .mp4 dá ao envio o teto de vídeo (256 MiB), mas não é fronteira de segurança: o
+    # teto de cada receita (`max_input_bytes`, 32 MiB nas demais) vale na aceitação (ADR 036).
+    account = Account(factory)
+    size = 40 * 1024 * 1024
+    item = create_upload(client, account.headers, name="x.mp4", size=size)
+    send_content(client, account.headers, item, b"\0" * size)
+    before = count_rows(factory)
+    payload = {**body([uuid.UUID(item["id"])]), "recipe_id": recipe_id}
+
+    response = post_run(client, account, payload, str(uuid.uuid4()))
+
+    assert response.status_code == status, response.text
+    if status == 422:
+        problem = assert_problem(response, 422, "VALIDATION_FAILED")
+        assert [e["field"] for e in problem["errors"]] == ["body.input_upload_ids"]
+        assert count_rows(factory) == before
 
 
 @pytest.mark.parametrize(("count", "status"), [(5, 202), (6, 422)])
@@ -438,6 +487,59 @@ def test_detox_recusa_name_prefix_enviado_com_name_mode_preserve(
     assert_problem(response, 422, "VALIDATION_FAILED")
 
 
+@pytest.mark.parametrize("prefix", ["doc", "File", "file2"])
+def test_detox_recusa_com_preserve_prefixo_diferente_do_default(
+    client: TestClient, factory: sessionmaker[Session], prefix: str
+) -> None:
+    payload = {
+        "recipe_id": "downloads-detox",
+        "recipe_version": 1,
+        "parameters": {"name_mode": "preserve", "name_prefix": prefix},
+    }
+
+    response = post_run(client, Account(factory), payload, None, "?validate_only=true")
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [e["field"] for e in problem["errors"]] == ["body.parameters"]
+
+
+def test_reenviar_os_parametros_de_uma_execucao_do_detox_e_aceito(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A13: os parâmetros resolvidos trazem o `name_prefix` default mesmo com `preserve`;
+    # repetir a configuração (2.2, Histórico) não pode esbarrar nele.
+    account = Account(factory)
+    first = post_run(
+        client,
+        account,
+        {**body(ready_inputs(factory, storage, account.id)), "recipe_id": "downloads-detox"},
+        str(uuid.uuid4()),
+    )
+    resolved = client.get(f"{RUNS}/{first.json()['id']}", headers=account.headers).json()
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == uuid.UUID(first.json()["id"]))
+            .values(status="succeeded", finished_at=func.now())
+        )
+    assert resolved["parameters"]["name_prefix"] == "file"
+    assert resolved["parameters"]["name_mode"] == "preserve"
+
+    again = post_run(
+        client,
+        account,
+        {
+            **body(ready_inputs(factory, storage, account.id)),
+            "recipe_id": "downloads-detox",
+            "parameters": resolved["parameters"],
+        },
+        str(uuid.uuid4()),
+    )
+
+    assert again.status_code == 202, again.text
+    assert again.json()["parameters"] == resolved["parameters"]
+
+
 def test_validate_only_nao_confere_uploads_nem_exige_chave(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -539,7 +641,7 @@ def test_execucao_nao_terminal_tem_retry_after_2(
 
     assert response.status_code == 200
     assert response.headers["retry-after"] == "2"
-    assert response.json().keys() == RUN_KEYS
+    assert response.json().keys() == DETAIL_KEYS
     assert response.json()["id"] == created["id"]
 
 
@@ -834,20 +936,70 @@ def test_resultados_publicados_em_ordem_de_posicao(
     assert response.status_code == 200
     results = response.json()
     assert results["published"] is True
-    assert results["expires_at"] is not None
+    # Os dois venceram: nenhuma validade a anunciar, como em `results_expire_at`.
+    assert results["expires_at"] is None
     assert results["artifacts"] == [
         {
             "artifact_id": str(table),
             "logical_name": "dados.csv",
             "role": "output",
             "file_name": "output-final.dat",
+            # `publish` vence em BASE_TIME + 48 h, que já passou.
+            "availability": "expired",
+            "source_artifact_id": None,
         },
         {
             "artifact_id": str(report),
             "logical_name": "report.json",
             "role": "report",
             "file_name": "report-final.dat",
+            "availability": "expired",
+            "source_artifact_id": None,
         },
+    ]
+
+
+def test_preview_nos_resultados_aponta_a_saida_de_origem(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    _, table = publish(factory, account.id, run_id)
+    preview = publish_preview(factory, account.id, run_id, of=table)
+
+    artifacts = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()["artifacts"]
+
+    by_id = {a["artifact_id"]: a for a in artifacts}
+    assert by_id[str(preview)]["role"] == "preview"
+    assert by_id[str(preview)]["source_artifact_id"] == str(table)
+    assert by_id[str(table)]["source_artifact_id"] is None
+
+
+def test_resultados_com_nomes_anulados_trazem_o_nome_generico(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    """Aos 30 dias a retenção anula os nomes (1.7); a resposta não muda de forma."""
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id.in_([report, table]))
+            .values(deleted_at=func.now(), file_name=None)
+        )
+        session.execute(
+            update(run_output).where(run_output.c.run_id == run_id).values(logical_name=None)
+        )
+
+    response = client.get(f"{RUNS}/{run_id}/results", headers=account.headers)
+
+    assert response.status_code == 200
+    assert [
+        (a["logical_name"], a["file_name"], a["availability"]) for a in response.json()["artifacts"]
+    ] == [
+        (f"output-{table}", f"output-{table}", "expired"),
+        (f"report-{report}", f"report-{report}", "expired"),
     ]
 
 
@@ -915,6 +1067,46 @@ def publish(
     return ids[ArtifactRole.REPORT], ids[ArtifactRole.OUTPUT]
 
 
+def publish_preview(
+    factory: sessionmaker[Session], owner_id: uuid.UUID, run_id: uuid.UUID, *, of: uuid.UUID
+) -> uuid.UUID:
+    """Preview da saída `of`, na posição 2, depois do que `publish` grava (ADR 037)."""
+    with unit_of_work(factory) as session:
+        object_id = session.execute(
+            insert(stored_object)
+            .values(
+                owner_id=owner_id,
+                storage_key=f"runs/{run_id}/preview",
+                state="committed",
+                sha256=b"\x00" * 32,
+                size_bytes=1,
+            )
+            .returning(stored_object.c.id)
+        ).scalar_one()
+        preview_id: uuid.UUID = session.execute(
+            insert(artifact)
+            .values(
+                owner_id=owner_id,
+                object_id=object_id,
+                role=ArtifactRole.PREVIEW,
+                file_name="dados.csv",
+                expires_at=BASE_TIME + timedelta(hours=48),
+                source_artifact_id=of,
+            )
+            .returning(artifact.c.id)
+        ).scalar_one()
+        session.execute(
+            insert(run_output).values(
+                run_id=run_id,
+                position=2,
+                owner_id=owner_id,
+                artifact_id=preview_id,
+                logical_name="previews/dados.csv",
+            )
+        )
+    return preview_id
+
+
 def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
 
@@ -926,15 +1118,22 @@ def test_openapi_publica_a_variante_do_catalogo(client: TestClient) -> None:
         "image-forge",
         "downloads-detox",
         "pdf-press",
+        "media-mill",
     ]
     assert schema["unevaluatedProperties"] is False
     assert operation["operationId"] == "createRun"
 
 
-def test_openapi_publica_os_quatro_papeis_de_artefato(client: TestClient) -> None:
+def test_openapi_publica_os_cinco_papeis_de_artefato(client: TestClient) -> None:
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
 
-    assert schemas["ArtifactRole"]["enum"] == ["output", "report", "manifest", "package"]
+    assert schemas["ArtifactRole"]["enum"] == [
+        "output",
+        "report",
+        "manifest",
+        "package",
+        "preview",
+    ]
 
 
 # Imagem do executor
@@ -988,3 +1187,312 @@ def test_api_em_producao_nao_sobe_sem_a_imagem_do_executor() -> None:
 
     with pytest.raises(ExecutorConfigError, match="GS_EXECUTOR_IMAGE"):
         create_app(settings)
+
+
+# Detalhe por item, parâmetros e disponibilidade dos resultados (1.1, 2.2)
+
+
+def with_items(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    owner: uuid.UUID,
+    run_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> list[uuid.UUID]:
+    uploads = ready_inputs(factory, storage, owner, len(rows))
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(run_input),
+            [
+                {
+                    "run_id": run_id,
+                    "position": i,
+                    "owner_id": owner,
+                    "upload_id": u,
+                    # Todas as linhas com as mesmas chaves: o INSERT em lote usa as da primeira.
+                    "outcome": None,
+                    "error_code": None,
+                    "details": None,
+                    **row,
+                }
+                for i, (u, row) in enumerate(zip(uploads, rows, strict=True))
+            ],
+        )
+        session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(
+                parameters={"trim_columns": ["a"]},
+                summary={"inputs": 3, "ok": 1, "rejected": 1, "duplicates": 1, "outputs": 1},
+            )
+        )
+    return uploads
+
+
+def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(
+        factory, account.id, BASE_TIME, status=Status.SUCCEEDED_WITH_WARNINGS
+    )
+    ok = {
+        "warnings": ["CSV_FORMULA_CELLS"],
+        "notices": ["IMAGE_P3_CONVERTED"],
+        "counts": {"records_read": 2},
+        "duplicate_of": None,
+        "formula_cells": {
+            "columns": [
+                {"name": "valor", "cells": 3},
+                {"name": "<b>conta</b>", "cells": 1},
+                {"name": None, "cells": 1},
+            ],
+            "more_columns": 2,
+        },
+    }
+    uploads = with_items(
+        factory,
+        storage,
+        account.id,
+        run_id,
+        [
+            {"outcome": "ok", "details": ok},
+            {
+                "outcome": "rejected",
+                "error_code": "CSV_STRUCTURE_INVALID",
+                "details": {"warnings": [], "counts": {}, "duplicate_of": None},
+            },
+            {"outcome": "ok", "details": {"warnings": [], "counts": {}, "duplicate_of": 0}},
+        ],
+    )
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body.keys() == DETAIL_KEYS
+    assert body["parameters"] == {"trim_columns": ["a"]}
+    assert body["summary"] == {"inputs": 3, "ok": 1, "rejected": 1, "duplicates": 1, "outputs": 1}
+    assert body["items"] == [
+        {
+            "position": 0,
+            "upload_id": str(uploads[0]),
+            "original_name": "a.txt",
+            "status": "ok",
+            "error_code": None,
+            "warnings": ["CSV_FORMULA_CELLS"],
+            "notices": ["IMAGE_P3_CONVERTED"],
+            "counts": {"records_read": 2},
+            "duplicate_of": None,
+            # Nome de coluna é dado do usuário: sai como texto, sem escapar nem interpretar; a
+            # coluna de cabeçalho vazio sai com nome nulo, sem sumir com a contagem.
+            "formula_cells": {
+                "columns": [
+                    {"name": "valor", "cells": 3},
+                    {"name": "<b>conta</b>", "cells": 1},
+                    {"name": None, "cells": 1},
+                ],
+                "more_columns": 2,
+            },
+        },
+        {
+            "position": 1,
+            "upload_id": str(uploads[1]),
+            "original_name": "a.txt",
+            "status": "rejected",
+            "error_code": "CSV_STRUCTURE_INVALID",
+            "warnings": [],
+            "notices": [],
+            "counts": {},
+            "duplicate_of": None,
+            "formula_cells": None,
+        },
+        {
+            "position": 2,
+            "upload_id": str(uploads[2]),
+            "original_name": "a.txt",
+            "status": "duplicate",
+            "error_code": None,
+            "warnings": [],
+            "notices": [],
+            "counts": {},
+            "duplicate_of": 0,
+            "formula_cells": None,
+        },
+    ]
+
+
+def test_item_ainda_nao_avaliado_aparece_pendente(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+
+    body = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()
+
+    [item] = body["items"]
+    assert item.keys() == ITEM_KEYS
+    assert (item["status"], item["warnings"], item["counts"]) == ("pending", [], {})
+    assert item["formula_cells"] is None
+    assert body["summary"] is None
+
+
+def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    tampered = {
+        "warnings": ["CSV_FORMULA_CELLS", "Ana Souza <ana@x.com>"],
+        "notices": ["ana@x.com"],
+        "counts": {"records_read": 1, "Ana Souza": 7, "written": "3"},
+        "duplicate_of": None,
+        "original_name": "salarios-ana.csv",
+        "formula_cells": {"columns": [{"name": "Ana", "cells": "7"}], "more_columns": 0},
+    }
+    with_items(
+        factory,
+        storage,
+        account.id,
+        run_id,
+        [{"outcome": "rejected", "error_code": "ana@x.com", "details": tampered}],
+    )
+
+    response = client.get(f"{RUNS}/{run_id}", headers=account.headers)
+
+    [item] = response.json()["items"]
+    assert item["warnings"] == ["CSV_FORMULA_CELLS"]
+    assert item["notices"] == []
+    assert item["counts"] == {"records_read": 1}
+    assert item["error_code"] is None
+    assert item["formula_cells"] is None
+    assert "ana" not in response.text.lower()
+
+
+def test_listagem_traz_parametros_e_validade_dos_resultados_sem_itens(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+
+    [listed] = client.get(RUNS, headers=account.headers).json()["data"]
+
+    assert listed.keys() == RUN_KEYS
+    assert listed["parameters"] == {}
+    # `publish` vence em BASE_TIME + 48 h, que já passou: nada disponível.
+    assert listed["results_expire_at"] is None
+
+
+def test_resultados_excluidos_deixam_a_validade_nula(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).values(deleted_at=BASE_TIME))
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] is None
+
+
+def test_resultados_trazem_a_disponibilidade_de_cada_artefato(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).where(artifact.c.id == table).values(deleted_at=BASE_TIME))
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == report)
+            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+
+    artifacts = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()["artifacts"]
+
+    assert [a["availability"] for a in artifacts] == ["deleted", "expired"]
+
+
+def test_com_um_artefato_excluido_e_outro_disponivel_a_validade_e_a_do_disponivel(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    report, table = publish(factory, account.id, run_id)
+    with unit_of_work(factory) as session:
+        # O excluído venceria antes; se contasse, a validade anunciada seria a dele.
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == table)
+            .values(expires_at=datetime(2098, 1, 1, tzinfo=UTC), deleted_at=BASE_TIME)
+        )
+        session.execute(
+            update(artifact)
+            .where(artifact.c.id == report)
+            .values(expires_at=datetime(2099, 1, 1, tzinfo=UTC))
+        )
+
+    detail = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+    results = client.get(f"{RUNS}/{run_id}/results", headers=account.headers).json()
+
+    assert detail["results_expire_at"] == "2099-01-01T00:00:00Z"
+    assert results["expires_at"] == "2099-01-01T00:00:00Z"
+    assert [a["availability"] for a in results["artifacts"]] == ["deleted", "available"]
+
+
+def test_item_mostra_o_nome_original_do_upload(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+
+    [item] = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()["items"]
+
+    assert item["original_name"] == "a.txt"
+
+
+def test_resultados_vencidos_deixam_a_validade_nula_antes_da_manutencao(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # `publish` vence em BASE_TIME + 48 h, já passado; a manutenção ainda não marcou nada.
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] is None
+
+
+def test_resultados_dentro_do_prazo_trazem_a_validade(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    publish(factory, account.id, run_id)
+    later = datetime(2099, 1, 1, tzinfo=UTC)
+    with unit_of_work(factory) as session:
+        session.execute(update(artifact).values(expires_at=later))
+
+    body = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()
+
+    assert body["results_expire_at"] == "2099-01-01T00:00:00Z"
+
+
+def test_contagens_finais_so_aparecem_em_execucao_terminal(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    created = create_run(client, factory, storage, account)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == uuid.UUID(created["id"]))
+            .values(summary={"inputs": 1, "ok": 1, "rejected": 0, "duplicates": 0, "outputs": 1})
+        )
+
+    body = client.get(f"{RUNS}/{created['id']}", headers=account.headers).json()
+
+    assert body["summary"] is None

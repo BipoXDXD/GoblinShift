@@ -28,9 +28,10 @@ describe("Oficina: execuções recentes", () => {
 
     const section = await recentSection();
     expect(await within(section).findAllByRole("listitem")).toHaveLength(5);
-    expect(screenRequests(api.requests).map((request) => new URL(request.url).search)).toEqual([
-      "?limit=5",
-    ]);
+    const runsRequests = screenRequests(api.requests).filter(
+      (request) => new URL(request.url).pathname === "/api/v1/runs",
+    );
+    expect(runsRequests.map((request) => new URL(request.url).search)).toEqual(["?limit=5"]);
     expect(within(section).getByRole("link", { name: "Ver o histórico completo" })).toHaveAttribute(
       "href",
       "/historico",
@@ -103,7 +104,7 @@ describe("Oficina: execuções recentes", () => {
 
     const section = await recentSection();
     expect(await within(section).findByRole("alert")).toHaveTextContent(/indisponível/);
-    expect(screen.getAllByRole("link", { name: /Abrir a Bancada/ })).toHaveLength(4);
+    expect(screen.getAllByRole("link", { name: /Abrir a Bancada/ })).toHaveLength(5);
   });
 
   it("não tem violações do axe", async () => {

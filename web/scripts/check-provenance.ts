@@ -22,7 +22,7 @@ const generationSchema = z.object({
   inputs: z.array(z.string()),
   rights: z.string().optional(),
   generation_id: z.string().optional(),
-  /** Modelo de terceiros por trás da ferramenta (ex.: o gerador de imagem que a fonte externa repassa). */
+  /** Identificador neutro da origem, vinculado ao registro externo. */
   upstream: z.string().optional(),
   /** Por que a origem é de terceiros ou não verificável; ausente quando é nossa. */
   third_party: z.string().optional(),
@@ -95,12 +95,24 @@ function chainViolations(provenance: Provenance, start: string): string[] {
   const decided = new Set(provenance.exceptions.map((exception) => exception.generation));
   const violations: string[] = [];
   const seen = new Set<string>();
-  const pending = [start];
-  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+  const active = new Set<string>();
+  const pending: { id: string; exit: boolean }[] = [{ id: start, exit: false }];
+  for (let frame = pending.pop(); frame !== undefined; frame = pending.pop()) {
+    const { id, exit } = frame;
+    if (exit) {
+      active.delete(id);
+      seen.add(id);
+      continue;
+    }
+    if (active.has(id)) {
+      violations.push(`ciclo na origem ${id}`);
+      continue;
+    }
     if (seen.has(id)) {
       continue;
     }
-    seen.add(id);
+    active.add(id);
+    pending.push({ id, exit: true });
     const generation = provenance.generations[id];
     if (generation === undefined) {
       violations.push(`geração ${id} não registrada`);
@@ -115,13 +127,15 @@ function chainViolations(provenance: Provenance, start: string): string[] {
         `deriva de ${id} (${generation.third_party}) sem decisão registrada em exceptions`,
       );
     }
-    const excluded = provenance.excluded.find((entry) => generation.generation_id === entry.source_id);
+    const excluded = provenance.excluded.find(
+      (entry) => generation.generation_id === entry.source_id,
+    );
     if (excluded !== undefined) {
       violations.push(
         `deriva de ${excluded.source_id} (${excluded.name}), excluída: ${excluded.reason}`,
       );
     }
-    pending.push(...generation.inputs);
+    pending.push(...generation.inputs.map((inputId) => ({ id: inputId, exit: false })));
   }
   return violations;
 }
@@ -145,7 +159,7 @@ function upstreamViolations(
         `${id} tem upstream "${generation.upstream}", mas cita o direito ${right.id}, que não declara upstream`,
       ];
     }
-    if (!generation.upstream.includes(right.upstream)) {
+    if (generation.upstream !== right.upstream) {
       return [
         `${id} tem upstream "${generation.upstream}", mas cita o direito ${right.id}, que vale para "${right.upstream}"`,
       ];

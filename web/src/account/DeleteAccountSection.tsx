@@ -27,11 +27,10 @@ export function DeleteAccountSection(): ReactElement {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const remove = useEndSession(deleteAccount, PATHS.accountDeleted);
+  // Fecha sempre, até com o pedido em voo (o navegador pode ter fechado o <dialog>).
   const close = (): void => {
-    if (!remove.isPending) {
-      setOpen(false);
-      setTyped("");
-    }
+    setOpen(false);
+    setTyped("");
   };
   return (
     <Card as="section" aria-labelledby={headingId}>
@@ -46,7 +45,10 @@ export function DeleteAccountSection(): ReactElement {
             type="button"
             variant="secondary"
             onClick={() => {
-              remove.reset();
+              // Reaberto com o pedido em voo, a resposta ainda tem de chegar.
+              if (!remove.isPending) {
+                remove.reset();
+              }
               setOpen(true);
             }}
           >
@@ -60,6 +62,7 @@ export function DeleteAccountSection(): ReactElement {
         confirmLabel={remove.isPending ? T.deleting : T.confirm}
         cancelLabel={T.cancel}
         confirmBlocked={!phraseMatches(typed) || remove.isPending}
+        busy={remove.isPending}
         onCancel={close}
         onConfirm={() => {
           if (phraseMatches(typed) && !remove.isPending) {

@@ -48,6 +48,7 @@ def test_limites_publicados_no_catalogo() -> None:
 
     assert limits == {
         "max_inputs": 20,
+        "max_input_bytes": 32 * 1024 * 1024,
         "max_total_input_bytes": 256 * 1024 * 1024,
         "max_input_pages": 200,
         "max_output_pages": 400,

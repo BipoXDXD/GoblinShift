@@ -10,8 +10,9 @@ import { expect, test, THEMES, useTheme } from "../support/test";
 
 const MIN_RING_PX = 2;
 const MIN_RING_CONTRAST = 3;
-// Teto de paradas por tela: a maior (Bancada com arquivos) tem bem menos que isso.
-const MAX_TAB_STOPS = 60;
+// Teto de paradas por tela, só para pegar armadilha de foco: a maior é o Histórico com uma página
+// cheia (25 linhas com o link da execução e o "Reusar configuração", mais filtros e moldura).
+const MAX_TAB_STOPS = 100;
 
 /** O que o navegador desenhou para o elemento focado, lido no próprio navegador. */
 interface FocusStop {
@@ -75,6 +76,7 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
     "Abrir a Bancada da Image Forge",
     "Abrir a Bancada da Downloads Detox",
     "Abrir a Bancada da PDF Press",
+    "Abrir a Bancada da Media Mill",
     // O rodapé vem depois de todo o conteúdo.
     "Termos de Uso",
     "Aviso de Privacidade",

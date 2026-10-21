@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import type { components } from "../../src/api/schema";
 import { CATALOG_BODY } from "../../src/test/catalogBody";
+import { THUMBNAIL_JPEG } from "../fixtures/files";
 import { writeArtifact } from "./artifacts";
 import { E2E } from "./env";
 import {
@@ -21,11 +22,18 @@ import {
 type Schemas = components["schemas"];
 type Run = Schemas["RunResponse"];
 type ArtifactReference = Schemas["ResultReferenceResponse"];
+type Preset = Schemas["PresetResponse"];
 
 // O pedido sai do bundle, que monta o corpo pela spec; a API falsa lê só o que usa, e um corpo
 // fora desse formato derruba o teste com o erro do Zod em vez de seguir com lixo.
 const uploadIntentsSchema = z.object({
   items: z.array(z.object({ name: z.string(), size: z.number().int() })),
+});
+const presetDraftSchema = z.object({
+  name: z.string().min(1).max(100),
+  recipe_id: z.string(),
+  recipe_version: z.number().int(),
+  parameters: z.record(z.string(), z.unknown()),
 });
 const runCommandSchema = z.object({
   recipe_id: z.string(),
@@ -50,7 +58,27 @@ type RunListQuery = z.infer<typeof runListQuerySchema>;
 export type RunCommand = z.infer<typeof runCommandSchema>;
 
 /** Execução com os campos que a matriz de estados troca (status, progresso, erro…). */
-export type RunOverrides = Partial<Omit<Run, "id">>;
+type RunDetail = Schemas["RunDetailResponse"];
+type RunDetailParts = Pick<RunDetail, "summary" | "items">;
+
+/** Execução com os campos que a matriz de estados troca (status, progresso, erro, itens…). */
+export type RunOverrides = Partial<Omit<Run, "id"> & RunDetailParts>;
+
+/** Preview de uma saída semeada, entregue por GET /artifacts/{id da saída}/preview (ADR 037). */
+export interface SeededPreview {
+  /** Nome que a receita dá ao preview: `.jpg`, `.csv` ou `.json`. */
+  readonly name: string;
+  readonly body: Buffer;
+  /** O que a API real manda: `image/jpeg` para a imagem, bytes opacos para o resto. */
+  readonly contentType: "image/jpeg" | "application/octet-stream";
+}
+
+/** Saída publicada de uma execução semeada, com ou sem preview. */
+export interface SeededOutput {
+  readonly name: string;
+  readonly body: Buffer;
+  readonly preview?: SeededPreview;
+}
 
 export interface FakeApi {
   /** Corpo de cada POST /runs aceito, na ordem. */
@@ -61,8 +89,13 @@ export interface FakeApi {
   readonly unhandled: readonly string[];
   /** Nome do upload pelo id, para conferir a ordem das entradas de uma execução. */
   uploadName(uploadId: string): string | undefined;
-  /** Execução parada num estado, para as telas da matriz; devolve o id. */
-  seedRun(overrides: RunOverrides): string;
+  /**
+   * Execução parada num estado, para as telas da matriz; devolve o id. Com `outputs`, os
+   * resultados são essas saídas (e os previews delas) no lugar do pacote.
+   */
+  seedRun(overrides: RunOverrides, outputs?: readonly SeededOutput[]): string;
+  /** O prazo das saídas acaba: o /results passa a dizer `expired`, com o vencimento passado. */
+  expireResults(runId: string): void;
   /** Sessão, termos e chaves da conta (fakeAccount.ts). */
   readonly account: FakeAccount;
   /**
@@ -88,10 +121,21 @@ interface StoredUpload {
 
 interface StoredRun {
   run: Run;
+  /** Resumo e itens da semeada; a criada por POST /runs os deriva das entradas. */
+  readonly detail?: RunDetailParts;
   /** Execução criada por POST /runs anda a cada consulta; a semeada fica parada. */
   readonly advances: boolean;
   readonly inputIds: readonly string[];
+  readonly outputs: readonly SeededOutput[];
 }
+
+/** Cabeçalhos com que a API real entrega o preview (artifacts.py e transfers.py). */
+const PREVIEW_PROTECTION_HEADERS: Readonly<Record<string, string>> = {
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "Cache-Control": "no-store",
+};
 
 /**
  * Liga a API falsa em todas as páginas do contexto. Pedido sem sessão nem
@@ -137,7 +181,8 @@ export async function installFakeApi(
     deletedUploads: state.deletedUploads,
     unhandled: state.unhandled,
     uploadName: (uploadId) => state.uploads.get(uploadId)?.name,
-    seedRun: (overrides) => state.seedRun(overrides),
+    seedRun: (overrides, outputs) => state.seedRun(overrides, outputs),
+    expireResults: (runId) => state.runsWithExpiredOutputs.add(runId),
     account,
     signIn: (options) => account.signIn(new URL(E2E.baseUrl).origin, options),
   };
@@ -155,8 +200,14 @@ class FakeState {
   readonly uploads = new Map<string, StoredUpload>();
   readonly runs = new Map<string, StoredRun>();
   readonly createdRuns: RunCommand[] = [];
+  /** Execuções cujas saídas foram excluídas ou venceram: o /results diz a disponibilidade. */
+  readonly runsWithoutOutputs = new Set<string>();
+  readonly runsWithExpiredOutputs = new Set<string>();
+  readonly presets = new Map<string, Preset>();
   readonly deletedUploads: string[] = [];
   readonly unhandled: string[] = [];
+  /** Preview publicado, pelo id da saída de origem. */
+  readonly previews = new Map<string, SeededPreview>();
   readonly #artifactsDir: string;
 
   constructor(artifactsDir: string) {
@@ -175,6 +226,8 @@ class FakeState {
       await this.createUploads(route, request);
     } else if (method === "PUT" && resource === "uploads" && action === "content" && id) {
       await this.receiveContent(route, request, id);
+    } else if (resource === "presets" && action === undefined) {
+      await this.handlePreset(route, request, id);
     } else if (method === "DELETE" && resource === "uploads" && id && segments.length === 2) {
       await this.deleteUpload(route, id);
     } else if (method === "POST" && path === "/runs") {
@@ -187,20 +240,31 @@ class FakeState {
       await this.cancelRun(route, id);
     } else if (method === "GET" && resource === "runs" && id && action === "results") {
       await this.results(route, id);
+    } else if (method === "DELETE" && resource === "runs" && id && action === "artifacts") {
+      await this.deleteRunArtifacts(route, id);
     } else if (method === "GET" && resource === "artifacts" && id && action === "download") {
       // O Chromium cancela download vindo do route.fulfill: segue para o servidor local, que
       // entrega o que publishArtifacts gravou (e2e/server/serve-dist.ts).
       await route.continue();
+    } else if (method === "GET" && resource === "artifacts" && id && action === "preview") {
+      await this.preview(route, id);
     } else {
       this.unhandled.push(`${method} ${path}`);
       await fulfillProblem(route, "NOT_FOUND", { status: 404 });
     }
   }
 
-  seedRun(overrides: RunOverrides): string {
+  seedRun(overrides: RunOverrides, outputs: readonly SeededOutput[] = []): string {
     const id = randomUUID();
-    const run = { ...runBody(id, "csv-janitor"), ...overrides };
-    this.runs.set(id, { run, advances: false, inputIds: [] });
+    const { summary = null, items = [], ...runOverrides } = overrides;
+    const run = { ...runBody(id, "csv-janitor"), ...runOverrides };
+    this.runs.set(id, {
+      run,
+      detail: { summary, items },
+      advances: false,
+      inputIds: [],
+      outputs,
+    });
     return id;
   }
 
@@ -248,6 +312,67 @@ class FakeState {
     await fulfillJson(route, received, { status: 200 });
   }
 
+  /**
+   * Presets como a API (presets.py): lista por nome, nome único (409), e DELETE só com o `If-Match`
+   * da revisão atual (ausente → 428, vencido → 412).
+   */
+  private async handlePreset(
+    route: Route,
+    request: Request,
+    id: string | undefined,
+  ): Promise<void> {
+    const method = request.method();
+    if (id === undefined) {
+      await (method === "POST" ? this.createPreset(route, request) : this.listPresets(route));
+      return;
+    }
+    const preset = this.presets.get(id);
+    if (preset === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    } else if (method === "DELETE") {
+      await this.deletePreset(route, request, preset);
+    } else {
+      await fulfillJson(route, preset, {
+        status: 200,
+        headers: { ETag: `"${String(preset.revision)}"` },
+      });
+    }
+  }
+
+  private async listPresets(route: Route): Promise<void> {
+    const data = [...this.presets.values()].sort((a, b) => a.name.localeCompare(b.name));
+    await fulfillJson(route, { data } satisfies Schemas["PresetListResponse"], { status: 200 });
+  }
+
+  private async createPreset(route: Route, request: Request): Promise<void> {
+    const draft = presetDraftSchema.parse(request.postDataJSON());
+    if ([...this.presets.values()].some((preset) => preset.name === draft.name)) {
+      await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
+      return;
+    }
+    const preset: Preset = {
+      ...draft,
+      id: randomUUID(),
+      revision: 1,
+      created_at: NOW,
+      updated_at: NOW,
+    };
+    this.presets.set(preset.id, preset);
+    await fulfillJson(route, preset, { status: 201, headers: { ETag: '"1"' } });
+  }
+
+  private async deletePreset(route: Route, request: Request, preset: Preset): Promise<void> {
+    const ifMatch = await request.headerValue("if-match");
+    if (ifMatch === null) {
+      await fulfillProblem(route, "PRECONDITION_REQUIRED", { status: 428 });
+    } else if (ifMatch !== `"${String(preset.revision)}"`) {
+      await fulfillProblem(route, "PRECONDITION_FAILED", { status: 412 });
+    } else {
+      this.presets.delete(preset.id);
+      await route.fulfill({ status: 204 });
+    }
+  }
+
   /** Como a API: 202 para o próprio upload (repetir também) e 404 para o que nunca existiu. */
   private async deleteUpload(route: Route, id: string): Promise<void> {
     const upload = this.uploads.get(id);
@@ -270,7 +395,7 @@ class FakeState {
     this.createdRuns.push(command);
     const id = randomUUID();
     const run = runBody(id, command.recipe_id);
-    this.runs.set(id, { run, advances: true, inputIds });
+    this.runs.set(id, { run, advances: true, inputIds, outputs: [] });
     const accepted: Schemas["AcceptedRunResponse"] = { ...run, idempotency_expires_at: LATER };
     await fulfillJson(route, accepted, { status: 202 });
   }
@@ -319,7 +444,21 @@ class FakeState {
     const headers: Record<string, string> = isTerminal(stored.run)
       ? {}
       : { "Retry-After": POLL_RETRY_AFTER_SECONDS };
-    await fulfillJson(route, stored.run, { status: 200, headers });
+    const detail: RunDetail = { ...stored.run, ...(stored.detail ?? derivedDetail(stored)) };
+    await fulfillJson(route, detail, { status: 200, headers });
+  }
+
+  /** Como a API: 404 sem a execução, 409 antes do fim, 202 (também ao repetir) depois. */
+  private async deleteRunArtifacts(route: Route, id: string): Promise<void> {
+    const stored = this.runs.get(id);
+    if (stored === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+    } else if (!isTerminal(stored.run)) {
+      await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
+    } else {
+      this.runsWithoutOutputs.add(id);
+      await route.fulfill({ status: 202 });
+    }
   }
 
   /**
@@ -355,36 +494,166 @@ class FakeState {
       await fulfillProblem(route, "STATE_CONFLICT", { status: 409 });
       return;
     }
-    const artifacts = this.publishArtifacts(stored);
+    const availability = this.availabilityOf(id);
+    const artifacts =
+      stored.outputs.length > 0
+        ? this.publishSeededOutputs(stored.outputs, availability)
+        : this.publishArtifacts(stored, availability);
     const results: Schemas["RunResultsResponse"] = {
       published: true,
-      expires_at: LATER,
+      expires_at: this.runsWithExpiredOutputs.has(id) ? NOW : LATER,
       artifacts,
     };
     await fulfillJson(route, results, { status: 200 });
   }
 
+  /** Como a API: excluídas valem mais que vencidas; as saídas de uma execução andam juntas. */
+  private availabilityOf(runId: string): ArtifactReference["availability"] {
+    if (this.runsWithoutOutputs.has(runId)) {
+      return "deleted";
+    }
+    return this.runsWithExpiredOutputs.has(runId) ? "expired" : "available";
+  }
+
   /** Pacote `<receita>.zip` (nome da API real, packaging/spec.py) e um arquivo por entrada. */
-  private publishArtifacts(stored: StoredRun): ArtifactReference[] {
+  private publishArtifacts(
+    stored: StoredRun,
+    availability: ArtifactReference["availability"],
+  ): ArtifactReference[] {
     const recipeId = stored.run.recipe_id;
-    const outputs = stored.inputIds.flatMap((uploadId) => {
+    const outputs: SeededOutput[] = stored.inputIds.flatMap((uploadId) => {
       const upload = this.uploads.get(uploadId);
       return upload?.content ? [{ name: upload.name, body: upload.content }] : [];
     });
-    const files = [
-      { role: "package" as const, name: `${recipeId}.zip`, body: EMPTY_ZIP },
-      ...outputs.map((output) => ({ role: "output" as const, ...output })),
+    const files: (SeededOutput & { readonly role: "package" | "output" })[] = [
+      { role: "package", name: `${recipeId}.zip`, body: EMPTY_ZIP },
+      ...(recipeId === "media-mill" ? outputs.flatMap(mediaMillOutputs) : outputs).map(
+        (output) => ({ role: "output" as const, ...output }),
+      ),
     ];
-    return files.map(({ role, name, body }) => {
+    return files.flatMap(({ role, name, body, preview }) => {
       const artifactId = randomUUID();
       writeArtifact(this.#artifactsDir, artifactId, {
         fileName: name,
         body,
         contentType: role === "package" ? "application/zip" : "application/octet-stream",
       });
-      return { artifact_id: artifactId, logical_name: name, role, file_name: name };
+      const reference: ArtifactReference = {
+        artifact_id: artifactId,
+        logical_name: name,
+        role,
+        file_name: name,
+        availability,
+        source_artifact_id: null,
+      };
+      return preview === undefined
+        ? [reference]
+        : [reference, this.publishPreview(artifactId, preview, availability)];
     });
   }
+
+  /** As saídas semeadas, cada uma seguida do seu preview, como a publicação do worker grava. */
+  private publishSeededOutputs(
+    outputs: readonly SeededOutput[],
+    availability: ArtifactReference["availability"],
+  ): ArtifactReference[] {
+    return outputs.flatMap((output) => {
+      const artifactId = randomUUID();
+      writeArtifact(this.#artifactsDir, artifactId, {
+        fileName: output.name,
+        body: output.body,
+        contentType: "application/octet-stream",
+      });
+      const reference: ArtifactReference = {
+        artifact_id: artifactId,
+        logical_name: output.name,
+        role: "output",
+        file_name: output.name,
+        availability,
+        source_artifact_id: null,
+      };
+      return output.preview === undefined
+        ? [reference]
+        : [reference, this.publishPreview(artifactId, output.preview, availability)];
+    });
+  }
+
+  /** Preview de uma saída, com papel `preview` e o id da saída de origem (ADR 037). */
+  private publishPreview(
+    sourceId: string,
+    preview: SeededPreview,
+    availability: ArtifactReference["availability"],
+  ): ArtifactReference {
+    this.previews.set(sourceId, preview);
+    return {
+      artifact_id: randomUUID(),
+      logical_name: `previews/${preview.name}`,
+      role: "preview",
+      file_name: preview.name,
+      availability,
+      source_artifact_id: sourceId,
+    };
+  }
+
+  /** GET /artifacts/{id}/preview: recebe o id da saída; sem preview, 404 como na API. */
+  private async preview(route: Route, sourceId: string): Promise<void> {
+    const preview = this.previews.get(sourceId);
+    if (preview === undefined) {
+      await fulfillProblem(route, "NOT_FOUND", { status: 404 });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: preview.contentType,
+      headers: {
+        "Content-Disposition": `attachment; filename="${preview.name}"`,
+        ...PREVIEW_PROTECTION_HEADERS,
+      },
+      body: preview.body,
+    });
+  }
+}
+
+/**
+ * Media Mill: um áudio e uma miniatura por vídeo, nos grupos de `out/` da API real (ADR 036); a
+ * miniatura é também o preview dela (ADR 037).
+ */
+function mediaMillOutputs({ name }: { readonly name: string }): SeededOutput[] {
+  const stem = name.replace(/\.[^.]*$/, "");
+  const thumbnail = `${stem}-10pct.jpg`;
+  return [
+    { name: `audio/${stem}.wav`, body: Buffer.from("RIFF") },
+    {
+      name: `thumbnails/${thumbnail}`,
+      body: THUMBNAIL_JPEG,
+      preview: { name: thumbnail, body: THUMBNAIL_JPEG, contentType: "image/jpeg" },
+    },
+  ];
+}
+
+/** Como o worker: itens pendentes enquanto roda; ao concluir, todos ok e o resumo. */
+function derivedDetail({ run, inputIds }: StoredRun): RunDetailParts {
+  if (run.status === "queued") {
+    return { summary: null, items: [] };
+  }
+  const done = isTerminal(run);
+  const items = inputIds.map((uploadId, index) => ({
+    position: index,
+    upload_id: uploadId,
+    original_name: null,
+    status: done ? ("ok" as const) : ("pending" as const),
+    error_code: null,
+    warnings: [],
+    notices: [],
+    counts: {},
+    duplicate_of: null,
+    formula_cells: null,
+  }));
+  const count = inputIds.length;
+  const summary = done
+    ? { inputs: count, ok: count, rejected: 0, duplicates: 0, outputs: count }
+    : null;
+  return { summary, items };
 }
 
 function isReceived(upload: StoredUpload | undefined): boolean {
@@ -445,6 +714,9 @@ function runBody(id: string, recipeId: string): Run {
     queue_expires_at: LATER,
     deadline_at: null,
     error: null,
+    parameters: {},
+    preset_id: null,
+    results_expire_at: null,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   artifactDownloadPath,
   cancelRun,
   type CancelOutcome,
+  deleteRunArtifacts,
   createRun,
   getRunResults,
   type AcceptedRun,
@@ -87,6 +88,8 @@ describe("getRunResults", () => {
           logical_name: "clientes",
           role: "output",
           file_name: "clientes.csv",
+          availability: "available",
+          source_artifact_id: null,
         },
       ],
     };
@@ -95,6 +98,18 @@ describe("getRunResults", () => {
     });
 
     expect(await getRunResults(client, RUN_ID)).toEqual(results);
+  });
+});
+
+describe("deleteRunArtifacts", () => {
+  it("manda o DELETE das saídas da execução e aceita o 202", async () => {
+    const { client, requests } = fakeApi({
+      [`DELETE /api/v1/runs/${RUN_ID}/artifacts`]: () => new Response(null, { status: 202 }),
+    });
+
+    await deleteRunArtifacts(client, RUN_ID);
+
+    expect(requests.map((request) => request.method)).toEqual(["DELETE"]);
   });
 });
 
