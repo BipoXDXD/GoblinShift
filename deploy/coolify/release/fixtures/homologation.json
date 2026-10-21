@@ -1,0 +1,121 @@
+{
+  "name": "receiver-v2-homologation",
+  "services": {
+    "app": {
+      "image": "${GS_APP_IMAGE:?synthetic image required}",
+      "container_name": "receiver-v2-homologation-app",
+      "pull_policy": "never",
+      "restart": "no",
+      "read_only": true,
+      "user": "65534:65534",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "64m",
+      "cpus": 0.25,
+      "pids_limit": 32,
+      "networks": [
+        "homologation"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "/var/lib/coolify-release-homologation-20261021/assets",
+          "target": "/sentinel-assets",
+          "read_only": true,
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "labels": [
+        "traefik.enable=false"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/bin/busybox",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/"
+        ],
+        "interval": "3s",
+        "timeout": "2s",
+        "retries": 10
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "1m",
+          "max-file": "2"
+        }
+      }
+    },
+    "web": {
+      "image": "${GS_WEB_IMAGE:?synthetic image required}",
+      "container_name": "receiver-v2-homologation-web",
+      "pull_policy": "never",
+      "restart": "no",
+      "read_only": true,
+      "user": "65534:65534",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "64m",
+      "cpus": 0.25,
+      "pids_limit": 32,
+      "networks": [
+        "homologation"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "/var/lib/coolify-release-homologation-20261021/assets",
+          "target": "/sentinel-assets",
+          "read_only": true,
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "labels": [
+        "traefik.enable=false"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "/bin/busybox",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/"
+        ],
+        "interval": "3s",
+        "timeout": "2s",
+        "retries": 10
+      },
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-size": "1m",
+          "max-file": "2"
+        }
+      }
+    }
+  },
+  "networks": {
+    "homologation": {
+      "external": true,
+      "name": "receiver-v2-homologation"
+    }
+  }
+}
