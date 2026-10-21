@@ -45,11 +45,11 @@
       "labels": [
         "traefik.enable=true",
         "traefik.docker.network=coolify",
-        "traefik.http.routers.migrated-sites-http.rule=Host(`goblinshift.dev`) || Host(`stillon.tech`)",
+        "traefik.http.routers.migrated-sites-http.rule=Host(`goblinshift.dev`) || Host(`stillon.tech`) || Host(`www.goblinshift.dev`) || Host(`www.stillon.tech`)",
         "traefik.http.routers.migrated-sites-http.entrypoints=http",
         "traefik.http.routers.migrated-sites-http.service=migrated-sites-http",
         "traefik.http.services.migrated-sites-http.loadbalancer.server.port=80",
-        "traefik.tcp.routers.migrated-sites-tls.rule=HostSNI(`goblinshift.dev`) || HostSNI(`stillon.tech`)",
+        "traefik.tcp.routers.migrated-sites-tls.rule=HostSNI(`goblinshift.dev`) || HostSNI(`stillon.tech`) || HostSNI(`www.goblinshift.dev`) || HostSNI(`www.stillon.tech`)",
         "traefik.tcp.routers.migrated-sites-tls.entrypoints=https",
         "traefik.tcp.routers.migrated-sites-tls.tls.passthrough=true",
         "traefik.tcp.routers.migrated-sites-tls.service=migrated-sites-tls",

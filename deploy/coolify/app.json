@@ -173,9 +173,6 @@
       "container_name": "goblinshift-maintenance-1",
       "labels": [
         "traefik.enable=false"
-      ],
-      "profiles": [
-        "cutover-live"
       ]
     },
     "migrate": {
@@ -385,9 +382,6 @@
       "container_name": "goblinshift-worker-1",
       "labels": [
         "traefik.enable=false"
-      ],
-      "profiles": [
-        "cutover-live"
       ]
     }
   },

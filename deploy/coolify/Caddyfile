@@ -23,7 +23,7 @@
   client_ip_headers X-Forwarded-For
  }
 }
-http://goblinshift.dev, http://stillon.tech {
+http://goblinshift.dev, http://stillon.tech, http://www.goblinshift.dev, http://www.stillon.tech {
  redir https://{host}{uri} 308
 }
 import /etc/caddy/conf.d/*.caddy
