@@ -2,7 +2,7 @@
 
 - **Data:** 2026-10-15
 - **Status:** aprovado em conversa, aguardando revisão desta spec.
-- **Fontes:** notas em `~/.claude/knowledge/notes/`:
+- **Fontes:** notas em registros locais do responsável:
   - `refactoring-ui.md` (RUI);
   - `practical-ui.md` (PUI);
   - `designing-interfaces.md` (DI);

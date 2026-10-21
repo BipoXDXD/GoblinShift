@@ -31,12 +31,10 @@
   - `npm run e2e -- <spec>`.
 - **Valores do sistema:** só valores do sistema. O `classScale.test.ts` recusa espaçamento fora da escala, valor arbitrário `-[…]`, tom cru (`moss`, `brass`, `stone`, `ember` e, a partir da Tarefa 1, `patina`) em componente, `outline-none` e `style={…}`.
 - **Textos:** todo texto de interface fica em `web/src/text.ts`, em pt-BR.
-- **Commits:** em português, no estilo do histórico ("Web: …"), terminando com `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **PRs:** dois, nesta ordem.
   - **`design-tokens`:** Tarefas 1 a 6. Abra do commit da Tarefa 6, contra `main`.
   - **`design-interacao`:** Tarefas 7 e 8. Depois do merge do primeiro, saia de `origin/main` numa branch `design-interacao`.
 
-  Cada PR termina com `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 - **Proibido:**
   - **Alvo de toque:** não mude o alvo de toque (44 px, `min-h-11`).
   - **Escalas e raio:** não mude a escala de espaço, a escala de tipo, os pesos nem o raio único (`rounded-lg` = 8 px).
@@ -137,7 +135,6 @@ Se algum tom reprovar em "cabe no sRGB", baixe o croma desse tom em 0,005 por ve
 git add web/src/styles/tokens.css web/src/styles/contrast.test.ts web/src/styles/classScale.test.ts
 git commit -m "Web: sucesso ganha a pátina, e o musgo fica só para o que se clica
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -255,7 +252,6 @@ Esperado: sem erro.
 git add web/src
 git commit -m "Web: elevação em três níveis (cartão, flutuante, diálogo) mais a rebaixada
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -328,7 +324,6 @@ Esperado: PASS. O build gera `z-index: var(--z-menu)`, o que dá para conferir c
 git add web/src
 git commit -m "Web: z-index por camadas com nome e moldura em min-h-svh
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -437,7 +432,6 @@ Esperado: PASS.
 git add web/src/styles web/e2e/specs/theme.spec.ts
 git commit -m "Web: tema escuro do sistema vale mesmo sem o theme-init.js
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -498,7 +492,6 @@ Esperado: PASS, inclusive o teste de igualdade do fallback, se o `--overlay` ent
 git add web/src/styles
 git commit -m "Web: diálogo trava a rolagem e o fundo escurecido ganha papel próprio
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -633,11 +626,9 @@ Esperado: PASS. O preload é da própria origem.
 git add web/scripts web/vite.config.ts web/tsconfig.node.json
 git commit -m "Web: preload da fonte do título, conferido pelo orçamento
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push -u origin HEAD:design-tokens
 gh pr create --base main --head design-tokens --title "Web: tokens da revisão de design (pátina, elevação, z-index, tema sem script)" --body "Implementa as tarefas 1 a 6 do plano docs/superpowers/plans/2026-10-15-revisao-design-livros.md (spec docs/superpowers/specs/2026-10-15-revisao-design-livros-design.md).
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 ```
 
 Inclua no PR os dois arquivos de `docs/superpowers/` desta branch. Espere os checks serem registrados e ficarem verdes antes de pedir o merge.
@@ -834,7 +825,6 @@ Esperado: PASS. O teste do axe deste arquivo também passa.
 git add web/src/text.ts web/src/workbench
 git commit -m "Web: remover um arquivo da Bancada pede confirmação
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1025,11 +1015,9 @@ Esperado: PASS.
 git add web/src web/e2e
 git commit -m "Web: Remover todos na Bancada, com confirmação e contagem
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push -u origin HEAD:design-interacao
 gh pr create --base main --head design-interacao --title "Web: confirmação ao remover e Remover todos na Bancada" --body "Implementa as tarefas 7 e 8 do plano docs/superpowers/plans/2026-10-15-revisao-design-livros.md.
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 ```
 
 Espere os checks serem registrados e ficarem verdes.

@@ -1,7 +1,7 @@
 # Termos de Uso do GoblinShift
 
-- **Versão:** v3-rascunho
-- **Vigência:** 2026-10-15
+- **Versão:** v4-rascunho
+- **Vigência:** 2026-10-21
 - **Endereço do serviço:** https://goblinshift.dev
 
 ## 1. Quem oferece o serviço
@@ -36,10 +36,9 @@ limpar tabelas CSV e organizar downloads) e entrega os resultados de forma priva
 manifesto e relatório. O catálogo publicado mostra só as receitas disponíveis, com formatos,
 parâmetros e limites em vigor.
 
-O processamento roda num ambiente isolado, sem acesso à rede. Não há inteligência artificial no
-processamento, nem scripts enviados por você, e nenhum arquivo seu é enviado a serviço de
-inteligência artificial. As ilustrações do site foram geradas com ajuda de inteligência
-artificial (ver [https://goblinshift.dev/creditos](https://goblinshift.dev/creditos)).
+O processamento executa as receitas descritas neste documento em ambiente isolado, sem acesso à
+rede. Não executamos scripts enviados por você nem enviamos seus arquivos a serviços externos
+durante o processamento.
 
 ## 4. Conta e acesso
 
@@ -153,10 +152,10 @@ e são tratadas assim que forem lidas.
   ([https://github.com/BipoXDXD/GoblinShift/blob/main/LICENSE](https://github.com/BipoXDXD/GoblinShift/blob/main/LICENSE)). A licença do código não cobre as
   ilustrações nem os modelos 3D.
 - O nome GoblinShift, o logotipo e os nomes dos personagens não podem ser usados de modo que
-  sugira vínculo ou endosso. As ilustrações e os modelos 3D do site são gerados com ajuda de
-  inteligência artificial e editados por nós; a nossa parte do trabalho está sob CC BY 4.0, sem
-  garantia de que a saída gerada por IA seja protegível por direito autoral. As goblins Jade e
-  Fagulha ficam fora dessa licença. Origem e detalhes em
+  sugira vínculo ou endosso. A nossa contribuição de seleção, renders e edição das ilustrações e
+  dos modelos 3D está sob CC BY 4.0, sem garantia de proteção autoral ou exclusividade sobre os
+  arquivos de origem. Essa licença não concede direitos sobre conteúdo de terceiros. As goblins
+  Jade e Fagulha e a marca ficam fora dessa licença. Condições e ressalvas em
   [https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md](https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md).
 - Se você acha que algo publicado no site (ilustração, modelo 3D ou texto) viola um direito
   seu, escreva para abuso@goblinshift.dev identificando o material e o direito. Analisamos o
@@ -203,3 +202,4 @@ Estes Termos são regidos pelas leis da República Federativa do Brasil.
 | `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
 | `v2-rascunho` | 2026-10-15 | Identificação de quem oferece o serviço; domínio e e-mails de contato; política de divulgação de vulnerabilidades; proibição de ceder chaves de API; prazo de resposta às denúncias; recurso contra bloqueio; aviso de 30 dias antes do fim do serviço; licença Apache 2.0 do código e CC BY 4.0 da arte; pedido de retirada de material do site; antecedência de 15 dias para mudanças e este histórico |
 | `v3-rascunho` | 2026-10-15 | Sem mudança de cláusula: o aceite é um só para os dois textos, e a versão sobe junto com o Aviso de Privacidade |
+| `v4-rascunho` | 2026-10-21 | Redação editorial e referência ao registro de licenças atualizadas; novo aceite conjunto, sem alterar aceites anteriores |

@@ -14,11 +14,10 @@ function setup(path: string) {
 }
 
 describe("rodapé", () => {
-  it("toda tela diz que as ilustrações são geradas com IA e leva aos créditos", async () => {
+  it("toda tela mantém o acesso público aos créditos", async () => {
     setup("/");
 
     const footer = await screen.findByRole("contentinfo");
-    expect(footer).toHaveTextContent("Ilustrações geradas com IA e editadas.");
     expect(within(footer).getByRole("link", { name: "Créditos" })).toHaveAttribute(
       "href",
       "/creditos",
@@ -32,8 +31,7 @@ describe("/creditos", () => {
 
     await expectHeadingFocused("Créditos");
     const main = screen.getByRole("main");
-    expect(main).toHaveTextContent("Hyper3D Rodin");
-    expect(main).toHaveTextContent("Tripo");
+    expect(main).toHaveTextContent("registro de licenças da arte");
     expect(main).toHaveTextContent("Blender");
   });
 
@@ -68,8 +66,10 @@ describe("/creditos", () => {
     await expectHeadingFocused("Créditos");
 
     const section = screen.getByRole("region", { name: "A marca" });
-    expect(section).toHaveTextContent("GPT Image");
-    expect(section).toHaveTextContent("desenhada à mão em SVG, sem IA");
+    expect(section).toHaveTextContent(
+      "O emblema do cabeçalho e o selo da oficina mostram a Rúbia.",
+    );
+    expect(section).toHaveTextContent("versão própria em SVG");
     expect(section).toHaveTextContent(/não são licenciados/);
   });
 

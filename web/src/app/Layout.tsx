@@ -41,7 +41,7 @@ const TERMS_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   PATHS.accountDeleted,
 ]);
 
-/** Textos legais e créditos, em toda tela; o aviso de IA aponta para os créditos. */
+/** Textos legais e créditos disponíveis em toda tela. */
 const FOOTER_LINKS = [
   { to: PATHS.terms, label: TEXT.legal.termsTitle },
   { to: PATHS.privacy, label: TEXT.legal.privacyTitle },
@@ -101,10 +101,9 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         <LoginFailedAlert />
         <TermsGate />
       </main>
-      {/* Aviso de IA discreto em toda tela (docs/art/LICENSE-ART.md); o detalhe fica nos créditos. */}
+      {/* Links públicos para textos legais e créditos. */}
       <footer className="border-t border-line-soft">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-sm text-fg-muted md:px-8">
-          <p>{T.aiArt}</p>
           <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6">
             {FOOTER_LINKS.map(({ to, label }) => (
               <Link key={to} to={to} className="inline-flex min-h-11 items-center font-semibold">

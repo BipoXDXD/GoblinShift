@@ -1,81 +1,57 @@
-# Arte do site: origem, direitos e licença
+# Arte do site: condições de uso e registro
 
-As goblins do site e a marca são **ilustrações e modelos 3D gerados com IA e editados**, com exceção do ícone da aba, desenhado à mão. Este arquivo registra de onde vieram, com base em quais termos estão no site e sob qual licença está a parte humana do trabalho. O registro arquivo a arquivo, com sha256 e a cadeia de gerações, fica em [`web/src/assets/art/PROVENANCE.json`](../../web/src/assets/art/PROVENANCE.json), conferido no CI por `web/scripts/check-provenance.ts` ([ADR 030](../adr/030-motor-e-asset-do-3d-da-abertura.md)).
+As ilustrações e os modelos do elenco, a marca e os ícones têm registro arquivo a arquivo em
+[`PROVENANCE.json`](../../web/src/assets/art/PROVENANCE.json). O verificador confere os hashes,
+a cadeia de origem, o direito aplicável, as exclusões e as decisões excepcionais. Os documentos
+completos de origem e termos ficam no registro externo `goblinshift-editorial-20261021`, cujo índice
+vincula os identificadores neutros aos originais e seus hashes. Esta edição não altera esses fatos
+nem amplia os direitos concedidos.
 
-## O que está no site
+## Elenco
 
-| Goblin | Onde | Modelo 3D (Hyper3D Rodin) |
-|---|---|---|
-| Rúbia | Cena 3D da abertura e a imagem estática dela; estado carregando, em rotação com a Fagulha; créditos | [`9f030f3c`](https://hyper3d.ai/workspace/rodin/9f030f3c-868c-4e55-a44e-71d6a3323265) (regeração de 1 milhão de triângulos da `e1c79f67`, mesma imagem de referência) |
-| Nyx | Estado de erro; créditos | [`19a1ddba`](https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9) |
-| Ferrugem | Estado de sucesso; créditos | [`ec3a728c`](https://hyper3d.ai/workspace/rodin/ec3a728c-d58f-40f4-a298-a144e6ba668b) |
-| Jade | Estado vazio; créditos | [`3c7aa397`](https://hyper3d.ai/workspace/rodin/3c7aa397-f83d-44ac-bf1b-bd65b0cb8524) |
-| Fagulha | Estado carregando, em rotação com a Rúbia; créditos | [`0d84776f`](https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd) |
+Rúbia aparece na cena 3D da abertura, na imagem estática e nos estados de carregamento; Nyx representa
+erros; Ferrugem, sucesso; Jade, o estado vazio; Fagulha alterna com Rúbia no carregamento. As cinco
+aparecem nos créditos. Ada e Lua permanecem excluídas conforme as decisões registradas.
 
-Cadeia da Rúbia, da Nyx e da Ferrugem (detalhe no `PROVENANCE.json`):
+## Marca reservada
 
-1. Conceito 2D **só por texto** no Seedream (ByteDance), pela API da Tripo.
-2. Versão frontal e versão semi-realista por image-to-image (Seedream e Banana Pro, do Google, pela Tripo), tendo como entradas **só imagens nossas**: o conceito do passo 1 e renders nossos de modelos do Rodin.
-3. Modelo 3D no Hyper3D Rodin Gen-2.5 a partir da imagem do passo 2.
-4. Edição humana: render no Blender, recorte e conversão (`scripts/arte/gerar-imagens.sh`); simplificação da malha, redimensionamento de textura e compressão do GLB (`scripts/arte/otimizar-glb.sh`).
+O emblema do cabeçalho e o selo da oficina mostram a Rúbia. O ícone da aba usa uma versão própria em
+SVG. O nome GoblinShift, o emblema, o selo, o ícone da aba e os nomes dos personagens não são licenciados,
+inclusive as contribuições de edição sobre eles. Não podem ser usados de modo que sugira vínculo ou
+endosso. A licença da seção seguinte não alcança a marca.
 
-A Ada (Rodin `417f7fe0`) saiu do site em 2026-10-15, por decisão do usuário; ela fica em `excluded` no `PROVENANCE.json`.
+## Licença da contribuição
 
-## A marca
+A contribuição de seleção, renders, enquadramento, recorte e otimização fica sob
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), **exceto Jade, Fagulha e a marca**. A concessão
+se limita a essa contribuição: não afirma autoria exclusiva sobre arquivos de origem nem garante sua
+proteção autoral ou exclusividade, e não concede direitos pertencentes a terceiros.
 
-Escolhida pelo usuário em 2026-10-15, na rodada r1 da logo:
+Crédito sugerido: “Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0”.
 
-| Peça | Onde | Origem |
-|---|---|---|
-| Emblema a1 (escudo da Rúbia com chave inglesa e martelo) | Cabeçalho, ao lado do nome em texto; `apple-touch-icon.png` e os ícones de 192 e 512 px do manifest | Tripo, modelo `chat_image_2.5_sunburst` (GPT Image 2.5), **só por texto**, tarefa `6a4e850a` |
-| Selo b1 ("GOBLINSHIFT · OFICINA"), marca secundária | Página de créditos e imagem de compartilhamento (`og-image.jpg`) | Mesmo modelo, só por texto, tarefa `81de143f` |
-| Ícone da aba (`favicon.svg` e `favicon.ico`) | Aba do navegador | **Obra própria**: a cabeça da Rúbia desenhada à mão em SVG, na grade de 32 px, sem IA |
+## Jade e Fagulha
 
-Edição humana do a1 e do b1 (`scripts/arte/gerar-marca.sh`): limpeza do alfa (o platô opaco vinha com 249 a 254 e os pixels transparentes carregavam cor escura, que vazava como halo ao reduzir), recorte justo, conversão AVIF e WebP por altura, os ícones quadrados sobre madeira e a composição da imagem de compartilhamento com o título na Bricolage Grotesque (`scripts/arte/render-marca.mjs`). A ilustração continua raster: não foi vetorizada.
+As exceções permanecem registradas em `exceptions`, com responsável, data e motivo:
 
-**A marca não é licenciada** (decisão J-13; Termos de Uso, item 9): o nome GoblinShift, o emblema, o selo, o ícone da aba e os nomes dos personagens ficam reservados, inclusive a parte humana do trabalho sobre eles. A CC BY 4.0 da seção "Direito autoral e licença" não os alcança.
+- Jade deriva de um modelo idêntico, byte a byte, ao modelo associado a uma imagem de terceiros trazida
+  como referência. O usuário assumiu o risco de publicação em 15/10/2026. Se o titular pedir retirada,
+  o material deve sair do site após análise do pedido.
+- A imagem de entrada da origem inicial da Fagulha não está registrada, portanto sua origem não pode
+  ser verificada. O usuário autorizou a publicação em 15/10/2026.
 
-## Jade e Fagulha: publicadas por decisão do usuário
+**Nenhum arquivo derivado de Jade ou Fagulha entra na concessão CC BY 4.0.** Pedidos de retirada:
+abuso@goblinshift.dev, identificando o material e o direito afetado, conforme o item 9 dos Termos.
 
-A Jade e a Fagulha seguem outra cadeia: um modelo gerado pelo usuário direto no site do Rodin, um render nosso dele, uma versão semi-realista no Banana Pro (pela Tripo) e o modelo final no Rodin. A origem do primeiro passo não é nossa:
+## Ressalvas preservadas
 
-- **Jade** (Rodin `3c7aa397`): deriva do modelo `cab576c8`, que é idêntico, byte a byte, ao 3D gerado a partir de `referencias-usuario/ref2-jeans.png`, uma imagem de terceiros trazida como referência.
-- **Fagulha** (Rodin `0d84776f`): deriva do modelo `f37f6132`, gerado direto no site do Rodin. Não há registro da imagem de entrada, então a origem não pode ser verificada.
+A cadeia completa de cessão e repasse ao usuário não foi verificada. Permanecem pendentes a definição
+precisa da categoria paga, a retroatividade de assinaturas ou mudanças de plano, o alcance dos direitos
+sobre as fontes, indenizações, limites de responsabilidade e jurisdição. Assinatura paga e saldo de API
+não equivalem, por si, a comprovação de cessão. O registro externo conserva os termos, datas de leitura,
+cláusulas, planos informados e essas pendências para revisão jurídica.
 
-**Decisão do usuário, em 2026-10-15:** ele assume o risco de publicar a Jade e libera a Fagulha. A decisão está em `exceptions` no `PROVENANCE.json` (quem, quando e por quê), e o `check-provenance` recusa qualquer outra geração de origem de terceiros que não tenha decisão registrada. Se o autor da imagem de referência pedir, a Jade sai do site: basta tirá-la do `elenco.tsv` e da rotação do estado vazio. O pedido de retirada chega por abuso@goblinshift.dev (Termos de Uso, item 9).
+## Código e fontes tipográficas
 
-**Jade e Fagulha ficam fora da licença CC BY 4.0 abaixo**, em todos os arquivos que derivam desses modelos: não licenciamos o que talvez não seja nosso.
-
-## Termos dos fornecedores (lidos em 2026-10-16)
-
-O que sustenta a publicação é a **assinatura paga da Tripo** (e a do Rodin), não o saldo da carteira de API. Cada geração 2D cita no `PROVENANCE.json` o direito do seu upstream, e o `check-provenance` recusa direito que não bate com o `upstream` declarado.
-
-| Direito (`rights`) | Gerações | Termos |
-|---|---|---|
-| `tripo-paid-openai-gpt-image` | Marca: emblema a1 e selo b1 (GPT Image 2.5, pela Tripo) | Tripo + OpenAI Terms of Use e Services Agreement 4.1 (vigentes desde 2026-01-01) |
-| `tripo-paid-google-banana-pro` | Versões semi-realistas (Banana Pro, pela Tripo) | Tripo + [Gemini API](https://ai.google.dev/gemini-api/terms) (2026-04-28): "Google won't claim ownership over that content" |
-| `tripo-paid-bytedance-seedream` | Conceitos e versões frontais (Seedream v5, pela Tripo) | Tripo + termos da ByteDance/BytePlus: **cláusula de titularidade da saída não localizada** |
-| `rodin-plano-pago` | Modelos 3D (Hyper3D Rodin) | [Termos](https://hyper3d.ai/legal/terms) e [preços](https://hyper3d.ai/pricing) do Rodin |
-
-- **Tripo** ([termos](https://developers.tripo3d.com/en/terms), atualizados em 2025-07-11): 5.2.2 dá ao "Paid User" todos os direitos, inclusive licenciar; 5.2.1 deixa os direitos com a Tripo no plano Free; 3.4 manda a "Third Party Output" seguir os termos do terceiro.
-- **Cessão do upstream vai à Tripo.** Nos termos da OpenAI, a saída é cedida ao cliente da OpenAI, que aqui é a Tripo; para Google e ByteDance, o que a Tripo recebe não foi verificado. O repasse ao usuário depende da Tripo 5.2.2/3.4 e **não foi verificado**.
-- **Rodin:** "any use" só nos planos Creator ou superiores, e os termos não cedem a propriedade da saída. O usuário é assinante (informado em 2026-10-15), mas o plano exato não foi conferido e **não se sabe se o plano vale para o que foi gerado antes da assinatura ou do upgrade**.
-
-Riscos que ficam para advogado (também em [`docs/legal/notas-internas.md`](../legal/notas-internas.md)):
-
-- cadeia de cessão do logo (OpenAI → Tripo → usuário), que não foi verificada;
-- saída de IA possivelmente não protegível e não exclusiva, o que afeta o registro da marca;
-- "Paid User" não é definido nos termos da Tripo;
-- retroatividade do plano do Rodin;
-- indenizações e limites de responsabilidade dos termos dos fornecedores;
-- jurisdição estrangeira nos termos dos fornecedores.
-
-## Direito autoral e licença
-
-O US Copyright Office (relatório *Copyright and Artificial Intelligence, Part 2*, 29 de janeiro de 2025) conclui que prompt sozinho não faz de ninguém autor. A saída bruta do Rodin, da Tripo e dos modelos de imagem pode não ser protegível, e este repositório não afirma autoria exclusiva sobre ela.
-
-A **contribuição humana** (seleção, renders, enquadramento, recorte e otimização dos modelos) fica sob [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), **exceto Jade e Fagulha** (seção anterior) **e a marca** (seção "A marca"), sem garantia de que a saída gerada por IA seja protegível por direito autoral. Crédito sugerido: "Arte do GoblinShift (https://goblinshift.dev), CC BY 4.0".
-
-O nome GoblinShift, o logotipo (o emblema, o selo e o ícone da aba, seção "A marca") e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.
-
-O código, inclusive os scripts de `scripts/arte/`, segue a [Apache License 2.0](../../LICENSE) do repositório. Essa licença não cobre `web/src/assets/art/`, os ícones e a imagem de compartilhamento de `web/public/`, `docs/art/` nem os modelos 3D (arquivo [`NOTICE`](../../NOTICE)). Os Termos de Uso dizem o mesmo no item 9.
+O código e os scripts de `scripts/arte/` seguem a [Apache License 2.0](../../LICENSE). Essa licença não
+cobre `web/src/assets/art/`, os ícones e a imagem de compartilhamento em `web/public/`, `docs/art/` nem
+os modelos 3D, conforme o [`NOTICE`](../../NOTICE). As fontes tipográficas mantêm suas licenças próprias.

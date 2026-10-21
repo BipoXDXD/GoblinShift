@@ -1,354 +1,257 @@
 {
   "schema": 1,
-  "terms": [
-    {
-      "id": "hyper3d-terms",
-      "url": "https://hyper3d.ai/legal/terms",
-      "last_updated": null,
-      "read_at": "2026-10-16",
-      "clauses": "2 (export conforme o plano), 5(b) (não limita o uso da saída), sem cessão de propriedade e sem garantia de proteção autoral"
-    },
-    {
-      "id": "hyper3d-pricing",
-      "url": "https://hyper3d.ai/pricing",
-      "last_updated": null,
-      "read_at": "2026-10-16",
-      "clauses": "Só Creator e acima: 'Unlimited export and any use'"
-    },
-    {
-      "id": "tripo-terms",
-      "url": "https://developers.tripo3d.com/en/terms",
-      "last_updated": "2025-07-11",
-      "read_at": "2026-10-16",
-      "clauses": "3.2 (uso comercial), 3.4 ('Third Party Output' segue os termos do terceiro), 5.2.1 (no plano Free os direitos ficam com a Tripo), 5.2.2 (Paid User tem todos os direitos, inclusive licenciar; 'Paid User' não é definido), 6.4 (créditos de API pré-pagos)"
-    },
-    {
-      "id": "gemini-api-terms",
-      "url": "https://ai.google.dev/gemini-api/terms",
-      "last_updated": "2026-04-28",
-      "read_at": "2026-10-16",
-      "clauses": "'Google won't claim ownership over that content'"
-    },
-    {
-      "id": "openai-terms-of-use",
-      "url": "https://openai.com/policies/terms-of-use/",
-      "last_updated": "2026-01-01",
-      "read_at": "2026-10-16",
-      "clauses": "Cessão da saída ao usuário da OpenAI; aqui esse usuário é a Tripo"
-    },
-    {
-      "id": "openai-services-agreement",
-      "url": "https://openai.com/policies/services-agreement/",
-      "last_updated": "2026-01-01",
-      "read_at": "2026-10-16",
-      "clauses": "4.1 (cessão da saída ao cliente da OpenAI, que aqui é a Tripo)"
-    },
-    {
-      "id": "byteplus-modelark-terms",
-      "url": "https://docs.byteplus.com/en/docs/ModelArk/Terms_and_Conditions",
-      "last_updated": null,
-      "read_at": "2026-10-16",
-      "clauses": "Cláusula de titularidade da saída do Seedream não localizada; não está claro que estes sejam os termos que ligam a ByteDance à Tripo. Pendente de leitura"
-    }
-  ],
   "rights": [
     {
-      "id": "rodin-plano-pago",
-      "vendor": "hyper3d",
-      "basis": ["hyper3d-terms", "hyper3d-pricing"],
-      "status": "termos lidos; 'any use' só nos planos Creator ou superiores e os termos não cedem a propriedade; usuário assinante do Rodin (informado em 2026-10-15), plano exato não conferido",
-      "note": "Retroatividade não verificada: não se sabe se o plano de hoje cobre as gerações feitas antes da assinatura ou do upgrade para Creator+."
+      "id": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-001"
     },
     {
-      "id": "tripo-paid-openai-gpt-image",
-      "vendor": "tripo",
-      "upstream": "GPT Image 2.5",
-      "basis": ["tripo-terms", "openai-terms-of-use", "openai-services-agreement"],
-      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)",
-      "note": "A cessão do upstream vai à Tripo; repasse ao usuário via Tripo 5.2.2/3.4, não verificado."
+      "id": "rights-002",
+      "source_record": "goblinshift-editorial-20261021",
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-002"
     },
     {
-      "id": "tripo-paid-google-banana-pro",
-      "vendor": "tripo",
-      "upstream": "Banana Pro",
-      "basis": ["tripo-terms", "gemini-api-terms"],
-      "status": "termos lidos; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)",
-      "note": "A cessão do upstream vai à Tripo; repasse ao usuário via Tripo 5.2.2/3.4, não verificado."
+      "id": "rights-003",
+      "source_record": "goblinshift-editorial-20261021",
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-003"
     },
     {
-      "id": "tripo-paid-bytedance-seedream",
-      "vendor": "tripo",
-      "upstream": "Seedream",
-      "basis": ["tripo-terms", "byteplus-modelark-terms"],
-      "status": "termos da Tripo lidos; termos da ByteDance sem cláusula de titularidade localizada; usuário assinante da Tripo e com saldo pago na API (informado em 2026-10-15)",
-      "note": "A cessão do upstream vai à Tripo; repasse ao usuário via Tripo 5.2.2/3.4, não verificado."
+      "id": "rights-004",
+      "source_record": "goblinshift-editorial-20261021",
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-004"
     }
   ],
   "generations": {
     "a-conceito": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "2c56c15e-deeb-4b99-9f2b-3e4b1c8544f0",
       "inputs": [],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r5-goticas/a-trancas-vermelhas"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "a-frontal": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "eb807d09-a173-47ac-8028-280ddc46491a",
       "inputs": ["a-conceito"],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r6-frontal/a-trancas-vermelhas"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "a-3d-gotica": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "e95f87af-4bdb-45fb-8a06-8a8fd5b92b2e",
-      "url": "https://hyper3d.ai/workspace/rodin/e95f87af-4bdb-45fb-8a06-8a8fd5b92b2e",
       "inputs": ["a-conceito"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "a-3d-frontal": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "38a7c889-53d3-41ac-9bff-66f67744fae0",
-      "url": "https://hyper3d.ai/workspace/rodin/38a7c889-53d3-41ac-9bff-66f67744fae0",
       "inputs": ["a-frontal"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "a-render-gotica": {
-      "tool": "Blender 5.2 (render_glb.py), render local",
       "inputs": ["a-3d-gotica"],
-      "local": "referencias-usuario/a-aprovada-3d-frente.png",
-      "note": "apesar da pasta, é render nosso do modelo e95f87af, não referência de terceiros"
+      "note": "apesar da pasta, é render nosso do modelo e95f87af, não referência de terceiros",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "ref-01-frente": {
-      "tool": "Blender 5.2 (render_glb.py), render local",
       "inputs": ["a-3d-frontal"],
-      "local": "tripo/r9-teste/ref-01-frente-branco.png"
+      "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "upstream": "source-003",
       "task_id": "a16cc6f2-4982-4ca7-ad92-72b0d8c41871",
       "inputs": ["a-conceito", "a-render-gotica"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "tripo/r7-realista/a-realista-banana"
+      "rights": "rights-003",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "e1c79f67-dafb-4f23-89ea-f4324beca492",
-      "url": "https://hyper3d.ai/workspace/rodin/e1c79f67-dafb-4f23-89ea-f4324beca492",
       "inputs": ["rubia-2d"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "rubia-3d-1m": {
-      "tool": "Hyper3D Rodin Gen-2.5-High",
       "generation_id": "9f030f3c-868c-4e55-a44e-71d6a3323265",
-      "url": "https://hyper3d.ai/workspace/rodin/9f030f3c-868c-4e55-a44e-71d6a3323265",
-      "settings": "malha Raw de 1 milhão de triângulos, texture_delight=false, GLB pbr (2026-10-15)",
       "inputs": ["rubia-2d"],
-      "rights": "rodin-plano-pago",
-      "local": "rodin/r11-rubia-1m/pbr.glb"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "b-conceito": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "a57d10f7-d32c-4395-8e02-89edfb1b2ace",
       "inputs": [],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r5-goticas/b-laranja-couro"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "b-frontal": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "cb7cf4e5-443a-473e-979c-d33922745a9f",
       "inputs": [],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r6-frontal/b-laranja-couro"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "ferrugem-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "upstream": "source-003",
       "task_id": "1711dadc-9bb3-4583-b56e-a48c8d3327b5",
       "inputs": ["b-frontal", "ref-01-frente"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "tripo/r9-teste/b-laranja-couro"
+      "rights": "rights-003",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "ferrugem-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "ec3a728c-d58f-40f4-a298-a144e6ba668b",
-      "url": "https://hyper3d.ai/workspace/rodin/ec3a728c-d58f-40f4-a298-a144e6ba668b",
       "inputs": ["ferrugem-2d"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "c-conceito": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "1025c32e-f903-48f1-b0ca-fed54e8e06d8",
       "inputs": [],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r5-goticas/c-inventora"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "c-frontal": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "3bf88944-5660-46d2-988f-1ca4922a7dc3",
       "inputs": ["c-conceito"],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r6-frontal/c-inventora"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "ada-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "upstream": "source-003",
       "task_id": "032f6ed0-17ba-4beb-8923-0e0d79eefb79",
       "inputs": ["c-frontal", "ref-01-frente"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "tripo/r9-teste/c-inventora"
+      "rights": "rights-003",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "ada-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "417f7fe0-23a6-4fec-922a-33fbb3c69032",
-      "url": "https://hyper3d.ai/workspace/rodin/417f7fe0-23a6-4fec-922a-33fbb3c69032",
       "inputs": ["ada-2d"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "e-frontal": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "1a0a9bf7-9a99-4565-9b31-928287f0531b",
       "inputs": [],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r6-frontal/e-preta-rosa"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "nyx-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "upstream": "source-003",
       "task_id": "2b13f0c5-224b-4a8c-abaa-4e6f6943c5ec",
       "inputs": ["e-frontal", "ref-01-frente"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "tripo/r9-teste/e-preta-rosa"
+      "rights": "rights-003",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "nyx-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "19a1ddba-fd13-461e-9136-8f8bea40cfc9",
-      "url": "https://hyper3d.ai/workspace/rodin/19a1ddba-fd13-461e-9136-8f8bea40cfc9",
       "inputs": ["nyx-2d"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "g-frontal": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "seedream_v5",
-      "upstream": "ByteDance Seedream (via Tripo)",
+      "upstream": "source-004",
       "task_id": "29b1c89e-b07b-48fd-8dab-67c1dac7ef80",
       "inputs": [],
-      "rights": "tripo-paid-bytedance-seedream",
-      "local": "tripo/r6-frontal/g-sininho"
+      "rights": "rights-004",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-render-ancora": {
-      "tool": "Blender 5.2 (render_glb.py), render local",
       "inputs": ["rubia-3d"],
-      "local": "rodin/r10-realista/ancoras/a-semirrealista_e1c79f67-frente-branco.png"
+      "source_record": "goblinshift-editorial-20261021"
     },
     "jade-origem": {
-      "tool": "Hyper3D Rodin (site, gerado pelo usuário)",
       "generation_id": "cab576c8",
       "inputs": [],
-      "rights": "rodin-plano-pago",
-      "third_party": "gerado da imagem de referência de terceiros referencias-usuario/ref2-jeans.png (mesmo arquivo de rodin/referencias-usuario/ref2-jeans/pbr.glb)",
-      "local": "rodin/r10-realista/origem/cab576c8.glb"
+      "rights": "rights-001",
+      "third_party": "Origem vinculada a imagem de terceiros; identidade do arquivo confirmada no registro externo.",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "jade-render-origem": {
-      "tool": "Blender 5.2 (render_glb.py), render local",
       "inputs": ["jade-origem"],
-      "local": "rodin/r10-realista/cab576c8/origem-frente-branco.png"
+      "source_record": "goblinshift-editorial-20261021"
     },
     "jade-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "upstream": "source-003",
       "task_id": "5783276f-9228-407d-b368-c795b723b0a5",
       "inputs": ["jade-render-origem", "rubia-render-ancora"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "rodin/r10-realista/cab576c8/2d-v1"
+      "rights": "rights-003",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "jade-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "3c7aa397-f83d-44ac-bf1b-bd65b0cb8524",
-      "url": "https://hyper3d.ai/workspace/rodin/3c7aa397-f83d-44ac-bf1b-bd65b0cb8524",
       "inputs": ["jade-2d"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "fagulha-origem": {
-      "tool": "Hyper3D Rodin (site, gerado pelo usuário)",
       "generation_id": "f37f6132",
       "inputs": [],
-      "rights": "rodin-plano-pago",
-      "third_party": "entrada não registrada: gerado direto no site do Rodin, proveniência não verificável",
-      "local": "rodin/r10-realista/origem/f37f6132.glb"
+      "rights": "rights-001",
+      "third_party": "Entrada não registrada; proveniência não verificável.",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "fagulha-render-origem": {
-      "tool": "Blender 5.2 (render_glb.py), render local",
       "inputs": ["fagulha-origem"],
-      "local": "rodin/r10-realista/f37f6132/origem-frente-branco.png"
+      "source_record": "goblinshift-editorial-20261021"
     },
     "fagulha-2d": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "banana_pro",
-      "upstream": "Google Gemini/Banana Pro (via Tripo)",
+      "upstream": "source-003",
       "task_id": "58862e7d-2083-4038-893a-0bd4143a7d83",
       "inputs": ["fagulha-render-origem", "rubia-render-ancora"],
-      "rights": "tripo-paid-google-banana-pro",
-      "local": "rodin/r10-realista/f37f6132/2d-v1"
+      "rights": "rights-003",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "fagulha-3d": {
-      "tool": "Hyper3D Rodin Gen-2.5",
       "generation_id": "0d84776f-e99b-47e8-be42-59d78af0a6dd",
-      "url": "https://hyper3d.ai/workspace/rodin/0d84776f-e99b-47e8-be42-59d78af0a6dd",
       "inputs": ["fagulha-2d"],
-      "rights": "rodin-plano-pago"
+      "rights": "rights-001",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "logo-a1-escudo": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "chat_image_2.5_sunburst",
-      "upstream": "GPT Image 2.5 (via Tripo; a API expõe só o nome chat_image_2.5_sunburst)",
+      "upstream": "source-002",
       "task_id": "6a4e850a-f39d-40cb-a47d-c73ea583b5bf",
       "inputs": [],
-      "rights": "tripo-paid-openai-gpt-image",
-      "local": "logo/r1/a1-escudo",
-      "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG"
+      "rights": "rights-002",
+      "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "logo-b1-selo": {
-      "tool": "Tripo API v3 (text-to-image)",
-      "model": "chat_image_2.5_sunburst",
-      "upstream": "GPT Image 2.5 (via Tripo; a API expõe só o nome chat_image_2.5_sunburst)",
+      "upstream": "source-002",
       "task_id": "81de143f-ea91-4608-a325-4c10d1ca3751",
       "inputs": [],
-      "rights": "tripo-paid-openai-gpt-image",
-      "local": "logo/r1/b1-selo",
-      "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG"
+      "rights": "rights-002",
+      "note": "só por texto, sem imagem de entrada; prompt em logo/r1/run.sh e no JSON ao lado do PNG",
+      "source_record": "goblinshift-editorial-20261021"
     },
     "favicon-rubia": {
-      "tool": "SVG desenhado à mão (web/public/favicon.svg)",
       "inputs": [],
-      "note": "obra própria do projeto: formas geométricas simples, sem IA nem imagem de terceiros"
+      "note": "Obra própria do projeto: formas geométricas simples em SVG, sem imagem de terceiros.",
+      "source_record": "goblinshift-editorial-20261021"
     }
   },
   "excluded": [
     {
       "name": "Ada",
-      "rodin": "417f7fe0-23a6-4fec-922a-33fbb3c69032",
-      "reason": "retirada do site por decisão do usuário em 2026-10-15 (não gostou do resultado)"
+      "reason": "retirada do site por decisão do usuário em 2026-10-15 (não gostou do resultado)",
+      "source_id": "417f7fe0-23a6-4fec-922a-33fbb3c69032"
     }
   ],
   "assets": [
@@ -359,8 +262,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-256w.webp",
@@ -369,8 +271,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-384w.avif",
@@ -379,8 +280,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-384w.webp",
@@ -389,8 +289,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-512w.avif",
@@ -399,8 +298,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-512w.webp",
@@ -409,8 +307,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-768w.avif",
@@ -419,8 +316,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/fagulha-768w.webp",
@@ -429,8 +325,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-256w.avif",
@@ -439,8 +334,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-256w.webp",
@@ -449,8 +343,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-384w.avif",
@@ -459,8 +352,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-384w.webp",
@@ -469,8 +361,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-512w.avif",
@@ -479,8 +370,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-512w.webp",
@@ -489,8 +379,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-768w.avif",
@@ -499,8 +388,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/ferrugem-768w.webp",
@@ -509,8 +397,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-256w.avif",
@@ -519,8 +406,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-256w.webp",
@@ -529,8 +415,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-384w.avif",
@@ -539,8 +424,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-384w.webp",
@@ -549,8 +433,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-512w.avif",
@@ -559,8 +442,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-512w.webp",
@@ -569,8 +451,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-768w.avif",
@@ -579,8 +460,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/jade-768w.webp",
@@ -589,8 +469,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-256w.avif",
@@ -599,8 +478,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-256w.webp",
@@ -609,8 +487,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-384w.avif",
@@ -619,8 +496,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-384w.webp",
@@ -629,8 +505,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-512w.avif",
@@ -639,8 +514,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-512w.webp",
@@ -649,8 +523,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-768w.avif",
@@ -659,8 +532,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/nyx-768w.webp",
@@ -669,8 +541,7 @@
       "human_edits": [
         "render no Blender (render_glb.py, EEVEE com tom AgX, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-256w.avif",
@@ -679,8 +550,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-256w.webp",
@@ -689,8 +559,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-384w.avif",
@@ -699,8 +568,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-384w.webp",
@@ -709,8 +577,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-512w.avif",
@@ -719,8 +586,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-512w.webp",
@@ -729,8 +595,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-768w.avif",
@@ -739,8 +604,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "goblins/rubia-768w.webp",
@@ -749,8 +613,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20); o mesmo render da imagem estática da cena 3D",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-192w.avif",
@@ -759,8 +622,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-192w.webp",
@@ -769,8 +631,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-384w.avif",
@@ -779,8 +640,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-384w.webp",
@@ -789,8 +649,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-640w.avif",
@@ -799,8 +658,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia-640w.webp",
@@ -809,8 +667,7 @@
       "human_edits": [
         "render no Blender (render_glb.py --realista, Cycles com tom Standard e três luzes, --yaw=20)",
         "recorte 4:5 e conversão AVIF/WebP (scripts/arte/gerar-imagens.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "oficina-3d/oficina-3d-rubia.glb",
@@ -818,8 +675,7 @@
       "derived_from": "rubia-3d-1m",
       "human_edits": [
         "weld, simplificação com atributos (posição, normal e UV; ~240 mil triângulos), texturas de 2048 px em WebP e compressão Meshopt com UV em 14 bits (scripts/arte/otimizar-glb.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-144h.avif",
@@ -828,8 +684,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-144h.webp",
@@ -838,8 +693,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-48h.avif",
@@ -848,8 +702,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-48h.webp",
@@ -858,8 +711,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-512h.avif",
@@ -868,8 +720,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-512h.webp",
@@ -878,8 +729,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-96h.avif",
@@ -888,8 +738,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/rubia-escudo-96h.webp",
@@ -898,8 +747,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/selo-oficina-128h.avif",
@@ -908,8 +756,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/selo-oficina-128h.webp",
@@ -918,8 +765,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/selo-oficina-256h.avif",
@@ -928,8 +774,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "marca/selo-oficina-256h.webp",
@@ -938,8 +783,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "conversão AVIF/WebP por altura (scripts/arte/gerar-marca.sh)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "public/apple-touch-icon.png",
@@ -948,8 +792,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "emblema centrado sobre madeira (wood-900), 180 px, paleta de 256 cores"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "public/icon-192.png",
@@ -958,8 +801,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "emblema centrado sobre madeira (wood-900), 192 px, paleta de 256 cores"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "public/icon-512.png",
@@ -968,8 +810,7 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "emblema centrado sobre madeira (wood-900), 512 px, paleta de 256 cores"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "public/og-image.jpg",
@@ -978,15 +819,13 @@
       "human_edits": [
         "limpeza do alfa (platô 249-254 vira 255, pontos soltos e RGB escuro dos transparentes removidos) e recorte justo (scripts/arte/gerar-marca.sh)",
         "composição de 1200×630 com o selo sobre madeira, faixa de cobre e o título na Bricolage Grotesque (scripts/arte/render-marca.mjs)"
-      ],
-      "ai_generated": true
+      ]
     },
     {
       "file": "public/favicon.svg",
       "sha256": "717343f5221da71c7425578bd7a431f2493843095535f567f483ca37a2e6c80b",
       "derived_from": "favicon-rubia",
-      "human_edits": ["desenho vetorial à mão na grade de 32 px"],
-      "ai_generated": false
+      "human_edits": ["desenho vetorial à mão na grade de 32 px"]
     },
     {
       "file": "public/favicon.ico",
@@ -994,8 +833,7 @@
       "derived_from": "favicon-rubia",
       "human_edits": [
         "rasterização do favicon.svg em 16, 32 e 48 px no Chromium (scripts/arte/render-marca.mjs)"
-      ],
-      "ai_generated": false
+      ]
     }
   ],
   "exceptions": [
@@ -1011,5 +849,6 @@
       "decided_at": "2026-10-15",
       "reason": "O usuário libera a Fagulha, cuja proveniência não pode ser verificada (entrada do modelo f37f6132 não registrada)."
     }
-  ]
+  ],
+  "source_record": "goblinshift-editorial-20261021"
 }
