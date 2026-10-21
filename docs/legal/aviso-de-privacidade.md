@@ -1,7 +1,7 @@
 # Aviso de Privacidade do GoblinShift
 
-- **Versão:** v3-rascunho
-- **Vigência:** 2026-10-15
+- **Versão:** v4-rascunho
+- **Vigência:** 2026-10-21
 - **Endereço do serviço:** https://goblinshift.dev
 
 Este aviso explica quais dados pessoais o GoblinShift trata, para quê, com base em quê, com quem
@@ -275,3 +275,4 @@ texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](htt
 | `v1-rascunho` | 2026-10-14 | Primeiro rascunho, redigido a partir do que o sistema faz |
 | `v2-rascunho` | 2026-10-15 | Identificação do controlador; domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |
 | `v3-rascunho` | 2026-10-15 | Provedor dos endereços de e-mail identificado: ImprovMX (encaminhamento) e Google/Gmail (caixa de entrada), nos itens 2, 3.6, 6 e 7 |
+| `v4-rascunho` | 2026-10-21 | Redação editorial e referência ao registro de licenças atualizadas; novo aceite conjunto, sem alterar aceites anteriores |

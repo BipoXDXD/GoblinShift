@@ -6,7 +6,7 @@
 
 ## Contexto
 
-A regra de apresentação do plano (2.2) dizia "oficina 2D em HTML/CSS, com cartões e goblins discretos; sem canvas/engine". O plano de design da fatia 7 recomendou manter isso na v1 (D14, opção 1): usar o 3D gerado no fonte externa e no fonte externa só como fonte de renders 2D. O motivo era o custo medido:
+A regra de apresentação do plano (2.2) dizia "oficina 2D em HTML/CSS, com cartões e goblins discretos; sem canvas/engine". O plano de design da fatia 7 recomendou manter isso na v1 (D14, opção 1): usar o modelo 3D a partir de fontes editoriais registradas só como fonte de renders 2D. O motivo era o custo medido:
 
 - **Peso:** o `@google/model-viewer` 4.4, com o three embutido, tem cerca de 289 KB gzip, e um goblin quantizado com textura WebP de 1024 px tem 250 a 450 KB. A home sem 3D fica perto de 400 KB na primeira visita; o 3D quase dobra a página.
 - **Celular:** WebGL em GPU fraca esquenta, gasta bateria e disputa o LCP.

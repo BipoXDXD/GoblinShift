@@ -4,26 +4,26 @@
     {
       "id": "rights-001",
       "source_record": "goblinshift-editorial-20261021",
-      "upstream": "source-001",
-      "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-001"
     },
     {
       "id": "rights-002",
       "source_record": "goblinshift-editorial-20261021",
-      "upstream": "source-002",
-      "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-002"
     },
     {
       "id": "rights-003",
       "source_record": "goblinshift-editorial-20261021",
-      "upstream": "source-003",
-      "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-003"
     },
     {
       "id": "rights-004",
       "source_record": "goblinshift-editorial-20261021",
-      "upstream": "source-004",
-      "status": "Condições originais preservadas no registro externo; sem ampliação de direitos."
+      "status": "Condições e ressalvas preservadas no registro externo; esta referência não amplia direitos.",
+      "upstream": "source-004"
     }
   ],
   "generations": {
@@ -37,70 +37,53 @@
     "a-frontal": {
       "upstream": "source-004",
       "task_id": "eb807d09-a173-47ac-8028-280ddc46491a",
-      "inputs": [
-        "a-conceito"
-      ],
+      "inputs": ["a-conceito"],
       "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "a-3d-gotica": {
       "generation_id": "e95f87af-4bdb-45fb-8a06-8a8fd5b92b2e",
-      "inputs": [
-        "a-conceito"
-      ],
+      "inputs": ["a-conceito"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "a-3d-frontal": {
       "generation_id": "38a7c889-53d3-41ac-9bff-66f67744fae0",
-      "inputs": [
-        "a-frontal"
-      ],
+      "inputs": ["a-frontal"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "a-render-gotica": {
-      "inputs": [
-        "a-3d-gotica"
-      ],
+      "inputs": ["a-3d-gotica"],
       "note": "apesar da pasta, é render nosso do modelo e95f87af, não referência de terceiros",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ref-01-frente": {
-      "inputs": [
-        "a-3d-frontal"
-      ],
+      "inputs": ["a-3d-frontal"],
       "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-2d": {
       "upstream": "source-003",
       "task_id": "a16cc6f2-4982-4ca7-ad92-72b0d8c41871",
-      "inputs": [
-        "a-conceito",
-        "a-render-gotica"
-      ],
+      "inputs": ["a-conceito", "a-render-gotica"],
       "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-3d": {
       "generation_id": "e1c79f67-dafb-4f23-89ea-f4324beca492",
-      "inputs": [
-        "rubia-2d"
-      ],
+      "inputs": ["rubia-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "rubia-3d-1m": {
       "generation_id": "9f030f3c-868c-4e55-a44e-71d6a3323265",
-      "inputs": [
-        "rubia-2d"
-      ],
+      "inputs": ["rubia-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "b-conceito": {
       "upstream": "source-004",
@@ -119,21 +102,16 @@
     "ferrugem-2d": {
       "upstream": "source-003",
       "task_id": "1711dadc-9bb3-4583-b56e-a48c8d3327b5",
-      "inputs": [
-        "b-frontal",
-        "ref-01-frente"
-      ],
+      "inputs": ["b-frontal", "ref-01-frente"],
       "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ferrugem-3d": {
       "generation_id": "ec3a728c-d58f-40f4-a298-a144e6ba668b",
-      "inputs": [
-        "ferrugem-2d"
-      ],
+      "inputs": ["ferrugem-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "c-conceito": {
       "upstream": "source-004",
@@ -145,30 +123,23 @@
     "c-frontal": {
       "upstream": "source-004",
       "task_id": "3bf88944-5660-46d2-988f-1ca4922a7dc3",
-      "inputs": [
-        "c-conceito"
-      ],
+      "inputs": ["c-conceito"],
       "rights": "rights-004",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ada-2d": {
       "upstream": "source-003",
       "task_id": "032f6ed0-17ba-4beb-8923-0e0d79eefb79",
-      "inputs": [
-        "c-frontal",
-        "ref-01-frente"
-      ],
+      "inputs": ["c-frontal", "ref-01-frente"],
       "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "ada-3d": {
       "generation_id": "417f7fe0-23a6-4fec-922a-33fbb3c69032",
-      "inputs": [
-        "ada-2d"
-      ],
+      "inputs": ["ada-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "e-frontal": {
       "upstream": "source-004",
@@ -180,21 +151,16 @@
     "nyx-2d": {
       "upstream": "source-003",
       "task_id": "2b13f0c5-224b-4a8c-abaa-4e6f6943c5ec",
-      "inputs": [
-        "e-frontal",
-        "ref-01-frente"
-      ],
+      "inputs": ["e-frontal", "ref-01-frente"],
       "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "nyx-3d": {
       "generation_id": "19a1ddba-fd13-461e-9136-8f8bea40cfc9",
-      "inputs": [
-        "nyx-2d"
-      ],
+      "inputs": ["nyx-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "g-frontal": {
       "upstream": "source-004",
@@ -204,76 +170,60 @@
       "source_record": "goblinshift-editorial-20261021"
     },
     "rubia-render-ancora": {
-      "inputs": [
-        "rubia-3d"
-      ],
+      "inputs": ["rubia-3d"],
       "source_record": "goblinshift-editorial-20261021"
     },
     "jade-origem": {
       "generation_id": "cab576c8",
       "inputs": [],
       "rights": "rights-001",
-      "third_party": "gerado da imagem de referência de terceiros referencias-usuario/ref2-jeans.png (mesmo arquivo de fonte externa/referencias-usuario/ref2-jeans/pbr.glb)",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "third_party": "Origem vinculada a imagem de terceiros; identidade do arquivo confirmada no registro externo.",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "jade-render-origem": {
-      "inputs": [
-        "jade-origem"
-      ],
+      "inputs": ["jade-origem"],
       "source_record": "goblinshift-editorial-20261021"
     },
     "jade-2d": {
       "upstream": "source-003",
       "task_id": "5783276f-9228-407d-b368-c795b723b0a5",
-      "inputs": [
-        "jade-render-origem",
-        "rubia-render-ancora"
-      ],
+      "inputs": ["jade-render-origem", "rubia-render-ancora"],
       "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "jade-3d": {
       "generation_id": "3c7aa397-f83d-44ac-bf1b-bd65b0cb8524",
-      "inputs": [
-        "jade-2d"
-      ],
+      "inputs": ["jade-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "fagulha-origem": {
       "generation_id": "f37f6132",
       "inputs": [],
       "rights": "rights-001",
-      "third_party": "entrada não registrada: gerado direto no site do fonte externa, proveniência não verificável",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "third_party": "Entrada não registrada; proveniência não verificável.",
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "fagulha-render-origem": {
-      "inputs": [
-        "fagulha-origem"
-      ],
+      "inputs": ["fagulha-origem"],
       "source_record": "goblinshift-editorial-20261021"
     },
     "fagulha-2d": {
       "upstream": "source-003",
       "task_id": "58862e7d-2083-4038-893a-0bd4143a7d83",
-      "inputs": [
-        "fagulha-render-origem",
-        "rubia-render-ancora"
-      ],
+      "inputs": ["fagulha-render-origem", "rubia-render-ancora"],
       "rights": "rights-003",
       "source_record": "goblinshift-editorial-20261021"
     },
     "fagulha-3d": {
       "generation_id": "0d84776f-e99b-47e8-be42-59d78af0a6dd",
-      "inputs": [
-        "fagulha-2d"
-      ],
+      "inputs": ["fagulha-2d"],
       "rights": "rights-001",
-      "upstream": "source-001",
-      "source_record": "goblinshift-editorial-20261021"
+      "source_record": "goblinshift-editorial-20261021",
+      "upstream": "source-001"
     },
     "logo-a1-escudo": {
       "upstream": "source-002",
@@ -293,7 +243,7 @@
     },
     "favicon-rubia": {
       "inputs": [],
-      "note": "obra própria do projeto: formas geométricas simples, com processamento determinístico nem imagem de terceiros",
+      "note": "Obra própria do projeto: formas geométricas simples em SVG, sem imagem de terceiros.",
       "source_record": "goblinshift-editorial-20261021"
     }
   },
@@ -875,9 +825,7 @@
       "file": "public/favicon.svg",
       "sha256": "717343f5221da71c7425578bd7a431f2493843095535f567f483ca37a2e6c80b",
       "derived_from": "favicon-rubia",
-      "human_edits": [
-        "desenho vetorial à mão na grade de 32 px"
-      ]
+      "human_edits": ["desenho vetorial à mão na grade de 32 px"]
     },
     {
       "file": "public/favicon.ico",

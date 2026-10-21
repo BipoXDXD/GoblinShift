@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GLB da cena 3D da abertura (ADR 030): lê o bruto do fonte externa fora do repositório e grava o
+# GLB da cena 3D da abertura (ADR 030): lê o modelo de origem fora do repositório e grava o
 # otimizado em web/src/assets/art/oficina-3d/. Só a Rúbia vai para o 3D.
 #
 # Passos e porquê:
@@ -8,13 +8,13 @@
 #      posição, normal e UV, e para onde qualquer um passaria do erro aceito. O simplify comum,
 #      só de posição, achatava a bochecha, apagava a íris do olho esquerdo e esticava o UV da
 #      coxa até amostrar o cabelo (ADR 030, "Defeitos da primeira versão").
-#   3. texturas redimensionadas para TEXTURE_PX e gravadas em WebP (EXT_texture_webp). O fonte externa
-#      entrega 2048 px; contra 1024 px, eles tiram ~40% da diferença para o bruto nos closes, por
+#   3. texturas redimensionadas para TEXTURE_PX e gravadas em WebP (EXT_texture_webp). A fonte registrada
+#      tem 2048 px; contra 1024 px, eles tiram ~40% da diferença para o bruto nos closes, por
 #      ~320 KB. Com uma fonte de textura maior, compare closes contra o bruto antes de subir.
 #   4. Meshopt (EXT_meshopt_compression) sobre a malha quantizada (KHR_mesh_quantization), com UV
 #      em 14 bits: o padrão de 12 bits dá passos de 1 texel numa textura de 4096 px.
 #
-# Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/otimizar-glb.sh
+# Uso: RUBIA_SOURCE=/caminho/bruto.glb scripts/arte/otimizar-glb.sh
 #      FONTE=/caminho/bruto.glb TEXTURE_PX=4096 scripts/arte/otimizar-glb.sh
 # Requer: Node e `npm ci` em web/ (o CLI do gltf-transform vem fixado pelo npx).
 set -euo pipefail
@@ -27,7 +27,7 @@ GLTF_TRANSFORM="@gltf-transform/cli@4.5.1"
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 out_dir="$repo/web/src/assets/art/oficina-3d"
-src="${FONTE:-$ARTE/$(awk -F'\t' '$1 == "rubia" { print $2 }' "$here/elenco.tsv")}"
+src="${FONTE:-${RUBIA_SOURCE:?Defina FONTE ou RUBIA_SOURCE com o caminho do GLB de origem registrado}}"
 out="$out_dir/oficina-3d-rubia.glb"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

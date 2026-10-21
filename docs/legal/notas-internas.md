@@ -44,13 +44,14 @@ Texto que abria o arquivo público até sair do build:
   MEI antes de abrir o cadastro?"
 - **J-18**, idade mínima e contas de menores (item 2).
 - **J-20**, procedimento para abuso sexual infantil e conteúdo ilegal grave: autoridades,
-  preservação, prazos e a expiração de 48 h (item 7). Este procedimento não é escrito por processamento externo.
+  preservação, prazos e a expiração de 48 h (item 7). Este procedimento exige orientação jurídica e aprovação do responsável.
 - **J-21**, foro em relação de consumo (item 13).
-- **Direitos sobre a arte e a marca** (item 9; J-13), sem id novo: o que fica para advogado está
-  em `docs/art/LICENSE-ART.md`, seção "Termos dos fornecedores". Cadeia de cessão do logo
-  (fonte externa, fonte externa, usuário); saída de processamento externo possivelmente não protegível e não exclusiva, o que afeta o
-  registro da marca; "Paid User" indefinido nos termos da fonte externa; retroatividade do plano do fonte externa;
-  indenizações e limites de responsabilidade dos fornecedores; jurisdição estrangeira.
+- **Direitos sobre a arte e a marca** (item 9; J-13), sem id novo: as ressalvas estão
+  em `docs/art/LICENSE-ART.md`, seção "Ressalvas preservadas", e os documentos completos no registro
+  externo `goblinshift-editorial-20261021`. Os IDs `rights-001` a `rights-004` vinculam as condições
+  às fontes `source-001` a `source-004`. Permanecem para revisão a cadeia de cessão entre fornecedores
+  e usuário, proteção e exclusividade dos arquivos de origem e da marca, categoria paga, retroatividade
+  dos planos, indenizações, limites de responsabilidade e jurisdição estrangeira.
 
 ### Marcações a definir: id e texto original
 
@@ -60,7 +61,7 @@ redação original, na ordem do arquivo.
 | Seção | Marcação original |
 |---|---|
 | 2. Aceite destes termos | [[A DEFINIR (J-18): idade mínima para usar o serviço e o que fazer com contas de menores. Google e GitHub têm idade mínima própria, mas o GoblinShift não recebe a data de nascimento e não tem como verificar idade.]] |
-| 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-20) com orientação jurídica: quais autoridades e canais (por exemplo, Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a preservação com a expiração automática de 48 horas; o plano registra que esse procedimento exige orientação jurídica e não pode ser escrito por processamento externo]] |
+| 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-20) com orientação jurídica: quais autoridades e canais (por exemplo, Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a preservação com a expiração automática de 48 horas; o plano registra que esse procedimento exige orientação jurídica e deve ser definido com orientação jurídica]] |
 | 13. Lei aplicável e foro | [[A DEFINIR (J-21): foro. Nota para a revisão: em relação de consumo, o consumidor pode demandar no foro do próprio domicílio (CDC, art. 101, I).]] |
 
 ### Notas para a revisão
@@ -94,14 +95,14 @@ abertura pública e ainda depende de fatia não concluída (indicada entre parê
 | Arquivos sem backup | Plano 3.8 (Backups: "Arquivos: sem backup, por decisão") |
 | Sem links públicos de compartilhamento | Plano 1.8 (Abuso e custo); ADR 012 |
 | Bloqueio revoga sessões e chaves, cancela a execução e impede novo login | Plano 1.8 (Estado da conta); ADR 012; plano das fatias 7 e 8, 2.6 (fatia 6) |
-| CSAM exige orientação jurídica, não runbook de processamento externo | Plano das fatias 7 e 8, 2.6 |
+| Procedimento de CSAM exige orientação jurídica | Plano das fatias 7 e 8, 2.6 |
 | Sem varredura automatizada de conteúdo nesta versão | Plano 1.8 (Abuso e custo): as medidas listadas são limites, privacidade, expiração, bloqueio e termos; nenhuma é varredura |
 | Canal de contato para denúncias | Plano 1.8 (Abuso e custo); ADR 012 |
 | `DELETE /me`: login recente; revoga, cancela e remove em até 24 h; backups expiram em até 30 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups) (fatia 6, não implementado) |
 | Remoção de metadados não é anonimização | Plano 1.2 (Image Forge, perfis de cor e metadados) |
 | Código sob Apache-2.0; a licença não cobre a arte nem os modelos 3D | `LICENSE`, `NOTICE`, `pyproject.toml` (`license`), `web/package.json` (`license`) |
 | Arte sob CC BY 4.0 na parte humana, exceto Jade e Fagulha | `docs/art/LICENSE-ART.md` |
-| Sem processamento externo no processamento; ilustrações do site geradas com processamento externo | Plano, introdução da seção 1; `docs/art/LICENSE-ART.md`; página `/creditos` (`web/src/legal/CreditsPage.tsx`) |
+| Processamento isolado sem rede; arte com registro de licenças | Plano, introdução da seção 1; `docs/art/LICENSE-ART.md`; página `/creditos` (`web/src/legal/CreditsPage.tsx`) |
 | "Código da tela de login" para o recurso contra bloqueio | Branch `login-recusado-ref` (a tela de login recusado mostra uma referência do pedido para citar no e-mail) |
 | Canal da política de divulgação em `/.well-known/security.txt` | Branch `politica-seguranca` (`SECURITY.md` e `web/public/.well-known/security.txt`) |
 
@@ -283,7 +284,7 @@ saíram dos textos públicos, que passaram à versão `v2-rascunho`.
 | J-10 | Opção A: sem aviso prévio (não há e-mail); recurso por `contato@` citando o código da tela de login e o provedor | Termos 8 |
 | J-11 | Opção A: 30 dias de aviso no site antes do fim do serviço, salvo segurança, ordem legal ou caso fortuito | Termos 8 |
 | J-12 | Apache-2.0; a licença não cobre `web/src/assets/art/`, `docs/art/` nem os modelos 3D (`NOTICE`) | Termos 9; `LICENSE`; `NOTICE` |
-| J-13 | Opção B: marca reservada; a parte humana da arte sob CC BY 4.0, sem garantia sobre a saída de processamento externo, com Jade e Fagulha fora da concessão. Os scripts de `scripts/arte/` passaram da CC BY 4.0 para a Apache-2.0, como o resto do código | Termos 9; `docs/art/LICENSE-ART.md` |
+| J-13 | Opção B: marca reservada; a parte humana da arte sob CC BY 4.0, sem garantia sobre a arquivos de origem, com Jade e Fagulha fora da concessão. Os scripts de `scripts/arte/` passaram da CC BY 4.0 para a Apache-2.0, como o resto do código | Termos 9; `docs/art/LICENSE-ART.md` |
 | J-14 | Opção A: 15 dias de antecedência para mudança relevante; tabela "Histórico de versões" no fim de cada texto, mais o link do Git | Termos 12; Aviso 12; fim dos dois textos |
 | J-15 | Aviso destacado no site, em até 3 dias úteis, "porque não temos o seu e-mail" | Aviso 10 |
 | J-16 | Controlador: Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR), canal `privacidade@goblinshift.dev`; sem CPF nem endereço. Fica a pergunta ao advogado sobre se isso basta | Termos 1; Aviso 1 |
@@ -297,8 +298,8 @@ Lacunas fora das marcações, resolvidas no mesmo dia:
 - **Dados enviados por e-mail**: item 3.6 novo do Aviso, retenção de 12 meses depois do fim da
   conversa (item 5), e os resumos dos itens 2 e 3.5 deixam de dizer que nenhum e-mail chega.
   Ficaram pendentes a base legal (item 4) e o provedor de e-mail (item 6).
-- **processamento externo no site**: o item 3 dos Termos diz que nenhum arquivo do usuário vai a serviço de processamento externo e que
-  as ilustrações do site foram geradas com processamento externo, com link para `/creditos`.
+- **Processamento e arte**: o item 3 dos Termos descreve o isolamento sem rede nem scripts de cliente.
+  As condições da arte permanecem em `docs/art/LICENSE-ART.md` e em `/creditos`.
 - **Notificação e retirada** de material do site que viole direito de alguém: Termos 9, por
   `abuso@`.
 
