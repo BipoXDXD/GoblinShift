@@ -172,7 +172,7 @@
   },
   "secrets": {
     "db_password": {
-      "file": "/srv/goblinshift/app//srv/goblinshift/secrets/db_password",
+      "file": "/srv/goblinshift/secrets/db_password",
       "name": "goblinshift_db_password"
     }
   }

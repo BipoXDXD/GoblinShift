@@ -403,23 +403,23 @@
   },
   "secrets": {
     "csrf_secret": {
-      "file": "/srv/goblinshift/app//srv/goblinshift/secrets/csrf_secret",
+      "file": "/srv/goblinshift/secrets/csrf_secret",
       "name": "goblinshift_csrf_secret"
     },
     "db_password": {
-      "file": "/srv/goblinshift/app//srv/goblinshift/secrets/db_password",
+      "file": "/srv/goblinshift/secrets/db_password",
       "name": "goblinshift_db_password"
     },
     "github_client_secret": {
-      "file": "/srv/goblinshift/app//srv/goblinshift/secrets/github_client_secret",
+      "file": "/srv/goblinshift/secrets/github_client_secret",
       "name": "goblinshift_github_client_secret"
     },
     "google_client_secret": {
-      "file": "/srv/goblinshift/app//srv/goblinshift/secrets/google_client_secret",
+      "file": "/srv/goblinshift/secrets/google_client_secret",
       "name": "goblinshift_google_client_secret"
     },
     "login_cookie_secret": {
-      "file": "/srv/goblinshift/app//srv/goblinshift/secrets/login_cookie_secret",
+      "file": "/srv/goblinshift/secrets/login_cookie_secret",
       "name": "goblinshift_login_cookie_secret"
     }
   }
