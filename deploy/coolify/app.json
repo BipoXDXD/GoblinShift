@@ -44,7 +44,7 @@
         ],
         "timeout": "3s"
       },
-      "image": "ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc",
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
         "options": {
@@ -125,7 +125,7 @@
       "group_add": [
         "61001"
       ],
-      "image": "ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc",
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
         "options": {
@@ -193,7 +193,7 @@
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
         "OTEL_SERVICE_NAME": "goblinshift-api"
       },
-      "image": "ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc",
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
         "options": {
@@ -230,7 +230,7 @@
       "environment": {
         "GS_DOMAIN": "${GS_DOMAIN:-_}"
       },
-      "image": "ghcr.io/bipoxdxd/goblinshift-web:sha-03f15c824029@sha256:76d9f0209ded60bcf7a109565fb95e4b77e350a0a7262c7f4eff4bb221328568",
+      "image": "${GS_WEB_IMAGE:-ghcr.io/bipoxdxd/goblinshift-web:sha-03f15c824029@sha256:76d9f0209ded60bcf7a109565fb95e4b77e350a0a7262c7f4eff4bb221328568}",
       "logging": {
         "driver": "local",
         "options": {
@@ -271,7 +271,7 @@
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
         "OTEL_SERVICE_NAME": "goblinshift-api"
       },
-      "image": "ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc",
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
         "options": {
@@ -336,7 +336,7 @@
       "group_add": [
         "61001"
       ],
-      "image": "ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc",
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
       "logging": {
         "driver": "local",
         "options": {
