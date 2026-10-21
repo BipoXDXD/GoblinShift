@@ -52,7 +52,7 @@
         "driver": "local",
         "options": {
           "max-size": "1m",
-          "max-file": "1"
+          "max-file": "2"
         }
       }
     },
@@ -107,7 +107,7 @@
         "driver": "local",
         "options": {
           "max-size": "1m",
-          "max-file": "1"
+          "max-file": "2"
         }
       }
     }
