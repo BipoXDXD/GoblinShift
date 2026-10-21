@@ -1,10 +1,10 @@
 # Elenco do site (ADR 030): as cinco goblins publicadas (a Ada saiu em 2026-10-15 e a Lua em
-# 2026-10-16, por decisão do usuário). Uma linha por goblin: id, GLB bruto do fonte externa (caminho a
-# partir de $ARTE) e o id da geração no fonte externa. A Rúbia vem da regeração com
+# 2026-10-16, por decisão do usuário). Uma linha por goblin: id, GLB de origem (caminho a
+# partir de $ARTE; @RUBIA_SOURCE exige caminho absoluto em RUBIA_SOURCE) e o id da registro de origem. A Rúbia vem da regeração com
 # 1 milhão de triângulos (9f030f3c), que o usuário escolheu em 2026-10-15 no lugar da e1c79f67.
 # A Jade e a Fagulha entram por decisão do usuário em 2026-10-15 (exceptions no PROVENANCE.json;
 # docs/art/LICENSE-ART.md).
-rubia	fonte externa/r11-rubia-1m/pbr.glb	9f030f3c-868c-4e55-a44e-71d6a3323265
+rubia	@RUBIA_SOURCE	9f030f3c-868c-4e55-a44e-71d6a3323265
 ferrugem	aprovados-2026-10-15/b-laranja-couro_ec3a728c.glb	ec3a728c-d58f-40f4-a298-a144e6ba668b
 nyx	aprovados-2026-10-15/e-preta-rosa_19a1ddba.glb	19a1ddba-fd13-461e-9136-8f8bea40cfc9
 fagulha	aprovados-2026-10-15/f-espartilho-realista_0d84776f.glb	0d84776f-e99b-47e8-be42-59d78af0a6dd

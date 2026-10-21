@@ -8,7 +8,7 @@
 #     render só: a mesma imagem vira a estática da cena e a goblin dos estados.
 # Os PNGs intermediários ficam numa pasta temporária: os brutos e renders continuam fora do Git.
 #
-# Uso: ARTE=~/Documents/GoblinShift-arte scripts/arte/gerar-imagens.sh [ID...]
+# Uso: ARTE=/caminho/arte RUBIA_SOURCE=/caminho/bruto.glb scripts/arte/gerar-imagens.sh [ID...]
 #      Sem ID, gera todas; com IDs do elenco.tsv (como `rubia`), só essas.
 # Requer: blender 5.x, magick, avifenc e cwebp no PATH, e $ARTE/ferramentas/render_glb.py.
 set -euo pipefail
@@ -83,7 +83,7 @@ while IFS=$'\t' read -r id glb _; do
     # A imagem estática da cena usa a luz realista (Cycles, três luzes, tom Standard), a mesma que
     # a cena do three imita (ADR 030). As goblins dos estados ficam no modo padrão (EEVEE, tom AgX,
     # um sol), o dos renders que o usuário aprovou para elas.
-    render_framed "$ARTE/$glb" "$work/$id.png" --realista
+    render_framed "${RUBIA_SOURCE:?Defina RUBIA_SOURCE com o caminho do GLB de origem registrado}" "$work/$id.png" --realista
     export_sizes "$work/$id.png" "$art/oficina-3d/oficina-3d-rubia" "${POSTER_WIDTHS[@]}"
     export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
   else

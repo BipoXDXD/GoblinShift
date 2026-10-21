@@ -31,8 +31,6 @@ build/
 .idea/
 .vscode/
 
-# Worktrees temporários do fonte externa
-.fonte externa/worktrees/
 
 # Estado local do servidor MCP Serena
 .serena/

@@ -1,3 +1,5 @@
+import manifest from "../src/assets/art/PROVENANCE.json";
+
 import { describe, expect, it } from "vitest";
 
 import { isPublicArt, provenanceViolations, type ArtFile } from "./check-provenance";
@@ -8,10 +10,15 @@ const SHA_B = "b".repeat(64);
 function doc(overrides: Record<string, unknown> = {}): unknown {
   return {
     schema: 1,
-    rights: [{ id: "fonte externa", vendor: "source-c", basis: [], status: "termos lidos" }],
+    rights: [{ id: "rights-c", vendor: "source-c", basis: [], status: "termos lidos" }],
     generations: {
-      "lua-2d": { tool: "fonte externa", inputs: [] },
-      "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["lua-2d"], rights: "fonte externa" },
+      "lua-2d": { tool: "Source A", inputs: [] },
+      "lua-3d": {
+        tool: "Source C",
+        generation_id: "81ae6621",
+        inputs: ["lua-2d"],
+        rights: "rights-c",
+      },
     },
     excluded: [{ name: "Jade", source_id: "3c7aa397-f83d", reason: "terceiros" }],
     assets: [
@@ -59,7 +66,12 @@ describe("provenanceViolations", () => {
   it("geração que não existe na cadeia", () => {
     const broken = doc({
       generations: {
-        "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["sumiu"], rights: "fonte externa" },
+        "lua-3d": {
+          tool: "Source C",
+          generation_id: "81ae6621",
+          inputs: ["sumiu"],
+          rights: "rights-c",
+        },
       },
     });
 
@@ -72,8 +84,8 @@ describe("provenanceViolations", () => {
   it("direito que não existe", () => {
     const broken = doc({
       generations: {
-        "lua-2d": { tool: "fonte externa", inputs: [] },
-        "lua-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["lua-2d"], rights: "nenhum" },
+        "lua-2d": { tool: "Source A", inputs: [] },
+        "lua-3d": { tool: "Source C", generation_id: "81ae", inputs: ["lua-2d"], rights: "nenhum" },
       },
     });
 
@@ -84,22 +96,27 @@ describe("provenanceViolations", () => {
 
   describe("direito e upstream da geração", () => {
     const rights = [
-      { id: "fonte externa", vendor: "source-c", basis: [], status: "termos lidos" },
-      { id: "rights-a", vendor: "fonte externa", upstream: "source-a", basis: [], status: "x" },
-      { id: "rights-b", vendor: "fonte externa", upstream: "source-b", basis: [], status: "x" },
+      { id: "rights-c", vendor: "source-c", basis: [], status: "termos lidos" },
+      { id: "rights-a", vendor: "source-a", upstream: "source-a", basis: [], status: "x" },
+      { id: "rights-b", vendor: "source-a", upstream: "source-b", basis: [], status: "x" },
     ];
 
     function withTwoD(generation: Record<string, unknown>): unknown {
       return doc({
         rights,
         generations: {
-          "lua-2d": { tool: "fonte externa", inputs: [], ...generation },
-          "lua-3d": { tool: "fonte externa", generation_id: "81ae", inputs: ["lua-2d"], rights: "fonte externa" },
+          "lua-2d": { tool: "Source A", inputs: [], ...generation },
+          "lua-3d": {
+            tool: "Source C",
+            generation_id: "81ae",
+            inputs: ["lua-2d"],
+            rights: "rights-c",
+          },
         },
       });
     }
 
-    it("upstream que contém o declarado no direito: aceita", () => {
+    it("upstream igual ao declarado no direito: aceita", () => {
       const ok = withTwoD({ upstream: "source-a", rights: "rights-a" });
 
       expect(provenanceViolations(FILES, ok)).toEqual([]);
@@ -114,10 +131,10 @@ describe("provenanceViolations", () => {
     });
 
     it("upstream declarado com direito que não distingue upstream: recusa", () => {
-      const generic = withTwoD({ upstream: "source-a", rights: "fonte externa" });
+      const generic = withTwoD({ upstream: "source-a", rights: "rights-c" });
 
       expect(provenanceViolations(FILES, generic)).toContain(
-        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas cita o direito fonte externa, que não declara upstream',
+        'goblins/lua-128w.avif: lua-2d tem upstream "source-a", mas cita o direito rights-c, que não declara upstream',
       );
     });
 
@@ -141,12 +158,12 @@ describe("provenanceViolations", () => {
   it("goblin excluída por proveniência não entra no site", () => {
     const tainted = doc({
       generations: {
-        "lua-2d": { tool: "fonte externa", inputs: [] },
+        "lua-2d": { tool: "Source A", inputs: [] },
         "lua-3d": {
-          tool: "fonte externa",
+          tool: "Source C",
           generation_id: "3c7aa397-f83d",
           inputs: ["lua-2d"],
-          rights: "fonte externa",
+          rights: "rights-c",
         },
       },
     });
@@ -158,9 +175,14 @@ describe("provenanceViolations", () => {
 
   describe("origem de terceiros ou não verificável", () => {
     const thirdParty = {
-      "lua-ref": { tool: "fonte externa (site)", inputs: [], third_party: "imagem de terceiros" },
-      "lua-2d": { tool: "fonte externa", inputs: ["lua-ref"] },
-      "lua-3d": { tool: "fonte externa", generation_id: "81ae6621", inputs: ["lua-2d"], rights: "fonte externa" },
+      "lua-ref": { tool: "Source C (site)", inputs: [], third_party: "imagem de terceiros" },
+      "lua-2d": { tool: "Source A", inputs: ["lua-ref"] },
+      "lua-3d": {
+        tool: "Source C",
+        generation_id: "81ae6621",
+        inputs: ["lua-2d"],
+        rights: "rights-c",
+      },
     };
     const NO_DECISION =
       "goblins/lua-128w.avif: deriva de lua-ref (imagem de terceiros) sem decisão registrada em exceptions";
@@ -206,6 +228,36 @@ describe("provenanceViolations", () => {
 
       expect(provenanceViolations(FILES, other)).toContain(NO_DECISION);
     });
+  });
+
+  it("ciclo de origem é recusado", () => {
+    const cyclic = doc({
+      generations: {
+        "lua-2d": { inputs: ["lua-3d"] },
+        "lua-3d": { inputs: ["lua-2d"], rights: "rights-c" },
+      },
+    });
+    expect(provenanceViolations(FILES, cyclic).some((v) => v.includes("ciclo"))).toBe(true);
+  });
+
+  it("identificador de origem exige igualdade exata", () => {
+    const mismatch = doc({
+      rights: [{ id: "rights-a", upstream: "source-a" }],
+      generations: { "lua-3d": { inputs: [], rights: "rights-a", upstream: "source-a-other" } },
+    });
+    expect(provenanceViolations(FILES, mismatch).some((v) => v.includes("vale para"))).toBe(true);
+  });
+
+  it("origem 3D publicada não pode perder seu direito", () => {
+    const broken = structuredClone(manifest);
+    const generation: { rights?: string } = broken.generations["rubia-3d-1m"];
+    delete generation.rights;
+    const files = broken.assets.map((asset) => ({ path: asset.file, sha256: asset.sha256 }));
+    expect(
+      provenanceViolations(files, broken).some((v) =>
+        v.includes('rubia-3d-1m tem upstream "source-001", mas não cita direito'),
+      ),
+    ).toBe(true);
   });
 
   it("documento fora do formato é um erro só, sem seguir adiante", () => {

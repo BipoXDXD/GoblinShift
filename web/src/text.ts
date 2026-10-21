@@ -75,7 +75,6 @@ export const TEXT = {
     navLabel: "Principal",
     skipToContent: "Pular para o conteúdo",
     brand: "GoblinShift",
-    editorialNote: "Ilustrações geradas com processamento externo e editadas.",
     creditsLink: "Créditos",
     footerNavLabel: "Rodapé",
   },
@@ -890,12 +889,12 @@ export const TEXT = {
     title: "Créditos",
     artHeading: "As goblins",
     art: [
-      "As goblins da oficina foram geradas com processamento externo e editadas à mão. Os conceitos em 2D saíram da fonte externa (com os modelos fonte externa e fonte externa), os modelos 3D do fonte externa fonte externa, e os renders, recortes e a otimização da cena 3D foram feitos no Blender e no glTF Transform.",
-      "A saída bruta de processamento externo pode não ser protegível por direito autoral; a parte humana (seleção, renders, edição e os scripts) fica sob a licença CC BY 4.0.",
+      "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no registro de licenças da arte.",
+      "A contribuição de seleção, renders e edição está sob CC BY 4.0, exceto Jade, Fagulha e a marca. A licença não concede direitos sobre conteúdo de terceiros nem garante proteção autoral ou exclusividade sobre os arquivos de origem.",
     ],
     brandHeading: "A marca",
     brand: [
-      "O emblema do cabeçalho e o selo da oficina mostram a Rúbia e foram gerados com processamento externo só a partir de texto, no fonte externa, e depois limpos e recortados à mão. O ícone da aba é outro desenho: a cabeça da Rúbia desenhada à mão em SVG, com processamento determinístico.",
+      "O emblema do cabeçalho e o selo da oficina mostram a Rúbia. O ícone da aba usa uma versão própria em SVG.",
       "O nome GoblinShift, o emblema, o selo e os nomes dos personagens não são licenciados e não podem ser usados de modo que sugira vínculo ou endosso.",
     ],
     sealAlt:

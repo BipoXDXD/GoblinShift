@@ -22,7 +22,7 @@ export default tseslint.config(
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
-      // Regras de TypeScript do projeto (seção TypeScript do fonte externa.md global e ETS).
+      // Regras de TypeScript do projeto e diretrizes de Effective TypeScript.
       "@typescript-eslint/consistent-type-assertions": [
         "error",
         { assertionStyle: "as", objectLiteralTypeAssertions: "never" },
