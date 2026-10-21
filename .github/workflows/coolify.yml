@@ -105,11 +105,26 @@ jobs:
           TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
         run: |
           tag="sha-${RELEASE_COMMIT:0:12}"
-          for name in goblinshift goblinshift-web goblinshift-executor; do
-            reference=$(crane digest "ghcr.io/bipoxdxd/$name:$tag")
-            docker pull "ghcr.io/bipoxdxd/$name@$reference"
+          echo '{}' > "$RUNNER_TEMP/scanned-images.json"
+          for role in app web executor; do
+            case "$role" in
+              app) name=goblinshift ;;
+              web) name=goblinshift-web ;;
+              executor) name=goblinshift-executor ;;
+            esac
+            crane manifest "ghcr.io/bipoxdxd/$name:$tag" > "$RUNNER_TEMP/scan-index.json"
+            if jq -e 'has("manifests")' "$RUNNER_TEMP/scan-index.json" >/dev/null; then
+              digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$RUNNER_TEMP/scan-index.json")
+            else
+              digest=$(crane digest "ghcr.io/bipoxdxd/$name:$tag")
+            fi
+            reference="ghcr.io/bipoxdxd/$name@$digest"
+            docker pull "$reference"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro "$TRIVY_IMAGE" image \
-              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "ghcr.io/bipoxdxd/$name@$reference"
+              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$reference"
+            jq --arg role "$role" --arg ref "$reference" '. + {($role): $ref}' \
+              "$RUNNER_TEMP/scanned-images.json" > "$RUNNER_TEMP/scanned-next.json"
+            mv "$RUNNER_TEMP/scanned-next.json" "$RUNNER_TEMP/scanned-images.json"
           done
       - name: Configure project-bound publication key
         env:
@@ -131,6 +146,7 @@ jobs:
           DEPLOY_KEY: ${{ runner.temp }}/release-ssh/key
           DEPLOY_KNOWN_HOSTS: ${{ runner.temp }}/release-ssh/known_hosts
           DEPLOY_TARGET: ${{ vars.COOLIFY_RELEASE_TARGET }}
+          SCANNED_IMAGES_FILE: ${{ runner.temp }}/scanned-images.json
           PUBLICATION_FILE: ${{ runner.temp }}/publication/publication.json
         run: bash deploy/coolify/release/send.sh
       - name: Remove runner credentials
