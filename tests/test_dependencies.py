@@ -12,7 +12,7 @@ import pikepdf
 import PIL
 
 ROOT = Path(__file__).resolve().parent.parent
-PILLOW_PIN = "pillow==12.3.0"
+PILLOW_PIN = "pillow==13.0.0"
 PIKEPDF_PIN = "pikepdf==10.16.0"
 # A wheel do pikepdf traz o libqpdf compilado junto; a versão dele muda com a do pikepdf.
 QPDF_VERSION = "12.4.2"
@@ -57,8 +57,8 @@ def test_grupo_do_executor_tem_so_os_mesmos_pins() -> None:
 
 
 def test_lock_e_ambiente_tem_a_versao_fixada_do_pillow() -> None:
-    assert _locked_versions()["pillow"] == "12.3.0"
-    assert PIL.__version__ == "12.3.0"
+    assert _locked_versions()["pillow"] == "13.0.0"
+    assert PIL.__version__ == "13.0.0"
 
 
 def test_lock_e_ambiente_tem_a_versao_fixada_do_pikepdf_e_do_qpdf() -> None:
