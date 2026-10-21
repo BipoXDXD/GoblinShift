@@ -1,0 +1,29 @@
+{
+ cert_issuer acme {
+  disable_http_challenge
+ }
+ servers :443 {
+  protocols h1 h2
+  listener_wrappers {
+   proxy_protocol {
+    timeout 2s
+    allow 172.16.1.6/32
+    fallback_policy reject
+   }
+   tls
+  }
+  trusted_proxies static 179.197.70.102/32
+  trusted_proxies_strict
+  client_ip_headers X-Forwarded-For
+ }
+ servers {
+  protocols h1 h2
+  trusted_proxies static 172.16.1.6/32 179.197.70.102/32
+  trusted_proxies_strict
+  client_ip_headers X-Forwarded-For
+ }
+}
+http://goblinshift.dev, http://stillon.tech, http://www.goblinshift.dev, http://www.stillon.tech {
+ redir https://{host}{uri} 308
+}
+import /etc/caddy/conf.d/*.caddy

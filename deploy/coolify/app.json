@@ -1,0 +1,420 @@
+{
+  "name": "goblinshift",
+  "services": {
+    "api": {
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully",
+          "required": true
+        },
+        "storage-init": {
+          "condition": "service_completed_successfully",
+          "required": true
+        }
+      },
+      "environment": {
+        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
+        "GS_DB_HOST": "postgres",
+        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
+        "GS_ENVIRONMENT": "production",
+        "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "OTEL_SERVICE_NAME": "goblinshift-api",
+        "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",
+        "GS_CURSOR_SECRET": "${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}",
+        "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
+        "GS_GITHUB_CLIENT_ID": "${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}",
+        "GS_GITHUB_CLIENT_SECRET_FILE": "/run/secrets/github_client_secret",
+        "GS_GOOGLE_CLIENT_ID": "${GS_GOOGLE_CLIENT_ID:?defina em secrets/app.env (console do Google)}",
+        "GS_GOOGLE_CLIENT_SECRET_FILE": "/run/secrets/google_client_secret",
+        "GS_LOGIN_COOKIE_SECRET_FILE": "/run/secrets/login_cookie_secret",
+        "GS_PUBLIC_ORIGIN": "${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}",
+        "GS_RUNNER": "executor_ctl",
+        "GS_SIGNUP_MODE": "${GS_SIGNUP_MODE:-closed}",
+        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}"
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 5,
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz',timeout=2)"
+        ],
+        "timeout": "3s"
+      },
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "unless-stopped",
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        },
+        {
+          "source": "google_client_secret",
+          "target": "/run/secrets/google_client_secret"
+        },
+        {
+          "source": "github_client_secret",
+          "target": "/run/secrets/github_client_secret"
+        },
+        {
+          "source": "csrf_secret",
+          "target": "/run/secrets/csrf_secret"
+        },
+        {
+          "source": "login_cookie_secret",
+          "target": "/run/secrets/login_cookie_secret"
+        }
+      ],
+      "volumes": [
+        {
+          "source": "/srv/goblinshift/storage",
+          "target": "/var/lib/goblinshift/storage",
+          "type": "bind",
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-api-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    },
+    "maintenance": {
+      "command": [
+        "gs-maintenance"
+      ],
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully",
+          "required": true
+        },
+        "storage-init": {
+          "condition": "service_completed_successfully",
+          "required": true
+        }
+      },
+      "environment": {
+        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
+        "GS_DB_HOST": "postgres",
+        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
+        "GS_ENVIRONMENT": "production",
+        "GS_MISSING_SWEEP_MAX_ABSENT_RATIO": null,
+        "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "OTEL_SERVICE_NAME": "goblinshift-maintenance",
+        "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
+        "GS_RUNNER": "executor_ctl",
+        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}",
+        "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
+      },
+      "group_add": [
+        "61001"
+      ],
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "unless-stopped",
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        }
+      ],
+      "volumes": [
+        {
+          "source": "/srv/goblinshift/storage",
+          "target": "/var/lib/goblinshift/storage",
+          "type": "bind",
+          "bind": {
+            "create_host_path": false
+          }
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "source": "/run/goblinshift",
+          "target": "/run/goblinshift",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "source": "/srv/goblinshift/exec-work",
+          "target": "/var/lib/goblinshift/exec-work",
+          "type": "bind"
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-maintenance-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    },
+    "migrate": {
+      "command": [
+        "alembic",
+        "upgrade",
+        "head"
+      ],
+      "depends_on": {},
+      "environment": {
+        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
+        "GS_DB_HOST": "postgres",
+        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
+        "GS_ENVIRONMENT": "production",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "OTEL_SERVICE_NAME": "goblinshift-api"
+      },
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "no",
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-migrate-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    },
+    "nginx": {
+      "cap_drop": [
+        "NET_RAW"
+      ],
+      "depends_on": {
+        "api": {
+          "condition": "service_healthy",
+          "required": true
+        }
+      },
+      "environment": {
+        "GS_DOMAIN": "${GS_DOMAIN:-_}"
+      },
+      "image": "${GS_WEB_IMAGE:-ghcr.io/bipoxdxd/goblinshift-web:sha-03f15c824029@sha256:76d9f0209ded60bcf7a109565fb95e4b77e350a0a7262c7f4eff4bb221328568}",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "edge": {
+          "ipv4_address": "172.31.0.4"
+        },
+        "internal": {}
+      },
+      "restart": "unless-stopped",
+      "pull_policy": "never",
+      "container_name": "goblinshift-nginx-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    },
+    "storage-init": {
+      "command": [
+        "install",
+        "-d",
+        "-o",
+        "app",
+        "-g",
+        "app",
+        "-m",
+        "700",
+        "/var/lib/goblinshift/storage/objects"
+      ],
+      "environment": {
+        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
+        "GS_DB_HOST": "postgres",
+        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
+        "GS_ENVIRONMENT": "production",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "OTEL_SERVICE_NAME": "goblinshift-api"
+      },
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "no",
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        }
+      ],
+      "user": "0",
+      "volumes": [
+        {
+          "source": "/srv/goblinshift/storage",
+          "target": "/var/lib/goblinshift/storage",
+          "type": "bind",
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-storage-init-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    },
+    "worker": {
+      "command": [
+        "gs-worker"
+      ],
+      "depends_on": {
+        "migrate": {
+          "condition": "service_completed_successfully",
+          "required": true
+        },
+        "storage-init": {
+          "condition": "service_completed_successfully",
+          "required": true
+        }
+      },
+      "environment": {
+        "FORWARDED_ALLOW_IPS": "172.30.0.0/24,172.31.0.2",
+        "GS_DB_HOST": "postgres",
+        "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
+        "GS_ENVIRONMENT": "production",
+        "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
+        "OTEL_SERVICE_NAME": "goblinshift-worker",
+        "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
+        "GS_RUNNER": "executor_ctl",
+        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}",
+        "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
+      },
+      "group_add": [
+        "61001"
+      ],
+      "image": "${GS_APP_IMAGE:-ghcr.io/bipoxdxd/goblinshift:sha-03f15c824029@sha256:54e9c5f01c78fa7e005994a4a3266b0180481c6ed018da289e7648abfdddd2cc}",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "unless-stopped",
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        }
+      ],
+      "stop_grace_period": "30s",
+      "volumes": [
+        {
+          "source": "/srv/goblinshift/storage",
+          "target": "/var/lib/goblinshift/storage",
+          "type": "bind",
+          "bind": {
+            "create_host_path": false
+          }
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "source": "/run/goblinshift",
+          "target": "/run/goblinshift",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "source": "/srv/goblinshift/exec-work",
+          "target": "/var/lib/goblinshift/exec-work",
+          "type": "bind"
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-worker-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    }
+  },
+  "networks": {
+    "edge": {
+      "name": "edge",
+      "external": true
+    },
+    "internal": {
+      "name": "goblinshift_internal",
+      "external": true
+    }
+  },
+  "secrets": {
+    "csrf_secret": {
+      "file": "/srv/goblinshift/secrets/csrf_secret",
+      "name": "goblinshift_csrf_secret"
+    },
+    "db_password": {
+      "file": "/srv/goblinshift/secrets/db_password",
+      "name": "goblinshift_db_password"
+    },
+    "github_client_secret": {
+      "file": "/srv/goblinshift/secrets/github_client_secret",
+      "name": "goblinshift_github_client_secret"
+    },
+    "google_client_secret": {
+      "file": "/srv/goblinshift/secrets/google_client_secret",
+      "name": "goblinshift_google_client_secret"
+    },
+    "login_cookie_secret": {
+      "file": "/srv/goblinshift/secrets/login_cookie_secret",
+      "name": "goblinshift_login_cookie_secret"
+    }
+  }
+}

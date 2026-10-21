@@ -1,0 +1,95 @@
+{
+  "name": "edge",
+  "services": {
+    "proxy": {
+      "image": "caddy:2@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52",
+      "pull_policy": "never",
+      "container_name": "edge-proxy-1",
+      "init": true,
+      "pids_limit": 128,
+      "mem_limit": "256m",
+      "cap_drop": [
+        "NET_RAW"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "./deploy/coolify/Caddyfile",
+          "target": "/etc/caddy/Caddyfile",
+          "read_only": true,
+          "bind": {
+            "create_host_path": false
+          }
+        },
+        {
+          "type": "bind",
+          "source": "./deploy/coolify/sites",
+          "target": "/etc/caddy/conf.d",
+          "read_only": true,
+          "bind": {
+            "create_host_path": false
+          }
+        },
+        "caddy_data:/data",
+        "caddy_config:/config"
+      ],
+      "networks": {
+        "edge": {
+          "ipv4_address": "172.31.0.2"
+        },
+        "coolify": {}
+      },
+      "labels": [
+        "traefik.enable=true",
+        "traefik.docker.network=coolify",
+        "traefik.http.routers.migrated-sites-http.rule=Host(`goblinshift.dev`) || Host(`stillon.tech`) || Host(`www.goblinshift.dev`) || Host(`www.stillon.tech`)",
+        "traefik.http.routers.migrated-sites-http.entrypoints=http",
+        "traefik.http.routers.migrated-sites-http.service=migrated-sites-http",
+        "traefik.http.services.migrated-sites-http.loadbalancer.server.port=80",
+        "traefik.tcp.routers.migrated-sites-tls.rule=HostSNI(`goblinshift.dev`) || HostSNI(`stillon.tech`) || HostSNI(`www.goblinshift.dev`) || HostSNI(`www.stillon.tech`)",
+        "traefik.tcp.routers.migrated-sites-tls.entrypoints=https",
+        "traefik.tcp.routers.migrated-sites-tls.tls.passthrough=true",
+        "traefik.tcp.routers.migrated-sites-tls.service=migrated-sites-tls",
+        "traefik.tcp.services.migrated-sites-tls.loadbalancer.server.port=443",
+        "traefik.tcp.services.migrated-sites-tls.loadbalancer.proxyprotocol.version=2"
+      ],
+      "restart": "unless-stopped",
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:2019/config/"
+        ],
+        "interval": "15s",
+        "timeout": "3s",
+        "retries": 5
+      }
+    }
+  },
+  "networks": {
+    "edge": {
+      "external": true,
+      "name": "edge"
+    },
+    "coolify": {
+      "external": true,
+      "name": "coolify"
+    }
+  },
+  "volumes": {
+    "caddy_data": {
+      "external": true,
+      "name": "edge_caddy_data"
+    },
+    "caddy_config": {
+      "external": true,
+      "name": "edge_caddy_config"
+    }
+  }
+}

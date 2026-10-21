@@ -1,0 +1,179 @@
+{
+  "name": "goblinshift",
+  "services": {
+    "postgres": {
+      "environment": {
+        "POSTGRES_DB": "goblinshift",
+        "POSTGRES_PASSWORD_FILE": "/run/secrets/db_password",
+        "POSTGRES_USER": "goblinshift"
+      },
+      "healthcheck": {
+        "interval": "5s",
+        "retries": 20,
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U goblinshift -d goblinshift"
+        ],
+        "timeout": "3s"
+      },
+      "image": "postgres:18.6-trixie@sha256:1267c7e692de235fda2a50dbcdbcbca4672ea6a0298576a6bd9d07cafc319b32",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "unless-stopped",
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        }
+      ],
+      "volumes": [
+        {
+          "source": "/srv/goblinshift/pg/data",
+          "target": "/var/lib/postgresql",
+          "type": "bind",
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-postgres-1",
+      "labels": [
+        "traefik.enable=false"
+      ],
+      "entrypoint": [
+        "/bin/sh",
+        "-ec",
+        "test -f /var/lib/postgresql/.coolify-pg-mount && exec docker-entrypoint.sh postgres"
+      ]
+    },
+    "otel-collector": {
+      "command": [
+        "--config=/etc/otelcol/config.yaml"
+      ],
+      "depends_on": {
+        "openobserve": {
+          "condition": "service_started",
+          "required": true
+        }
+      },
+      "environment": {
+        "OPENOBSERVE_BASIC_AUTH": "${OPENOBSERVE_BASIC_AUTH:?defina em .env (scripts/dev-secrets.sh)}"
+      },
+      "image": "otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "restart": "unless-stopped",
+      "volumes": [
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "read_only": true,
+          "source": "./docker/otel-collector/config.yaml",
+          "target": "/etc/otelcol/config.yaml",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "read_only": true,
+          "source": "/srv/goblinshift/pg",
+          "target": "/hostfs/pg",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "read_only": true,
+          "source": "/srv/goblinshift/storage",
+          "target": "/hostfs/storage",
+          "type": "bind"
+        },
+        {
+          "bind": {
+            "create_host_path": false
+          },
+          "read_only": true,
+          "source": "/srv/goblinshift/telemetry",
+          "target": "/hostfs/telemetry",
+          "type": "bind"
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-otel-collector-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    },
+    "openobserve": {
+      "environment": {
+        "ZO_COMPACT_DATA_RETENTION_DAYS": "30",
+        "ZO_DATA_DIR": "/data",
+        "ZO_LOCAL_MODE": "true",
+        "ZO_ROOT_USER_EMAIL": "${OPENOBSERVE_ROOT_EMAIL:?defina em .env (scripts/dev-secrets.sh)}",
+        "ZO_ROOT_USER_PASSWORD": "${OPENOBSERVE_ROOT_PASSWORD:?defina em .env (scripts/dev-secrets.sh)}"
+      },
+      "image": "openobserve/openobserve:v1.0.4@sha256:d4a878fac1f6c56003764f7f2a1625668917388f167e222c8c810de3f54c56ba",
+      "logging": {
+        "driver": "local",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "networks": {
+        "internal": null
+      },
+      "ports": [
+        "127.0.0.1:${GS_OPENOBSERVE_PORT:-5080}:5080"
+      ],
+      "restart": "unless-stopped",
+      "volumes": [
+        {
+          "source": "/srv/goblinshift/telemetry/data",
+          "target": "/data",
+          "type": "bind",
+          "bind": {
+            "create_host_path": false
+          }
+        }
+      ],
+      "pull_policy": "never",
+      "container_name": "goblinshift-openobserve-1",
+      "labels": [
+        "traefik.enable=false"
+      ]
+    }
+  },
+  "networks": {
+    "internal": {
+      "name": "goblinshift_internal",
+      "external": true
+    }
+  },
+  "secrets": {
+    "db_password": {
+      "file": "/srv/goblinshift/secrets/db_password",
+      "name": "goblinshift_db_password"
+    }
+  }
+}
