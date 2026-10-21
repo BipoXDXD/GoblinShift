@@ -71,6 +71,7 @@ ENV PYTHONPATH=/opt/goblinshift \
 # 61001 é o GID do grupo gs-exec do host, dono da área de trabalho montada em /work.
 RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
            /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+           /usr/local/lib/python3.14/ensurepip \
            /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
  && groupadd --gid 61001 gs-exec \
  && useradd --uid 61000 --gid 61001 --no-create-home --home-dir /nonexistent \

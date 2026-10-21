@@ -37,3 +37,9 @@ O Image Forge decodifica, converte e grava JPEG e PNG, com perfis de cor e EXIF.
 - `uv run pytest tests/test_dependencies.py`: pins, lock e ambiente na 12.3.0.
 - `uv run lint-imports`: contrato "Só o executor carrega o PIL" mantido.
 - Na imagem do executor (marcador `executor_image`, também sob `runsc` no job `gvisor`): `PIL.__version__ == "12.3.0"`, `pillow` como única distribuição de terceiros, e Image Forge e Downloads Detox processando um work dir real com o mesmo ZIP em duas execuções (`tests/test_executor_image.py`).
+
+## Atualização de segurança — 2026-10-21
+
+Os pins da aplicação e do executor passam a Pillow 13.0.0, mantendo a estratégia de versão exata e wheels com hashes. A versão corrige falhas críticas e altas de decodificação e limites de memória reportadas no ciclo 13.0.0. As APIs removidas nessa versão não são utilizadas pelo Image Forge; o projeto já exige Python 3.14. As mídias existentes não são reprocessadas nem modificadas pela atualização.
+
+O lock também atualiza certifi para 2026.10.19, removendo as raízes emSign afetadas. As imagens de runtime não precisam de instaladores: pip e ensurepip, incluindo cópias vendorizadas de bibliotecas, são removidos; o build continua usando uv e o lock. Os testes de pin/ambiente e da imagem exigem 13.0.0 e ausência de ambos os instaladores. A imagem web recebe as versões corrigidas de curl/libcurl e libexpat, sem trocar o Nginx nem seus assets. A promoção permanece bloqueada até os testes completos, gVisor e Trivy das imagens passarem.

@@ -18,7 +18,7 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
     "opentelemetry-sdk>=1.45.1",
     "pikepdf==10.16.0",
-    "pillow==12.3.0",
+    "pillow==13.0.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.15.0",
@@ -41,7 +41,7 @@ build-backend = "uv_build"
 # Dependências de terceiros da imagem do executor (Pillow, ADR 018; pikepdf, que traz o qpdf na
 # wheel e puxa lxml e packaging, ADR 035): o Dockerfile instala só este grupo, a partir do lock.
 # Os pins repetem os de [project.dependencies]; tests/test_dependencies.py confere os dois.
-executor = ["pikepdf==10.16.0", "pillow==12.3.0"]
+executor = ["pikepdf==10.16.0", "pillow==13.0.0"]
 # Teste de contrato (scripts/contract-test.sh, job "Contrato" do CI). Fora do `dev` para não
 # pesar na sincronização dos outros jobs; versão exata porque cada release muda as heurísticas e
 # um CI vermelho tem de vir de mudança na API, não do fuzzer.

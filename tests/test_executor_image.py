@@ -46,7 +46,7 @@ WORLD_READABLE_DIR = 0o755
 WORLD_READABLE_FILE = 0o644
 SUCCEEDED = 0
 FFMPEG_VERSION = "8.1.2"  # ADR 036; ARG FFMPEG_VERSION em docker/executor.Dockerfile
-PILLOW_VERSION = "12.3.0"  # ADR 018; tests/test_dependencies.py confere o mesmo pin no lock
+PILLOW_VERSION = "13.0.0"  # ADR 018; tests/test_dependencies.py confere o mesmo pin no lock
 PIKEPDF_VERSION = "10.16.0"  # ADR 035; idem
 QPDF_VERSION = "12.4.2"  # o libqpdf que vem dentro da wheel do pikepdf
 RECIPE_FAILURE = 3
@@ -154,7 +154,9 @@ def make_work_dir(
     return work
 
 
-@pytest.mark.parametrize("module", ["sqlalchemy", "fastapi", "pydantic", "goblinshift.runs", "pip"])
+@pytest.mark.parametrize(
+    "module", ["sqlalchemy", "fastapi", "pydantic", "goblinshift.runs", "pip", "ensurepip"]
+)
 def test_imagem_nao_consegue_importar_o_que_esta_fora_do_processing(
     image: str, module: str
 ) -> None:
