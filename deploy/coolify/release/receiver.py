@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import traceback
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -463,6 +464,12 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
+        # Detailed diagnosis stays on the root side; CI receives a fixed message.
+        descriptor = os.open(
+            "/var/log/coolify-release-errors.log", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600
+        )
+        with os.fdopen(descriptor, "a") as error_log:
+            traceback.print_exc(file=error_log)
         # No API body, private env, command stderr or app logs reach CI.
         print(
             "Release refused or failed: "
