@@ -1,6 +1,6 @@
-name: Restauração testada do backup
+name: Forwarding audit - external recovery
 
-# Todo mês, fora da VPS: baixa o dump mais recente com a chave só de leitura, decifra com a
+# Auditoria dedicada, fora da VPS: baixa o dump mais recente com a chave só de leitura, decifra com a
 # chave privada age e restaura num PostgreSQL efêmero da mesma versão da produção, conferindo
 # revisão do Alembic, contas, execuções, idade e retenção do dump (docs/adr/022-backup-externo.md).
 # Falhar aqui falha o job e pinga /fail no check "restauração mensal" do healthchecks.io.
@@ -9,19 +9,31 @@ name: Restauração testada do backup
 # stderr do pg_restore e do psql, e o PostgreSQL efêmero loga erros sem DETAIL, CONTEXT nem o
 # comando.
 on:
-  schedule:
-    - cron: "23 10 1 * *"
   workflow_dispatch:
+    inputs:
+      delayed:
+        description: Wait for the scheduled review window
+        type: boolean
+        default: true
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: restore-check
+  group: forwarding-audit-goblinshift
   cancel-in-progress: false
 
 jobs:
+  wait:
+    name: Scheduled audit gate
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.delayed && 'forwarding-audit-wait-20261023' || 'forwarding-audit-now-20261023' }}
+    timeout-minutes: 5
+    steps:
+      - run: echo 'Read-only evidence renewal; no production deployment.'
   revisions:
+    needs: wait
     name: Revisões do Alembic conhecidas pelo código
     # Instala as dependências do projeto (código do PyPI) longe dos secrets: o job da restauração
     # recebe só a lista de revisões.
