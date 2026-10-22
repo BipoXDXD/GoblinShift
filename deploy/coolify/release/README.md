@@ -12,3 +12,28 @@ O receptor limita o transporte OCI a 4 GiB e a expansão agregada das camadas a 
 A trava comum da VPS serializa os receptores e intents duráveis bloqueiam novas releases após falhas.
 O inventário administrativo de armazenamento e o protocolo v2 com hash exato são obrigatórios.
 Instalação coordenada, reconciliação, limites e testes estão em [ISOLATION.md](ISOLATION.md).
+
+
+## Fila e validação da publicação
+
+Este projeto recebe workflow_run da CI `CI` concluída com sucesso na main. O gate consulta
+novamente o push da main deste repositório, SHA e tentativa exatos, e exige todos os jobs obrigatórios.
+Eventos de PR/fork, tags, CI incompleta ou com falha não liberam produção. A execução manual exige
+um SHA completo e aprovado.
+
+Checks de PR têm fila independente. Produção preserva pendências com queue:max e mantém
+cancel-in-progress:false. Um SHA superado encerra com eligible=false antes de preparar o envio
+ou antes de transmiti-lo à VPS; não publica e não gera falha artificial. O novo SHA tem sua própria
+execução após o CI aprovado. Cancelamentos administrativos e o limite de100 pendências continuam possíveis.
+
+As imagens deste projeto já são publicadas pela CI. Repetições reutilizam as referências do commit;
+não dependem do número da tentativa do workflow de release. Digests, plataforma, scanners e assets
+continuam sujeitos às validações existentes. Não há artefato intermediário do Duora a copiar aqui.
+
+A aplicação usa o recurso nativo do Coolify. O receptor verifica propriedade e imagem executada,
+sem fixar a etiqueta informativa coolify.version; o executor de observador do Duora não se aplica.
+Outras incompatibilidades ou intents pendentes continuam bloqueadas para inspeção. O receptor
+compartilhado da VPS permanece inalterado.
+
+queue:max é aceito pelo GitHub e consta em sua documentação oficial. Actionlint1.7.12 ainda não
+conhece a propriedade; validar o parser real e os checks do GitHub sem retirar gates existentes.
