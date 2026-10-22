@@ -59,7 +59,7 @@ class GateTests(unittest.TestCase):
 
 
 class SupersededReleaseTests(unittest.TestCase):
-    def test_superseded_release_is_successful_noop_before_any_ci_query(self):
+    def test_superseded_release_is_successful_noop_before_any_ci_query(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "output"
             env = {
@@ -77,7 +77,7 @@ class SupersededReleaseTests(unittest.TestCase):
             self.assertIn("eligible=false", output.read_text())
             self.assertEqual(api.call_count, 1)
 
-    def test_strict_callers_still_refuse_stale_commits(self):
+    def test_strict_callers_still_refuse_stale_commits(self) -> None:
         with (
             patch.dict(
                 os.environ,

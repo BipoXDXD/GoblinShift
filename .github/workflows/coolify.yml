@@ -1,7 +1,10 @@
 name: Coolify release
 
 on:
-  workflow_run:
+  # Reviewed boundary: successful same-repository main pushes only; trusted main
+  # tooling rechecks exact CI SHA/attempt/jobs through the API before production.
+  # No PR code or upstream-run artifacts are executed; credentials stay protected.
+  workflow_run: # zizmor: ignore[dangerous-triggers] reviewed and mitigated boundary; see release/README.md
     workflows: [CI]
     types: [completed]
     branches: [main]

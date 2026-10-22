@@ -26,6 +26,13 @@ cancel-in-progress:false. Um SHA superado encerra com eligible=false antes de pr
 ou antes de transmiti-lo à VPS; não publica e não gera falha artificial. O novo SHA tem sua própria
 execução após o CI aprovado. Cancelamentos administrativos e o limite de100 pendências continuam possíveis.
 
+O uso de workflow_run tem risco de execução privilegiada e foi revisado explicitamente.
+A única exceção inline dangerous-triggers cobre esse gatilho: o job aceita apenas sucesso
+de push da main do mesmo repositório, faz checkout da main confiável e confirma pela API
+SHA, tentativa e jobs obrigatórios. Não executa código nem consome artefatos de PR/fork;
+as credenciais de produção só são utilizadas depois de eligible=true. O scanner zizmor
+permanece fixado e ativo para todos os workflows, sem desativação global de regra.
+
 As imagens deste projeto já são publicadas pela CI. Repetições reutilizam as referências do commit;
 não dependem do número da tentativa do workflow de release. Digests, plataforma, scanners e assets
 continuam sujeitos às validações existentes. Não há artefato intermediário do Duora a copiar aqui.
