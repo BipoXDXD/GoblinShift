@@ -42,3 +42,6 @@ build/
 .work/
 deploy/load/results/
 .schemathesis/
+
+# Artefatos OCI de publicação; não são imagens locais nem código-fonte.
+.docker-artifacts/
