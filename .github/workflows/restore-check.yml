@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: forwarding-audit-goblinshift
+  group: forwarding-audit-goblinshift-${{ inputs.periodic && 'periodic' || inputs.delayed && 'scheduled' || 'now' }}
   cancel-in-progress: false
 
 jobs:
