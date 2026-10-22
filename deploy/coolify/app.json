@@ -98,6 +98,19 @@
       "command": [
         "gs-maintenance"
       ],
+      "healthcheck": {
+        "interval": "30s",
+        "timeout": "5s",
+        "start_period": "15s",
+        "retries": 3,
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import sys\nfrom pathlib import Path\nfrom datetime import timedelta\nfrom uuid import UUID\nfrom goblinshift.platform.settings import Settings\nfrom goblinshift.platform.db import make_engine\nfrom goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')\nsettings = Settings(db_connect_timeout_s=2)\nengine = make_engine(settings)\ntry:\n    with engine.connect() as connection:\n        connection.exec_driver_sql('SELECT 1').scalar_one()\nfinally:\n    engine.dispose()\nExecutorCtlRunner(settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id, call_timeout=timedelta(seconds=2)).status(UUID('00000000-0000-4000-8000-000000000000'))",
+          "gs-maintenance"
+        ]
+      },
       "depends_on": {
         "migrate": {
           "condition": "service_completed_successfully",
@@ -227,6 +240,22 @@
       "environment": {
         "GS_DOMAIN": "${GS_DOMAIN:-_}"
       },
+      "healthcheck": {
+        "interval": "10s",
+        "timeout": "3s",
+        "start_period": "10s",
+        "retries": 5,
+        "test": [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "2",
+          "http://127.0.0.1/readyz"
+        ]
+      },
       "image": "${GS_WEB_IMAGE:-ghcr.io/bipoxdxd/goblinshift-web:sha-03f15c824029@sha256:76d9f0209ded60bcf7a109565fb95e4b77e350a0a7262c7f4eff4bb221328568}",
       "logging": {
         "driver": "local",
@@ -307,6 +336,19 @@
       "command": [
         "gs-worker"
       ],
+      "healthcheck": {
+        "interval": "30s",
+        "timeout": "5s",
+        "start_period": "15s",
+        "retries": 3,
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import sys\nfrom pathlib import Path\nfrom datetime import timedelta\nfrom uuid import UUID\nfrom goblinshift.platform.settings import Settings\nfrom goblinshift.platform.db import make_engine\nfrom goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner\nif not any(Path(arg).name == sys.argv[1] for arg in Path('/proc/1/cmdline').read_text().split('\\0')):\n    raise SystemExit('expected service process is absent')\nsettings = Settings(db_connect_timeout_s=2)\nengine = make_engine(settings)\ntry:\n    with engine.connect() as connection:\n        connection.exec_driver_sql('SELECT 1').scalar_one()\nfinally:\n    engine.dispose()\nExecutorCtlRunner(settings.executor_ctl_socket, settings.work_root, work_group=settings.executor_group_id, call_timeout=timedelta(seconds=2)).status(UUID('00000000-0000-4000-8000-000000000000'))",
+          "gs-worker"
+        ]
+      },
       "depends_on": {
         "migrate": {
           "condition": "service_completed_successfully",
