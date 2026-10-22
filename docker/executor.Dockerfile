@@ -10,7 +10,7 @@ FROM ghcr.io/astral-sh/uv:0.12.15@sha256:62f8c047d0a0e9ece6b53fc63df902585a67a47
 
 # Estágio de build: instala o grupo `executor` do uv.lock (Pillow e pikepdf) com os hashes do lock e só
 # a partir de wheels. Nem o uv nem o requirements gerado chegam à imagem final.
-FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS deps
+FROM python:3.14.9-slim-trixie@sha256:a145a961ec2cf5741772d5e39773d979271132884fd778f6c3fad34e52b85402 AS deps
 COPY --from=uv /uv /bin/uv
 WORKDIR /build
 COPY pyproject.toml uv.lock ./
@@ -27,7 +27,7 @@ RUN uv export --locked --only-group executor --no-emit-project --format requirem
 # as flags de cada chamada (-protocol_whitelist file, -f forçado) continuam valendo por cima.
 # Sem `--enable-gpl` nem bibliotecas externas: LGPL 2.1, com a licença copiada para a imagem.
 # Mesma base da imagem final, para o binário ligar contra a mesma glibc.
-FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS ffmpeg
+FROM python:3.14.9-slim-trixie@sha256:a145a961ec2cf5741772d5e39773d979271132884fd778f6c3fad34e52b85402 AS ffmpeg
 ARG FFMPEG_VERSION=8.1.2
 ARG FFMPEG_SHA256=464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c
 # nasm só no amd64 (assembly x86 do decoder H.264); no arm64 o NEON vem do próprio compilador.
@@ -57,7 +57,7 @@ RUN ./configure --prefix=/opt/ffmpeg \
  && install -D -m 0644 COPYING.LGPLv2.1 /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 \
  && install -D -m 0644 LICENSE.md /opt/ffmpeg/share/doc/ffmpeg/LICENSE.md
 
-FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
+FROM python:3.14.9-slim-trixie@sha256:a145a961ec2cf5741772d5e39773d979271132884fd778f6c3fad34e52b85402
 
 # PYTHONSAFEPATH: com `python -m`, o diretório corrente (/work, preenchido pelo worker) entraria
 # no sys.path e um .py ali sombrearia a biblioteca padrão.
