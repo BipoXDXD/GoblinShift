@@ -1,5 +1,6 @@
-// Chunk da cena 3D da abertura (ADR 027 e 030). O nome do arquivo vira o nome do chunk, e o
+// Chunk da cena 3D da abertura (ADR 027, 030 e 038). O nome do arquivo vira o nome do chunk, e o
 // check-budget reconhece o prefixo `assets/oficina-3d`: não renomeie sem mudar os dois.
+// Um renderer só para o elenco inteiro: trocar de goblin baixa o GLB dela e troca o modelo.
 import {
   Box3,
   Color,
@@ -22,8 +23,11 @@ import {
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-import modelUrl from "../assets/art/oficina-3d/oficina-3d-rubia.glb?url";
+import type { CastId } from "./cast";
+import { attachGestures } from "./gestures";
 import type { MountOptions, SceneHandle } from "./OficinaHero";
+import { REST_POSE, turned, type Pose } from "./pose";
+import { ShowOrder } from "./show-order";
 
 const FIELD_OF_VIEW_DEGREES = 22;
 /** Folga em volta da goblin, para o cabelo não encostar na borda do quadro. */
@@ -31,10 +35,8 @@ const FRAME_MARGIN = 1.06;
 /** Entrada: gira de um lado para o outro e para; abaixo dos 5 s da WCAG 2.2.2, sem botão. */
 const INTRO_MS = 3_500;
 const INTRO_FROM_RADIANS = 0.9;
-/** Mesmo ângulo da imagem estática (render a 20°), para a troca não dar salto. */
-const REST_RADIANS = -0.35;
-/** Arrastar 1 px gira isto; o arrasto é só horizontal, a rolagem vertical continua da página. */
-const DRAG_RADIANS_PER_PX = 0.01;
+/** Auto-rotação do botão Girar: uma volta a cada 12 s. */
+const SPIN_RADIANS_PER_MS = (2 * Math.PI) / 12_000;
 const MAX_PIXEL_RATIO = 2;
 /*
  * Luz do render realista que o usuário aprovou (render_glb.py --realista, ADR 030): três luzes de
@@ -66,10 +68,16 @@ const SHADOW_NORMAL_BIAS = 0.005;
 const SHADOW_BIAS = -0.0005;
 const SHADOW_SOFTNESS = 3;
 
-export async function mountScene(host: HTMLElement, options: MountOptions): Promise<SceneHandle> {
+/** Os GLBs do elenco, um por goblin; só o escolhido é baixado (ADR 038). */
+const MODEL_URLS = import.meta.glob<string>("../assets/art/oficina-3d/*.glb", {
+  query: "?url",
+  import: "default",
+  eager: true,
+});
+
+export function mountScene(host: HTMLElement, options: MountOptions): SceneHandle {
   // O decoder Meshopt é WASM embutido neste chunk: nada vem de CDN e não há Worker (ADR 030).
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.parseAsync(await fetchModel(options.signal), "");
   const renderer = new WebGLRenderer({
     antialias: true,
     alpha: true,
@@ -85,20 +93,60 @@ export async function mountScene(host: HTMLElement, options: MountOptions): Prom
 
   const scene = new Scene();
   scene.environment = grayWorld(renderer);
-
   const turntable = new Group();
-  turntable.add(gltf.scene);
-  scene.add(turntable);
+  const lights = new Group();
+  scene.add(turntable, lights);
   const camera = new PerspectiveCamera(FIELD_OF_VIEW_DEGREES, 4 / 5, 0.01, 100);
-  const radius = frameModel(gltf.scene, camera);
-  addLights(scene, gltf.scene, radius);
-  // Compila os shaders em paralelo (KHR_parallel_shader_compile) antes do primeiro quadro, para a
-  // compilação não virar uma tarefa longa na thread principal.
-  await renderer.compileAsync(scene, camera);
 
-  const render = (): void => {
-    renderer.render(scene, camera);
+  /** Distância da câmera ao centro da goblin, que muda com o tamanho de cada modelo. */
+  let distance = 1;
+  const stage = new Stage(host, renderer, {
+    applyPose: (pose) => {
+      // O giro roda a goblin sob as luzes fixas; a inclinação sobe ou desce a câmera numa órbita.
+      turntable.rotation.y = pose.yaw;
+      camera.position.set(0, Math.sin(pose.pitch), Math.cos(pose.pitch)).multiplyScalar(distance);
+      camera.lookAt(0, 0, 0);
+    },
+    render: () => {
+      renderer.render(scene, camera);
+      markGpuMemory(host, renderer);
+    },
+  });
+  /** Só a troca mais recente vale: uma carga mais antiga que termina depois é descartada. */
+  const order = new ShowOrder<CastId>();
+
+  const show = async (goblin: CastId, signal: AbortSignal): Promise<void> => {
+    const ticket = order.begin(goblin);
+    if (ticket === null) {
+      // Voltou para a goblin que já está no palco antes de a outra chegar: nada a baixar.
+      return;
+    }
+    const gltf = await loader.parseAsync(await fetchModel(modelUrlOf(goblin), signal), "");
+    const superseded = (): boolean => !order.isCurrent(ticket) || signal.aborted;
+    if (superseded()) {
+      disposeTree(gltf.scene);
+      return;
+    }
+    order.cleared();
+    turntable.children.forEach(disposeTree);
+    turntable.clear();
+    lights.children.forEach(disposeTree);
+    lights.clear();
+    turntable.add(gltf.scene);
+    const framed = frameModel(gltf.scene, camera);
+    distance = framed.distance;
+    addLights(lights, gltf.scene, framed.radius);
+    // Compila os shaders em paralelo (KHR_parallel_shader_compile) antes do primeiro quadro, para
+    // a compilação não virar uma tarefa longa na thread principal.
+    await renderer.compileAsync(scene, camera);
+    if (superseded()) {
+      return;
+    }
+    order.shown(ticket, goblin);
+    host.dataset["goblin"] = goblin;
+    stage.playIntro();
   };
+
   const resize = (): void => {
     const { clientWidth: width, clientHeight: height } = host;
     if (width === 0 || height === 0) {
@@ -107,12 +155,16 @@ export async function mountScene(host: HTMLElement, options: MountOptions): Prom
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    render();
+    stage.render();
   };
-
-  const stage: Stage = { host, renderer, turntable, render };
-  const stopIntro = playIntro(stage);
-  const stopDrag = enableDrag(stage, stopIntro);
+  const stopGestures = attachGestures(host, {
+    onStart: () => {
+      stage.stopIntro();
+    },
+    onTurn: (by) => {
+      stage.turn(by);
+    },
+  });
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(host);
   const onLost = (event: Event): void => {
@@ -125,20 +177,57 @@ export async function mountScene(host: HTMLElement, options: MountOptions): Prom
   resize();
 
   return {
+    show,
+    turn: (by) => {
+      stage.stopIntro();
+      stage.turn(by);
+    },
+    resetPose: () => {
+      stage.resetPose();
+    },
+    setSpinning: (spinning) => {
+      stage.setSpinning(spinning);
+    },
+    setReducedMotion: (reduced) => {
+      stage.setReducedMotion(reduced);
+    },
     dispose: () => {
-      stopIntro();
-      stopDrag();
+      order.cancelAll();
+      stage.stop();
+      stopGestures();
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("webglcontextlost", onLost);
-      disposeScene(scene);
+      scene.environment?.dispose();
+      disposeTree(scene);
+      // Devolve o contexto ao navegador na hora, sem esperar o coletor de lixo; o listener de
+      // perda já saiu, então isto não volta como falha da cena.
+      renderer.forceContextLoss();
       renderer.dispose();
       renderer.domElement.remove();
     },
   };
 }
 
-async function fetchModel(signal: AbortSignal): Promise<ArrayBuffer> {
-  const response = await fetch(modelUrl, { signal });
+/**
+ * Geometrias e texturas que o renderer mantém na GPU, para o E2E conferir que trocar de goblin e
+ * voltar não deixa sobra (`data-geometrias`, `data-texturas`).
+ */
+function markGpuMemory(host: HTMLElement, renderer: WebGLRenderer): void {
+  const { geometries, textures } = renderer.info.memory;
+  host.dataset["geometrias"] = String(geometries);
+  host.dataset["texturas"] = String(textures);
+}
+
+function modelUrlOf(goblin: CastId): string {
+  const url = MODEL_URLS[`../assets/art/oficina-3d/oficina-3d-${goblin}.glb`];
+  if (url === undefined) {
+    throw new Error(`modelo da goblin ${goblin} não existe; rode scripts/arte/otimizar-glb.sh`);
+  }
+  return url;
+}
+
+async function fetchModel(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`modelo da oficina: HTTP ${String(response.status)}`);
   }
@@ -156,7 +245,7 @@ function grayWorld(renderer: WebGLRenderer): Texture {
 }
 
 /** As três luzes do render realista, fixas no mundo; a principal faz sombra na própria goblin. */
-function addLights(scene: Scene, model: Object3D, radius: number): void {
+function addLights(lights: Group, model: Object3D, radius: number): void {
   const up = new Vector3(0, 1, 0);
   LIGHTS.forEach(({ power, yawDegrees, pitchDegrees }, index) => {
     const yaw = (yawDegrees * Math.PI) / 180;
@@ -164,12 +253,12 @@ function addLights(scene: Scene, model: Object3D, radius: number): void {
     const light = new DirectionalLight(0xffffff, (LIGHT_SCALE * power) / (9 * Math.PI));
     light.position
       .set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch))
-      .applyAxisAngle(up, REST_RADIANS)
+      .applyAxisAngle(up, REST_POSE.yaw)
       .multiplyScalar(radius * LIGHT_DISTANCE_RADII);
     if (index === KEY_LIGHT_INDEX) {
       castShadowOver(light, radius);
     }
-    scene.add(light);
+    lights.add(light);
   });
   model.traverse((object) => {
     object.castShadow = true;
@@ -194,10 +283,13 @@ function castShadowOver(light: DirectionalLight, radius: number): void {
 }
 
 /**
- * Centra a goblin na origem, de pé, e afasta a câmera até ela caber inteira no quadro 4:5.
- * Devolve o raio da caixa da goblin, que dá a escala das luzes e da sombra.
+ * Centra a goblin na origem, de pé, e calcula a distância da câmera para ela caber inteira no
+ * quadro 4:5. Devolve também o raio da caixa da goblin, que dá a escala das luzes e da sombra.
  */
-function frameModel(model: Object3D, camera: PerspectiveCamera): number {
+function frameModel(
+  model: Object3D,
+  camera: PerspectiveCamera,
+): { readonly radius: number; readonly distance: number } {
   const box = new Box3().setFromObject(model);
   const size = box.getSize(new Vector3());
   const center = box.getCenter(new Vector3());
@@ -205,76 +297,157 @@ function frameModel(model: Object3D, camera: PerspectiveCamera): number {
   const halfFov = (FIELD_OF_VIEW_DEGREES * Math.PI) / 360;
   const fitHeight = size.y / 2 / Math.tan(halfFov);
   const fitWidth = size.x / 2 / Math.tan(halfFov) / camera.aspect;
-  const distance = Math.max(fitHeight, fitWidth) * FRAME_MARGIN + size.z / 2;
-  camera.position.set(0, 0, distance);
-  camera.lookAt(0, 0, 0);
-  return size.length() / 2;
+  return {
+    radius: size.length() / 2,
+    distance: Math.max(fitHeight, fitWidth) * FRAME_MARGIN + size.z / 2,
+  };
 }
 
-/** O que a entrada e o arrasto mexem: o prato giratório e o quadro desenhado no host. */
-interface Stage {
-  readonly host: HTMLElement;
-  readonly renderer: WebGLRenderer;
-  readonly turntable: Group;
+interface StageView {
+  readonly applyPose: (pose: Pose) => void;
   readonly render: () => void;
 }
 
-/** Toca a entrada uma vez, com ease-out, e para; marca `data-movimento` para o E2E. */
-function playIntro({ host, renderer, turntable, render }: Stage): () => void {
-  let start: number | null = null;
-  host.dataset["movimento"] = "entrada";
-  const stop = (): void => {
-    renderer.setAnimationLoop(null);
-    host.dataset["movimento"] = "parado";
-  };
-  turntable.rotation.y = INTRO_FROM_RADIANS;
-  renderer.setAnimationLoop((now) => {
-    start ??= now;
-    const progress = Math.min(1, (now - start) / INTRO_MS);
-    const eased = 1 - (1 - progress) ** 3;
-    turntable.rotation.y = INTRO_FROM_RADIANS + (REST_RADIANS - INTRO_FROM_RADIANS) * eased;
-    render();
-    if (progress === 1) {
-      stop();
-    }
-  });
-  return stop;
-}
+type Motion = "entrada" | "girando" | "parado";
 
-/** Arrastar gira a goblin; renderiza só quando ela muda, sem laço parado gastando bateria. */
-function enableDrag({ host, turntable, render }: Stage, stopIntro: () => void): () => void {
-  let lastX: number | null = null;
-  const onDown = (event: PointerEvent): void => {
-    stopIntro();
-    lastX = event.clientX;
-    host.setPointerCapture(event.pointerId);
-  };
-  const onMove = (event: PointerEvent): void => {
-    if (lastX === null) {
+/**
+ * A pose da goblin e o que a mexe: a entrada (uma vez, até 3,5 s, nunca com movimento reduzido), a
+ * auto-rotação do botão Girar, o arrasto e as setas. O laço de animação só roda com entrada ou
+ * giro; fora disso o canvas redesenha só quando a pose muda, sem gastar bateria. Marca `data-movimento`, `data-giro` e
+ * `data-inclinacao` (graus) no host para o E2E.
+ */
+class Stage {
+  readonly #host: HTMLElement;
+  readonly #renderer: WebGLRenderer;
+  readonly #view: StageView;
+  #pose: Pose = REST_POSE;
+  #introStart: number | null = null;
+  #introRunning = false;
+  #spinning = false;
+  #reducedMotion = false;
+  #lastFrame: number | null = null;
+
+  constructor(host: HTMLElement, renderer: WebGLRenderer, view: StageView) {
+    this.#host = host;
+    this.#renderer = renderer;
+    this.#view = view;
+    this.#mark();
+  }
+
+  render(): void {
+    this.#view.render();
+  }
+
+  playIntro(): void {
+    if (this.#reducedMotion) {
+      // Sem a entrada, a goblin chega já na pose de repouso.
+      this.#pose = REST_POSE;
+      this.#apply();
+      this.#loop();
       return;
     }
-    turntable.rotation.y += (event.clientX - lastX) * DRAG_RADIANS_PER_PX;
-    lastX = event.clientX;
-    render();
-  };
-  const onUp = (): void => {
-    lastX = null;
-  };
-  host.addEventListener("pointerdown", onDown);
-  host.addEventListener("pointermove", onMove);
-  host.addEventListener("pointerup", onUp);
-  host.addEventListener("pointercancel", onUp);
-  return () => {
-    host.removeEventListener("pointerdown", onDown);
-    host.removeEventListener("pointermove", onMove);
-    host.removeEventListener("pointerup", onUp);
-    host.removeEventListener("pointercancel", onUp);
-  };
+    this.#pose = { yaw: INTRO_FROM_RADIANS, pitch: REST_POSE.pitch };
+    this.#introStart = null;
+    this.#introRunning = true;
+    this.#apply();
+    this.#loop();
+  }
+
+  stopIntro(): void {
+    this.#introRunning = false;
+    this.#loop();
+  }
+
+  turn(by: Pose): void {
+    this.#pose = turned(this.#pose, by);
+    this.#apply();
+  }
+
+  resetPose(): void {
+    this.#introRunning = false;
+    this.#spinning = false;
+    this.#pose = REST_POSE;
+    this.#apply();
+    this.#loop();
+  }
+
+  setSpinning(spinning: boolean): void {
+    this.#spinning = spinning;
+    if (spinning) {
+      this.#introRunning = false;
+    }
+    this.#loop();
+  }
+
+  setReducedMotion(reduced: boolean): void {
+    this.#reducedMotion = reduced;
+    if (reduced && this.#introRunning) {
+      // A entrada interrompida termina onde terminaria, sem animar o resto.
+      this.#introRunning = false;
+      this.#pose = { ...this.#pose, yaw: REST_POSE.yaw };
+      this.#apply();
+      this.#loop();
+    }
+  }
+
+  stop(): void {
+    this.#introRunning = false;
+    this.#spinning = false;
+    this.#renderer.setAnimationLoop(null);
+  }
+
+  /** Liga o laço se há o que animar e desliga quando não há. */
+  #loop(): void {
+    this.#mark();
+    if (!this.#introRunning && !this.#spinning) {
+      this.#renderer.setAnimationLoop(null);
+      this.#lastFrame = null;
+      return;
+    }
+    this.#renderer.setAnimationLoop((now) => {
+      this.#frame(now);
+    });
+  }
+
+  #frame(now: number): void {
+    const elapsed = this.#lastFrame === null ? 0 : now - this.#lastFrame;
+    this.#lastFrame = now;
+    if (this.#introRunning) {
+      this.#introStart ??= now;
+      const progress = Math.min(1, (now - this.#introStart) / INTRO_MS);
+      const eased = 1 - (1 - progress) ** 3;
+      this.#pose = {
+        ...this.#pose,
+        yaw: INTRO_FROM_RADIANS + (REST_POSE.yaw - INTRO_FROM_RADIANS) * eased,
+      };
+      if (progress === 1) {
+        this.#introRunning = false;
+      }
+    } else if (this.#spinning) {
+      this.#pose = turned(this.#pose, { yaw: elapsed * SPIN_RADIANS_PER_MS, pitch: 0 });
+    }
+    this.#apply();
+    if (!this.#introRunning && !this.#spinning) {
+      this.#loop();
+    }
+  }
+
+  #apply(): void {
+    this.#view.applyPose(this.#pose);
+    this.#view.render();
+    this.#host.dataset["giro"] = String(Math.round((this.#pose.yaw * 180) / Math.PI));
+    this.#host.dataset["inclinacao"] = String(Math.round((this.#pose.pitch * 180) / Math.PI));
+  }
+
+  #mark(): void {
+    const motion: Motion = this.#introRunning ? "entrada" : this.#spinning ? "girando" : "parado";
+    this.#host.dataset["movimento"] = motion;
+  }
 }
 
-function disposeScene(scene: Scene): void {
-  scene.environment?.dispose();
-  scene.traverse((object) => {
+/** Libera da GPU a malha, os materiais, as texturas e os mapas de sombra de uma árvore. */
+function disposeTree(root: Object3D): void {
+  root.traverse((object) => {
     if (object instanceof DirectionalLight) {
       // A luz com sombra guarda o mapa de sombra na GPU.
       object.dispose();

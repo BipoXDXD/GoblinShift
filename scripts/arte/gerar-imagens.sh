@@ -3,17 +3,21 @@
 # 4:5 com fundo transparente e AVIF + WebP nas larguras que a interface pede.
 #   - estados (vazio, carregando, erro, sucesso) e elenco dos créditos: 256, 384, 512 e 768 px de
 #     largura (a caixa vai de 192 a 256 px CSS, em telas de 1× a 3×), em web/src/assets/art/goblins/;
-#   - imagem estática da cena 3D da Rúbia (placeholder e fallback): 192, 384 e 640 px, em
-#     web/src/assets/art/oficina-3d/, com o prefixo que o check-budget reconhece. A Rúbia sai de um
-#     render só: a mesma imagem vira a estática da cena e a goblin dos estados.
+#   - imagem estática da cena 3D de cada goblin (placeholder, miniatura do seletor e fallback;
+#     ADR 038): 192, 384 e 640 px, em web/src/assets/art/oficina-3d/, com o prefixo que o
+#     check-budget reconhece, e com a luz realista que a cena imita. A Rúbia sai de um render só:
+#     a mesma imagem vira a estática da cena e a goblin dos estados.
 # Os PNGs intermediários ficam numa pasta temporária: os brutos e renders continuam fora do Git.
 #
 # Uso: ARTE=/caminho/arte RUBIA_SOURCE=/caminho/bruto.glb scripts/arte/gerar-imagens.sh [ID...]
 #      Sem ID, gera todas; com IDs do elenco.tsv (como `rubia`), só essas.
+#      ALVO=cena gera só as imagens da cena 3D; ALVO=estados, só as dos estados (padrão: as duas).
+#      Gerar de novo muda os bytes: atualize o sha256 no PROVENANCE.json.
 # Requer: blender 5.x, magick, avifenc e cwebp no PATH, e $ARTE/ferramentas/render_glb.py.
 set -euo pipefail
 
 ARTE="${ARTE:-$HOME/Documents/GoblinShift-arte}"
+ALVO="${ALVO:-tudo}"
 RENDER_PX=1400
 YAW_DEGREES=20
 STATE_WIDTHS=(256 384 512 768)
@@ -31,6 +35,10 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 [[ -f "$render" ]] || { echo "render_glb.py não encontrado: $render" >&2; exit 1; }
+case "$ALVO" in
+  tudo | cena | estados) ;;
+  *) echo "ALVO deve ser tudo, cena ou estados: $ALVO" >&2; exit 1 ;;
+esac
 mkdir -p "$art/goblins" "$art/oficina-3d"
 
 # Render transparente → recorte justo → caixa 4:5 com 4% de folga, centrada embaixo (os pés
@@ -76,22 +84,36 @@ selected() {
   return 1
 }
 
-while IFS=$'\t' read -r id glb _; do
+wants() { [[ "$ALVO" == "tudo" || "$ALVO" == "$1" ]]; }
+
+# O elenco entra pelo descritor 3, para o blender e o magick não consumirem as linhas pelo stdin.
+while IFS=$'\t' read -r -u 3 id glb _; do
   [[ -z "$id" || "$id" == \#* ]] && continue
   selected "$id" "$@" || continue
+  source="$ARTE/$glb"
   if [[ "$id" == "rubia" ]]; then
-    # A imagem estática da cena usa a luz realista (Cycles, três luzes, tom Standard), a mesma que
-    # a cena do three imita (ADR 030). As goblins dos estados ficam no modo padrão (EEVEE, tom AgX,
-    # um sol), o dos renders que o usuário aprovou para elas.
-    render_framed "${RUBIA_SOURCE:?Defina RUBIA_SOURCE com o caminho do GLB de origem registrado}" "$work/$id.png" --realista
-    export_sizes "$work/$id.png" "$art/oficina-3d/oficina-3d-rubia" "${POSTER_WIDTHS[@]}"
-    export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
-  else
-    render_framed "$ARTE/$glb" "$work/$id.png"
+    source="${RUBIA_SOURCE:?Defina RUBIA_SOURCE com o caminho do GLB de origem registrado}"
+  fi
+  # A imagem da cena usa a luz realista (Cycles, três luzes, tom Standard), a mesma que a cena do
+  # three imita (ADR 030). As goblins dos estados ficam no modo padrão (EEVEE, tom AgX, um sol), o
+  # dos renders que o usuário aprovou para elas; a Rúbia é a exceção, com o render realista nos
+  # dois lugares.
+  if wants cena || [[ "$id" == "rubia" ]]; then
+    render_framed "$source" "$work/$id-realista.png" --realista
+  fi
+  if wants cena; then
+    export_sizes "$work/$id-realista.png" "$art/oficina-3d/oficina-3d-$id" "${POSTER_WIDTHS[@]}"
+  fi
+  if wants estados; then
+    if [[ "$id" == "rubia" ]]; then
+      cp "$work/$id-realista.png" "$work/$id.png"
+    else
+      render_framed "$source" "$work/$id.png"
+    fi
     export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
   fi
   echo "$id: ok"
-done <"$here/elenco.tsv"
+done 3<"$here/elenco.tsv"
 
 find "$art/goblins" "$art/oficina-3d" -type f \( -name '*.avif' -o -name '*.webp' \) \
   -exec wc -c {} + | sort -k2

@@ -2,6 +2,7 @@
 
 - **Estado:** Aceito (2026-10-15); atualizado no mesmo dia com a entrada da Jade e da Fagulha por decisão do usuário (item 10), e de novo com a correção dos defeitos da Rúbia, a troca dela pela regeração de 1 milhão de triângulos e a luz realista (itens 2, 3, 5 e 7; seção "Defeitos da primeira versão"). Substitui em parte o [ADR 027](027-3d-na-abertura.md): a condição 5 (teto do GLB) e a condição 6 (CSP). As condições 1 a 4 do 027 continuam valendo.
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Apresentação, "sem canvas/engine"), [3.6](../GoblinShiftPlan.md#s3-6) (CSP da SPA)
+- **Complementado por:** [ADR 038](038-elenco-em-3d-na-abertura.md), que leva as cinco goblins ao palco, uma por vez e sob demanda, com inclinação e teclado (substitui a parte do item 4 sobre giro só horizontal e canvas fora do Tab).
 - **Relacionado:** [ADR 027](027-3d-na-abertura.md); `docs/art/LICENSE-ART.md`; `web/src/assets/art/PROVENANCE.json`
 
 ## Contexto
