@@ -3,171 +3,27 @@
 // a cena chega depois do `load`, sem CDN, sem violar a CSP e com a entrada parando em até 5 s.
 // Trocar de goblin no seletor baixa só o GLB dela; mouse, setas e o botão Girar mexem a vista.
 import AxeBuilder from "@axe-core/playwright";
-import type { Page, Request } from "@playwright/test";
 
 import { E2E } from "../support/env";
+import {
+  HERO,
+  CHUNK_OR_MODEL,
+  SCENE_READY_MS,
+  INTRO_LIMIT_MS,
+  pretendGpu,
+  withoutWebGl,
+  recordRequests,
+  waitPastIdle,
+  heroImage,
+  castButton,
+  modelsRequested,
+  waitSceneStill,
+  sceneHost,
+  holdFrames,
+  nextFrame,
+  prepareGpu,
+} from "../support/oficina3d";
 import { expect, test } from "../support/test";
-
-declare global {
-  interface Window {
-    /** Desenha um quadro segurado; só existe depois de {@link holdFrames}. */
-    e2eNextFrame?: () => void;
-  }
-}
-
-const HERO = "[data-oficina-3d]";
-const CHUNK_OR_MODEL = /\/assets\/oficina-3d[^/]*\.js$|\.glb(\?|$)/;
-const MODEL = /\/assets\/oficina-3d-([a-z]+)-[^/]*\.glb$/;
-const CAST_GROUP = "Escolha a goblin";
-/**
- * Tempo para o chunk, o GLB e o primeiro quadro. O Chromium do CI desenha em software
- * (SwiftShader): a montagem levou de 5 a 22 s nas medições locais, conforme a carga da máquina.
- */
-const SCENE_READY_MS = 45_000;
-/** WCAG 2.2.2: movimento automático para sozinho em até 5 s (mais a folga de um quadro). */
-const INTRO_LIMIT_MS = 5_500;
-
-/**
- * O Chromium headless não tem GPU: o WebGL dele é em software (SwiftShader), que a página recusa
- * de propósito. Para provar o caminho com GPU, a spec tira a ressalva de desempenho do getContext e
- * troca o nome do renderizador antes de qualquer script da página, como se houvesse placa de vídeo.
- */
-async function pretendGpu(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const UNMASKED_RENDERER = 0x9246;
-    // Os originais são chamados com o `this` certo pelo Reflect.apply logo abaixo.
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (
-      this: HTMLCanvasElement,
-      type: string,
-      options?: Record<string, unknown>,
-    ): unknown {
-      const rest = { ...options };
-      delete rest["failIfMajorPerformanceCaveat"];
-      return Reflect.apply(getContext, this, [type, rest]);
-    } as typeof getContext;
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const getParameter = WebGL2RenderingContext.prototype.getParameter;
-    WebGL2RenderingContext.prototype.getParameter = function (
-      this: WebGL2RenderingContext,
-      parameter: number,
-    ): unknown {
-      return parameter === UNMASKED_RENDERER
-        ? "E2E GPU"
-        : Reflect.apply(getParameter, this, [parameter]);
-    };
-  });
-}
-
-/** Quanto o relógio dos quadros anda a cada {@link nextFrame}: a 30° por segundo, 30° de giro. */
-const FRAME_STEP_MS = 1_000;
-
-/**
- * Girando, a cena pede um quadro atrás do outro, e cada um prende a thread principal por segundos
- * no SwiftShader: o clique e os scripts do Playwright esperavam mais que o actionTimeout entre um
- * quadro e outro (runs 38866217252 e 38871601000). Com a cena já parada, a spec passa a segurar os
- * quadros da página: o requestAnimationFrame só enfileira, e cada {@link nextFrame} desenha um com
- * o relógio adiantado de FRAME_STEP_MS. A thread fica livre entre os quadros, como com GPU.
- */
-async function holdFrames(page: Page): Promise<void> {
-  await page.evaluate((stepMs: number) => {
-    const queued = new Map<number, FrameRequestCallback>();
-    let nextId = 1;
-    let clock = performance.now();
-    window.requestAnimationFrame = (callback: FrameRequestCallback): number => {
-      const id = nextId;
-      nextId += 1;
-      queued.set(id, callback);
-      return id;
-    };
-    window.cancelAnimationFrame = (id: number): void => {
-      queued.delete(id);
-    };
-    window.e2eNextFrame = (): void => {
-      clock += stepMs;
-      const callbacks = [...queued.values()];
-      queued.clear();
-      for (const callback of callbacks) {
-        callback(clock);
-      }
-    };
-  }, FRAME_STEP_MS);
-}
-
-/** Desenha um quadro segurado por {@link holdFrames}. */
-async function nextFrame(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    if (window.e2eNextFrame === undefined) {
-      throw new Error("os quadros não estão segurados: chame holdFrames antes");
-    }
-    window.e2eNextFrame();
-  });
-}
-
-async function withoutWebGl(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    // O original é chamado com o `this` certo pelo Reflect.apply logo abaixo.
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (
-      this: HTMLCanvasElement,
-      type: string,
-      options?: unknown,
-    ): unknown {
-      return type.startsWith("webgl") ? null : Reflect.apply(getContext, this, [type, options]);
-    } as typeof getContext;
-  });
-}
-
-function recordRequests(page: Page): Request[] {
-  const requests: Request[] = [];
-  page.on("request", (request) => requests.push(request));
-  return requests;
-}
-
-/** Espera o `load` e dois momentos ociosos: depois disso a página já teria pedido a cena. */
-async function waitPastIdle(page: Page): Promise<void> {
-  await page.waitForLoadState("load");
-  for (let round = 0; round < 2; round += 1) {
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestIdleCallback(() => {
-            resolve();
-          });
-        }),
-    );
-  }
-}
-
-function heroImage(page: Page, name = "Rúbia") {
-  return page.locator(HERO).getByRole("img", { name: new RegExp(`^${name}, goblin`) });
-}
-
-function castButton(page: Page, name: string) {
-  return page.getByRole("group", { name: CAST_GROUP }).getByRole("button", { name });
-}
-
-/** As goblins cujo GLB a página pediu, na ordem dos pedidos. */
-function modelsRequested(requests: readonly Request[]): string[] {
-  return requests.flatMap((request) => MODEL.exec(new URL(request.url()).pathname)?.[1] ?? []);
-}
-
-/** Espera a cena da goblin ficar pronta e a entrada parar, para mexer sem disputar quadros. */
-async function waitSceneStill(page: Page): Promise<void> {
-  await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "pronto", {
-    timeout: SCENE_READY_MS,
-  });
-  await expect(sceneHost(page)).toHaveAttribute("data-movimento", "parado", {
-    timeout: INTRO_LIMIT_MS,
-  });
-}
-
-/** O elemento que a cena marca com a pose e o movimento (o host do canvas). */
-function sceneHost(page: Page) {
-  return page.locator(HERO).locator("[data-movimento]");
-}
 
 test("com movimento reduzido fica a imagem e nada do 3D é pedido", async ({ page }) => {
   const requests = recordRequests(page);
@@ -187,7 +43,7 @@ test("com movimento reduzido fica a imagem e nada do 3D é pedido", async ({ pag
   expect(requests.map((r) => r.url()).filter((url) => CHUNK_OR_MODEL.test(url))).toEqual([]);
 });
 
-test("sem WebGL fica a imagem e nada do 3D é pedido", async ({ page }) => {
+test("sem WebGL fica a imagem e nada do 3D é pedido", async ({ page, isMobile }) => {
   const requests = recordRequests(page);
   await withoutWebGl(page);
   await page.goto("/");
@@ -196,13 +52,19 @@ test("sem WebGL fica a imagem e nada do 3D é pedido", async ({ page }) => {
   await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "imagem");
   await expect(heroImage(page)).toBeVisible();
 
-  await castButton(page, "Ferrugem").click();
-  await expect(heroImage(page, "Ferrugem")).toBeVisible();
+  for (const name of ["Fagulha", "Ferrugem", "Jade", "Nyx", "Rúbia"]) {
+    if (isMobile) await castButton(page, name).tap();
+    else await castButton(page, name).click();
+    await expect(heroImage(page, name)).toBeVisible();
+    await expect(castButton(page, name)).toHaveAttribute("aria-pressed", "true");
+  }
+  await expect(page.getByRole("button", { name: /Inclinar para ver/ })).toHaveCount(0);
   expect(requests.map((r) => r.url()).filter((url) => CHUNK_OR_MODEL.test(url))).toEqual([]);
 });
 
 test("WebGL só em software conta como sem WebGL", async ({ page }) => {
   const requests = recordRequests(page);
+  await pretendGpu(page, "SwiftShader");
   await page.goto("/");
   await waitPastIdle(page);
 
@@ -220,8 +82,8 @@ test.describe("com GPU", () => {
   test.slow();
   // Cada quadro em software trava a thread principal; sob carga, um clique espera mais que 5 s.
   test.use({ actionTimeout: 15_000 });
-  test.beforeEach(async ({ page }) => {
-    await pretendGpu(page);
+  test.beforeEach(async ({ page, browserName }, testInfo) => {
+    await prepareGpu(page, browserName, testInfo);
   });
 
   test("a cena chega depois do load, só da própria origem, e a entrada para em até 5 s", async ({
@@ -347,7 +209,11 @@ test.describe("com GPU", () => {
     await expect(host).toHaveAttribute("data-inclinacao", "11");
   });
 
-  test("botões inclinam sem arrasto dentro dos limites", async ({ page, isMobile }, testInfo) => {
+  test("botões inclinam sem arrasto dentro dos limites", async ({
+    page,
+    isMobile,
+    browserName,
+  }, testInfo) => {
     await page.goto("/");
     await waitSceneStill(page);
     const host = sceneHost(page);
@@ -380,9 +246,11 @@ test.describe("com GPU", () => {
     await expect(up).toBeFocused();
     await expect(up).toHaveCSS("outline-style", "solid");
     await expect(up).toHaveCSS("outline-width", "3px");
-    await page.keyboard.press("Tab");
+    // No WebKit/macOS, Option+Tab inclui os botões sem alterar a preferência do sistema.
+    const tab = browserName === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab";
+    await page.keyboard.press(tab);
     await expect(down).toBeFocused();
-    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press(`Shift+${tab}`);
     await expect(up).toBeFocused();
     await page.screenshot({
       path: testInfo.outputPath("controles-inclinacao.png"),
@@ -390,8 +258,12 @@ test.describe("com GPU", () => {
     });
   });
 
-  test("pinça no palco amplia a página; um dedo gira e rola", async ({ page, isMobile }) => {
-    test.skip(!isMobile, "Pinça nativa exige viewport móvel");
+  test("pinça no palco amplia a página; um dedo gira e rola", async ({
+    page,
+    isMobile,
+    browserName,
+  }) => {
+    test.skip(!isMobile || browserName !== "chromium", "Pinça nativa via CDP exige Chromium móvel");
     await page.goto("/");
     await waitSceneStill(page);
     const host = sceneHost(page);

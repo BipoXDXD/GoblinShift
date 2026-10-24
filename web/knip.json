@@ -7,7 +7,7 @@
     "type": true
   },
   "playwright": {
-    "config": ["e2e/playwright.config.ts"],
+    "config": ["e2e/playwright.config.ts", "e2e/playwright.webkit.config.ts"],
     "entry": ["e2e/specs/**/*.spec.ts"]
   }
 }

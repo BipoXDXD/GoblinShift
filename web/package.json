@@ -69,6 +69,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test -c e2e",
+    "e2e:webkit": "playwright test -c e2e/playwright.webkit.config.ts",
     "e2e:notice": "E2E_NOTICE=1 E2E_DIST_DIR=dist-notice playwright test -c e2e",
     "e2e:sabotage": "node e2e/sabotage.ts",
     "coverage": "vitest run --coverage",
