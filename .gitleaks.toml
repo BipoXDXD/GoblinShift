@@ -8,3 +8,10 @@ useDefault = true
 [[allowlists]]
 description = "Valor ilustrativo de Idempotency-Key no exemplo de POST /api/v1/runs do plano (1.6)"
 regexes = ['''^3f0c1b6e-6a2d-4c55-9a7e-2b1f8d4c9e10$''']
+
+# Detecta o formato de chave emitido pelo próprio GoblinShift, inclusive fora de atribuições.
+[[rules]]
+id = "goblinshift-api-key"
+description = "GoblinShift API key"
+regex = '''gsk_[0-9a-f]{16}_[A-Za-z0-9_-]{43}'''
+keywords = ["gsk_"]

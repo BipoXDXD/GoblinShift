@@ -31,3 +31,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # Dependências Python declaradas em pyproject.toml e fixadas em uv.lock.
+  - package-ecosystem: uv
+    directory: /
+    open-pull-requests-limit: 1
+    schedule:
+      interval: weekly
