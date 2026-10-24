@@ -75,6 +75,8 @@ O pytest falha se o `openapi.json` não acompanhar a API, e o job "Interface web
 
 #### No navegador (Playwright, `web/e2e/`)
 
+O palco 3D também tem uma suíte independente de [WebKit móvel](docs/testing/webkit-palco-3d.md), com `npm run e2e:webkit` e job próprio; a emulação não substitui a homologação em Safari/iOS físico.
+
 As specs rodam no Chromium, em desktop (1280 px) e celular (400 px): as jornadas das quatro receitas (arquivos, reordenar só por botões, parâmetros, executar, baixar), o Histórico (execuções recentes na Oficina, Carregar mais pelo cursor, filtros na URL), axe WCAG 2.2 A/AA com contraste nos dois temas, anel de foco e ordem do Tab, movimento reduzido, troca de tema sem piscar, CLS e CSP sem violação. O build de `dist/` é servido com os cabeçalhos lidos de `docker/nginx/snippets/spa-headers.conf`, a mesma CSP de produção, e a API é falsa, dentro do processo do Playwright (`e2e/support/fakeApi.ts`), com os tipos da spec.
 
 A chave de API só existe no processo de teste: cada pedido para `/api/v1/` ganha o `Authorization` por rota do Playwright, e uma spec confere que a chave, um canário `CANARY-<uuid>`, não aparece no HTML, nos assets, no storage nem nos cookies. Sem a chave, a API recusa com 401 e a Bancada mostra o aviso de login em breve, sem repetir a leitura.
