@@ -409,7 +409,7 @@ jobs:
     # Coolify é o único ingresso automático de publicação. O legado fica desativado na fonte,
     # independentemente de variáveis administrativas. Manter este job pulado e seu dependente
     # preserva os dois resultados skipped que o gate de release exige antes de enviar imagens.
-    if: ${{ false }}
+    if: "false"
     runs-on: ubuntu-24.04
     # Os segredos VPS_SSH_KEY e VPS_KNOWN_HOSTS moram só neste environment, cuja política de
     # branches é "só main" (configuração do GitHub, ADR 033): nenhum outro ref lê a chave da VPS.

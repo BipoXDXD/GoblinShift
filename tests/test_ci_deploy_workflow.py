@@ -23,7 +23,7 @@ def deploy_job() -> dict[str, Any]:
 
 
 def test_deploy_legado_fica_desativado_independentemente_de_variaveis() -> None:
-    assert deploy_job()["if"] == "${{ false }}"
+    assert deploy_job()["if"] == "false"
 
 
 def test_deploy_roda_no_environment_production() -> None:
