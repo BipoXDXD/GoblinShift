@@ -1,4 +1,4 @@
-"""O job de deploy do CI só roda na main, no environment `production`, sem permissões (ADR 033)."""
+"""A publicação legada fica desativada; Coolify é o único ingresso automático."""
 
 import re
 from pathlib import Path
@@ -22,11 +22,8 @@ def deploy_job() -> dict[str, Any]:
     return job
 
 
-def test_deploy_so_roda_em_push_na_main() -> None:
-    condition = deploy_job()["if"]
-
-    assert "github.event_name == 'push'" in condition
-    assert "github.ref == 'refs/heads/main'" in condition
+def test_deploy_legado_fica_desativado_independentemente_de_variaveis() -> None:
+    assert deploy_job()["if"] == "${{ false }}"
 
 
 def test_deploy_roda_no_environment_production() -> None:
@@ -52,6 +49,9 @@ def test_so_o_job_de_deploy_toca_nos_segredos_da_vps() -> None:
         assert not referenced & DEPLOY_SECRETS, name
 
 
-def test_condicao_do_deploy_usa_so_variavel_do_repositorio() -> None:
-    """`vars.VPS_HOST` no `if` do job só enxerga variável do repositório, não a do environment."""
-    assert "vars.VPS_HOST != ''" in deploy_job()["if"]
+def test_jornadas_legadas_dependem_do_deploy_desativado() -> None:
+    job = ci_workflow()["jobs"]["vps-smoke"]
+
+    assert job["needs"] == ["deploy"]
+    assert "if" not in job
+    assert job["uses"] == "./.github/workflows/e2e-vps.yml"
