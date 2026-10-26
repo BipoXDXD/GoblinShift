@@ -23,11 +23,14 @@ export const SCENE_READY_MS = 45_000;
 export const INTRO_LIMIT_MS = 5_500;
 
 /**
- * O Chromium headless não tem GPU: o WebGL dele é em software (SwiftShader), que a página recusa
- * de propósito. Para provar o caminho com GPU, a spec tira a ressalva de desempenho do getContext e
+ * O Chromium headless pode oferecer só WebGL em software, que a página recusa de propósito.
+ * Para provar o caminho da cena, a spec tira a ressalva de desempenho do getContext e
  * troca o nome do renderizador antes de qualquer script da página, como se houvesse placa de vídeo.
  */
-export async function pretendGpu(page: Page, renderer = "E2E GPU"): Promise<void> {
+export async function pretendGpu(
+  page: Page,
+  renderer = "E2E GPU",
+): Promise<void> {
   await page.addInitScript((rendererName: string) => {
     const UNMASKED_RENDERER = 0x9246;
     // Os originais são chamados com o `this` certo pelo Reflect.apply logo abaixo.
@@ -110,7 +113,9 @@ export async function withoutWebGl(page: Page): Promise<void> {
       type: string,
       options?: unknown,
     ): unknown {
-      return type.startsWith("webgl") ? null : Reflect.apply(getContext, this, [type, options]);
+      return type.startsWith("webgl")
+        ? null
+        : Reflect.apply(getContext, this, [type, options]);
     } as typeof getContext;
   });
 }
@@ -145,23 +150,33 @@ export async function waitPastIdle(page: Page): Promise<void> {
 }
 
 export function heroImage(page: Page, name = "Rúbia"): Locator {
-  return page.locator(HERO).getByRole("img", { name: new RegExp(`^${name}, goblin`) });
+  return page
+    .locator(HERO)
+    .getByRole("img", { name: new RegExp(`^${name}, goblin`) });
 }
 
 export function castButton(page: Page, name: string): Locator {
-  return page.getByRole("group", { name: CAST_GROUP }).getByRole("button", { name });
+  return page
+    .getByRole("group", { name: CAST_GROUP })
+    .getByRole("button", { name });
 }
 
 /** As goblins cujo GLB a página pediu, na ordem dos pedidos. */
 export function modelsRequested(requests: readonly Request[]): string[] {
-  return requests.flatMap((request) => MODEL.exec(new URL(request.url()).pathname)?.[1] ?? []);
+  return requests.flatMap(
+    (request) => MODEL.exec(new URL(request.url()).pathname)?.[1] ?? [],
+  );
 }
 
 /** Espera a cena da goblin ficar pronta e a entrada parar, para mexer sem disputar quadros. */
 export async function waitSceneStill(page: Page): Promise<void> {
-  await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "pronto", {
-    timeout: SCENE_READY_MS,
-  });
+  await expect(page.locator(HERO)).toHaveAttribute(
+    "data-oficina-3d",
+    "pronto",
+    {
+      timeout: SCENE_READY_MS,
+    },
+  );
   await expect(sceneHost(page)).toHaveAttribute("data-movimento", "parado", {
     timeout: INTRO_LIMIT_MS,
   });
@@ -172,33 +187,38 @@ export function sceneHost(page: Page): Locator {
   return page.locator(HERO).locator("[data-movimento]");
 }
 
-/** Chromium usa SwiftShader; WebKit deve oferecer WebGL real ou falhar com o diagnóstico. */
+/** Registra o backend antes de qualquer disfarce; WebKit exige aceleração real. */
 export async function prepareGpu(
   page: Page,
   browserName: string,
   testInfo: TestInfo,
 ): Promise<void> {
-  if (browserName === "chromium") {
-    await pretendGpu(page);
-    return;
-  }
-  const capability = await page.evaluate(() => {
+  const capability = await page.evaluate((allowSoftware: boolean) => {
     const gl = document
       .createElement("canvas")
-      .getContext("webgl2", { failIfMajorPerformanceCaveat: true });
+      .getContext("webgl2", { failIfMajorPerformanceCaveat: !allowSoftware });
     const info = gl?.getExtension("WEBGL_debug_renderer_info");
-    const renderer: unknown = gl && info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
+    const renderer: unknown =
+      gl && info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
     gl?.getExtension("WEBGL_lose_context")?.loseContext();
     return {
       webgl2: gl !== null,
       renderer: typeof renderer === "string" ? renderer : null,
       userAgent: navigator.userAgent,
     };
-  });
+  }, browserName === "chromium");
   await testInfo.attach("webgl-capability", {
     body: JSON.stringify(capability, null, 2),
     contentType: "application/json",
   });
+  if (browserName === "chromium") {
+    expect(
+      capability.webgl2,
+      "Chromium sem WebGL 2; veja webgl-capability",
+    ).toBe(true);
+    await pretendGpu(page);
+    return;
+  }
   expect(
     capability.webgl2,
     "WebKit sem WebGL 2: execute em macOS com GPU; veja webgl-capability",

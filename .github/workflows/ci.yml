@@ -173,7 +173,17 @@ jobs:
         run: npx playwright install --with-deps --only-shell chromium
       - name: Build
         run: npm run build
+      - name: Conferir partição exata das specs por ID e projeto
+        run: node e2e/check-phase-partition.ts
       - name: Specs (desktop e celular, só Chromium)
+        env:
+          E2E_PHASE: ui
+        run: npm run e2e
+      # SwiftShader disputa os núcleos com os demais workers. Uma cena por vez,
+      # inclusive entre os projetos, mantém os mesmos casos e tetos (sem retry).
+      - name: Palco 3D com GPU (desktop e celular, um worker)
+        env:
+          E2E_PHASE: gpu
         run: npm run e2e
       - name: Capturas dos controles 3D para aprovação visual
         if: always()
@@ -188,6 +198,8 @@ jobs:
       - name: Build com o aviso global
         run: npm run build:notice-e2e
       - name: Specs com o aviso global
+        env:
+          E2E_PHASE: notice
         run: npm run e2e:notice
       - name: Relatório e traces da falha
         if: failure()
