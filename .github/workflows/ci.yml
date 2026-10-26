@@ -174,7 +174,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Conferir partição exata das specs por ID e projeto
-        run: node e2e/check-phase-partition.ts
+        run: npm run e2e:check-phases
       - name: Specs (desktop e celular, só Chromium)
         env:
           E2E_PHASE: ui
