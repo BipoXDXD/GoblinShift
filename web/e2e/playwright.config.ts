@@ -13,10 +13,7 @@ const RUN_PHASE = process.env["E2E_PHASE"];
 if (RUN_PHASE !== undefined && !["ui", "gpu", "notice"].includes(RUN_PHASE)) {
   throw new Error("E2E_PHASE inválida");
 }
-if (
-  RUN_PHASE !== undefined &&
-  (E2E.remote || (RUN_PHASE === "notice") !== NOTICE_BUILD)
-) {
+if (RUN_PHASE !== undefined && (E2E.remote || (RUN_PHASE === "notice") !== NOTICE_BUILD)) {
   throw new Error("E2E_PHASE exige o build local correspondente à fase");
 }
 
@@ -68,18 +65,13 @@ function specSelection() {
   if (E2E.vps) {
     return { testMatch: VPS_SPEC };
   }
-  return NOTICE_BUILD
-    ? { testMatch: NOTICE_SPECS }
-    : { testIgnore: NOTICE_SPEC };
+  return NOTICE_BUILD ? { testMatch: NOTICE_SPECS } : { testIgnore: NOTICE_SPEC };
 }
 
 export default defineConfig({
   testDir: "specs",
   ...specSelection(),
-  outputDir:
-    RUN_PHASE === undefined
-      ? "../test-results"
-      : `../test-results/${RUN_PHASE}`,
+  outputDir: RUN_PHASE === undefined ? "../test-results" : `../test-results/${RUN_PHASE}`,
   fullyParallel: true,
   forbidOnly: !!process.env["CI"],
   // Contra a VPS, a rede e a página legal longa no Firefox passam do teto local: uma nova tentativa,
@@ -87,11 +79,7 @@ export default defineConfig({
   retries: E2E.vps ? 1 : 0,
   // O runner do GitHub tem 4 vCPUs e o padrão do Playwright usaria só 2; as specs esperam mais a
   // rede falsa e os quadros do que a CPU.
-  ...(RUN_PHASE === "gpu"
-    ? { workers: 1 }
-    : process.env["CI"]
-      ? { workers: 4 }
-      : {}),
+  ...(RUN_PHASE === "gpu" ? { workers: 1 } : process.env["CI"] ? { workers: 4 } : {}),
   // Cada spec tem poucos segundos; um teste preso falha cedo em vez de comer o orçamento.
   timeout: E2E.vps ? 60_000 : 20_000,
   expect: { timeout: 5_000 },

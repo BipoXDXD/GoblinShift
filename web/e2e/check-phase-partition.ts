@@ -128,21 +128,15 @@ function list(phase: Phase | undefined, notice = false): Selection {
   return {
     tests,
     workers: report.config.workers,
-    outputDirs: new Set(
-      report.config.projects.map((project) => project.outputDir),
-    ),
+    outputDirs: new Set(report.config.projects.map((project) => project.outputDir)),
   };
 }
 
 function equalTests(expected: Selection, actual: Selection): void {
-  if (actual.tests.size !== expected.tests.size)
-    fail("A partição perdeu ou adicionou testes");
+  if (actual.tests.size !== expected.tests.size) fail("A partição perdeu ou adicionou testes");
   for (const [id, entry] of expected.tests) {
     const found = actual.tests.get(id);
-    if (
-      found === undefined ||
-      JSON.stringify(found) !== JSON.stringify(entry)
-    ) {
+    if (found === undefined || JSON.stringify(found) !== JSON.stringify(entry)) {
       fail("Identidade, timeout ou estado esperado mudou na partição");
     }
   }
@@ -154,9 +148,7 @@ try {
   const gpu = list("gpu");
   const noticeCanonical = list(undefined, true);
   const notice = list("notice", true);
-  if (
-    [canonical, ui, gpu, notice].some((selection) => selection.tests.size === 0)
-  ) {
+  if ([canonical, ui, gpu, notice].some((selection) => selection.tests.size === 0)) {
     fail("Partição vazia não é evidência de cobertura");
   }
   if (gpu.workers !== 1) fail("A fase GPU precisa de exatamente um worker");
@@ -168,14 +160,12 @@ try {
   equalTests(canonical, { ...ui, tests: combined });
   equalTests(noticeCanonical, notice);
   for (const [id, entry] of canonical.tests) {
-    if (!(entry.gpu ? gpu : ui).tests.has(id))
-      fail("Teste foi para a fase incorreta");
+    if (!(entry.gpu ? gpu : ui).tests.has(id)) fail("Teste foi para a fase incorreta");
   }
   const usedOutputs = new Set<string>();
   for (const selection of [ui, gpu, notice]) {
     for (const directory of selection.outputDirs) {
-      if (usedOutputs.has(directory))
-        fail("As fases sobrescrevem os mesmos resultados");
+      if (usedOutputs.has(directory)) fail("As fases sobrescrevem os mesmos resultados");
       usedOutputs.add(directory);
     }
   }

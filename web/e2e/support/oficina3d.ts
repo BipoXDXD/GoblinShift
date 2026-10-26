@@ -27,10 +27,7 @@ export const INTRO_LIMIT_MS = 5_500;
  * Para provar o caminho da cena, a spec tira a ressalva de desempenho do getContext e
  * troca o nome do renderizador antes de qualquer script da página, como se houvesse placa de vídeo.
  */
-export async function pretendGpu(
-  page: Page,
-  renderer = "E2E GPU",
-): Promise<void> {
+export async function pretendGpu(page: Page, renderer = "E2E GPU"): Promise<void> {
   await page.addInitScript((rendererName: string) => {
     const UNMASKED_RENDERER = 0x9246;
     // Os originais são chamados com o `this` certo pelo Reflect.apply logo abaixo.
@@ -113,9 +110,7 @@ export async function withoutWebGl(page: Page): Promise<void> {
       type: string,
       options?: unknown,
     ): unknown {
-      return type.startsWith("webgl")
-        ? null
-        : Reflect.apply(getContext, this, [type, options]);
+      return type.startsWith("webgl") ? null : Reflect.apply(getContext, this, [type, options]);
     } as typeof getContext;
   });
 }
@@ -150,33 +145,23 @@ export async function waitPastIdle(page: Page): Promise<void> {
 }
 
 export function heroImage(page: Page, name = "Rúbia"): Locator {
-  return page
-    .locator(HERO)
-    .getByRole("img", { name: new RegExp(`^${name}, goblin`) });
+  return page.locator(HERO).getByRole("img", { name: new RegExp(`^${name}, goblin`) });
 }
 
 export function castButton(page: Page, name: string): Locator {
-  return page
-    .getByRole("group", { name: CAST_GROUP })
-    .getByRole("button", { name });
+  return page.getByRole("group", { name: CAST_GROUP }).getByRole("button", { name });
 }
 
 /** As goblins cujo GLB a página pediu, na ordem dos pedidos. */
 export function modelsRequested(requests: readonly Request[]): string[] {
-  return requests.flatMap(
-    (request) => MODEL.exec(new URL(request.url()).pathname)?.[1] ?? [],
-  );
+  return requests.flatMap((request) => MODEL.exec(new URL(request.url()).pathname)?.[1] ?? []);
 }
 
 /** Espera a cena da goblin ficar pronta e a entrada parar, para mexer sem disputar quadros. */
 export async function waitSceneStill(page: Page): Promise<void> {
-  await expect(page.locator(HERO)).toHaveAttribute(
-    "data-oficina-3d",
-    "pronto",
-    {
-      timeout: SCENE_READY_MS,
-    },
-  );
+  await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "pronto", {
+    timeout: SCENE_READY_MS,
+  });
   await expect(sceneHost(page)).toHaveAttribute("data-movimento", "parado", {
     timeout: INTRO_LIMIT_MS,
   });
@@ -198,8 +183,7 @@ export async function prepareGpu(
       .createElement("canvas")
       .getContext("webgl2", { failIfMajorPerformanceCaveat: !allowSoftware });
     const info = gl?.getExtension("WEBGL_debug_renderer_info");
-    const renderer: unknown =
-      gl && info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
+    const renderer: unknown = gl && info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
     gl?.getExtension("WEBGL_lose_context")?.loseContext();
     return {
       webgl2: gl !== null,
@@ -212,10 +196,7 @@ export async function prepareGpu(
     contentType: "application/json",
   });
   if (browserName === "chromium") {
-    expect(
-      capability.webgl2,
-      "Chromium sem WebGL 2; veja webgl-capability",
-    ).toBe(true);
+    expect(capability.webgl2, "Chromium sem WebGL 2; veja webgl-capability").toBe(true);
     await pretendGpu(page);
     return;
   }
