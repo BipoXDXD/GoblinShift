@@ -1,8 +1,9 @@
 """Configuração do executor-ctl, lida de /etc/goblinshift/executor-ctl.json (dono root)."""
 
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .images import ImageNotAllowedError, _read_root_file
@@ -34,6 +35,7 @@ class Config:
     # Sem o filesystem de tamanho fixo montado, o executor escreveria no disco raiz da VPS
     # (ADR 005); só os testes, com a área num diretório temporário, desligam a exigência.
     require_mount: bool = True
+    loaded_bytes_sha256: str | None = field(default=None, compare=False, repr=False)
 
 
 def load_config(path: Path) -> Config:
@@ -76,6 +78,9 @@ def _parse_config(raw: str | bytes, path: Path) -> Config:
         runtime=_runtime(content["runtime"]),
         images_file=_absolute_path(content, "images_file"),
         require_mount=_flag(content.get("require_mount", True)),
+        loaded_bytes_sha256=hashlib.sha256(
+            raw.encode("utf-8") if isinstance(raw, str) else raw
+        ).hexdigest(),
     )
 
 

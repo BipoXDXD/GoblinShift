@@ -64,6 +64,7 @@ target-version = "py314"
 [tool.ruff.per-file-target-version]
 # Rodam no Python do host (3.12 no Ubuntu 24.04), fora da imagem da aplicação.
 "deploy/executor_ctl/**" = "py312"
+"deploy/executor_inventory/**" = "py312"
 "deploy/acceptance/**" = "py312"
 "deploy/backup/**" = "py312"
 "deploy/openobserve/**" = "py312"
@@ -74,7 +75,7 @@ select = ["E", "W", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "N", "RUF"]
 
 [tool.ruff.lint.isort]
 # Pacotes do host em deploy/, importados pelos testes via pythonpath.
-known-first-party = ["executor_ctl", "openobserve", "tls_check"]
+known-first-party = ["executor_ctl", "executor_inventory", "openobserve", "tls_check"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
