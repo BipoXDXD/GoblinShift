@@ -5,6 +5,8 @@ estado compartilhado entre eles. Os spans sintéticos saem pelo mesmo exportador
 aplicação, com os atributos que o evento amplo grava (o contrato é conferido em
 tests/api/test_wide_event.py).
 
+O OpenObserve roda com o teto de memória e os caches de produção (deploy/coolify/infra.json).
+
 Diferenças do ambiente de produção, só aqui:
 - `ZO_SKIP_SSRF_CHECKS`: o receptor de webhooks roda no host do teste, num IP privado, que o
   OpenObserve recusaria (ADR 013);
@@ -40,6 +42,7 @@ from openobserve.client import Credentials, OpenObserve
 
 ROOT = Path(__file__).resolve().parents[2]
 COLLECTOR_CONFIG = ROOT / "docker" / "otel-collector" / "config.yaml"
+PRODUCTION_INFRA = ROOT / "deploy" / "coolify" / "infra.json"
 BUSYBOX_IMAGE = (
     "busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 )
@@ -178,10 +181,27 @@ def telemetry() -> Iterator[Telemetry]:
         yield Telemetry(api, f"{base_url}/api/default/v1/traces")
 
 
+def production_memory() -> tuple[str, dict[str, str]]:
+    """Teto de memória e caches do OpenObserve de produção (deploy/coolify/infra.json).
+
+    Os alertas e SLOs rodam aqui sob os mesmos limites de memória da VPS, para que um teto
+    apertado demais apareça no CI e não como alerta perdido em produção.
+    """
+    service = json.loads(PRODUCTION_INFRA.read_text(encoding="utf-8"))["services"]["openobserve"]
+    limit: str = service["deploy"]["resources"]["limits"]["memory"]
+    environment = {
+        name: value for name, value in service["environment"].items() if name.startswith("ZO_MEM")
+    }
+    return limit.lower(), environment
+
+
 def _openobserve(network: Network) -> DockerContainer:
+    memory_limit, memory_environment = production_memory()
+    container = DockerContainer(compose_image("openobserve"))
+    for name, value in memory_environment.items():
+        container = container.with_env(name, value)
     return (
-        DockerContainer(compose_image("openobserve"))
-        .with_env("ZO_LOCAL_MODE", "true")
+        container.with_env("ZO_LOCAL_MODE", "true")
         .with_env("ZO_DATA_DIR", "/data")
         .with_env("ZO_ROOT_USER_EMAIL", CREDENTIALS.email)
         .with_env("ZO_ROOT_USER_PASSWORD", CREDENTIALS.password)
@@ -190,7 +210,7 @@ def _openobserve(network: Network) -> DockerContainer:
         .with_exposed_ports(O2_PORT)
         .with_network(network)
         .with_network_aliases("openobserve")
-        .with_kwargs(extra_hosts={"host.docker.internal": "host-gateway"})
+        .with_kwargs(extra_hosts={"host.docker.internal": "host-gateway"}, mem_limit=memory_limit)
     )
 
 

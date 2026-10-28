@@ -53,7 +53,16 @@
         "/bin/sh",
         "-ec",
         "test -f /var/lib/postgresql/.coolify-pg-mount && exec docker-entrypoint.sh postgres"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "512M",
+            "cpus": "1.0",
+            "pids": 256
+          }
+        }
+      }
     },
     "otel-collector": {
       "command": [
@@ -122,13 +131,25 @@
       "container_name": "goblinshift-otel-collector-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "256M",
+            "cpus": "0.25",
+            "pids": 64
+          }
+        }
+      }
     },
     "openobserve": {
       "environment": {
         "ZO_COMPACT_DATA_RETENTION_DAYS": "30",
         "ZO_DATA_DIR": "/data",
         "ZO_LOCAL_MODE": "true",
+        "ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE": "128",
+        "ZO_MEMORY_CACHE_MAX_SIZE": "64",
+        "ZO_MEM_TABLE_MAX_SIZE": "64",
         "ZO_ROOT_USER_EMAIL": "${OPENOBSERVE_ROOT_EMAIL:?defina em .env (scripts/dev-secrets.sh)}",
         "ZO_ROOT_USER_PASSWORD": "${OPENOBSERVE_ROOT_PASSWORD:?defina em .env (scripts/dev-secrets.sh)}"
       },
@@ -161,7 +182,16 @@
       "container_name": "goblinshift-openobserve-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "512M",
+            "cpus": "0.5",
+            "pids": 128
+          }
+        }
+      }
     }
   },
   "networks": {
