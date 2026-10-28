@@ -179,7 +179,7 @@ def ledger_machine(factory: sessionmaker[Session]) -> type[RuleBasedStateMachine
 def test_livro_razao_mantem_o_invariante_em_qualquer_sequencia(
     factory: sessionmaker[Session],
 ) -> None:
-    run_state_machine_as_test(  # type: ignore[no-untyped-call]  # API sem anotações no Hypothesis
+    run_state_machine_as_test(
         ledger_machine(factory),
         settings=settings(
             max_examples=25,
