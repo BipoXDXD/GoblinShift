@@ -5,3 +5,6 @@ coverage/
 *.tsbuildinfo
 test-results/
 playwright-report/
+
+test-results-webkit/
+playwright-report-webkit/
