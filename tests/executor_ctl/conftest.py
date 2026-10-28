@@ -8,9 +8,11 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from executor_ctl import images
 from executor_ctl.config import Config
 from executor_ctl.docker_cli import DockerCli
 from executor_ctl.server import bind_server
@@ -27,8 +29,9 @@ def make_config(
 ) -> Config:
     area = tmp_path / "exec-work"
     area.mkdir(exist_ok=True)
-    images_file = tmp_path / "images.json"
+    images_file = tmp_path.resolve() / "images.json"
     images_file.write_text(json.dumps({"allowed": allowed or []}))
+    images_file.chmod(0o600)
     return Config(
         socket=socket_dir / "ctl.sock",
         group=current_group(),
@@ -67,3 +70,20 @@ def running_server(config: Config, docker: DockerCli) -> Iterator[Path]:
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+@pytest.fixture
+def synthetic_policy_metadata(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Only temp-fixture ownership is simulated; native policy suite never requests this."""
+
+    def root_stat(fd: int) -> os.stat_result:
+        fields = list(os.fstat(fd))
+        fields[4] = fields[5] = 0
+        fields[0] = int(fields[0]) & ~0o022
+        return os.stat_result(fields)
+
+    proxy = SimpleNamespace(
+        **{name: root_stat if name == "fstat" else getattr(os, name) for name in dir(os)}
+    )
+    monkeypatch.setattr(images, "os", proxy)
+    return proxy

@@ -6,14 +6,16 @@ import os
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
 
-from .config import DEFAULT_CONFIG_PATH, ConfigError, load_config
+from .config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 from .docker_cli import DockerCli
 from .journal import configure_logging
 from .server import bind_server
 from .service import ExecutorService
+from .witness import PassiveObserver
 
 EXIT_CONFIG_ERROR = 2
 EXIT_HOST_NOT_READY = 1
@@ -21,7 +23,11 @@ EXIT_HOST_NOT_READY = 1
 _log = logging.getLogger("executor_ctl")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    observer_provider: Callable[[Config], PassiveObserver] | None = None,
+) -> int:
     configure_logging()
     arguments = sys.argv[1:] if argv is None else argv
     config_path = Path(arguments[0]) if arguments else DEFAULT_CONFIG_PATH
@@ -40,7 +46,21 @@ def main(argv: list[str] | None = None) -> int:
         _log.error("grupo inexistente", extra={"detail": config.group})
         return EXIT_HOST_NOT_READY
 
-    server = bind_server(config, ExecutorService(config, DockerCli(), group_id), group_id)
+    observer = None
+    if observer_provider is not None:
+        try:
+            observer = observer_provider(config)
+        except Exception:
+            # Operator capability errors must not echo arbitrary payloads/secrets.
+            return EXIT_HOST_NOT_READY
+        if not isinstance(observer, PassiveObserver):
+            return EXIT_HOST_NOT_READY
+    service = (
+        ExecutorService(config, DockerCli(), group_id)
+        if observer is None
+        else ExecutorService(config, DockerCli(), group_id, observer=observer)
+    )
+    server = bind_server(config, service, group_id)
 
     def shut_down(signum: int, frame: FrameType | None) -> None:
         # shutdown() espera o laço do serve_forever, que roda nesta mesma thread.
