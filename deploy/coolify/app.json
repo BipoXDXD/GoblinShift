@@ -92,7 +92,16 @@
       "container_name": "goblinshift-api-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "384M",
+            "cpus": "1.0",
+            "pids": 256
+          }
+        }
+      }
     },
     "maintenance": {
       "command": [
@@ -186,7 +195,16 @@
       "container_name": "goblinshift-maintenance-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "384M",
+            "cpus": "0.5",
+            "pids": 128
+          }
+        }
+      }
     },
     "migrate": {
       "command": [
@@ -225,7 +243,16 @@
       "container_name": "goblinshift-migrate-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "384M",
+            "cpus": "1.0",
+            "pids": 128
+          }
+        }
+      }
     },
     "nginx": {
       "cap_drop": [
@@ -275,7 +302,16 @@
       "container_name": "goblinshift-nginx-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "64M",
+            "cpus": "0.25",
+            "pids": 64
+          }
+        }
+      }
     },
     "storage-init": {
       "command": [
@@ -330,7 +366,16 @@
       "container_name": "goblinshift-storage-init-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "64M",
+            "cpus": "0.25",
+            "pids": 32
+          }
+        }
+      }
     },
     "worker": {
       "command": [
@@ -424,7 +469,16 @@
       "container_name": "goblinshift-worker-1",
       "labels": [
         "traefik.enable=false"
-      ]
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "384M",
+            "cpus": "1.0",
+            "pids": 256
+          }
+        }
+      }
     }
   },
   "networks": {

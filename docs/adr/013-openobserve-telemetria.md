@@ -47,8 +47,16 @@ Com 10 GiB e retenção de 30 dias, o orçamento é de cerca de 340 MiB por dia,
 - Com o filesystem de telemetria cheio, o OpenObserve para de ingerir e continua respondendo; "telemetria acima de 85%" é alerta de causa.
 - Como a aplicação só fala OTLP com o Collector, trocar de backend não muda o código.
 
+## Teto de memória (2026-10-28)
+
+Sem limite no container, o OpenObserve dimensiona os buffers pela RAM do host inteiro: na VPS de 7,9 GiB, o pool de consultas do DataFusion chegava a 2,9 GiB e a memtable a quase 2 GiB, num host compartilhado. Medido em produção sem teto: 325 MiB em uso, 417 MiB de pico.
+
+O serviço em `deploy/coolify/infra.json` tem teto de 512 MiB, 0,5 CPU e 128 processos, e fixa os buffers em MiB: `ZO_MEMORY_CACHE_MAX_SIZE=64` (o cache de dados em memória fica desligado, que é o padrão da v1.0.4; o valor só limita se alguém ligá-lo), `ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE=128` e `ZO_MEM_TABLE_MAX_SIZE=64`. A soma (256 MiB) é metade do teto; a outra metade fica para o runtime, a base GeoIP carregada em memória e o page cache. A v1.0.4 lê o limite do cgroup, então os valores explícitos só tornam o dimensionamento independente dessa detecção. Numa carga local de 200 mil registros com consultas agregadas, o pico caiu de 401 MiB (sem teto) para 327 MiB, sem erro de consulta. Os alertas consultam janelas de 10 a 60 minutos, bem abaixo do pool de 128 MiB.
+
+O job "SLOs e alertas (OpenObserve)" do CI sobe o OpenObserve com esse teto e esses buffers (lidos do `infra.json`), então um teto apertado demais reprova o CI antes de virar alerta perdido.
+
 ## Como verificar
 
-- `compose.yaml` mantém `ZO_LOCAL_MODE`, `ZO_COMPACT_DATA_RETENTION_DAYS: "30"` e a porta publicada só em `127.0.0.1`.
+- `compose.yaml` mantém `ZO_LOCAL_MODE`, `ZO_COMPACT_DATA_RETENTION_DAYS: "30"` e a porta publicada só em `127.0.0.1`; `deploy/coolify/infra.json`, o Compose de produção, mantém o mesmo e o teto de memória (`tests/test_coolify_resource_limits.py`).
 - Na VPS, `docker stats` do OpenObserve abaixo de 512 MiB em uso normal; se passar disso, este ADR é revisto.
 - `df -h /srv/goblinshift/telemetry` abaixo de 85%.
