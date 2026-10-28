@@ -25,7 +25,8 @@ from executor_ctl.profile import EXECUTOR_UID, container_name
 
 from .conftest import make_config, running_server
 
-pytestmark = pytest.mark.executor_ctl
+# Docker/protocol behavior uses temp fixtures; trust enforcement has a separate native suite.
+pytestmark = [pytest.mark.executor_ctl, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
 RUNTIME = os.environ.get("GS_TEST_RUNTIME", "runc")
 BASE_IMAGE = (

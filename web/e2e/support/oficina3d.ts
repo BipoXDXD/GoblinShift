@@ -23,8 +23,8 @@ export const SCENE_READY_MS = 45_000;
 export const INTRO_LIMIT_MS = 5_500;
 
 /**
- * O Chromium headless não tem GPU: o WebGL dele é em software (SwiftShader), que a página recusa
- * de propósito. Para provar o caminho com GPU, a spec tira a ressalva de desempenho do getContext e
+ * O Chromium headless pode oferecer só WebGL em software, que a página recusa de propósito.
+ * Para provar o caminho da cena, a spec tira a ressalva de desempenho do getContext e
  * troca o nome do renderizador antes de qualquer script da página, como se houvesse placa de vídeo.
  */
 export async function pretendGpu(page: Page, renderer = "E2E GPU"): Promise<void> {
@@ -172,20 +172,16 @@ export function sceneHost(page: Page): Locator {
   return page.locator(HERO).locator("[data-movimento]");
 }
 
-/** Chromium usa SwiftShader; WebKit deve oferecer WebGL real ou falhar com o diagnóstico. */
+/** Registra o backend antes de qualquer disfarce; WebKit exige aceleração real. */
 export async function prepareGpu(
   page: Page,
   browserName: string,
   testInfo: TestInfo,
 ): Promise<void> {
-  if (browserName === "chromium") {
-    await pretendGpu(page);
-    return;
-  }
-  const capability = await page.evaluate(() => {
+  const capability = await page.evaluate((allowSoftware: boolean) => {
     const gl = document
       .createElement("canvas")
-      .getContext("webgl2", { failIfMajorPerformanceCaveat: true });
+      .getContext("webgl2", { failIfMajorPerformanceCaveat: !allowSoftware });
     const info = gl?.getExtension("WEBGL_debug_renderer_info");
     const renderer: unknown = gl && info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
     gl?.getExtension("WEBGL_lose_context")?.loseContext();
@@ -194,11 +190,16 @@ export async function prepareGpu(
       renderer: typeof renderer === "string" ? renderer : null,
       userAgent: navigator.userAgent,
     };
-  });
+  }, browserName === "chromium");
   await testInfo.attach("webgl-capability", {
     body: JSON.stringify(capability, null, 2),
     contentType: "application/json",
   });
+  if (browserName === "chromium") {
+    expect(capability.webgl2, "Chromium sem WebGL 2; veja webgl-capability").toBe(true);
+    await pretendGpu(page);
+    return;
+  }
   expect(
     capability.webgl2,
     "WebKit sem WebGL 2: execute em macOS com GPU; veja webgl-capability",

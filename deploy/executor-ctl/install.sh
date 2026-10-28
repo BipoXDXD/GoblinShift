@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Instala o executor-ctl como serviço systemd do host (docs/GoblinShiftPlan.md, 3.6 e 3.8; ADR 004).
 # Idempotente e aditivo, como o provision.sh, que chama este script: não sobrescreve configuração
-# existente, não reinicia o Docker e não mexe em firewall. Reinicia só o próprio executor-ctl, e só
+# existente. Exige migração administrativa prévia e drenada; não cria política vazia.
+# Não reinicia o Docker e não mexe em firewall. Reinicia só o próprio executor-ctl, e só
 # quando o pacote ou a unit mudaram (os containers das tentativas não dependem dele para rodar).
 #
 # Uso: sudo bash deploy/executor-ctl/install.sh
@@ -16,14 +17,37 @@ PREFIX=/opt/goblinshift/executor-ctl
 CONFIG_DIR=/etc/goblinshift
 CONFIG="$CONFIG_DIR/executor-ctl.json"
 WORK_AREA=/srv/goblinshift/exec-work
-IMAGES_DIR=/srv/goblinshift/executor
-IMAGES_FILE="$IMAGES_DIR/images.json"
+IMAGES_FILE=/var/lib/coolify-release/goblinshift/executor-images.json
 SERVICE=goblinshift-executor-ctl.service
 UNIT="/etc/systemd/system/$SERVICE"
 SOCKET=/run/goblinshift/executor-ctl.sock
 [[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
 note() { printf '==> %s\n' "$*"; }
 changed=0
+
+# A migration must prepare BOTH files before this script can mutate even a group.
+# Read the source package without PYTHONPATH/user site; do not trust a stale installed reader.
+note "Preflight administrativo (somente leitura)"
+if ! python3 -I -B - "$SOURCE" "$CONFIG" <<'PY_PREFLIGHT'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]).parent))
+from executor_ctl.config import ConfigError, load_config
+from executor_ctl.images import ImageNotAllowedError, _read_allowlist
+
+try:
+    path = Path(sys.argv[2])
+    config = load_config(path)
+    if not _read_allowlist(config.images_file):
+        raise ImageNotAllowedError("política vazia não autoriza instalação")
+except (ConfigError, ImageNotAllowedError) as error:
+    print(f"migração administrativa revisada necessária antes de instalar: {error}", file=sys.stderr)
+    sys.exit(1)
+PY_PREFLIGHT
+then
+  exit 1
+fi
 
 note "Grupo ${GROUP} (GID ${GROUP_ID})"
 if getent group "$GROUP" >/dev/null; then
@@ -57,33 +81,7 @@ else
   echo "   já está igual ao checkout."
 fi
 
-note "Configuração ${CONFIG}"
-install -d -m 755 "$CONFIG_DIR"
-if [[ ! -f "$CONFIG" ]]; then
-  cat > "$CONFIG" <<EOF
-{
-  "socket": "${SOCKET}",
-  "group": "${GROUP}",
-  "work_area": "${WORK_AREA}",
-  "runtime": "runsc",
-  "images_file": "${IMAGES_FILE}"
-}
-EOF
-  chmod 644 "$CONFIG"
-  changed=1
-else
-  echo "   já existe; mantida como está."
-fi
-
-note "Allowlist de imagens ${IMAGES_FILE} (gravada pelo deploy)"
-[[ -d "$IMAGES_DIR" ]] || install -d -m 755 -o "$APP_USER" -g "$APP_USER" "$IMAGES_DIR"
-if [[ ! -f "$IMAGES_FILE" ]]; then
-  echo '{"allowed": []}' > "$IMAGES_FILE"
-  chown "$APP_USER:$APP_USER" "$IMAGES_FILE"
-  chmod 644 "$IMAGES_FILE"
-else
-  echo "   já existe; mantida como está."
-fi
+note "Configuração ${CONFIG} e política ${IMAGES_FILE} validadas; mantidas sem escrita."
 
 note "Área de trabalho ${WORK_AREA}"
 if mountpoint -q "$WORK_AREA"; then
