@@ -13,6 +13,7 @@ from .docker_cli import (
     DockerCli,
 )
 from .images import require_allowed
+from .witness import PassiveObserver
 
 # Teto da carência de stop (3.6, "Parada": SIGTERM, até 10 s, depois SIGKILL).
 MAX_STOP_GRACE_S = 10
@@ -21,17 +22,27 @@ _log = logging.getLogger(__name__)
 
 
 class ExecutorService:
-    def __init__(self, config: Config, docker: DockerCli, executor_gid: int) -> None:
+    def __init__(
+        self,
+        config: Config,
+        docker: DockerCli,
+        executor_gid: int,
+        *,
+        observer: PassiveObserver | None = None,
+    ) -> None:
         self._config = config
         self._docker = docker
         self._executor_gid = executor_gid
+        self._observer = observer
         # A área inteira é a cota de uma tentativa: o "está limpa?" do start e o apagar do
         # remove não podem se intercalar. stop e status não mexem na área e ficam de fora.
         self._area_lock = threading.Lock()
 
     def start(self, attempt_id: uuid.UUID, image: str) -> ContainerStatus:
         """Cria e inicia o container; se ele já existe, devolve o estado dele sem criar outro."""
-        require_allowed(self._config.images_file, image)
+        policy = require_allowed(self._config.images_file, image)
+        if self._observer is not None:
+            self._observer.observe(attempt_id, image, self._config, policy)
         name = profile.container_name(attempt_id)
         with self._area_lock:
             existing = self._docker.inspect(name)

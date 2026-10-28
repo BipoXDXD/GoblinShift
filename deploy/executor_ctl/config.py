@@ -1,11 +1,15 @@
 """Configuração do executor-ctl, lida de /etc/goblinshift/executor-ctl.json (dono root)."""
 
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .images import ImageNotAllowedError, _read_root_file
+
 DEFAULT_CONFIG_PATH = Path("/etc/goblinshift/executor-ctl.json")
+IMAGES_FILE = "/var/lib/coolify-release/goblinshift/executor-images.json"
 
 # runc só serve para desenvolvimento e para a CI sem gVisor; em produção é runsc (ADR 004).
 ALLOWED_RUNTIMES = frozenset({"runsc", "runc"})
@@ -31,13 +35,31 @@ class Config:
     # Sem o filesystem de tamanho fixo montado, o executor escreveria no disco raiz da VPS
     # (ADR 005); só os testes, com a área num diretório temporário, desligam a exigência.
     require_mount: bool = True
+    loaded_bytes_sha256: str | None = field(default=None, compare=False, repr=False)
 
 
 def load_config(path: Path) -> Config:
     try:
-        content = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raw = _read_root_file(path)
+    except ImageNotAllowedError as error:
         raise ConfigError(f"não foi possível ler {path}: {error}") from error
+    return _parse_config(raw, path)
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("chave JSON duplicada")
+        result[key] = value
+    return result
+
+
+def _parse_config(raw: str | bytes, path: Path) -> Config:
+    try:
+        content = json.loads(raw, object_pairs_hook=_unique_object)
+    except (UnicodeDecodeError, ValueError, RecursionError) as error:
+        raise ConfigError(f"JSON inválido ou ambíguo em {path}") from error
     if not isinstance(content, dict):
         raise ConfigError(f"{path} precisa conter um objeto JSON")
     keys = set(content)
@@ -47,6 +69,8 @@ def load_config(path: Path) -> Config:
     unknown = keys - _REQUIRED_KEYS - _OPTIONAL_KEYS
     if unknown:
         raise ConfigError(f"chaves desconhecidas em {path}: {sorted(unknown)}")
+    if content["images_file"] != IMAGES_FILE:
+        raise ConfigError(f"images_file exige migração administrativa para {IMAGES_FILE}")
     return Config(
         socket=_absolute_path(content, "socket"),
         group=_group(content["group"]),
@@ -54,6 +78,9 @@ def load_config(path: Path) -> Config:
         runtime=_runtime(content["runtime"]),
         images_file=_absolute_path(content, "images_file"),
         require_mount=_flag(content.get("require_mount", True)),
+        loaded_bytes_sha256=hashlib.sha256(
+            raw.encode("utf-8") if isinstance(raw, str) else raw
+        ).hexdigest(),
     )
 
 
@@ -73,7 +100,7 @@ def _group(value: object) -> str:
 
 
 def _runtime(value: object) -> str:
-    if value not in ALLOWED_RUNTIMES:
+    if not isinstance(value, str) or value not in ALLOWED_RUNTIMES:
         raise ConfigError(f"runtime precisa ser um de {sorted(ALLOWED_RUNTIMES)}")
     return str(value)
 

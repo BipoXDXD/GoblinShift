@@ -75,7 +75,8 @@
     "coverage": "vitest run --coverage",
     "knip": "knip",
     "type-coverage": "type-coverage -p tsconfig.app.json --strict --at-least 100 --detail",
-    "generate:api": "openapi-typescript openapi/openapi.json --output src/api/schema.d.ts"
+    "generate:api": "openapi-typescript openapi/openapi.json --output src/api/schema.d.ts",
+    "e2e:check-phases": "node e2e/check-phase-partition.ts"
   },
   "allowScripts": {
     "fsevents": false
