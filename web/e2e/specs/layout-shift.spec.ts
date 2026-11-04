@@ -1,6 +1,9 @@
 // CLS < 0,05 (P9): a página não pula enquanto carrega fontes, catálogo, execução e resultados. O
 // valor é a soma de todo `layout-shift` sem interação recente, mais estrita que a janela de sessão
 // do Core Web Vitals.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import type { Page } from "@playwright/test";
 
 import { ExecucaoPage } from "../pages/ExecucaoPage";
@@ -8,6 +11,10 @@ import { BancadaPage } from "../pages/BancadaPage";
 import { expect, test } from "../support/test";
 
 const MAX_CLS = 0.05;
+/** Bem depois do período de bloqueio da fonte (até 100 ms no swap e no optional). */
+const LATE_FONT_MS = 1_000;
+const MONO_FONT =
+  "@fontsource-variable/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-wght-normal.woff2";
 
 /** Registra cada deslocamento desde o início do carregamento, antes de qualquer script da página. */
 async function recordLayoutShifts(page: Page): Promise<void> {
@@ -59,6 +66,32 @@ test("Oficina: CLS abaixo de 0,05 até as fontes carregarem", async ({ page }) =
 
 test("Bancada: CLS abaixo de 0,05 do carregamento do catálogo ao formulário", async ({ page }) => {
   await new BancadaPage(page).open("csv-janitor");
+  expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+});
+
+// No CI, a Atkinson do texto às vezes chegava depois da primeira pintura: o fallback (DejaVu Sans)
+// é mais largo, o aviso quebrava numa linha a mais e o conteúdo subia 24 px na troca (CLS 0,134).
+// Aqui a fonte chega com a tela já pintada e passado o período de bloqueio do `font-display` (até
+// 100 ms no swap e no optional). Para não depender das fontes do sistema, a resposta traz a
+// Atkinson Mono, de métricas bem diferentes de qualquer fallback: se a fonte tardia ainda for
+// aplicada, o texto se move.
+test("Bancada: CLS abaixo de 0,05 com a fonte do texto chegando depois da primeira pintura", async ({
+  page,
+}) => {
+  const lateFont = readFileSync(fileURLToPath(import.meta.resolve(MONO_FONT)));
+  let markPainted = (): void => undefined;
+  const painted = new Promise<void>((resolve) => {
+    markPainted = resolve;
+  });
+  await page.route("**/assets/atkinson-hyperlegible-next-*.woff2", async (route) => {
+    const blockPeriodOver = new Promise((resolve) => setTimeout(resolve, LATE_FONT_MS));
+    await Promise.all([painted, blockPeriodOver]);
+    await route.fulfill({ contentType: "font/woff2", body: lateFont });
+  });
+  // Sem esperar o `load`: o preload da fonte segurada o atrasaria até a resposta.
+  await page.goto("/bancada/csv-janitor", { waitUntil: "commit" });
+  await expect(page.getByRole("button", { name: "Executar" })).toBeVisible();
+  markPainted();
   expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
 });
 
