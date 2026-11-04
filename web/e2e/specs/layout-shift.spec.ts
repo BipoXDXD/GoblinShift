@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { BancadaPage } from "../pages/BancadaPage";
@@ -69,31 +69,69 @@ test("Bancada: CLS abaixo de 0,05 do carregamento do catálogo ao formulário", 
   expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
 });
 
-// No CI, a Atkinson do texto às vezes chegava depois da primeira pintura: o fallback (DejaVu Sans)
-// é mais largo, o aviso quebrava numa linha a mais e o conteúdo subia 24 px na troca (CLS 0,134).
-// Aqui a fonte chega com a tela já pintada e passado o período de bloqueio do `font-display` (até
-// 100 ms no swap e no optional). Para não depender das fontes do sistema, a resposta traz a
-// Atkinson Mono, de métricas bem diferentes de qualquer fallback: se a fonte tardia ainda for
-// aplicada, o texto se move.
-test("Bancada: CLS abaixo de 0,05 com a fonte do texto chegando depois da primeira pintura", async ({
-  page,
-}) => {
+/** Uma tela aberta sem esperar o `load` e o elemento que diz que ela está pintada. */
+interface Screen {
+  readonly path: string;
+  readonly ready: (page: Page) => Locator;
+}
+
+const OFICINA: Screen = {
+  path: "/",
+  ready: (page) => page.getByRole("link", { name: /CSV Janitor/ }),
+};
+const BANCADA: Screen = {
+  path: "/bancada/csv-janitor",
+  ready: (page) => page.getByRole("button", { name: "Executar" }),
+};
+
+/**
+ * Segura a fonte que casa com `fontGlob` até a tela estar pintada e passar o período de bloqueio do
+ * `font-display` (até 100 ms no swap e no optional), e responde com a Atkinson Mono, de métricas bem
+ * diferentes de qualquer fallback: se a fonte tardia ainda for aplicada, o texto se move, seja qual
+ * for a fonte do sistema.
+ */
+async function openWithLateFont(page: Page, screen: Screen, fontGlob: string): Promise<void> {
   const lateFont = readFileSync(fileURLToPath(import.meta.resolve(MONO_FONT)));
   let markPainted = (): void => undefined;
   const painted = new Promise<void>((resolve) => {
     markPainted = resolve;
   });
-  await page.route("**/assets/atkinson-hyperlegible-next-*.woff2", async (route) => {
+  await page.route(fontGlob, async (route) => {
     const blockPeriodOver = new Promise((resolve) => setTimeout(resolve, LATE_FONT_MS));
     await Promise.all([painted, blockPeriodOver]);
     await route.fulfill({ contentType: "font/woff2", body: lateFont });
   });
   // Sem esperar o `load`: o preload da fonte segurada o atrasaria até a resposta.
-  await page.goto("/bancada/csv-janitor", { waitUntil: "commit" });
-  await expect(page.getByRole("button", { name: "Executar" })).toBeVisible();
+  await page.goto(screen.path, { waitUntil: "commit" });
+  await expect(screen.ready(page)).toBeVisible();
   markPainted();
+}
+
+const TEXT_FONT = "**/assets/atkinson-hyperlegible-next-*.woff2";
+const TITLE_FONT = "**/assets/bricolage-grotesque-*.woff2";
+
+// No CI, a Atkinson do texto às vezes chegava depois da primeira pintura: o fallback (DejaVu Sans)
+// é mais largo, o aviso quebrava numa linha a mais e o conteúdo subia 24 px na troca (CLS 0,134).
+test("Bancada: CLS abaixo de 0,05 com a fonte do texto chegando depois da primeira pintura", async ({
+  page,
+}) => {
+  await openWithLateFont(page, BANCADA, TEXT_FONT);
   expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
 });
+
+// A do título segue em swap (ADR 040): os títulos ocupam poucas linhas e a troca quase não mexe
+// na altura. A Oficina, com o título de abertura em várias linhas, é o caso mais apertado.
+for (const [name, screen] of [
+  ["Oficina", OFICINA],
+  ["Bancada", BANCADA],
+] as const) {
+  test(`${name}: CLS abaixo de 0,05 com a fonte do título chegando depois da primeira pintura`, async ({
+    page,
+  }) => {
+    await openWithLateFont(page, screen, TITLE_FONT);
+    expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+  });
+}
 
 test("Execução: CLS abaixo de 0,05 do carregamento aos resultados", async ({ page, fakeApi }) => {
   const execucao = new ExecucaoPage(page);
