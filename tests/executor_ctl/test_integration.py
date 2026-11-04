@@ -30,8 +30,8 @@ pytestmark = [pytest.mark.executor_ctl, pytest.mark.usefixtures("synthetic_polic
 
 RUNTIME = os.environ.get("GS_TEST_RUNTIME", "runc")
 BASE_IMAGE = (
-    "python:3.14.9-slim-trixie"
-    "@sha256:a145a961ec2cf5741772d5e39773d979271132884fd778f6c3fad34e52b85402"
+    "python:3.14.10-slim-trixie"
+    "@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966"
 )
 TEST_IMAGE_TAG = "goblinshift-executor-ctl-test:latest"
 # Só para o Docker sem o image store do containerd, em que imagem construída não tem digest.

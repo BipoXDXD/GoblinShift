@@ -64,8 +64,8 @@ MAINTENANCE_CRITERION = "manutenção religada depois das sondas"
 MAINTENANCE_STOP_S = 60
 SOCKET_TIMEOUT_S = 10
 PROBE_IMAGE = (
-    "python:3.14.9-slim-trixie"
-    "@sha256:a145a961ec2cf5741772d5e39773d979271132884fd778f6c3fad34e52b85402"
+    "python:3.14.10-slim-trixie"
+    "@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966"
 )
 PROBE_SCRIPT = Path(__file__).with_name("probe.py")
 # Dono de <area>/<id> no contrato da fatia 4: o UID do worker, com o grupo gs-exec.

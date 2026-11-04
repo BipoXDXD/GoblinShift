@@ -32,8 +32,8 @@ DOCKERFILE = ROOT / "docker" / "web.Dockerfile"
 IMAGE = "goblinshift-web:test"
 # Mesma base, por digest, da imagem do executor: já está no host de quem roda a suíte.
 PYTHON_IMAGE = (
-    "python:3.14.9-slim-trixie"
-    "@sha256:a145a961ec2cf5741772d5e39773d979271132884fd778f6c3fad34e52b85402"
+    "python:3.14.10-slim-trixie"
+    "@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966"
 )
 EDGE_SUBNET = "172.31.0.0/24"
 # Faixa dinâmica fora dos IPs fixos, como na rede edge (deploy/edge/compose.yaml).
