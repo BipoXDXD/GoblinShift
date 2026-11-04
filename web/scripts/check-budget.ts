@@ -55,8 +55,20 @@ const FIRST_POSTER = /^assets\/oficina-3d-rubia-640w-[^/]*\.avif$/;
 const THUMBNAIL = /^assets\/oficina-3d-[a-z]+-192w-[^/]*\.avif$/;
 const THREE_D_CHUNK = /^assets\/oficina-3d-[^/]*\.js$/;
 
-/** A fonte do título da primeira tela: a única com preload (CSSD 12.5); o resto chega por swap. */
-export const FONT_PRELOAD = /bricolage-grotesque-latin-wght-normal-[^/]*\.woff2$/;
+/**
+ * Fontes com preload: a do título da primeira tela (CSSD 12.5) e a do texto, que é `optional` e só
+ * aparece se chegar antes da primeira pintura (ADR 040). As outras chegam por swap.
+ */
+export const FONT_PRELOADS = [
+  {
+    what: "fonte do título (bricolage-grotesque latin)",
+    file: /bricolage-grotesque-latin-wght-normal-[^/]*\.woff2$/,
+  },
+  {
+    what: "fonte do texto (atkinson-hyperlegible-next latin)",
+    file: /atkinson-hyperlegible-next-latin-wght-normal-[^/]*\.woff2$/,
+  },
+] as const;
 
 /** Cada teto que passou, em texto para o log do CI; lista vazia quando está tudo dentro. */
 export function budgetViolations(files: readonly BuiltFile[], indexHtml: string): string[] {
@@ -84,8 +96,10 @@ export function budgetViolations(files: readonly BuiltFile[], indexHtml: string)
       unit: "KB",
     }),
   ];
-  if (!hasFontPreload(indexHtml)) {
-    violations.push("index.html sem preload da fonte do título (bricolage-grotesque latin)");
+  for (const font of FONT_PRELOADS) {
+    if (!hasFontPreload(indexHtml, font.file)) {
+      violations.push(`index.html sem preload da ${font.what}`);
+    }
   }
   violations.push(...initialThreeDViolations(files));
   for (const file of files) {
@@ -195,10 +209,10 @@ function referencedAssets(indexHtml: string): Set<string> {
   return new Set(urls);
 }
 
-function hasFontPreload(indexHtml: string): boolean {
+function hasFontPreload(indexHtml: string, fontFile: RegExp): boolean {
   return [...indexHtml.matchAll(/<link\b[^>]*rel="preload"[^>]*>/g)].some(([tag]) => {
     const href = /href="\/([^"]+)"/.exec(tag)?.[1];
-    return href !== undefined && FONT_PRELOAD.test(href) && tag.includes("crossorigin");
+    return href !== undefined && fontFile.test(href) && tag.includes("crossorigin");
   });
 }
 

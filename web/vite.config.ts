@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
-import { FONT_PRELOAD } from "./scripts/check-budget";
+import { FONT_PRELOADS } from "./scripts/check-budget";
 import { preloadFonts } from "./scripts/vite-preload-fonts";
 
 /**
@@ -14,7 +14,7 @@ import { preloadFonts } from "./scripts/vite-preload-fonts";
 const noticeFile = process.env["GS_NOTICE_FILE"];
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), preloadFonts(FONT_PRELOAD)],
+  plugins: [react(), tailwindcss(), preloadFonts(FONT_PRELOADS.map((font) => font.file))],
   resolve: {
     alias:
       noticeFile === undefined || noticeFile === ""

@@ -5,6 +5,7 @@ import { budgetViolations, type BuiltFile } from "./check-budget";
 const KB = 1024;
 const INDEX = `<script src="/theme-init.js"></script>
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/assets/bricolage-grotesque-latin-wght-normal-x.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/assets/atkinson-hyperlegible-next-latin-wght-normal-x.woff2">
 <script type="module" crossorigin src="/assets/index-abc.js"></script>
 <link rel="modulepreload" crossorigin href="/assets/vendor-def.js">
 <link rel="stylesheet" crossorigin href="/assets/index-abc.css">`;
@@ -73,10 +74,24 @@ describe("budgetViolations", () => {
   });
 
   it("exige o preload da fonte do título", () => {
-    const withoutPreload = INDEX.replace(/<link rel="preload"[^>]*>\n/, "");
-    expect(budgetViolations(WITHIN, withoutPreload)).toContain(
+    const withoutPreload = INDEX.replace(/<link rel="preload"[^>]*bricolage[^>]*>\n/, "");
+    expect(budgetViolations(WITHIN, withoutPreload)).toEqual([
       "index.html sem preload da fonte do título (bricolage-grotesque latin)",
-    );
+    ]);
+  });
+
+  it("exige o preload da fonte do texto, que é optional (ADR 040)", () => {
+    const withoutPreload = INDEX.replace(/<link rel="preload"[^>]*atkinson[^>]*>\n/, "");
+    expect(budgetViolations(WITHIN, withoutPreload)).toEqual([
+      "index.html sem preload da fonte do texto (atkinson-hyperlegible-next latin)",
+    ]);
+  });
+
+  it("não aceita preload de fonte sem crossorigin", () => {
+    const withoutCors = INDEX.replace(/crossorigin (href="\/assets\/atkinson)/, "$1");
+    expect(budgetViolations(WITHIN, withoutCors)).toEqual([
+      "index.html sem preload da fonte do texto (atkinson-hyperlegible-next latin)",
+    ]);
   });
 
   it("CSS acima do teto", () => {
