@@ -3,7 +3,8 @@
 // arquivo trocado, sem tocar no código-fonte), serve a cópia numa porta própria e roda só a spec
 // do caso. O script sai com 1 se alguma spec continuar verde com o defeito.
 //
-// Uso, depois de `npm run build`: npm run e2e:sabotage [-- trecho do nome do caso]
+// Uso, depois de `npm run build` e `npm run build:notice-e2e`:
+// npm run e2e:sabotage [-- trecho do nome do caso]
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +16,8 @@ interface Case {
   readonly spec: readonly string[];
   readonly plant: (dist: string) => void;
   readonly env?: Readonly<Record<string, string>>;
+  /** Build de origem da cópia; sem ele, o `dist/` normal. */
+  readonly dist?: string;
   /** Defeito num arquivo do repositório, desfeito ao fim do caso (o snippet do Nginx). */
   readonly sourceEdit?: {
     readonly file: string;
@@ -24,6 +27,7 @@ interface Case {
 }
 
 const DIST = "dist";
+const NOTICE_DIST = "dist-notice";
 const FIRST_PORT = 4180;
 const PLANTED_KEY = "CANARY-sabotagem-fixa";
 
@@ -133,6 +137,15 @@ const CASES: readonly Case[] = [
         });
         observer.observe(document, { childList: true, subtree: true });`,
       );
+    },
+  },
+  {
+    name: "CLS: fonte do texto trocada quando chega depois da primeira pintura",
+    spec: ["layout-shift.spec.ts", "-g", "fonte do texto"],
+    dist: NOTICE_DIST,
+    env: { E2E_NOTICE: "1" },
+    plant: (dist) => {
+      replaceInCss(dist, "font-display:optional", "font-display:swap");
     },
   },
   {
@@ -282,7 +295,7 @@ function runCase(sabotage: Case, port: number): boolean {
       }
       writeFileSync(edit.file, original.replace(edit.search, edit.replace));
     }
-    cpSync(DIST, dist, { recursive: true });
+    cpSync(sabotage.dist ?? DIST, dist, { recursive: true });
     sabotage.plant(dist);
     const result = spawnSync(
       "npx",
