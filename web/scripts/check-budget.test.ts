@@ -94,6 +94,18 @@ describe("budgetViolations", () => {
     ]);
   });
 
+  it.each([
+    ["as", /as="font" /],
+    ["type", /type="font\/woff2" /],
+  ])("não aceita preload de fonte sem o atributo %s", (_attribute, attribute) => {
+    const atkinsonPreload = /<link rel="preload"[^>]*atkinson[^>]*>/;
+    const tag = atkinsonPreload.exec(INDEX)?.[0] ?? "";
+    const withoutAttribute = INDEX.replace(tag, tag.replace(attribute, ""));
+    expect(budgetViolations(WITHIN, withoutAttribute)).toEqual([
+      "index.html sem preload da fonte do texto (atkinson-hyperlegible-next latin)",
+    ]);
+  });
+
   it("CSS acima do teto", () => {
     const files = WITHIN.map((entry) =>
       entry.path.endsWith(".css") ? file(entry.path, 26 * KB) : entry,

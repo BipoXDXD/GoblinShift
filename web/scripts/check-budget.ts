@@ -212,7 +212,15 @@ function referencedAssets(indexHtml: string): Set<string> {
 function hasFontPreload(indexHtml: string, fontFile: RegExp): boolean {
   return [...indexHtml.matchAll(/<link\b[^>]*rel="preload"[^>]*>/g)].some(([tag]) => {
     const href = /href="\/([^"]+)"/.exec(tag)?.[1];
-    return href !== undefined && fontFile.test(href) && tag.includes("crossorigin");
+    // Sem `as="font"` e `crossorigin` o preload não casa com o pedido da @font-face e a fonte baixa
+    // duas vezes; o `type` deixa o navegador pular um formato que não suporta.
+    return (
+      href !== undefined &&
+      fontFile.test(href) &&
+      tag.includes('as="font"') &&
+      tag.includes('type="font/woff2"') &&
+      tag.includes("crossorigin")
+    );
   });
 }
 
