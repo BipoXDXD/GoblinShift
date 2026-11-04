@@ -1,6 +1,6 @@
 # ADR 040. Fonte do texto com `font-display: optional` e preload
 
-- **Estado:** proposto (2026-11-04), pendente de revisão do usuário no PR
+- **Estado:** aceito (2026-11-04), decidido pelo usuário no PR #156 entre `optional` e `swap` com fallback ajustado
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (frontend). Os rótulos P9 (CLS abaixo de 0,05, `web/e2e/specs/layout-shift.spec.ts`) e D5 (fontes auto-hospedadas, `web/src/styles/fonts.css`) são os usados no código; o plano não os define por id.
 - **Substitui:** o item "O `font-display: swap` continua" de [revisão de design, 4.4](../superpowers/specs/2026-10-15-revisao-design-livros-design.md), só para a fonte do texto.
 - **Relacionado:** [ADR 031](031-aviso-global-no-bundle.md)
