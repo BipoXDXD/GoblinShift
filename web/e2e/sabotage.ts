@@ -6,7 +6,15 @@
 // Uso, depois de `npm run build` e `npm run build:notice-e2e`:
 // npm run e2e:sabotage [-- trecho do nome do caso]
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,6 +26,8 @@ interface Case {
   readonly env?: Readonly<Record<string, string>>;
   /** Build de origem da cópia; sem ele, o `dist/` normal. */
   readonly dist?: string;
+  /** Projeto do Playwright; sem ele, o desktop. */
+  readonly project?: "desktop" | "mobile";
   /** Defeito num arquivo do repositório, desfeito ao fim do caso (o snippet do Nginx). */
   readonly sourceEdit?: {
     readonly file: string;
@@ -28,6 +38,10 @@ interface Case {
 
 const DIST = "dist";
 const NOTICE_DIST = "dist-notice";
+const BUILD_COMMAND: Readonly<Record<string, string>> = {
+  [DIST]: "npm run build",
+  [NOTICE_DIST]: "npm run build:notice-e2e",
+};
 const FIRST_PORT = 4180;
 const PLANTED_KEY = "CANARY-sabotagem-fixa";
 
@@ -139,15 +153,17 @@ const CASES: readonly Case[] = [
       );
     },
   },
-  {
-    name: "CLS: fonte do texto trocada quando chega depois da primeira pintura",
+  // No celular a margem é estreita (CLS 0,068 contra o teto de 0,05): o caso roda nos dois projetos.
+  ...(["desktop", "mobile"] as const).map((project): Case => ({
+    name: `CLS: fonte do texto trocada quando chega depois da primeira pintura (${project})`,
     spec: ["layout-shift.spec.ts", "-g", "fonte do texto"],
     dist: NOTICE_DIST,
+    project,
     env: { E2E_NOTICE: "1" },
     plant: (dist) => {
       replaceInCss(dist, "font-display:optional", "font-display:swap");
     },
-  },
+  })),
   {
     name: "CSP: atributo style inline",
     spec: ["csp.spec.ts", "-g", "Oficina, tema light"],
@@ -295,7 +311,13 @@ function runCase(sabotage: Case, port: number): boolean {
       }
       writeFileSync(edit.file, original.replace(edit.search, edit.replace));
     }
-    cpSync(sabotage.dist ?? DIST, dist, { recursive: true });
+    const source = sabotage.dist ?? DIST;
+    if (!existsSync(source)) {
+      throw new Error(
+        `${source}/ não existe: rode antes \`${BUILD_COMMAND[source] ?? "o build dele"}\``,
+      );
+    }
+    cpSync(source, dist, { recursive: true });
     sabotage.plant(dist);
     const result = spawnSync(
       "npx",
@@ -303,7 +325,7 @@ function runCase(sabotage: Case, port: number): boolean {
         "playwright",
         "test",
         "--config=e2e/playwright.config.ts",
-        "--project=desktop",
+        `--project=${sabotage.project ?? "desktop"}`,
         "--reporter=line",
         ...sabotage.spec,
       ],
