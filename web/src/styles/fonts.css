@@ -2,12 +2,17 @@
  * Fontes auto-hospedadas (D5), servidas pela própria origem: a CSP de 3.6 não aceita CDN. Só os
  * subconjuntos latin e latin-ext, os do pt-BR; o navegador baixa o latin-ext apenas se a página
  * usar algum caractere dele (unicode-range). Licença: SIL OFL 1.1 (web/LICENCAS-FONTES.md).
+ *
+ * A fonte do texto (Atkinson Next) é `optional` e tem preload (ADR 040): se não chegar no período
+ * de bloqueio, a página fica no fallback em vez de reflowar na troca. Com `swap`, o fallback mais
+ * largo (DejaVu Sans no Linux) quebrava o aviso numa linha a mais e o conteúdo pulava quando a
+ * fonte chegava. Título e código seguem `swap`: a troca do título mediu CLS de no máximo 0,031.
  */
 
 @font-face {
   font-family: "Atkinson Hyperlegible Next Variable";
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   font-weight: 200 800;
   src: url("@fontsource-variable/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-ext-wght-normal.woff2")
     format("woff2-variations");
@@ -20,7 +25,7 @@
 @font-face {
   font-family: "Atkinson Hyperlegible Next Variable";
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   font-weight: 200 800;
   src: url("@fontsource-variable/atkinson-hyperlegible-next/files/atkinson-hyperlegible-next-latin-wght-normal.woff2")
     format("woff2-variations");

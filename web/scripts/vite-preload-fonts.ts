@@ -1,10 +1,10 @@
 import type { Plugin } from "vite";
 
 /**
- * Injeta o preload das fontes cujo arquivo final casa com `pattern`. O nome tem hash do build, por
- * isso o link não pode ir escrito no index.html.
+ * Injeta o preload das fontes cujo arquivo final casa com algum de `patterns`. O nome tem hash do
+ * build, por isso o link não pode ir escrito no index.html.
  */
-export function preloadFonts(pattern: RegExp): Plugin {
+export function preloadFonts(patterns: readonly RegExp[]): Plugin {
   return {
     name: "goblinshift-preload-fonts",
     apply: "build",
@@ -13,7 +13,7 @@ export function preloadFonts(pattern: RegExp): Plugin {
       handler(_html, context) {
         const bundle = context.bundle ?? {};
         return Object.keys(bundle)
-          .filter((fileName) => pattern.test(fileName))
+          .filter((fileName) => patterns.some((pattern) => pattern.test(fileName)))
           .map((fileName) => ({
             tag: "link",
             attrs: {
