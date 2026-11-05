@@ -114,15 +114,17 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 
 ### Mudança no `Caddyfile`
 
-Os passos acima só cobrem `sites/`. O `Caddyfile` é um bind de arquivo único: `install`, `mv` ou `sed -i` trocam o inode, e o container continua lendo o arquivo antigo. `cp` sobrescreve no mesmo inode e não toca o destino se a origem não abrir; `cat origem > destino` não serve, porque zera o destino antes de ler.
+Os passos acima só cobrem `sites/`. O `Caddyfile` é um bind de arquivo único e somente leitura, e o Git do Coolify troca o inode dele: em 2026-11-05 o `mountinfo` do container mostrava `Caddyfile//deleted`, com o gateway preso desde 21/10 a um arquivo apagado no host. Sobrescrever o host, portanto, não chega ao processo. Recriar o container resolveria, mas derruba os sites do gateway.
 
-O bloco é independente dos passos acima e para no primeiro erro. Salve-o num arquivo na VPS e rode `COMMIT=<commit de merge> API=<recurso do gateway> TOKEN=<token> bash arquivo`, nunca colado na sessão: o `set -e` fecharia o SSH. Se o inode do host e o do container divergirem, o bind ficou preso a um arquivo antigo, e a correção exige recriar o container numa janela combinada com o StillOn. Se o hash atual aparecer numa trava, atualize a trava junto.
+Por isso o bloco valida e aplica uma cópia dentro do container e só depois atualiza o host, que é o que o Docker monta num restart ou numa recriação. Assim, um arquivo inválido não muda nada, e o `/etc/caddy/Caddyfile` visto dentro do container pode continuar antigo até o próximo restart: a conferência é a configuração em execução, na API de administração.
+
+Salve o bloco num arquivo na VPS e rode `COMMIT=<commit de merge> API=<recurso do gateway> TOKEN=<token> bash arquivo`, nunca colado na sessão: o `set -e` fecharia o SSH. Se o hash do arquivo do host aparecer numa trava, atualize a trava junto.
 
 ```bash
 set -euo pipefail
 : "${COMMIT:?}" "${API:?}" "${TOKEN:?}"
 ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
-test "$(stat -c %i "$ORIGEM")" = "$(docker exec edge-proxy-1 stat -c %i /etc/caddy/Caddyfile)"
+test -s "$ORIGEM"
 if grep -rls "$(sha256sum "$ORIGEM" | cut -d' ' -f1)" \
     /etc/coolify-release /var/lib/coolify-release /etc/goblinshift /etc/duora; then
   echo "trava do Caddyfile encontrada" >&2
@@ -142,16 +144,19 @@ ANTERIOR=$(curl -fsS -H "Authorization: Bearer $TOKEN" "$API" | jq -r .git_commi
 [[ "$ANTERIOR" =~ ^([0-9a-f]{7,40}|HEAD)$ ]] || { echo "git_commit_sha inesperado: $ANTERIOR" >&2; exit 1; }
 cp -a "$ORIGEM" "$BACKUP"
 echo "$ANTERIOR" > "$BACKUP.commit"
+docker exec edge-proxy-1 cat /etc/caddy/Caddyfile > "$BACKUP.em-uso"
 echo "ORIGEM=$ORIGEM"
 echo "BACKUP=$BACKUP"
 
+docker cp "$NOVO" edge-proxy-1:/tmp/Caddyfile.novo
+docker exec edge-proxy-1 caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile
+docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile
+docker exec edge-proxy-1 rm /tmp/Caddyfile.novo
 cp "$NOVO" "$ORIGEM"
-docker exec edge-proxy-1 cat /etc/caddy/Caddyfile | cmp - "$NOVO"
-docker exec edge-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-docker exec edge-proxy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+cmp "$NOVO" "$ORIGEM"
 ```
 
-Se o bloco parar antes de imprimir `BACKUP`, nada mudou; remova o `CLONE` impresso. Se parar depois, ou para reverter, use os caminhos impressos: rode `cp "$BACKUP" "$ORIGEM"` e repita o `validate` e o `reload`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
+Se o bloco parar antes do `reload`, a produção não mudou; remova o `CLONE` impresso. Para reverter depois, use os caminhos impressos: copie `$BACKUP.em-uso` para `/tmp/Caddyfile.novo` do container, repita o `validate` e o `reload`, e rode `cp "$BACKUP" "$ORIGEM"`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
 
 ## Atualizar a lista
 
