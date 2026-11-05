@@ -236,12 +236,94 @@ O recurso "GoblinShift - Banco e observabilidade" do Coolify (`deploy/coolify/in
 
 A publicação faz `docker compose up -d`, que recria cada serviço cujo hash de configuração mudou. Por isso esta troca tem duas etapas. O recurso foi publicado pela última vez no commit `ff88bebb`, e depois dele o `infra.json` ganhou os tetos de memória, CPU e processos dos três serviços e os buffers do OpenObserve ([ADR 013](../../docs/adr/013-openobserve-telemetria.md#teto-de-memória-2026-10-28)). Esses acréscimos mudam o hash dos três, então publicar a v1.1.2 direto daquele commit recriaria também o Postgres.
 
-1. **Primeira etapa, à parte:** publicar a `main` ainda com a v1.0.4, só para aplicar os limites. Ela recria os três serviços, com a queda do banco que isso traz, e não migra nada.
-2. **Segunda etapa, esta seção:** trocar a imagem. Daí em diante a única diferença é a linha `image` do OpenObserve, e só ele é recriado.
+1. **[Primeira etapa](#primeira-etapa-publicar-os-limites), à parte:** publicar a `main` ainda com a v1.0.4, só para aplicar os limites. Ela recria os três serviços, com a queda do banco que isso traz, e não migra nada.
+2. **Segunda etapa, o resto desta seção:** trocar a imagem. Daí em diante a única diferença é a linha `image` do OpenObserve, e só ele é recriado.
 
 Ensaiado com o Compose derivado do `infra.json`: do `ff88bebb` para o PR, o plano recria os três; da `main` com limites para o PR, o Postgres e o Collector ficam `Running`, com o mesmo `StartedAt` e o mesmo hash. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado dos dois e a conferência o compara.
 
 **Nunca use Stop nem Restart do recurso no painel:** eles agem sobre o recurso inteiro, inclusive o Postgres. Pare só o container do OpenObserve, como abaixo.
+
+### Primeira etapa: publicar os limites
+
+Tudo na VPS, em janela própria: o Postgres é recriado, e a aplicação fica sem banco por instantes. Sem Run em andamento e sem release da CI rodando, porque os receptores não coordenam uma publicação manual concorrente ([ISOLATION.md](../coolify/release/ISOLATION.md)). O UUID do recurso aparece na URL dele no painel. Estas definições servem para a seção inteira; numa sessão nova, repita o bloco.
+
+```bash
+UUID=<uuid do recurso "GoblinShift - Banco e observabilidade">
+TOKEN=$(sudo cat /etc/coolify-release/api-token)
+API=http://127.0.0.1:8000/api/v1/applications/$UUID
+
+publicar() {
+  local deployment status
+  deployment=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$API/start" | jq -r .deployment_uuid)
+  while :; do
+    status=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+      "http://127.0.0.1:8000/api/v1/deployments/$deployment" | jq -r .status)
+    echo "$status"
+    case "$status" in
+      queued|in_progress) sleep 5 ;;
+      finished) return 0 ;;
+      *) return 1 ;;
+    esac
+  done
+}
+
+estado_dos_servicos() {
+  sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
+    goblinshift-postgres-1 goblinshift-otel-collector-1 goblinshift-openobserve-1
+}
+```
+
+1. **Escolha o commit e confira.** `ALVO` é um commit da `main` que ainda fixa a v1.0.4, ou seja, anterior ao merge do PR da v1.1.2. Num clone, o `git show` precisa mostrar a v1.0.4, e o `git diff` só os tetos dos três serviços e as três variáveis `ZO_MEM*`.
+
+   ```bash
+   git show <ALVO>:deploy/coolify/infra.json | grep 'openobserve/openobserve:'
+   git diff ff88bebb <ALVO> -- deploy/coolify/infra.json docker/otel-collector/config.yaml
+   ```
+
+2. **Renove o backup do banco e grave o estado.** Os três arquivos ficam em `/var/backups` para sobreviver a uma sessão nova. O horário de início é a referência do `StartedAt` no pré-requisito da segunda etapa.
+
+   ```bash
+   sudo systemctl start goblinshift-pg-backup.service
+   sudo journalctl -u goblinshift-pg-backup -n 5 --no-pager
+   estado_dos_servicos | sudo tee /var/backups/goblinshift-o2-hash-antes.txt
+   curl -fsS -H "Authorization: Bearer $TOKEN" "$API" | jq -r .git_commit_sha \
+     | sudo tee /var/backups/goblinshift-o2-etapa1-commit-anterior.txt
+   date -u +%Y-%m-%dT%H:%M:%SZ | sudo tee /var/backups/goblinshift-o2-etapa1-inicio.txt
+   ```
+
+3. **Publique.** Com o `PATCH`, o recurso fica num commit fixo, e o auto-deploy deixa de importar para o que ele vai publicar.
+
+   ```bash
+   ALVO=<commit completo>
+   curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d "{\"git_commit_sha\":\"$ALVO\"}" "$API"
+   publicar    # precisa terminar em finished
+   ```
+
+4. **Confira a saúde.** Os três serviços `running`, com o Postgres `healthy`; a API, o worker e a manutenção `healthy`; `/readyz` em 200; e, dois minutos depois, o Collector sem falha de exportação. Depois rode o `conferir_etapa1` do [pré-requisito](#antes-do-merge).
+
+   ```bash
+   sudo docker inspect -f '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}} reinícios={{.RestartCount}}' \
+     goblinshift-postgres-1 goblinshift-otel-collector-1 goblinshift-openobserve-1 \
+     goblinshift-api-1 goblinshift-worker-1 goblinshift-maintenance-1
+   sudo docker exec goblinshift-postgres-1 pg_isready -U goblinshift -d goblinshift
+   curl -fsS -o /dev/null -w '%{http_code}\n' https://goblinshift.dev/readyz
+   sudo docker logs --since 2m goblinshift-otel-collector-1 2>&1 | grep -c 'Exporting failed'    # 0
+   ```
+
+**Rollback da primeira etapa.** Esta etapa não migra nada: os dados continuam nos mesmos binds, e a v1.0.4 lê o mesmo volume. Voltar é publicar o commit gravado no passo 2, o que recria os três serviços de novo, sem os tetos. Quem aplicou os limites ao vivo precisa reaplicá-los depois. Se o valor gravado for `HEAD`, a função recusa, porque esse valor apontaria para a `main`: grave à mão o commit fixo `ff88bebb` completo no arquivo e rode de novo. O backup do passo 2 só entra se o banco voltar com defeito.
+
+```bash
+rollback_etapa1() {
+  local anterior
+  anterior=$(sudo cat /var/backups/goblinshift-o2-etapa1-commit-anterior.txt) || return 1
+  [[ "$anterior" =~ ^[0-9a-f]{7,40}$ ]] || { echo "commit fixo exigido, achei: $anterior"; return 1; }
+  curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"git_commit_sha\":\"$anterior\"}" "$API" || return 1
+  publicar
+}
+rollback_etapa1
+```
 
 ### De v1.0.4 para v1.1.2
 
@@ -261,17 +343,34 @@ A partida da v1.1.2 registra dois avisos esperados: `ZO_EXT_AUTH_SALT is not set
 
 ### Antes do merge
 
-Tudo na VPS. O UUID do recurso aparece na URL dele no painel.
+Tudo na VPS, com as definições da [primeira etapa](#primeira-etapa-publicar-os-limites) na sessão.
 
 ```bash
 NEW='openobserve/openobserve:v1.1.2@sha256:4a154849432f75c4fb024de32fe34163c02406c905dab22bf8d213d2e3386392'
 OLD='openobserve/openobserve:v1.0.4@sha256:d4a878fac1f6c56003764f7f2a1625668917388f167e222c8c810de3f54c56ba'
-UUID=<uuid do recurso "GoblinShift - Banco e observabilidade">
-TOKEN=$(sudo cat /etc/coolify-release/api-token)
-API=http://127.0.0.1:8000/api/v1/applications/$UUID
 ```
 
-**Pré-requisito: a primeira etapa já publicada.** Sem ela, a publicação abaixo recria o Postgres. Confira nos containers em execução, antes do merge:
+**Pré-requisito: a primeira etapa já publicada.** Sem ela, a publicação abaixo recria o Postgres. Limites no `docker inspect` não provam isso: em produção eles já foram aplicados ao vivo, e o hash de configuração continua o de `ff88bebb`. O critério são o hash e o `StartedAt` dos três serviços: o hash precisa ser diferente do gravado em `/var/backups/goblinshift-o2-hash-antes.txt`, e o `StartedAt` precisa ser posterior ao início da primeira etapa, gravado em `/var/backups/goblinshift-o2-etapa1-inicio.txt`. Sem esses arquivos, a conferência falha: o hash não pode ser comparado com um calculado do repositório, porque inclui os rótulos do Coolify.
+
+```bash
+conferir_etapa1() {
+  local inicio nome iniciado hash antes falhas=0
+  inicio=$(sudo cat /var/backups/goblinshift-o2-etapa1-inicio.txt) || return 1
+  while read -r nome iniciado hash; do
+    antes=$(sudo awk -v nome="$nome" '$1 == nome {print $3}' /var/backups/goblinshift-o2-hash-antes.txt)
+    if [ -n "$antes" ] && [ -n "$hash" ] && [ "$hash" != "$antes" ] && [[ "$iniciado" > "$inicio" ]]; then
+      echo "ok $nome"
+    else
+      echo "FALHOU $nome"
+      falhas=1
+    fi
+  done < <(estado_dos_servicos)
+  return "$falhas"
+}
+conferir_etapa1
+```
+
+Se aparecer `FALHOU`, pare: publique a primeira etapa antes do merge deste PR. Como complemento, confira os limites e as variáveis:
 
 ```bash
 sudo docker inspect -f '{{.Name}} {{.HostConfig.Memory}} {{.HostConfig.NanoCpus}} {{.HostConfig.PidsLimit}}' \
@@ -279,8 +378,6 @@ sudo docker inspect -f '{{.Name}} {{.HostConfig.Memory}} {{.HostConfig.NanoCpus}
 # Só as variáveis de memória: o ambiente completo do container tem a senha do root.
 sudo docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' goblinshift-openobserve-1 \
   | grep -E '^ZO_(MEMORY_CACHE_MAX_SIZE|MEMORY_CACHE_DATAFUSION_MAX_SIZE|MEM_TABLE_MAX_SIZE)='
-sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
-  goblinshift-postgres-1 goblinshift-otel-collector-1 goblinshift-openobserve-1
 ```
 
 | Container | Memória | `NanoCpus` | Processos |
@@ -289,11 +386,11 @@ sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "c
 | `goblinshift-otel-collector-1` | 268435456 | 250000000 | 64 |
 | `goblinshift-openobserve-1` | 536870912 | 500000000 | 128 |
 
-As variáveis precisam sair como `ZO_MEMORY_CACHE_MAX_SIZE=64`, `ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE=128` e `ZO_MEM_TABLE_MAX_SIZE=64`. Sem limite, o `docker inspect` mostra `0 0 <no value>`. O hash dos três precisa ser diferente do anotado antes da primeira etapa, e o `StartedAt` precisa ser posterior a ela. O hash inclui os rótulos do Coolify, então não dá para compará-lo com um calculado do repositório. Se algo não bater, pare: faça a primeira etapa antes do merge deste PR.
+As variáveis precisam sair como `ZO_MEMORY_CACHE_MAX_SIZE=64`, `ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE=128` e `ZO_MEM_TABLE_MAX_SIZE=64`.
 
 1. **Auto-deploy desligado.** Com ele ligado, o merge publica sem backup. Rode a leitura abaixo e confira `is_auto_deploy_enabled` em `settings`. Se estiver `true`, desligue antes do merge, com o mesmo `PATCH` do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md#antes-do-merge). Se não der para saber, não faça o merge. A ordem importa: sem a imagem na VPS, uma publicação falha sem tocar no container atual (ensaiado com o Compose local), mas o passo 2 tira essa proteção.
 
-   Guarde em arquivo o `git_commit_sha`: é o destino do rollback, e precisa sobreviver a uma sessão nova. Se o valor for `HEAD`, grave no lugar dele o commit publicado na primeira etapa.
+   Guarde em arquivo o `git_commit_sha`: é o destino do rollback, e precisa sobreviver a uma sessão nova. Ele precisa ser um commit fixo, o `ALVO` da primeira etapa. Se for `HEAD`, pare: o rollback recusa esse valor.
 
    ```bash
    curl -fsS -H "Authorization: Bearer $TOKEN" "$API" \
@@ -348,16 +445,10 @@ Depois do merge e com a release da CI terminada, porque os receptores não coord
    sudo sha256sum -c /var/backups/goblinshift-o2-backup.sha256
    ```
 
-6. **Publique.** Se o `git_commit_sha` do passo 1 for um commit fixo e não `HEAD`, aponte antes para o commit de merge: `curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"git_commit_sha":"<commit de merge>"}' "$API"`.
+6. **Publique.** O recurso está no commit fixo do passo 1, então aponte antes para o commit de merge: `curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"git_commit_sha":"<commit de merge>"}' "$API"`.
 
    ```bash
-   deployment=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$API/start" | jq -r .deployment_uuid)
-   while :; do
-     status=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
-       "http://127.0.0.1:8000/api/v1/deployments/$deployment" | jq -r .status)
-     echo "$status"
-     case "$status" in queued|in_progress) sleep 5 ;; *) break ;; esac
-   done    # precisa terminar em finished
+   publicar    # precisa terminar em finished
    ```
 
 ### Conferência
@@ -387,7 +478,7 @@ curl -fsS -o /dev/null -w '%{http_code}\n' https://goblinshift.dev/readyz    # 2
 - **Heartbeat:** o check "alertas do OpenObserve" do healthchecks.io precisa receber um ping depois da publicação. O `gs-heartbeat` avalia na virada de cada hora; se a virada cair com o OpenObserve parado, ele pinga logo depois da partida. Sem ping até um minuto depois da próxima virada, a publicação não acabou: veja `sudo docker logs goblinshift-openobserve-1 2>&1 | grep -E 'SCHEDULER|ERROR' | tail`.
 - **Dados:** no OpenObserve, pelo túnel, um `SELECT count(*)` em `default` dos dias anteriores devolve linhas.
 
-Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima semana sem incidente e apague: `sudo shred -u "$(sudo awk '{print $2}' /var/backups/goblinshift-o2-backup.sha256)"` e `sudo rm /var/backups/goblinshift-o2-backup.sha256 /var/backups/goblinshift-o2-commit-anterior.txt`. Depois, religue o auto-deploy só se ele estava ligado antes do passo 1.
+Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima semana sem incidente e apague: `sudo shred -u "$(sudo awk '{print $2}' /var/backups/goblinshift-o2-backup.sha256)"` e `sudo rm /var/backups/goblinshift-o2-*`. Depois, religue o auto-deploy só se ele estava ligado antes do passo 1.
 
 ### Rollback
 
@@ -395,26 +486,33 @@ Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima s
 
 Restaurar perde a telemetria e as mudanças de alerta posteriores ao backup, e devolve as vulnerabilidades da v1.0.4. É solução de horas, não destino.
 
-Numa sessão nova, defina `TOKEN` e `API` como em [Antes do merge](#antes-do-merge). O resto vem dos arquivos gravados nos passos 1 e 5. Se o `sha256sum -c` falhar, pare: o backup não serve, e a saída é consertar para a frente com a v1.1.2.
+Numa sessão nova, repita as definições da [primeira etapa](#primeira-etapa-publicar-os-limites). O resto vem dos arquivos gravados nos passos 1 e 5. A função para antes de `docker stop`, `mv` e `tar` se o commit gravado não for fixo, se o valor for `HEAD` ou se o `sha256sum -c` falhar. Neste último caso o backup não serve, e a saída é consertar para a frente com a v1.1.2.
 
 ```bash
-soma=/var/backups/goblinshift-o2-backup.sha256
-backup=$(sudo awk '{print $2}' "$soma")
-anterior=$(sudo cat /var/backups/goblinshift-o2-commit-anterior.txt)
-sudo sha256sum -c "$soma"
+rollback_o2() {
+  local soma backup anterior telemetria
+  soma=/var/backups/goblinshift-o2-backup.sha256
+  telemetria=/srv/goblinshift/telemetry
+  anterior=$(sudo cat /var/backups/goblinshift-o2-commit-anterior.txt) || return 1
+  [[ "$anterior" =~ ^[0-9a-f]{7,40}$ ]] || { echo "commit fixo exigido, achei: $anterior"; return 1; }
+  backup=$(sudo awk '{print $2}' "$soma") || return 1
+  [ -n "$backup" ] || return 1
+  sudo sha256sum -c "$soma" || return 1
 
-sudo docker stop -t 60 goblinshift-openobserve-1
-cd /srv/goblinshift/telemetry
-sudo mv data "data.v1.1.2-$(date -u +%Y%m%dT%H%M%SZ)"    # para diagnóstico; apague se faltar espaço
-sudo tar -C /srv/goblinshift/telemetry --numeric-owner -xzpSf "$backup"
-sudo ls -ld data data/db
+  sudo docker stop -t 60 goblinshift-openobserve-1 || return 1
+  # Fica para diagnóstico; apague depois se faltar espaço.
+  sudo mv "$telemetria/data" "$telemetria/data.v1.1.2-$(date -u +%Y%m%dT%H%M%SZ)" || return 1
+  sudo tar -C "$telemetria" --numeric-owner -xzpSf "$backup" || return 1
+  sudo ls -ld "$telemetria/data" "$telemetria/data/db" || return 1
 
-curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"git_commit_sha\":\"$anterior\"}" "$API"
-deployment=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$API/start" | jq -r .deployment_uuid)
+  curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"git_commit_sha\":\"$anterior\"}" "$API" || return 1
+  publicar
+}
+rollback_o2
 ```
 
-Espere o deployment como no passo 6 e confira como acima, com a imagem antiga: o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. O commit anotado já tem os limites, então aqui também só o OpenObserve é recriado. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
+Confira como acima, com a imagem antiga: `publicar` termina em `finished`, o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. O commit gravado já tem os limites, então aqui também só o OpenObserve é recriado. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
 
 ### Ensaio local (2026-11-05)
 
