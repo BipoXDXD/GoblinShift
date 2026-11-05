@@ -237,9 +237,25 @@ O recurso "GoblinShift - Banco e observabilidade" do Coolify (`deploy/coolify/in
 A publicação faz `docker compose up -d`, que recria cada serviço cujo hash de configuração mudou. Por isso esta troca tem duas etapas. O recurso foi publicado pela última vez no commit `ff88bebb`, e depois dele o `infra.json` ganhou os tetos de memória, CPU e processos dos três serviços e os buffers do OpenObserve ([ADR 013](../../docs/adr/013-openobserve-telemetria.md#teto-de-memória-2026-10-28)). Esses acréscimos mudam o hash dos três, então publicar a v1.1.2 direto daquele commit recriaria também o Postgres.
 
 1. **[Primeira etapa](#primeira-etapa-publicar-os-limites), à parte:** publicar a `main` ainda com a v1.0.4, só para aplicar os limites. Ela recria os três serviços, com a queda do banco que isso traz, e não migra nada.
-2. **Segunda etapa, o resto desta seção:** trocar a imagem. Daí em diante a única diferença é a linha `image` do OpenObserve, e só ele é recriado.
+2. **Segunda etapa, o resto desta seção:** trocar a imagem. Daí em diante a única diferença é a linha `image` do OpenObserve, mas a publicação pelo Coolify ainda recria os três serviços (abaixo).
 
 Ensaiado com o Compose derivado do `infra.json`: do `ff88bebb` para o PR, o plano recria os três; da `main` com limites para o PR, o Postgres e o Collector ficam `Running`, com o mesmo `StartedAt` e o mesmo hash. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado dos dois e a conferência o compara.
+
+**A publicação pelo Coolify derruba o recurso inteiro.** Em 2026-11-05, a primeira etapa mostrou duas coisas que o ensaio com Compose não cobriu:
+
+- O Coolify remove os containers do recurso ("Removing old containers") antes de subir os novos, mesmo os que não mudaram. O Postgres, o Collector e o OpenObserve caem em toda publicação, e a API fica sem banco até eles voltarem.
+- Os três serviços usam `pull_policy: never`. A imagem de um container em execução pode não estar disponível depois que ele é removido: `postgres:18.6-trixie` sumiu, a publicação falhou com os containers já removidos, e a produção ficou cerca de 4 minutos fora, sem perda de dados, até `docker pull` da imagem fixada e nova publicação.
+
+Por isso, antes de **toda** publicação deste recurso, confira na VPS que cada imagem fixada no commit a publicar existe no disco, e baixe a que faltar:
+
+```bash
+git show <commit>:deploy/coolify/infra.json | jq -r '.services[].image' | while read -r imagem; do
+  sudo docker image inspect "$imagem" --format '{{.Id}}' >/dev/null 2>&1 || sudo docker pull -q "$imagem"
+  sudo docker image inspect "$imagem" --format "ok $imagem" || echo "FALTA $imagem"
+done
+```
+
+Qualquer `FALTA` impede a publicação. Durante a queda, o worker reinicia sozinho até o Postgres voltar.
 
 **Nunca use Stop nem Restart do recurso no painel:** eles agem sobre o recurso inteiro, inclusive o Postgres. Pare só o container do OpenObserve, como abaixo.
 
@@ -425,7 +441,7 @@ As variáveis precisam sair como `ZO_MEMORY_CACHE_MAX_SIZE=64`, `ZO_MEMORY_CACHE
 
 Depois do merge e com a release da CI terminada, porque os receptores não coordenam uma publicação manual concorrente ([ISOLATION.md](../coolify/release/ISOLATION.md)). Fora de horário de uso e sem Run em andamento: durante a troca os alertas ficam sem avaliação, e o Collector só segura o que chegar enquanto durarem as novas tentativas dele.
 
-4. **Anote o estado e renove o backup do banco.** Com o pré-requisito, o Postgres e o Collector não reiniciam. Se o Coolify recriar o Postgres por causa de um rótulo, a aplicação cai por instantes, e é melhor ter um backup de agora.
+4. **Anote o estado e renove o backup do banco.** Com o pré-requisito, o hash do Postgres e do Collector não muda, mas o Coolify os recria mesmo assim, e a aplicação cai por instantes. Confira antes as imagens, como no início desta seção.
 
    ```bash
    sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
@@ -456,7 +472,8 @@ Depois do merge e com a release da CI terminada, porque os receptores não coord
 ```bash
 sudo docker inspect -f '{{.Config.Image}} {{.State.Status}} reinícios={{.RestartCount}}' goblinshift-openobserve-1
 sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
-  goblinshift-postgres-1 goblinshift-otel-collector-1 | diff - ~/o2-antes.txt && echo 'sem reinício e mesmo hash'
+  goblinshift-postgres-1 goblinshift-otel-collector-1 | awk '{print $1, $3}' | diff - <(awk '{print $1, $3}' ~/o2-antes.txt) && echo 'mesmo hash'
+sudo docker exec goblinshift-postgres-1 pg_isready -U goblinshift -d goblinshift
 sudo docker logs goblinshift-openobserve-1 2>&1 | grep -E 'DB_SCHEMA|DB upgrade completed'
 sudo docker logs goblinshift-openobserve-1 2>&1 | grep -c 'has been applied'    # 36
 sudo docker logs --since 2m goblinshift-otel-collector-1 2>&1 | grep -c 'Exporting failed'   # 0, dois minutos depois da partida
@@ -523,7 +540,7 @@ Compose derivado do `deploy/coolify/infra.json`, com os mesmos tetos de memória
 | v1.0.4: `provision`, 23 mil spans (20 mil depois de uma reinicialização e 3 mil ainda no WAL) e notificações chegando | 16 alertas, 3 destinos, 1 template |
 | Publicar direto do `ff88bebb`, sem os limites | Plano recria Postgres, Collector e OpenObserve |
 | Publicar a `main` com a v1.0.4 (primeira etapa) | Recria os três e aplica os limites; hash novo nos três |
-| Trocar para a v1.1.2 no mesmo volume, já com os limites | Saudável em 3,3 s; 36 migrações em 0,13 s; WAL reaplicado; Postgres e Collector sem reinício |
+| Trocar para a v1.1.2 no mesmo volume, já com os limites | Saudável em 3,3 s; 36 migrações em 0,13 s; WAL reaplicado; hash do Postgres e do Collector sem mudança no Compose; o Coolify os recria mesmo assim |
 | Comparar antes e depois | 16 alertas iguais, só com os 3 campos novos; template e destinos iguais; os 23 mil spans, sem perda nem duplicata |
 | Agendador depois da troca | Alerta de teste a cada minuto seguiu notificando; `gs-heartbeat` notificou às 11:00:30 no horário local do ensaio; o Collector seguiu gravando métricas |
 | `provision` de novo na v1.1.2 | Tudo `atualizado`, nada criado ou removido; nada mudou |
