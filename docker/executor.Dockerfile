@@ -36,7 +36,10 @@ RUN apt-get update -q \
         ca-certificates $(if [ "$(dpkg --print-architecture)" = amd64 ]; then echo nasm; fi) \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+# Segunda origem: o ffmpeg.org já ficou fora do ar e travou CI e release. O Debian publica o mesmo
+# tarball, e o SHA-256 abaixo é o que garante a integridade, venha de onde vier.
+RUN curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 20 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+  || curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 20 -o ffmpeg.tar.xz "https://deb.debian.org/debian/pool/main/f/ffmpeg/ffmpeg_${FFMPEG_VERSION}.orig.tar.xz" \
  && echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c - \
  && tar -xJf ffmpeg.tar.xz --strip-components=1 \
  && rm ffmpeg.tar.xz
