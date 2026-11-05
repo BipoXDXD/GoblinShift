@@ -241,7 +241,9 @@ Os termos de uso (item 2) prometem bloquear e excluir em até 15 dias, contados 
 4. Confira, em até 24 h, que a conta sumiu; esperado, 0:
 
    ```bash
-   psql_gs -v id="$owner_id" -c "SELECT count(*) FROM app_user WHERE id = :'id';"
+   psql_gs -v id="$owner_id" <<'SQL'
+   SELECT count(*) FROM app_user WHERE id = :'id';
+   SQL
    ```
 
 5. Responda a quem avisou só que o pedido foi atendido, e apague a ficha quando a mensagem vencer. A auditoria fica 90 dias e o backup expira em até 31 dias.

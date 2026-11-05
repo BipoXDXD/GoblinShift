@@ -219,7 +219,7 @@ abertura pública. As fatias citadas no plano já estão na `main`, conferida em
 | Procedimento de CSAM | Plano das fatias 7 e 8, 2.6; `docs/runbooks/abuso.md`; J-20 nesta nota |
 | Sem varredura automatizada de conteúdo nesta versão | Plano 1.8 (Abuso e custo): as medidas listadas são limites, privacidade, expiração, bloqueio e termos; nenhuma é varredura |
 | Canal de contato para denúncias | Plano 1.8 (Abuso e custo); ADR 012 |
-| `DELETE /me` e `gs-admin request-deletion`: revoga, cancela e remove em até 24 h; backups expiram em até 31 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups); `src/goblinshift/entrypoints/api/me_delete.py` |
+| `DELETE /me` e `gs-admin request-deletion`: revoga, cancela e remove em até 24 h; backups expiram em até 31 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups); `src/goblinshift/entrypoints/api/me_delete.py`; `src/goblinshift/entrypoints/admin_cli.py` |
 | Remoção de metadados não é anonimização | Plano 1.2 (Image Forge, perfis de cor e metadados) |
 | Código sob Apache-2.0; a licença não cobre a arte nem os modelos 3D | `LICENSE`, `NOTICE`, `pyproject.toml` (`license`), `web/package.json` (`license`) |
 | Arte sob CC BY 4.0 na parte humana, exceto Jade e Fagulha | `docs/art/LICENSE-ART.md` |
@@ -262,7 +262,7 @@ o especificado para a abertura pública. Os caminhos citados estão na `main`, c
 | Tabela de retenção (1 h, 24 h, 48 h, 30 dias, 90 dias, 7 dias, 24 h, 30 dias) | Plano 1.7 (Retenção); `src/goblinshift/files/limits.py` (`INCOMPLETE_UPLOAD_TTL`, `READY_UPLOAD_TTL`, `ARTIFACT_TTL`, `USED_INPUT_TTL`); `src/goblinshift/runs/acceptance.py` (`IDEMPOTENCY_TTL`) |
 | Arquivos sem backup | Plano 3.8 (Backups) |
 | Hostinger, KVM 2, Campinas (SP) | Plano 3.8 (Servidor); ADR 011 |
-| Backup: dump diário, cifrado com `age` antes do envio, chave só de escrita, 30 dias por ciclo de vida do bucket, chave privada fora da VPS | `docs/adr/022-backup-externo.md`, `deploy/backup/pg-backup.sh`, `deploy/backup/goblinshift-pg-backup.timer`; plano 3.8; plano 7-8, 2.2 |
+| Backup: dump diário, cifrado com `age` antes do envio, chave só de escrita, até 31 dias por ciclo de vida do bucket, chave privada fora da VPS | `docs/adr/022-backup-externo.md`, `deploy/backup/pg-backup.sh`, `deploy/backup/goblinshift-pg-backup.timer`; plano 3.8; plano 7-8, 2.2 |
 | Backblaze B2 nos EUA | Decisão do dono em 2026-10-15: região US East. Plano 7-8, 2.2; ADR 022 (alvo B2). A região é configuração (`BACKUP_S3_REGION`), fora do repositório |
 | Eventos de segurança guardados 90 dias depois de `DELETE /me` | ADR 026, Consequências; `tests/test_schema_fatia_6.py` (apagar a conta mantém os eventos) |
 | Mensagens por e-mail guardadas 12 meses depois do fim da conversa | Decisão do dono em 2026-10-15 (documento de decisões jurídicas, J-6) |
@@ -270,7 +270,7 @@ o especificado para a abertura pública. Os caminhos citados estão na `main`, c
 | Restauração mensal decifrada em runner do GitHub Actions | `.github/workflows/restore-check.yml` (`runs-on: ubuntu-24.04`, `cron: "23 10 1 * *"`, serviço `postgres` efêmero) |
 | healthchecks.io recebe só pings | ADR 022, Decisão 4 |
 | Exclusão adiada de arquivos | Plano 1.1 (Exclusão) e 3.6 (Exclusão sempre adiada) |
-| `DELETE /me` e `gs-admin request-deletion`: revoga, cancela, remove em até 24 h; backup em até 31 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente), 3.8 (Backups) |
+| `DELETE /me` e `gs-admin request-deletion`: revoga, cancela, remove em até 24 h; backup em até 31 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente), 3.8 (Backups); `src/goblinshift/entrypoints/admin_cli.py` |
 | Acesso por `GET /me`, histórico e presets | Plano 1.8 (Acesso); `src/goblinshift/entrypoints/api/me.py` (id, nome, escopos, limites, consumo e aceite) |
 | Cookies `__Host-gs_session` e `__Host-gs_csrf` e seus atributos | Plano 3.6 (Sessão, CSRF) |
 | HTTPS, banco sem porta exposta, segredos em hash | Plano 3.8 (Proxy de borda, Rede) e 3.6 |

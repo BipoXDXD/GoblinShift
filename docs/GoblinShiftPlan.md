@@ -428,7 +428,7 @@ A disponibilidade é independente do estado histórico: uma execução pode cont
 <a id="s1-8"></a>
 ### 1.8. Serviço aberto: contas, abuso e privacidade
 
-**Contas:** qualquer conta Google (OpenID Connect) ou GitHub (OAuth 2.0) cria um usuário no primeiro login, sem convite. A identidade é `(issuer, subject)`: no Google, `https://accounts.google.com` + `sub`; no GitHub, `https://github.com` + o `id` numérico de `GET /user`, nunca o `login`, que pode mudar. A mesma pessoa entrando por Google e por GitHub tem duas contas; não há vínculo automático por e-mail. Detalhes do fluxo em [3.6](#s3-6).
+**Contas:** com o cadastro aberto ([ADR 023](adr/023-cadastro-fechado-ate-a-abertura.md)), qualquer conta Google (OpenID Connect) ou GitHub (OAuth 2.0) cria um usuário no primeiro login, sem convite. A identidade é `(issuer, subject)`: no Google, `https://accounts.google.com` + `sub`; no GitHub, `https://github.com` + o `id` numérico de `GET /user`, nunca o `login`, que pode mudar. A mesma pessoa entrando por Google e por GitHub tem duas contas; não há vínculo automático por e-mail. Detalhes do fluxo em [3.6](#s3-6).
 
 **Estado da conta:** `active` ou `blocked`. Bloquear é uma operação de administrador, feita por CLI no servidor (sem painel web na v1): revoga sessões e chaves, cancela a execução não terminal e impede novos logins da mesma identidade.
 

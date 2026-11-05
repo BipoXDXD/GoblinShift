@@ -56,8 +56,8 @@
 - Nome do dump com 128 bits aleatórios e logs sem o nome completo.
 - Restauração mensal num banco efêmero, com papel sem superusuário, e alerta externo
   (healthchecks.io) se o backup ou a restauração falharem.
-- Proposta da J-27: um diário de exclusões pseudonimizado, fora do dump, reaplicado depois
-  de toda restauração, para que a conta excluída não volte.
+- Depois de uma restauração, a data da cópia é publicada e o titular pode repetir o pedido de
+  exclusão: não há diário de exclusões fora do dump (J-27).
 
 ## 5. Conclusão
 

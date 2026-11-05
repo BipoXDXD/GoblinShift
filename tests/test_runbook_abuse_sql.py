@@ -51,8 +51,17 @@ def test_o_roteiro_tem_os_blocos_sql_esperados() -> None:
     blocks = psql_blocks(markdown)
 
     assert len(blocks) == markdown.count("<<'SQL'")
-    assert len(blocks) == 7  # os sete blocos do roteiro, contados à mão
+    assert len(blocks) == 8  # os oito blocos do roteiro, contados à mão
     assert all(variables for variables, _ in blocks)
+
+
+def test_nenhum_comando_interpola_variavel_do_psql_em_menos_c() -> None:
+    """O psql não interpola `:'nome'` em `-c`: só pela entrada padrão."""
+    lines = RUNBOOK.read_text(encoding="utf-8").splitlines()
+
+    broken = [line for line in lines if "psql_gs" in line and " -c " in line and ":'" in line]
+
+    assert broken == []
 
 
 @pytest.fixture
