@@ -66,14 +66,17 @@ def test_segue_o_workflow_da_release_pelo_nome_que_ele_tem() -> None:
 
 
 def test_so_a_release_bem_sucedida_da_main_deste_repositorio_dispara() -> None:
-    condition = " ".join(journey()["if"].split())
-
-    assert "github.ref == 'refs/heads/main'" in condition
-    assert "github.event.workflow_run.conclusion == 'success'" in condition
-    assert "github.event.workflow_run.head_branch == 'main'" in condition
-    assert "github.event.workflow_run.head_repository.full_name == github.repository" in condition
-    # O coolify.yml também roda em PR; um fork com branch `main` passaria pelo filtro `branches`.
-    assert "github.event.workflow_run.event != 'pull_request'" in condition
+    # Expressão inteira: um `||` a mais abriria o job com todas as condições ainda presentes. O
+    # `event` existe porque o coolify.yml também roda em PR, e um fork com branch `main` passaria
+    # pelo filtro `branches`.
+    assert " ".join(journey()["if"].split()) == (
+        "github.ref == 'refs/heads/main' && "
+        "(github.event_name != 'workflow_run' || "
+        "(github.event.workflow_run.conclusion == 'success' && "
+        "github.event.workflow_run.event != 'pull_request' && "
+        "github.event.workflow_run.head_branch == 'main' && "
+        "github.event.workflow_run.head_repository.full_name == github.repository))"
+    )
 
 
 def test_agenda_fora_do_domingo_da_aceitacao_que_para_o_worker() -> None:

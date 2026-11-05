@@ -19,8 +19,16 @@ from typing import Any
 
 REQUIRED_SCOPES = frozenset({"files:read", "files:write", "runs:read", "runs:write"})
 JOURNEY_RUNS = 4
-# Teto folgado para entradas e saídas das quatro execuções: as entradas somam cerca de 1,6 MiB.
-JOURNEY_BYTES = 8 * 1024 * 1024
+# Teto folgado para as entradas das quatro execuções, que somam cerca de 1,6 MiB, e para o que elas
+# publicam.
+JOURNEY_INPUT_BYTES = 8 * 1024 * 1024
+# Cópia de goblinshift.runs.acceptance.RUN_OUTPUT_CEILING_BYTES (1008 MiB): este script só usa a
+# biblioteca padrão, e tests/test_e2e_quota_check.py compara os dois valores. A aceitação reserva
+# esse teto por Run; como a conta só tem uma Run ativa, basta folga para um de cada vez.
+RUN_OUTPUT_CEILING_BYTES = 1_056_964_608
+# Só cobre o pool da conta: o pool global de 20 GiB não aparece no `GET /me`, e um pool global
+# cheio ainda recusa a Run no meio da jornada.
+JOURNEY_STORAGE_BYTES = RUN_OUTPUT_CEILING_BYTES + JOURNEY_INPUT_BYTES
 
 
 def shortfall(me: dict[str, Any]) -> str | None:
@@ -30,9 +38,9 @@ def shortfall(me: dict[str, Any]) -> str | None:
         return f"execução ativa na conta ({usage['active_run_id']})"
     if usage["runs_last_24h"] + JOURNEY_RUNS > limits["runs_per_24h"]:
         return f"{usage['runs_last_24h']} de {limits['runs_per_24h']} execuções em 24 h"
-    if usage["input_bytes_last_24h"] + JOURNEY_BYTES > limits["input_bytes_per_24h"]:
+    if usage["input_bytes_last_24h"] + JOURNEY_INPUT_BYTES > limits["input_bytes_per_24h"]:
         return f"{usage['input_bytes_last_24h']} bytes de entrada em 24 h"
-    if usage["storage_reserved_bytes"] + JOURNEY_BYTES > limits["storage_bytes"]:
+    if usage["storage_reserved_bytes"] + JOURNEY_STORAGE_BYTES > limits["storage_bytes"]:
         return f"{usage['storage_reserved_bytes']} bytes de armazenamento reservados"
     return None
 
