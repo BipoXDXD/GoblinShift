@@ -12,4 +12,6 @@ Os quatro serviços contínuos da aplicação têm healthcheck no Compose. A API
 
 Manter backups e restauração verificada antes de atualizar uma versão. Não apontar tráfego para a origem com dados antigos após o destino aceitar escritas. Uma reversão precisa primeiro preservar e transferir o estado novo.
 
+Os serviços de monitoramento e backup do host ficam fora do Coolify; o que foi corrigido neles está em [Unidades auxiliares do host](../../docs/runbooks/unidades-do-host.md).
+
 A configuração do gateway (`Caddyfile` e `sites/`) não passa pela release da CI, que só troca imagens: publicar `sites/`, publicar o `Caddyfile` e atualizar a lista de faixas da Cloudflare seguem os passos do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md).
