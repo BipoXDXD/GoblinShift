@@ -1,8 +1,21 @@
 goblinshift.dev {
- reverse_proxy 172.31.0.4:80 {
-  header_up X-Forwarded-For {client_ip}
-  lb_try_duration 5s
-  lb_try_interval 250ms
+ # Só uma conexão das faixas da Cloudflare informa o cliente, e num cabeçalho com jeito de IP.
+ # Escopo de site: trusted_proxies é por servidor e mudaria os outros sites da 443 (ADR 041).
+ @cloudflare {
+  import cloudflare-ips.conf
+  header_regexp CF-Connecting-IP ^[0-9A-Fa-f:.]+$
+ }
+ # `route` executa na ordem escrita, sem depender da ordenação de diretivas do Caddy: o valor
+ # padrão vem antes da troca pelo IP informado.
+ route {
+  vars client_address {remote_host}
+  vars @cloudflare client_address {header.CF-Connecting-IP}
+  reverse_proxy 172.31.0.4:80 {
+   header_up X-Forwarded-For {vars.client_address}
+   header_up -CF-Connecting-IP
+   lb_try_duration 5s
+   lb_try_interval 250ms
+  }
  }
 }
 www.goblinshift.dev {

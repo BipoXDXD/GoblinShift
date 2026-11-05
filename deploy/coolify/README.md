@@ -11,3 +11,5 @@ Segredos de interpolação são configurados como variáveis privadas no Coolify
 Os quatro serviços contínuos da aplicação têm healthcheck no Compose. A API verifica a prontidão do banco e do schema; o Nginx consulta `/readyz` pelo próprio proxy; worker e manutenção verificam o processo esperado, uma consulta somente leitura no banco e uma consulta de status ao executor-ctl, sem criar tentativas. Assim o status agregado no Coolify reflete as dependências operacionais. Migração e inicialização de armazenamento usam `restart: no` e ficam fora do agregado por serem tarefas de execução única.
 
 Manter backups e restauração verificada antes de atualizar uma versão. Não apontar tráfego para a origem com dados antigos após o destino aceitar escritas. Uma reversão precisa primeiro preservar e transferir o estado novo.
+
+A configuração do gateway (`Caddyfile` e `sites/`) não passa pela release da CI, que só troca imagens: publicar e atualizar a lista de faixas da Cloudflare seguem os passos do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md).

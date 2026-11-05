@@ -3,8 +3,9 @@
 # que termina o TLS (ADR 014).
 
 # IP real do cliente: só o proxy de borda (IP fixo na rede edge) pode informá-lo. A borda troca
-# o X-Forwarded-For recebido da internet pelo IP de quem conectou, então o valor é um IP só. De
-# qualquer outra origem o cabeçalho é ignorado e vale o IP de quem conectou. Daqui em diante
+# o X-Forwarded-For recebido da internet pelo IP que ela resolveu para o cliente (o que a
+# Cloudflare informa, se a conexão veio das faixas dela; ADR 041), então o valor é um IP só, v4 ou
+# v6. De qualquer outra origem o cabeçalho é ignorado e vale o IP de quem conectou. Daqui em diante
 # $remote_addr é o cliente; $realip_remote_addr continua sendo quem conectou ao Nginx.
 set_real_ip_from 172.31.0.2;
 real_ip_header X-Forwarded-For;

@@ -55,6 +55,12 @@ def test_api_recebe_so_o_ip_do_cliente_e_nao_a_cadeia(stack: NginxLogs) -> None:
     assert response.body == "203.0.113.8"
 
 
+def test_api_recebe_o_ipv6_do_cliente_informado_pela_borda(stack: NginxLogs) -> None:
+    response = stack.fetch(stack.edge, API_ECHO, "X-Forwarded-For: 2001:db8:abcd:12::77")
+
+    assert response.body == "2001:db8:abcd:12::77"
+
+
 def test_ip_informado_por_quem_nao_e_a_borda_e_ignorado(stack: NginxLogs) -> None:
     response = stack.fetch(stack.other, API_ECHO, "X-Forwarded-For: 203.0.113.9")
 
