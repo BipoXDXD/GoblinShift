@@ -466,6 +466,57 @@ def test_id_token_dentro_da_folga_de_relogio_e_aceito(
     assert login(client, fake, "google").headers["location"] == "/"
 
 
+# Instante fixo do relógio da validação (2027-01-15T08:00:00Z) e a folga padrão do Authlib, a
+# que `parse_id_token` usa: o token vale enquanto `exp > agora - folga`.
+CLOCK_NOW = 1_800_000_000
+ID_TOKEN_LEEWAY_SECONDS = 120
+
+
+@pytest.fixture
+def fixed_validation_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("joserfc._rfc7519.claims._generate_now", lambda: CLOCK_NOW)
+
+
+@pytest.mark.usefixtures("fixed_validation_clock")
+@pytest.mark.parametrize(
+    "exp",
+    [CLOCK_NOW, CLOCK_NOW - ID_TOKEN_LEEWAY_SECONDS + 1],
+    ids=["exp-igual-a-agora", "ultimo-segundo-da-folga"],
+)
+def test_id_token_ate_o_ultimo_segundo_da_folga_e_aceito(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    login_app: FastAPI,
+    exp: int,
+) -> None:
+    open_signup(login_app)
+    fake.claims_patch = {"iat": CLOCK_NOW - 3600, "exp": exp}
+
+    assert login(client, fake, "google").headers["location"] == "/"
+    assert len(sessions.started) == 1
+
+
+@pytest.mark.usefixtures("fixed_validation_clock")
+@pytest.mark.parametrize(
+    "exp",
+    [CLOCK_NOW - ID_TOKEN_LEEWAY_SECONDS, CLOCK_NOW - ID_TOKEN_LEEWAY_SECONDS - 1],
+    ids=["exp-igual-ao-limite-da-folga", "um-segundo-alem-da-folga"],
+)
+def test_id_token_vencido_no_limite_da_folga_e_recusado(
+    client: TestClient,
+    fake: FakeProviders,
+    sessions: StoredSessions,
+    factory: sessionmaker[Session],
+    login_app: FastAPI,
+    exp: int,
+) -> None:
+    open_signup(login_app)
+    fake.claims_patch = {"iat": CLOCK_NOW - 3600, "exp": exp}
+
+    assert_nothing_logged_in(factory, sessions, login(client, fake, "google"))
+
+
 def test_emissor_sem_https_e_aceito_e_normalizado(
     client: TestClient,
     fake: FakeProviders,
