@@ -67,6 +67,11 @@ ENV PYTHONPATH=/opt/goblinshift \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Sobe só o apt até a base oficial trazer a correção da CVE-2026-109518 (fixa em 3.0.4), que
+# barra a release no Trivy. Nada usa o apt em tempo de execução.
+RUN apt-get update -qq \
+ && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 \
+ && rm -rf /var/lib/apt/lists/*
 # O pip não é usado em tempo de execução; sai para não sobrar um instalador dentro do sandbox.
 # 61001 é o GID do grupo gs-exec do host, dono da área de trabalho montada em /work.
 RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
