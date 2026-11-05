@@ -12,7 +12,7 @@ COPY web/ ./
 COPY docs/legal/ /docs/legal/
 RUN npm run build
 
-FROM nginx:1.30.5@sha256:9bf97bd7714f5e24c1ccd545ecb9eb5435cb6d109c97cebb15e7e455e0239edb
+FROM nginx:1.30.6@sha256:f12e4e280502f79dae4488c9f677ab3ebe8a7079818bbfbf3242f236bac64d34
 # Fixed Debian security updates; the scanned image digest is the release boundary.
 RUN apt-get update -q \
  && apt-get install -yq --no-install-recommends --only-upgrade \
