@@ -234,7 +234,12 @@ Registre as duas notificações (horário e canal) no plano ao fechar a fatia.
 
 O recurso "GoblinShift - Banco e observabilidade" do Coolify (`deploy/coolify/infra.json`) tem o Postgres, o Collector e o OpenObserve. A release da CI não o publica: o workflow e o receptor só trocam imagens do recurso da aplicação ([release/README.md](../coolify/release/README.md)). A imagem é fixada por digest e tem `pull_policy: never`, então ela precisa chegar à VPS antes da publicação.
 
-A publicação faz `docker compose up -d`, que recria só o serviço cuja definição mudou. No ensaio local, com o Compose derivado do `infra.json`, o Postgres e o Collector não reiniciaram. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado do Postgres e a conferência o compara.
+A publicação faz `docker compose up -d`, que recria cada serviço cujo hash de configuração mudou. Por isso esta troca tem duas etapas. O recurso foi publicado pela última vez no commit `ff88bebb`, e depois dele o `infra.json` ganhou os tetos de memória, CPU e processos dos três serviços e os buffers do OpenObserve ([ADR 013](../../docs/adr/013-openobserve-telemetria.md#teto-de-memória-2026-10-28)). Esses acréscimos mudam o hash dos três, então publicar a v1.1.2 direto daquele commit recriaria também o Postgres.
+
+1. **Primeira etapa, à parte:** publicar a `main` ainda com a v1.0.4, só para aplicar os limites. Ela recria os três serviços, com a queda do banco que isso traz, e não migra nada.
+2. **Segunda etapa, esta seção:** trocar a imagem. Daí em diante a única diferença é a linha `image` do OpenObserve, e só ele é recriado.
+
+Ensaiado com o Compose derivado do `infra.json`: do `ff88bebb` para o PR, o plano recria os três; da `main` com limites para o PR, o Postgres e o Collector ficam `Running`, com o mesmo `StartedAt` e o mesmo hash. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado dos dois e a conferência o compara.
 
 **Nunca use Stop nem Restart do recurso no painel:** eles agem sobre o recurso inteiro, inclusive o Postgres. Pare só o container do OpenObserve, como abaixo.
 
@@ -266,11 +271,41 @@ TOKEN=$(sudo cat /etc/coolify-release/api-token)
 API=http://127.0.0.1:8000/api/v1/applications/$UUID
 ```
 
-1. **Auto-deploy desligado.** Com ele ligado, o merge publica sem backup. Rode a leitura abaixo e confira `is_auto_deploy_enabled` em `settings`. Se estiver `true`, desligue antes do merge, com o mesmo `PATCH` do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md#antes-do-merge). Se não der para saber, não faça o merge. Anote `git_commit_sha`: é preciso no passo 6. A ordem importa: sem a imagem na VPS, uma publicação falha sem tocar no container atual (ensaiado com o Compose local), mas o passo 2 tira essa proteção.
+**Pré-requisito: a primeira etapa já publicada.** Sem ela, a publicação abaixo recria o Postgres. Confira nos containers em execução, antes do merge:
+
+```bash
+sudo docker inspect -f '{{.Name}} {{.HostConfig.Memory}} {{.HostConfig.NanoCpus}} {{.HostConfig.PidsLimit}}' \
+  goblinshift-postgres-1 goblinshift-otel-collector-1 goblinshift-openobserve-1
+# Só as variáveis de memória: o ambiente completo do container tem a senha do root.
+sudo docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' goblinshift-openobserve-1 \
+  | grep -E '^ZO_(MEMORY_CACHE_MAX_SIZE|MEMORY_CACHE_DATAFUSION_MAX_SIZE|MEM_TABLE_MAX_SIZE)='
+sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
+  goblinshift-postgres-1 goblinshift-otel-collector-1 goblinshift-openobserve-1
+```
+
+| Container | Memória | `NanoCpus` | Processos |
+|---|---|---|---|
+| `goblinshift-postgres-1` | 536870912 | 1000000000 | 256 |
+| `goblinshift-otel-collector-1` | 268435456 | 250000000 | 64 |
+| `goblinshift-openobserve-1` | 536870912 | 500000000 | 128 |
+
+As variáveis precisam sair como `ZO_MEMORY_CACHE_MAX_SIZE=64`, `ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE=128` e `ZO_MEM_TABLE_MAX_SIZE=64`. Sem limite, o `docker inspect` mostra `0 0 <no value>`. O hash dos três precisa ser diferente do anotado antes da primeira etapa, e o `StartedAt` precisa ser posterior a ela. O hash inclui os rótulos do Coolify, então não dá para compará-lo com um calculado do repositório. Se algo não bater, pare: faça a primeira etapa antes do merge deste PR.
+
+1. **Auto-deploy desligado.** Com ele ligado, o merge publica sem backup. Rode a leitura abaixo e confira `is_auto_deploy_enabled` em `settings`. Se estiver `true`, desligue antes do merge, com o mesmo `PATCH` do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md#antes-do-merge). Se não der para saber, não faça o merge. A ordem importa: sem a imagem na VPS, uma publicação falha sem tocar no container atual (ensaiado com o Compose local), mas o passo 2 tira essa proteção.
+
+   Guarde em arquivo o `git_commit_sha`: é o destino do rollback, e precisa sobreviver a uma sessão nova. Se o valor for `HEAD`, grave no lugar dele o commit publicado na primeira etapa.
 
    ```bash
    curl -fsS -H "Authorization: Bearer $TOKEN" "$API" \
      | jq '{git_branch, git_commit_sha, docker_compose_location, watch_paths, settings}'
+   curl -fsS -H "Authorization: Bearer $TOKEN" "$API" | jq -r .git_commit_sha \
+     | sudo tee /var/backups/goblinshift-o2-commit-anterior.txt
+   ```
+
+   Num clone do repositório, a diferença entre esse commit e o que será publicado precisa ser só a linha `image` do OpenObserve. Qualquer outra linha muda o hash de outro serviço:
+
+   ```bash
+   git diff <commit anotado> <commit a publicar> -- deploy/coolify/infra.json docker/otel-collector/config.yaml
    ```
 
 2. **Imagem na VPS, e a antiga preservada.** Não rode `docker image prune` até encerrar a janela de rollback.
@@ -281,9 +316,10 @@ API=http://127.0.0.1:8000/api/v1/applications/$UUID
    sudo docker image inspect "$OLD" --format '{{.Id}}'                     # precisa existir
    ```
 
-3. **Espaço para o backup.** Ele fica fora do filesystem da telemetria, que tem 10 GiB fixos e é o que está sendo salvo.
+3. **Espaço para o backup, em outro filesystem.** A telemetria tem 10 GiB fixos e é o que está sendo salvo, então o backup não pode ficar nela. As duas linhas do `df --output=target` precisam ser diferentes; iguais significam que `/srv/goblinshift/telemetry` não está montado ou que `/var/backups` foi parar nele.
 
    ```bash
+   df --output=target /var/backups /srv/goblinshift/telemetry
    sudo du -sh /srv/goblinshift/telemetry/data
    df -h /var/backups
    ```
@@ -292,23 +328,24 @@ API=http://127.0.0.1:8000/api/v1/applications/$UUID
 
 Depois do merge e com a release da CI terminada, porque os receptores não coordenam uma publicação manual concorrente ([ISOLATION.md](../coolify/release/ISOLATION.md)). Fora de horário de uso e sem Run em andamento: durante a troca os alertas ficam sem avaliação, e o Collector só segura o que chegar enquanto durarem as novas tentativas dele.
 
-4. **Anote o estado e renove o backup do banco.** Se o Coolify recriar o Postgres por causa de um rótulo, a aplicação cai por instantes, e é melhor ter um backup de agora.
+4. **Anote o estado e renove o backup do banco.** Com o pré-requisito, o Postgres e o Collector não reiniciam. Se o Coolify recriar o Postgres por causa de um rótulo, a aplicação cai por instantes, e é melhor ter um backup de agora.
 
    ```bash
-   sudo docker inspect -f '{{.Name}} {{.State.StartedAt}}' \
+   sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
      goblinshift-postgres-1 goblinshift-otel-collector-1 | tee ~/o2-antes.txt
    sudo systemctl start goblinshift-pg-backup.service
    sudo journalctl -u goblinshift-pg-backup -n 5 --no-pager
    ```
 
-5. **Pare só o OpenObserve e salve o volume.** Com ele de pé, o SQLite e o WAL dão uma cópia inconsistente. O `-S` é obrigatório: cada WAL é um arquivo esparso de 512 MiB, e sem ele a restauração ocupa 2,6 GiB onde o volume tinha 65 MiB (medido), num filesystem de 10 GiB. O arquivo tem as URLs dos destinos, que são segredo: fica só leitura do root, e sai da VPS só cifrado.
+5. **Pare só o OpenObserve e salve o volume.** Com ele de pé, o SQLite e o WAL dão uma cópia inconsistente. O `-S` é obrigatório: cada WAL é um arquivo esparso de 512 MiB, e sem ele a restauração ocupa 2,6 GiB onde o volume tinha 65 MiB (medido), num filesystem de 10 GiB. O arquivo tem as URLs dos destinos, que são segredo: fica só leitura do root, e sai da VPS só cifrado. O arquivo `.sha256` guarda o caminho e a soma juntos, para o rollback funcionar numa sessão nova.
 
    ```bash
    sudo docker stop -t 60 goblinshift-openobserve-1
    backup=/var/backups/goblinshift-telemetry-v1.0.4-$(date -u +%Y%m%dT%H%M%SZ).tar.gz
    sudo sh -c "umask 077 && tar -C /srv/goblinshift/telemetry --numeric-owner -czSf '$backup' data"
    sudo tar -tzf "$backup" | grep '^data/db/metadata.sqlite'      # o banco precisa aparecer
-   sudo sha256sum "$backup"
+   sudo sha256sum "$backup" | sudo tee /var/backups/goblinshift-o2-backup.sha256
+   sudo sha256sum -c /var/backups/goblinshift-o2-backup.sha256
    ```
 
 6. **Publique.** Se o `git_commit_sha` do passo 1 for um commit fixo e não `HEAD`, aponte antes para o commit de merge: `curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"git_commit_sha":"<commit de merge>"}' "$API"`.
@@ -327,8 +364,8 @@ Depois do merge e com a release da CI terminada, porque os receptores não coord
 
 ```bash
 sudo docker inspect -f '{{.Config.Image}} {{.State.Status}} reinícios={{.RestartCount}}' goblinshift-openobserve-1
-sudo docker inspect -f '{{.Name}} {{.State.StartedAt}}' \
-  goblinshift-postgres-1 goblinshift-otel-collector-1 | diff - ~/o2-antes.txt && echo 'sem reinício'
+sudo docker inspect -f '{{.Name}} {{.State.StartedAt}} {{index .Config.Labels "com.docker.compose.config-hash"}}' \
+  goblinshift-postgres-1 goblinshift-otel-collector-1 | diff - ~/o2-antes.txt && echo 'sem reinício e mesmo hash'
 sudo docker logs goblinshift-openobserve-1 2>&1 | grep -E 'DB_SCHEMA|DB upgrade completed'
 sudo docker logs goblinshift-openobserve-1 2>&1 | grep -c 'has been applied'    # 36
 sudo docker logs --since 2m goblinshift-otel-collector-1 2>&1 | grep -c 'Exporting failed'   # 0, dois minutos depois da partida
@@ -350,7 +387,7 @@ curl -fsS -o /dev/null -w '%{http_code}\n' https://goblinshift.dev/readyz    # 2
 - **Heartbeat:** o check "alertas do OpenObserve" do healthchecks.io precisa receber um ping depois da publicação. O `gs-heartbeat` avalia na virada de cada hora; se a virada cair com o OpenObserve parado, ele pinga logo depois da partida. Sem ping até um minuto depois da próxima virada, a publicação não acabou: veja `sudo docker logs goblinshift-openobserve-1 2>&1 | grep -E 'SCHEDULER|ERROR' | tail`.
 - **Dados:** no OpenObserve, pelo túnel, um `SELECT count(*)` em `default` dos dias anteriores devolve linhas.
 
-Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima semana sem incidente e apague: `sudo shred -u "$backup"`. Depois, religue o auto-deploy só se ele estava ligado antes do passo 1.
+Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima semana sem incidente e apague: `sudo shred -u "$(sudo awk '{print $2}' /var/backups/goblinshift-o2-backup.sha256)"` e `sudo rm /var/backups/goblinshift-o2-backup.sha256 /var/backups/goblinshift-o2-commit-anterior.txt`. Depois, religue o auto-deploy só se ele estava ligado antes do passo 1.
 
 ### Rollback
 
@@ -358,19 +395,26 @@ Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima s
 
 Restaurar perde a telemetria e as mudanças de alerta posteriores ao backup, e devolve as vulnerabilidades da v1.0.4. É solução de horas, não destino.
 
+Numa sessão nova, defina `TOKEN` e `API` como em [Antes do merge](#antes-do-merge). O resto vem dos arquivos gravados nos passos 1 e 5. Se o `sha256sum -c` falhar, pare: o backup não serve, e a saída é consertar para a frente com a v1.1.2.
+
 ```bash
+soma=/var/backups/goblinshift-o2-backup.sha256
+backup=$(sudo awk '{print $2}' "$soma")
+anterior=$(sudo cat /var/backups/goblinshift-o2-commit-anterior.txt)
+sudo sha256sum -c "$soma"
+
 sudo docker stop -t 60 goblinshift-openobserve-1
 cd /srv/goblinshift/telemetry
 sudo mv data "data.v1.1.2-$(date -u +%Y%m%dT%H%M%SZ)"    # para diagnóstico; apague se faltar espaço
-sudo sh -c "sha256sum '$backup' && tar -C /srv/goblinshift/telemetry --numeric-owner -xzpSf '$backup'"
+sudo tar -C /srv/goblinshift/telemetry --numeric-owner -xzpSf "$backup"
 sudo ls -ld data data/db
-# Volte o recurso para o commit anterior ao merge, ou reverta o PR e use o commit do revert.
+
 curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"git_commit_sha":"<commit anterior ao merge>"}' "$API"
+  -d "{\"git_commit_sha\":\"$anterior\"}" "$API"
 deployment=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$API/start" | jq -r .deployment_uuid)
 ```
 
-Espere o deployment como no passo 6 e confira como acima, com a imagem antiga: o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
+Espere o deployment como no passo 6 e confira como acima, com a imagem antiga: o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. O commit anotado já tem os limites, então aqui também só o OpenObserve é recriado. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
 
 ### Ensaio local (2026-11-05)
 
@@ -379,7 +423,9 @@ Compose derivado do `deploy/coolify/infra.json`, com os mesmos tetos de memória
 | Passo | Resultado |
 |---|---|
 | v1.0.4: `provision`, 23 mil spans (20 mil depois de uma reinicialização e 3 mil ainda no WAL) e notificações chegando | 16 alertas, 3 destinos, 1 template |
-| Trocar para a v1.1.2 no mesmo volume | Saudável em 3,3 s; 36 migrações em 0,13 s; WAL reaplicado; Postgres e Collector sem reinício |
+| Publicar direto do `ff88bebb`, sem os limites | Plano recria Postgres, Collector e OpenObserve |
+| Publicar a `main` com a v1.0.4 (primeira etapa) | Recria os três e aplica os limites; hash novo nos três |
+| Trocar para a v1.1.2 no mesmo volume, já com os limites | Saudável em 3,3 s; 36 migrações em 0,13 s; WAL reaplicado; Postgres e Collector sem reinício |
 | Comparar antes e depois | 16 alertas iguais, só com os 3 campos novos; template e destinos iguais; os 23 mil spans, sem perda nem duplicata |
 | Agendador depois da troca | Alerta de teste a cada minuto seguiu notificando; `gs-heartbeat` notificou às 11:00:30 no horário local do ensaio; o Collector seguiu gravando métricas |
 | `provision` de novo na v1.1.2 | Tudo `atualizado`, nada criado ou removido; nada mudou |
