@@ -196,6 +196,16 @@ def test_o_ffmpeg_completo_chega_antes_das_fixtures_de_video() -> None:
     assert step_index(install["name"]) < step_index("Media Mill")
 
 
+def test_o_apt_nao_depende_do_espelho_do_azure_nem_consome_o_timeout_do_job() -> None:
+    install = step_named("Instalar o FFmpeg completo (vídeos sintéticos do Media Mill)")
+    run = install["run"]
+
+    assert run.index("azure.archive.ubuntu.com") < run.index("apt-get update")
+    assert "xargs -0 -r sudo sed -i" in run
+    assert "/archive.ubuntu.com/g" in run
+    assert install["timeout-minutes"] == 10
+
+
 def test_o_aviso_roda_mesmo_com_a_jornada_quebrada_ou_estourada() -> None:
     assert notify()["needs"] == ["journey"]
     assert notify()["if"] == "always() && needs.journey.result != 'skipped'"
