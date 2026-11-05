@@ -231,7 +231,7 @@ def test_lista_so_vale_no_site_do_goblinshift() -> None:
         assert "CF-Connecting-IP" not in text, path
 
 
-def test_outros_sites_e_opcoes_globais_ficam_como_estavam() -> None:
+def test_site_do_stillon_fica_como_estava() -> None:
     assert (SITES / "stillon.tech.caddy").read_text() == (
         "stillon.tech {\n"
         " reverse_proxy 172.31.0.3:80 {\n"
@@ -244,7 +244,13 @@ def test_outros_sites_e_opcoes_globais_ficam_como_estavam() -> None:
         " redir https://stillon.tech{uri} 308\n"
         "}\n"
     )
-    assert "trusted_proxies static 179.197.70.102/32\n" in (COOLIFY / "Caddyfile").read_text()
+
+
+def test_a_vps_aposentada_nao_e_mais_proxy_confiavel() -> None:
+    caddyfile = (COOLIFY / "Caddyfile").read_text()
+
+    assert RETIRED_VPS not in caddyfile
+    assert "trusted_proxies static 172.16.1.6/32\n" in caddyfile
 
 
 def _address_pattern() -> re.Pattern[str]:
@@ -334,6 +340,13 @@ def test_ip_forjado_de_fora_da_faixa_e_ignorado(gateway: Gateway, source: str, h
     received = gateway.echo(GOBLINSHIFT, source, f"{header}: {FORGED}")
 
     assert received["xff"] == source
+
+
+@pytest.mark.gateway
+def test_x_forwarded_for_vindo_da_vps_aposentada_nao_vale_no_stillon(gateway: Gateway) -> None:
+    received = gateway.echo(STILLON, RETIRED_VPS, f"X-Forwarded-For: {FORGED}")
+
+    assert received["xff"] == RETIRED_VPS
 
 
 @pytest.mark.gateway

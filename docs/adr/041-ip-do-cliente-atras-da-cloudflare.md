@@ -18,7 +18,7 @@ O conserto tem de cumprir três condições:
 
 | Alternativa | Prós | Contras |
 |-------------|------|---------|
-| **A. `trusted_proxies` global** com as faixas e `client_ip_headers CF-Connecting-IP` no servidor da 443 | É o recurso próprio do Caddy; `{client_ip}` e os logs do gateway passam a ter o cliente | `trusted_proxies` é opção de servidor, não de site: vale para todos os sites da 443 e muda o que o StillOn recebe. Exige mudar o `Caddyfile` e decidir nos dois repositórios (ADR 014). O arquivo é um bind de arquivo único, então uma troca por renomeação só chega ao container recriando-o, com todos os sites juntos |
+| **A. `trusted_proxies` global** com as faixas e `client_ip_headers CF-Connecting-IP` no servidor da 443 | É o recurso próprio do Caddy; `{client_ip}` e os logs do gateway passam a ter o cliente | `trusted_proxies` é opção de servidor, não de site: vale para todos os sites da 443 e muda o que o StillOn recebe. Exige mudar o `Caddyfile` e decidir nos dois repositórios (ADR 014). O arquivo é um bind de arquivo único, então uma troca por renomeação não chega ao processo em execução; aplicar exige [copiar para dentro do container](#mudança-no-caddyfile) ou recriá-lo, com todos os sites juntos |
 | **B. Matcher `remote_ip` no site do GoblinShift** (escolhida) | Escopo por site: só `goblinshift.dev` lê a lista. `Caddyfile` e `gateway.json` ficam intactos. Publica com `caddy reload`, sem recriar o container. O site deixa de depender do `trusted_proxies` global, inclusive do IP aposentado | Mais linhas no site. `{client_ip}` e o log do próprio Caddy continuam com a borda. Um segundo site que queira o mesmo repete o bloco |
 | **C. Resolver no Nginx** (`set_real_ip_from` com as faixas e `real_ip_header CF-Connecting-IP`) | Fica no código do projeto e publica com a imagem | Não funciona sozinho: o par do Nginx é sempre o gateway, nunca a Cloudflare. Quem valida a origem precisa ver a conexão de origem, e só o gateway vê. Sem isso, qualquer um forjaria o cabeçalho |
 | **D. Módulo `caddy-cloudflare-ip`** | Faixas atualizadas sozinhas | Exige build próprio do Caddy em lugar da imagem oficial por digest, atualiza a confiança sem revisão e continua global como A |
@@ -32,7 +32,7 @@ Alternativa B. Em `deploy/coolify/sites/goblinshift.dev.caddy`, o matcher `@clou
 - **`CF-Connecting-IP`, não `X-Forwarded-For`:** é um valor só, escrito pela Cloudflare. O `X-Forwarded-For` é uma cadeia que começa no que o cliente mandou.
 - **`vars_regexp` sobre o placeholder, não `header_regexp`:** o `header_regexp` aceita o pedido se qualquer linha do cabeçalho casar, e o valor repetido chegaria inteiro ao Nginx. O placeholder junta as linhas com vírgula, e a regex recusa esse valor.
 - **Regex estrita de endereço, não classe de caracteres:** `....` ou `deadbeef` passariam por uma classe, o Nginx não os entenderia e o `$remote_addr` viraria o gateway, juntando quem os enviasse num só balde do `limit_req`. Formas que a Cloudflare não envia, como `::ffff:192.0.2.1`, também são recusadas e caem no caso de quem conectou.
-- **`{remote_host}`, não `{client_ip}`:** `{client_ip}` obedece ao `trusted_proxies` global, e nele ainda está o IP aposentado, de onde um `X-Forwarded-For` forjado seria aceito.
+- **`{remote_host}`, não `{client_ip}`:** `{client_ip}` obedece ao `trusted_proxies` global, que na data desta decisão ainda tinha o IP aposentado, de onde um `X-Forwarded-For` forjado seria aceito.
 - **O `CF-Connecting-IP` para no gateway:** ele é removido do pedido ao Nginx, porque ali já não há como saber quem o escreveu.
 - **Lista em `deploy/coolify/sites/cloudflare-ips.conf`:** a extensão `.conf` fica fora do glob `*.caddy` do `Caddyfile`, e só o site do GoblinShift a importa. Como o diretório `sites/` é um bind de diretório, o arquivo novo não exige mudar o `gateway.json`.
 
@@ -42,7 +42,7 @@ O Nginx, o uvicorn e a auditoria não mudam: continuam confiando só no IP fixo 
 
 Nada no repositório trava o `Caddyfile` nem `sites/` por hash. O sha256 do `gateway.json` é o digest da imagem; `preserved-assets.json` cobre só mídias; `receiver-release.json` cobre só o `receiver.py`. As travas `compose_sha256`/`caddy_sha256` do Duora são de arquivos dele, fora do gateway. Se existe outra trava na VPS, este repositório não mostra, e isso se confere no passo 1 de [Depois do merge](#depois-do-merge).
 
-A release da CI também não publica isto: o workflow `coolify.yml` e o receptor só trocam imagens do recurso da aplicação. O gateway é um recurso próprio do Coolify, e nenhum workflow chama o Deploy Webhook dele. O `caddy reload` não derruba conexões nem pede janela de manutenção, mas o gateway é compartilhado, então evite-o durante publicações dos outros projetos.
+A release da CI também não publica isto: o workflow `coolify.yml` e o receptor só trocam imagens do recurso da aplicação. O gateway é um recurso próprio do Coolify, e nenhum workflow chama o Deploy Webhook dele. O `caddy reload` não interrompe requisições em andamento nem pede janela de manutenção, mas o gateway é compartilhado, então evite-o durante publicações dos outros projetos.
 
 Os comandos usam a API local do Coolify, a mesma do receptor. O UUID do recurso aparece na URL dele no painel. Os campos foram conferidos na especificação OpenAPI atual do Coolify; confira também na versão instalada. O painel é a referência se a API responder diferente ou `null`:
 
@@ -97,8 +97,13 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
      cmp "$CLONE/deploy/coolify/sites/$arquivo" "$SITES/$arquivo"
    done
    ```
-5. Validar: `docker exec edge-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
-6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
+5. Validar a partir do `Caddyfile` do host, nunca o de `/etc/caddy`: o container pode estar preso a uma versão antiga, e recarregá-la desfaria a última [mudança no `Caddyfile`](#mudança-no-caddyfile):
+   ```sh
+   ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
+   docker cp "$ORIGEM" edge-proxy-1:/tmp/Caddyfile.novo
+   docker exec edge-proxy-1 caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile
+   ```
+6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile`, depois `docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo`.
 7. Alinhar o recurso do gateway ao commit, para um Redeploy futuro não devolver o bug. Alinhar é só gravar o campo; quem recria o container é o Redeploy ou o `instant_deploy`, e nenhum dos dois entra aqui:
    - Se `git_commit_sha` for `HEAD`, não há o que gravar: o próximo Redeploy clona a `main`, com os mesmos bytes.
    - Se for um commit fixo, gravar o novo:
@@ -111,6 +116,54 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 9. Remover o clone: `rm -rf "$CLONE"`. O `$BACKUP` fica até a correção ser dada como estável.
 
 **Reversão:** `cp -a "$BACKUP/." "$SITES/"` e repetir os passos 5 e 6. O `cloudflare-ips.conf` que sobrar não faz efeito, porque nada mais o importa. Se o `git_commit_sha` foi alterado, gravar de volta o valor lido antes do merge. Trecho inválido não derruba nada: o `reload` recusa e a configuração anterior fica no ar (ADR 014).
+
+### Mudança no `Caddyfile`
+
+Os passos acima só cobrem `sites/`. O `Caddyfile` é um bind de arquivo único e somente leitura, e o Git do Coolify troca o inode dele: em 2026-11-05 o `mountinfo` do container mostrava `Caddyfile//deleted`, com o gateway preso desde 21/10 a um arquivo apagado no host. Sobrescrever o host, portanto, não chega ao processo. Recriar o container resolveria, mas derruba os sites do gateway.
+
+Por isso o bloco valida e aplica uma cópia dentro do container e só depois atualiza o host, que é o que o Docker monta num restart ou numa recriação. Assim, um arquivo inválido não muda nada, e o `/etc/caddy/Caddyfile` visto dentro do container pode continuar antigo até o próximo restart: a conferência é a configuração em execução, na API de administração, salva pelo próprio bloco. O `reload` não interrompe requisições em andamento; WebSocket e SSE não foram medidos.
+
+Salve o bloco num arquivo na VPS e rode `COMMIT=<commit de merge> API=$API TOKEN=$TOKEN bash arquivo`, nunca colado na sessão: o `set -e` fecharia o SSH. `$API` e `$TOKEN` são os do passo 7 e do Antes do merge. Se o hash do arquivo do host aparecer numa trava, o bloco para: atualize a trava e rode de novo.
+
+```bash
+set -euo pipefail
+: "${COMMIT:?}" "${API:?}" "${TOKEN:?}"
+ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
+test -s "$ORIGEM"
+if grep -rlsq "$(sha256sum "$ORIGEM" | cut -d' ' -f1)" \
+    /etc/coolify-release /var/lib/coolify-release /etc/goblinshift /etc/duora; then
+  echo "trava do Caddyfile encontrada" >&2
+  exit 1
+fi
+
+CLONE=$(mktemp -d /root/goblinshift-caddyfile.XXXXXX)
+echo "CLONE=$CLONE"
+git clone --quiet https://github.com/BipoXDXD/GoblinShift.git "$CLONE"
+git -C "$CLONE" merge-base --is-ancestor "$COMMIT" origin/main || { echo "commit fora da main" >&2; exit 1; }
+git -C "$CLONE" checkout --quiet "$COMMIT"
+NOVO=$CLONE/deploy/coolify/Caddyfile
+test -s "$NOVO"
+
+BACKUP=/root/gateway-backup-caddyfile-$(date -u +%Y%m%dT%H%M%SZ)
+ANTERIOR=$(curl -fsS -H "Authorization: Bearer $TOKEN" "$API" | jq -r .git_commit_sha)
+[[ "$ANTERIOR" =~ ^([0-9a-f]{7,40}|HEAD)$ ]] || { echo "git_commit_sha inesperado: $ANTERIOR" >&2; exit 1; }
+cp -a "$ORIGEM" "$BACKUP"
+echo "$ANTERIOR" > "$BACKUP.commit"
+docker exec edge-proxy-1 cat /etc/caddy/Caddyfile > "$BACKUP.em-uso"
+echo "ORIGEM=$ORIGEM"
+echo "BACKUP=$BACKUP"
+
+docker cp "$NOVO" edge-proxy-1:/tmp/Caddyfile.novo
+docker exec edge-proxy-1 caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile
+docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile
+cp "$NOVO" "$ORIGEM"
+cmp "$NOVO" "$ORIGEM"
+docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo
+docker exec edge-proxy-1 wget -qO- http://127.0.0.1:2019/config/ > "$BACKUP.config.json"
+echo "configuração em execução salva em $BACKUP.config.json"
+```
+
+Se o bloco parar antes do `reload`, a produção não mudou; remova o `CLONE` impresso. Para reverter depois, use os caminhos impressos: copie `$BACKUP.em-uso` para `/tmp/Caddyfile.novo` do container, repita o `validate` e o `reload`, e rode `cp "$BACKUP" "$ORIGEM"`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
 
 ## Atualizar a lista
 
@@ -127,7 +180,7 @@ Enquanto a lista estiver atrasada, uma faixa nova da Cloudflare cai no caso de q
 - `limit_req`, auditoria e antiabuso passam a contar por cliente real. Quem hoje divide uma borda com muitos clientes deixa de dividir a cota; clientes atrás do mesmo NAT continuam dividindo.
 - O `limit_req` conta por endereço. Em IPv6, um cliente com um /64 inteiro tem muitos endereços, então o limite é mais fraco que em IPv4. Já era assim para quem chegava direto; agora vale também para quem vem pela Cloudflare. Agrupar por prefixo fica para outra decisão.
 - **Risco aceito:** as faixas são da Cloudflare, não desta conta. Outro cliente da Cloudflare pode apontar uma zona dele para a origem, mas o `CF-Connecting-IP` continua escrito pela Cloudflare, então ele só informa o próprio IP. Fechar esse caminho exige Authenticated Origin Pulls, que fica fora deste ADR.
-- **Pendência fora do escopo:** o `trusted_proxies` global continua com o IP da VPS aposentada, e um `X-Forwarded-For` forjado vindo desse IP ainda vale para quem usa `{client_ip}`, como o `stillon.tech`. Removê-lo muda o `Caddyfile` compartilhado e precisa de decisão conjunta (ADR 014).
+- **Resolvido em 2026-11-05:** o `trusted_proxies` global tinha o IP da VPS aposentada, cancelada e sujeita a reatribuição, e um `X-Forwarded-For` forjado vindo dele valia para quem usa `{client_ip}`, como o `stillon.tech`. O dono autorizou a remoção: no `Caddyfile`, o servidor da 443 ficou sem proxy confiável, e o das demais portas, só com o Traefik. Em produção isso só vale depois da [publicação do `Caddyfile`](#mudança-no-caddyfile). O `{remote_host}` do site do GoblinShift continua como está.
 - `deploy/edge/` é o caminho anterior ao Coolify e fica como está: não está no fluxo de produção descrito em [`deploy/coolify/README.md`](../../deploy/coolify/README.md).
 
 ## Compliance

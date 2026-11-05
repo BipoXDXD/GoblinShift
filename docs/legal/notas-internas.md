@@ -71,7 +71,7 @@ para os titulares. Conferido contra o código e contra a produção na mesma dat
   gravado em produção é o do usuário ou o da borda. O Aviso continua correto como limite do que
   guardamos, mas, se for o da borda, a auditoria perde utilidade antiabuso.
   Resolvido em 2026-11-05 ([ADR 041](../adr/041-ip-do-cliente-atras-da-cloudflare.md)): o IP
-  gravado é o do cliente, truncado.
+  gravado é o do cliente, truncado, e `179.197.70.102` saiu do `Caddyfile` versionado.
 - **healthchecks.io e alertas.** Recebem só pings e o texto do alerta, sem dado pessoal
   (`deploy/backup/lib.sh`, `deploy/openobserve/provision.py`). O canal urgente ainda não está
   configurado. Discord, Telegram e Slack são só opções do README.
