@@ -18,7 +18,7 @@ O conserto tem de cumprir três condições:
 
 | Alternativa | Prós | Contras |
 |-------------|------|---------|
-| **A. `trusted_proxies` global** com as faixas e `client_ip_headers CF-Connecting-IP` no servidor da 443 | É o recurso próprio do Caddy; `{client_ip}` e os logs do gateway passam a ter o cliente | `trusted_proxies` é opção de servidor, não de site: vale para todos os sites da 443 e muda o que o StillOn recebe. Exige mudar o `Caddyfile` e decidir nos dois repositórios (ADR 014). O arquivo é um bind de arquivo único, então uma troca por renomeação só chega ao container recriando-o, com todos os sites juntos |
+| **A. `trusted_proxies` global** com as faixas e `client_ip_headers CF-Connecting-IP` no servidor da 443 | É o recurso próprio do Caddy; `{client_ip}` e os logs do gateway passam a ter o cliente | `trusted_proxies` é opção de servidor, não de site: vale para todos os sites da 443 e muda o que o StillOn recebe. Exige mudar o `Caddyfile` e decidir nos dois repositórios (ADR 014). O arquivo é um bind de arquivo único, então uma troca por renomeação não chega ao processo em execução; aplicar exige [copiar para dentro do container](#mudança-no-caddyfile) ou recriá-lo, com todos os sites juntos |
 | **B. Matcher `remote_ip` no site do GoblinShift** (escolhida) | Escopo por site: só `goblinshift.dev` lê a lista. `Caddyfile` e `gateway.json` ficam intactos. Publica com `caddy reload`, sem recriar o container. O site deixa de depender do `trusted_proxies` global, inclusive do IP aposentado | Mais linhas no site. `{client_ip}` e o log do próprio Caddy continuam com a borda. Um segundo site que queira o mesmo repete o bloco |
 | **C. Resolver no Nginx** (`set_real_ip_from` com as faixas e `real_ip_header CF-Connecting-IP`) | Fica no código do projeto e publica com a imagem | Não funciona sozinho: o par do Nginx é sempre o gateway, nunca a Cloudflare. Quem valida a origem precisa ver a conexão de origem, e só o gateway vê. Sem isso, qualquer um forjaria o cabeçalho |
 | **D. Módulo `caddy-cloudflare-ip`** | Faixas atualizadas sozinhas | Exige build próprio do Caddy em lugar da imagem oficial por digest, atualiza a confiança sem revisão e continua global como A |
@@ -42,7 +42,7 @@ O Nginx, o uvicorn e a auditoria não mudam: continuam confiando só no IP fixo 
 
 Nada no repositório trava o `Caddyfile` nem `sites/` por hash. O sha256 do `gateway.json` é o digest da imagem; `preserved-assets.json` cobre só mídias; `receiver-release.json` cobre só o `receiver.py`. As travas `compose_sha256`/`caddy_sha256` do Duora são de arquivos dele, fora do gateway. Se existe outra trava na VPS, este repositório não mostra, e isso se confere no passo 1 de [Depois do merge](#depois-do-merge).
 
-A release da CI também não publica isto: o workflow `coolify.yml` e o receptor só trocam imagens do recurso da aplicação. O gateway é um recurso próprio do Coolify, e nenhum workflow chama o Deploy Webhook dele. O `caddy reload` não derruba conexões nem pede janela de manutenção, mas o gateway é compartilhado, então evite-o durante publicações dos outros projetos.
+A release da CI também não publica isto: o workflow `coolify.yml` e o receptor só trocam imagens do recurso da aplicação. O gateway é um recurso próprio do Coolify, e nenhum workflow chama o Deploy Webhook dele. O `caddy reload` não interrompe requisições em andamento nem pede janela de manutenção, mas o gateway é compartilhado, então evite-o durante publicações dos outros projetos.
 
 Os comandos usam a API local do Coolify, a mesma do receptor. O UUID do recurso aparece na URL dele no painel. Os campos foram conferidos na especificação OpenAPI atual do Coolify; confira também na versão instalada. O painel é a referência se a API responder diferente ou `null`:
 
@@ -97,8 +97,13 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
      cmp "$CLONE/deploy/coolify/sites/$arquivo" "$SITES/$arquivo"
    done
    ```
-5. Validar: `docker exec edge-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`.
-6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
+5. Validar a partir do `Caddyfile` do host, nunca o de `/etc/caddy`: o container pode estar preso a uma versão antiga, e recarregá-la desfaria a última [mudança no `Caddyfile`](#mudança-no-caddyfile):
+   ```sh
+   ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
+   docker cp "$ORIGEM" edge-proxy-1:/tmp/Caddyfile.novo
+   docker exec edge-proxy-1 caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile
+   ```
+6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile`, depois `docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo`.
 7. Alinhar o recurso do gateway ao commit, para um Redeploy futuro não devolver o bug. Alinhar é só gravar o campo; quem recria o container é o Redeploy ou o `instant_deploy`, e nenhum dos dois entra aqui:
    - Se `git_commit_sha` for `HEAD`, não há o que gravar: o próximo Redeploy clona a `main`, com os mesmos bytes.
    - Se for um commit fixo, gravar o novo:
@@ -116,16 +121,16 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 
 Os passos acima só cobrem `sites/`. O `Caddyfile` é um bind de arquivo único e somente leitura, e o Git do Coolify troca o inode dele: em 2026-11-05 o `mountinfo` do container mostrava `Caddyfile//deleted`, com o gateway preso desde 21/10 a um arquivo apagado no host. Sobrescrever o host, portanto, não chega ao processo. Recriar o container resolveria, mas derruba os sites do gateway.
 
-Por isso o bloco valida e aplica uma cópia dentro do container e só depois atualiza o host, que é o que o Docker monta num restart ou numa recriação. Assim, um arquivo inválido não muda nada, e o `/etc/caddy/Caddyfile` visto dentro do container pode continuar antigo até o próximo restart: a conferência é a configuração em execução, na API de administração.
+Por isso o bloco valida e aplica uma cópia dentro do container e só depois atualiza o host, que é o que o Docker monta num restart ou numa recriação. Assim, um arquivo inválido não muda nada, e o `/etc/caddy/Caddyfile` visto dentro do container pode continuar antigo até o próximo restart: a conferência é a configuração em execução, na API de administração, salva pelo próprio bloco. O `reload` não interrompe requisições em andamento; WebSocket e SSE não foram medidos.
 
-Salve o bloco num arquivo na VPS e rode `COMMIT=<commit de merge> API=<recurso do gateway> TOKEN=<token> bash arquivo`, nunca colado na sessão: o `set -e` fecharia o SSH. Se o hash do arquivo do host aparecer numa trava, atualize a trava junto.
+Salve o bloco num arquivo na VPS e rode `COMMIT=<commit de merge> API=$API TOKEN=$TOKEN bash arquivo`, nunca colado na sessão: o `set -e` fecharia o SSH. `$API` e `$TOKEN` são os do passo 7 e do Antes do merge. Se o hash do arquivo do host aparecer numa trava, o bloco para: atualize a trava e rode de novo.
 
 ```bash
 set -euo pipefail
 : "${COMMIT:?}" "${API:?}" "${TOKEN:?}"
 ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
 test -s "$ORIGEM"
-if grep -rls "$(sha256sum "$ORIGEM" | cut -d' ' -f1)" \
+if grep -rlsq "$(sha256sum "$ORIGEM" | cut -d' ' -f1)" \
     /etc/coolify-release /var/lib/coolify-release /etc/goblinshift /etc/duora; then
   echo "trava do Caddyfile encontrada" >&2
   exit 1
@@ -134,7 +139,7 @@ fi
 CLONE=$(mktemp -d /root/goblinshift-caddyfile.XXXXXX)
 echo "CLONE=$CLONE"
 git clone --quiet https://github.com/BipoXDXD/GoblinShift.git "$CLONE"
-git -C "$CLONE" merge-base --is-ancestor "$COMMIT" origin/main
+git -C "$CLONE" merge-base --is-ancestor "$COMMIT" origin/main || { echo "commit fora da main" >&2; exit 1; }
 git -C "$CLONE" checkout --quiet "$COMMIT"
 NOVO=$CLONE/deploy/coolify/Caddyfile
 test -s "$NOVO"
@@ -151,9 +156,11 @@ echo "BACKUP=$BACKUP"
 docker cp "$NOVO" edge-proxy-1:/tmp/Caddyfile.novo
 docker exec edge-proxy-1 caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile
 docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile
-docker exec edge-proxy-1 rm /tmp/Caddyfile.novo
 cp "$NOVO" "$ORIGEM"
 cmp "$NOVO" "$ORIGEM"
+docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo
+docker exec edge-proxy-1 wget -qO- http://127.0.0.1:2019/config/ > "$BACKUP.config.json"
+echo "configuração em execução salva em $BACKUP.config.json"
 ```
 
 Se o bloco parar antes do `reload`, a produção não mudou; remova o `CLONE` impresso. Para reverter depois, use os caminhos impressos: copie `$BACKUP.em-uso` para `/tmp/Caddyfile.novo` do container, repita o `validate` e o `reload`, e rode `cp "$BACKUP" "$ORIGEM"`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
