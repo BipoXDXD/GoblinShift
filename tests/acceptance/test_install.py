@@ -7,7 +7,7 @@ caminhos que só o root grava. O goblinshift é dono do checkout e de /srv/gobli
 
 import pytest
 
-from tests.host_sandbox import run_as_root
+from tests.host_sandbox import installed, run_as_root
 
 pytestmark = pytest.mark.host_installer
 
@@ -47,14 +47,40 @@ find {PREFIX} -printf 'F %u:%g %m %p\\n'
     assert entries[f"{PREFIX}/acceptance/scheduled.sh"][1] == "755"
 
 
-def installed(stdout: str) -> dict[str, tuple[str, str]]:
-    """Linhas `F <dono:grupo> <modo> <caminho>` do find: caminho -> (dono:grupo, modo)."""
-    entries = {}
-    for line in stdout.splitlines():
-        if line.startswith("F "):
-            _, owner, mode, path = line.split(" ", 3)
-            entries[path] = (owner, mode)
-    return entries
+def test_reinstalar_a_aceitacao_mantem_o_script_do_timer_de_backup() -> None:
+    # /usr/local/lib/goblinshift/backup é dividido com o deploy/backup/install.sh, cuja unit
+    # executa o pg-backup.sh dali: trocar o diretório inteiro deixaria a unit sem o arquivo.
+    result = run_as_root(
+        FILLED_CONFIG
+        + f"""
+install -d -m 755 {PREFIX} {PREFIX}/backup
+echo original >{PREFIX}/backup/pg-backup.sh
+echo antiga >{PREFIX}/backup/lib.sh
+{INSTALL}
+cat {PREFIX}/backup/pg-backup.sh
+grep -c antiga {PREFIX}/backup/lib.sh || true
+"""
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-2:] == ["original", "0"]
+
+
+def test_recusa_diretorio_da_lib_que_outro_usuario_grava() -> None:
+    result = run_as_root(
+        FILLED_CONFIG
+        + f"""
+install -d -m 755 {PREFIX}
+install -d -m 755 -o goblinshift -g goblinshift {PREFIX}/backup
+rc=0; {INSTALL} || rc=$?
+echo "rc=$rc"
+test -e {PREFIX}/backup/lib.sh && echo "COPIADO" || true
+"""
+    )
+
+    assert "rc=0" not in result.stdout
+    assert "COPIADO" not in result.stdout
+    assert f"{PREFIX}/backup" in result.stderr
 
 
 def test_script_instalado_carrega_a_lib_e_o_pacote_da_propria_copia() -> None:

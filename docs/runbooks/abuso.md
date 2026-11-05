@@ -7,11 +7,11 @@ Como achar a conta, preservar o mínimo, bloquear, conferir e responder a quem d
 O bloqueio é por CLI no servidor (não há painel web na v1). Todos os comandos abaixo rodam **na VPS**, num shell com sudo.
 
 ```bash
-# Todo comando do Compose de produção passa pelo deploy/compose.sh (README, "Contas e chaves de API").
-compose=(sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh)
-gs_admin() { "${compose[@]}" exec -T api gs-admin "$@"; }
+# Direto nos containers do Coolify, nunca pela cópia parada em /srv/goblinshift/app (README,
+# "Comandos manuais na VPS").
+gs_admin() { sudo docker exec -i goblinshift-api-1 gs-admin "$@"; }
 # SQL pela entrada padrão, com os ids em variáveis do psql (:'nome'): nada é colado no texto.
-psql_gs() { "${compose[@]}" exec -T postgres psql -U goblinshift -d goblinshift -v ON_ERROR_STOP=1 "$@"; }
+psql_gs() { sudo docker exec -i goblinshift-postgres-1 psql -U goblinshift -d goblinshift -v ON_ERROR_STOP=1 "$@"; }
 ```
 
 ## 1. Achar a conta

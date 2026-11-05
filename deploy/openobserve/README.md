@@ -171,15 +171,15 @@ A saída lista cada template, destino e alerta criado, atualizado ou removido. A
 
 Na primeira vez num stream sem as colunas dos SLOs (antes da primeira Run terminada depois do deploy, por exemplo), o script grava um span-semente, `goblinshift.schema-seed` com `main = false`, que declara as colunas. Ele não conta em nenhum SLO, porque todas as consultas filtram `main = 'true'`; sem ele, o OpenObserve recusaria a consulta em toda avaliação.
 
-Também dá para rodar na própria VPS, sem túnel, como o usuário `goblinshift` (dono de `/srv/goblinshift/secrets`, modo 700), somando o `app.env` (credencial) a um arquivo só com as URLs, também com `chmod 600`:
+Também dá para rodar na própria VPS, sem túnel, a partir do [checkout temporário](../../README.md#checkout-temporário-na-vps) (nunca da cópia parada em `/srv/goblinshift/app`), como o usuário `goblinshift` (dono de `/srv/goblinshift/secrets`, modo 700), somando o `app.env` (credencial) a um arquivo só com as URLs, também com `chmod 600`:
 
 ```bash
-cd /srv/goblinshift/app/deploy
+cd "$gs_tmp/repo/deploy"
 sudo -u goblinshift python3 -B -m openobserve provision \
   --secrets-file /srv/goblinshift/secrets/app.env --secrets-file /srv/goblinshift/secrets/alertas.env
 ```
 
-**Disco e heartbeat.** O alerta de disco e o heartbeat leem `system_filesystem_utilization`, que o Collector produz com as montagens do `compose.prod.yaml`. O provisionamento falha enquanto esse stream não existir: confira que o deploy com o Collector novo já rodou. O `release.sh` só recria o Collector quando o serviço muda no Compose; depois de mudar só o `docker/otel-collector/config.yaml`, rode `sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh restart otel-collector` na VPS.
+**Disco e heartbeat.** O alerta de disco e o heartbeat leem `system_filesystem_utilization`, que o Collector produz com as montagens do `compose.prod.yaml`. O provisionamento falha enquanto esse stream não existir: confira que a publicação com o Collector novo já rodou. Depois de mudar só o `docker/otel-collector/config.yaml`, publique o recurso de infraestrutura no Coolify e rode `sudo docker restart goblinshift-otel-collector-1` na VPS.
 
 ## Relatório do SLI e do orçamento
 
@@ -200,9 +200,8 @@ Antes, confira que o check do heartbeat no healthchecks.io recebeu o primeiro pi
 Com o PostgreSQL parado, a API responde 500 a todo `POST /runs` (a credencial é conferida no banco), e cada resposta é um evento elegível e ruim. São precisos pelo menos 101 na hora e 26 nos 15 min.
 
 ```bash
-# Todo comando do Compose de produção passa pelo deploy/compose.sh (README, "Contas e chaves de API").
-compose=(sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh)
-"${compose[@]}" stop postgres
+# Direto no container, nunca pela cópia parada em /srv/goblinshift/app (README, "Comandos manuais na VPS").
+sudo docker stop goblinshift-postgres-1
 # Chave no formato válido, mas inexistente: nada é criado.
 key="gsk_0000000000000000_$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
 for i in $(seq 130); do
@@ -210,7 +209,7 @@ for i in $(seq 130); do
     -H "Authorization: Bearer $key" -H "Idempotency-Key: drill-$(printf '%016d' "$i")" \
     -H 'Content-Type: application/json' -d '{}'
 done | sort | uniq -c        # esperado: 130 respostas 500
-"${compose[@]}" start postgres
+sudo docker start goblinshift-postgres-1
 ```
 
 Em até 10 minutos (exportação do Collector mais a avaliação a cada 5 min) chegam `gs-slo-aceitacao-urgente` (canal urgente) e `gs-slo-aceitacao-aviso` (canal de aviso). Se as respostas não forem 500 (por exemplo, 429 do limitador do Nginx), elas não contam: ajuste e repita.

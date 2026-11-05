@@ -8,8 +8,12 @@
 # Os caminhos saem da posição do script: ele vive em <raiz>/app/deploy, com <raiz> =
 # /srv/goblinshift. Roda como o usuário `goblinshift` (ou root), que lê secrets/.
 #
+# PERIGO: a produção é publicada pelo Coolify, e /srv/goblinshift/app é uma cópia parada com um
+# secrets/release.env congelado. Por ali, `up`, `run`, `pull` e `down` recriam os serviços, com o
+# PostgreSQL entre eles, usando imagens antigas. Na VPS use `docker exec` e `docker logs` nos
+# containers `goblinshift-*` (README, "Comandos manuais na VPS").
+#
 # Uso: deploy/compose.sh <argumentos do docker compose…>
-#   ex.: sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin …
 set -euo pipefail
 
 app=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

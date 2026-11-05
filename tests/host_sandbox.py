@@ -51,3 +51,13 @@ def run_as_root(scenario: str) -> subprocess.CompletedProcess[str]:
         check=False,
         timeout=TIMEOUT_S,
     )
+
+
+def installed(stdout: str) -> dict[str, tuple[str, str]]:
+    """Linhas `F <dono:grupo> <modo> <caminho>` do find: caminho -> (dono:grupo, modo)."""
+    entries = {}
+    for line in stdout.splitlines():
+        if line.startswith("F "):
+            _, owner, mode, path = line.split(" ", 3)
+            entries[path] = (owner, mode)
+    return entries

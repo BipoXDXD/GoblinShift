@@ -3,10 +3,13 @@
 Roda na própria VPS, como root, antes de abrir o serviço e a cada mudança no host (gVisor,
 Docker, kernel, perfil do executor ou executor-ctl), com o worker parado:
 
-    cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.run
+    cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.run
 
-O `-B` evita deixar `__pycache__` do root no checkout, que pertence ao usuário goblinshift; o
-`-m` a partir de deploy/ torna importável o pacote do executor-ctl.
+O `$gs_tmp` é um checkout temporário atual da main (README, "Checkout temporário na VPS"), nunca a
+cópia parada em /srv/goblinshift/app.
+
+O `-B` evita deixar `__pycache__` do root no checkout; o `-m` a partir de deploy/ torna importável
+o pacote do executor-ctl.
 
 Prova, dentro do executor e com os limites de 1.7: container sob runsc com o perfil fixo; sem
 rede; ENOSPC ao encher a área de 6 GiB; RLIMIT_FSIZE por arquivo; morte por falta de memória

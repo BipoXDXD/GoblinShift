@@ -1,6 +1,8 @@
 """A publicação legada fica desativada; Coolify é o único ingresso automático."""
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+LEGACY_DEPLOY_SCRIPT = ROOT / "deploy" / "deploy.sh"
 DEPLOY_SECRETS = {"VPS_SSH_KEY", "VPS_KNOWN_HOSTS"}
 SECRET_REFERENCE = re.compile(r"secrets\.([A-Za-z0-9_]+)")
 
@@ -55,3 +58,26 @@ def test_jornadas_legadas_dependem_do_deploy_desativado() -> None:
     assert job["needs"] == ["deploy"]
     assert "if" not in job
     assert job["uses"] == "./.github/workflows/e2e-vps.yml"
+
+
+def test_script_de_deploy_legado_recusa_mesmo_pedido_valido_sem_tocar_em_nada(
+    tmp_path: Path,
+) -> None:
+    commit = "a" * 40
+    git_log = tmp_path / "git.log"
+    fake_git = tmp_path / "git"
+    fake_git.write_text(f'#!/bin/sh\necho "$*" >>"{git_log}"\n')
+    fake_git.chmod(0o755)
+
+    result = subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(LEGACY_DEPLOY_SCRIPT), commit, f"sha-{commit[:12]}"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+    )
+
+    assert result.returncode == 64
+    assert "Coolify" in result.stderr
+    assert not git_log.exists()

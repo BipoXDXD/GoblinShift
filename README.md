@@ -147,13 +147,13 @@ uv run gs-admin find-user --user-hash <hash>               # user.hash da teleme
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
-Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …` localmente. Na VPS, todo comando do Compose passa pelo `deploy/compose.sh` (veja abaixo): `sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin …`.
+Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …` localmente. Na VPS, o comando vai direto ao container em execução ([veja abaixo](#comandos-manuais-na-vps)): `sudo docker exec -i goblinshift-api-1 gs-admin …`.
 
 A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Contas criadas pelo `gs-admin` são do operador e não passam pelo aceite dos termos; as do login web recebem `403 TERMS_NOT_ACCEPTED` até aceitar a versão vigente pela sessão (`POST /api/v1/me/terms:accept`; [ADR 029](docs/adr/029-aceite-versionado-dos-termos.md)). Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
 
 ## Deploy sem queda
 
-O `deploy/deploy.sh` (chamado pela CI) migra o banco, sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga (`deploy/rollout-api.sh`). O Nginx, que leva o build da SPA, é recriado a cada versão; enquanto ele volta, a borda repete a conexão (`lb_try_duration` em `deploy/edge/conf.d/goblinshift.caddy`). Para conferir localmente, com a pilha de pé:
+A produção é publicada só pelo Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)). O caminho antigo por SSH está morto: o `deploy/deploy.sh` só recusa, o `deploy/release.sh` não tem quem o chame e o job `deploy` da CI fica pulado, porque o gate de release exige esse resultado (`deploy/coolify/release/gate.py`). O `deploy/rollout-api.sh` sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga. O Nginx, que leva o build da SPA, é recriado a cada versão; enquanto ele volta, a borda repete a conexão (`lb_try_duration` em `deploy/edge/conf.d/goblinshift.caddy`). Para conferir localmente, com a pilha de pé:
 
 ```bash
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
@@ -163,15 +163,31 @@ Logs dos containers giram por serviço no próprio Compose (driver `local`, até
 
 ### Comandos manuais na VPS
 
-O Compose de produção depende da versão implantada (tag da aplicação e imagem do executor por digest), que o deploy grava em `/srv/goblinshift/secrets/release.env` (atômico, modo 600, ao lado do `app.env`). O `deploy/compose.sh` junta esse arquivo, os segredos, os dois arquivos do Compose e os diretórios de dados do host; o deploy usa o mesmo script. Rode como o usuário `goblinshift`:
+O Coolify é dono dos containers `goblinshift-*`. Comandos manuais vão direto a eles, como root:
 
 ```bash
-sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh ps
-sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh logs --tail 100 worker
-sudo -u goblinshift /srv/goblinshift/app/deploy/compose.sh exec api gs-admin create-user --display-name "Ana"
+sudo docker ps --filter name=goblinshift-
+sudo docker logs --tail 100 goblinshift-worker-1
+sudo docker exec -i goblinshift-api-1 gs-admin create-user --display-name "Ana"
+sudo docker exec -i goblinshift-postgres-1 psql -U goblinshift -d goblinshift -c 'SELECT count(*) FROM app_user'
 ```
 
-Sem o arquivo (antes do primeiro deploy) o script para com uma mensagem, em vez de o Compose cair na imagem `dev`. Se um deploy falhar no meio, o arquivo guarda a versão daquela tentativa, que é a configuração aplicada por último ao projeto Compose.
+> **Perigo: não opere pela cópia em `/srv/goblinshift/app`.** Ela parou em 2026-10-21 e não é Git. Pelo `deploy/compose.sh` dela, comandos de leitura funcionam, mas `up`, `run`, `pull` e `down` recriam 9 serviços com imagem antiga, incluindo o PostgreSQL. O `secrets/release.env` está congelado desde então, e o `/srv/goblinshift/executor/images.json` é velho: a allowlist viva é `/var/lib/coolify-release/goblinshift/executor-images.json`. Rodar `install.sh` ou `acceptance.*` a partir dela regride `/opt/goblinshift` e `/usr/local/lib/goblinshift`, e o instalador da aceitação daquela versão apaga o `pg-backup.sh` do timer de backup.
+
+### Checkout temporário na VPS
+
+Instaladores e `acceptance.*` rodam de um checkout temporário da `main` atual, descartado no fim:
+
+```bash
+gs_tmp="$(mktemp -d /tmp/goblinshift.XXXXXX)"
+chmod 755 "$gs_tmp"
+(umask 022 && git clone --quiet --depth 1 https://github.com/BipoXDXD/GoblinShift.git "$gs_tmp/repo")
+git -C "$gs_tmp/repo" log -1 --format='%h %s'   # confira o commit antes de rodar
+# … os comandos que citam "$gs_tmp" nas seções abaixo …
+sudo rm -rf "$gs_tmp"
+```
+
+O `chmod 755` é necessário: o `mktemp -d` cria o diretório com 700, e quem precisa ler o checkout não é o root. Os instaladores o leem com os privilégios do `goblinshift`, e as sondas da aceitação e o gerador do Image Forge montam arquivos dele em containers com outro UID.
 
 ### Segredos do login
 
@@ -203,7 +219,7 @@ Rotação:
 
 Cada tentativa roda num container próprio da imagem `ghcr.io/bipoxdxd/goblinshift-executor` ([`docker/executor.Dockerfile`](docker/executor.Dockerfile)), publicada pela CI com a mesma tag da aplicação (`sha-<12>`). Ela contém só o Python da base oficial (fixada por digest, sem pip), `goblinshift/__init__.py` e `goblinshift/processing/` com o bytecode já compilado, o Pillow 12.3.0 instalado do `uv.lock` com hashes por um estágio de build ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)) e o FFmpeg 8.1.2 compilado do fonte oficial (conferido por SHA-256) só com os demuxers `mov` e `matroska` e os protocolos `file` e `pipe`, sem componentes GPL ([ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)): nada de banco, web nem outras dependências de terceiros. Sem cache, construir a imagem leva alguns minutos por causa do FFmpeg; por isso os testes `executor_image` rodam na CI só no job `gvisor`. Roda como `61000:61001` com `ENTRYPOINT` fixo em `python -m goblinshift.processing.executor /work`.
 
-No deploy, `deploy/executor-image.sh` baixa a imagem da tag implantada, resolve o digest e o grava na allowlist do `executor-ctl` (`/srv/goblinshift/executor/images.json`, com o digest novo e o anterior); a referência `…@sha256:…` vai para o Compose em `GS_EXECUTOR_IMAGE`, gravada pelo `deploy/release-env.sh` no `release.env` do host.
+Na publicação, o receptor do Coolify (`deploy/coolify/release/receiver.py`) grava o digest na allowlist do `executor-ctl` (`/var/lib/coolify-release/goblinshift/executor-images.json`), e a referência `…@sha256:…` chega aos containers em `GS_EXECUTOR_IMAGE`.
 
 ```bash
 uv run pytest -m executor_image                            # constrói a imagem e a roda com runc
@@ -212,12 +228,12 @@ GS_TEST_RUNTIME=runsc uv run pytest -m executor_image      # o mesmo sob gVisor 
 
 ## Teste de aceitação do ambiente (na VPS)
 
-Prova, dentro do executor sob gVisor e com os limites do plano (1.7), que não há rede, que a área de 6 GiB acaba em `ENOSPC`, que memória acima de 2 GiB mata o processo, que um fork bomb para em 64 processos e que a aplicação não alcança o `docker.sock` ([ADRs 004, 005 e 015](docs/adr/)). Roda antes de abrir o serviço e a cada mudança no host:
+Prova, dentro do executor sob gVisor e com os limites do plano (1.7), que não há rede, que a área de 6 GiB acaba em `ENOSPC`, que memória acima de 2 GiB mata o processo, que um fork bomb para em 64 processos e que a aplicação não alcança o `docker.sock` ([ADRs 004, 005 e 015](docs/adr/)). Roda antes de abrir o serviço e a cada mudança no host, a partir do [checkout temporário](#checkout-temporário-na-vps):
 
 ```bash
-sudo bash deploy/gvisor.sh                 # instala o gVisor (já incluído no provision.sh)
-sudo bash deploy/executor-ctl/install.sh   # instala o executor-ctl (já incluído no provision.sh)
-cd deploy && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passarem; -B: sem bytecode do root
+sudo bash "$gs_tmp/repo/deploy/gvisor.sh"                 # instala o gVisor (já incluído no provision.sh)
+sudo bash "$gs_tmp/repo/deploy/executor-ctl/install.sh"   # instala o executor-ctl (já incluído no provision.sh)
+cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.run  # sai com 0 só se todos passarem; -B: sem bytecode do root
 ```
 
 O teste monta o `docker run` das sondas com o perfil de produção do `executor-ctl` (`deploy/executor_ctl/profile.py`) e confere que o serviço responde no socket. Rode com o worker parado: a área de trabalho só admite uma tentativa por vez. O próprio teste para o container `maintenance` durante as sondas e o religa no fim, porque a manutenção removeria a sonda como tentativa sem registro ([ADR 017](docs/adr/017-aceitacao-suspende-a-manutencao.md)); se o teste for morto à força, ele já terá impresso o `docker start` que religa a manutenção.
@@ -227,23 +243,25 @@ O teste monta o `docker run` das sondas com o perfil de produção do `executor-
 O `goblinshift-acceptance.timer` roda o mesmo teste uma vez por semana, no domingo às 07:30 UTC com até 30 min de sorteio, e pinga o check "aceitação semanal" do healthchecks.io (7 dias, tolerância de 2 h) (`/start`, sucesso ou `/fail`; tabela dos monitores em [`deploy/openobserve/README.md`](deploy/openobserve/README.md#monitores-externos)). O `deploy/acceptance/scheduled.sh` para o worker durante o teste e o religa no fim, também quando a aceitação reprova; se o worker não voltar, o resultado é `/fail` e o log traz o `docker start` que o religa. Nesses 10 a 30 minutos (ADR 017) as execuções esperam na fila.
 
 ```bash
-sudo bash deploy/acceptance/install.sh       # copia o código e cria /etc/goblinshift/acceptance.env vazio (root, 600)
-sudoedit /etc/goblinshift/acceptance.env     # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>
-sudo bash deploy/acceptance/install.sh       # com a URL preenchida, liga o timer
+sudo bash "$gs_tmp/repo/deploy/acceptance/install.sh"   # copia o código e cria /etc/goblinshift/acceptance.env vazio (root, 600)
+sudoedit /etc/goblinshift/acceptance.env                # ACCEPTANCE_HEALTHCHECK_URL=<URL de ping do check>
+sudo bash "$gs_tmp/repo/deploy/acceptance/install.sh"   # com a URL preenchida, liga o timer
 sudo systemctl start goblinshift-acceptance.service   # roda já; resultado em journalctl -u goblinshift-acceptance
 ```
 
-O serviço roda como root, então não executa nada do checkout nem lê nada de `/srv/goblinshift/secrets`, que pertencem ao usuário `goblinshift`: quem controlasse esses caminhos rodaria código como root. O instalador copia `deploy/acceptance`, `deploy/executor_ctl` e `deploy/backup/lib.sh` para `/usr/local/lib/goblinshift` (do root, sem escrita para outros) recusa diretório de destino que outro usuário grave ou que seja symlink e lê o checkout com os privilégios do `goblinshift`, para que um symlink plantado ali não copie um arquivo que só o root lê. Por isso uma mudança na aceitação só chega ao timer quando o `install.sh` roda de novo, como no executor-ctl; rode-o a partir de um checkout conferido (`git status` limpo, no commit implantado). A unit tem o sistema de arquivos somente leitura fora da área de trabalho e só as capabilities que as sondas usam (`systemd-analyze security goblinshift-acceptance.service`).
+O serviço roda como root, então não executa nada de checkout nem lê nada de `/srv/goblinshift/secrets`, que pertence ao usuário `goblinshift`: quem controlasse esses caminhos rodaria código como root. O instalador copia `deploy/acceptance`, `deploy/executor_ctl` e `deploy/backup/lib.sh` para `/usr/local/lib/goblinshift` (do root, sem escrita para outros) recusa diretório de destino que outro usuário grave ou que seja symlink e lê o checkout com os privilégios do `goblinshift`, para que um symlink plantado ali não copie um arquivo que só o root lê. O `deploy/backup/lib.sh` entra em `/usr/local/lib/goblinshift/backup`, dividido com o timer de backup: o instalador troca só esse arquivo. Uma mudança na aceitação só chega ao timer quando o `install.sh` roda de novo, como no executor-ctl; rode-o a partir do [checkout temporário](#checkout-temporário-na-vps), nunca da cópia parada. A unit tem o sistema de arquivos somente leitura fora da área de trabalho e só as capabilities que as sondas usam (`systemd-analyze security goblinshift-acceptance.service`).
 
 Não rode o teste de caos nem os do Image Forge e do Media Mill no horário do timer: todos usam a mesma área de trabalho.
 
 ### Pior caso do Image Forge (na VPS, antes de publicar uma versão)
 
-Mede 100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas numa tentativa com o perfil de produção (gVisor, 1 vCPU, 2 GiB), sem passar pela API: constrói a imagem do executor do checkout, gera as fotos dentro dela e roda a tentativa na área de trabalho real, com a manutenção parada como nas sondas ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)). Rode com o worker parado:
+Mede 100 JPEGs de 24 MP em Display P3 com orientação 6 e miniaturas numa tentativa com o perfil de produção (gVisor, 1 vCPU, 2 GiB), sem passar pela API: usa a imagem do executor, gera as fotos dentro dela e roda a tentativa na área de trabalho real, com a manutenção parada como nas sondas ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)). Rode com o worker parado, do [checkout temporário](#checkout-temporário-na-vps):
 
 ```bash
-cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.image_forge_load   # PASSOU só dentro de 600 s
+cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.image_forge_load   # PASSOU só dentro de 600 s
 ```
+
+Sem opções, o comando **constrói a imagem no host**, o que compila o FFmpeg e é pesado para a VPS que atende a produção: prefira [medir com a imagem publicada](#medir-com-a-imagem-publicada).
 
 ### Pior caso do Media Mill (na VPS, antes de publicar a versão)
 
@@ -252,15 +270,35 @@ A VPS não tem FFmpeg e a imagem do executor só tem o build mínimo, que não c
 ```bash
 ./scripts/media-mill-worst-case.sh /tmp/pior-caso            # na máquina com FFmpeg (~375 MiB)
 scp /tmp/pior-caso/*.mp4 stillon:/tmp/pior-caso/
-cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.media_mill_load /tmp/pior-caso   # PASSOU só dentro de 600 s
+cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.media_mill_load /tmp/pior-caso   # PASSOU só dentro de 600 s
 ```
+
+Como no Image Forge, sem opções o comando **constrói a imagem no host**: prefira a imagem publicada, abaixo.
+
+### Medir com a imagem publicada
+
+As duas medições usam a tag local `goblinshift-executor:medicao`. Com `--skip-build`, medem a imagem que já tem essa tag, sem `docker build`, e param se ela não existir. A tag é só um nome local: nada na produção a usa.
+
+```bash
+# A imagem em produção; antes de publicar, use ghcr.io/bipoxdxd/goblinshift-executor:sha-<12 dígitos do commit>.
+image="$(sudo docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' goblinshift-worker-1 |
+  sed -n 's/^GS_EXECUTOR_IMAGE=//p')"
+sudo docker pull "$image"
+sudo docker tag "$image" goblinshift-executor:medicao
+cd "$gs_tmp/repo/deploy"
+sudo python3 -B -m acceptance.image_forge_load --skip-build
+sudo python3 -B -m acceptance.media_mill_load --skip-build /tmp/pior-caso
+sudo docker rmi goblinshift-executor:medicao   # remove só a tag
+```
+
+O Image Forge gera as fotos com o `scripts/e2e_fixtures.py` do checkout: o checkout e a imagem devem ser do mesmo commit, ou da `main` compatível com ela.
 
 ### Teste de caos do worker (na VPS)
 
-Prova o critério de pronto da fatia 4 ([plano, 3.7 e 3.9](docs/GoblinShiftPlan.md#s3-9)): o worker morto por SIGKILL e pausado além do lease em cada fronteira do protocolo (logo depois do claim, com o executor rodando e durante a coleta e publicação), sem publicação duplicada nem container órfão. Roda contra a pilha de produção, com a fila vazia (o teste derruba o worker e recusa começar se houver execução não terminal, container de executor ou área de trabalho suja):
+Prova o critério de pronto da fatia 4 ([plano, 3.7 e 3.9](docs/GoblinShiftPlan.md#s3-9)): o worker morto por SIGKILL e pausado além do lease em cada fronteira do protocolo (logo depois do claim, com o executor rodando e durante a coleta e publicação), sem publicação duplicada nem container órfão. Roda do [checkout temporário](#checkout-temporário-na-vps) contra a pilha de produção, com a fila vazia (o teste derruba o worker e recusa começar se houver execução não terminal, container de executor ou área de trabalho suja):
 
 ```bash
-cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.chaos   # sai com 0 só se todos passarem
+cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.chaos   # sai com 0 só se todos passarem
 sudo python3 -B -m acceptance.chaos --scenario sigstop/coleta          # só um cenário (repetível)
 # --base-url muda a URL da API (padrão https://goblinshift.dev; a borda não atende pelo IP)
 ```
@@ -273,10 +311,10 @@ Os testes do `executor-ctl` com Docker real usam o runtime de `GS_TEST_RUNTIME` 
 
 Dump diário cifrado com `age`, enviado ao Backblaze B2 com uma chave só de escrita, e restauração testada todo mês no GitHub Actions ([ADR 022](docs/adr/022-backup-externo.md)). Antes de ligar:
 
-1. Gere o par `age` fora da VPS (`age-keygen -o goblinshift-backup.key`), ponha a chave pública em `deploy/backup/age-recipients.txt` por PR e guarde a privada no gerenciador de senhas e no secret `BACKUP_AGE_IDENTITY`.
+1. Gere o par `age` fora da VPS (`age-keygen -o goblinshift-backup.key`), ponha a chave pública em `deploy/backup/age-recipients.txt` por PR e guarde a privada no gerenciador de senhas e no secret `BACKUP_AGE_IDENTITY`. Na troca de chave, rode o instalador do passo 4 depois do merge: o timer usa a cópia instalada.
 2. No B2 (passo pendente, fora do repositório): bucket privado com **Object Lock ligado e retenção padrão em modo compliance de 30 dias**, mais a regra de ciclo de vida que esconde o arquivo aos 30 dias e apaga 1 dia depois. Uma chave para a VPS só com `writeFiles` (sem `writeFileRetentions`, `writeFileLegalHolds`, `bypassGovernance`, `deleteFiles`, `readFiles` nem `listFiles`) e uma para a restauração com `listFiles`, `readFiles` e `readFileRetentions`, que expõe o modo e o prazo da retenção. Sem o Object Lock, a chave que escreve sobrescreve ou esconde os dumps, e a restauração mensal reprova.
 3. No healthchecks.io: os checks "backup diário" (1 dia, tolerância de 2 h) e "restauração mensal" (31 dias).
-4. Na VPS: `sudo bash deploy/backup/install.sh` cria `/srv/goblinshift/secrets/backup.env` vazio; preencha e rode de novo para ligar o timer. Teste já com `sudo systemctl start goblinshift-pg-backup.service`.
+4. Na VPS, a partir do [checkout temporário](#checkout-temporário-na-vps): `sudo bash "$gs_tmp/repo/deploy/backup/install.sh"` copia o `pg-backup.sh`, o `lib.sh` e o `age-recipients.txt` para `/usr/local/lib/goblinshift/backup` (do root; a unit executa dali, sem depender de checkout) e cria `/srv/goblinshift/secrets/backup.env` vazio; preencha e rode de novo para ligar o timer. Teste já com `sudo systemctl start goblinshift-pg-backup.service`. O dump sai por `docker exec` no `goblinshift-postgres-1`, sem Compose.
 5. No GitHub (passo pendente, fora do repositório): environment `backup-restore` com **política de branches "só `main`"** (Deployment branches and tags → Selected branches → `main`), para que nenhum outro ref rode com a chave privada, e com os secrets `BACKUP_S3_READ_KEY_ID`, `BACKUP_S3_READ_KEY`, `BACKUP_AGE_IDENTITY` e `RESTORE_HEALTHCHECK_URL`, e as variáveis do repositório `BACKUP_S3_ENDPOINT`, `BACKUP_S3_REGION` e `BACKUP_S3_BUCKET`. Rode o workflow "Restauração testada do backup" à mão uma vez e registre o resultado aqui.
 
 Os testes (`uv run pytest tests/backup`) rodam os scripts reais contra PostgreSQL e S3 locais (SeaweedFS, com o mesmo Object Lock do bucket real) e precisam de `age` e `curl` no PATH.

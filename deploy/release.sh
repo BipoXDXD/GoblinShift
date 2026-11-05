@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Implanta a versão já em checkout (docs/GoblinShiftPlan.md, 3.8). Chamado pelo deploy.sh depois
-# de validar o pedido e fazer o checkout do commit; por isso esta é sempre a versão do commit
-# implantado. Roda como o usuário `goblinshift`, em /srv/goblinshift/app.
+# MORTO: nada chama este script desde que a publicação passou para o Coolify
+# (deploy/coolify/README.md). Não rode na VPS: ele recria a pilha com a versão de release.env. Fica
+# no repositório como registro da ordem do deploy, que tests/test_deploy_storage_mark.py confere.
 #
-# Uso (só pelo deploy.sh): deploy/release.sh <image-tag>
+# Implantava a versão já em checkout (docs/GoblinShiftPlan.md, 3.8), em /srv/goblinshift/app.
+#
+# Uso (histórico): deploy/release.sh <image-tag>
 set -euo pipefail
 
 tag="${1:?uso: release.sh <image-tag>}"

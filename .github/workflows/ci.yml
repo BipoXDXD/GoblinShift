@@ -450,7 +450,8 @@ jobs:
         env:
           VPS_TARGET: ${{ vars.VPS_USER }}@${{ vars.VPS_HOST }}
           IMAGE_TAG: ${{ needs.image.outputs.tag }}
-        # A chave da CI na VPS (usuário goblinshift) só pode executar deploy/deploy.sh (forced command).
+        # Legado: o job nunca roda (`if: "false"`), e o deploy/deploy.sh, único comando que a chave
+        # da CI pode executar na VPS (forced command), hoje só recusa.
         run: |
           # SC2029: expandir aqui é o objetivo; a VPS recebe o SHA e a tag já resolvidos.
           # shellcheck disable=SC2029

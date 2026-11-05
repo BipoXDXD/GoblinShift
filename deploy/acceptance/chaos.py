@@ -2,7 +2,10 @@
 
 Roda na própria VPS, como root, com a pilha de produção de pé e a fila vazia:
 
-    cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.chaos
+    cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.chaos
+
+O `$gs_tmp` é um checkout temporário atual da main (README, "Checkout temporário na VPS"), nunca a
+cópia parada em /srv/goblinshift/app.
 
 Opções: `--base-url` (padrão https://goblinshift.dev), `--user <id>` para reaproveitar uma conta de
 teste em vez de criar outra, e `--scenario <falha>/<fronteira>` (repetível) para rodar só parte.
@@ -34,7 +37,7 @@ Falhas, no container do worker:
   vencida tem de afetar zero linhas.
 
 Por que `docker` e não `docker compose`: o compose.prod.yaml interpola a versão implantada
-(`GS_EXECUTOR_IMAGE`, `GS_IMAGE_TAG`), que só o deploy/compose.sh carrega; o Compose sem ela recusa
+(`GS_EXECUTOR_IMAGE`, `GS_IMAGE_TAG`), que o Coolify injeta nos containers; o Compose sem ela recusa
 o arquivo ou, pior, recria o worker com outra imagem, e o teste não precisa do Compose para isso.
 Os containers são achados pelos rótulos do projeto Compose, como no acceptance/run.py, e a chave
 de API sai do `gs-admin` no container da API.
