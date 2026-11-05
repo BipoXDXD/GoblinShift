@@ -8,12 +8,15 @@ sobe esta constante, e toda conta precisa aceitar de novo.
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from goblinshift.identity.accounts import UnknownAccountError
+from goblinshift.identity.audit import AuditEventType, AuditOutcome
+from goblinshift.identity.audit import record as record_audit_event
 from goblinshift.identity.tables import app_user
 
 # "rascunho" até a revisão jurídica (plano da fatia 8, F8-5). É a versão declarada no cabeçalho e
@@ -28,6 +31,46 @@ class TermsAcceptance:
     version: str
     accepted_at: datetime
     newly_accepted: bool
+
+
+class TermsChannel(StrEnum):
+    """Por onde o aceite chegou (ADR 029 e o adendo de 2026-11-05).
+
+    `WEB` é a pessoa na sessão do navegador; `ADMIN_CLI` é o operador pelo `gs-admin
+    accept-terms`, para as contas que ele mesmo opera. Só o segundo vai para o `details` do
+    evento: os aceites anteriores à migração 0017 são todos da sessão e ficaram sem detalhe.
+    """
+
+    WEB = "web"
+    ADMIN_CLI = "admin_cli"
+
+
+def record_terms_acceptance(
+    session: Session,
+    owner_id: UUID,
+    *,
+    version: str,
+    now: datetime,
+    channel: TermsChannel,
+    ip: str | None,
+) -> TermsAcceptance:
+    """Aceita `version` pela conta e audita o aceite novo como `TERMS_ACCEPTED`, na mesma transação.
+
+    O caminho único da sessão web e do `gs-admin`: repetir não grava nem audita de novo, e a
+    conta inexistente levanta `UnknownAccountError` sem auditar.
+    """
+    accepted = accept_terms(session, owner_id, version=version, now=now)
+    if accepted.newly_accepted:
+        record_audit_event(
+            session,
+            event=AuditEventType.TERMS_ACCEPTED,
+            user_id=owner_id,
+            ip=ip,
+            outcome=AuditOutcome.SUCCESS,
+            now=now,
+            details=None if channel is TermsChannel.WEB else {"channel": channel.value},
+        )
+    return accepted
 
 
 def accept_terms(

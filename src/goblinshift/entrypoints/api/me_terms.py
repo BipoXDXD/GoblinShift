@@ -22,13 +22,7 @@ from goblinshift.entrypoints.api.dependencies import (
 )
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
-from goblinshift.identity import (
-    AuditEventType,
-    AuditOutcome,
-    UnknownAccountError,
-    accept_terms,
-    record_audit_event,
-)
+from goblinshift.identity import TermsChannel, UnknownAccountError, record_terms_acceptance
 
 router = APIRouter(tags=["me"])
 
@@ -69,16 +63,14 @@ def accept_current_terms(
         )
     try:
         with session.begin():
-            accepted = accept_terms(session, principal.owner_id, version=current_version, now=now)
-            if accepted.newly_accepted:
-                record_audit_event(
-                    session,
-                    event=AuditEventType.TERMS_ACCEPTED,
-                    user_id=principal.owner_id,
-                    ip=client_ip(request),
-                    outcome=AuditOutcome.SUCCESS,
-                    now=now,
-                )
+            accepted = record_terms_acceptance(
+                session,
+                principal.owner_id,
+                version=current_version,
+                now=now,
+                channel=TermsChannel.WEB,
+                ip=client_ip(request),
+            )
     except UnknownAccountError:
         raise ApiProblem(
             ProblemCode.AUTHENTICATION_REQUIRED, "A sessão não vale mais para esta conta."

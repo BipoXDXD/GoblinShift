@@ -71,7 +71,13 @@ from goblinshift.identity.sessions import (
     revoke_session,
     start_session,
 )
-from goblinshift.identity.terms import CURRENT_TERMS_VERSION, TermsAcceptance, accept_terms
+from goblinshift.identity.terms import (
+    CURRENT_TERMS_VERSION,
+    TermsAcceptance,
+    TermsChannel,
+    accept_terms,
+    record_terms_acceptance,
+)
 from goblinshift.identity.users import (
     ExternalIdentity,
     LoginRefusal,
@@ -110,6 +116,7 @@ __all__ = [
     "RequestLimitExceededError",
     "Scope",
     "TermsAcceptance",
+    "TermsChannel",
     "UnknownAccountError",
     "accept_terms",
     "authenticate_api_key",
@@ -133,6 +140,7 @@ __all__ = [
     "parse_scopes",
     "purge_owner",
     "record_audit_event",
+    "record_terms_acceptance",
     "request_account_deletion",
     "resolve_login",
     "revoke_all_credentials",

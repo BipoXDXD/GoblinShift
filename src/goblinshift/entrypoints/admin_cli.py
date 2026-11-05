@@ -8,6 +8,7 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin revoke-key --key <public_id>
     gs-admin block --user <id>
     gs-admin unblock --user <id>
+    gs-admin accept-terms --user <id>
     gs-admin list-users [--pending]
     gs-admin find-user --user-hash <hash>
     printf '%s' "$user_hash" | gs-admin find-user --user-hash -
@@ -18,7 +19,10 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
 `block` bloqueia, revoga sessões e chaves e cancela a execução ativa; repetir completa o que
-faltou. `list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
+faltou. `accept-terms` registra o aceite da versão vigente dos termos numa conta que o próprio
+operador opera, como a de teste das jornadas (ADR 029): mesmas colunas e mesmo `TERMS_ACCEPTED` do
+aceite web, com `{"channel": "admin_cli"}` no `details`; repetir não grava nem audita de novo.
+`list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
 identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
 `find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso);
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
@@ -44,6 +48,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
+    CURRENT_TERMS_VERSION,
     DEFAULT_KEY_DAYS,
     MAX_KEY_DAYS,
     AuditEventType,
@@ -51,6 +56,7 @@ from goblinshift.identity import (
     InvalidDisplayNameError,
     InvalidKeyLifetimeError,
     InvalidScopesError,
+    TermsChannel,
     UnknownAccountError,
     block_account,
     create_admin_user,
@@ -58,6 +64,7 @@ from goblinshift.identity import (
     issue_key,
     parse_scopes,
     record_audit_event,
+    record_terms_acceptance,
     revoke_key,
     unblock_account,
 )
@@ -145,6 +152,12 @@ def _argument_parser() -> argparse.ArgumentParser:
     unblock = commands.add_parser("unblock", help="libera a conta bloqueada ou pendente")
     unblock.add_argument("--user", type=UUID, required=True, help="id da conta")
     unblock.set_defaults(command=_unblock)
+
+    accept_terms = commands.add_parser(
+        "accept-terms", help="registra o aceite da versão vigente dos termos numa conta"
+    )
+    accept_terms.add_argument("--user", type=UUID, required=True, help="id da conta")
+    accept_terms.set_defaults(command=_accept_terms)
 
     list_users = commands.add_parser("list-users", help="lista as contas, das mais novas primeiro")
     list_users.add_argument(
@@ -245,6 +258,25 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
     if not found:
         return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe ou tem exclusão pedida")
     print(f"conta {args.user} liberada", file=sys.stderr)
+    return EXIT_OK
+
+
+def _accept_terms(args: argparse.Namespace, context: _Context) -> int:
+    try:
+        with unit_of_work(context.factory) as session:
+            accepted = record_terms_acceptance(
+                session,
+                args.user,
+                version=CURRENT_TERMS_VERSION,
+                now=datetime.now(UTC),
+                channel=TermsChannel.ADMIN_CLI,
+                ip=None,  # Ação do administrador no servidor: não há IP de cliente a registrar.
+            )
+    except UnknownAccountError:
+        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+    outcome = "aceitou" if accepted.newly_accepted else "já tinha aceitado"
+    moment = accepted.accepted_at.isoformat()
+    print(f"conta {args.user} {outcome} os termos {accepted.version} em {moment}", file=sys.stderr)
     return EXIT_OK
 
 

@@ -126,8 +126,9 @@ audit_event = Table(
     # `X-Request-ID` da requisição que gerou o evento; no login recusado, é o código que a tela
     # mostra e que a pessoa cita no recurso contra o bloqueio (J-10). Nulo fora de requisição.
     Column("request_id", Uuid),
-    # Só no `ACCOUNT_LIMITS_CHANGED` (migração 0016): `{"changes": {<item>: {"old", "new"}}}`.
-    # Números e nomes fixos, sem dado pessoal: sai com a linha aos 90 dias (1.7).
+    # No `ACCOUNT_LIMITS_CHANGED` (migração 0016): `{"changes": {<item>: {"old", "new"}}}`. No
+    # `TERMS_ACCEPTED` do `gs-admin` (0017): exatamente `{"channel": "admin_cli"}`. Números e
+    # nomes fixos, sem dado pessoal: sai com a linha aos 90 dias (1.7).
     Column("details", JSONB),
     Index(None, "occurred_at"),
     Index(None, "user_id", "occurred_at"),
@@ -141,6 +142,8 @@ audit_event = Table(
     CheckConstraint(
         "CASE WHEN event_type = 'ACCOUNT_LIMITS_CHANGED' "
         "THEN coalesce(jsonb_typeof(details) = 'object', false) "
+        "WHEN event_type = 'TERMS_ACCEPTED' "
+        """THEN details IS NULL OR details = '{"channel": "admin_cli"}'::jsonb """
         "ELSE details IS NULL END",
         name="details",
     ),

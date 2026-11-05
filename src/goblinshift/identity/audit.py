@@ -40,8 +40,9 @@ class AuditEventType(StrEnum):
     ACCOUNT_DELETION_REQUESTED = "ACCOUNT_DELETION_REQUESTED"
     ACCOUNT_BLOCKED = "ACCOUNT_BLOCKED"
     ACCOUNT_UNBLOCKED = "ACCOUNT_UNBLOCKED"
+    # Com `details` só quando o operador registra o aceite: ver `identity.terms.TermsChannel`.
     TERMS_ACCEPTED = "TERMS_ACCEPTED"
-    # O único com `details` (CHECK `audit_event_details_check`): ver `LimitChange`.
+    # Sempre com `details` (CHECK `audit_event_details_check`): ver `LimitChange`.
     ACCOUNT_LIMITS_CHANGED = "ACCOUNT_LIMITS_CHANGED"
 
 
@@ -84,7 +85,8 @@ def record(
 ) -> None:
     """Grava o evento na transação de quem chama.
 
-    `details` só no tipo que o exige (`ACCOUNT_LIMITS_CHANGED`); o CHECK do banco recusa o resto.
+    `details` só no `ACCOUNT_LIMITS_CHANGED`, que o exige, e no `TERMS_ACCEPTED` registrado pelo
+    operador, com o canal fixo; o CHECK do banco recusa o resto.
 
     `request_id` liga o evento ao `X-Request-ID` da resposta; o login o grava para o operador
     achar a conta pelo código da tela de login recusado.

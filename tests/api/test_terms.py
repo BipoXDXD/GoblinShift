@@ -6,6 +6,7 @@ revogar chave, excluir a conta). A sessão real passa por aqui, com cookie e CSR
 na autenticação, que a sessão simulada dos outros testes substitui.
 """
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,9 +18,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.admin_cli import EXIT_OK
+from goblinshift.entrypoints.admin_cli import main as gs_admin
 from goblinshift.identity import CURRENT_TERMS_VERSION, ExternalIdentity, resolve_login
 from goblinshift.identity.tables import app_user, audit_event
 from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.settings import Settings
 from tests.api.files_support import bearer
 from tests.api.session_support import open_session, session_headers
 from tests.api.support import assert_problem
@@ -83,6 +87,32 @@ def terms_events(factory: sessionmaker[Session], owner_id: UUID) -> list[tuple[s
             .order_by(audit_event.c.id)
         ).all()
     return [(row.event_type, row.outcome) for row in rows]
+
+
+def terms_details(factory: sessionmaker[Session], owner_id: UUID) -> list[object]:
+    with factory() as session:
+        return list(
+            session.execute(
+                select(audit_event.c.details)
+                .where(
+                    audit_event.c.user_id == owner_id,
+                    audit_event.c.event_type == "TERMS_ACCEPTED",
+                )
+                .order_by(audit_event.c.id)
+            ).scalars()
+        )
+
+
+@pytest.fixture
+def cli_environment(db_settings: Settings) -> Iterator[None]:
+    """O `gs-admin` lê as mesmas variáveis GS_* que a API e chega ao mesmo banco."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("GS_DB_HOST", db_settings.db_host)
+        mp.setenv("GS_DB_PORT", str(db_settings.db_port))
+        mp.setenv("GS_DB_USER", db_settings.db_user)
+        mp.setenv("GS_DB_PASSWORD", db_settings.db_password.get_secret_value())
+        mp.setenv("GS_DB_NAME", db_settings.db_name)
+        yield
 
 
 # --- Bloqueio até o aceite --------------------------------------------------------------------
@@ -190,10 +220,45 @@ def test_aceite_libera_as_rotas_e_e_auditado(
     assert version == CURRENT_TERMS_VERSION
     assert datetime.fromisoformat(body["accepted_at"]) == accepted_at
     assert terms_events(factory, owner) == [("TERMS_ACCEPTED", "success")]
+    # O aceite pela sessão não leva detalhe; só o do `gs-admin` marca o canal.
+    assert terms_details(factory, owner) == [None]
     assert client.get(CATALOG, headers=auth).status_code == 200
     me = client.get(ME, headers=auth).json()["terms"]
     assert me["accepted_version"] == CURRENT_TERMS_VERSION
     assert me["acceptance_required"] is False
+
+
+@pytest.mark.usefixtures("cli_environment")
+def test_aceite_pelo_gs_admin_libera_a_chave_da_conta(
+    client: TestClient, factory: sessionmaker[Session], capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner = external_account(factory)
+    auth = bearer(new_key(factory, owner).token)
+    assert_problem(client.get(CATALOG, headers=auth), 403, "TERMS_NOT_ACCEPTED")
+
+    exit_code = gs_admin(["accept-terms", "--user", str(owner)])
+
+    assert exit_code == EXIT_OK, capsys.readouterr().err
+    assert client.get(CATALOG, headers=auth).status_code == 200
+    me = client.get(ME, headers=auth).json()["terms"]
+    assert me["accepted_version"] == CURRENT_TERMS_VERSION
+    assert me["acceptance_required"] is False
+    assert terms_details(factory, owner) == [{"channel": "admin_cli"}]
+
+
+@pytest.mark.usefixtures("cli_environment")
+def test_aceite_web_depois_do_gs_admin_nao_audita_de_novo(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner = external_account(factory)
+    assert gs_admin(["accept-terms", "--user", str(owner)]) == EXIT_OK
+    _, accepted_at = stored_terms(factory, owner)
+
+    response = accept(client, signed_in(app, owner))
+
+    assert response.status_code == 200, response.text
+    assert datetime.fromisoformat(response.json()["accepted_at"]) == accepted_at
+    assert terms_details(factory, owner) == [{"channel": "admin_cli"}]
 
 
 def test_aceite_e_idempotente(

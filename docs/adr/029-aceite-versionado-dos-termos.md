@@ -48,3 +48,36 @@ Onde bloquear:
 - `tests/api/test_terms.py`: a conta sem aceite recebe `403 TERMS_NOT_ACCEPTED`, pela sessão e pela chave, sem dado da conta no corpo; toda rota autenticada da matriz de autorização fora da lista de isentas recusa; `GET /me` mostra a versão a aceitar; o aceite libera as rotas e é auditado uma vez; repetir é idempotente; versão nova bloqueia de novo e exige novo aceite; versão diferente da vigente dá 409; chave, corpo inválido, campo extra com o id de outra conta e CSRF forjado são recusados sem gravar nada; o aceite de uma conta não libera a outra.
 - `tests/test_migration_0008.py`: a 0008 aceita o evento e o downgrade o apaga e restaura o `CHECK` antigo.
 - `tests/security/authz_matrix.py`: `POST /me/terms:accept` é rota de sessão (chave → 403).
+
+## Adendo de 2026-11-05: aceite registrado pelo operador
+
+### Contexto
+
+As jornadas com escrita contra `https://goblinshift.dev` ([plano, "Pendente na fatia 7"](../GoblinShiftPlan.md)) precisam de uma conta de teste que já tenha aceitado os termos. O aceite só saía pela sessão web, e uma conta do login recebe `403 TERMS_NOT_ACCEPTED` até aceitar. As contas do `create-user` não passam pelo bloqueio, mas também não exercitam o que uma conta real do login exercita; aceitar por um navegador a cada versão nova dos termos seria um passo manual a mais para uma conta que é do próprio dono do serviço.
+
+| Alternativa | Prós | Contras |
+|---|---|---|
+| **`gs-admin accept-terms`, com a origem no evento** | Mesmo caminho de domínio do aceite web; a auditoria distingue quem registrou; acesso à CLI já exige `sudo` na VPS | Exige a migração 0017, que amplia o `CHECK` de `details` |
+| Mesmo comando, sem marcar a origem | Sem migração | A auditoria não separa o aceite da pessoa do registrado pelo operador |
+| `UPDATE` manual no banco | Nenhum código | Sem evento de auditoria, fora do caminho de domínio e sem teste |
+| Aceitar por script na sessão web | Nenhuma mudança no serviço | Automatiza um login real com provedor externo e guarda credencial dele na CI |
+
+### Decisão
+
+- **`gs-admin accept-terms --user <id>`** registra o aceite de `CURRENT_TERMS_VERSION`, sem parâmetro de versão. Destina-se só a contas operadas pelo próprio dono do serviço, como a conta de teste das jornadas. Não serve para aceitar em nome de outra pessoa: aceite de terceiro não é ato dela, e a regra de "ato da pessoa no navegador" continua valendo para toda conta alheia.
+- **O mesmo caminho nos dois canais**: a sessão web e a CLI chamam `record_terms_acceptance` (`identity/terms.py`), que grava as colunas e audita na mesma transação. Repetir não grava nem audita de novo; conta inexistente sai com 1, sem evento.
+- **A origem fica no evento**: o `TERMS_ACCEPTED` do operador leva `details = {"channel": "admin_cli"}` e `ip_prefix` nulo. O da sessão continua sem `details`, como os eventos já gravados. A migração 0017 amplia o `CHECK` para aceitar esse valor exato, comparado por igualdade, e nada mais: nenhum dado pessoal entra por ali.
+- **O bloqueio por conta não muda**: `POST /me/terms:accept` segue só pela sessão, com a chave recebendo 403, e o comando não libera conta bloqueada nem pendente. Em conta criada pelo `create-user` ele só registra o aceite, que o bloqueio já não exigia.
+
+### Consequências
+
+- Nada no código confere que a conta é mesmo do operador: a garantia é o acesso restrito à CLI, este adendo e a auditoria. Usar o comando em conta de terceiro é erro de operação.
+- Cada versão nova dos termos bloqueia de novo a conta de teste, até o comando rodar outra vez. É o efeito pedido por 1.8; o dono do serviço decide quando repetir.
+- A marca do canal vive na auditoria, que guarda 90 dias. Depois disso, as colunas da conta não distinguem o aceite do operador do aceite da pessoa. Se a revisão jurídica pedir essa prova por mais tempo, a tabela de histórico descrita acima passa a guardar também o canal.
+- A migração 0017 só amplia o `CHECK` (*expand*): a API anterior continua gravando `details` nulo. O downgrade anula o canal, que o `CHECK` antigo recusaria, e mantém os eventos.
+
+### Como verificar
+
+- `tests/identity/test_admin_cli.py`: `accept-terms` grava a versão vigente e audita o canal, sem IP; repetir mantém a data e não audita; troca uma versão anterior pela vigente; conta inexistente sai com 1, sem evento; não libera conta bloqueada; não muda outra conta.
+- `tests/api/test_terms.py`: a chave da conta recebe 403 antes e 200 depois do `gs-admin accept-terms`; o aceite web seguinte responde a mesma data sem novo evento; o aceite web não leva `details`.
+- `tests/test_migration_0017.py`: o `CHECK` aceita NULL e o canal fixo no `TERMS_ACCEPTED`, recusa outros valores e o downgrade anula o canal mantendo os eventos.

@@ -6,7 +6,7 @@ import io
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID, uuid7
+from uuid import UUID, uuid4, uuid7
 
 import pytest
 from sqlalchemy import select
@@ -15,10 +15,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
+    CURRENT_TERMS_VERSION,
+    ExternalIdentity,
     Scope,
+    accept_terms,
     authenticate_api_key,
     block_account,
     request_account_deletion,
+    resolve_login,
 )
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
@@ -598,11 +602,143 @@ def test_set_limits_abaixo_do_reservado_sai_com_2(
     assert limits_events(factory, str(owner)) == []
 
 
-@pytest.mark.parametrize("command", ["usage", "set-limits"])
+@pytest.mark.parametrize("command", ["usage", "set-limits", "accept-terms"])
 def test_conta_inexistente_sai_com_1(capsys: pytest.CaptureFixture[str], command: str) -> None:
     extra = ["--runs-per-24h", "5"] if command == "set-limits" else []
 
-    exit_code, _, err = run(capsys, command, "--user", str(uuid7()), *extra)
+    exit_code, out, err = run(capsys, command, "--user", str(uuid7()), *extra)
 
     assert exit_code == EXIT_NOT_FOUND
+    assert out == ""
     assert "não existe" in err
+
+
+# --- accept-terms (ADR 029, adendo de 2026-11-05) ---------------------------------------------
+
+
+def login_account(factory: sessionmaker[Session]) -> UUID:
+    """Conta do login web, a que passa pelo aceite; as do `gs-admin` são do operador."""
+    identity = ExternalIdentity(
+        issuer="https://accounts.google.com", subject=uuid4().hex, display_name="Conta Google"
+    )
+    with unit_of_work(factory) as session:
+        result = resolve_login(session, identity, signup_open=True, now=datetime.now(UTC))
+    assert isinstance(result, UUID)
+    return result
+
+
+def stored_terms(factory: sessionmaker[Session], owner: UUID) -> tuple[str | None, datetime | None]:
+    with factory() as session:
+        row = session.execute(
+            select(app_user.c.terms_version, app_user.c.terms_accepted_at).where(
+                app_user.c.id == owner
+            )
+        ).one()
+    return row.terms_version, row.terms_accepted_at
+
+
+def terms_events(factory: sessionmaker[Session], owner: UUID) -> list[tuple[str, object, object]]:
+    with factory() as session:
+        rows = session.execute(
+            select(audit_event.c.outcome, audit_event.c.ip_prefix, audit_event.c.details)
+            .where(audit_event.c.user_id == owner, audit_event.c.event_type == "TERMS_ACCEPTED")
+            .order_by(audit_event.c.id)
+        ).all()
+    return [(row.outcome, row.ip_prefix, row.details) for row in rows]
+
+
+def test_accept_terms_grava_a_versao_vigente_e_audita_a_origem_admin(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    owner = login_account(factory)
+    before = datetime.now(UTC)
+
+    exit_code, out, err = run(capsys, "accept-terms", "--user", str(owner))
+
+    assert exit_code == EXIT_OK
+    assert out == ""
+    assert CURRENT_TERMS_VERSION in err
+    version, accepted_at = stored_terms(factory, owner)
+    assert version == CURRENT_TERMS_VERSION
+    assert accepted_at is not None
+    assert before <= accepted_at <= datetime.now(UTC)
+    # Sem IP de cliente: a ação é do operador no servidor. O canal é o único detalhe.
+    assert terms_events(factory, owner) == [("success", None, {"channel": "admin_cli"})]
+
+
+def test_accept_terms_repetido_mantem_a_data_e_nao_audita_de_novo(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    owner = login_account(factory)
+    run(capsys, "accept-terms", "--user", str(owner))
+    first = stored_terms(factory, owner)
+
+    exit_code, out, err = run(capsys, "accept-terms", "--user", str(owner))
+
+    assert exit_code == EXIT_OK
+    assert out == ""
+    assert "já" in err
+    assert stored_terms(factory, owner) == first
+    assert len(terms_events(factory, owner)) == 1
+
+
+def test_accept_terms_de_uma_conta_nao_muda_a_outra(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    owner = login_account(factory)
+    other = login_account(factory)
+
+    run(capsys, "accept-terms", "--user", str(owner))
+
+    assert stored_terms(factory, other) == (None, None)
+    assert terms_events(factory, other) == []
+
+
+def test_accept_terms_de_conta_inexistente_nao_audita(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    missing = uuid7()
+
+    exit_code, _, _ = run(capsys, "accept-terms", "--user", str(missing))
+
+    assert exit_code == EXIT_NOT_FOUND
+    assert terms_events(factory, missing) == []
+
+
+def test_accept_terms_troca_a_versao_anterior_pela_vigente(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    owner = login_account(factory)
+    with unit_of_work(factory) as session:
+        accept_terms(session, owner, version="versao-anterior", now=datetime.now(UTC))
+
+    exit_code, _, _ = run(capsys, "accept-terms", "--user", str(owner))
+
+    assert exit_code == EXIT_OK
+    assert stored_terms(factory, owner)[0] == CURRENT_TERMS_VERSION
+    assert terms_events(factory, owner) == [("success", None, {"channel": "admin_cli"})]
+
+
+def test_accept_terms_nao_libera_conta_bloqueada(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    owner = login_account(factory)
+    with unit_of_work(factory) as session:
+        block_account(session, owner, datetime.now(UTC))
+
+    exit_code, _, _ = run(capsys, "accept-terms", "--user", str(owner))
+
+    assert exit_code == EXIT_OK
+    assert stored_terms(factory, owner)[0] == CURRENT_TERMS_VERSION
+    assert status_of(factory, str(owner)) == "blocked"
+
+
+def test_accept_terms_em_conta_do_operador_so_registra(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    user_id = create_user(capsys)
+
+    exit_code, _, _ = run(capsys, "accept-terms", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    assert stored_terms(factory, UUID(user_id))[0] == CURRENT_TERMS_VERSION
