@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
+from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     Scope,
@@ -24,12 +25,15 @@ from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import Status
+from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
 from tests.identity.support import new_user
-from tests.runs.worker_support import queue_run
+from tests.runs.worker_support import local_runner, queue_run
 
 pytestmark = pytest.mark.integration
+
+MAX_PURGE_CYCLES = 5
 
 
 @pytest.fixture(autouse=True)
@@ -185,6 +189,14 @@ def status_of(factory: sessionmaker[Session], user_id: str) -> str:
     return status
 
 
+def deletion_requested_at(factory: sessionmaker[Session], user_id: str) -> datetime | None:
+    with factory() as session:
+        requested_at: datetime | None = session.execute(
+            select(app_user.c.deletion_requested_at).where(app_user.c.id == UUID(user_id))
+        ).scalar_one()
+    return requested_at
+
+
 def audited(factory: sessionmaker[Session], user_id: str) -> list[str]:
     with factory() as session:
         return list(
@@ -280,6 +292,95 @@ def test_unblock_de_conta_em_exclusao_e_recusado_sem_auditoria(
     assert "exclusão" in err
     assert status_of(factory, user_id) == "blocked"
     assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
+
+
+def test_request_deletion_marca_revoga_cancela_e_audita(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    user_id = create_user(capsys)
+    _, token, _ = run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, out, err = run(capsys, "request-deletion", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    assert out == ""
+    assert user_id in err
+    assert deletion_requested_at(factory, user_id) is not None
+    with unit_of_work(factory) as session:
+        assert authenticate_api_key(session, token.strip(), datetime.now(UTC)) is None
+        run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
+        assert run_status.scalar_one() == Status.CANCELED
+    assert audited(factory, user_id) == ["ACCOUNT_DELETION_REQUESTED"]
+
+
+def test_request_deletion_repetido_mantem_o_primeiro_pedido_e_completa_o_que_faltou(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A primeira chamada caiu entre as duas transações: exclusão pedida, execução na fila.
+    user_id = create_user(capsys)
+    run_id = queue_run(factory, storage, UUID(user_id))
+    first_request = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+    with unit_of_work(factory) as session:
+        request_account_deletion(session, UUID(user_id), first_request)
+
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    assert deletion_requested_at(factory, user_id) == first_request
+    with factory() as session:
+        status = session.execute(
+            select(run_table.c.status).where(run_table.c.id == run_id)
+        ).scalar_one()
+    assert status == Status.CANCELED
+
+
+def test_request_deletion_de_conta_inexistente_sai_como_nao_encontrada(
+    capsys: pytest.CaptureFixture[str], factory: sessionmaker[Session]
+) -> None:
+    missing = str(uuid7())
+
+    exit_code, out, err = run(capsys, "request-deletion", "--user", missing)
+
+    assert exit_code == EXIT_NOT_FOUND
+    assert out == ""
+    assert missing in err
+    assert audited(factory, missing) == []
+
+
+def test_conta_bloqueada_com_exclusao_pedida_e_purgada_pela_manutencao(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    tmp_path: Path,
+) -> None:
+    user_id = create_user(capsys)
+    other_id = create_user(capsys)
+    run(capsys, "issue-key", "--user", user_id, "--scopes", "files:read")
+    queue_run(factory, storage, UUID(user_id))
+    run(capsys, "block", "--user", user_id)
+    assert status_of(factory, user_id) == "blocked"
+
+    exit_code, _, _ = run(capsys, "request-deletion", "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    maintenance = Maintenance(factory, storage, local_runner(tmp_path / "work"))
+    jobs = AccountJobs(factory)
+    for _ in range(MAX_PURGE_CYCLES):
+        maintenance.run_cycle()
+        jobs.run_cycle()
+    with factory() as session:
+        remaining = set(session.execute(select(app_user.c.id)).scalars())
+        keys = session.execute(select(api_key.c.id)).first()
+        runs = session.execute(select(run_table.c.id)).first()
+    assert remaining == {UUID(other_id)}
+    assert keys is None
+    assert runs is None
+    # A auditoria fica por 90 dias depois da exclusão (ADR 026).
+    assert audited(factory, user_id) == [
+        "ACCOUNT_BLOCKED",
+        "ACCOUNT_DELETION_REQUESTED",
+    ]
 
 
 def test_list_users_imprime_id_emissor_estado_e_criacao_sem_sujeito(

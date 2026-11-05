@@ -66,7 +66,7 @@ def test_os_dois_textos_tem_a_mesma_vigencia() -> None:
     assert header_field(terms, "Vigência") == header_field(privacy, "Vigência")
 
 
-CONTROLLER = "Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR)"
+CONTROLLER = "Return to Monkey Corporation (CNPJ em registro), de Curitiba (PR)"
 PRIVACY_CHANNEL = "privacidade@goblinshift.dev"
 # CPF com ou sem pontuação: o controlador publica nome e cidade, nunca documento.
 CPF = r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"
@@ -80,6 +80,7 @@ def test_identifica_o_controlador_com_nome_cidade_e_canal(path: Path) -> None:
     assert CONTROLLER in section
     assert PRIVACY_CHANNEL in section
     assert "nome completo do controlador" not in text
+    assert "pessoa física" not in text
 
 
 @pytest.mark.parametrize("path", TEXTS, ids=lambda path: path.name)
@@ -106,12 +107,31 @@ def test_interface_importa_so_os_dois_textos_publicos() -> None:
     assert imported == PUBLIC_TEXTS
 
 
-@pytest.mark.parametrize(
-    "name",
-    ["lia-j23-auditoria-e-antiabuso.md", "lia-j24-telemetria.md", "lia-j25-backup.md"],
-)
-def test_rascunho_de_lia_se_declara_rascunho_e_fora_do_build(name: str) -> None:
+# Restos do rascunho que não podem chegar ao texto vigente: marcação a definir, aviso de
+# rascunho e notas ao revisor.
+DRAFT_LEFTOVERS = ["[[A DEFINIR", "rascunho", "RASCUNHO", "Nota para a revisão"]
+
+
+@pytest.mark.parametrize("path", TEXTS, ids=lambda path: path.name)
+def test_texto_vigente_nao_tem_resto_de_rascunho(path: Path) -> None:
+    text = path.read_text(encoding="utf-8").split(HISTORY_HEADING, 1)[0]
+
+    for leftover in DRAFT_LEFTOVERS:
+        assert leftover not in text, leftover
+
+
+def test_versao_vigente_nao_e_rascunho() -> None:
+    assert "rascunho" not in CURRENT_TERMS_VERSION
+
+
+LIAS = ["lia-j23-auditoria-e-antiabuso.md", "lia-j24-telemetria.md", "lia-j25-backup.md"]
+
+
+@pytest.mark.parametrize("name", LIAS)
+def test_lia_e_registro_interno_fora_do_build(name: str) -> None:
     text = (LEGAL / name).read_text(encoding="utf-8")
 
-    assert "**RASCUNHO para o advogado, não publicar.**" in text
+    assert "**Registro interno, não publicar.**" in text
     assert "Nada daqui entra no build da SPA" in text or "Fora do build da SPA" in text
+    assert "RASCUNHO" not in text
+    assert "Perguntas ao revisor" not in text
