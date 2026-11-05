@@ -417,7 +417,7 @@ Reservar capacidade com atualização atômica no banco. Considerar arquivos rec
 | Containers e área de trabalho do executor      | Até a coleta ser persistida                       | Removidos pelo `executor-ctl`                     |
 | Telemetria (eventos amplos e traces)           | 30 dias                                           | Expiração no backend de telemetria                |
 | Logs da aplicação e dos containers             | ≥ 14 dias no volume previsto; teto de 50 MiB      | Rotação por tamanho, por serviço, no Compose      |
-| Backups do PostgreSQL                          | 30 dias                                           | Expiração no armazenamento externo ([3.8](#s3-8)) |
+| Backups do PostgreSQL                          | Até 31 dias (imutável por 30, apagado 1 dia depois) | Expiração no armazenamento externo ([3.8](#s3-8)) |
 
 Os jobs de expiração rodam no processo `maintenance`, em lotes, com índices parciais sobre as linhas ainda não expiradas.
 
