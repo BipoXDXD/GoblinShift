@@ -1,7 +1,7 @@
 # Aviso de Privacidade do GoblinShift
 
-- **Versão:** v4-rascunho
-- **Vigência:** 2026-10-21
+- **Versão:** v5
+- **Vigência:** 2026-11-05
 - **Endereço do serviço:** https://goblinshift.dev
 
 Este aviso explica quais dados pessoais o GoblinShift trata, para quê, com base em quê, com quem
@@ -10,10 +10,11 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
 
 ## 1. Controlador e contato
 
-- **Controlador:** Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR).
+- **Controlador:** Return to Monkey Corporation (CNPJ em registro), de Curitiba (PR).
 - **Canal para assuntos de privacidade e exercício de direitos:** privacidade@goblinshift.dev.
-- **Encarregado (DPO):** [[A DEFINIR: nome e contato do encarregado, ou a declaração de
-  dispensa.]]
+- **Encarregado (DPO):** não indicamos encarregado. Como agente de tratamento de pequeno porte,
+  o controlador está dispensado dessa indicação (Resolução CD/ANPD nº 2/2022, art. 11), e o canal
+  acima é o canal de comunicação com os titulares.
 
 ## 2. Resumo
 
@@ -27,9 +28,11 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
   momento.
 - Usamos só **cookies estritamente necessários**. Não há publicidade, rastreadores nem
   analytics de terceiros.
-- O servidor fica no Brasil. Ficam fora do país o **backup cifrado do banco de dados**, guardado
-  nos Estados Unidos por 30 dias, e, se você nos escrever, a **mensagem de e-mail**, que passa
-  pelo ImprovMX e chega a uma caixa de e-mail do Google (Gmail), em local que não controlamos.
+- O servidor fica no Brasil, mas o site passa pela **Cloudflare**, que recebe as conexões antes
+  dele. Ficam fora do país o **backup cifrado do banco de dados**, guardado nos Estados Unidos
+  por 30 dias, e, se você nos escrever, a **mensagem de e-mail**, guardada na Zoho, em local que
+  não controlamos.
+- O serviço é só para maiores de 18 anos.
 
 ## 3. Que dados tratamos
 
@@ -93,6 +96,13 @@ Quanto aos dados de terceiros que você enviar, veja o item 6 dos Termos de Uso.
   registro de acesso. Quando o servidor web não consegue falar com a aplicação, o registro de
   erro dele inclui a linha da requisição, com a query string, mas o endereço anotado ali é o do
   proxy de borda, e não o seu.
+- **Visitantes sem conta:** quem só abre o site ou tenta entrar também gera eventos de telemetria
+  e registros de acesso, sempre com o IP truncado. Um evento de segurança de login recusado pode
+  ficar sem conta associada.
+- **Cloudflare:** antes de chegar ao nosso servidor, cada conexão passa pela Cloudflare (item 6),
+  que abre a cifra HTTPS e recebe o **IP completo**, os cabeçalhos e o conteúdo da requisição. O
+  truncamento descrito neste aviso vale para o que nós guardamos, não para o que a Cloudflare
+  trata no trânsito.
 
 ### 3.5. O que **não** coletamos
 
@@ -100,7 +110,8 @@ Quanto aos dados de terceiros que você enviar, veja o item 6 dos Termos de Uso.
 - E-mail, telefone, data de nascimento, documento ou endereço; o e-mail só chega se você nos
   escrever (item 3.6).
 - Dados de pagamento: o serviço é gratuito.
-- Cookies de publicidade, de analytics ou de terceiros; o site não carrega scripts de terceiros.
+- Cookies de publicidade ou de analytics; o site não carrega scripts de terceiros. O único cookie
+  de terceiro possível é o de segurança da Cloudflare (item 9).
 - Conteúdo, nomes de arquivo e parâmetros em telemetria.
 
 ### 3.6. Dados que você nos envia por e-mail
@@ -111,8 +122,8 @@ para responder e tratar o seu pedido, e não os juntamos à sua conta: como não
 na conta, não temos como ligar uma mensagem a uma conta, a não ser pelo que você mesmo
 informar. Guardamos a conversa por 12 meses depois do fim dela.
 
-Esses endereços não são caixas de correio próprias: o ImprovMX recebe a mensagem e a encaminha
-para uma caixa de e-mail do Google (Gmail) do controlador, onde ela fica guardada (item 6).
+Esses endereços ficam numa caixa de e-mail da Zoho, contratada pelo controlador, onde as
+mensagens são recebidas e guardadas (item 6).
 
 ## 4. Para que usamos e com que base legal
 
@@ -121,15 +132,19 @@ para uma caixa de e-mail do Google (Gmail) do controlador, onde ela fica guardad
 | Criar a conta, autenticar e manter a sessão | Identificador do provedor, nome de exibição, sessão, chaves | Execução de contrato (inciso V) |
 | Receber, processar e entregar seus arquivos; histórico e presets | Arquivos, nomes, parâmetros, histórico, presets | Execução de contrato (inciso V) |
 | Aplicar cotas e limites justos entre usuários | Consumo da conta | Execução de contrato (inciso V) |
-| Registrar o aceite dos Termos e do Aviso | Versão e data do aceite | Execução de contrato (inciso V) [[A DEFINIR: ou exercício regular de direitos (inciso VI)]] |
-| Proteger o serviço e as contas: auditoria de segurança, investigação de abuso, bloqueio | Eventos de segurança com IP truncado, estado da conta | Legítimo interesse (inciso IX), na segurança do próprio serviço e dos usuários [[A DEFINIR: registrar a avaliação de legítimo interesse]] |
-| Medir disponibilidade, diagnosticar falhas e alertar | Telemetria pseudonimizada, logs técnicos | Legítimo interesse (inciso IX) [[A DEFINIR]] |
-| Recuperar o banco de dados em caso de desastre | Cópia cifrada do banco (item 7) | Legítimo interesse (inciso IX) [[A DEFINIR]] |
-| Responder a quem nos escreve: contato, denúncias e pedidos sobre dados pessoais | Endereço de e-mail, mensagem e anexos (item 3.6) | [[A DEFINIR: base legal]] |
+| Entregar o site com proteção contra ataques | IP, requisição e conteúdo em trânsito, tratados pela Cloudflare (item 6) | Execução de contrato (inciso V) |
+| Registrar o aceite dos Termos e do Aviso | Versão e data do aceite | Execução de contrato (inciso V) e exercício regular de direitos (inciso VI), para provar o aceite |
+| Proteger o serviço e as contas: auditoria de segurança, investigação de abuso, bloqueio | Eventos de segurança com IP truncado, estado da conta | Legítimo interesse (inciso IX), na segurança do próprio serviço e dos usuários; avaliação registrada, com resumo disponível a pedido |
+| Medir disponibilidade, diagnosticar falhas e alertar | Telemetria pseudonimizada, logs técnicos | Legítimo interesse (inciso IX); avaliação registrada, com resumo disponível a pedido |
+| Recuperar o banco de dados em caso de desastre e testar essa recuperação | Cópia cifrada do banco (item 7) | Execução de contrato (inciso V), para manter a conta, os presets e o histórico que você usa |
+| Responder a quem nos escreve sobre o serviço | Endereço de e-mail, mensagem e anexos (item 3.6) | Execução de contrato ou procedimentos preliminares a pedido do titular (inciso V) |
+| Atender pedidos sobre dados pessoais | Endereço de e-mail, mensagem e anexos (item 3.6) | Cumprimento de obrigação legal (inciso II) |
+| Receber e apurar denúncias | Endereço de e-mail, mensagem e anexos (item 3.6) | Exercício regular de direitos (inciso VI) e, quando houver, obrigação legal (inciso II) |
+| Manter o bloqueio de uma conta | Identificador do provedor, nome de exibição e estado da conta | Exercício regular de direitos (inciso VI) |
 | Atender denúncias, ordens e obrigações legais | O que for estritamente necessário ao caso | Cumprimento de obrigação legal (inciso II) e exercício regular de direitos (inciso VI) |
 
-Não usamos seus dados para publicidade, para traçar perfil, para treinar inteligência
-artificial nem para decisões automatizadas que afetem seus interesses. Os bloqueios de cota e
+Não usamos seus dados para publicidade, para traçar perfil, para treinar modelos de aprendizado
+de máquina nem para decisões automatizadas que afetem seus interesses. Os bloqueios de cota e
 de taxa são regras fixas e públicas, aplicadas igualmente a todas as contas.
 
 ## 5. Por quanto tempo guardamos
@@ -150,31 +165,41 @@ de taxa são regras fixas e públicas, aplicadas igualmente a todas as contas.
 | Logs técnicos dos serviços | Até 50 MiB por serviço (5 arquivos de 10 MiB), o que cobre cerca de 14 dias no volume previsto; com pouco tráfego, uma linha pode durar mais. Os logs também somem sempre que o serviço é recriado, o que acontece a cada atualização | Rotação por tamanho |
 | Backup cifrado do banco de dados | 30 dias | Expiração automática no provedor do backup |
 | Mensagens que você nos envia por e-mail (item 3.6) | 12 meses depois do fim da conversa | Mensagens apagadas da caixa de e-mail |
+| Registros preservados em caso de abuso sexual infantil (item 7 dos Termos de Uso) | O prazo que a autoridade indicar; sem indicação, 6 meses a partir da comunicação | Registros apagados |
+| Conta bloqueada: identificador do provedor, nome de exibição e estado | Enquanto o bloqueio durar, com revisão ao menos uma vez por ano | Liberação da conta ou exclusão |
 | Dados da conta | Enquanto a conta existir | Exclusão da conta (item 8) |
 
 Os prazos acima são aplicados por rotinas automáticas de manutenção. Arquivos não têm backup:
 depois de apagados, não podem ser recuperados.
 
-[[A DEFINIR: se a conta for bloqueada e depois excluída, o identificador do provedor é mantido
-para que o bloqueio continue valendo? Por quanto tempo?]]
+**Conta bloqueada.** Uma conta bloqueada não entra mais e, por isso, não consegue usar a
+exclusão pela própria conta. O identificador do provedor fica guardado para que o bloqueio
+continue valendo, e os demais dados seguem os prazos acima. Você pode pedir a revisão do bloqueio
+ou a eliminação pelo canal de privacidade. Atendemos, salvo se a conservação for necessária para
+cumprir obrigação legal ou para exercer direitos em processo (LGPD, arts. 7º, II e VI, e 16, I).
+Depois da exclusão de uma conta, não guardamos nenhum identificador do provedor; se a mesma
+pessoa voltar a entrar, será uma conta nova, sujeita a novo bloqueio.
 
 ## 6. Com quem compartilhamos
 
 Não vendemos nem cedemos dados pessoais. Os dados passam pelos fornecedores abaixo, cada um
-apenas no necessário para a sua função.
+apenas no necessário para a sua função. **Operador** trata dados em nosso nome. **Controlador
+independente** decide por conta própria como trata os dados, na relação direta que você tem com
+ele, sob a política dele.
 
 | Fornecedor | Papel | Que dados | Onde |
 |---|---|---|---|
-| **Hostinger** | Hospedagem do servidor (VPS) onde rodam a aplicação, o banco de dados, os arquivos e a telemetria | Todos os dados descritos no item 3 | Datacenter em Campinas (SP), Brasil |
-| **Google** | Provedor de login (se você entra com Google) | O Google sabe que você entrou no GoblinShift; nos devolve o identificador `sub` | Conforme a política do Google |
-| **GitHub** | Provedor de login (se você entra com GitHub) | O GitHub sabe que você entrou no GoblinShift; nos devolve o `id` e o nome de usuário públicos | Conforme a política do GitHub |
-| **GitHub (Actions)** | Teste mensal de restauração do backup | Uma vez por mês, a cópia mais recente do banco é decifrada e restaurada num servidor temporário do GitHub Actions, para provar que o backup funciona; o servidor é descartado ao fim | Infraestrutura do GitHub, fora do controle de localização do GoblinShift [[A DEFINIR: confirmar localização e mencionar como transferência internacional]] |
-| **Backblaze (B2)** | Armazenamento do backup do banco de dados | Cópia diária do banco, **cifrada antes de sair do servidor**; o Backblaze não tem a chave para decifrá-la | Estados Unidos |
-| **ImprovMX** | Encaminhamento dos e-mails enviados a contato@, abuso@ e privacidade@goblinshift.dev para a nossa caixa de entrada | O que você nos escrever (item 3.6): seu endereço de e-mail, a mensagem e os anexos, enquanto a mensagem é encaminhada | Conforme a política do ImprovMX; fora do controle de localização do GoblinShift |
-| **Google (Gmail)** | Caixa de entrada que recebe e guarda as mensagens encaminhadas | O que você nos escrever (item 3.6) | Conforme a política do Google; fora do controle de localização do GoblinShift |
+| **Hostinger** (operador) | Hospedagem do servidor (VPS) onde rodam a aplicação, o banco de dados, os arquivos e a telemetria | Todos os dados descritos no item 3 | Datacenter em Campinas (SP), Brasil |
+| **Cloudflare** (operador) | DNS, proxy reverso e proteção do site: recebe as conexões, abre a cifra HTTPS e repassa ao servidor | IP completo, cabeçalhos e conteúdo das requisições e respostas em trânsito, inclusive arquivos enviados e baixados, e cookies. O navegador também pode enviar à Cloudflare relatórios de falha de rede, com o endereço do site e o IP | Rede global da Cloudflare, fora do controle de localização do GoblinShift |
+| **Google** (controlador independente) | Provedor de login (se você entra com Google) | O Google sabe que você entrou no GoblinShift; nos devolve o identificador `sub` | Conforme a política do Google |
+| **GitHub** (controlador independente) | Provedor de login (se você entra com GitHub) | O GitHub sabe que você entrou no GoblinShift; nos devolve o `id` e o nome de usuário públicos | Conforme a política do GitHub |
+| **GitHub (Actions)** (operador) | Teste mensal de restauração do backup | Uma vez por mês, a cópia mais recente do banco é decifrada e restaurada num servidor temporário do GitHub Actions, para provar que o backup funciona; o servidor é descartado ao fim | Infraestrutura do GitHub, fora do Brasil, em região que não controlamos |
+| **Backblaze (B2)** (operador) | Armazenamento do backup do banco de dados | Cópia diária do banco, **cifrada antes de sair do servidor**; o Backblaze não tem a chave para decifrá-la | Estados Unidos |
+| **Zoho (Zoho Mail)** (operador) | Recebimento e guarda dos e-mails enviados a contato@, abuso@ e privacidade@goblinshift.dev | O que você nos escrever (item 3.6): seu endereço de e-mail, a mensagem e os anexos | Conforme a política da Zoho; fora do controle de localização do GoblinShift |
 
 A telemetria fica no próprio servidor, sem envio a terceiros. O serviço de monitoramento do
-backup (healthchecks.io) recebe só um sinal de "backup feito" ou "falhou", sem dados pessoais.
+backup (healthchecks.io) recebe só um sinal de "backup feito" ou "falhou", sem dados pessoais, e
+os alertas técnicos enviados a nós trazem só o nome e a descrição do alerta.
 
 Também podemos fornecer dados a autoridades quando a lei ou uma ordem judicial exigir, e no caso
 de conteúdo de abuso sexual infantil (item 7 dos Termos de Uso).
@@ -183,18 +208,21 @@ de conteúdo de abuso sexual infantil (item 7 dos Termos de Uso).
 
 O servidor principal fica no Brasil. Saem do país, ou podem sair:
 
-1. **O backup do banco de dados**, guardado no Backblaze B2, nos Estados Unidos, por 30 dias. Ele
+1. **O tráfego do site**, que passa pela Cloudflare (item 6). O processamento dos seus arquivos
+   fica no servidor no Brasil, mas não controlamos por quais pontos da rede da Cloudflare a sua
+   conexão passa.
+2. **O backup do banco de dados**, guardado no Backblaze B2, nos Estados Unidos, por 30 dias. Ele
    é cifrado no nosso servidor antes do envio, com uma chave cuja parte privada não fica nem no
    servidor nem no Backblaze; a chave que o servidor usa para enviar só pode gravar, não pode
    ler nem apagar backups. O banco contém os dados das seções 3.1 a 3.3 (não contém arquivos).
-2. **A restauração mensal de teste** desse backup, feita no GitHub Actions (item 6).
-3. **As mensagens que você nos envia por e-mail** (item 3.6), que passam pelo ImprovMX e ficam
-   numa caixa de e-mail do Google (Gmail). Não controlamos em que país esses dois fornecedores
-   tratam a mensagem.
+3. **A restauração mensal de teste** desse backup, feita no GitHub Actions (item 6).
+4. **As mensagens que você nos envia por e-mail** (item 3.6), guardadas numa caixa de e-mail da
+   Zoho. Não controlamos em que país esse fornecedor trata a mensagem.
 
-[[A DEFINIR: mecanismo de transferência do art. 33 da LGPD (por exemplo,
-cláusulas-padrão contratuais aprovadas pela ANPD, ou outro) para o Backblaze e para o GitHub
-Actions.]]
+Essas transferências se apoiam no art. 33, IX, da LGPD: são necessárias para executar o contrato
+com você, cumprir obrigação legal ou exercer direitos (art. 7º, II, V e VI). Google e GitHub, como
+provedores de login, tratam os dados como controladores independentes, na relação direta que
+você mantém com eles.
 
 ## 8. Seus direitos e como exercê-los
 
@@ -207,7 +235,8 @@ A LGPD (art. 18) garante a você, entre outros, o direito de:
 - **portabilidade** dos dados;
 - **eliminação** dos dados;
 - saber com quem compartilhamos seus dados (item 6);
-- **opor-se** a tratamento feito com base em legítimo interesse, se houver descumprimento da lei;
+- **opor-se** a tratamento feito com base em legítimo interesse, se houver descumprimento da lei
+  (art. 18, § 2º);
 - peticionar à **Autoridade Nacional de Proteção de Dados (ANPD)**.
 
 **Como exercer pela própria conta, sem pedir a ninguém:**
@@ -217,14 +246,16 @@ A LGPD (art. 18) garante a você, entre outros, o direito de:
 | Acesso | A área da conta (`GET /me`), o histórico de execuções e a lista de presets mostram o que a conta guarda, incluindo o consumo |
 | Portabilidade | Baixe os resultados e relatórios das execuções enquanto estiverem disponíveis; presets e histórico podem ser lidos pela API em JSON |
 | Eliminação de arquivos | Excluir um arquivo ou resultado o torna indisponível na hora; a remoção física acontece assim que nenhuma execução ou download em andamento o estiver usando |
-| Eliminação da conta | Excluir a conta (`DELETE /me`, exige login recente) revoga sessões e chaves, cancela a execução em andamento e remove arquivos, resultados, presets e histórico **em até 24 horas**. Os eventos de segurança (item 3.2) continuam guardados por até 90 dias depois da exclusão, com o identificador interno da conta e o IP truncado, para proteger o serviço. Cópias no backup do banco deixam de existir quando o backup expira, **em até 30 dias**; até lá elas só seriam usadas para recuperar o banco num desastre [[A DEFINIR: o que fazer se uma restauração trouxer de volta uma conta excluída]] |
+| Eliminação da conta | Excluir a conta (`DELETE /me`, exige login recente) revoga sessões e chaves, cancela a execução em andamento e remove arquivos, resultados, presets e histórico **em até 24 horas**. Os eventos de segurança (item 3.2) continuam guardados por até 90 dias depois da exclusão, com o identificador interno da conta e o IP truncado, para proteger o serviço. Cópias no backup do banco deixam de existir quando o backup expira, **em até 30 dias**; até lá elas só seriam usadas para recuperar o banco num desastre. Se uma restauração for necessária, antes de reabrir o serviço excluímos de novo as contas cuja exclusão esteja registrada depois da data da cópia, e publicamos um aviso no site; quem pediu a exclusão nesse intervalo pode repeti-la pela conta ou pelo canal de privacidade |
 | Encerrar acessos | "Sair de todas as sessões" revoga todas as sessões e chaves da conta |
 
 **Pelo canal de privacidade** (privacidade@goblinshift.dev), para os demais pedidos, como correção,
-oposição ou informações sobre compartilhamento. Como não temos seu e-mail, poderemos pedir que
-você comprove o controle da conta (por exemplo, fazendo login e informando um código exibido na
-conta) antes de atender. [[A DEFINIR: procedimento de verificação de identidade e prazo de
-resposta.]]
+oposição ou informações sobre compartilhamento. Como não temos seu e-mail, confirmamos a sua
+identidade pelo próprio login: você entra no GoblinShift e nos informa o identificador da conta.
+Para quem não consegue entrar (por exemplo, conta bloqueada), vale o código da tela de login
+recusado. Confirmação de tratamento e acesso em forma simplificada são respondidos de imediato;
+os demais pedidos e a declaração completa, em **até 15 dias** contados do pedido com a identidade
+confirmada (art. 19). Quando não pudermos atender, respondemos com o motivo.
 
 **Correção do nome de exibição:** para contas GitHub, ele é o seu nome de usuário no GitHub e é
 atualizado a cada login; para corrigi-lo, altere-o no GitHub e entre de novo no GoblinShift. Para
@@ -241,8 +272,10 @@ isso não pedimos consentimento para eles, e o serviço não funciona sem eles.
 | `__Host-gs_csrf` | Protege contra ações feitas em seu nome por outros sites (CSRF). `Secure` e `SameSite=Strict` | Trocado a cada sessão |
 | `__Secure-gs_login` | Existe só durante o login: guarda, assinada, só uma chave que aponta para o estado do login enquanto você está no Google ou no GitHub. É `HttpOnly`, `Secure` e `SameSite=Lax`, e o navegador só o envia às rotas de login (`/auth`) | 10 minutos; o estado a que ele aponta também expira em 10 minutos |
 
-Não usamos cookies de publicidade, de analytics ou de terceiros. Ao sair, o serviço pede ao
-navegador que apague os cookies e o armazenamento do site.
+Não usamos cookies de publicidade nem de analytics. Se a Cloudflare identificar tráfego suspeito,
+ela pode gravar um cookie técnico próprio de segurança (como `__cf_bm` ou `cf_clearance`), usado
+só para distinguir pessoas de robôs. Ao sair, o serviço pede ao navegador que apague os cookies e
+o armazenamento do site.
 
 ## 10. Segurança
 
@@ -256,8 +289,10 @@ o seu e-mail.
 
 ## 11. Crianças e adolescentes
 
-[[A DEFINIR: idade mínima e tratamento de dados de crianças e adolescentes (LGPD, art. 14). O
-serviço não coleta idade.]]
+O GoblinShift é só para maiores de 18 anos e não é dirigido a crianças e adolescentes. O serviço
+não coleta idade: ao aceitar os Termos, você declara ter 18 anos ou mais. Se soubermos que uma
+conta pertence a uma pessoa com menos de 18 anos, ela é bloqueada e excluída, com os dados dela,
+em até 15 dias. Pai, mãe ou responsável pode avisar pelo canal de privacidade.
 
 ## 12. Mudanças neste aviso
 
@@ -276,3 +311,4 @@ texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](htt
 | `v2-rascunho` | 2026-10-15 | Identificação do controlador; domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |
 | `v3-rascunho` | 2026-10-15 | Provedor dos endereços de e-mail identificado: ImprovMX (encaminhamento) e Google/Gmail (caixa de entrada), nos itens 2, 3.6, 6 e 7 |
 | `v4-rascunho` | 2026-10-21 | Redação editorial e referência ao registro de licenças atualizadas; novo aceite conjunto, sem alterar aceites anteriores |
+| `v5` | 2026-11-05 | Primeira versão vigente, sem marcações pendentes: Cloudflare incluída como fornecedora; Zoho no lugar de ImprovMX e Gmail; dispensa de encarregado; bases legais completas; papel de cada fornecedor; mecanismo da transferência internacional; conta bloqueada; restauração de backup; verificação de identidade e prazo de 15 dias; serviço só para maiores de 18 anos; identificação do controlador |

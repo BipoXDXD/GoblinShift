@@ -1,12 +1,12 @@
 # Termos de Uso do GoblinShift
 
-- **Versão:** v4-rascunho
-- **Vigência:** 2026-10-21
+- **Versão:** v5
+- **Vigência:** 2026-11-05
 - **Endereço do serviço:** https://goblinshift.dev
 
 ## 1. Quem oferece o serviço
 
-O GoblinShift é oferecido por Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR)
+O GoblinShift é oferecido por Return to Monkey Corporation (CNPJ em registro), de Curitiba (PR)
 ("nós"), que é o controlador dos dados pessoais tratados no serviço. Canal do controlador:
 privacidade@goblinshift.dev.
 
@@ -25,9 +25,10 @@ ele, o uso não continua.
 
 Se você não concorda com estes Termos, não use o serviço.
 
-[[A DEFINIR: idade mínima para usar o serviço e o que fazer com contas de menores. Google e
-GitHub têm idade mínima própria, mas o GoblinShift não recebe a data de nascimento e não tem
-como verificar idade.]]
+**O serviço é só para maiores de 18 anos.** Ao aceitar estes Termos, você declara ter 18 anos
+ou mais. O GoblinShift não é dirigido a crianças e adolescentes, não recebe a sua data de
+nascimento e não tem como verificar idade. Se soubermos que uma conta pertence a uma pessoa com
+menos de 18 anos, a conta é bloqueada e excluída, com os dados dela, em até 15 dias.
 
 ## 3. O que o serviço faz
 
@@ -110,10 +111,15 @@ Ao tomarmos conhecimento desse conteúdo, por denúncia ou de outro modo:
 - a conta é **bloqueada**: o bloqueio revoga sessões e chaves, cancela a execução em andamento e
   impede novos logins da mesma identidade;
 - o acesso ao conteúdo é **bloqueado imediatamente**;
-- preservamos os registros e o material necessários e comunicamos às autoridades competentes,
-  na forma da lei [[A DEFINIR: quais autoridades e canais (por exemplo,
-  Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a
-  preservação com a expiração automática de 48 horas]].
+- comunicamos o fato à **Polícia Federal** e à **Central Nacional de Denúncias da SaferNet
+  Brasil**, sem demora, e atendemos ao que a autoridade requisitar;
+- preservamos os registros da conta e das execuções e os hashes SHA-256 dos arquivos, fora do
+  alcance das rotinas de expiração, pelo prazo que a autoridade indicar ou, sem indicação, por
+  6 meses a partir da comunicação;
+- não abrimos, copiamos nem repassamos o conteúdo por iniciativa própria. Se a autoridade
+  requisitar a preservação do material antes da expiração de 48 horas, ele é guardado cifrado,
+  com acesso restrito, só até a entrega a ela, e apagado em seguida. Sem essa requisição, o
+  arquivo expira no prazo normal do item 5.
 
 Para os demais conteúdos ilegais, adotamos as mesmas medidas que forem cabíveis. O GoblinShift
 não faz, nesta versão, varredura automatizada do conteúdo dos arquivos para moderação: a
@@ -132,7 +138,8 @@ e são tratadas assim que forem lidas.
   ou outros usuários, ou quando a lei exigir. Não temos o seu e-mail e por isso não avisamos
   antes de bloquear. Se você acha que o bloqueio foi um engano, escreva para
   contato@goblinshift.dev com o código da tela de login e o provedor (Google ou GitHub), e
-  analisamos o caso. Essa regra não vale para o item 7.
+  analisamos o caso. Essa regra não vale para o item 7. O que fazemos com os dados de uma
+  conta bloqueada está no item 5 do Aviso de Privacidade.
 - **Por você.** Você pode excluir sua conta a qualquer momento pela própria conta (operação
   `DELETE /me`, que exige login recente). A exclusão revoga sessões e chaves, cancela a
   execução em andamento e remove arquivos, resultados, presets e histórico em até 24 horas.
@@ -171,10 +178,9 @@ e são tratadas assim que forem lidas.
   metadados suportados, mas não é anonimização.
 - Os arquivos são apagados após o prazo do item 5 e **não têm backup**. Não use o GoblinShift
   como único local de guarda de nenhum arquivo.
-- Na extensão permitida pela lei, não respondemos por perda de arquivos, lucros cessantes ou
-  danos indiretos decorrentes do uso ou da indisponibilidade do serviço. Nada nestes Termos
-  limita responsabilidade que a lei não permita limitar, como a decorrente de dolo ou culpa
-  grave.
+- Respondemos pelos danos na forma da lei. Nada nestes Termos exclui ou reduz direito ou
+  responsabilidade que a lei não permita excluir ou reduzir, inclusive os previstos no Código de
+  Defesa do Consumidor, quando ele se aplicar.
 
 ## 11. Privacidade
 
@@ -192,8 +198,9 @@ texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](htt
 
 ## 13. Lei aplicável e foro
 
-Estes Termos são regidos pelas leis da República Federativa do Brasil.
-[[A DEFINIR: foro.]]
+Estes Termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro de
+Curitiba (PR). Se você for consumidor, pode propor a ação no foro do seu domicílio, e esta
+eleição não limita esse direito.
 
 ## Histórico de versões
 
@@ -203,3 +210,4 @@ Estes Termos são regidos pelas leis da República Federativa do Brasil.
 | `v2-rascunho` | 2026-10-15 | Identificação de quem oferece o serviço; domínio e e-mails de contato; política de divulgação de vulnerabilidades; proibição de ceder chaves de API; prazo de resposta às denúncias; recurso contra bloqueio; aviso de 30 dias antes do fim do serviço; licença Apache 2.0 do código e CC BY 4.0 da arte; pedido de retirada de material do site; antecedência de 15 dias para mudanças e este histórico |
 | `v3-rascunho` | 2026-10-15 | Sem mudança de cláusula: o aceite é um só para os dois textos, e a versão sobe junto com o Aviso de Privacidade |
 | `v4-rascunho` | 2026-10-21 | Redação editorial e referência ao registro de licenças atualizadas; novo aceite conjunto, sem alterar aceites anteriores |
+| `v5` | 2026-11-05 | Primeira versão vigente, sem marcações pendentes: serviço só para maiores de 18 anos; comunicação às autoridades e preservação em caso de abuso sexual infantil; foro; responsabilidade na forma da lei; identificação do controlador |

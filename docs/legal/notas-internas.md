@@ -6,71 +6,186 @@ Material de revisão dos [Termos de Uso](termos-de-uso.md) e do
 `PrivacyPage.tsx`), e `web/src/legal/LegalPage.test.tsx` e `web/e2e/specs/legal.spec.ts` falham se
 algo deste arquivo voltar para eles.
 
-Convenção: nos textos públicos, o que depende de decisão fica marcado como `[[A DEFINIR: ...]]`,
-visível na página enquanto o texto for rascunho. O id do levantamento da fatia 8 (J-n) de cada
-marcação, as perguntas ao revisor e as fontes de cada afirmação técnica ficam aqui.
+Os textos públicos estão na versão `v5`, vigente desde 2026-11-05, sem marcações pendentes. O
+id de cada decisão do levantamento da fatia 8 (J-n) e as fontes de cada afirmação técnica ficam
+aqui.
+
+## Revisão de 2026-11-05
+
+Revisado em 2026-11-05, por decisão do dono do serviço. Cada item abaixo resolve um ponto que
+estava em aberto no rascunho `v4-rascunho`, sempre pela opção mais protetora para o serviço e
+para os titulares. Conferido contra o código e contra a produção na mesma data.
+
+### Controlador
+
+- **J-16, identificação.** O controlador passa a ser Return to Monkey Corporation, CNPJ em
+  registro, de Curitiba (PR), com o canal `privacidade@goblinshift.dev`. O art. 9º, III, da LGPD
+  pede identificação e contato do controlador. Assim que o CNPJ sair, ele substitui "CNPJ em
+  registro" nos dois textos, em versão nova. O teste `test_nao_publica_cpf` continua valendo.
+- **J-17, encarregado.** Dispensado. Agente de pequeno porte (Resolução CD/ANPD nº 2/2022, art.
+  2º) não é obrigado a indicar encarregado (art. 11) e precisa manter canal de comunicação com o
+  titular (art. 11, § 1º), que é `privacidade@`. A exclusão do art. 3º não se aplica enquanto a
+  receita estiver dentro dos limites legais. O tratamento não é de alto risco (art. 4º): sem
+  larga escala e sem tratamento que afete significativamente interesses e direitos, e o serviço
+  não usa decisão automatizada nem coleta dado sensível; o conteúdo dos arquivos é lido só pela
+  receita. Se o enquadramento mudar, a dispensa cai.
+- **Registro das operações (art. 37).** A Resolução nº 2/2022 (art. 9º) admite registro
+  simplificado. Os itens 3 a 7 do Aviso, os LIAs e as tabelas desta nota fazem esse papel.
+
+### Bases legais e LIAs
+
+- **J-22, aceite.** Incisos V e VI do art. 7º juntos: o aceite integra o contrato e serve de
+  prova dele.
+- **J-23, auditoria e antiabuso.** Legítimo interesse (inciso IX) mantido. LIA concluída, com
+  90 dias depois da exclusão considerados proporcionais.
+- **J-24, telemetria.** Legítimo interesse mantido. LIA concluída; `user.hash` é tratado como
+  dado pessoal.
+- **J-25, backup.** A base passou para execução de contrato (inciso V), porque só assim o art.
+  33, IX, cobre a transferência: esse inciso alcança os incisos II, V e VI do art. 7º, e não o
+  legítimo interesse. A LIA fica como registro de proporcionalidade.
+- **Mensagens por e-mail.** Sem legítimo interesse, pelo mesmo motivo: contato sobre o serviço
+  no inciso V, inclusive procedimentos preliminares a pedido do titular; pedidos de titulares no
+  inciso II; denúncias no inciso VI e, quando houver, no II.
+- **Cloudflare.** Inciso V: é por ela que o site é entregue.
+- **Bloqueio.** Inciso VI enquanto a conta bloqueada existir.
+
+### Transferência internacional
+
+- **J-19.** Mecanismo adotado: art. 33, IX, para Cloudflare, Backblaze, GitHub Actions e Zoho. Os
+  provedores de login são controladores independentes, em relação direta com o titular.
+- Foi adotado esse inciso porque o controlador não comprovou cláusulas-padrão da Resolução
+  CD/ANPD nº 19/2024 com nenhum fornecedor. Se elas forem incorporadas, entram como reforço.
+- A localização do GitHub Actions não é controlável, e o Aviso diz isso.
+
+### Divergências encontradas em produção em 2026-11-05
+
+- **Cloudflare não constava em nenhum texto.** `goblinshift.dev` resolve para IPs da Cloudflare,
+  os servidores de nome são dela, e a resposta traz `server: cloudflare` e os cabeçalhos `nel` e
+  `report-to` apontando para `a.nel.cloudflare.com`. Portanto a Cloudflare abre o TLS e vê IP
+  completo, cabeçalhos, cookies e arquivos em trânsito, e o navegador pode lhe enviar relatórios
+  de falha de rede. Era a omissão mais grave: entrou nos itens 2, 3.4, 3.5, 4, 6, 7 e 9 do Aviso.
+- **O e-mail não passa pelo ImprovMX.** Os MX são `mx.zoho.com`, `mx2.zoho.com` e `mx3.zoho.com`, e
+  o SPF inclui `zohomail.com`. O Aviso passou a citar a Zoho e deixou de citar ImprovMX e Gmail.
+- **IP visto pelo serviço.** `deploy/coolify/Caddyfile` confia em `X-Forwarded-For` só de
+  `179.197.70.102` e `172.16.1.6`, sem as faixas da Cloudflare. Não foi verificado se o IP
+  gravado em produção é o do usuário ou o da borda. O Aviso continua correto como limite do que
+  guardamos, mas, se for o da borda, a auditoria perde utilidade antiabuso.
+- **healthchecks.io e alertas.** Recebem só pings e o texto do alerta, sem dado pessoal
+  (`deploy/backup/lib.sh`, `deploy/openobserve/provision.py`). O canal urgente ainda não está
+  configurado. Discord, Telegram e Slack são só opções do README.
+
+### Marco Civil da Internet, art. 15
+
+- O art. 15 obriga o provedor de aplicação "constituído na forma de pessoa jurídica, que exerça
+  essa atividade de forma organizada, profissionalmente e com fins econômicos" a guardar registros
+  de acesso por 6 meses, sob sigilo.
+- **Posição:** hoje não se aplica. O serviço é gratuito, não tem receita, anúncio nem plano pago,
+  e o cadastro está fechado. Por isso o Aviso mantém o IP truncado, e nada guarda o IP completo.
+- **A posição é frágil** e deve ser refeita antes da abertura: o controlador passa a ser pessoa
+  jurídica, o que atende um dos requisitos, e a jurisprudência tende a ler "fins econômicos" de
+  forma ampla, incluindo benefício indireto. IP truncado não cumpre o art. 15, que pede data,
+  hora e IP de origem (art. 5º, VIII).
+- **Gatilho:** qualquer receita, plano pago, anúncio ou patrocínio exige, antes de começar, guardar
+  os registros completos por 6 meses, sob sigilo, e publicar nova versão do Aviso.
+
+### CDC
+
+Tratado como aplicável por cautela: o serviço gratuito não afasta a relação de consumo quando há
+ganho indireto. Por isso a cláusula que afastava lucros cessantes e danos indiretos saiu (CDC, art.
+51, I), e os Termos ficam só com os avisos práticos e a responsabilidade na forma da lei.
+
+- **J-21, foro.** Curitiba (PR), ressalvado ao consumidor o foro do próprio domicílio (CDC, art.
+  101, I).
+
+### Crianças e adolescentes
+
+- **J-18.** Idade mínima de 18 anos, por autodeclaração no aceite (tela de aceite e Termos 2).
+  Motivos: o art. 14 da LGPD exige consentimento de pai, mãe ou responsável para crianças, o que o
+  serviço não tem como colher; e contrato com menor de idade é anulável ou nulo pelo Código Civil.
+  Conta de menor é bloqueada e excluída em até 15 dias.
+
+### Abuso sexual infantil
+
+- **J-20.** Comunicação sem demora à Polícia Federal e à SaferNet Brasil. Preservam-se metadados,
+  hashes e o identificador da conta numa ficha cifrada fora da VPS, pelo prazo da autoridade ou,
+  sem prazo, por 6 meses, por analogia com o prazo do art. 15 do Marco Civil, cujo § 2º admite
+  pedido cautelar de guarda por prazo maior a qualquer provedor de aplicações.
+- O conteúdo não é aberto nem copiado por iniciativa própria: a posse é crime (ECA, art. 241-B),
+  e a exceção do § 2º, III, vale para o provedor só até a entrega à autoridade, com sigilo (§ 3º).
+  Só se a autoridade requisitar antes das 48 horas, o arquivo é copiado cifrado e entregue.
+- O código não tem retenção legal (*legal hold*): a preservação é manual, em
+  `docs/runbooks/abuso.md`, seção "Abuso sexual infantil (CSAM)".
+
+### Direitos do titular
+
+- **J-26, bloqueio e exclusão.** Conta bloqueada não entra e não usa `DELETE /me`; não existe comando
+  administrativo de exclusão. Os dados da conta ficam enquanto o bloqueio durar, com revisão anual
+  (`docs/runbooks/abuso.md`). O HMAC de `issuer` + `subject` proposto antes não foi implementado:
+  depois de uma exclusão, nenhum identificador fica, por minimização.
+- **J-27, restauração.** O diário de exclusões não foi implementado. Antes de reabrir, reaplicam-se
+  as exclusões registradas depois da data da cópia, e um aviso no site orienta a repetir o pedido.
+- **J-28, verificação e prazo.** Identidade pelo login no provedor ou pelo código da tela de login
+  recusado. Resposta simplificada imediata e declaração completa em até 15 dias (art. 19). O prazo
+  em dobro do agente de pequeno porte (Resolução nº 2/2022, art. 14) não é usado.
+
+### Fornecedores
+
+Hostinger, Cloudflare, Backblaze, GitHub Actions e Zoho são operadores. Google e GitHub, como
+login, são controladores independentes. O Aviso declara isso no item 6.
+
+### Direitos sobre a arte e a marca
+
+As ressalvas ficam em `docs/art/LICENSE-ART.md`, seção "Ressalvas preservadas", e os documentos
+completos no registro externo `goblinshift-editorial-20261021`. Os Termos 9 só descrevem essas
+condições, sem garantia de proteção ou exclusividade sobre os arquivos de origem.
+
+### Versão
+
+`v5`, e não `v3`: `v3-rascunho` e `v4-rascunho` já foram usadas. A troca exige novo aceite de
+toda conta do login (ADR 029). Com o cadastro fechado, só as contas do dono são atingidas, e os
+15 dias de antecedência dos textos não se aplicam. O aviso de rascunho saiu das páginas.
+
+### Antes de abrir o cadastro
+
+Depende do dono, fora do repositório:
+
+1. Trocar "CNPJ em registro" pelo número, em versão nova dos textos.
+2. Confirmar se a caixa da Zoho encaminha para outra caixa. Se encaminhar para o Gmail, o Google
+   volta aos itens 3.6, 6 e 7 do Aviso.
+3. Conferir se o plano da Cloudflare e o da Zoho têm contrato de tratamento de dados aceito, e
+   incorporar as cláusulas-padrão da ANPD onde houver.
+4. Conferir os canais de denúncia da Polícia Federal e da SaferNet indicados no roteiro.
+5. Testar os três endereços de e-mail, envio e resposta.
+
+### Riscos residuais
+
+Recomendam revisão por advogado(a) se o serviço crescer ou passar a ter fins econômicos:
+
+- **Controlador sem CNPJ registrado.** Até o registro, "Return to Monkey Corporation" não tem
+  personalidade jurídica: quem responde é a pessoa natural por trás do serviço, e o texto
+  identifica o controlador de forma incompleta (LGPD, art. 9º, III). Também não foi feita busca
+  de nome empresarial nem de marca.
+- **Marco Civil, art. 15.** A posição acima pode não resistir, e o IP truncado não atende à
+  guarda exigida.
+- **Art. 33, IX, como mecanismo único.** A ANPD pode entender que a Cloudflare e o backup não são
+  estritamente necessários ao contrato. O reforço são as cláusulas-padrão.
+- **Idade por autodeclaração.** A Lei nº 15.211/2025 (ECA Digital), em vigor desde 2026-03-17,
+  vale para serviço de acesso provável por menores (art. 1º, parágrafo único) e veda autodeclaração
+  para conteúdo ou serviço impróprio ou proibido a menores (art. 9º, § 1º). Posição: o GoblinShift
+  não é esse caso, porque é ferramenta de arquivos sem conteúdo adulto, e os 18 anos são limite
+  contratual. Um limite próprio de 18 anos, porém, pode ser lido como "proibido a menores".
+- **Preservação manual.** A posse temporária do material e a falta de *legal hold* no código.
+- **Responsabilidade por conteúdo de terceiros.** A decisão do STF sobre o art. 19 do Marco Civil
+  ampliou a responsabilidade dos provedores; os arquivos são privados, mas o alcance não foi medido.
+- **Restauração.** Uma exclusão feita depois da cópia e sem registro pode voltar até que a pessoa
+  repita o pedido.
+- **Citações.** Conferidos no Planalto ou na ANPD em 2026-11-05: LGPD (arts. 7º, 9º, 13, 16, 18, 19
+  e 33), Marco Civil (arts. 5º, 13 e 15), ECA (art. 241-B), Resolução nº 2/2022 e Lei nº 15.211/2025.
+  Não conferidos: CDC, Código Civil, Resolução nº 19/2024 e a jurisprudência citada. O art. 241-B
+  foi alterado pela Lei nº 15.487/2026, que mexeu nos §§ 1º e 4º; confirme que os §§ 2º e 3º, base
+  da preservação, seguem iguais.
 
 ## Termos de Uso
-
-### Cabeçalho do rascunho
-
-Texto que abria o arquivo público até sair do build:
-
-> **RASCUNHO — não publicar sem revisão jurídica humana.**
->
-> Este texto foi redigido a partir do que o sistema faz (código e plano técnico), não por
-> advogado(a). O plano exige revisão jurídica antes da abertura pública
-> (`docs/GoblinShiftPlan.md`, 1.8; ADR 012). Trechos entre `[[A DEFINIR: ...]]` dependem de
-> decisão do dono do serviço. Notas marcadas como **Nota para a revisão** são perguntas ao
-> revisor e saem do texto final. As fontes internas de cada afirmação técnica estão no fim.
-
-### Pendências antes de publicar
-
-> Esta seção sai do texto final. Cada marcação `[[A DEFINIR (J-n) ...]]` traz o id do
-> levantamento da fatia 8. Nenhuma delas depende de código: os pontos que se resolviam lendo a
-> implementação já foram preenchidos.
-
-**Decide o dono do serviço:** nenhuma pendência; as decisões de 2026-10-15 estão em
-"Decisões aplicadas", no fim deste arquivo.
-
-**Exige advogado(a):**
-
-- **J-16**, identificação do controlador (itens 1 dos dois textos). Preenchido em 2026-10-15:
-  Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR), com o canal
-  `privacidade@goblinshift.dev`, sem CPF nem endereço. Pergunta ao advogado: "Sou pessoa física,
-  sem CNPJ, e opero gratuitamente um serviço aberto que trata dados pessoais de terceiros. Nome
-  completo, cidade/UF e e-mail bastam para identificar o controlador perante a LGPD e o CDC, ou
-  preciso publicar CPF ou endereço? Posso usar endereço comercial ou caixa postal? Vale abrir um
-  MEI antes de abrir o cadastro?"
-- **J-18**, idade mínima e contas de menores (item 2).
-- **J-20**, procedimento para abuso sexual infantil e conteúdo ilegal grave: autoridades,
-  preservação, prazos e a expiração de 48 h (item 7). Este procedimento exige orientação jurídica e aprovação do responsável.
-- **J-21**, foro em relação de consumo (item 13).
-- **Direitos sobre a arte e a marca** (item 9; J-13), sem id novo: as ressalvas estão
-  em `docs/art/LICENSE-ART.md`, seção "Ressalvas preservadas", e os documentos completos no registro
-  externo `goblinshift-editorial-20261021`. Os IDs `rights-001` a `rights-004` vinculam as condições
-  às fontes `source-001` a `source-004`. Permanecem para revisão a cadeia de cessão entre fornecedores
-  e usuário, proteção e exclusividade dos arquivos de origem e da marca, categoria paga, retroatividade
-  dos planos, indenizações, limites de responsabilidade e jurisdição estrangeira.
-
-### Marcações a definir: id e texto original
-
-O texto público mostra cada marcação sem o id e sem as notas ao revisor. Esta é a
-redação original, na ordem do arquivo.
-
-| Seção | Marcação original |
-|---|---|
-| 2. Aceite destes termos | [[A DEFINIR (J-18): idade mínima para usar o serviço e o que fazer com contas de menores. Google e GitHub têm idade mínima própria, mas o GoblinShift não recebe a data de nascimento e não tem como verificar idade.]] |
-| 7. Abuso sexual infantil e outros conteúdos ilegais | [[A DEFINIR (J-20) com orientação jurídica: quais autoridades e canais (por exemplo, Polícia Federal e Ministério Público), o que preservar, por quanto tempo, e como conciliar a preservação com a expiração automática de 48 horas; o plano registra que esse procedimento exige orientação jurídica e deve ser definido com orientação jurídica]] |
-| 13. Lei aplicável e foro | [[A DEFINIR (J-21): foro. Nota para a revisão: em relação de consumo, o consumidor pode demandar no foro do próprio domicílio (CDC, art. 101, I).]] |
-
-### Notas para a revisão
-
-Item 10, antes da lista:
-
-> **Nota para a revisão:** o serviço é gratuito, mas a relação pode ser considerada de consumo
-> (CDC). Cláusulas que exonerem ou atenuem a responsabilidade do fornecedor podem ser nulas
-> (CDC, art. 51, I). Ajustar a redação abaixo ao que for válido.
 
 ### Fontes internas
 
@@ -81,7 +196,7 @@ abertura pública e ainda depende de fatia não concluída (indicada entre parê
 | Afirmação | Fonte |
 |---|---|
 | Projeto de portfólio, gratuito, código público, serviço aberto | Plano, introdução da seção 1 e 1.8; ADR 012 |
-| Revisão jurídica obrigatória antes da abertura | Plano 1.8 (último item de Privacidade); ADR 012, Consequências e Como verificar; plano das fatias 7 e 8, 2.1 |
+| Revisão antes da abertura | Plano 1.8 (último item de Privacidade); ADR 012; seção "Revisão de 2026-11-05" destas notas |
 | Aceite no primeiro login com versão e data; reaceite quando a versão muda | Plano 1.8 (Base legal e transparência) e 3.3 (`User`: versão e data dos termos); plano das fatias 7 e 8, 2.1 (fatia 6/8, não implementado) |
 | Receitas fixas, resultados privados com manifesto e relatório; catálogo mostra só o implementado | Plano, introdução da seção 1 e 1.1 |
 | Sem rede no processamento, com processamento determinístico, sem scripts do cliente | Plano, introdução da seção 1; 3.6 (Sandbox: `--network=none`) |
@@ -95,7 +210,7 @@ abertura pública e ainda depende de fatia não concluída (indicada entre parê
 | Arquivos sem backup | Plano 3.8 (Backups: "Arquivos: sem backup, por decisão") |
 | Sem links públicos de compartilhamento | Plano 1.8 (Abuso e custo); ADR 012 |
 | Bloqueio revoga sessões e chaves, cancela a execução e impede novo login | Plano 1.8 (Estado da conta); ADR 012; plano das fatias 7 e 8, 2.6 (fatia 6) |
-| Procedimento de CSAM exige orientação jurídica | Plano das fatias 7 e 8, 2.6 |
+| Procedimento de CSAM | Plano das fatias 7 e 8, 2.6; `docs/runbooks/abuso.md`; J-20 nesta nota |
 | Sem varredura automatizada de conteúdo nesta versão | Plano 1.8 (Abuso e custo): as medidas listadas são limites, privacidade, expiração, bloqueio e termos; nenhuma é varredura |
 | Canal de contato para denúncias | Plano 1.8 (Abuso e custo); ADR 012 |
 | `DELETE /me`: login recente; revoga, cancela e remove em até 24 h; backups expiram em até 30 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups) (fatia 6, não implementado) |
@@ -107,91 +222,6 @@ abertura pública e ainda depende de fatia não concluída (indicada entre parê
 | Canal da política de divulgação em `/.well-known/security.txt` | Branch `politica-seguranca` (`SECURITY.md` e `web/public/.well-known/security.txt`) |
 
 ## Aviso de Privacidade
-
-### Cabeçalho do rascunho
-
-Texto que abria o arquivo público até sair do build:
-
-> **RASCUNHO — não publicar sem revisão jurídica humana.**
->
-> Este texto foi redigido a partir do que o sistema faz (código e plano técnico), não por
-> advogado(a). O plano exige revisão jurídica antes da abertura pública
-> (`docs/GoblinShiftPlan.md`, 1.8; ADR 012). Trechos entre `[[A DEFINIR: ...]]` dependem de
-> decisão do dono do serviço. Notas marcadas como **Nota para a revisão** são perguntas ao
-> revisor e saem do texto final. As fontes internas de cada afirmação técnica estão no fim,
-> junto com as divergências entre plano e código encontradas ao redigir.
-
-### Pendências antes de publicar
-
-> Esta seção sai do texto final. Cada marcação `[[A DEFINIR (J-n) ...]]` traz o id do
-> levantamento da fatia 8. Nenhuma delas depende de código: os pontos que se resolviam lendo a
-> implementação já foram preenchidos.
-
-**Decide o dono do serviço:**
-
-Nenhuma pendência; o provedor de e-mail foi decidido (ver "Decisões aplicadas").
-
-**Exige advogado(a):**
-
-- **J-16**, se nome, cidade/UF e e-mail bastam para identificar o controlador (item 1); a
-  pergunta completa está nas pendências dos Termos, acima.
-- **J-17**, encarregado ou declaração de dispensa como agente de pequeno porte (item 1).
-- **J-18**, idade mínima e LGPD art. 14, sem como verificar idade (item 11).
-- **J-19**, transferência internacional: localização do GitHub Actions e mecanismo do art. 33
-  (itens 6 e 7). A região do B2 foi decidida em 2026-10-15: Estados Unidos (US East). O item 7
-  do Aviso passou a listar também as mensagens de e-mail (ImprovMX e Google/Gmail), cuja
-  localização não é controlada; a marcação do mecanismo do art. 33 continua citando só o
-  Backblaze e o GitHub Actions, e o revisor precisa dizer se o mecanismo cobre também esses dois.
-- **J-22**, base legal do registro do aceite: execução de contrato ou exercício regular de
-  direitos (item 4).
-- **J-23 a J-25**, avaliações de legítimo interesse (LIA) da auditoria e do antiabuso, da
-  telemetria e do backup (item 4). Rascunhos para o revisor, cada um com as perguntas no fim:
-  [J-23](lia-j23-auditoria-e-antiabuso.md), [J-24](lia-j24-telemetria.md) e
-  [J-25](lia-j25-backup.md). Como estas notas, ficam fora do build da SPA
-  (`tests/test_legal_texts.py` falha se a interface importar outro arquivo de `docs/legal/`).
-- **Base legal das mensagens por e-mail** (item 4, linha nova de 2026-10-15, sem id no
-  levantamento): proposta para levar, obrigação legal (inciso II) nos pedidos de titulares e
-  legítimo interesse (inciso IX) no contato geral e nas denúncias.
-- **J-26**, manter o identificador do provedor depois de bloqueio seguido de exclusão, e por
-  quanto tempo (item 5). Proposta técnica para levar: guardar só um HMAC de `issuer` + `subject`,
-  por prazo fixo.
-- **J-27**, restauração que traz de volta uma conta excluída (item 8). Proposta técnica: um
-  diário de exclusões pseudonimizado, fora do dump, reaplicado depois de toda restauração.
-- **J-28**, verificação de identidade e prazo de resposta do art. 19 (item 8). Proposta: a
-  verificação é o próprio login no provedor, com resposta em até 15 dias.
-
-### Marcações a definir: id e texto original
-
-O texto público mostra cada marcação sem o id e sem as notas ao revisor. Esta é a
-redação original, na ordem do arquivo.
-
-| Seção | Marcação original |
-|---|---|
-| 1. Controlador e contato | [[A DEFINIR (J-17): nome e contato do encarregado, ou a declaração de dispensa. Nota para a revisão: a ANPD dispensa agentes de tratamento de pequeno porte de indicar encarregado, mas exige um canal de comunicação com o titular; confirmar o enquadramento e a redação.]] |
-| 4. Para que usamos e com que base legal | [[A DEFINIR (J-22) na revisão: ou exercício regular de direitos (inciso VI)]] |
-| 4. Para que usamos e com que base legal | [[A DEFINIR (J-23) na revisão: registrar a avaliação de legítimo interesse]] |
-| 4. Para que usamos e com que base legal | [[A DEFINIR (J-24) na revisão]] |
-| 4. Para que usamos e com que base legal | [[A DEFINIR (J-25) na revisão]] |
-| 4. Para que usamos e com que base legal | [[A DEFINIR: base legal]] (mensagens por e-mail, item 3.6; sem id) |
-| 5. Por quanto tempo guardamos | [[A DEFINIR (J-26): se a conta for bloqueada e depois excluída, o identificador do provedor é mantido para que o bloqueio continue valendo? Por quanto tempo? O plano diz que o bloqueio "impede novos logins da mesma identidade", mas não diz o que acontece depois de `DELETE /me`.]] |
-| 6. Com quem compartilhamos | [[A DEFINIR (J-19): confirmar localização e mencionar como transferência internacional]] |
-| 7. Transferência internacional | [[A DEFINIR (J-19) com a revisão jurídica: mecanismo de transferência do art. 33 da LGPD (por exemplo, cláusulas-padrão contratuais aprovadas pela ANPD, ou outro) para o Backblaze e para o GitHub Actions.]] |
-| 8. Seus direitos e como exercê-los | [[A DEFINIR (J-27) na revisão: o que fazer se uma restauração trouxer de volta uma conta excluída]] |
-| 8. Seus direitos e como exercê-los | [[A DEFINIR (J-28): procedimento de verificação de identidade e prazo de resposta; nota para a revisão: art. 19 da LGPD.]] |
-| 11. Crianças e adolescentes | [[A DEFINIR (J-18): idade mínima e tratamento de dados de crianças e adolescentes (LGPD, art. 14). O serviço não coleta idade.]] |
-
-### Notas para a revisão
-
-Item 4, antes da tabela de bases legais:
-
-> **Nota para a revisão:** o plano adota "execução do contrato" como base principal. As demais
-> bases abaixo são proposta deste rascunho e precisam de validação.
-
-Item 6, antes da tabela de fornecedores:
-
-> **Nota para a revisão:** confirmar a qualificação de cada fornecedor (operador, suboperador
-> ou controlador independente). Google e GitHub, como provedores de login, tratam seus dados
-> também sob as políticas próprias, na relação direta que você tem com eles.
 
 ### Fontes internas
 
@@ -219,6 +249,7 @@ parênteses). Caminhos sem branch indicada estão na `main` (conferida em `6c1c4
 | Metadados GPS em fotos como exemplo; remoção de metadados não é anonimização | Plano 1.2 (Image Forge: orientar por EXIF, remover metadados suportados) |
 | Telemetria: eventos por requisição, tentativa, término; `user.hash` HMAC; o que nunca entra | Plano 3.7 (Eventos amplos); `src/goblinshift/entrypoints/api/wide_event.py` (docstring) |
 | IP truncado /24 e /48 nos eventos; query string removida | `src/goblinshift/platform/telemetry.py` (`IPV4_PREFIX_BITS`, `IPV6_PREFIX_BITS`, `truncate_client_address`) |
+| Cloudflare como proxy; Zoho como e-mail | Consulta de DNS e `curl -I https://goblinshift.dev` em 2026-11-05 (ver "Divergências encontradas em produção") |
 | Telemetria na VPS, sem terceiros, 30 dias | Plano 3.7 (Backend de telemetria) e 1.8; ADR 013; `docker/otel-collector/config.yaml` (só exporta para o OpenObserve local) |
 | Sem scripts de terceiros | Plano 3.6 (Cabeçalhos da aplicação: CSP `script-src 'self'; connect-src 'self'`) |
 | Base legal execução de contrato | Plano 1.8 (Base legal e transparência) |
@@ -275,10 +306,10 @@ saíram dos textos públicos, que passaram à versão `v2-rascunho`.
 
 | Id | Decisão | Onde |
 |---|---|---|
-| J-4 | Versão `v2-rascunho`, vigência 2026-10-15. Continua "rascunho" até a revisão jurídica; `CURRENT_TERMS_VERSION` subiu junto, e toda conta aceita de novo (ADR 029) | Topo dos dois textos; `src/goblinshift/identity/terms.py` |
+| J-4 | Versão `v2-rascunho`, vigência 2026-10-15. `CURRENT_TERMS_VERSION` subiu junto, e toda conta aceita de novo (ADR 029) | Topo dos dois textos; `src/goblinshift/identity/terms.py` |
 | J-5 | Domínio `https://goblinshift.dev` | Topo dos dois textos |
 | J-6 | Três aliases: `contato@`, `abuso@` e `privacidade@goblinshift.dev`. O dono cria os aliases e testa envio e resposta antes da abertura | Termos 1, 7, 8 e 9; Aviso 1, 3.6 e 8 |
-| J-7 | Autorização para testar falhas comunicadas de boa-fé pelo canal de `https://goblinshift.dev/.well-known/security.txt`. O advogado confere a redação da autorização, sem bloquear | Termos 6, item 7 |
+| J-7 | Autorização para testar falhas comunicadas de boa-fé pelo canal de `https://goblinshift.dev/.well-known/security.txt`. | Termos 6, item 7 |
 | J-8 | Opção B: um item só, sobre emprestar, vender ou publicar chaves de API e revender o serviço | Termos 6, item 9 |
 | J-9 | Opção B: primeira resposta em até 3 dias úteis; abuso sexual infantil com prioridade | Termos 7 |
 | J-10 | Opção A: sem aviso prévio (não há e-mail); recurso por `contato@` citando o código da tela de login e o provedor | Termos 8 |
@@ -287,9 +318,9 @@ saíram dos textos públicos, que passaram à versão `v2-rascunho`.
 | J-13 | Opção B: marca reservada; a parte humana da arte sob CC BY 4.0, sem garantia sobre a arquivos de origem, com Jade e Fagulha fora da concessão. Os scripts de `scripts/arte/` passaram da CC BY 4.0 para a Apache-2.0, como o resto do código | Termos 9; `docs/art/LICENSE-ART.md` |
 | J-14 | Opção A: 15 dias de antecedência para mudança relevante; tabela "Histórico de versões" no fim de cada texto, mais o link do Git | Termos 12; Aviso 12; fim dos dois textos |
 | J-15 | Aviso destacado no site, em até 3 dias úteis, "porque não temos o seu e-mail" | Aviso 10 |
-| J-16 | Controlador: Luca Sebastian Pimentel Perez, pessoa física, de Curitiba (PR), canal `privacidade@goblinshift.dev`; sem CPF nem endereço. Fica a pergunta ao advogado sobre se isso basta | Termos 1; Aviso 1 |
-| J-19 (parcial) | Região do B2: Estados Unidos (US East). O mecanismo do art. 33 continua com o advogado | Aviso 6 |
-| Provedor de e-mail | Os aliases `contato@`, `abuso@` e `privacidade@` passam pelo ImprovMX, que encaminha para uma caixa Gmail (Google) do controlador. O endereço da caixa não entra no texto. Aviso: itens 2, 3.6, 6 (duas linhas, ImprovMX e Google) e 7 (item 3 da lista). Localização dos dois: "conforme a política do fornecedor", sem afirmar país. Versão `v3-rascunho` (o aceite é um só, então os Termos sobem junto, sem mudança de cláusula) | Aviso 2, 3.6, 6 e 7; `src/goblinshift/identity/terms.py` |
+| J-16 | Controlador de Curitiba (PR), canal `privacidade@goblinshift.dev`; sem CPF nem endereço. Substituída em 2026-11-05 (ver "Revisão de 2026-11-05") | Termos 1; Aviso 1 |
+| J-19 (parcial) | Região do B2: Estados Unidos (US East). O mecanismo do art. 33 foi definido em 2026-11-05 | Aviso 6 |
+| Provedor de e-mail | Os aliases `contato@`, `abuso@` e `privacidade@` passam pelo ImprovMX, que encaminha para uma caixa Gmail (Google) do controlador. O endereço da caixa não entra no texto. Aviso: itens 2, 3.6, 6 (duas linhas, ImprovMX e Google) e 7 (item 3 da lista). Localização dos dois: "conforme a política do fornecedor", sem afirmar país. Versão `v3-rascunho` (o aceite é um só, então os Termos sobem junto, sem mudança de cláusula). Substituída em 2026-11-05: os MX atuais são da Zoho | Aviso 2, 3.6, 6 e 7; `src/goblinshift/identity/terms.py` |
 
 Lacunas fora das marcações, resolvidas no mesmo dia:
 
@@ -297,11 +328,10 @@ Lacunas fora das marcações, resolvidas no mesmo dia:
   segurança ficam 90 dias depois de `DELETE /me`.
 - **Dados enviados por e-mail**: item 3.6 novo do Aviso, retenção de 12 meses depois do fim da
   conversa (item 5), e os resumos dos itens 2 e 3.5 deixam de dizer que nenhum e-mail chega.
-  Ficaram pendentes a base legal (item 4) e o provedor de e-mail (item 6).
 - **Processamento e arte**: o item 3 dos Termos descreve o isolamento sem rede nem scripts de cliente.
   As condições da arte permanecem em `docs/art/LICENSE-ART.md` e em `/creditos`.
 - **Notificação e retirada** de material do site que viole direito de alguém: Termos 9, por
   `abuso@`.
 
 Nesta troca de versão, a antecedência de 15 dias do J-14 não se aplicou: o cadastro está
-fechado, as únicas contas são do dono, e o texto continua rascunho.
+fechado e as únicas contas são do dono.
