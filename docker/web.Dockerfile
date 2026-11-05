@@ -2,7 +2,7 @@
 # o build e a configuração que o serve juntos, para os dois nunca divergirem num deploy.
 #
 # Bases fixadas pelo digest do índice multiplataforma (amd64 na VPS e na CI, arm64 no Mac).
-FROM node:24.21.0-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66 AS build
+FROM node:24.22.2-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS build
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 # --ignore-scripts: nenhuma dependência precisa de script de instalação para o build.
@@ -12,7 +12,7 @@ COPY web/ ./
 COPY docs/legal/ /docs/legal/
 RUN npm run build
 
-FROM nginx:1.30.5@sha256:9bf97bd7714f5e24c1ccd545ecb9eb5435cb6d109c97cebb15e7e455e0239edb
+FROM nginx:1.30.6@sha256:f12e4e280502f79dae4488c9f677ab3ebe8a7079818bbfbf3242f236bac64d34
 # Fixed Debian security updates; the scanned image digest is the release boundary.
 RUN apt-get update -q \
  && apt-get install -yq --no-install-recommends --only-upgrade \
