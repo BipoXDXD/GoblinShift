@@ -79,8 +79,14 @@ jobs:
       - run: uv sync --locked
       - name: Instalar o FFmpeg completo (vídeos sintéticos do Media Mill)
         # O FFmpeg do runner só gera as fixtures; a receita, na imagem do executor, usa o build
-        # mínimo do ADR 036.
-        run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+        # mínimo do ADR 036. Em 2026-11-05 o espelho do Azure caiu para cerca de 40 KB/s e os 94 MB
+        # do pacote estouraram o timeout do job, enquanto o archive.ubuntu.com entregava 7 MB/s.
+        timeout-minutes: 10
+        run: |
+          sudo grep -rlZ azure.archive.ubuntu.com /etc/apt |
+            xargs -0 -r sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g'
+          sudo apt-get update -q
+          sudo apt-get install -yq ffmpeg
       - name: Cota da conta de teste
         id: quota
         env:
