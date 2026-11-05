@@ -116,15 +116,21 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 
 Os passos acima só cobrem `sites/`. O `Caddyfile` é um bind de arquivo único: `install`, `mv` ou `sed -i` trocam o inode, e o container continua lendo o arquivo antigo. `cp` sobrescreve no mesmo inode e não toca o destino se a origem não abrir; `cat origem > destino` não serve, porque zera o destino antes de ler.
 
-O bloco é independente dos passos acima e para no primeiro erro. Rode com `bash`, com `$COMMIT` sendo o commit de merge e `$API` e `$TOKEN` os do recurso do gateway. A primeira comparação confirma que o arquivo do host é o que o container lê; se ela divergir, o bind ficou preso a um inode antigo, e a correção exige recriar o container numa janela combinada com o StillOn.
+O bloco é independente dos passos acima e para no primeiro erro. Salve-o num arquivo na VPS e rode `COMMIT=<commit de merge> API=<recurso do gateway> TOKEN=<token> bash arquivo`, nunca colado na sessão: o `set -e` fecharia o SSH. Se o inode do host e o do container divergirem, o bind ficou preso a um arquivo antigo, e a correção exige recriar o container numa janela combinada com o StillOn. Se o hash atual aparecer numa trava, atualize a trava junto.
 
 ```bash
 set -euo pipefail
-grep -rlE 'Caddyfile' /etc/coolify-release /var/lib/coolify-release /etc/goblinshift 2>/dev/null || true
+: "${COMMIT:?}" "${API:?}" "${TOKEN:?}"
 ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
-docker exec edge-proxy-1 cat /etc/caddy/Caddyfile | cmp - "$ORIGEM"
+test "$(stat -c %i "$ORIGEM")" = "$(docker exec edge-proxy-1 stat -c %i /etc/caddy/Caddyfile)"
+if grep -rls "$(sha256sum "$ORIGEM" | cut -d' ' -f1)" \
+    /etc/coolify-release /var/lib/coolify-release /etc/goblinshift /etc/duora; then
+  echo "trava do Caddyfile encontrada" >&2
+  exit 1
+fi
 
 CLONE=$(mktemp -d /root/goblinshift-caddyfile.XXXXXX)
+echo "CLONE=$CLONE"
 git clone --quiet https://github.com/BipoXDXD/GoblinShift.git "$CLONE"
 git -C "$CLONE" merge-base --is-ancestor "$COMMIT" origin/main
 git -C "$CLONE" checkout --quiet "$COMMIT"
@@ -133,9 +139,11 @@ test -s "$NOVO"
 
 BACKUP=/root/gateway-backup-caddyfile-$(date -u +%Y%m%dT%H%M%SZ)
 ANTERIOR=$(curl -fsS -H "Authorization: Bearer $TOKEN" "$API" | jq -r .git_commit_sha)
-[[ "$ANTERIOR" =~ ^[0-9a-f]{7,40}$ ]]
+[[ "$ANTERIOR" =~ ^([0-9a-f]{7,40}|HEAD)$ ]] || { echo "git_commit_sha inesperado: $ANTERIOR" >&2; exit 1; }
 cp -a "$ORIGEM" "$BACKUP"
 echo "$ANTERIOR" > "$BACKUP.commit"
+echo "ORIGEM=$ORIGEM"
+echo "BACKUP=$BACKUP"
 
 cp "$NOVO" "$ORIGEM"
 docker exec edge-proxy-1 cat /etc/caddy/Caddyfile | cmp - "$NOVO"
@@ -143,7 +151,7 @@ docker exec edge-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter 
 docker exec edge-proxy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
-Se o bloco parar depois do `cp "$NOVO"`, ou para reverter, rode `cp "$BACKUP" "$ORIGEM"`, repita o `validate` e o `reload` e grave de volta o commit de `$BACKUP.commit`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `$CLONE`.
+Se o bloco parar antes de imprimir `BACKUP`, nada mudou; remova o `CLONE` impresso. Se parar depois, ou para reverter, use os caminhos impressos: rode `cp "$BACKUP" "$ORIGEM"` e repita o `validate` e o `reload`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
 
 ## Atualizar a lista
 
