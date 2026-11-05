@@ -5,11 +5,12 @@
 # chave só de escrita → ping no healthchecks.io (/start, sucesso ou /fail). A expiração em 30
 # dias é regra de ciclo de vida do bucket, não deste script: a chave da VPS não apaga nem lê.
 #
-# Rodado pelo timer goblinshift-pg-backup.timer (deploy/backup/install.sh), com a configuração
-# em /srv/goblinshift/secrets/backup.env. Variáveis:
+# Rodado pelo timer goblinshift-pg-backup.timer, da cópia que o deploy/backup/install.sh faz em
+# /usr/local/lib/goblinshift/backup, com a configuração em /srv/goblinshift/secrets/backup.env.
+# Variáveis:
 #   BACKUP_PG_CONTAINER         container do PostgreSQL (a unit define goblinshift-postgres-1)
 #   BACKUP_PG_USER, BACKUP_PG_DB    padrão: goblinshift
-#   BACKUP_AGE_RECIPIENTS_FILE  padrão: deploy/backup/age-recipients.txt, versionado
+#   BACKUP_AGE_RECIPIENTS_FILE  padrão: age-recipients.txt, versionado, ao lado deste script
 #   BACKUP_S3_ENDPOINT, BACKUP_S3_REGION, BACKUP_S3_BUCKET, BACKUP_S3_PREFIX (padrão: pg/)
 #   BACKUP_S3_KEY_ID, BACKUP_S3_SECRET  chave de aplicação só de escrita
 #   BACKUP_HEALTHCHECK_URL      URL de ping do check "backup diário"

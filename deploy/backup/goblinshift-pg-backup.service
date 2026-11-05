@@ -13,8 +13,9 @@ User=goblinshift
 Group=goblinshift
 Environment=BACKUP_PG_CONTAINER=goblinshift-postgres-1
 EnvironmentFile=/srv/goblinshift/secrets/backup.env
-# O script vem do checkout implantado: muda só pelo mesmo review e pipeline do código.
-ExecStart=/srv/goblinshift/app/deploy/backup/pg-backup.sh
+# Copiado pelo install.sh para um caminho do root, fora de qualquer checkout: uma versão nova só
+# chega aqui quando o instalador roda de novo.
+ExecStart=/usr/local/lib/goblinshift/backup/pg-backup.sh
 TimeoutStartSec=1h
 Nice=10
 IOSchedulingClass=idle

@@ -1,18 +1,24 @@
 """Pior caso do Media Mill sob gVisor, antes de publicar a versão (ADR 036).
 
-Roda na VPS, como root, a partir do checkout da branch, com o worker parado, sobre os vídeos que
+Roda na VPS, como root, a partir de um checkout temporário atual (README, "Checkout temporário na
+VPS"; nunca da cópia parada em /srv/goblinshift/app), com o worker parado, sobre os vídeos que
 `scripts/media-mill-worst-case.sh` gera numa máquina com o FFmpeg completo (a VPS não tem FFmpeg,
 e a imagem do executor só tem o build mínimo, que não codifica H.264):
 
-    cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.media_mill_load <dir-dos-videos>
+    cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.media_mill_load <dir-dos-videos>
 
-Reaproveita a medição do Image Forge (`image_forge_load.measure`): constrói a imagem do executor do
+Sem opções, constrói a imagem no host: minutos de CPU por causa do FFmpeg, pesado na VPS que atende
+a produção. Para medir uma imagem já publicada, retague-a para `goblinshift-executor:medicao` e use
+`--skip-build` (README, "Medir com a imagem publicada").
+
+Reaproveita a medição do Image Forge (`image_forge_load.measure`): usa a imagem do executor do
 checkout e roda uma tentativa de verdade com as MESMAS opções do perfil de produção (runsc, 1 vCPU,
 2 GiB, sem rede), com a manutenção parada (ADR 017). Pede áudio em FLAC e três miniaturas por
 vídeo. Passa se a tentativa terminar com código 0, todos os vídeos aceitos, dentro de 600 s.
 Usa só a biblioteca padrão (Python 3.12 do host).
 """
 
+import argparse
 import grp
 import hashlib
 import os
@@ -61,18 +67,21 @@ def expected_for(videos: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1:
-        print("uso: python3 -B -m acceptance.media_mill_load <dir-dos-videos>", file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(prog="python3 -B -m acceptance.media_mill_load")
+    parser.add_argument("videos", type=Path, help="diretório com os vídeos do pior caso")
+    load.add_skip_build(parser)
+    options = parser.parse_args(argv)
     if os.geteuid() != 0:
         print("rode com sudo", file=sys.stderr)
         return 2
-    videos = Path(argv[0]).resolve()
+    videos = options.videos.resolve()
     expected = expected_for(videos)
     config = load_config(DEFAULT_CONFIG_PATH)
     host = Host(config, grp.getgrnam(config.group).gr_gid)
-    print(f"construindo {load.IMAGE} a partir de {load.REPO_ROOT}")
-    load.build_image()
+    if options.skip_build:
+        load.require_image()
+    else:
+        load.build_image()
     return load.measure_with_maintenance_suspended(
         lambda: load.measure(host, videos, expected, CRITERION)
     )

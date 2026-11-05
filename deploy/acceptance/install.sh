@@ -11,7 +11,10 @@
 # A cópia lê o checkout com os privilégios do goblinshift: um symlink plantado ali não leva para
 # PREFIX nem para as units um arquivo que só o root lê.
 #
-# Uso: sudo bash deploy/acceptance/install.sh
+# Rode de um checkout temporário da main (README, "Checkout temporário na VPS"), nunca da cópia
+# parada em /srv/goblinshift/app: ele troca o código em PREFIX pelo da versão de onde roda.
+#
+# Uso: sudo bash <checkout>/deploy/acceptance/install.sh
 set -euo pipefail
 
 APP_USER=goblinshift
@@ -84,10 +87,14 @@ copy_from_checkout 644 "$staging/executor_ctl" "$DEPLOY"/executor_ctl/*.py
 copy_from_checkout 644 "$staging/backup" "$DEPLOY/backup/lib.sh"
 copy_from_checkout 644 "$staging/units" "$DEPLOY/acceptance/goblinshift-acceptance.service" \
   "$DEPLOY/acceptance/$TIMER"
-for package in acceptance executor_ctl backup; do
+root_dir "$PREFIX/backup"
+for package in acceptance executor_ctl; do
   rm -rf "${PREFIX:?}/$package"
   mv "$staging/$package" "$PREFIX/$package"
 done
+# Só o lib.sh: o diretório é dividido com o deploy/backup/install.sh, e o timer de backup executa o
+# pg-backup.sh que mora ali.
+mv -f "$staging/backup/lib.sh" "$PREFIX/backup/lib.sh"
 echo "   copiado do checkout."
 
 note "Configuração ${CONFIG}"

@@ -49,3 +49,12 @@ Três decisões: **onde agenda**, **como cifra e envia** e **onde restaura**.
 - **Passo pendente, fora do repositório:** criar o bucket no B2 com Object Lock e retenção padrão em compliance de 30 dias, e as duas chaves com exatamente as capacidades acima. A restauração mensal reprova enquanto isso não estiver feito.
 - Na VPS, depois de `sudo bash deploy/backup/install.sh` com a configuração preenchida: `sudo systemctl start goblinshift-pg-backup.service` e o objeto aparece no bucket; o check "backup diário" fica verde.
 - A primeira execução manual do workflow `restore-check.yml` termina verde, e o resultado vai para o README.
+
+## Atualização de 2026-11-05: script fora do checkout
+
+A publicação passou para o Coolify, e `/srv/goblinshift/app` virou uma cópia parada. Ela era o único caminho que o timer usava. O `deploy/backup/install.sh` agora copia `pg-backup.sh`, `lib.sh` e `age-recipients.txt` para `/usr/local/lib/goblinshift/backup`, do root, e a unit executa dali, com o mesmo `User=goblinshift`.
+
+- **Ordem:** o código entra no destino antes da unit. Uma cópia recusada deixa a unit anterior funcionando.
+- **Diretório dividido:** o `deploy/acceptance/install.sh` também usa esse diretório, para o `lib.sh`. Os dois instaladores trocam só os próprios arquivos.
+- **Custo:** mudança no backup ou chave `age` nova só chega ao timer quando o instalador roda de novo, a partir de um checkout temporário da `main` (README, "Checkout temporário na VPS"). O código do timer deixa de ser gravável pelo usuário da aplicação.
+- **Compliance:** `systemctl cat goblinshift-pg-backup.service` mostra `ExecStart=/usr/local/lib/goblinshift/backup/pg-backup.sh`, e `tests/backup/test_install.py` roda esse script com `/srv/goblinshift/app` removido.

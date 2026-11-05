@@ -1,6 +1,6 @@
 # Serviços do GoblinShift (docs/GoblinShiftPlan.md, 3.8).
 # Local:    ./scripts/dev-secrets.sh && docker compose up --build   (carrega compose.override.yaml)
-# Produção: docker compose -f compose.yaml -f compose.prod.yaml …    (ver deploy/deploy.sh)
+# Produção: docker compose -f compose.yaml -f compose.prod.yaml …    (ver deploy/coolify/README.md)
 # Esta base não publica portas: em produção o tráfego chega pelo proxy de borda do host.
 
 name: goblinshift

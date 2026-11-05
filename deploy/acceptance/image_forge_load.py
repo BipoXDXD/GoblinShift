@@ -1,11 +1,16 @@
 """Pior caso do Image Forge sob gVisor, antes do merge da fatia 5 (ADR 018; plano da fatia, item 9).
 
-Roda na VPS, como root, a partir do checkout da branch, com o worker parado:
+Roda na VPS, como root, a partir de um checkout temporário atual (README, "Checkout temporário na
+VPS"; nunca da cópia parada em /srv/goblinshift/app), com o worker parado:
 
-    cd /srv/goblinshift/app/deploy && sudo python3 -B -m acceptance.image_forge_load
+    cd "$gs_tmp/repo/deploy" && sudo python3 -B -m acceptance.image_forge_load
+
+Sem opções, constrói a imagem no host: minutos de CPU por causa do FFmpeg, pesado na VPS que atende
+a produção. Para medir uma imagem já publicada, retague-a para `goblinshift-executor:medicao` e use
+`--skip-build` (README, "Medir com a imagem publicada").
 
 O deploy só implanta a `main`, e a versão 1 do Image Forge não pode mudar depois de publicada
-(1.6): por isso a medição não passa pela API. Constrói a imagem do executor do checkout, gera com
+(1.6): por isso a medição não passa pela API. Usa a imagem do executor do checkout, gera com
 ela as 100 fotos de 24 MP do cenário `image-forge-carga` (scripts/e2e_fixtures.py; o Pillow é o da
 imagem, o host não precisa de nada além do Docker) e roda uma tentativa de verdade: área de
 trabalho `<área>/<uuid>`, as mesmas regras de posse do executor-ctl e as MESMAS opções do perfil de
@@ -16,6 +21,7 @@ Passa se a tentativa terminar com código 0, todas as imagens processadas, dentr
 teto (1.7). Imprime o tempo para o ADR 018. Usa só a biblioteca padrão (Python 3.12 do host).
 """
 
+import argparse
 import grp
 import json
 import os
@@ -50,14 +56,19 @@ WORKER_FILE_MODE = 0o640
 CRITERION = "100 imagens de 24 MP numa tentativa sob o perfil de produção (teto de 600 s)"
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="python3 -B -m acceptance.image_forge_load")
+    add_skip_build(parser)
+    options = parser.parse_args(argv)
     if os.geteuid() != 0:
         print("rode com sudo", file=sys.stderr)
         return 2
     config = load_config(DEFAULT_CONFIG_PATH)
     host = Host(config, grp.getgrnam(config.group).gr_gid)
-    print(f"construindo {IMAGE} a partir de {REPO_ROOT}")
-    build_image()
+    if options.skip_build:
+        require_image()
+    else:
+        build_image()
     with tempfile.TemporaryDirectory(prefix="gs-carga-") as generated:
         fixtures = Path(generated)
         print("gerando as fixtures na própria imagem")
@@ -66,8 +77,29 @@ def main() -> int:
         return measure_with_maintenance_suspended(lambda: measure(host, fixtures, expected))
 
 
+def add_skip_build(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--skip-build",
+        action="store_true",
+        help=f"mede a imagem {IMAGE} já presente no host, sem construir",
+    )
+
+
+def require_image() -> None:
+    """A imagem publicada, retagueada pelo operador; sem ela, para antes de mexer na manutenção.
+
+    A tag é só um nome local e pode ser velha: o digest impresso registra o que foi medido.
+    """
+    try:
+        digests = _docker("image", "inspect", "--format", "{{.Id}} {{.RepoDigests}}", IMAGE)
+    except RuntimeError as error:
+        raise SystemExit(f"{error}\nfalta a imagem; rode: docker tag <imagem> {IMAGE}") from error
+    print(f"medindo {IMAGE}, já presente no host: {digests.strip()}")
+
+
 def build_image() -> None:
     """A imagem do executor do checkout, com a tag da medição."""
+    print(f"construindo {IMAGE} a partir de {REPO_ROOT}")
     _docker("build", "--quiet", "--file", str(REPO_ROOT / "docker" / "executor.Dockerfile"),
             "--tag", IMAGE, str(REPO_ROOT), timeout=BUILD_TIMEOUT_S)  # fmt: skip
 
@@ -221,4 +253,4 @@ def _docker(*args: str, timeout: float = 120) -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

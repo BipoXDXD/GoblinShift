@@ -4,6 +4,9 @@ O script inteiro só roda no host, como root e sob runsc; aqui ficam as partes p
 ele monta a partir do expected.json do gerador e o veredito sobre o que a tentativa relatou.
 """
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 from acceptance import image_forge_load as load
 from acceptance.run import MAINTENANCE_CRITERION, Outcome
@@ -148,3 +151,66 @@ def test_manutencao_que_nao_volta_reprova_a_medicao_que_passou(
     assert code == 1
     assert f"PASSOU  {load.CRITERION}: 420 s" in printed
     assert f"FALHOU  {MAINTENANCE_CRITERION}" in printed
+
+
+@pytest.fixture
+def host_stubs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """O main sem root, sem host e sem medir; a lista recebe de onde a imagem veio."""
+    steps: list[str] = []
+
+    def fake_generate(target: Path) -> None:
+        (target / "expected.json").write_text("{}", encoding="utf-8")
+
+    def fake_measurement(_measurement: Any) -> int:
+        return 0
+
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr(load, "load_config", lambda _path: type("Config", (), {"group": "g"}))
+    monkeypatch.setattr("grp.getgrnam", lambda _name: type("Group", (), {"gr_gid": 1}))
+    monkeypatch.setattr(load, "build_image", lambda: steps.append("build"))
+    monkeypatch.setattr(load, "require_image", lambda: steps.append("require"))
+    monkeypatch.setattr(load, "_generate", fake_generate)
+    monkeypatch.setattr(load, "measure_with_maintenance_suspended", fake_measurement)
+    return steps
+
+
+def test_por_padrao_constroi_a_imagem_do_checkout(host_stubs: list[str]) -> None:
+    assert load.main([]) == 0
+
+    assert host_stubs == ["build"]
+
+
+def test_skip_build_usa_a_imagem_retagueada_sem_construir(host_stubs: list[str]) -> None:
+    assert load.main(["--skip-build"]) == 0
+
+    assert host_stubs == ["require"]
+
+
+def test_require_image_imprime_o_digest_medido_sem_construir(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def fake_docker(*args: str, timeout: float = 120) -> str:
+        calls.append(args)
+        return "sha256:abc [ghcr.io/bipoxdxd/goblinshift-executor@sha256:def]\n"
+
+    monkeypatch.setattr(load, "_docker", fake_docker)
+
+    load.require_image()
+
+    assert [call[:2] for call in calls] == [("image", "inspect")]
+    assert calls[0][-1] == "goblinshift-executor:medicao"
+    assert "goblinshift-executor@sha256:def" in capsys.readouterr().out
+
+
+def test_require_image_para_com_a_receita_de_retag_quando_a_tag_falta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(*_args: str, timeout: float = 120) -> str:
+        raise RuntimeError("docker image falhou: No such image")
+
+    monkeypatch.setattr(load, "_docker", missing)
+
+    with pytest.raises(SystemExit, match="docker tag"):
+        load.require_image()

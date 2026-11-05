@@ -9,7 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKUP_DIR = ROOT / "deploy" / "backup"
-APP_CHECKOUT = Path("/srv/goblinshift/app")
+INSTALLED_SCRIPT = Path("/usr/local/lib/goblinshift/backup/pg-backup.sh")
 RESTORE_WORKFLOW = ROOT / ".github" / "workflows" / "restore-check.yml"
 # `dono/repo@<sha de 40 dígitos>`, com a versão legível num comentário ao lado.
 PINNED_ACTION = re.compile(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}")
@@ -36,13 +36,15 @@ def required_by_installer() -> set[str]:
     return set(match.group(1).split())
 
 
-def test_servico_roda_como_usuario_da_aplicacao_com_o_script_do_checkout() -> None:
+def test_servico_roda_como_usuario_da_aplicacao_com_o_script_instalado_pelo_root() -> None:
     service = unit("goblinshift-pg-backup.service")["Service"]
+    installer = (BACKUP_DIR / "install.sh").read_text()
 
     assert service["User"] == "goblinshift"
     assert service["EnvironmentFile"] == "/srv/goblinshift/secrets/backup.env"
-    script = Path(service["ExecStart"])
-    assert (ROOT / script.relative_to(APP_CHECKOUT)).is_file()
+    assert Path(service["ExecStart"]) == INSTALLED_SCRIPT
+    assert f"PREFIX={INSTALLED_SCRIPT.parent}" in installer
+    assert "/srv/goblinshift/app" not in (BACKUP_DIR / "goblinshift-pg-backup.service").read_text()
 
 
 def test_timer_e_diario_com_folga_e_recupera_execucao_perdida() -> None:

@@ -5,8 +5,11 @@
 # e todos os objetos pareceriam ausentes. Por isso a sentinela só é gravada depois de conferir a
 # montagem, e nunca por um `up` (o serviço `storage-mark` tem perfil próprio).
 #
-# Uso, de /srv/goblinshift/app: deploy/storage-mark.sh        confere e grava a sentinela
-#                               deploy/storage-mark.sh check  só confere a montagem
+# PERIGO: o modo sem argumento roda `compose.sh run`. Na VPS, não o use a partir da cópia parada em
+# /srv/goblinshift/app (deploy/compose.sh explica o risco); só o deploy legado o chamava.
+#
+# Uso: deploy/storage-mark.sh        confere e grava a sentinela
+#      deploy/storage-mark.sh check  só confere a montagem
 set -euo pipefail
 
 storage=/srv/goblinshift/storage

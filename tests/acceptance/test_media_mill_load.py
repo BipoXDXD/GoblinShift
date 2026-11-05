@@ -6,6 +6,7 @@ do diretório de vídeos, com os parâmetros já resolvidos pelo catálogo.
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from acceptance import image_forge_load as load
@@ -53,3 +54,45 @@ def test_veredito_usa_o_criterio_do_media_mill() -> None:
     )
 
     assert (outcome.criterion, outcome.passed) == (media.CRITERION, True)
+
+
+@pytest.fixture
+def host_stubs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
+    """O main sem root, sem host e sem medir; a lista recebe de onde a imagem veio."""
+    steps: list[str] = []
+
+    def fake_measurement(_measurement: Any) -> int:
+        return 0
+
+    (tmp_path / "a.mp4").write_bytes(b"a")
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr(media, "load_config", lambda _path: type("Config", (), {"group": "g"}))
+    monkeypatch.setattr("grp.getgrnam", lambda _name: type("Group", (), {"gr_gid": 1}))
+    monkeypatch.setattr(load, "build_image", lambda: steps.append("build"))
+    monkeypatch.setattr(load, "require_image", lambda: steps.append("require"))
+    monkeypatch.setattr(load, "measure_with_maintenance_suspended", fake_measurement)
+    return steps
+
+
+def test_por_padrao_constroi_a_imagem_do_checkout(host_stubs: list[str], tmp_path: Path) -> None:
+    assert media.main([str(tmp_path)]) == 0
+
+    assert host_stubs == ["build"]
+
+
+def test_skip_build_usa_a_imagem_retagueada_sem_construir(
+    host_stubs: list[str], tmp_path: Path
+) -> None:
+    assert media.main(["--skip-build", str(tmp_path)]) == 0
+
+    assert host_stubs == ["require"]
+
+
+def test_sem_o_diretorio_dos_videos_sai_com_2_sem_tocar_na_imagem(
+    host_stubs: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        media.main([])
+
+    assert stopped.value.code == 2
+    assert host_stubs == []

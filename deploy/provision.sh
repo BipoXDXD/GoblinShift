@@ -73,6 +73,7 @@ id "$APP_USER" >/dev/null 2>&1 || adduser --disabled-password --gecos "" "$APP_U
 # (o deploy e o backup precisam do daemon; o Compose de produção passa pelo fitness test de lá).
 usermod -aG docker "$APP_USER"
 install -d -m 700 -o "$APP_USER" -g "$APP_USER" "/home/$APP_USER/.ssh"
+# O deploy.sh está morto (a publicação é pelo Coolify) e só recusa; a chave não abre shell.
 cat > "/home/$APP_USER/.ssh/authorized_keys" <<EOF
 command="${ROOT}/app/deploy/deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ${CI_PUBKEY}
 EOF
