@@ -55,6 +55,8 @@ O serviço em `deploy/coolify/infra.json` tem teto de 512 MiB, 0,5 CPU e 128 pro
 
 O job "SLOs e alertas (OpenObserve)" do CI sobe o OpenObserve com esse teto e esses buffers (lidos do `infra.json`), então um teto apertado demais reprova o CI antes de virar alerta perdido.
 
+Reconferido na v1.1.2 (2026-11-05): `ZO_MEMORY_CACHE_ENABLED` continua `false` por padrão, e as três variáveis continuam valendo. Com cerca de 340 mil spans e consultas agregadas, sob os tetos do `infra.json`, o pico foi de 438 MiB, contra 420 MiB da v1.0.4 na mesma carga; o procedimento da troca está em [`deploy/openobserve/README.md`](../../deploy/openobserve/README.md#atualizar-o-openobserve).
+
 ## Como verificar
 
 - `compose.yaml` mantém `ZO_LOCAL_MODE`, `ZO_COMPACT_DATA_RETENTION_DAYS: "30"` e a porta publicada só em `127.0.0.1`; `deploy/coolify/infra.json`, o Compose de produção, mantém o mesmo e o teto de memória (`tests/test_coolify_resource_limits.py`).
