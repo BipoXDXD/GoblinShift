@@ -36,7 +36,7 @@ RUN apt-get update -q \
         ca-certificates $(if [ "$(dpkg --print-architecture)" = amd64 ]; then echo nasm; fi) \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-RUN curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
  && echo "${FFMPEG_SHA256}  ffmpeg.tar.xz" | sha256sum -c - \
  && tar -xJf ffmpeg.tar.xz --strip-components=1 \
  && rm ffmpeg.tar.xz
