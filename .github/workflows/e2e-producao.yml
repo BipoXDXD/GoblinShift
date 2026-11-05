@@ -1,0 +1,136 @@
+name: Jornada com escrita em produção
+
+# Upload, execução e download de verdade em https://goblinshift.dev: o PDF Press e o Media Mill
+# (scripts/e2e-pdf-press.sh e e2e-media-mill.sh) rodam o mesmo pedido duas vezes e conferem o ZIP
+# contra fixtures geradas aqui. É o que as jornadas só de leitura (e2e-vps.yml) não provam: que
+# fila, worker, executor sob gVisor e storage continuam funcionando juntos depois de uma release.
+#
+# Roda depois de cada release bem-sucedida do Coolify, toda semana e à mão. Quarta às 11:37 UTC
+# fica longe do domingo da aceitação, que para o worker (README, "Aceitação semanal").
+#
+# A chave E2E_VPS_API_KEY (environment production, conta de teste, com files:* e runs:*) vence em
+# 2027-02-03; o procedimento de rotação está no README, "Execução de ponta a ponta". Chave vencida
+# falha o job e avisa. Ela só vai para a produção: a URL é fixa aqui, sem input de quem dispara, e
+# só chega por env aos passos que falam com a API, nunca às dependências do projeto.
+#
+# Cota: cada rodada cria 4 execuções de um teto de 30 a cada 24 h. Sem folga, a rodada é pulada e
+# não pinga nada (scripts/e2e_quota_check.py). Os dados expiram sozinhos: entradas e saídas 48 h
+# depois do fim da execução; upload pronto sem uso, em 24 h; incompleto, em 1 h.
+#
+# Sucesso pinga o check "jornada com escrita" do healthchecks.io (7 dias, tolerância de 1 dia);
+# falha pinga /fail. Sem ping nenhum, o healthchecks.io avisa sozinho. O log é público: a URL do
+# ping é segredo e chega ao curl pelo stdin, nunca na linha de comando.
+on:
+  # Fronteira revisada: nada do evento escolhe o código, que é sempre o da main; o job só confere
+  # a conclusão da release. PR não recebe a chave, e o environment production só aceita a main.
+  workflow_run: # zizmor: ignore[dangerous-triggers] sem checkout nem artefato do evento; ver acima
+    workflows: [Coolify release]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "37 11 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Uma execução não terminal por conta (1.7): duas rodadas juntas se recusariam com 409.
+  group: e2e-producao
+  cancel-in-progress: false
+
+env:
+  # O Python vem do setup-python (.python-version); se o uv tentar baixar outro, o job falha
+  # em vez de rodar silenciosamente com um interpretador diferente.
+  UV_PYTHON_DOWNLOADS: never
+
+jobs:
+  journey:
+    name: Upload, execução e download
+    # O `pull_request` do coolify.yml passaria pelo filtro `branches` num fork com branch `main`.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event != 'pull_request' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    environment: production
+    # 4 execuções de até 5 min no acompanhamento (POLL_LIMIT) mais a preparação do runner.
+    timeout-minutes: 30
+    env:
+      BASE_URL: https://goblinshift.dev
+    outputs:
+      fits: ${{ steps.quota.outputs.fits }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # O job tem o secret da conta de teste: o token do GitHub não fica no .git.
+          persist-credentials: false
+      # Instala exatamente a versão de .python-version, sem depender do catálogo embutido no uv.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # Job com chave de produção: nada restaurado de cache, tudo conferido pelo uv.lock.
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Instalar o FFmpeg completo (vídeos sintéticos do Media Mill)
+        # O FFmpeg do runner só gera as fixtures; a receita, na imagem do executor, usa o build
+        # mínimo do ADR 036.
+        run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+      - name: Cota da conta de teste
+        id: quota
+        env:
+          GS_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
+        run: |
+          if [[ -z "$GS_API_KEY" ]]; then
+            echo "::error::O secret E2E_VPS_API_KEY está vazio ou não existe no environment production."
+            exit 1
+          fi
+          scripts/e2e-quota-check.sh "$BASE_URL" >>"$GITHUB_OUTPUT"
+      - name: PDF Press
+        if: steps.quota.outputs.fits == 'true'
+        env:
+          GS_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
+        run: scripts/e2e-pdf-press.sh "$BASE_URL"
+      - name: Media Mill
+        if: steps.quota.outputs.fits == 'true'
+        env:
+          GS_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
+        run: scripts/e2e-media-mill.sh "$BASE_URL"
+
+  notify:
+    name: Avisar o healthchecks.io
+    # Job à parte: estouro do timeout ou queda do runner também chegam aqui. Pulada, a jornada
+    # não provou nada, e o ping é só de quem rodou.
+    needs: [journey]
+    if: always() && needs.journey.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Sem checkout nem API: nenhuma permissão, e nenhum segredo além da URL do ping.
+    permissions: {}
+    steps:
+      - name: Pingar o check da jornada
+        env:
+          E2E_WRITE_HEALTHCHECK_URL: ${{ secrets.E2E_WRITE_HEALTHCHECK_URL }}
+          RESULT: ${{ needs.journey.result }}
+          FITS: ${{ needs.journey.outputs.fits }}
+        run: |
+          if [[ -z "$E2E_WRITE_HEALTHCHECK_URL" ]]; then
+            echo "::error::O secret E2E_WRITE_HEALTHCHECK_URL está vazio ou não existe. Cadastre a URL de ping do check \"jornada com escrita\" do healthchecks.io em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [[ "$RESULT" == "success" && "$FITS" != "true" ]]; then
+            echo "Rodada pulada por falta de cota: sem ping."
+            exit 0
+          fi
+          suffix=""
+          [[ "$RESULT" == "success" ]] || suffix="/fail"
+          url="${E2E_WRITE_HEALTHCHECK_URL%/}${suffix}"
+          url="${url//\\/\\\\}"
+          url="${url//\"/\\\"}"
+          printf 'url = "%s"\n' "$url" |
+            curl --config - -fsS -m 10 --retry 3 --output /dev/null

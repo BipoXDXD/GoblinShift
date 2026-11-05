@@ -307,6 +307,30 @@ GS_API_KEY=gsk_… ./scripts/e2e-media-mill.sh http://localhost       # FLAC, mi
 
 Contra a VPS, a URL é `https://goblinshift.dev`: a borda não encaminha o acesso pelo IP ao GoblinShift, para a chave não trafegar em texto claro ([ADR 014](docs/adr/014-proxy-de-borda-caddy.md)).
 
+### Jornada com escrita em produção (GitHub Actions)
+
+O workflow `e2e-producao.yml` roda o PDF Press e o Media Mill em `https://goblinshift.dev` depois de cada release bem-sucedida do Coolify, às quartas às 11:37 UTC e à mão, com a chave `E2E_VPS_API_KEY` do environment `production`, de uma conta de teste. Sucesso pinga o check "jornada com escrita" do healthchecks.io, e falha pinga `/fail` (secret de repositório `E2E_WRITE_HEALTHCHECK_URL`, [tabela dos monitores](deploy/openobserve/README.md#monitores-externos)).
+
+Cada rodada cria 4 execuções, de um teto de 30 a cada 24 h. O passo `scripts/e2e-quota-check.sh` lê o `GET /me` antes de começar: sem folga na cota, com menos de 1016 MiB livres no armazenamento da conta (a aceitação reserva 1008 MiB por execução) ou com outra execução ativa na conta, a rodada é pulada sem ping; chave recusada, escopo ausente ou termos pendentes falham. Nada é apagado à mão, porque tudo expira sozinho: entradas e saídas 48 h depois do fim da execução, upload pronto sem uso em 24 h e incompleto em 1 h. Cada rodada envia cerca de 1,6 MiB, e o histórico das execuções sai em 90 dias, sem contar em cota nenhuma.
+
+**A chave atual vence em 2027-02-03** (validade máxima de 90 dias). Rode tudo na máquina local, com o `gh` autenticado e acesso SSH de root à VPS. O `gs-admin` roda na VPS, dentro do container da API em execução, porque `/srv/goblinshift/app` pode estar defasado em relação à release publicada pelo Coolify. O `docker exec` vai sem `-t`: um TTY acrescentaria CRLF e misturaria o stderr ao token.
+
+```bash
+umask 077                                            # local: os dois arquivos só para o seu usuário
+ssh root@<vps> docker exec -i goblinshift-api-1 gs-admin issue-key --user <id da conta de teste> \
+  --scopes files:read,files:write,runs:read,runs:write --days 90 > chave.txt 2> chave.err
+cat chave.err                                        # identificador e validade da chave nova; anote
+grep -Ecx 'gsk_[0-9a-f]{16}_[A-Za-z0-9_-]{43}' chave.txt   # tem de imprimir 1
+gh secret set E2E_VPS_API_KEY --env production < chave.txt
+gh workflow run e2e-producao.yml                     # confere a chave nova
+ssh root@<vps> docker exec -i goblinshift-api-1 gs-admin revoke-key --key <public_id antigo>
+rm chave.txt chave.err
+```
+
+O `public_id` antigo é a parte de 16 dígitos depois de `gsk_` na chave anterior e fica registrado no `chave.err` da rotação anterior. Sem nenhum dos dois, ele aparece na lista de chaves da página `/acesso`, numa sessão da conta de teste. Revogue só depois que a rodada manual passar. Se o container tiver outro nome, ache-o com `ssh root@<vps> docker ps --filter name=api`.
+
+Depois, atualize a data neste parágrafo e no cabeçalho do workflow.
+
 As fixtures do Image Forge, do Detox, do PDF Press e do Media Mill saem de `uv run python -m scripts.e2e_fixtures <receita> <dir>`, sem baixar nada e com os mesmos bytes a cada execução (os vídeos do Media Mill exigem o FFmpeg completo no `PATH`, como os testes), junto com o `expected.json` que `scripts/e2e_check_package.py` confere no ZIP baixado só com a biblioteca padrão do host. `POLL_LIMIT` (padrão 150, a cada 2 s) aumenta a espera por execução. `./scripts/measure-image-forge.sh` mede o pior caso do Image Forge (100 JPEGs de 24 MP com miniaturas, ~430 MiB) e só passa se couber numa tentativa ([ADR 018](docs/adr/018-pillow-na-imagem-do-executor.md)).
 
 Em desenvolvimento, o worker roda a receita num subprocesso do próprio container, sem gVisor (`GS_RUNNER=local`, em `compose.override.yaml`), com o FFmpeg mínimo copiado da imagem do executor. Em produção só existe o `executor-ctl` do host, que cria um container gVisor por tentativa com a imagem fixada na Run (`GS_EXECUTOR_IMAGE`, por digest); o worker e a manutenção recusam subir com o Runner local ([ADR 016](docs/adr/016-runner-local-na-vps-ate-a-fatia-4.md), substituído na fatia 4).

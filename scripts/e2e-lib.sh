@@ -28,8 +28,9 @@ api() {
   # Falha com o corpo problem+json visível em vez de seguir com uma resposta de erro.
   local method="$1" path="$2"
   shift 2
-  curl --silent --show-error --fail-with-body --max-time 30 -X "$method" \
-    -H "Authorization: Bearer $KEY" "$@" "$BASE$path"
+  # A chave vai por --config, não por argumento: fica fora da lista de processos do host.
+  curl --config <(printf 'header = "Authorization: Bearer %s"\n' "$KEY") \
+    --silent --show-error --fail-with-body --max-time 30 -X "$method" "$@" "$BASE$path"
 }
 
 json() {
@@ -154,7 +155,9 @@ require_same_package() {
 
 generate_fixtures() {
   local recipe_id="$1" dir="$2"
-  (cd "$E2E_REPO_ROOT" && uv run --quiet python -m scripts.e2e_fixtures "$recipe_id" "$dir")
+  # O gerador importa as dependências do projeto, que não têm por que enxergar a chave.
+  (cd "$E2E_REPO_ROOT" &&
+    env -u GS_API_KEY uv run --quiet python -m scripts.e2e_fixtures "$recipe_id" "$dir")
 }
 
 expected_field() {
