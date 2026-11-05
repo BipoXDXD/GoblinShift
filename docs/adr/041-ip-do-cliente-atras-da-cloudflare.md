@@ -1,6 +1,6 @@
 # ADR 041. IP do cliente atrás da Cloudflare, resolvido no site do gateway
 
-- **Estado:** proposto (2026-11-05)
+- **Estado:** aceito e publicado no gateway em 2026-11-05, por decisão do dono do serviço
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8)
 - **Relacionado:** [ADR 014](014-proxy-de-borda-caddy.md) (contrato de confiança entre a borda e os projetos)
 
