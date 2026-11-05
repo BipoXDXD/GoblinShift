@@ -20,6 +20,11 @@ concurrency:
   group: restore-check
   cancel-in-progress: false
 
+env:
+  # O Python vem do setup-python (.python-version); se o uv tentar baixar outro, o job falha
+  # em vez de rodar silenciosamente com um interpretador diferente.
+  UV_PYTHON_DOWNLOADS: never
+
 jobs:
   revisions:
     name: Revisões do Alembic conhecidas pelo código
