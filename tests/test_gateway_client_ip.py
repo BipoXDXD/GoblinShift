@@ -231,7 +231,7 @@ def test_lista_so_vale_no_site_do_goblinshift() -> None:
         assert "CF-Connecting-IP" not in text, path
 
 
-def test_outros_sites_e_opcoes_globais_ficam_como_estavam() -> None:
+def test_site_do_stillon_fica_como_estava() -> None:
     assert (SITES / "stillon.tech.caddy").read_text() == (
         "stillon.tech {\n"
         " reverse_proxy 172.31.0.3:80 {\n"

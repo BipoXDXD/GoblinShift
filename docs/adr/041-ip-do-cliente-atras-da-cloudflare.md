@@ -112,6 +112,23 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 
 **Reversão:** `cp -a "$BACKUP/." "$SITES/"` e repetir os passos 5 e 6. O `cloudflare-ips.conf` que sobrar não faz efeito, porque nada mais o importa. Se o `git_commit_sha` foi alterado, gravar de volta o valor lido antes do merge. Trecho inválido não derruba nada: o `reload` recusa e a configuração anterior fica no ar (ADR 014).
 
+### Mudança no `Caddyfile`
+
+Os passos acima só cobrem `sites/`. O `Caddyfile` é um bind de arquivo único: `install`, `mv` ou `sed -i` trocam o inode, e o container continua lendo o arquivo antigo. Ele precisa ser sobrescrito no mesmo inode, como abaixo. `$COMMIT` e `$CLONE` vêm dos passos 2 e 9 acima; `$API` e `$TOKEN` são os do recurso do gateway. O backup fica fora do checkout, como no passo 3.
+
+```sh
+ORIGEM=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}')
+BACKUP=/root/gateway-backup-caddyfile-$(date -u +%Y%m%dT%H%M%SZ)
+cp -a "$ORIGEM" "$BACKUP"
+curl -fsS -H "Authorization: Bearer $TOKEN" "$API" | jq -r .git_commit_sha > "$BACKUP.commit"
+cat "$CLONE/deploy/coolify/Caddyfile" > "$ORIGEM"    # mesmo inode
+docker exec edge-proxy-1 cat /etc/caddy/Caddyfile | cmp - "$CLONE/deploy/coolify/Caddyfile"
+docker exec edge-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker exec edge-proxy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Depois, alinhe o `git_commit_sha` e confira como nos passos 7 e 8. Se o `validate` falhar, ou para reverter, restaure com `cat "$BACKUP" > "$ORIGEM"`, repita o `reload` e grave de volta o commit de `$BACKUP.commit`.
+
 ## Atualizar a lista
 
 A Cloudflare publica as faixas em <https://www.cloudflare.com/ips-v4> e <https://www.cloudflare.com/ips-v6>. Para atualizar:
@@ -127,7 +144,7 @@ Enquanto a lista estiver atrasada, uma faixa nova da Cloudflare cai no caso de q
 - `limit_req`, auditoria e antiabuso passam a contar por cliente real. Quem hoje divide uma borda com muitos clientes deixa de dividir a cota; clientes atrás do mesmo NAT continuam dividindo.
 - O `limit_req` conta por endereço. Em IPv6, um cliente com um /64 inteiro tem muitos endereços, então o limite é mais fraco que em IPv4. Já era assim para quem chegava direto; agora vale também para quem vem pela Cloudflare. Agrupar por prefixo fica para outra decisão.
 - **Risco aceito:** as faixas são da Cloudflare, não desta conta. Outro cliente da Cloudflare pode apontar uma zona dele para a origem, mas o `CF-Connecting-IP` continua escrito pela Cloudflare, então ele só informa o próprio IP. Fechar esse caminho exige Authenticated Origin Pulls, que fica fora deste ADR.
-- **Resolvido em 2026-11-05:** o `trusted_proxies` global tinha o IP da VPS aposentada, cancelada e sujeita a reatribuição, e um `X-Forwarded-For` forjado vindo dele valia para quem usa `{client_ip}`, como o `stillon.tech`. O dono autorizou a remoção: o servidor da 443 ficou sem proxy confiável, e o das demais portas, só com o Traefik. O `{remote_host}` do site do GoblinShift continua como está.
+- **Resolvido em 2026-11-05:** o `trusted_proxies` global tinha o IP da VPS aposentada, cancelada e sujeita a reatribuição, e um `X-Forwarded-For` forjado vindo dele valia para quem usa `{client_ip}`, como o `stillon.tech`. O dono autorizou a remoção: no `Caddyfile`, o servidor da 443 ficou sem proxy confiável, e o das demais portas, só com o Traefik. Em produção isso só vale depois da [publicação do `Caddyfile`](#mudança-no-caddyfile). O `{remote_host}` do site do GoblinShift continua como está.
 - `deploy/edge/` é o caminho anterior ao Coolify e fica como está: não está no fluxo de produção descrito em [`deploy/coolify/README.md`](../../deploy/coolify/README.md).
 
 ## Compliance
