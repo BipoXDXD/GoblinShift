@@ -32,7 +32,7 @@ for (const [path, title] of [
   ["/termos", "Termos de Uso do GoblinShift"],
   ["/privacidade", "Aviso de Privacidade do GoblinShift"],
 ] as const) {
-  test(`${path} mostra o aviso de rascunho e nenhum material interno`, async ({ page }) => {
+  test(`${path} mostra o texto vigente e nenhum material interno`, async ({ page }) => {
     const scripts: Promise<string>[] = [];
     page.on("response", (response) => {
       if (response.request().resourceType() === "script") {
@@ -42,18 +42,16 @@ for (const [path, title] of [
 
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
-    await expect(page.getByRole("complementary", { name: "Rascunho" })).toContainText(
-      "ainda não passou por revisão jurídica",
-    );
+    await expect(page.getByRole("complementary")).toHaveCount(0);
 
     const shown = await page.getByRole("article").innerText();
     for (const marker of PAGE_MARKERS) {
       expect(shown).not.toMatch(marker);
     }
-    expect(shown).toContain("[[A DEFINIR");
+    expect(shown).not.toContain("[[A DEFINIR");
 
     const bundle = (await Promise.all(scripts)).join("\n");
-    expect(bundle).toContain("A DEFINIR");
+    expect(bundle).not.toContain("[[A DEFINIR");
     for (const marker of BUNDLE_MARKERS) {
       expect(bundle).not.toContain(marker);
     }

@@ -51,7 +51,7 @@ describe("Aceite dos termos", () => {
 
     expect(
       await screen.findByText(
-        "Para continuar, leia e aceite a versão v1 dos Termos de Uso e do Aviso de Privacidade.",
+        "Para continuar, leia e aceite a versão v1 dos Termos de Uso e do Aviso de Privacidade. Ao aceitar, você declara ter 18 anos ou mais.",
       ),
     ).toBeVisible();
     expect(screen.getByRole("link", { name: "Ler os Termos de Uso" })).toHaveAttribute(

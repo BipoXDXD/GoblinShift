@@ -67,8 +67,7 @@ def needs_acceptance(factory: sessionmaker[Session], owner_id: UUID, version: st
     return account.needs_terms_acceptance(version)
 
 
-def test_versao_vigente_e_um_rascunho_dentro_do_limite_do_banco() -> None:
-    assert "rascunho" in CURRENT_TERMS_VERSION
+def test_versao_vigente_cabe_no_limite_do_banco() -> None:
     assert 1 <= len(CURRENT_TERMS_VERSION) <= 64
 
 

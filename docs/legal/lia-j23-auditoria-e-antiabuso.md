@@ -1,12 +1,10 @@
 # LIA J-23: auditoria de segurança e antiabuso
 
-> **RASCUNHO para o advogado, não publicar.** Avaliação de legítimo interesse (LGPD, art. 7º,
-> IX, e art. 10) redigida a partir do que o sistema faz (código e plano técnico), não por
-> advogado(a). Nada daqui entra no build da SPA: só os dois textos públicos são importados
+> **Registro interno, não publicar.** Revisado em 2026-11-05, por decisão do dono do serviço. Avaliação de legítimo interesse (LGPD, art. 7º,
+> IX, e art. 10) redigida a partir do que o sistema faz (código e plano técnico). Nada daqui entra no build da SPA: só os dois textos públicos são importados
 > (`tests/test_legal_texts.py` falha se outro arquivo de `docs/legal/` for importado pela
 > interface). Estrutura em quatro fases, a do guia orientativo da ANPD sobre legítimo
-> interesse (2024): finalidade, necessidade, balanceamento e salvaguardas. As **perguntas ao
-> revisor** ficam no fim. Id do levantamento: J-23 (`notas-internas.md`, item 4 do Aviso).
+> interesse (2024): finalidade, necessidade, balanceamento e salvaguardas. Id do levantamento: J-23 (`notas-internas.md`, item 4 do Aviso).
 
 ## 0. O tratamento avaliado
 
@@ -73,13 +71,16 @@ só o uso dele para decidir um bloqueio.
 - Oposição (art. 18, § 2º): o titular pode pedir pelo `privacidade@`; a resposta proposta é
   avaliar caso a caso, porque atender por padrão anularia a finalidade de segurança.
 
-## Perguntas ao revisor
+## 5. Conclusão
 
-1. O legítimo interesse é a base adequada, ou a segurança do serviço cabe melhor em outra
-   hipótese (por exemplo, exercício regular de direitos, inciso VI, para guardar prova num
-   bloqueio contestado)?
-2. 90 dias depois da exclusão da conta é proporcional? O plano admite reduzir.
-3. Os eventos de quem só tentou entrar (falha de login, sem conta) também precisam de menção
-   específica no Aviso?
-4. É preciso documento formal separado (relatório de impacto, art. 38) ou este registro basta
-   para um agente de pequeno porte?
+O legítimo interesse (inciso IX) é a base adequada, e o interesse prevalece: o impacto é baixo,
+o dado é mínimo e as salvaguardas estão em vigor. Pontos fixados na revisão:
+
+1. **Base.** Legítimo interesse para o registro de segurança. Quando um bloqueio é contestado, a
+   guarda da prova desse bloqueio também se apoia no exercício regular de direitos (inciso VI).
+2. **Prazo.** Os 90 dias depois da exclusão da conta são proporcionais: a alternativa perde o
+   rastro de quem exclui a conta para sumir, e o registro fica só com o identificador interno.
+3. **Quem só tentou entrar.** O item 3.4 do Aviso passou a citar os visitantes sem conta.
+4. **Relatório de impacto (art. 38).** Não elaborado: a ANPD não o requisitou, e o tratamento não
+   é de alto risco nos critérios da Resolução CD/ANPD nº 2/2022, art. 4º. Este registro basta
+   para o agente de pequeno porte.

@@ -1,6 +1,6 @@
 # ADR 029. Aceite versionado dos termos na conta, com bloqueio na autenticação
 
-- **Estado:** aceito na fatia 8 (2026-10-14), tarefa F8-4 (A5) do plano da fatia 8. A versão vigente continua marcada "rascunho" até a revisão jurídica (F8-5)
+- **Estado:** aceito na fatia 8 (2026-10-14), tarefa F8-4 (A5) do plano da fatia 8. A versão vigente é `v5`, revisada em 2026-11-05, por decisão do dono do serviço (F8-5)
 - **Plano:** [1.8](../GoblinShiftPlan.md#s1-8), [3.3](../GoblinShiftPlan.md#s3-3), [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 023](023-cadastro-fechado-ate-a-abertura.md), [ADR 026](026-auditoria-sobrevive-a-exclusao.md), [ADR 028](028-limite-de-requisicoes-no-postgresql.md)
 
@@ -28,7 +28,7 @@ Onde bloquear:
 ## Decisão
 
 - **Guardar na conta**: `accept_terms` faz `UPDATE app_user SET terms_version = :v, terms_accepted_at = :agora WHERE id = :conta AND terms_version IS DISTINCT FROM :v`. Se nenhuma linha muda, a versão já estava aceita e a data do primeiro aceite é devolvida. De dois aceites simultâneos, um grava e o outro encontra a versão aceita depois do commit do primeiro. Só o aceite novo vira evento `TERMS_ACCEPTED` na auditoria (migração 0008, que só amplia o `CHECK` do tipo de evento).
-- **Versão vigente é constante do servidor**: `CURRENT_TERMS_VERSION` em `identity/terms.py` (`"v3-rascunho"` desde 2026-10-15; antes `"v2-rascunho"` e `"v1-rascunho"`), posta em `app.state.terms_version` na subida. Trocar o texto em `docs/legal` sobe essa constante no mesmo PR; `tests/test_legal_texts.py` confere que o cabeçalho e o histórico de versões dos dois textos declaram a mesma versão.
+- **Versão vigente é constante do servidor**: `CURRENT_TERMS_VERSION` em `identity/terms.py` (`"v5"` desde 2026-11-05, a primeira sem a marca de rascunho; antes `"v4-rascunho"` a `"v1-rascunho"`), posta em `app.state.terms_version` na subida. Trocar o texto em `docs/legal` sobe essa constante no mesmo PR; `tests/test_legal_texts.py` confere que o cabeçalho e o histórico de versões dos dois textos declaram a mesma versão.
 - **Bloqueio em `authenticate`**, depois do limite de requisições: conta do login sem o aceite da versão vigente recebe `403 TERMS_NOT_ACCEPTED` (problem+json, código novo do catálogo) em toda rota autenticada, por sessão ou por chave. Ficam isentas só as rotas que leem a própria conta, aceitam os termos ou reduzem o acesso: `GET /me`, `POST /me/terms:accept`, `DELETE /me`, `POST /auth/logout-all`, `GET /api-keys` e `DELETE /api-keys/{key_id}`. O `POST /auth/logout` não autentica e não passa pelo bloqueio. Recusar os termos nunca impede sair, revogar chaves nem pedir a exclusão da conta.
 - **`POST /api/v1/me/terms:accept` só pela sessão web, com CSRF**: o aceite é um ato da pessoa no navegador, não de um script com chave (chave → 403 `FORBIDDEN`). O corpo estrito traz só `version`, a versão que a pessoa leu. Se não for a vigente, a resposta é 409 `STATE_CONFLICT` e nada é gravado. O valor gravado é o do servidor e a conta é sempre a da credencial: campo extra (`user_id`, `owner_id`, `accepted_at`) dá 422 e nada muda. Repetir responde 200 com a mesma data.
 - **`GET /me` ganha `terms`**: `current_version`, `accepted_version`, `accepted_at` e `acceptance_required`. A SPA decide por esse campo se mostra a tela de aceite. O callback do login não muda.
@@ -40,6 +40,7 @@ Onde bloquear:
 - Subir `CURRENT_TERMS_VERSION` bloqueia na hora todas as contas do login, inclusive as chaves de API usadas por scripts, até a pessoa aceitar na interface. É o efeito pedido por 1.8, e o `detail` do 403 diz qual versão aceitar e onde.
 - O histórico de versões anteriores aceitas não fica guardado além dos 90 dias da auditoria, e a auditoria não registra qual versão foi aceita. Se a revisão jurídica pedir prova de aceites antigos, a tabela de histórico entra como *expand*, alimentada pelo mesmo `accept_terms`.
 - Durante o deploy da 0008, a API anterior não bloqueia nem audita aceites. O `CHECK` ampliado só aceita um valor a mais (*expand*). O downgrade apaga os eventos `TERMS_ACCEPTED`, que o `CHECK` antigo recusaria; a versão aceita continua na conta.
+- A passagem para `v5` exige novo aceite de toda conta do login. Com o cadastro fechado, só as contas do dono são atingidas, e o deploy dessa versão bloqueia as chaves delas até o aceite na interface. A antecedência de 15 dias dos textos não se aplica a esta troca, porque o serviço não está aberto ao público.
 - As páginas `/termos` e `/privacidade` e a tela de aceite ficam para a interface (`fatia-7-telas`), sobre o `GET /me` e o `POST /me/terms:accept`.
 
 ## Como verificar

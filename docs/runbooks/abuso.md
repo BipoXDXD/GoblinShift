@@ -147,7 +147,7 @@ O teste `tests/api/auth/test_block_end_to_end.py` prova este roteiro contra o Po
 O bloqueio **não apaga nada**: ele só tira o acesso.
 
 - Uploads, artefatos e saídas expiram sozinhos em 48 horas; não há link público, então nada fica servido a terceiros enquanto isso.
-- A conta bloqueada continua existindo, com o estado `blocked`, para que a mesma identidade não volte a entrar. Não há comando de administrador que apague a conta: a exclusão completa é o `DELETE /me` do titular, e uma conta bloqueada não consegue fazê-lo.
+- A conta bloqueada continua existindo, com o estado `blocked`, para que a mesma identidade não volte a entrar. Ela não consegue usar o `DELETE /me`; quando a exclusão for devida, use `gs_admin request-deletion --user "$owner_id"`, que segue o mesmo caminho: marca o pedido, revoga, audita `ACCOUNT_DELETION_REQUESTED` e cancela a execução, e a manutenção purga em até 24 h. Depois disso, a identidade pode voltar a entrar como conta nova.
 - Se a lei ou um pedido do titular exigir apagar a conta, trate como pedido de dados pessoais (aviso de privacidade) e registre a decisão na ficha do caso antes de agir.
 - A auditoria do caso fica 90 dias em qualquer cenário.
 
@@ -162,8 +162,8 @@ Sessões e chaves continuam revogadas: a pessoa entra de novo e emite chaves nov
 ## 7. Responder à denúncia
 
 - Responda pelo canal de denúncias dos termos (item 7) sem dizer quem é a conta nem o que ela guarda: "Recebemos a denúncia, analisamos e tomamos as medidas previstas nos Termos de Uso."
-- Prazo de resposta: o que os termos fixarem (ponto J-9, ainda em aberto na revisão jurídica).
-- Ordem judicial ou pedido de autoridade: não responda sozinho; siga a orientação jurídica (aviso de privacidade, finalidade "Atender denúncias, ordens e obrigações legais").
+- Prazo de resposta: primeira resposta em até 3 dias úteis; abuso sexual infantil tem prioridade (termos de uso, item 7).
+- Ordem judicial ou pedido de autoridade: confira a origem e o alcance do pedido antes de responder, entregue só o que ele exige e registre o que foi entregue (aviso de privacidade, finalidade "Atender denúncias, ordens e obrigações legais"). Nesse caso, recomenda-se ouvir um advogado(a).
 - Feche a ficha do caso com: data da denúncia, `user.hash`, `owner_id`, o que foi feito e quando.
 
 ## 8. Recurso contra o bloqueio
@@ -207,6 +207,47 @@ O código também está no evento amplo da telemetria (`request_id` no OpenObser
 
 ## Abuso sexual infantil (CSAM)
 
-O procedimento (autoridades e canais, o que preservar, por quanto tempo e como conciliar a preservação com a expiração de 48 horas) **é jurídico e não está escrito aqui**. Ele é o ponto **J-20** dos termos de uso ([`docs/legal/termos-de-uso.md`](../legal/termos-de-uso.md), item 7) e depende de orientação de advogado(a).
+Este procedimento executa o item 7 dos termos de uso ([`docs/legal/termos-de-uso.md`](../legal/termos-de-uso.md)); o raciocínio está no ponto **J-20** de [`docs/legal/notas-internas.md`](../legal/notas-internas.md).
 
-Até esse procedimento existir, consulte o(a) advogado(a) antes de qualquer passo deste roteiro.
+1. **Não abra, não baixe e não repasse o arquivo.** Trate só metadados. Possuir esse material é crime, e a exceção do ECA (art. 241-B, § 2º) é estreita: vale para quem comunica a autoridade, só até a entrega.
+2. **Registre, antes de bloquear:** rode as consultas do passo 2 do roteiro geral e a consulta abaixo. Aqui, ao contrário do roteiro geral, o `subject` entra na ficha, porque é o que identifica a pessoa para a autoridade. A ficha fica cifrada, fora da VPS e fora do repositório: a auditoria, o histórico e o `subject` da conta têm expiração própria.
+
+   ```bash
+   psql_gs -v id="$owner_id" <<'SQL'
+   SELECT issuer, subject, status, created_at FROM app_user WHERE id = :'id';
+   SELECT id, encode(sha256, 'hex') AS sha256, size_bytes, created_at FROM stored_object
+     WHERE owner_id = :'id' ORDER BY created_at DESC;
+   SQL
+   ```
+
+3. **Bloqueie** a conta (passo 3 do roteiro). A conta bloqueada não consegue usar `DELETE /me`, o que mantém o identificador. Não libere e não rode `request-deletion` enquanto o prazo do passo 6 correr.
+4. **Comunique sem demora** à Polícia Federal (canal oficial de denúncias da PF) e à Central Nacional de Denúncias da SaferNet Brasil (canal de denúncias no site dela), com os metadados e sem o material. Anote data, hora e protocolo na ficha.
+5. **Só se a autoridade requisitar a preservação do conteúdo, dentro das 48 horas:** copie o objeto para um arquivo cifrado com `age`, fora do volume de arquivos e com acesso restrito, entregue à autoridade como ela indicar e apague a cópia depois da entrega. Sem requisição, o arquivo expira no prazo normal.
+6. **Guarde a ficha** pelo prazo que a autoridade indicar; sem indicação, por 6 meses a partir da comunicação, e apague depois.
+7. Responda a quem denunciou só que a denúncia foi recebida e tratada.
+
+## Conta de pessoa com menos de 18 anos
+
+Os termos de uso (item 2) prometem bloquear e excluir em até 15 dias, contados de quando soubermos.
+
+1. Ache a conta (passo 1) e registre na ficha a data do aviso, quem avisou e o `owner_id`, sem documento nem dado da criança ou do adolescente.
+2. Bloqueie (passo 3).
+3. Peça a exclusão:
+
+   ```bash
+   gs_admin request-deletion --user "$owner_id"
+   ```
+
+4. Confira, em até 24 h, que a conta sumiu; esperado, 0:
+
+   ```bash
+   psql_gs -v id="$owner_id" <<'SQL'
+   SELECT count(*) FROM app_user WHERE id = :'id';
+   SQL
+   ```
+
+5. Responda a quem avisou só que o pedido foi atendido, e apague a ficha quando a mensagem vencer. A auditoria fica 90 dias e o backup expira em até 31 dias.
+
+## Revisão anual dos bloqueios
+
+Uma vez por ano, liste as contas (`gs_admin list-users`), inclusive as pendentes do cadastro fechado (`--pending`), e confira, na ficha de cada caso, se o motivo continua valendo. Sem motivo vigente, libere a conta (passo 6) ou peça a exclusão com `gs_admin request-deletion --user "$owner_id"` (aviso de privacidade, item 5). Conta com caso de abuso sexual infantil em aberto segue o prazo da seção acima.
