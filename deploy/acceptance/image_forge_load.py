@@ -86,12 +86,15 @@ def add_skip_build(parser: argparse.ArgumentParser) -> None:
 
 
 def require_image() -> None:
-    """A imagem publicada, retagueada pelo operador; sem ela, para antes de mexer na manutenção."""
+    """A imagem publicada, retagueada pelo operador; sem ela, para antes de mexer na manutenção.
+
+    A tag é só um nome local e pode ser velha: o digest impresso registra o que foi medido.
+    """
     try:
-        _docker("image", "inspect", "--format", "{{.Id}}", IMAGE)
+        digests = _docker("image", "inspect", "--format", "{{.Id}} {{.RepoDigests}}", IMAGE)
     except RuntimeError as error:
         raise SystemExit(f"{error}\nfalta a imagem; rode: docker tag <imagem> {IMAGE}") from error
-    print(f"medindo {IMAGE}, já presente no host")
+    print(f"medindo {IMAGE}, já presente no host: {digests.strip()}")
 
 
 def build_image() -> None:

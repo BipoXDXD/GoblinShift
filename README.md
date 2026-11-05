@@ -198,9 +198,9 @@ O login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração do
 | `GS_PUBLIC_ORIGIN` (`https://goblinshift.dev`), `GS_GOOGLE_CLIENT_ID`, `GS_GITHUB_CLIENT_ID` | `app.env` | operador; os IDs não são segredo |
 | `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | `app.env` | operador |
 | `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
-| `csrf_secret`, `login_cookie_secret` | arquivo | `deploy/app-secrets.sh` (`openssl rand -hex 32`), uma vez, nunca trocados por ele |
+| `csrf_secret`, `login_cookie_secret` | arquivo | operador, com `openssl rand -hex 32` (abaixo); a publicação pelo Coolify não os cria |
 
-Sem uma das variáveis, o Compose recusa o arquivo antes de qualquer comando; sem um dos arquivos, ou com ele ilegível pela API, o `deploy/app-secrets.sh` para o deploy com o nome do que falta. Nos dois casos isso acontece antes do `migrate`, sem mexer no banco. Se ainda assim a API subir sem um segredo, ela sai na partida com um erro que nomeia a variável.
+Sem uma das variáveis, o Compose recusa o arquivo antes de qualquer comando. Se ainda assim a API subir sem um segredo, ela sai na partida com um erro que nomeia a variável.
 
 ```bash
 sudo -u goblinshift -i
@@ -211,9 +211,9 @@ chmod 644 google_client_secret github_client_secret
 ```
 
 Rotação:
-- *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo, reimplantar (re-run do job de deploy) e só então revogar o antigo;
-- `csrf_secret`: apagar o arquivo e reimplantar (o deploy gera outro). Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
-- `login_cookie_secret`: apagar o arquivo e reimplantar. Só derruba os logins em andamento.
+- *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo, publicar a aplicação de novo pelo Coolify e só então revogar o antigo;
+- `csrf_secret`: sobrescrever o arquivo com `openssl rand -hex 32` e publicar de novo pelo Coolify. Não apague o arquivo: nada o recria na publicação. Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
+- `login_cookie_secret`: o mesmo procedimento. Só derruba os logins em andamento.
 
 ## Imagem do executor
 

@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,22 +61,37 @@ def test_jornadas_legadas_dependem_do_deploy_desativado() -> None:
     assert job["uses"] == "./.github/workflows/e2e-vps.yml"
 
 
+COMMIT = "a" * 40
+VALID_REQUEST = (COMMIT, f"sha-{COMMIT[:12]}")
+
+
+@pytest.mark.parametrize(
+    ("args", "ssh_command"),
+    [
+        (VALID_REQUEST, ""),
+        ((), f"deploy {' '.join(VALID_REQUEST)}"),
+    ],
+    ids=["argumentos", "forced-command"],
+)
 def test_script_de_deploy_legado_recusa_mesmo_pedido_valido_sem_tocar_em_nada(
-    tmp_path: Path,
+    tmp_path: Path, args: tuple[str, ...], ssh_command: str
 ) -> None:
-    commit = "a" * 40
     git_log = tmp_path / "git.log"
     fake_git = tmp_path / "git"
     fake_git.write_text(f'#!/bin/sh\necho "$*" >>"{git_log}"\n')
     fake_git.chmod(0o755)
 
     result = subprocess.run(  # noqa: S603 - argv fixo
-        ["bash", str(LEGACY_DEPLOY_SCRIPT), commit, f"sha-{commit[:12]}"],  # noqa: S607
+        ["bash", str(LEGACY_DEPLOY_SCRIPT), *args],  # noqa: S607
         capture_output=True,
         text=True,
         check=False,
         timeout=10,
-        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "SSH_ORIGINAL_COMMAND": ssh_command,
+        },
     )
 
     assert result.returncode == 64

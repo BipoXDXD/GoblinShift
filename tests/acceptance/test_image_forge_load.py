@@ -186,20 +186,22 @@ def test_skip_build_usa_a_imagem_retagueada_sem_construir(host_stubs: list[str])
     assert host_stubs == ["require"]
 
 
-def test_require_image_confere_a_tag_da_medicao_sem_construir(
-    monkeypatch: pytest.MonkeyPatch,
+def test_require_image_imprime_o_digest_medido_sem_construir(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     calls: list[tuple[str, ...]] = []
 
     def fake_docker(*args: str, timeout: float = 120) -> str:
         calls.append(args)
-        return "sha256:abc\n"
+        return "sha256:abc [ghcr.io/bipoxdxd/goblinshift-executor@sha256:def]\n"
 
     monkeypatch.setattr(load, "_docker", fake_docker)
 
     load.require_image()
 
-    assert calls == [("image", "inspect", "--format", "{{.Id}}", "goblinshift-executor:medicao")]
+    assert [call[:2] for call in calls] == [("image", "inspect")]
+    assert calls[0][-1] == "goblinshift-executor:medicao"
+    assert "goblinshift-executor@sha256:def" in capsys.readouterr().out
 
 
 def test_require_image_para_com_a_receita_de_retag_quando_a_tag_falta(
