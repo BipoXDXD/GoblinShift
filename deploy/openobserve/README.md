@@ -234,12 +234,12 @@ Registre as duas notificações (horário e canal) no plano ao fechar a fatia.
 
 O recurso "GoblinShift - Banco e observabilidade" do Coolify (`deploy/coolify/infra.json`) tem o Postgres, o Collector e o OpenObserve. A release da CI não o publica: o workflow e o receptor só trocam imagens do recurso da aplicação ([release/README.md](../coolify/release/README.md)). A imagem é fixada por digest e tem `pull_policy: never`, então ela precisa chegar à VPS antes da publicação.
 
-A publicação faz `docker compose up -d`, que recria cada serviço cujo hash de configuração mudou. Por isso esta troca tem duas etapas. O recurso foi publicado pela última vez no commit `ff88bebb`, e depois dele o `infra.json` ganhou os tetos de memória, CPU e processos dos três serviços e os buffers do OpenObserve ([ADR 013](../../docs/adr/013-openobserve-telemetria.md#teto-de-memória-2026-10-28)). Esses acréscimos mudam o hash dos três, então publicar a v1.1.2 direto daquele commit recriaria também o Postgres.
+A publicação termina em `docker compose up -d`, que por si só recria apenas o serviço cujo hash de configuração mudou; o Coolify, porém, remove todos antes (abaixo). Por isso esta troca tem duas etapas. O recurso foi publicado pela última vez no commit `ff88bebb`, e depois dele o `infra.json` ganhou os tetos de memória, CPU e processos dos três serviços e os buffers do OpenObserve ([ADR 013](../../docs/adr/013-openobserve-telemetria.md#teto-de-memória-2026-10-28)). Esses acréscimos mudam o hash dos três, então publicar a v1.1.2 direto daquele commit recriaria também o Postgres.
 
 1. **[Primeira etapa](#primeira-etapa-publicar-os-limites), à parte:** publicar a `main` ainda com a v1.0.4, só para aplicar os limites. Ela recria os três serviços, com a queda do banco que isso traz, e não migra nada.
 2. **Segunda etapa, o resto desta seção:** trocar a imagem. Daí em diante a única diferença é a linha `image` do OpenObserve, mas a publicação pelo Coolify ainda recria os três serviços (abaixo).
 
-Ensaiado com o Compose derivado do `infra.json`: do `ff88bebb` para o PR, o plano recria os três; da `main` com limites para o PR, o Postgres e o Collector ficam `Running`, com o mesmo `StartedAt` e o mesmo hash. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado dos dois e a conferência o compara.
+Ensaiado com o Compose derivado do `infra.json`: do `ff88bebb` para o PR, o plano recria os três; da `main` com limites para o PR, no Compose puro o Postgres e o Collector ficam `Running`, com o mesmo `StartedAt` e o mesmo hash. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado dos dois e a conferência o compara.
 
 **A publicação pelo Coolify derruba o recurso inteiro.** Em 2026-11-05, a primeira etapa mostrou duas coisas que o ensaio com Compose não cobriu:
 
@@ -327,7 +327,7 @@ estado_dos_servicos() {
    sudo docker logs --since 2m goblinshift-otel-collector-1 2>&1 | grep -c 'Exporting failed'    # 0
    ```
 
-**Rollback da primeira etapa.** Esta etapa não migra nada: os dados continuam nos mesmos binds, e a v1.0.4 lê o mesmo volume. Voltar é publicar o commit gravado no passo 2, o que recria os três serviços de novo, sem os tetos. Quem aplicou os limites ao vivo precisa reaplicá-los depois. Se o valor gravado for `HEAD`, a função recusa, porque esse valor apontaria para a `main`: grave à mão o commit fixo `ff88bebb` completo no arquivo e rode de novo. O backup do passo 2 só entra se o banco voltar com defeito.
+**Rollback da primeira etapa.** Rode antes a conferência de imagens do início da seção. Esta etapa não migra nada: os dados continuam nos mesmos binds, e a v1.0.4 lê o mesmo volume. Voltar é publicar o commit gravado no passo 2, o que recria os três serviços de novo, sem os tetos. Quem aplicou os limites ao vivo precisa reaplicá-los depois. Se o valor gravado for `HEAD`, a função recusa, porque esse valor apontaria para a `main`: grave à mão o commit fixo `ff88bebb` completo no arquivo e rode de novo. O backup do passo 2 só entra se o banco voltar com defeito.
 
 ```bash
 rollback_etapa1() {
@@ -366,7 +366,7 @@ NEW='openobserve/openobserve:v1.1.2@sha256:4a154849432f75c4fb024de32fe34163c0240
 OLD='openobserve/openobserve:v1.0.4@sha256:d4a878fac1f6c56003764f7f2a1625668917388f167e222c8c810de3f54c56ba'
 ```
 
-**Pré-requisito: a primeira etapa já publicada.** Sem ela, a publicação abaixo recria o Postgres. Limites no `docker inspect` não provam isso: em produção eles já foram aplicados ao vivo, e o hash de configuração continua o de `ff88bebb`. O critério são o hash e o `StartedAt` dos três serviços: o hash precisa ser diferente do gravado em `/var/backups/goblinshift-o2-hash-antes.txt`, e o `StartedAt` precisa ser posterior ao início da primeira etapa, gravado em `/var/backups/goblinshift-o2-etapa1-inicio.txt`. Sem esses arquivos, a conferência falha: o hash não pode ser comparado com um calculado do repositório, porque inclui os rótulos do Coolify.
+**Pré-requisito: a primeira etapa já publicada.** Sem ela, a publicação abaixo muda o hash do Postgres e do Collector junto com a versão do OpenObserve, misturando as duas causas se algo falhar. Limites no `docker inspect` não provam isso: em produção eles já foram aplicados ao vivo, e o hash de configuração continua o de `ff88bebb`. O critério são o hash e o `StartedAt` dos três serviços: o hash precisa ser diferente do gravado em `/var/backups/goblinshift-o2-hash-antes.txt`, e o `StartedAt` precisa ser posterior ao início da primeira etapa, gravado em `/var/backups/goblinshift-o2-etapa1-inicio.txt`. Sem esses arquivos, a conferência falha: o hash não pode ser comparado com um calculado do repositório, porque inclui os rótulos do Coolify.
 
 ```bash
 conferir_etapa1() {
@@ -529,7 +529,7 @@ rollback_o2() {
 rollback_o2
 ```
 
-Confira como acima, com a imagem antiga: `publicar` termina em `finished`, o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. O commit gravado já tem os limites, então aqui também só o OpenObserve é recriado. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
+Confira como acima, com a imagem antiga: `publicar` termina em `finished`, o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. O Coolify recria os três serviços de novo, com queda do banco: rode antes a conferência de imagens do início da seção, porque o rollback publica como qualquer outra publicação. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
 
 ### Ensaio local (2026-11-05)
 
