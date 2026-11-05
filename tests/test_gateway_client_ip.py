@@ -52,6 +52,22 @@ RETIRED_VPS = "179.197.70.102"
 CLIENT_V4 = "203.0.113.7"
 CLIENT_V6 = "2001:db8:abcd:12::77"
 FORGED = "192.0.2.66"
+IPV6_GROUPS = 8
+# Formatos que uma classe de caracteres deixaria passar. O Nginx não entende os sem porta: sem IP,
+# o $remote_addr seria o gateway, e todos que os enviassem cairiam no mesmo balde do limit_req.
+NOT_AN_ADDRESS = (
+    "....",
+    "deadbeef",
+    "203.0.113.7:80",
+    "256.1.1.1",
+    "203.0.113",
+    "203.0.113.07",
+    "1:2",
+    ":::",
+    "2001:db8::1::2",
+    "1:2:3:4:5:6:7:8:9",
+    "12345::1",
+)
 ECHO_CADDYFILE = """\
 :80 {
  respond "xff={header.X-Forwarded-For} cf={header.CF-Connecting-IP}"
@@ -231,6 +247,41 @@ def test_outros_sites_e_opcoes_globais_ficam_como_estavam() -> None:
     assert "trusted_proxies static 179.197.70.102/32\n" in (COOLIFY / "Caddyfile").read_text()
 
 
+def _address_pattern() -> re.Pattern[str]:
+    site = (SITES / "goblinshift.dev.caddy").read_text()
+    match = re.search(r"vars_regexp \{header\.CF-Connecting-IP\} `(?P<regex>[^`]+)`", site)
+    assert match is not None
+    return re.compile(match["regex"])
+
+
+def _every_compression() -> list[str]:
+    """Todo `::` possível num endereço de 8 grupos: a parte difícil da regex de IPv6."""
+    groups = [f"{index:x}" for index in range(1, IPV6_GROUPS + 1)]
+    return [
+        ":".join(groups[:start]) + "::" + ":".join(groups[start + length :])
+        for length in range(1, IPV6_GROUPS + 1)
+        for start in range(IPV6_GROUPS - length + 1)
+    ]
+
+
+@pytest.mark.parametrize("address", _every_compression())
+def test_regex_aceita_toda_forma_comprimida_de_ipv6(address: str) -> None:
+    assert ip_address(address).version == 6
+    assert _address_pattern().search(address)
+
+
+@pytest.mark.parametrize(
+    "address", ["0.1.2.3", "9.9.9.9", "10.99.100.199", "200.249.250.255", "255.255.255.255"]
+)
+def test_regex_aceita_ipv4_nas_fronteiras_dos_octetos(address: str) -> None:
+    assert _address_pattern().search(address)
+
+
+@pytest.mark.parametrize("value", NOT_AN_ADDRESS)
+def test_regex_recusa_o_que_nao_e_endereco(value: str) -> None:
+    assert _address_pattern().search(value) is None
+
+
 # --- Gateway real ------------------------------------------------------------------------------
 
 
@@ -244,6 +295,9 @@ def test_outros_sites_e_opcoes_globais_ficam_como_estavam() -> None:
         (CLOUDFLARE_V6, CLIENT_V6),
         (LAST_INSIDE_V4, CLIENT_V4),
         (LAST_INSIDE_V6, CLIENT_V6),
+        (CLOUDFLARE_V4, "2001:DB8:ABCD:12::77"),
+        (CLOUDFLARE_V4, "::1"),
+        (CLOUDFLARE_V4, "1:2:3:4:5:6:7:8"),
     ],
 )
 def test_ip_informado_pela_cloudflare_vale(gateway: Gateway, edge: str, client: str) -> None:
@@ -290,6 +344,11 @@ def test_ip_forjado_de_fora_da_faixa_e_ignorado(gateway: Gateway, source: str, h
         pytest.param((f"X-Forwarded-For: {FORGED}",), id="so-x-forwarded-for"),
         pytest.param(("CF-Connecting-IP: <script>",), id="valor-que-nao-e-ip"),
         pytest.param((f"CF-Connecting-IP: {FORGED}, {CLIENT_V4}",), id="lista-de-ips"),
+        pytest.param(
+            (f"CF-Connecting-IP: {CLIENT_V4}", f"CF-Connecting-IP: {FORGED}"),
+            id="dois-cabecalhos",
+        ),
+        *[pytest.param((f"CF-Connecting-IP: {value}",), id=value) for value in NOT_AN_ADDRESS],
     ],
 )
 def test_borda_da_cloudflare_sem_ip_utilizavel_vale_como_quem_conectou(
