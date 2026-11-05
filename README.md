@@ -211,8 +211,8 @@ chmod 644 google_client_secret github_client_secret
 ```
 
 Rotação:
-- *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo, publicar a aplicação de novo pelo Coolify e só então revogar o antigo;
-- `csrf_secret`: sobrescrever o arquivo com `openssl rand -hex 32` e publicar de novo pelo Coolify. Não apague o arquivo: nada o recria na publicação. Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
+- *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo (mantendo o modo 644), rodar `sudo docker restart goblinshift-api-1`, conferir um login e só então revogar o antigo;
+- `csrf_secret`: sobrescrever o arquivo com `openssl rand -hex 32` (mantendo o modo 644) e rodar `sudo docker restart goblinshift-api-1`. A API só lê esses arquivos na partida, e uma publicação do Coolify pode não recriá-la. Não apague o arquivo: nada o recria na publicação. Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
 - `login_cookie_secret`: o mesmo procedimento. Só derruba os logins em andamento.
 
 ## Imagem do executor
