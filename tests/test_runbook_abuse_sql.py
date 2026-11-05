@@ -20,7 +20,8 @@ from tests.conftest import run_migrations
 pytestmark = pytest.mark.integration
 
 RUNBOOK = Path(__file__).resolve().parents[1] / "docs" / "runbooks" / "abuso.md"
-_PSQL_BLOCK = re.compile(r"^psql_gs (?P<args>.*?) <<'SQL'\n(?P<sql>.*?)^SQL$", re.M | re.S)
+# Com indentação opcional: um bloco dentro de lista numerada também precisa ser testado.
+_PSQL_BLOCK = re.compile(r"^ *psql_gs (?P<args>.*?) <<'SQL'\n(?P<sql>.*?)^ *SQL$", re.M | re.S)
 _VARIABLE = re.compile(r'-v (?P<name>\w+)="\$(?P<shell>\w+)"')
 # Valores de exemplo das variáveis de shell que o roteiro passa ao psql.
 EXAMPLE_VALUES = {
@@ -50,7 +51,7 @@ def test_o_roteiro_tem_os_blocos_sql_esperados() -> None:
     blocks = psql_blocks(markdown)
 
     assert len(blocks) == markdown.count("<<'SQL'")
-    assert len(blocks) == 6  # os seis blocos do roteiro, contados à mão
+    assert len(blocks) == 7  # os sete blocos do roteiro, contados à mão
     assert all(variables for variables, _ in blocks)
 
 
