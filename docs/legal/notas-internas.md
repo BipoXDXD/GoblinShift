@@ -118,12 +118,14 @@ ganho indireto. Por isso a cláusula que afastava lucros cessantes e danos indir
 
 ### Direitos do titular
 
-- **J-26, bloqueio e exclusão.** Conta bloqueada não entra e não usa `DELETE /me`; não existe comando
-  administrativo de exclusão. Os dados da conta ficam enquanto o bloqueio durar, com revisão anual
-  (`docs/runbooks/abuso.md`). O HMAC de `issuer` + `subject` proposto antes não foi implementado:
+- **J-26, bloqueio e exclusão.** Conta bloqueada não entra e não usa `DELETE /me`. O comando
+  `gs-admin request-deletion` pede a exclusão pelo mesmo caminho de domínio e serve aos pedidos
+  aceitos, às contas de menores e à revisão anual (`docs/runbooks/abuso.md`). Sem pedido, os dados
+  ficam enquanto o bloqueio durar. O HMAC de `issuer` + `subject` proposto antes não foi implementado:
   depois de uma exclusão, nenhum identificador fica, por minimização.
-- **J-27, restauração.** O diário de exclusões não foi implementado. Antes de reabrir, reaplicam-se
-  as exclusões registradas depois da data da cópia, e um aviso no site orienta a repetir o pedido.
+- **J-27, restauração.** O diário de exclusões não foi implementado, e a auditoria restaurada só
+  vai até a data da cópia. O site publica essa data, e quem excluiu a conta depois dela repete o
+  pedido; o que ainda houver de registro fora da cópia é refeito antes de reabrir.
 - **J-28, verificação e prazo.** Identidade pelo login no provedor ou pelo código da tela de login
   recusado. Resposta simplificada imediata e declaração completa em até 15 dias (art. 19). O prazo
   em dobro do agente de pequeno porte (Resolução nº 2/2022, art. 14) não é usado.
@@ -156,6 +158,7 @@ Depende do dono, fora do repositório:
    incorporar as cláusulas-padrão da ANPD onde houver.
 4. Conferir os canais de denúncia da Polícia Federal e da SaferNet indicados no roteiro.
 5. Testar os três endereços de e-mail, envio e resposta.
+6. Acrescentar rotação de logs ao `proxy` do gateway, numa janela própria, e ajustar o item 5 do Aviso.
 
 ### Riscos residuais
 
@@ -177,8 +180,11 @@ Recomendam revisão por advogado(a) se o serviço crescer ou passar a ter fins e
 - **Preservação manual.** A posse temporária do material e a falta de *legal hold* no código.
 - **Responsabilidade por conteúdo de terceiros.** A decisão do STF sobre o art. 19 do Marco Civil
   ampliou a responsabilidade dos provedores; os arquivos são privados, mas o alcance não foi medido.
-- **Restauração.** Uma exclusão feita depois da cópia e sem registro pode voltar até que a pessoa
-  repita o pedido.
+- **Restauração.** Uma exclusão feita depois da cópia pode voltar até que a pessoa repita o
+  pedido, e ela só saberá pelo aviso no site.
+- **Log do proxy de borda.** `deploy/coolify/gateway.json` não define rotação para o serviço
+  `proxy`, e o Aviso declara isso. O serviço é compartilhado com outro site, então a rotação fica
+  para uma janela do dono.
 - **Citações.** Conferidos no Planalto ou na ANPD em 2026-11-05: LGPD (arts. 7º, 9º, 13, 16, 18, 19
   e 33), Marco Civil (arts. 5º, 13 e 15), ECA (art. 241-B), Resolução nº 2/2022 e Lei nº 15.211/2025.
   Não conferidos: CDC, Código Civil, Resolução nº 19/2024 e a jurisprudência citada. O art. 241-B
@@ -191,35 +197,35 @@ Recomendam revisão por advogado(a) se o serviço crescer ou passar a ter fins e
 
 Cada afirmação técnica dos Termos corresponde a um trecho do plano ou do código. "Plano" é
 `docs/GoblinShiftPlan.md`. Onde a fonte é só o plano, o comportamento é o especificado para a
-abertura pública e ainda depende de fatia não concluída (indicada entre parênteses).
+abertura pública. As fatias citadas no plano já estão na `main`, conferida em 2026-11-05.
 
 | Afirmação | Fonte |
 |---|---|
 | Projeto de portfólio, gratuito, código público, serviço aberto | Plano, introdução da seção 1 e 1.8; ADR 012 |
 | Revisão antes da abertura | Plano 1.8 (último item de Privacidade); ADR 012; seção "Revisão de 2026-11-05" destas notas |
-| Aceite no primeiro login com versão e data; reaceite quando a versão muda | Plano 1.8 (Base legal e transparência) e 3.3 (`User`: versão e data dos termos); plano das fatias 7 e 8, 2.1 (fatia 6/8, não implementado) |
+| Aceite no primeiro login com versão e data; reaceite quando a versão muda | Plano 1.8 (Base legal e transparência) e 3.3 (`User`: versão e data dos termos); plano das fatias 7 e 8, 2.1; ADR 029; `src/goblinshift/identity/terms.py` |
 | Receitas fixas, resultados privados com manifesto e relatório; catálogo mostra só o implementado | Plano, introdução da seção 1 e 1.1 |
 | Sem rede no processamento, com processamento determinístico, sem scripts do cliente | Plano, introdução da seção 1; 3.6 (Sandbox: `--network=none`) |
-| Login só Google (OIDC) ou GitHub (OAuth 2.0), sem senha própria, sem convite | Plano 1.8 (Contas) e 3.6 (Identidade web); ADR 008; ADR 012 (fatia 6) |
+| Login só Google (OIDC) ou GitHub (OAuth 2.0), sem senha própria; com cadastro fechado, a conta nova fica à espera de liberação | Plano 1.8 (Contas) e 3.6 (Identidade web); ADR 008; ADR 012; ADR 023 |
 | Duas contas separadas para a mesma pessoa; sem vínculo por e-mail | Plano 1.8; ADR 008, Decisão e Consequências |
-| Sessão: 30 min de inatividade ou 8 h absolutas; `logout-all` revoga sessões e chaves | Plano 3.6 (Sessão) (fatia 6) |
+| Sessão: 30 min de inatividade ou 8 h absolutas; `logout-all` revoga sessões e chaves | Plano 3.6 (Sessão) |
 | Até 5 chaves; exibição única; 30 dias padrão, 90 máximo; exige login recente | Plano 1.7 (Configurações), 3.6 (Chaves de API e Autenticação recente); `src/goblinshift/identity/keys.py` (validade) |
 | Cotas: 1 execução não terminal, 30 execuções e 2 GiB/24 h, 4 GiB por conta, 100 presets | Plano 1.7 (tabela de limites); ADR 012 |
 | Recusa imediata ao atingir limite; fila com prazo de 2 h | Plano 1.7 (Fila) e 1.8 (Recusar cedo); `src/goblinshift/runs/lifecycle.py` (`QUEUE_WINDOW = 2 h`) |
 | Arquivos e resultados por 48 h após o término; upload não usado em 24 h | Plano 1.7 (Retenção); `src/goblinshift/files/limits.py` (`ARTIFACT_TTL`, `USED_INPUT_TTL`, `READY_UPLOAD_TTL`) |
 | Arquivos sem backup | Plano 3.8 (Backups: "Arquivos: sem backup, por decisão") |
 | Sem links públicos de compartilhamento | Plano 1.8 (Abuso e custo); ADR 012 |
-| Bloqueio revoga sessões e chaves, cancela a execução e impede novo login | Plano 1.8 (Estado da conta); ADR 012; plano das fatias 7 e 8, 2.6 (fatia 6) |
+| Bloqueio revoga sessões e chaves, cancela a execução e impede novo login | Plano 1.8 (Estado da conta); ADR 012; plano das fatias 7 e 8, 2.6 |
 | Procedimento de CSAM | Plano das fatias 7 e 8, 2.6; `docs/runbooks/abuso.md`; J-20 nesta nota |
 | Sem varredura automatizada de conteúdo nesta versão | Plano 1.8 (Abuso e custo): as medidas listadas são limites, privacidade, expiração, bloqueio e termos; nenhuma é varredura |
 | Canal de contato para denúncias | Plano 1.8 (Abuso e custo); ADR 012 |
-| `DELETE /me`: login recente; revoga, cancela e remove em até 24 h; backups expiram em até 30 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups) (fatia 6, não implementado) |
+| `DELETE /me` e `gs-admin request-deletion`: revoga, cancela e remove em até 24 h; backups expiram em até 31 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente) e 3.8 (Backups); `src/goblinshift/entrypoints/api/me_delete.py` |
 | Remoção de metadados não é anonimização | Plano 1.2 (Image Forge, perfis de cor e metadados) |
 | Código sob Apache-2.0; a licença não cobre a arte nem os modelos 3D | `LICENSE`, `NOTICE`, `pyproject.toml` (`license`), `web/package.json` (`license`) |
 | Arte sob CC BY 4.0 na parte humana, exceto Jade e Fagulha | `docs/art/LICENSE-ART.md` |
 | Processamento isolado sem rede; arte com registro de licenças | Plano, introdução da seção 1; `docs/art/LICENSE-ART.md`; página `/creditos` (`web/src/legal/CreditsPage.tsx`) |
-| "Código da tela de login" para o recurso contra bloqueio | Branch `login-recusado-ref` (a tela de login recusado mostra uma referência do pedido para citar no e-mail) |
-| Canal da política de divulgação em `/.well-known/security.txt` | Branch `politica-seguranca` (`SECURITY.md` e `web/public/.well-known/security.txt`) |
+| "Código da tela de login" para o recurso contra bloqueio | A tela de login recusado mostra uma referência do pedido para citar no e-mail) |
+| Canal da política de divulgação em `/.well-known/security.txt` | `SECURITY.md` e `web/public/.well-known/security.txt` |
 
 ## Aviso de Privacidade
 
@@ -227,22 +233,21 @@ abertura pública e ainda depende de fatia não concluída (indicada entre parê
 
 "Plano" é `docs/GoblinShiftPlan.md`; "plano 7-8" é o levantamento das fatias 7 e 8
 (`planos/fatias7-8-plano.md`, fora do repositório). Onde a fonte é só o plano, o comportamento é
-o especificado para a abertura pública e ainda depende de fatia não concluída (indicada entre
-parênteses). Caminhos sem branch indicada estão na `main` (conferida em `6c1c41f`); os marcados
-`origin/fatia-6` foram conferidos em `51c2707` e entram com o PR #20.
+o especificado para a abertura pública. Os caminhos citados estão na `main`, conferida em
+2026-11-05.
 
 | Afirmação | Fonte |
 |---|---|
-| Sem senha própria; login Google (OIDC, escopo `openid`) ou GitHub (OAuth 2.0, sem escopo); token do GitHub descartado após uma chamada a `GET /user` | Plano 1.8 (Contas, Minimização) e 3.6 (Identidade web); ADR 008 (fatia 6) |
+| Sem senha própria; login Google (OIDC, escopo `openid`) ou GitHub (OAuth 2.0, sem escopo); token do GitHub descartado após uma chamada a `GET /user` | Plano 1.8 (Contas, Minimização) e 3.6 (Identidade web); ADR 008 |
 | E-mail não coletado; só `issuer`, `subject` e nome de exibição | Plano 1.8 (Minimização); ADR 008, Consequências; `src/goblinshift/identity/tables.py` (`app_user` sem coluna de e-mail) |
 | Identidade GitHub pelo `id` numérico; nome de exibição = `login` | Plano 1.8 (Contas, Minimização); ADR 008 |
 | Estado `active`/`blocked`, data de criação | `src/goblinshift/identity/tables.py` (`status`, `created_at`) |
-| Versão e data dos termos no `User` | Plano 3.3 (`User`); plano 7-8, 2.1 (fatia 6/8) |
+| Versão e data dos termos no `User` | Plano 3.3 (`User`); plano 7-8, 2.1; ADR 029 |
 | Provedor de login não recebe acesso aos arquivos | Plano 3.6 (Identidade web); ADR 008, Consequências |
-| Sessão: segredo aleatório com hash no banco, datas, expiração 30 min / 8 h, `Clear-Site-Data` no logout, `logout-all` | Plano 3.6 (Sessão) e 3.3 (`WebSession`) (fatia 6) |
+| Sessão: segredo aleatório com hash no banco, datas, expiração 30 min / 8 h, `Clear-Site-Data` no logout, `logout-all` | Plano 3.6 (Sessão) e 3.3 (`WebSession`) |
 | Chaves: identificador público, hash, escopos, datas, último uso | Plano 3.6 (Chaves de API); `src/goblinshift/identity/tables.py` (`api_key`) |
-| Auditoria: eventos listados, IP truncado /24 e /48, sem nomes nem conteúdo, 90 dias | Plano 3.6 (Auditoria), 3.3 (`AuditEvent`), 1.7 (Retenção) e 1.8 (Privacidade) (fatia 6) |
-| Estado transitório do login no PostgreSQL por poucos minutos; cookie leva só a chave | Plano 3.6 (Sessão, último parágrafo) e 1.7 (Retenção) (fatia 6) |
+| Auditoria: eventos listados, IP truncado /24 e /48, sem nomes nem conteúdo, 90 dias | Plano 3.6 (Auditoria), 3.3 (`AuditEvent`), 1.7 (Retenção) e 1.8 (Privacidade) |
+| Estado transitório do login no PostgreSQL por poucos minutos; cookie leva só a chave | Plano 3.6 (Sessão, último parágrafo) e 1.7 (Retenção) |
 | Arquivos com tamanho e SHA-256; nomes, parâmetros, resultado por arquivo; histórico; presets | Plano 3.3 (`Upload`, `Run`, `RunInput`, `StoredObject`, `Preset`) e 1.1 |
 | Consumo calculado do histórico | Plano 3.3 (último parágrafo: cotas a partir de `Run` e `RunInput`) e 1.8 (Abuso e custo) |
 | Conteúdo lido só pela receita, em contêiner isolado e sem rede | Plano 3.6 (Sandbox) |
@@ -261,16 +266,16 @@ parênteses). Caminhos sem branch indicada estão na `main` (conferida em `6c1c4
 | Backblaze B2 nos EUA | Decisão do dono em 2026-10-15: região US East. Plano 7-8, 2.2; ADR 022 (alvo B2). A região é configuração (`BACKUP_S3_REGION`), fora do repositório |
 | Eventos de segurança guardados 90 dias depois de `DELETE /me` | ADR 026, Consequências; `tests/test_schema_fatia_6.py` (apagar a conta mantém os eventos) |
 | Mensagens por e-mail guardadas 12 meses depois do fim da conversa | Decisão do dono em 2026-10-15 (documento de decisões jurídicas, J-6) |
-| Aviso de incidente no site | Decisão do dono em 2026-10-15 (J-15); o aviso global do site está na branch `aviso-global` |
+| Aviso de incidente no site | Decisão do dono em 2026-10-15 (J-15); o aviso global do site está em `web/src` |
 | Restauração mensal decifrada em runner do GitHub Actions | `.github/workflows/restore-check.yml` (`runs-on: ubuntu-24.04`, `cron: "23 10 1 * *"`, serviço `postgres` efêmero) |
 | healthchecks.io recebe só pings | ADR 022, Decisão 4 |
 | Exclusão adiada de arquivos | Plano 1.1 (Exclusão) e 3.6 (Exclusão sempre adiada) |
-| `DELETE /me`: login recente, revoga, cancela, remove em até 24 h; backup em até 30 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente), 3.8 (Backups) (fatia 6) |
-| Acesso por `GET /me`, histórico e presets | Plano 1.8 (Acesso); `src/goblinshift/entrypoints/api/me.py` (hoje só id, nome e escopos; consumo entra na fatia 6) |
-| Cookies `__Host-gs_session` e `__Host-gs_csrf` e seus atributos | Plano 3.6 (Sessão, CSRF) (fatia 6) |
+| `DELETE /me` e `gs-admin request-deletion`: revoga, cancela, remove em até 24 h; backup em até 31 dias | Plano 1.8 (Exclusão), 3.6 (Autenticação recente), 3.8 (Backups) |
+| Acesso por `GET /me`, histórico e presets | Plano 1.8 (Acesso); `src/goblinshift/entrypoints/api/me.py` (id, nome, escopos, limites, consumo e aceite) |
+| Cookies `__Host-gs_session` e `__Host-gs_csrf` e seus atributos | Plano 3.6 (Sessão, CSRF) |
 | HTTPS, banco sem porta exposta, segredos em hash | Plano 3.8 (Proxy de borda, Rede) e 3.6 |
-| Nome "Conta Google" para contas Google; nome do GitHub (`login`) regravado a cada login; nome sem edição | `origin/fatia-6`: `src/goblinshift/identity/providers.py:34-35` (`GOOGLE_SCOPE`, `GOOGLE_DISPLAY_NAME`), `:78` e `:90`; `src/goblinshift/identity/users.py:62` (`ON CONFLICT ... set_ display_name`); `src/goblinshift/entrypoints/api/me.py:68` (só `GET /me`, sem rota de edição) |
-| Cookie `__Secure-gs_login`: chave assinada, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/auth`, 10 minutos; estado do login expira em 10 minutos | `origin/fatia-6`: `src/goblinshift/entrypoints/api/cookies.py:18-22`; `src/goblinshift/entrypoints/api/app.py:86-96` (`SessionMiddleware` do Starlette, que sempre marca `httponly`); `src/goblinshift/identity/login_state.py:21` (`LOGIN_STATE_TTL`) |
+| Nome "Conta Google" para contas Google; nome do GitHub (`login`) regravado a cada login; nome sem edição | `src/goblinshift/identity/providers.py` (`GOOGLE_SCOPE`, `GOOGLE_DISPLAY_NAME`); `src/goblinshift/identity/users.py` (`ON CONFLICT ... set_ display_name`); `src/goblinshift/entrypoints/api/me.py` (só `GET /me`, sem rota de edição) |
+| Cookie `__Secure-gs_login`: chave assinada, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/auth`, 10 minutos; estado do login expira em 10 minutos | `src/goblinshift/entrypoints/api/cookies.py`; `src/goblinshift/entrypoints/api/app.py` (`SessionMiddleware` do Starlette, que sempre marca `httponly`); `src/goblinshift/identity/login_state.py` (`LOGIN_STATE_TTL`) |
 | Log de acesso do Nginx: IP truncado /24 e /48, só o caminho, sem Referer nem User-Agent; Uvicorn sem log de acesso | `docker/nginx/templates/access-log.conf.template` (`log_format privacy`); `docker/nginx/templates/default.conf.template:25`; `docker/app.Dockerfile:34` (`--no-access-log`); `tests/test_nginx_logs.py`; PR #12 |
 | Log de erro do Nginx com a linha da requisição e o IP da borda | PR #12 ("Fora do escopo") |
 | Proxy de borda sem log de acesso | `deploy/edge/Caddyfile` e `deploy/edge/conf.d/goblinshift.caddy` (sem diretiva `log`) |
@@ -294,9 +299,9 @@ Todas as três encontradas no primeiro rascunho estão resolvidas na `main` (con
 3. **IP na telemetria: resolvida pelo PR #16.** A truncagem do IP e a remoção da query string nos
    eventos estão na `main` (`src/goblinshift/platform/telemetry.py`, `truncate_client_address`).
 
-Fica fora deste aviso, como nota operacional: o `deploy/edge/compose.yaml` (infraestrutura
-compartilhada) não declara rotação própria de logs. O Caddy da borda não grava log de acesso,
-então isso não muda o que o aviso declara.
+Nota operacional: nem `deploy/edge/compose.yaml` nem `deploy/coolify/gateway.json`, de
+infraestrutura compartilhada, declaram rotação própria de logs. O Caddy da borda não grava log de
+acesso, e o item 5 do Aviso declara as mensagens técnicas dele à parte.
 
 ## Decisões aplicadas em 2026-10-15
 

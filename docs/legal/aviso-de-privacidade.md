@@ -30,7 +30,7 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
   analytics de terceiros.
 - O servidor fica no Brasil, mas o site passa pela **Cloudflare**, que recebe as conexões antes
   dele. Ficam fora do país o **backup cifrado do banco de dados**, guardado nos Estados Unidos
-  por 30 dias, e, se você nos escrever, a **mensagem de e-mail**, guardada na Zoho, em local que
+  por até 31 dias, e, se você nos escrever, a **mensagem de e-mail**, guardada na Zoho, em local que
   não controlamos.
 - O serviço é só para maiores de 18 anos.
 
@@ -42,7 +42,7 @@ Pessoais (Lei nº 13.709/2018, "LGPD").
 |---|---|---|
 | Identificador da conta no provedor (`issuer` + `subject`) | Google: o `sub` do login OpenID Connect. GitHub: o `id` numérico da conta | É a sua identidade no GoblinShift |
 | Nome de exibição | GitHub: o seu nome de usuário público (`login`). Google: o texto fixo "Conta Google" | Para contas Google, nenhum nome é recebido, porque pedimos só o escopo `openid`; por isso todas aparecem como "Conta Google" |
-| Estado da conta (`active` ou `blocked`) e data de criação | Gerado pelo serviço | |
+| Estado da conta (`active` ou `blocked`) e data de criação | Gerado pelo serviço | Enquanto o cadastro estiver fechado, a conta nova fica como `blocked`, à espera de liberação |
 | Versão dos Termos e do Aviso aceitos e data do aceite | Gerado no aceite | |
 
 **Pedimos o mínimo aos provedores:** ao Google, só o escopo `openid`; ao GitHub, nenhum escopo.
@@ -162,11 +162,12 @@ de taxa são regras fixas e públicas, aplicadas igualmente a todas as contas.
 | Eventos de segurança (auditoria) | 90 dias, inclusive depois da exclusão da conta | Registros apagados |
 | Registros de idempotência (proteção contra pedido repetido) | 24 horas | Registro apagado |
 | Telemetria | 30 dias | Expiração automática no servidor de telemetria |
-| Logs técnicos dos serviços | Até 50 MiB por serviço (5 arquivos de 10 MiB), o que cobre cerca de 14 dias no volume previsto; com pouco tráfego, uma linha pode durar mais. Os logs também somem sempre que o serviço é recriado, o que acontece a cada atualização | Rotação por tamanho |
-| Backup cifrado do banco de dados | 30 dias | Expiração automática no provedor do backup |
+| Logs técnicos dos serviços da aplicação | Até 50 MiB por serviço (5 arquivos de 10 MiB), o que cobre cerca de 14 dias no volume previsto; com pouco tráfego, uma linha pode durar mais. Os logs também somem sempre que o serviço é recriado, o que acontece a cada atualização | Rotação por tamanho |
+| Mensagens técnicas do proxy de borda do nosso servidor | Sem teto de tamanho nem prazo fixo: ficam até o proxy ser recriado. Ele não grava registro de acesso, mas uma mensagem de erro pode trazer o endereço e o caminho da requisição | Recriação do proxy |
+| Backup cifrado do banco de dados | Até 31 dias: cada cópia fica imutável por 30 dias, é ocultada nesse prazo e apagada 1 dia depois | Expiração automática no provedor do backup |
 | Mensagens que você nos envia por e-mail (item 3.6) | 12 meses depois do fim da conversa | Mensagens apagadas da caixa de e-mail |
 | Registros preservados em caso de abuso sexual infantil (item 7 dos Termos de Uso) | O prazo que a autoridade indicar; sem indicação, 6 meses a partir da comunicação | Registros apagados |
-| Conta bloqueada: identificador do provedor, nome de exibição e estado | Enquanto o bloqueio durar, com revisão ao menos uma vez por ano | Liberação da conta ou exclusão |
+| Conta bloqueada ou à espera de liberação: identificador do provedor, nome de exibição e estado | Enquanto o bloqueio ou a espera durar, com revisão ao menos uma vez por ano | Liberação da conta ou exclusão |
 | Dados da conta | Enquanto a conta existir | Exclusão da conta (item 8) |
 
 Os prazos acima são aplicados por rotinas automáticas de manutenção. Arquivos não têm backup:
@@ -175,7 +176,8 @@ depois de apagados, não podem ser recuperados.
 **Conta bloqueada.** Uma conta bloqueada não entra mais e, por isso, não consegue usar a
 exclusão pela própria conta. O identificador do provedor fica guardado para que o bloqueio
 continue valendo, e os demais dados seguem os prazos acima. Você pode pedir a revisão do bloqueio
-ou a eliminação pelo canal de privacidade. Atendemos, salvo se a conservação for necessária para
+ou a eliminação pelo canal de privacidade. Nesse caso, nós pedimos a exclusão da conta, que segue
+o mesmo caminho do item 8. Atendemos, salvo se a conservação for necessária para
 cumprir obrigação legal ou para exercer direitos em processo (LGPD, arts. 7º, II e VI, e 16, I).
 Depois da exclusão de uma conta, não guardamos nenhum identificador do provedor; se a mesma
 pessoa voltar a entrar, será uma conta nova, sujeita a novo bloqueio.
@@ -211,7 +213,7 @@ O servidor principal fica no Brasil. Saem do país, ou podem sair:
 1. **O tráfego do site**, que passa pela Cloudflare (item 6). O processamento dos seus arquivos
    fica no servidor no Brasil, mas não controlamos por quais pontos da rede da Cloudflare a sua
    conexão passa.
-2. **O backup do banco de dados**, guardado no Backblaze B2, nos Estados Unidos, por 30 dias. Ele
+2. **O backup do banco de dados**, guardado no Backblaze B2, nos Estados Unidos, por até 31 dias. Ele
    é cifrado no nosso servidor antes do envio, com uma chave cuja parte privada não fica nem no
    servidor nem no Backblaze; a chave que o servidor usa para enviar só pode gravar, não pode
    ler nem apagar backups. O banco contém os dados das seções 3.1 a 3.3 (não contém arquivos).
@@ -246,7 +248,7 @@ A LGPD (art. 18) garante a você, entre outros, o direito de:
 | Acesso | A área da conta (`GET /me`), o histórico de execuções e a lista de presets mostram o que a conta guarda, incluindo o consumo |
 | Portabilidade | Baixe os resultados e relatórios das execuções enquanto estiverem disponíveis; presets e histórico podem ser lidos pela API em JSON |
 | Eliminação de arquivos | Excluir um arquivo ou resultado o torna indisponível na hora; a remoção física acontece assim que nenhuma execução ou download em andamento o estiver usando |
-| Eliminação da conta | Excluir a conta (`DELETE /me`, exige login recente) revoga sessões e chaves, cancela a execução em andamento e remove arquivos, resultados, presets e histórico **em até 24 horas**. Os eventos de segurança (item 3.2) continuam guardados por até 90 dias depois da exclusão, com o identificador interno da conta e o IP truncado, para proteger o serviço. Cópias no backup do banco deixam de existir quando o backup expira, **em até 30 dias**; até lá elas só seriam usadas para recuperar o banco num desastre. Se uma restauração for necessária, antes de reabrir o serviço excluímos de novo as contas cuja exclusão esteja registrada depois da data da cópia, e publicamos um aviso no site; quem pediu a exclusão nesse intervalo pode repeti-la pela conta ou pelo canal de privacidade |
+| Eliminação da conta | Excluir a conta (`DELETE /me`, exige login recente) revoga sessões e chaves, cancela a execução em andamento e remove arquivos, resultados, presets e histórico **em até 24 horas**. Os eventos de segurança (item 3.2) continuam guardados por até 90 dias depois da exclusão, com o identificador interno da conta e o IP truncado, para proteger o serviço. Cópias no backup do banco deixam de existir quando o backup expira, **em até 31 dias**; até lá elas só seriam usadas para recuperar o banco num desastre. Uma cópia não sabe das exclusões feitas depois dela, e o registro delas pode se perder junto com o banco. Por isso, depois de uma restauração, publicamos no site a data da cópia usada, e quem excluiu a conta depois dessa data precisa repetir o pedido pela conta ou pelo canal de privacidade. Se ainda tivermos registro dessas exclusões fora da cópia, nós as refazemos antes de reabrir o serviço |
 | Encerrar acessos | "Sair de todas as sessões" revoga todas as sessões e chaves da conta |
 
 **Pelo canal de privacidade** (privacidade@goblinshift.dev), para os demais pedidos, como correção,
@@ -291,8 +293,8 @@ o seu e-mail.
 
 O GoblinShift é só para maiores de 18 anos e não é dirigido a crianças e adolescentes. O serviço
 não coleta idade: ao aceitar os Termos, você declara ter 18 anos ou mais. Se soubermos que uma
-conta pertence a uma pessoa com menos de 18 anos, ela é bloqueada e excluída, com os dados dela,
-em até 15 dias. Pai, mãe ou responsável pode avisar pelo canal de privacidade.
+conta pertence a uma pessoa com menos de 18 anos, ela é bloqueada e excluída em até 15 dias; as
+cópias no backup expiram como no item 5. Pai, mãe ou responsável pode avisar pelo canal de privacidade.
 
 ## 12. Mudanças neste aviso
 

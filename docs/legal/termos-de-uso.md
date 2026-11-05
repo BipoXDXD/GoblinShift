@@ -28,7 +28,8 @@ Se você não concorda com estes Termos, não use o serviço.
 **O serviço é só para maiores de 18 anos.** Ao aceitar estes Termos, você declara ter 18 anos
 ou mais. O GoblinShift não é dirigido a crianças e adolescentes, não recebe a sua data de
 nascimento e não tem como verificar idade. Se soubermos que uma conta pertence a uma pessoa com
-menos de 18 anos, a conta é bloqueada e excluída, com os dados dela, em até 15 dias.
+menos de 18 anos, a conta é bloqueada e excluída em até 15 dias; as cópias no backup expiram
+como descrito no Aviso de Privacidade.
 
 ## 3. O que o serviço faz
 
@@ -44,7 +45,8 @@ durante o processamento.
 ## 4. Conta e acesso
 
 - **Login só por Google ou GitHub.** O GoblinShift não tem senha própria. Você entra com uma
-  conta Google ou GitHub, e a primeira entrada cria sua conta, sem convite.
+  conta Google ou GitHub, e a primeira entrada registra sua conta. Enquanto o cadastro estiver
+  fechado, a conta nova fica à espera de liberação e não acessa o serviço.
 - **Uma conta por provedor.** Entrar por Google e por GitHub cria **duas contas separadas**,
   cada uma com seus arquivos, histórico e cotas. Não juntamos contas, nem por e-mail.
 - **Sessão.** A sessão no navegador expira depois de 30 minutos sem uso ou 8 horas depois do
@@ -143,7 +145,7 @@ e são tratadas assim que forem lidas.
 - **Por você.** Você pode excluir sua conta a qualquer momento pela própria conta (operação
   `DELETE /me`, que exige login recente). A exclusão revoga sessões e chaves, cancela a
   execução em andamento e remove arquivos, resultados, presets e histórico em até 24 horas.
-  Cópias no backup do banco de dados deixam de existir quando o backup expira, em até 30 dias
+  Cópias no backup do banco de dados deixam de existir quando o backup expira, em até 31 dias
   (detalhes no Aviso de Privacidade).
 - **Fim do serviço.** Por ser um projeto de portfólio gratuito, o serviço pode ser alterado,
   suspenso ou encerrado. Se o serviço for encerrado, avisaremos no site com pelo menos 30 dias

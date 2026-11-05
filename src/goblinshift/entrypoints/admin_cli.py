@@ -8,6 +8,7 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin revoke-key --key <public_id>
     gs-admin block --user <id>
     gs-admin unblock --user <id>
+    gs-admin request-deletion --user <id>
     gs-admin list-users [--pending]
     gs-admin find-user --user-hash <hash>
     printf '%s' "$user_hash" | gs-admin find-user --user-hash -
@@ -18,7 +19,10 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
 `block` bloqueia, revoga sessões e chaves e cancela a execução ativa; repetir completa o que
-faltou. `list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
+faltou. `request-deletion` pede a exclusão da conta pelo mesmo caminho do `DELETE /me`, também
+para conta bloqueada, que não consegue entrar: marca o pedido, revoga, audita e cancela a execução
+ativa, e a manutenção purga em até 24 h; repetir mantém o primeiro pedido e completa o que faltou.
+`list-users` imprime id, emissor, estado e criação separados por tab, sem o sujeito da
 identidade externa; `--pending` mostra só as contas à espera de liberação (ADR 023).
 `find-user` traduz o `user.hash` dos eventos da telemetria no id da conta (roteiro de abuso);
 com `--user-hash -` lê o hash da entrada padrão, para ele não ficar no log do sudo.
@@ -58,6 +62,7 @@ from goblinshift.identity import (
     issue_key,
     parse_scopes,
     record_audit_event,
+    request_account_deletion,
     revoke_key,
     unblock_account,
 )
@@ -145,6 +150,13 @@ def _argument_parser() -> argparse.ArgumentParser:
     unblock = commands.add_parser("unblock", help="libera a conta bloqueada ou pendente")
     unblock.add_argument("--user", type=UUID, required=True, help="id da conta")
     unblock.set_defaults(command=_unblock)
+
+    deletion = commands.add_parser(
+        "request-deletion",
+        help="pede a exclusão da conta, mesmo bloqueada; a manutenção purga em até 24 h",
+    )
+    deletion.add_argument("--user", type=UUID, required=True, help="id da conta")
+    deletion.set_defaults(command=_request_deletion)
 
     list_users = commands.add_parser("list-users", help="lista as contas, das mais novas primeiro")
     list_users.add_argument(
@@ -245,6 +257,23 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
     if not found:
         return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe ou tem exclusão pedida")
     print(f"conta {args.user} liberada", file=sys.stderr)
+    return EXIT_OK
+
+
+def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
+    now = datetime.now(UTC)
+    try:
+        with unit_of_work(context.factory) as session:
+            request_account_deletion(session, args.user, now)
+            _audit(session, AuditEventType.ACCOUNT_DELETION_REQUESTED, args.user, now)
+    except UnknownAccountError:
+        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+    # Depois do commit, como em `DELETE /me`; se cair aqui, repetir o comando completa.
+    storage = FileStorage(context.settings.storage_root)
+    canceled = cancel_active_run(context.factory, storage, args.user)
+    print(f"exclusão da conta {args.user} pedida", file=sys.stderr)
+    if canceled is not None:
+        print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
     return EXIT_OK
 
 

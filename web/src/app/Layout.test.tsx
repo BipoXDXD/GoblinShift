@@ -127,8 +127,8 @@ describe("Layout: termos pendentes", () => {
         jsonResponse(
           meBody({
             terms: {
-              current_version: "v2-rascunho",
-              accepted_version: "v1-rascunho",
+              current_version: "v2",
+              accepted_version: "v1",
               accepted_at: "2026-10-14T12:00:00Z",
               acceptance_required: true,
             },
