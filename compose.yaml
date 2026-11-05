@@ -170,7 +170,7 @@ services:
     logging: *logging
 
   openobserve:
-    image: openobserve/openobserve:v1.0.4
+    image: openobserve/openobserve:v1.1.2@sha256:4a154849432f75c4fb024de32fe34163c02406c905dab22bf8d213d2e3386392
     environment:
       ZO_LOCAL_MODE: "true"
       ZO_DATA_DIR: /data

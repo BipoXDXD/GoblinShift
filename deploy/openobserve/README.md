@@ -230,6 +230,167 @@ sudo rm "$fs/drill-fill"
 
 Registre as duas notificações (horário e canal) no plano ao fechar a fatia.
 
+## Atualizar o OpenObserve
+
+O recurso "GoblinShift - Banco e observabilidade" do Coolify (`deploy/coolify/infra.json`) tem o Postgres, o Collector e o OpenObserve. A release da CI não o publica: o workflow e o receptor só trocam imagens do recurso da aplicação ([release/README.md](../coolify/release/README.md)). A imagem é fixada por digest e tem `pull_policy: never`, então ela precisa chegar à VPS antes da publicação.
+
+A publicação faz `docker compose up -d`, que recria só o serviço cuja definição mudou. No ensaio local, com o Compose derivado do `infra.json`, o Postgres e o Collector não reiniciaram. Os rótulos que o próprio Coolify acrescenta não entraram no ensaio, por isso o passo 4 anota o estado do Postgres e a conferência o compara.
+
+**Nunca use Stop nem Restart do recurso no painel:** eles agem sobre o recurso inteiro, inclusive o Postgres. Pare só o container do OpenObserve, como abaixo.
+
+### De v1.0.4 para v1.1.2
+
+Motivo: o crítico [GHSA-7w4v-2c9r-q94v](https://github.com/openobserve/openobserve/security/advisories/GHSA-7w4v-2c9r-q94v) (CVSS 9,8, senha externa vazia aceita no login) e os demais [advisories](https://github.com/openobserve/openobserve/security/advisories) corrigidos até a v1.1.1. A v1.1.2 é a última estável em 2026-11-05; a v1.2.0-rc1 ainda é candidata. Fontes: notas da [v1.1.0](https://github.com/openobserve/openobserve/releases/tag/v1.1.0), da [v1.1.1](https://github.com/openobserve/openobserve/releases/tag/v1.1.1) e da [v1.1.2](https://github.com/openobserve/openobserve/releases/tag/v1.1.2), PRs [#15054](https://github.com/openobserve/openobserve/pull/15054), [#15191](https://github.com/openobserve/openobserve/pull/15191) e [#15087](https://github.com/openobserve/openobserve/pull/15087), e o diff de `src/config/src/config.rs` e `src/config/src/meta/alerts/alert.rs` entre as tags.
+
+| Tema | O que muda | Efeito aqui |
+|---|---|---|
+| Metadados | 36 migrações novas no SQLite (`DB_SCHEMA_VERSION` de 77 para 97), quase todas tabelas e colunas de recursos novos | Aplicadas em menos de 1 s no ensaio. **Sem volta**, veja [Rollback](#rollback) |
+| API de alertas | `/api/v2/{org}/alerts` igual; a resposta ganha `keep_firing_for` (0), `notify_on_recovery` (`false`) e `recovery_destinations` (`[]`) | O cliente e o `provision` não mudaram. Os defaults mantêm o comportamento atual: sem aviso de recuperação |
+| Destinos e templates | Sem mudança de contrato. Destinos passam pelo cliente com proteção contra SSRF, com novas allowlists `ZO_SSRF_ALLOWED_CIDRS` e `ZO_SSRF_ALLOWED_HOSTS` | Nenhum, porque os destinos são URLs públicas HTTPS. Entrega recusada agora conta como falha no histórico do alerta (#15154) |
+| Autenticação | Senha vazia ou conta sem `password_ext` não entram mais com Basic, presigned ou `auth_ext` | Só contas externas. O root continua: o Collector seguiu gravando métricas depois da troca |
+| Variáveis | `ZO_METRICS_INDEX_ENABLED` e `ZO_FEATURE_WAL_PACK_ENABLED` saíram. Default de `ZO_EXT_AUTH_SALT` ficou vazio | Nenhuma das duas está no `infra.json`. Instalação existente mantém o salt legado e registra um aviso |
+| Consultas | Motor DataFusion 55.1; PromQL igual ao Prometheus | Os alertas usam SQL, e a suíte `-m openobserve` passou inteira sem mudança de código |
+| Imagem | 549 MB para 594 MB em arm64 | O `docker pull` da VPS leva mais alguns MB. A imagem da v1.0.4 não tem shell, então o backup roda no host |
+
+A partida da v1.1.2 registra dois avisos esperados: `ZO_EXT_AUTH_SALT is not set` e `ZO_INTERNAL_GRPC_TOKEN is not set`. Ficam como estão nesta troca: definir o salt numa instalação existente muda a derivação das credenciais externas e é uma decisão à parte.
+
+### Antes do merge
+
+Tudo na VPS. O UUID do recurso aparece na URL dele no painel.
+
+```bash
+NEW='openobserve/openobserve:v1.1.2@sha256:4a154849432f75c4fb024de32fe34163c02406c905dab22bf8d213d2e3386392'
+OLD='openobserve/openobserve:v1.0.4@sha256:d4a878fac1f6c56003764f7f2a1625668917388f167e222c8c810de3f54c56ba'
+UUID=<uuid do recurso "GoblinShift - Banco e observabilidade">
+TOKEN=$(sudo cat /etc/coolify-release/api-token)
+API=http://127.0.0.1:8000/api/v1/applications/$UUID
+```
+
+1. **Auto-deploy desligado.** Com ele ligado, o merge publica sem backup. Rode a leitura abaixo e confira `is_auto_deploy_enabled` em `settings`. Se estiver `true`, desligue antes do merge, com o mesmo `PATCH` do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md#antes-do-merge). Se não der para saber, não faça o merge. Anote `git_commit_sha`: é preciso no passo 6. A ordem importa: sem a imagem na VPS, uma publicação falha sem tocar no container atual (ensaiado com o Compose local), mas o passo 2 tira essa proteção.
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer $TOKEN" "$API" \
+     | jq '{git_branch, git_commit_sha, docker_compose_location, watch_paths, settings}'
+   ```
+
+2. **Imagem na VPS, e a antiga preservada.** Não rode `docker image prune` até encerrar a janela de rollback.
+
+   ```bash
+   sudo docker pull "$NEW"
+   sudo docker image inspect "$NEW" --format '{{.Os}}/{{.Architecture}}'   # linux/amd64
+   sudo docker image inspect "$OLD" --format '{{.Id}}'                     # precisa existir
+   ```
+
+3. **Espaço para o backup.** Ele fica fora do filesystem da telemetria, que tem 10 GiB fixos e é o que está sendo salvo.
+
+   ```bash
+   sudo du -sh /srv/goblinshift/telemetry/data
+   df -h /var/backups
+   ```
+
+### Publicação
+
+Depois do merge e com a release da CI terminada, porque os receptores não coordenam uma publicação manual concorrente ([ISOLATION.md](../coolify/release/ISOLATION.md)). Fora de horário de uso e sem Run em andamento: durante a troca os alertas ficam sem avaliação, e o Collector só segura o que chegar enquanto durarem as novas tentativas dele.
+
+4. **Anote o estado e renove o backup do banco.** Se o Coolify recriar o Postgres por causa de um rótulo, a aplicação cai por instantes, e é melhor ter um backup de agora.
+
+   ```bash
+   sudo docker inspect -f '{{.Name}} {{.State.StartedAt}}' \
+     goblinshift-postgres-1 goblinshift-otel-collector-1 | tee ~/o2-antes.txt
+   sudo systemctl start goblinshift-pg-backup.service
+   sudo journalctl -u goblinshift-pg-backup -n 5 --no-pager
+   ```
+
+5. **Pare só o OpenObserve e salve o volume.** Com ele de pé, o SQLite e o WAL dão uma cópia inconsistente. O `-S` é obrigatório: cada WAL é um arquivo esparso de 512 MiB, e sem ele a restauração ocupa 2,6 GiB onde o volume tinha 65 MiB (medido), num filesystem de 10 GiB. O arquivo tem as URLs dos destinos, que são segredo: fica só leitura do root, e sai da VPS só cifrado.
+
+   ```bash
+   sudo docker stop -t 60 goblinshift-openobserve-1
+   backup=/var/backups/goblinshift-telemetry-v1.0.4-$(date -u +%Y%m%dT%H%M%SZ).tar.gz
+   sudo sh -c "umask 077 && tar -C /srv/goblinshift/telemetry --numeric-owner -czSf '$backup' data"
+   sudo tar -tzf "$backup" | grep '^data/db/metadata.sqlite'      # o banco precisa aparecer
+   sudo sha256sum "$backup"
+   ```
+
+6. **Publique.** Se o `git_commit_sha` do passo 1 for um commit fixo e não `HEAD`, aponte antes para o commit de merge: `curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"git_commit_sha":"<commit de merge>"}' "$API"`.
+
+   ```bash
+   deployment=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$API/start" | jq -r .deployment_uuid)
+   while :; do
+     status=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+       "http://127.0.0.1:8000/api/v1/deployments/$deployment" | jq -r .status)
+     echo "$status"
+     case "$status" in queued|in_progress) sleep 5 ;; *) break ;; esac
+   done    # precisa terminar em finished
+   ```
+
+### Conferência
+
+```bash
+sudo docker inspect -f '{{.Config.Image}} {{.State.Status}} reinícios={{.RestartCount}}' goblinshift-openobserve-1
+sudo docker inspect -f '{{.Name}} {{.State.StartedAt}}' \
+  goblinshift-postgres-1 goblinshift-otel-collector-1 | diff - ~/o2-antes.txt && echo 'sem reinício'
+sudo docker logs goblinshift-openobserve-1 2>&1 | grep -E 'DB_SCHEMA|DB upgrade completed'
+sudo docker logs goblinshift-openobserve-1 2>&1 | grep -c 'has been applied'    # 36
+sudo docker logs --since 2m goblinshift-otel-collector-1 2>&1 | grep -c 'Exporting failed'   # 0, dois minutos depois da partida
+sudo docker stats --no-stream goblinshift-openobserve-1
+curl -fsS -o /dev/null -w '%{http_code}\n' https://goblinshift.dev/readyz    # 200
+```
+
+- **Imagem:** a nova, `running`, zero reinícios. Log com `DB upgrade completed to version 97`.
+- **16 alertas:** rode o `provision` (seção [Provisionar pelo túnel SSH](#provisionar-pelo-túnel-ssh)) e conte. O script é idempotente, então só confirma o que já existe: 16 linhas `alerta atualizado`, nenhuma `alerta criado`, nenhuma `alerta removido`, e sai com 0.
+
+  ```bash
+  cd deploy && uv run python -m openobserve provision --secrets-file ~/.config/goblinshift/alertas.env | tee /tmp/o2-provision.txt
+  grep -c '^alerta atualizado' /tmp/o2-provision.txt    # 16
+  grep -E '^alerta (criado|removido)' /tmp/o2-provision.txt    # nada
+  rm /tmp/o2-provision.txt
+  uv run python -m openobserve sli --secrets-file ~/.config/goblinshift/alertas.env
+  ```
+
+- **Heartbeat:** o check "alertas do OpenObserve" do healthchecks.io precisa receber um ping depois da publicação. O `gs-heartbeat` avalia na virada de cada hora; se a virada cair com o OpenObserve parado, ele pinga logo depois da partida. Sem ping até um minuto depois da próxima virada, a publicação não acabou: veja `sudo docker logs goblinshift-openobserve-1 2>&1 | grep -E 'SCHEDULER|ERROR' | tail`.
+- **Dados:** no OpenObserve, pelo túnel, um `SELECT count(*)` em `default` dos dias anteriores devolve linhas.
+
+Só com tudo isso certo a publicação acabou. Guarde o backup até a próxima semana sem incidente e apague: `sudo shred -u "$backup"`. Depois, religue o auto-deploy só se ele estava ligado antes do passo 1.
+
+### Rollback
+
+**Rollback exige restaurar o backup.** Trocar só a imagem não funciona: as 36 migrações não têm volta, e a v1.0.4 num volume migrado entra em laço de reinício, com `DB_SCHEMA_VERSION mismatch : expected 77, found 97` seguido de `Migration file of version '...' is missing`. Esse laço não estraga nada: subir a v1.1.2 de novo no mesmo volume funciona, com os dados intactos. Prefira isso a restaurar, se o problema não for da versão nova.
+
+Restaurar perde a telemetria e as mudanças de alerta posteriores ao backup, e devolve as vulnerabilidades da v1.0.4. É solução de horas, não destino.
+
+```bash
+sudo docker stop -t 60 goblinshift-openobserve-1
+cd /srv/goblinshift/telemetry
+sudo mv data "data.v1.1.2-$(date -u +%Y%m%dT%H%M%SZ)"    # para diagnóstico; apague se faltar espaço
+sudo sh -c "sha256sum '$backup' && tar -C /srv/goblinshift/telemetry --numeric-owner -xzpSf '$backup'"
+sudo ls -ld data data/db
+# Volte o recurso para o commit anterior ao merge, ou reverta o PR e use o commit do revert.
+curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"git_commit_sha":"<commit anterior ao merge>"}' "$API"
+deployment=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$API/start" | jq -r .deployment_uuid)
+```
+
+Espere o deployment como no passo 6 e confira como acima, com a imagem antiga: o log diz `DB_SCHEMA_VERSION match, skipping db upgrade`, e o `provision` mostra as mesmas 16 linhas. Depois reverta o PR na `main` para o repositório voltar a descrever a produção. A restauração precisa do `$OLD` na VPS (passo 2).
+
+### Ensaio local (2026-11-05)
+
+Compose derivado do `deploy/coolify/infra.json`, com os mesmos tetos de memória, CPU e processos, Postgres e Collector reais, em volumes nomeados no lugar dos binds, em arm64. A imagem amd64, a da VPS, repetiu a migração sob emulação. O que o ensaio não cobre: o Coolify, os rótulos que ele acrescenta, e o tamanho real do banco de produção.
+
+| Passo | Resultado |
+|---|---|
+| v1.0.4: `provision`, 23 mil spans (20 mil depois de uma reinicialização e 3 mil ainda no WAL) e notificações chegando | 16 alertas, 3 destinos, 1 template |
+| Trocar para a v1.1.2 no mesmo volume | Saudável em 3,3 s; 36 migrações em 0,13 s; WAL reaplicado; Postgres e Collector sem reinício |
+| Comparar antes e depois | 16 alertas iguais, só com os 3 campos novos; template e destinos iguais; os 23 mil spans, sem perda nem duplicata |
+| Agendador depois da troca | Alerta de teste a cada minuto seguiu notificando; `gs-heartbeat` notificou às 11:00:30 no horário local do ensaio; o Collector seguiu gravando métricas |
+| `provision` de novo na v1.1.2 | Tudo `atualizado`, nada criado ou removido; nada mudou |
+| Voltar para a v1.0.4 no mesmo volume | Falha: laço de reinício com 36 migrações desconhecidas |
+| v1.1.2 de novo depois dessa falha | Estado idêntico ao de antes da tentativa |
+| Restaurar o backup e subir a v1.0.4 | Estado idêntico ao anterior à troca; os 2 mil spans gravados depois do backup se perderam, como esperado |
+| Mesma migração na imagem amd64, sob emulação, a partir do mesmo backup | 36 migrações; 16 alertas e os 23 mil spans preservados, com os mesmos 3 campos novos |
+| Carga: cerca de 340 mil spans e consultas agregadas, sob o teto de 512 MiB | Pico de 420 MiB na v1.0.4 e 438 MiB na v1.1.2; até 31 e 27 processos (teto 128); sem OOM e sem consulta com erro |
+
+**Limite de ingestão, nas duas versões.** A memtable tem teto de 64 MiB e só gira pelo prazo de 600 s, conferido por um laço que também dorme 600 s. Uma rajada que enche o teto, cerca de 160 mil spans do ensaio em menos de um minuto, faz o OpenObserve responder 503 a tudo, métricas do Collector inclusive, por até 20 minutos: medido de 13:31 a 13:51 UTC na v1.1.2, e a v1.0.4 tem o mesmo código. Não é regressão, e o tráfego real fica longe disso, mas 503 repetido no log do Collector depois de um pico é isso, e passa sozinho.
+
 ## Testes
 
 ```bash

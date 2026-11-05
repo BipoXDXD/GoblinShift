@@ -1,8 +1,8 @@
 """Cliente mínimo da API HTTP do OpenObserve, só com a biblioteca padrão.
 
 Roda no notebook do operador (pelo túnel SSH) ou no Python do host da VPS, sem dependências. Só
-as operações que o provisionamento e o relatório usam, com os caminhos da v1.0.4 (a versão
-fixada no compose.yaml). Mensagens de erro trazem método, caminho, status e a mensagem do
+as operações que o provisionamento e o relatório usam, com os caminhos da versão
+fixada no compose.yaml. Mensagens de erro trazem método, caminho, status e a mensagem do
 OpenObserve, nunca a credencial.
 """
 

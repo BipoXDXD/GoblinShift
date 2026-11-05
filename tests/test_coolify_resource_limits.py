@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 COOLIFY_DIR = ROOT / "deploy" / "coolify"
@@ -44,6 +45,7 @@ PEAK_MEMORY_MIB = {
     "postgres": 64,
 }
 MIN_HEADROOM = 1.5
+OPENOBSERVE_PINNED_IMAGE = re.compile(r"openobserve/openobserve:v[\d.]+@sha256:[0-9a-f]{64}")
 OPENOBSERVE_MEMORY_SETTINGS = (
     "ZO_MEMORY_CACHE_MAX_SIZE",
     "ZO_MEMORY_CACHE_DATAFUSION_MAX_SIZE",
@@ -138,6 +140,15 @@ def test_o_openobserve_fixa_os_caches_em_memoria_abaixo_do_teto_do_container() -
 
 def test_o_openobserve_mantem_a_retencao_de_30_dias_da_janela_dos_slos() -> None:
     assert openobserve()["environment"]["ZO_COMPACT_DATA_RETENTION_DAYS"] == "30"
+
+
+def test_o_openobserve_tem_a_mesma_imagem_fixada_por_digest_no_compose_e_na_producao() -> None:
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+
+    image = openobserve()["image"]
+
+    assert OPENOBSERVE_PINNED_IMAGE.fullmatch(image)
+    assert compose["services"]["openobserve"]["image"] == image
 
 
 def placeholder_environment(path: Path) -> dict[str, str]:
