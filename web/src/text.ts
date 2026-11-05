@@ -880,7 +880,7 @@ export const TEXT = {
   terms: {
     acceptTitle: "Termos de uso",
     acceptLead: (version: string) =>
-      `Para continuar, leia e aceite a versão ${version} dos Termos de Uso e do Aviso de Privacidade.`,
+      `Para continuar, leia e aceite a versão ${version} dos Termos de Uso e do Aviso de Privacidade. Ao aceitar, você declara ter 18 anos ou mais.`,
     readTerms: "Ler os Termos de Uso",
     readPrivacy: "Ler o Aviso de Privacidade",
     accept: "Aceitar e continuar",
@@ -916,8 +916,5 @@ export const TEXT = {
   legal: {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",
-    draftTitle: "Rascunho",
-    draftBody:
-      "Este texto ainda não passou por revisão jurídica e pode mudar antes da abertura do serviço.",
   },
 } as const;

@@ -1,9 +1,8 @@
 # LIA J-24: telemetria e registros técnicos
 
-> **RASCUNHO para o advogado, não publicar.** Avaliação de legítimo interesse (LGPD, art. 7º,
-> IX, e art. 10) redigida a partir do que o sistema faz (código e plano técnico), não por
-> advogado(a). Fora do build da SPA, como a J-23. Quatro fases do guia orientativo da ANPD
-> (2024) e perguntas ao revisor no fim. Id do levantamento: J-24.
+> **Registro interno, não publicar.** Revisado em 2026-11-05, por decisão do dono do serviço. Avaliação de legítimo interesse (LGPD, art. 7º,
+> IX, e art. 10) redigida a partir do que o sistema faz (código e plano técnico). Fora do build da SPA, como a J-23. Quatro fases do guia orientativo da ANPD
+> (2024). Id do levantamento: J-24.
 
 ## 0. O tratamento avaliado
 
@@ -59,11 +58,15 @@
 - Oposição: pelo `privacidade@`, caso a caso; o `user.hash` não permite apagar só os eventos
   de uma conta sem o segredo, mas eles expiram sozinhos em 30 dias.
 
-## Perguntas ao revisor
+## 5. Conclusão
 
-1. O `user.hash` é dado pseudonimizado (art. 13, § 4º) e, por isso, ainda dado pessoal?
-   Proposta: tratar como dado pessoal e manter esta avaliação.
-2. Visitantes sem conta (requisições ao site e ao login) também precisam de menção no Aviso,
-   além do que o item 3.4 já diz?
-3. O prazo de logs "cerca de 14 dias, por tamanho" é aceitável como redação, ou o Aviso deve
-   trazer um teto fixo em dias?
+O legítimo interesse (inciso IX) é a base adequada, e o interesse prevalece. Pontos fixados na
+revisão:
+
+1. **`user.hash`.** É dado pseudonimizado e continua sendo dado pessoal (art. 5º, I, e art. 13,
+   § 4º); por isso esta avaliação se mantém.
+2. **Visitantes sem conta.** O item 3.4 do Aviso passou a citá-los.
+3. **Prazo dos logs.** A redação por tamanho fica, porque é a regra real; o Aviso avisa que uma
+   linha pode durar mais com pouco tráfego e que os logs somem a cada atualização.
+4. **Cloudflare.** A borda trata o IP completo antes de o serviço truncá-lo. Isso não muda esta
+   avaliação, que cobre o que o controlador guarda; a Cloudflare está no item 6 do Aviso.

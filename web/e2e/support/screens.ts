@@ -283,7 +283,9 @@ export const SCREENS: readonly Screen[] = [
     name: "Termos de Uso",
     open: async (page: Page): Promise<void> => {
       await page.goto("/termos");
-      await expect(page.getByRole("complementary", { name: "Rascunho" })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Termos de Uso do GoblinShift" }),
+      ).toBeVisible();
     },
   },
   {
@@ -304,7 +306,9 @@ export const SCREENS: readonly Screen[] = [
     name: "Aviso de Privacidade",
     open: async (page: Page): Promise<void> => {
       await page.goto("/privacidade");
-      await expect(page.getByRole("complementary", { name: "Rascunho" })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Aviso de Privacidade do GoblinShift" }),
+      ).toBeVisible();
     },
   },
   {

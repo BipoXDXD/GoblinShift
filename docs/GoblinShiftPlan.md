@@ -417,7 +417,7 @@ Reservar capacidade com atualização atômica no banco. Considerar arquivos rec
 | Containers e área de trabalho do executor      | Até a coleta ser persistida                       | Removidos pelo `executor-ctl`                     |
 | Telemetria (eventos amplos e traces)           | 30 dias                                           | Expiração no backend de telemetria                |
 | Logs da aplicação e dos containers             | ≥ 14 dias no volume previsto; teto de 50 MiB      | Rotação por tamanho, por serviço, no Compose      |
-| Backups do PostgreSQL                          | 30 dias                                           | Expiração no armazenamento externo ([3.8](#s3-8)) |
+| Backups do PostgreSQL                          | Até 31 dias (imutável por 30, apagado 1 dia depois) | Expiração no armazenamento externo ([3.8](#s3-8)) |
 
 Os jobs de expiração rodam no processo `maintenance`, em lotes, com índices parciais sobre as linhas ainda não expiradas.
 
@@ -428,7 +428,7 @@ A disponibilidade é independente do estado histórico: uma execução pode cont
 <a id="s1-8"></a>
 ### 1.8. Serviço aberto: contas, abuso e privacidade
 
-**Contas:** qualquer conta Google (OpenID Connect) ou GitHub (OAuth 2.0) cria um usuário no primeiro login, sem convite. A identidade é `(issuer, subject)`: no Google, `https://accounts.google.com` + `sub`; no GitHub, `https://github.com` + o `id` numérico de `GET /user`, nunca o `login`, que pode mudar. A mesma pessoa entrando por Google e por GitHub tem duas contas; não há vínculo automático por e-mail. Detalhes do fluxo em [3.6](#s3-6).
+**Contas:** com o cadastro aberto ([ADR 023](adr/023-cadastro-fechado-ate-a-abertura.md)), qualquer conta Google (OpenID Connect) ou GitHub (OAuth 2.0) cria um usuário no primeiro login, sem convite. A identidade é `(issuer, subject)`: no Google, `https://accounts.google.com` + `sub`; no GitHub, `https://github.com` + o `id` numérico de `GET /user`, nunca o `login`, que pode mudar. A mesma pessoa entrando por Google e por GitHub tem duas contas; não há vínculo automático por e-mail. Detalhes do fluxo em [3.6](#s3-6).
 
 **Estado da conta:** `active` ou `blocked`. Bloquear é uma operação de administrador, feita por CLI no servidor (sem painel web na v1): revoga sessões e chaves, cancela a execução não terminal e impede novos logins da mesma identidade.
 
@@ -446,7 +446,7 @@ A disponibilidade é independente do estado histórico: uma execução pode cont
 - *Exclusão:* `DELETE /me` revoga sessões e chaves, cancela a execução não terminal e remove uploads, artefatos, presets e histórico em até 24 horas. Cópias em backup expiram com o ciclo de backups ([3.8](#s3-8)), e o aviso de privacidade diz isso.
 - *Localização:* preferir o datacenter da Hostinger no Brasil; se outro for usado, o aviso de privacidade declara a transferência internacional.
 - Logs e métricas seguem a regra de 3.7: sem conteúdo, nomes de arquivo ou tokens. Eventos de segurança guardam IP truncado por 90 dias, por segurança do próprio serviço ([3.6](#s3-6)). A telemetria fica na própria VPS, sem envio a terceiros ([3.7](#s3-7)).
-- Os textos de termos e privacidade devem passar por revisão jurídica antes da abertura pública.
+- Os textos de termos e privacidade foram revisados em 2026-11-05, por decisão do dono do serviço, e estão na versão `v5` (`docs/legal/notas-internas.md`). Qualquer mudança relevante antes ou depois da abertura segue o versionamento do [ADR 029](adr/029-aceite-versionado-dos-termos.md).
 
 **Licenças:** o repositório é público e não contém segredos. O Media Mill usa um build do FFmpeg sem `--enable-gpl` e sem `--enable-nonfree` (LGPL), com os avisos de licença publicados junto com a imagem do executor. [D14](GoblinShiftReferencias.md#d-3).
 
@@ -1112,17 +1112,17 @@ Cada fatia funciona de ponta a ponta, vai para a VPS pelo pipeline e só então 
 - *Pendente na fatia 7:* a jornada **com escrita** (upload → execução → download) contra a VPS. O modo `E2E_VPS` só faz `GET` por desenho (um fixture reprova qualquer outro método, #79), e as jornadas com conta (Bancada com o catálogo, Histórico, Acesso) são puladas porque o secret `E2E_VPS_API_KEY` não existe no repositório nem no environment `production` (conferido com `gh secret list` em 2026-10-16). Falta decisão e credencial do usuário: uma conta de teste que já aceitou os termos e uma chave com escopo de escrita em produção. O aceite dos termos só sai por sessão, então também falta um caminho no `gs-admin` para aceitá-lo (registrado como fora do #37).
 
 **Fatia 8. Abertura pública.**
-- *Entra:* termos e aviso de privacidade revisados juridicamente, backup externo do PostgreSQL com restauração testada, eventos amplos, SLOs e alertas de [3.7](#s3-7) no OpenObserve, monitor de uptime externo, um teste de carga simples que confirma os limites por classe de rota, e um roteiro de resposta a abuso (como bloquear uma conta e o que verificar).
+- *Entra:* termos e aviso de privacidade revisados, backup externo do PostgreSQL com restauração testada, eventos amplos, SLOs e alertas de [3.7](#s3-7) no OpenObserve, monitor de uptime externo, um teste de carga simples que confirma os limites por classe de rota, e um roteiro de resposta a abuso (como bloquear uma conta e o que verificar).
 - *Pronto quando:* a primeira restauração de backup funcionou, os três SLOs aparecem calculados sobre tráfego real, um alerta de queima e um de causa dispararam num teste provocado, e o roteiro de abuso foi executado uma vez de ponta a ponta.
 - *Confirmado na fatia 8, em parte:*
   - **Backup e restauração** ([ADR 022](adr/022-backup-externo.md); PRs #16, #56, #61, #63): o workflow "Restauração testada do backup" restaurou na CI o dump mais recente do bucket do B2 (dump de 2026-10-16 00:57 UTC) num PostgreSQL efêmero e terminou com `restauração conferida: revisão 0009, dump de 0 h` (run 38834729030, 2026-10-16 01:22 UTC). Duas falhas vieram antes e foram corrigidas: o B2 com Object Lock recusava o `PUT` sem `Content-MD5` (#61) e o `dump_check.py` usava sintaxe do Python 3.14 num runner 3.12 (#63).
   - **Evento amplo, SLOs e alertas como código** (#16, 2026-10-14; alertas de causa no #81): o SQL dos SLIs, a queima em duas janelas, as causas e o heartbeat têm testes contra o OpenObserve real no job "SLOs e alertas (OpenObserve)" do CI.
   - **Limites e carga** (#26, #27 e #32, 2026-10-14): o limite por conta e classe de rota e o `limit_req` de `/auth/*` têm testes de integração e de Nginx real; o k6 contra o Compose local passou nos cenários de fila (10 aceitas e 2 `503 QUEUE_FULL`), transferências (`429` na terceira) e jornada (58/58 execuções, `POST /runs` p99,5 de 369 ms), com os limiares dos SLOs. A VPS ficou de fora de propósito, por ser compartilhada com o StillOn.
   - **Roteiro de abuso** (#44, 2026-10-15): `docs/runbooks/abuso.md`, `gs-admin find-user --user-hash` e um teste de ponta a ponta pela API e pelo login (`tests/api/auth/test_block_end_to_end.py`: depois do `gs-admin block`, sessão e chave dão 401, a execução vira `canceled`, o login é recusado e a auditoria registra `ACCOUNT_BLOCKED`).
+  - **Revisão dos termos e do aviso de privacidade:** revisados em 2026-11-05, por decisão do dono do serviço, versão `v5`. O que ainda depende do dono está em `docs/legal/notas-internas.md`, seção "Antes de abrir o cadastro".
   - **Aceite dos termos** (#33, [ADR 029](adr/029-aceite-versionado-dos-termos.md)), **aceitação agendada** com ping no healthchecks.io (#47, criada como diária e hoje semanal, aos domingos às 07:30 UTC) e **vigia do certificado TLS** (#57, executado todo dia pela CI).
 - *Pendente na fatia 8:* o serviço continua fechado ([ADR 023](adr/023-cadastro-fechado-ate-a-abertura.md)), e estes critérios ainda não foram cumpridos:
-  - **Revisão jurídica dos termos e do aviso de privacidade.** Os textos estão em `v3-rascunho` e marcados "não publicar sem revisão jurídica humana" (`docs/legal/notas-internas.md`). Depende do advogado que o usuário contratar.
-  - **Três SLOs sobre tráfego real.** Com o cadastro fechado (`GS_SIGNUP_MODE=closed`) não há tráfego de terceiros; abrir é decisão do usuário e vem depois da revisão jurídica.
+  - **Três SLOs sobre tráfego real.** Com o cadastro fechado (`GS_SIGNUP_MODE=closed`) não há tráfego de terceiros; abrir é decisão do usuário.
   - **Alertas de queima e de causa disparados num teste provocado na VPS.** Não há registro de que o provisionamento (`python -m openobserve provision`, por túnel SSH) tenha rodado nem de que o disparo tenha sido feito. Faltam o webhook do canal urgente (`GS_ALERT_URGENT_URL`), uma credencial do usuário, e o acesso SSH dele.
   - **Monitor de uptime externo de `/readyz`:** resolvido em 2026-11-05 com o Worker `goblinshift-uptime` da Cloudflare ([deploy/uptime](../deploy/uptime/README.md)), a cada 2 min, avisando direto no Discord, sem depender da VPS. O vigia do certificado TLS e os pings do healthchecks.io cobrem outros riscos.
   - **Cenários `limite-por-conta` e `limite-auth` do k6 contra a VPS.** Confirmados localmente no PR #102 (mesclado em 2026-10-16, com esses cenários ligados por padrão no `run-local.sh`), rodada de 2026-10-16 no commit `a6025be`: 190/190 requisições dentro do limite passaram e 3/3 acima dele foram recusadas com `429` e `Retry-After`; no login, 11/11 passaram e a 12ª recebeu `429` do Nginx. Contra a VPS segue pendente de decisão do usuário, porque a máquina é dividida com o StillOn.
