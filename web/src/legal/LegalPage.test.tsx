@@ -34,13 +34,11 @@ describe.each([
   ["/termos", "Termos de Uso do GoblinShift", terms],
   ["/privacidade", "Aviso de Privacidade do GoblinShift", privacy],
 ])("%s", (path, title, source) => {
-  it("o título do arquivo é o h1 da tela, com o aviso de rascunho logo abaixo", async () => {
+  it("o título do arquivo é o h1 da tela, sem aviso de rascunho", async () => {
     setup(path);
 
     await expectHeadingFocused(title);
-    expect(screen.getByRole("complementary", { name: "Rascunho" })).toHaveTextContent(
-      "Este texto ainda não passou por revisão jurídica",
-    );
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("cada seção ## do arquivo vira um h2", async () => {
@@ -63,7 +61,7 @@ describe.each([
     }
   });
 
-  it("a página não mostra material interno, mas mantém as marcações a definir", async () => {
+  it("a página não mostra material interno nem marcações a definir", async () => {
     setup(path);
     await expectHeadingFocused(title);
 
@@ -71,7 +69,7 @@ describe.each([
     for (const marker of INTERNAL_MARKERS) {
       expect(shown).not.toMatch(marker);
     }
-    expect(shown).toContain("[[A DEFINIR");
+    expect(shown).not.toContain("[[A DEFINIR");
   });
 
   it("não tem violações do axe", async () => {

@@ -1,0 +1,11 @@
+{
+  "name": "goblinshift-uptime",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-24",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": { "crons": ["*/2 * * * *"] },
+  "vars": { "TARGET_URL": "https://goblinshift.dev/readyz" },
+  "kv_namespaces": [{ "binding": "UPTIME_STATE", "id": "ef3cf3010cfe4342ac73ee70b4fe9074" }],
+  "observability": { "enabled": true }
+}
