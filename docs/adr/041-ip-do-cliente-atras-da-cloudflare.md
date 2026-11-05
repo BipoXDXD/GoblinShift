@@ -32,7 +32,7 @@ Alternativa B. Em `deploy/coolify/sites/goblinshift.dev.caddy`, o matcher `@clou
 - **`CF-Connecting-IP`, não `X-Forwarded-For`:** é um valor só, escrito pela Cloudflare. O `X-Forwarded-For` é uma cadeia que começa no que o cliente mandou.
 - **`vars_regexp` sobre o placeholder, não `header_regexp`:** o `header_regexp` aceita o pedido se qualquer linha do cabeçalho casar, e o valor repetido chegaria inteiro ao Nginx. O placeholder junta as linhas com vírgula, e a regex recusa esse valor.
 - **Regex estrita de endereço, não classe de caracteres:** `....` ou `deadbeef` passariam por uma classe, o Nginx não os entenderia e o `$remote_addr` viraria o gateway, juntando quem os enviasse num só balde do `limit_req`. Formas que a Cloudflare não envia, como `::ffff:192.0.2.1`, também são recusadas e caem no caso de quem conectou.
-- **`{remote_host}`, não `{client_ip}`:** `{client_ip}` obedece ao `trusted_proxies` global, e nele ainda está o IP aposentado, de onde um `X-Forwarded-For` forjado seria aceito.
+- **`{remote_host}`, não `{client_ip}`:** `{client_ip}` obedece ao `trusted_proxies` global, que na data desta decisão ainda tinha o IP aposentado, de onde um `X-Forwarded-For` forjado seria aceito.
 - **O `CF-Connecting-IP` para no gateway:** ele é removido do pedido ao Nginx, porque ali já não há como saber quem o escreveu.
 - **Lista em `deploy/coolify/sites/cloudflare-ips.conf`:** a extensão `.conf` fica fora do glob `*.caddy` do `Caddyfile`, e só o site do GoblinShift a importa. Como o diretório `sites/` é um bind de diretório, o arquivo novo não exige mudar o `gateway.json`.
 
@@ -127,7 +127,7 @@ Enquanto a lista estiver atrasada, uma faixa nova da Cloudflare cai no caso de q
 - `limit_req`, auditoria e antiabuso passam a contar por cliente real. Quem hoje divide uma borda com muitos clientes deixa de dividir a cota; clientes atrás do mesmo NAT continuam dividindo.
 - O `limit_req` conta por endereço. Em IPv6, um cliente com um /64 inteiro tem muitos endereços, então o limite é mais fraco que em IPv4. Já era assim para quem chegava direto; agora vale também para quem vem pela Cloudflare. Agrupar por prefixo fica para outra decisão.
 - **Risco aceito:** as faixas são da Cloudflare, não desta conta. Outro cliente da Cloudflare pode apontar uma zona dele para a origem, mas o `CF-Connecting-IP` continua escrito pela Cloudflare, então ele só informa o próprio IP. Fechar esse caminho exige Authenticated Origin Pulls, que fica fora deste ADR.
-- **Pendência fora do escopo:** o `trusted_proxies` global continua com o IP da VPS aposentada, e um `X-Forwarded-For` forjado vindo desse IP ainda vale para quem usa `{client_ip}`, como o `stillon.tech`. Removê-lo muda o `Caddyfile` compartilhado e precisa de decisão conjunta (ADR 014).
+- **Resolvido em 2026-11-05:** o `trusted_proxies` global tinha o IP da VPS aposentada, cancelada e sujeita a reatribuição, e um `X-Forwarded-For` forjado vindo dele valia para quem usa `{client_ip}`, como o `stillon.tech`. O dono autorizou a remoção: o servidor da 443 ficou sem proxy confiável, e o das demais portas, só com o Traefik. O `{remote_host}` do site do GoblinShift continua como está.
 - `deploy/edge/` é o caminho anterior ao Coolify e fica como está: não está no fluxo de produção descrito em [`deploy/coolify/README.md`](../../deploy/coolify/README.md).
 
 ## Compliance

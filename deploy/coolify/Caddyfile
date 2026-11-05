@@ -12,13 +12,10 @@
    }
    tls
   }
-  trusted_proxies static 179.197.70.102/32
-  trusted_proxies_strict
-  client_ip_headers X-Forwarded-For
  }
  servers {
   protocols h1 h2
-  trusted_proxies static 172.16.1.6/32 179.197.70.102/32
+  trusted_proxies static 172.16.1.6/32
   trusted_proxies_strict
   client_ip_headers X-Forwarded-For
  }
