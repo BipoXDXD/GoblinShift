@@ -1,6 +1,6 @@
 # ADR 036. Media Mill: FFmpeg mínimo compilado na imagem do executor, allowlist antes do FFmpeg e tetos de tempo por chamada
 
-- **Estado:** aceito na implementação do Media Mill (2026-10-15); pendente de revisão do usuário no PR e da medição do pior caso na VPS
+- **Estado:** aceito na implementação do Media Mill (2026-10-15); pior caso medido na VPS em 2026-11-05 (ver Consequências)
 - **Plano:** [1.5](../GoblinShiftPlan.md#s1-5), [1.6](../GoblinShiftPlan.md#s1-6), [1.7](../GoblinShiftPlan.md#s1-7), [2.3](../GoblinShiftPlan.md#s2-3), [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md), [ADR 005](005-area-do-executor-em-filesystem-fixo.md), [ADR 018](018-pillow-na-imagem-do-executor.md), [ADR 019](019-layout-de-out-pacote-e-papeis.md)
 
@@ -65,6 +65,7 @@ A imagem do executor era biblioteca padrão + Pillow (ADR 018). O FFmpeg do Debi
 - Atualizar o FFmpeg: mudar `FFMPEG_VERSION` e `FFMPEG_SHA256` (verificando a assinatura GPG), `FFMPEG_VERSION` em `tests/test_executor_image.py` e publicar uma imagem nova; Runs já aceitas seguem na imagem fixada nelas.
 - GOP muito longo vira recusa: com keyframe a cada 10 s (600 quadros a 60 fps), cada miniatura cabe no teto; um vídeo de 300 s com um keyframe só decodifica até 16.200 quadros para a miniatura de 90% e é recusado como `MEDIA_TOO_LARGE`. Referência local (Mac, Docker com `--cpus=1`, runc, build mínimo): cerca de 100 quadros 1080p60 por segundo.
 - Pior caso: 5 vídeos de 300 s em 1080p60 com keyframe a cada 10 s, FLAC e 3 miniaturas (`scripts/media-mill-worst-case.sh`, cerca de 77 MiB cada). Referência local: 95 s, os 5 vídeos aceitos e 20 saídas (Mac M-series, Docker com `--cpus=1 --memory=2g`, runc, sem gVisor, 2026-10-15). A medição que vale, sob gVisor e 1 vCPU, é feita na VPS antes do merge com `sudo python3 -B -m acceptance.media_mill_load <dir>`; se não couber nos 10 min, os tetos ou o `max_inputs` da v1 caem antes de a versão chegar à `main`, e o número medido é registrado aqui.
+- **Pior caso medido na VPS (2026-11-05):** a imagem publicada do executor do commit `4acbf15`, sob `runsc`, 1 vCPU, 2 GiB e sem rede, rodou os 5 vídeos de 300 s em 1080p60 (FLAC e 3 miniaturas) em **16 s**, contra o teto de 600 s: saída 0, 5 aceitos, 0 rejeitados e 20 saídas. Medido com `acceptance.media_mill_load` sem o build local, com a imagem publicada retagueada, porque ela é o que roda em produção. Os tetos e o `max_inputs` da v1 ficam como estão.
 
 ## Como verificar
 

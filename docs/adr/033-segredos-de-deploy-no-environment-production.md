@@ -40,3 +40,10 @@ environment existir, e nenhum dos dois é segredo.
   permissões, segredos lidos por `secrets.`).
 - Compliance: `gh api repos/BipoXDXD/GoblinShift/environments/production/deployment-branch-policies`
   lista só `main`, e `gh secret list` (repositório) não traz `VPS_SSH_KEY` nem `VPS_KNOWN_HOSTS`.
+
+## Atualização de 2026-11-05: `E2E_VPS_API_KEY`
+
+O secret `E2E_VPS_API_KEY` (chave de API da conta de teste `teste-e2e`, usada pelas jornadas contra a VPS) também fica só no environment `production`. A conta foi criada por `gs-admin create-user` e é do operador, isenta do aceite dos termos ([ADR 029](029-aceite-versionado-dos-termos.md)).
+
+- **Rotação:** a chave vale 90 dias, até **2027-02-03**. Antes dessa data, emitir uma chave nova para a mesma conta e regravar o secret no environment.
+- **Compliance:** `gh secret list --env production` lista `E2E_VPS_API_KEY`.
