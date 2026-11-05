@@ -127,6 +127,7 @@ markers = [
     "executor_ctl: executor-ctl com Docker real (runtime em GS_TEST_RUNTIME, padrão runc)",
     "nginx_image: constrói e sobe a imagem do Nginx com a SPA (docker/web.Dockerfile; precisa de Docker)",
     "nginx: Nginx real com os templates do repositório (precisa de Docker)",
+    "gateway: gateway Caddy real com a configuração de deploy/coolify (precisa de Docker)",
     "backup: backup e restauração do PostgreSQL contra S3 local (precisa de Docker, age e curl)",
     "openobserve: SLOs e alertas contra OpenObserve e Collector reais (precisa de Docker)",
     "host_installer: instaladores de deploy/ como root num container Debian (precisa de Docker)",
