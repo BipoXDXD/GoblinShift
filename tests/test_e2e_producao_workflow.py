@@ -201,6 +201,8 @@ def test_o_apt_nao_depende_do_espelho_do_azure_nem_consome_o_timeout_do_job() ->
     run = install["run"]
 
     assert run.index("azure.archive.ubuntu.com") < run.index("apt-get update")
+    assert "xargs -0 -r sudo sed -i" in run
+    assert "/archive.ubuntu.com/g" in run
     assert install["timeout-minutes"] == 10
 
 
