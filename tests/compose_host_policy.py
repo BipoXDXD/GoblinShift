@@ -4,10 +4,11 @@ Recebe a configuração já mesclada e interpolada (`docker compose config --for
 que daria a um container acesso ao host ou a outro projeto da VPS compartilhada (ADR 011): modo
 privilegiado, capabilities extras, namespaces do host ou de outro container, dispositivos,
 confinamento desligado e montagens fora de uma allowlist explícita. A lista vazia é o único
-resultado aceito, salvo os desvios do gateway fixados em `tests/test_compose_host_policy.py`.
+resultado aceito; os desvios do gateway, pendentes de decisão do dono (ADR 034), continuam sendo
+violações e só estão fixados em `tests/test_compose_host_policy.py`.
 
 Os JSON de `deploy/coolify/`, que são o que a produção executa, passam por essa mesma política e
-ainda precisam de imagem fixada por digest (`coolify_policy_violations`).
+ainda precisam de imagem fixada por digest, sem `build` (`coolify_policy_violations`).
 """
 
 import posixpath
@@ -65,14 +66,16 @@ def host_policy_violations(config: Mapping[str, Any], host: HostPaths) -> list[s
 
 def coolify_policy_violations(config: Mapping[str, Any], host: HostPaths) -> list[str]:
     """A política do host sobre os JSON de `deploy/coolify/`, com a imagem fixada por digest."""
-    return [*host_policy_violations(config, host), *unpinned_image_problems(config)]
+    return [*host_policy_violations(config, host), *image_source_problems(config)]
 
 
-def unpinned_image_problems(config: Mapping[str, Any]) -> Iterator[str]:
+def image_source_problems(config: Mapping[str, Any]) -> Iterator[str]:
     for name, service in (config.get("services") or {}).items():
         image = service.get("image")
         if image is None or PINNED_IMAGE.fullmatch(image) is None:
             yield f"{name}: image sem digest: {image or 'ausente'}"
+        if "build" in service:
+            yield f"{name}: build"
 
 
 def service_option_problems(service: Mapping[str, Any]) -> Iterator[str]:

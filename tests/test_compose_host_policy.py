@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -317,8 +318,8 @@ def test_todas_as_violacoes_sao_listadas() -> None:
 
 COOLIFY_DIR = ROOT / "deploy" / "coolify"
 DIGEST = "a" * 64
-# O que o gateway tem fora da política, sem exceção na própria política. A lista exata mantém o
-# resto da regra valendo para ele: um bind ou volume a mais reprova o teste.
+# O que o gateway tem fora da política, pendente de decisão do dono (ADR 034). Não é exceção: a
+# política segue reprovando. A lista exata e GATEWAY_MOUNTS impedem que os desvios cresçam ou mudem.
 GATEWAY_DEVIATIONS = (
     # Configuração do Caddy versionada, só para leitura, mas fora de <repositório>/docker.
     f"proxy: bind {ROOT}/deploy/coolify/Caddyfile",
@@ -327,6 +328,17 @@ GATEWAY_DEVIATIONS = (
     "volume caddy_config: external",
     "volume caddy_data: external",
 )
+# A mensagem da política não diz o alvo nem `read_only`, e não vê o nome real do volume.
+GATEWAY_MOUNTS = {
+    f"{ROOT}/deploy/coolify/Caddyfile": ("/etc/caddy/Caddyfile", True),
+    f"{ROOT}/deploy/coolify/sites": ("/etc/caddy/conf.d", True),
+    "caddy_config": ("/config", False),
+    "caddy_data": ("/data", False),
+}
+GATEWAY_VOLUME_NAMES = {"caddy_config": "edge_caddy_config", "caddy_data": "edge_caddy_data"}
+GATEWAY_SERVICE = "proxy"
+CADDYFILE = f"{ROOT}/deploy/coolify/Caddyfile"
+SITES = f"{ROOT}/deploy/coolify/sites"
 EXPECTED_DEVIATIONS: dict[str, tuple[str, ...]] = {
     "app.json": (),
     "infra.json": (),
@@ -341,6 +353,7 @@ SABOTAGES: list[tuple[dict[str, Any], str]] = [
     ({"pid": "host"}, "pid=host"),
     ({"image": "caddy:2"}, "image sem digest: caddy:2"),
     ({"image": "${GS_APP_IMAGE:-ghcr.io/x/y:latest}"}, "image sem digest: ghcr.io/x/y:latest"),
+    ({"build": "."}, "build"),
 ]
 SABOTAGED_MOUNTS: list[tuple[Any, str]] = [
     ("/var/run/docker.sock:/var/run/docker.sock", "bind /var/run/docker.sock"),
@@ -390,6 +403,143 @@ def sabotaged(document: dict[str, Any], service: str, changes: dict[str, Any]) -
 def with_mount(document: dict[str, Any], service: str, mount: Any) -> dict[str, Any]:
     current = document["services"][service].get("volumes", [])
     return sabotaged(document, service, {"volumes": [*current, mount]})
+
+
+def gateway_deviation_problems(config: dict[str, Any]) -> list[str]:
+    problems = [
+        problem
+        for name, service in config["services"].items()
+        for mount in service.get("volumes", [])
+        for problem in gateway_mount_problems(name, mount)
+    ]
+    for volume, expected in GATEWAY_VOLUME_NAMES.items():
+        name = config["volumes"][volume]["name"]
+        if name != expected:
+            problems.append(f"volume {volume}: name {name}")
+    return problems
+
+
+def gateway_mount_problems(service: str, mount: dict[str, Any]) -> Iterator[str]:
+    source = mount.get("source", "")
+    if source not in GATEWAY_MOUNTS:
+        return
+    if service != GATEWAY_SERVICE:
+        yield f"{service}: monta {source}"
+        return
+    target, read_only = GATEWAY_MOUNTS[source]
+    if mount["target"] != target:
+        yield f"{service}: {source} em {mount['target']}"
+    if bool(mount.get("read_only")) != read_only:
+        yield f"{service}: {source} com read_only={not read_only}"
+
+
+def gateway_mount(document: dict[str, Any], index: int) -> dict[str, Any]:
+    mount: dict[str, Any] = document["services"][GATEWAY_SERVICE]["volumes"][index]
+    return mount
+
+
+def bind_without_read_only(document: dict[str, Any], index: int) -> None:
+    del gateway_mount(document, index)["read_only"]
+
+
+def bind_with_target(document: dict[str, Any], index: int, target: str) -> None:
+    gateway_mount(document, index)["target"] = target
+
+
+def service_mounting(document: dict[str, Any], mount: str) -> None:
+    document["services"]["outro"] = {"image": f"caddy@sha256:{DIGEST}", "volumes": [mount]}
+
+
+def proxy_with_volumes(document: dict[str, Any], *mounts: str) -> None:
+    document["services"][GATEWAY_SERVICE]["volumes"][2:] = list(mounts)
+
+
+def renamed_volume(document: dict[str, Any], volume: str, name: str) -> None:
+    document["volumes"][volume]["name"] = name
+
+
+GatewayMutation = Callable[[dict[str, Any]], None]
+GATEWAY_MUTATIONS: list[tuple[str, GatewayMutation, str]] = [
+    (
+        "Caddyfile_gravavel",
+        lambda document: bind_without_read_only(document, 0),
+        f"proxy: {CADDYFILE} com read_only=False",
+    ),
+    (
+        "sites_gravavel",
+        lambda document: bind_without_read_only(document, 1),
+        f"proxy: {SITES} com read_only=False",
+    ),
+    (
+        "Caddyfile_em_outro_alvo",
+        lambda document: bind_with_target(document, 0, "/etc/passwd"),
+        f"proxy: {CADDYFILE} em /etc/passwd",
+    ),
+    (
+        "sites_em_outro_alvo",
+        lambda document: bind_with_target(document, 1, "/srv"),
+        f"proxy: {SITES} em /srv",
+    ),
+    (
+        "caddy_data_em_outro_alvo",
+        lambda document: proxy_with_volumes(document, "caddy_data:/outro", "caddy_config:/config"),
+        "proxy: caddy_data em /outro",
+    ),
+    (
+        "caddy_config_so_leitura",
+        lambda document: proxy_with_volumes(
+            document, "caddy_data:/data", "caddy_config:/config:ro"
+        ),
+        "proxy: caddy_config com read_only=True",
+    ),
+    (
+        "caddy_data_de_outro_projeto",
+        lambda document: renamed_volume(document, "caddy_data", "coolify-db"),
+        "volume caddy_data: name coolify-db",
+    ),
+    (
+        "caddy_config_de_outro_projeto",
+        lambda document: renamed_volume(document, "caddy_config", "coolify-db"),
+        "volume caddy_config: name coolify-db",
+    ),
+    (
+        "caddy_data_em_outro_servico",
+        lambda document: service_mounting(document, "caddy_data:/data"),
+        "outro: monta caddy_data",
+    ),
+    (
+        "caddy_config_em_outro_servico",
+        lambda document: service_mounting(document, "caddy_config:/config"),
+        "outro: monta caddy_config",
+    ),
+    (
+        "Caddyfile_em_outro_servico",
+        lambda document: service_mounting(
+            document, "./deploy/coolify/Caddyfile:/etc/caddy/Caddyfile:ro"
+        ),
+        f"outro: monta {CADDYFILE}",
+    ),
+]
+
+
+def test_os_desvios_do_gateway_mantem_a_forma_registrada() -> None:
+    config = rendered(coolify_document("gateway.json"))
+
+    assert gateway_deviation_problems(config) == []
+
+
+@pytest.mark.parametrize(
+    ("mutate", "problem"),
+    [(mutate, problem) for _, mutate, problem in GATEWAY_MUTATIONS],
+    ids=[case for case, _, _ in GATEWAY_MUTATIONS],
+)
+def test_mudanca_na_forma_dos_desvios_do_gateway_e_reprovada(
+    mutate: GatewayMutation, problem: str
+) -> None:
+    document = coolify_document("gateway.json")
+    mutate(document)
+
+    assert gateway_deviation_problems(rendered(document)) == [problem]
 
 
 def test_todo_json_do_coolify_passa_pela_politica() -> None:
@@ -485,10 +635,19 @@ def test_imagem_sem_digest_valido_e_reprovada(image: str) -> None:
 
 
 def test_servico_sem_imagem_e_reprovado() -> None:
-    config = {"services": {"app": {"build": "."}}}
+    config = {"services": {"app": {"command": "x"}}}
 
     assert coolify_policy_violations(config, HOST) == ["app: image sem digest: ausente"]
 
 
-def test_a_regra_de_digest_nao_alcanca_o_compose_da_vps() -> None:
-    assert host_policy_violations(config_with({"image": "caddy:2"}), HOST) == []
+def test_build_com_imagem_fixada_e_reprovado() -> None:
+    # A imagem local construída na VPS tomaria o lugar da que o digest fixou.
+    config = config_with({"image": f"caddy@sha256:{DIGEST}", "build": {"context": "."}})
+
+    assert coolify_policy_violations(config, HOST) == ["app: build"]
+
+
+def test_as_regras_de_imagem_nao_alcancam_o_compose_da_vps() -> None:
+    config = config_with({"image": "caddy:2", "build": {"context": "."}})
+
+    assert host_policy_violations(config, HOST) == []
