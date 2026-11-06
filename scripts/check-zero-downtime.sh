@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Prova local de que deploy/rollout-api.sh troca a API sem queda (docs/GoblinShiftPlan.md, 3.8).
+# Prova local de que deploy/rollout-api.sh troca a API sem resposta fora de 200. Vale só para a
+# pilha local: a publicação pelo Coolify não usa esse script (deploy/coolify/README.md).
 #
 # Pré-requisito: a pilha local de pé (docker compose up --build -d). Dispara requisições
 # contínuas a /readyz pelo Nginx durante o rollout e sai com 1 se alguma não for 200.
