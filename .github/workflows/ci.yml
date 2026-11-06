@@ -155,12 +155,13 @@ jobs:
 
   e2e:
     name: Interface no navegador (Playwright)
-    # Em paralelo com web. As duas suítes levaram quase 9 min nos runners;
-    # o limite inclui preparo, capturas e finalização, sem reduzir testes.
+    # Em paralelo com web. As duas suítes levaram quase 9 min nos runners, e o
+    # limite de 12 min já estourou em runner lento, cancelando o CI. O limite
+    # inclui preparo, capturas e finalização, sem reduzir testes.
     # A API é falsa e o build usa os cabeçalhos de produção do Nginx
     # (web/e2e/server/serve-dist.ts).
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
