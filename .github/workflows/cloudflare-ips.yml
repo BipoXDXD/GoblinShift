@@ -1,0 +1,96 @@
+name: Faixas da Cloudflare
+
+# Todo dia compara as listas oficiais com docker/gateway/sites/cloudflare-ips.conf, pelas mesmas
+# validações de scripts/cloudflare_ips.py, e abre uma issue se divergirem. Não grava nada: a lista
+# é decisão de confiança, revisada e aplicada à mão (ADR 041, "Atualizar a lista"). Resposta
+# inválida da fonte falha o job em vez de virar issue. Em PR, só confere que a comparação roda.
+on:
+  schedule:
+    - cron: "41 8 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/cloudflare-ips.yml
+      - docker/gateway/sites/cloudflare-ips.conf
+      - scripts/cloudflare_ips.py
+
+permissions: {}
+
+concurrency:
+  group: cloudflare-ips-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    name: Comparar as faixas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.compare.outputs.report }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version-file: .python-version
+      - name: Comparar com as listas oficiais
+        id: compare
+        # O script só usa a biblioteca padrão.
+        run: |
+          report="$RUNNER_TEMP/faixas.md"
+          python -m scripts.cloudflare_ips --drift-report "$report"
+          if [[ -f "$report" ]]; then
+            cat "$report"
+            {
+              echo 'report<<FIM_DO_RELATORIO'
+              cat "$report"
+              echo 'FIM_DO_RELATORIO'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "Sem divergência."
+          fi
+
+  report:
+    name: Avisar por issue
+    needs: compare
+    if: github.event_name != 'pull_request' && needs.compare.outputs.report != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # abre a issue de divergência
+    steps:
+      - name: Abrir a issue ou comentar nela se a divergência mudou
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # O repositório é público: só conta o que o próprio workflow escreveu, senão uma issue
+          # ou um comentário de terceiros com o mesmo texto calaria o aviso.
+          BOT_LOGIN: github-actions[bot]
+          ISSUE_TITLE: Faixas da Cloudflare divergem de cloudflare-ips.conf
+          REPORT: ${{ needs.compare.outputs.report }}
+        run: |
+          report=$(printf '%s' "$REPORT")
+          issues="repos/$GITHUB_REPOSITORY/issues"
+          issue=$(gh api --paginate --method GET "$issues" \
+            -f state=open -f "creator=$BOT_LOGIN" -f per_page=100 |
+            jq -cs --arg title "$ISSUE_TITLE" --arg bot "$BOT_LOGIN" \
+              '[add[]? | select(.title == $title and .user.login == $bot
+                and (has("pull_request") | not))][0] // empty')
+          if [[ -z "$issue" ]]; then
+            printf '%s\n' "$report" |
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file -
+            exit 0
+          fi
+          number=$(jq -r .number <<< "$issue")
+          latest=$(gh api --paginate "$issues/$number/comments?per_page=100" |
+            jq -rs --arg bot "$BOT_LOGIN" \
+              '[add[]? | select(.user.login == $bot) | .body] | last // empty')
+          [[ -n "$latest" ]] || latest=$(jq -r .body <<< "$issue")
+          if [[ "$latest" == "$report" ]]; then
+            echo "A issue aberta já traz este relatório."
+            exit 0
+          fi
+          printf '%s\n' "$report" |
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file -
