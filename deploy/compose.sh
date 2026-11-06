@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Docker Compose da cópia parada em /srv/goblinshift/app (docs/GoblinShiftPlan.md, 3.8), anterior
-# à publicação pelo Coolify, que lê deploy/coolify/app.json e não usa este script.
+# Docker Compose da cópia antiga da VPS (docs/GoblinShiftPlan.md, 3.8), anterior à publicação pelo
+# Coolify, que lê deploy/coolify/app.json e não usa este script.
 # Junta os arquivos do Compose, os segredos (secrets/app.env), a versão implantada
 # (secrets/release.env, gravado pelo deploy/release-env.sh) e os diretórios de dados do host. Sem
 # a versão implantada, o compose.prod.yaml recusa o arquivo (GS_EXECUTOR_IMAGE) e o compose.yaml
@@ -9,7 +9,7 @@
 # Os caminhos saem da posição do script: ele vive em <raiz>/app/deploy, com <raiz> =
 # /srv/goblinshift. Roda como o usuário `goblinshift` (ou root), que lê secrets/.
 #
-# PERIGO: a produção é publicada pelo Coolify, e /srv/goblinshift/app é uma cópia parada com um
+# PERIGO: a produção é publicada pelo Coolify, e a cópia antiga da VPS tem um
 # secrets/release.env congelado. Por ali, `up`, `run`, `pull` e `down` recriam os serviços, com o
 # PostgreSQL entre eles, usando imagens antigas. Na VPS use `docker exec` e `docker logs` nos
 # containers `goblinshift-*` (README, "Comandos manuais na VPS").

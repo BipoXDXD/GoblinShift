@@ -92,8 +92,8 @@ services:
         ipv4_address: 172.31.0.4
 
 # Arquivos em /srv/goblinshift/secrets (diretório 700), modo 644 como o db_password: a API lê com
-# o próprio UID. Os client secrets são gravados pelo operador. As chaves do servidor já existem no
-# host: a publicação pelo Coolify não as gera, e o deploy/app-secrets.sh só é chamado pelo
+# o próprio UID. Os client secrets são gravados pelo operador. As chaves do servidor também são do
+# operador: a publicação pelo Coolify não as cria, e o deploy/app-secrets.sh só é chamado pelo
 # deploy/release.sh, morto (README, "Segredos do login").
 secrets:
   google_client_secret:

@@ -7,8 +7,8 @@ SIGTERM e SIGINT param o laço de forma segura: o worker deixa de reivindicar e 
 tentativa em andamento antes de sair. O prazo de parada do deploy (`stop_grace_period`, 30 s) é
 menor que o teto de uma tentativa (10 min), então uma tentativa longa não termina a tempo: a
 plataforma mata o processo (SIGKILL) e quem recupera é o lease vencido: a manutenção encontra
-o executor pelo nome, confirma o término e reagenda. O trabalho recomeça do zero, e a Run só
-falha se esgotar as tentativas.
+o executor pelo nome, confirma o término e reagenda. O trabalho recomeça do zero, e a Run pode
+falhar se esgotar as tentativas ou o prazo.
 
 Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
 o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
