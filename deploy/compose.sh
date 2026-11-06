@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Docker Compose da produção (docs/GoblinShiftPlan.md, 3.8), o mesmo para o deploy e o operador.
+# Docker Compose da cópia parada em /srv/goblinshift/app (docs/GoblinShiftPlan.md, 3.8), anterior
+# à publicação pelo Coolify, que lê deploy/coolify/app.json e não usa este script.
 # Junta os arquivos do Compose, os segredos (secrets/app.env), a versão implantada
 # (secrets/release.env, gravado pelo deploy/release-env.sh) e os diretórios de dados do host. Sem
 # a versão implantada, o compose.prod.yaml recusa o arquivo (GS_EXECUTOR_IMAGE) e o compose.yaml

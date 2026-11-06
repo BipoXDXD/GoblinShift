@@ -9,7 +9,7 @@
 # segundos; o expand/contract das migrações já conta com isso.
 #
 # Uso: deploy/rollout-api.sh <comando compose…>
-#   ex.: deploy/rollout-api.sh docker compose -f compose.yaml -f compose.prod.yaml
+#   ex.: deploy/rollout-api.sh docker compose
 set -euo pipefail
 
 (($# > 0)) || { echo "uso: rollout-api.sh <comando compose…>" >&2; exit 64; }

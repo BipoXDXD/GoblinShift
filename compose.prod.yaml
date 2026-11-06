@@ -33,9 +33,9 @@ services:
       GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
       # Login web (fatia 6, 3.6), só na API. Sem uma destas, o Compose recusa o arquivo antes de
       # qualquer comando, e o deploy para antes do `migrate`, sem mexer no banco.
-      GS_PUBLIC_ORIGIN: ${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}
-      GS_GOOGLE_CLIENT_ID: ${GS_GOOGLE_CLIENT_ID:?defina em secrets/app.env (console do Google)}
-      GS_GITHUB_CLIENT_ID: ${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}
+      GS_PUBLIC_ORIGIN: ${GS_PUBLIC_ORIGIN:?variável do recurso no Coolify (https://goblinshift.dev)}
+      GS_GOOGLE_CLIENT_ID: ${GS_GOOGLE_CLIENT_ID:?variável do recurso no Coolify (console do Google)}
+      GS_GITHUB_CLIENT_ID: ${GS_GITHUB_CLIENT_ID:?variável do recurso no Coolify (OAuth App do GitHub)}
       # Fechado até a abertura pública (ADR 023).
       GS_SIGNUP_MODE: ${GS_SIGNUP_MODE:-closed}
       GS_GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
@@ -92,17 +92,18 @@ services:
         ipv4_address: 172.31.0.4
 
 # Arquivos em /srv/goblinshift/secrets (diretório 700), modo 644 como o db_password: a API lê com
-# o próprio UID. Os client secrets são gravados pelo operador; as chaves do servidor, geradas pelo
-# deploy/app-secrets.sh (README, "Segredos do login").
+# o próprio UID. Os client secrets são gravados pelo operador. As chaves do servidor já existem no
+# host: a publicação pelo Coolify não as gera, e o deploy/app-secrets.sh só é chamado pelo
+# deploy/release.sh, morto (README, "Segredos do login").
 secrets:
   google_client_secret:
-    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/google_client_secret
+    file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/google_client_secret
   github_client_secret:
-    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/github_client_secret
+    file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/github_client_secret
   csrf_secret:
-    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/csrf_secret
+    file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/csrf_secret
   login_cookie_secret:
-    file: ${GS_SECRETS_DIR:?exportado pelo deploy/compose.sh}/login_cookie_secret
+    file: ${GS_SECRETS_DIR:?diretório dos segredos no host}/login_cookie_secret
 
 networks:
   edge:
