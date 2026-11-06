@@ -48,7 +48,7 @@ def links_to_acceptance(traceparent: str | None) -> list[Link]:
 
 def read_executor_timings(path: Path) -> dict[str, int]:
     """Tempos das fases do executor, em ms; vazio se o arquivo falta ou foge do schema."""
-    data = _read_regular_file(path, TIMINGS_MAX_BYTES)
+    data = read_regular_file(path, TIMINGS_MAX_BYTES)
     if data is None:
         return {}
     try:
@@ -73,14 +73,17 @@ def _is_duration(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX_PHASE_MS
 
 
-def _read_regular_file(path: Path, max_bytes: int) -> bytes | None:
+def read_regular_file(path: Path, max_bytes: int) -> bytes | None:
+    """Conteúdo do arquivo regular; `None` se falta, não é regular ou passa de `max_bytes`."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        # Antes do `fdopen`, que recusa diretório sem fechar o descritor recebido.
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            return None
+        with os.fdopen(fd, "rb") as source:
+            data = source.read(max_bytes + 1)
     except OSError:
         # Ausente, symlink (ELOOP) ou ilegível.
         return None
-    with os.fdopen(fd, "rb") as source:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        data = source.read(max_bytes + 1)
     return data if len(data) <= max_bytes else None

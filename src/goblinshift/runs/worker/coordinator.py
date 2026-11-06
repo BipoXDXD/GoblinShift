@@ -96,6 +96,7 @@ from goblinshift.runs.worker.collection import (
     collect_outputs,
 )
 from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.strict_json import parse_strict_json
 
 logger = logging.getLogger(__name__)
 
@@ -697,16 +698,22 @@ class Coordinator:
 
     def _failure_code(self, claimed: ClaimedAttempt) -> ErrorCode | None:
         """Código de `failure.json`; fora do catálogo de falhas determinísticas → `None`."""
-        path = self._runner.work_dir(claimed.attempt_id) / "failure.json"
-        try:
-            with path.open("rb") as source:
-                document = json.loads(source.read(FAILURE_MAX_BYTES))
-        except OSError, ValueError:
-            return None
-        code = document.get("code") if isinstance(document, dict) else None
-        if code not in {c.value for c in DETERMINISTIC_CODES}:
-            return None
-        return ErrorCode(code)
+        return read_failure_code(self._runner.work_dir(claimed.attempt_id) / "failure.json")
+
+
+def read_failure_code(path: Path) -> ErrorCode | None:
+    """Código de `failure.json`; fora do catálogo de falhas determinísticas → `None`."""
+    data = attempt_event.read_regular_file(path, FAILURE_MAX_BYTES)
+    if data is None:
+        return None
+    try:
+        document = parse_strict_json(data)
+    except ValueError:
+        return None
+    code = document.get("code") if isinstance(document, dict) else None
+    if not isinstance(code, str) or code not in {c.value for c in DETERMINISTIC_CODES}:
+        return None
+    return ErrorCode(code)
 
 
 def _create_for_executor(path: Path) -> BinaryIO:

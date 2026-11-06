@@ -123,6 +123,13 @@ def test_fifo_nao_trava_a_leitura(tmp_path: Path) -> None:
     assert read_executor_timings(path) == {}
 
 
+def test_diretorio_nao_tem_tempos(tmp_path: Path) -> None:
+    path = tmp_path / "telemetry.json"
+    path.mkdir()
+
+    assert read_executor_timings(path) == {}
+
+
 # --- link para o trace da aceitação ---------------------------------------------------------------
 
 
