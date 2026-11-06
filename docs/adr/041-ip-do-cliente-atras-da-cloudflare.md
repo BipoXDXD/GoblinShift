@@ -42,7 +42,7 @@ O Nginx, o uvicorn e a auditoria não mudam: continuam confiando só no IP fixo 
 
 O `stillon.tech` tinha o mesmo defeito: com `X-Forwarded-For {client_ip}`, o StillOn recebia a borda da Cloudflare e contava por borda. Em 2026-11-06, `docker/gateway/sites/stillon.tech.caddy` passou a aplicar a regra acima com o mesmo bloco, e só o domínio e o destino (`172.31.0.3:80`) diferem. `lb_try_duration`, `lb_try_interval` e o redirect de `www` continuam.
 
-O arquivo é o mesmo que o StillOn prova na cadeia completa dele, em `deploy/ci/checar-borda-cloudflare.sh`. Nenhuma automação compara os dois repositórios: uma mudança neste site precisa ser levada à cópia de lá.
+Fora as linhas `tls` do [ADR 043](043-confianca-no-gateway.md), o arquivo é o mesmo que o StillOn prova na cadeia completa dele, em `deploy/ci/checar-borda-cloudflare.sh`. Nenhuma automação compara os dois repositórios: uma mudança neste site precisa ser levada à cópia de lá.
 
 ## Publicação
 
@@ -182,7 +182,7 @@ Se o bloco parar antes do `reload`, a produção não mudou; remova o `CLONE` im
 
 ## Atualizar a lista
 
-A Cloudflare publica as faixas em <https://www.cloudflare.com/ips-v4> e <https://www.cloudflare.com/ips-v6>. Para atualizar:
+A Cloudflare publica as faixas em <https://www.cloudflare.com/ips-v4> e <https://www.cloudflare.com/ips-v6>. O workflow `cloudflare-ips` as compara com a lista todo dia, com as mesmas validações do script, e abre uma issue se divergirem. Para atualizar:
 
 1. `uv run python -m scripts.cloudflare_ips` regrava `cloudflare-ips.conf`. O script recusa lista vazia, família errada, faixa não pública ou mais larga que /8 (IPv4) ou /16 (IPv6), e nesse caso não grava nada.
 2. Revisar o diff e abrir PR: a lista é decisão de confiança, por isso não se atualiza sozinha.

@@ -3,7 +3,9 @@
 Sobe a imagem do `gateway.json` com a configuração versionada. A origem de cada conexão vem do
 PROXY protocol v2, como o Traefik faz em produção: é ela, e não o que o cliente escreve nos
 cabeçalhos, que decide se o `CF-Connecting-IP` vale. A cópia da configuração só troca o que depende
-do ambiente (emissor do certificado, IP do Traefik, destinos); as regras de IP são as do repo.
+do ambiente (emissor e certificado, IP do Traefik, destinos); as regras de IP são as do repo. O
+certificado de origem (ADR 043) tem o próprio gateway, com os sites intactos e certificados
+descartáveis.
 """
 
 import json
@@ -76,6 +78,9 @@ ECHO_CADDYFILE = """\
 }
 """
 TEST_ISSUER = " local_certs\n skip_install_trust\n"
+ORIGIN_CERT_DIR = "/data/origin-ca"
+ORIGIN_CERT_LINE = re.compile(rf"^ *tls {ORIGIN_CERT_DIR}/.*\n", re.MULTILINE)
+CERT_DAYS = "1"
 
 
 def _docker(*args: str) -> str:
@@ -100,6 +105,10 @@ def _replace_once(text: str, old: str, new: str) -> str:
     return text.replace(old, new)
 
 
+def _without_origin_certificate(site: str) -> str:
+    return ORIGIN_CERT_LINE.sub("", site)
+
+
 def _copy_gateway_config(target: Path, subnet: str) -> None:
     """Copia a configuração versionada, adaptada só no que depende do ambiente de teste."""
     sites = target / "conf.d"
@@ -112,7 +121,7 @@ def _copy_gateway_config(target: Path, subnet: str) -> None:
     (target / "Caddyfile").write_text(caddyfile)
     for site in SITES.iterdir():
         text = re.sub(r"172\.31\.0\.[34]:80", "eco:80", site.read_text())
-        (sites / site.name).write_text(text)
+        (sites / site.name).write_text(_without_origin_certificate(text))
 
 
 def _proxy_header(source: str) -> bytes:
@@ -255,7 +264,9 @@ def test_site_do_stillon_mantem_destino_tentativas_e_redirect() -> None:
     assert "reverse_proxy 172.31.0.3:80 {\n" in site
     assert "lb_try_duration 5s\n" in site
     assert "lb_try_interval 250ms\n" in site
-    assert site.endswith("www.stillon.tech {\n redir https://stillon.tech{uri} 308\n}\n")
+    assert _without_origin_certificate(site).endswith(
+        "www.stillon.tech {\n redir https://stillon.tech{uri} 308\n}\n"
+    )
 
 
 def test_a_vps_aposentada_nao_e_mais_proxy_confiavel() -> None:
@@ -263,6 +274,22 @@ def test_a_vps_aposentada_nao_e_mais_proxy_confiavel() -> None:
 
     assert RETIRED_VPS not in caddyfile
     assert "trusted_proxies static 172.16.1.6/32\n" in caddyfile
+
+
+@pytest.mark.parametrize("host", SITES_BEHIND_CLOUDFLARE)
+def test_dominio_e_www_usam_o_certificado_de_origem_da_zona(host: str) -> None:
+    site = (SITES / f"{host}.caddy").read_text()
+    directive = f" tls {ORIGIN_CERT_DIR}/{host}.pem {ORIGIN_CERT_DIR}/{host}.key\n"
+
+    assert site.startswith(f"{host} {{\n{directive}")
+    assert f"\nwww.{host} {{\n{directive}" in site
+    assert site.count(directive) == 2
+    assert len(ORIGIN_CERT_LINE.findall(site)) == 2
+
+
+def test_certificado_de_origem_nao_muda_o_recurso_do_gateway() -> None:
+    assert ORIGIN_CERT_DIR not in (COOLIFY / "gateway.json").read_text()
+    assert ORIGIN_CERT_DIR not in (GATEWAY / "Caddyfile").read_text()
 
 
 def _address_pattern() -> re.Pattern[str]:
@@ -303,6 +330,133 @@ def test_regex_recusa_o_que_nao_e_endereco(value: str) -> None:
 # --- Gateway real ------------------------------------------------------------------------------
 
 each_site = pytest.mark.parametrize("host", SITES_BEHIND_CLOUDFLARE)
+
+
+def _issue_certificate(directory: Path, host: str) -> None:
+    command = [
+        "openssl", "req", "-x509", "-nodes", "-newkey", "ec",
+        "-pkeyopt", "ec_paramgen_curve:prime256v1", "-days", CERT_DAYS, "-subj", f"/CN={host}",
+        "-addext", f"subjectAltName=DNS:{host},DNS:*.{host}",
+        "-keyout", str(directory / f"{host}.key"), "-out", str(directory / f"{host}.pem"),
+    ]  # fmt: skip
+    subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
+        command, capture_output=True, check=True, timeout=DOCKER_TIMEOUT_SECONDS
+    )
+
+
+def _served_certificate(port: int, host: str) -> bytes:
+    """Certificado que o gateway entrega no handshake com este SNI, em DER."""
+    # Certificado autoassinado do teste: quem confere é a comparação com o arquivo.
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    with socket.create_connection(("127.0.0.1", port), SOCKET_TIMEOUT_SECONDS) as raw:
+        raw.sendall(_proxy_header(CLOUDFLARE_V4))
+        with context.wrap_socket(raw, server_hostname=host) as tls:
+            certificate = tls.getpeercert(binary_form=True)
+    assert certificate is not None
+    return certificate
+
+
+def _wait_for_certificate(port: int, host: str) -> None:
+    deadline = time.monotonic() + READY_TIMEOUT_SECONDS
+    while True:
+        try:
+            _served_certificate(port, host)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(READY_POLL_SECONDS)
+
+
+@dataclass(frozen=True)
+class OriginGateway:
+    """Gateway com os sites intactos e certificados descartáveis no caminho do volume."""
+
+    port: int
+    config: Path
+    certificates: Path
+
+    def validate(self, *mounts: str) -> subprocess.CompletedProcess[str]:
+        """Roda o `caddy validate` da configuração num container novo, com estas montagens."""
+        command = [
+            "docker", "run", "--rm", "--network", "none",
+            "-v", f"{self.config}:/etc/caddy:ro", *mounts, _gateway_image(),
+            "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile",
+        ]  # fmt: skip
+        return subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
+            command, capture_output=True, text=True, check=False, timeout=DOCKER_TIMEOUT_SECONDS
+        )
+
+
+@pytest.fixture(scope="module")
+def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginGateway]:
+    workdir = tmp_path_factory.mktemp("origem")
+    config = workdir / "caddy"
+    certificates = workdir / "origin-ca"
+    certificates.mkdir()
+    for host in SITES_BEHIND_CLOUDFLARE:
+        _issue_certificate(certificates, host)
+    suffix = uuid.uuid4().hex[:8]
+    network = f"gs-test-origem-{suffix}"
+    proxy = f"gs-test-origem-proxy-{suffix}"
+    _docker("network", "create", network)
+    try:
+        subnet = _docker(
+            "network", "inspect", "-f", "{{(index .IPAM.Config 0).Subnet}}", network
+        ).strip()
+        _copy_gateway_config(config, subnet)
+        for site in SITES.glob("*.caddy"):
+            (config / "conf.d" / site.name).write_text(site.read_text())
+        _docker(
+            "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
+            "-v", f"{config}:/etc/caddy:ro",
+            "-v", f"{certificates}:{ORIGIN_CERT_DIR}:ro", _gateway_image(),
+        )  # fmt: skip
+        port = int(_docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1])
+        _wait_for_certificate(port, GOBLINSHIFT)
+        yield OriginGateway(port, config, certificates)
+    finally:
+        subprocess.run(  # noqa: S603 - nomes gerados pelo teste, sem shell
+            ["docker", "rm", "--force", proxy],  # noqa: S607
+            capture_output=True,
+            check=False,
+            timeout=DOCKER_TIMEOUT_SECONDS,
+        )
+        _docker("network", "rm", network)
+
+
+@pytest.mark.gateway
+@each_site
+@pytest.mark.parametrize("prefix", ["", "www."], ids=["dominio", "www"])
+def test_gateway_entrega_o_certificado_de_origem(
+    origin_gateway: OriginGateway, host: str, prefix: str
+) -> None:
+    expected = (origin_gateway.certificates / f"{host}.pem").read_text()
+
+    served = _served_certificate(origin_gateway.port, f"{prefix}{host}")
+
+    assert served == ssl.PEM_cert_to_DER_cert(expected)
+
+
+@pytest.mark.gateway
+def test_configuracao_com_os_arquivos_do_certificado_e_valida(
+    origin_gateway: OriginGateway,
+) -> None:
+    result = origin_gateway.validate("-v", f"{origin_gateway.certificates}:{ORIGIN_CERT_DIR}:ro")
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.gateway
+def test_configuracao_sem_os_arquivos_do_certificado_e_recusada(
+    origin_gateway: OriginGateway,
+) -> None:
+    result = origin_gateway.validate()
+
+    assert result.returncode != 0
+    assert ORIGIN_CERT_DIR in result.stderr
 
 
 @pytest.mark.gateway
