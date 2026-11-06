@@ -35,7 +35,7 @@ x-app: &app
   logging: *logging
 
 # Storage privado (docs/GoblinShiftPlan.md, 3.6): local num volume; na VPS, o filesystem de
-# tamanho fixo /srv/goblinshift/storage (deploy/release.sh).
+# tamanho fixo /srv/goblinshift/storage.
 x-storage: &storage
   ${GS_STORAGE_DATA:-storage}:/var/lib/goblinshift/storage
 

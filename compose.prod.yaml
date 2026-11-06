@@ -5,10 +5,11 @@
 # Executor (fatia 4): o worker e a manutenção falam com o executor-ctl do host pelo socket em
 # /run/goblinshift (grupo gs-exec, GID 61001) e preparam a área de trabalho no filesystem de
 # tamanho fixo /srv/goblinshift/exec-work. Nenhum serviço monta o socket do Docker. A imagem do
-# executor (por digest) vem do deploy/release.sh, a mesma para a API, que a fixa na Run.
+# executor (por digest) é a mesma para a API, que a fixa na Run; na produção, quem a define é a
+# release do Coolify (deploy/coolify/release/receiver.py).
 x-executor-env: &executor-env
   GS_RUNNER: executor_ctl
-  GS_EXECUTOR_IMAGE: ${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}
+  GS_EXECUTOR_IMAGE: ${GS_EXECUTOR_IMAGE:?definida pela release do Coolify (imagem do executor por digest)}
 
 # Sem `create_host_path`: se o executor-ctl ou o filesystem da área não estiverem instalados, o
 # container não sobe, em vez de o Docker criar diretórios vazios no lugar deles.
@@ -28,8 +29,8 @@ services:
   api:
     environment:
       <<: *executor-env
-      GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
-      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+      GS_CURSOR_SECRET: ${GS_CURSOR_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
       # Login web (fatia 6, 3.6), só na API. Sem uma destas, o Compose recusa o arquivo antes de
       # qualquer comando, e o deploy para antes do `migrate`, sem mexer no banco.
       GS_PUBLIC_ORIGIN: ${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}
@@ -53,13 +54,13 @@ services:
     environment:
       <<: *executor-env
       GS_WORK_ROOT: /var/lib/goblinshift/exec-work
-      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
   maintenance:
     <<: *executor-client
     environment:
       <<: *executor-env
       GS_WORK_ROOT: /var/lib/goblinshift/exec-work
-      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}
+      GS_USER_HASH_SECRET: ${GS_USER_HASH_SECRET:?segredo obrigatório, variável privada do recurso no Coolify}
   # Ocupação dos filesystems de tamanho fixo para o alerta de disco acima de 85% (3.7 e
   # docker/otel-collector/config.yaml). Só leitura: o Collector só precisa do statfs.
   otel-collector:

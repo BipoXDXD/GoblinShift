@@ -4,9 +4,10 @@ Laço: tenta o claim; sem trabalho, espera um `NOTIFY goblinshift_runs` por até
 `GS_WORKER_POLL_INTERVAL_S` (2 s), a garantia contra notificação perdida. Uma tentativa por vez.
 
 SIGTERM e SIGINT param o laço de forma segura: o worker deixa de reivindicar e termina a
-tentativa em andamento antes de sair, porque o deploy concede um prazo de parada maior que uma
-tentativa (3.8). Se a plataforma matar o processo antes (SIGKILL), nada se perde: o lease vence,
-e a manutenção encontra o executor pelo nome, confirma o término e reagenda.
+tentativa em andamento antes de sair. O prazo de parada do deploy (`stop_grace_period`, 30 s) é
+menor que o teto de uma tentativa (10 min), então uma tentativa longa não termina a tempo: a
+plataforma mata o processo (SIGKILL) e quem recupera é o lease vencido. Nada se perde: a
+manutenção encontra o executor pelo nome, confirma o término e reagenda.
 
 Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
 o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).

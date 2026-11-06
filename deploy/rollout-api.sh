@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Troca os containers da API sem queda (docs/GoblinShiftPlan.md, 3.8).
+# Troca os containers da API na pilha local, sem derrubar as requisições em curso. Não faz parte
+# da publicação: a produção sai pelo Coolify (deploy/coolify/README.md), e o `container_name` fixo
+# de deploy/coolify/app.json impede escalar o serviço `api` como este script faz.
 #
 # Sobe containers novos ao lado dos atuais, espera o healthcheck deles, dá tempo ao Nginx de
 # enxergá-los pelo DNS do Docker e só então para os antigos com SIGTERM. Se algo falhar antes
