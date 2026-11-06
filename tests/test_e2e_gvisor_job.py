@@ -108,6 +108,21 @@ def test_os_dois_jobs_instalam_o_gvisor_do_mesmo_jeito(job_id: str) -> None:
     assert RUNSC_INSTALLER in run_commands(jobs()[job_id])
 
 
+def test_o_instalador_do_runsc_troca_o_espelho_antes_do_update() -> None:
+    # O teste do espelho só lê os workflows: o apt deste script fica fora do alcance dele.
+    installer = (ROOT / RUNSC_INSTALLER).read_text()
+
+    assert installer.index("ci-apt-sem-azure.sh") < installer.index("apt-get update")
+
+
+def test_o_job_troca_o_espelho_antes_do_apt_do_playwright() -> None:
+    # `playwright install --with-deps` chama o apt por dentro.
+    commands = run_commands(job())
+
+    browser = next(index for index, command in enumerate(commands) if "--with-deps" in command)
+    assert commands.index(RUNSC_INSTALLER) < browser
+
+
 def test_o_job_sobe_a_pilha_antes_das_jornadas() -> None:
     commands = run_commands(job())
 

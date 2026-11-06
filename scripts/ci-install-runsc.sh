@@ -12,6 +12,7 @@ keyring=/usr/share/keyrings/gvisor-archive-keyring.gpg
 curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
 echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" |
   sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+"$(dirname "${BASH_SOURCE[0]}")/ci-apt-sem-azure.sh"
 sudo apt-get update -q
 sudo apt-get install -yq "runsc=${GVISOR_VERSION}"
 runsc --version | head -n 1
