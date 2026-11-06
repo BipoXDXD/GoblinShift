@@ -182,7 +182,7 @@ def test_upload_incompleto_expirado_libera_a_reserva(
             .values(expires_at=func.now() - timedelta(seconds=1))
         )
 
-    assert expire_incomplete_uploads(factory(), storage) == 1
+    assert expire_incomplete_uploads(factory(), storage).uploads == 1
 
     assert live_amount(factory, HolderKind.UPLOAD, intent.id) is None
     assert account_reserved(factory, owner) == 0

@@ -63,6 +63,13 @@ class PurgeReport:
     failed_keys: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class IncompleteUploadsExpiry:
+    uploads: int
+    # As linhas já saíram: estas chaves só existem aqui, e os arquivos delas ficaram no disco.
+    failed_keys: tuple[str, ...]
+
+
 def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     """Apaga o arquivo de uma linha já confirmada; `False` se ele ficou no disco.
 
@@ -81,7 +88,7 @@ def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     return True
 
 
-def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
+def expire_incomplete_uploads(session: Session, storage: FileStorage) -> IncompleteUploadsExpiry:
     """Remove linha e objeto de uploads incompletos vencidos ou excluídos (1.7: "1 hora").
 
     Upload incompleto nunca chegou a uma execução nem tem conteúdo confirmado, então não há
@@ -110,9 +117,10 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
                     stored_object.c.state == ObjectState.PENDING,
                 )
             )
-    for row in rows:
-        remove_file_after_commit(storage, row.storage_key)
-    return len(rows)
+    failed_keys = tuple(
+        row.storage_key for row in rows if not remove_file_after_commit(storage, row.storage_key)
+    )
+    return IncompleteUploadsExpiry(uploads=len(rows), failed_keys=failed_keys)
 
 
 def expire_unused_uploads(session: Session) -> int:

@@ -16,7 +16,7 @@ from goblinshift.files.missing import GOVERNOR_MIN_SAMPLE
 from goblinshift.files.states import Availability, ObjectState
 from goblinshift.files.storage import FileStorage, ObjectStat
 from goblinshift.files.tables import stored_object, upload
-from goblinshift.files.uploads import get_upload
+from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
@@ -24,7 +24,7 @@ from goblinshift.runs.maintenance import UNREADABLE_LOG_SAMPLE, Maintenance, Mai
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.runner import LocalRunner
-from tests.files.support import mark_mounted, ready_upload
+from tests.files.support import create_intent, mark_mounted, ready_upload
 from tests.runs.worker_support import (
     LEASE,
     attempts,
@@ -209,6 +209,7 @@ def test_falha_ao_apagar_um_candidato_nao_perde_os_demais(
 
     assert counts["candidates_discarded"] == 1
     assert set(attempted) == candidates
+    assert counts["candidate_files_not_removed"] == 1
 
 
 def test_candidatos_de_tentativa_encerrada_sao_descartados(
@@ -286,6 +287,33 @@ def test_ciclo_inclui_a_retencao_de_arquivos(
         "artifacts_expired",
         "objects_purged",
     } <= counts.keys()
+
+
+def test_arquivo_que_fica_no_disco_entra_na_contagem_do_ciclo(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    ready = ready_upload(factory, storage, owner, b"abc")
+    intent = create_intent(factory, owner)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, ready.id)
+        request_deletion(session, owner, intent.id)
+
+    def refuse_delete(_key: str) -> None:
+        raise PermissionError("disco recusou")
+
+    monkeypatch.setattr(storage, "delete", refuse_delete)
+    cycles = maintenance(factory, storage, local_runner(work_root))
+
+    first = cycles.run_cycle()
+    second = cycles.run_cycle()
+
+    # Um do expurgo e um do upload incompleto. As linhas saíram: nenhuma volta os repete.
+    assert first["purge_files_not_removed"] == 2
+    assert second["purge_files_not_removed"] == 0
 
 
 # --- Objetos ausentes do storage (1.7, 3.8) ---------------------------------------------------

@@ -143,7 +143,7 @@ class Maintenance:
             "queue_expired": self.expire_queue(),
             "deadlines": self.apply_deadlines(),
             "holds_released": self.release_orphan_holds(),
-            "candidates_discarded": self.discard_stale_candidates(),
+            **self.discard_stale_candidates(),
             "work_areas_removed": self.sweep_work_areas(),
             **self.apply_retention(),
             **self.mark_missing_objects(),
@@ -278,7 +278,7 @@ class Maintenance:
             )
         return len(terminal)
 
-    def discard_stale_candidates(self) -> int:
+    def discard_stale_candidates(self) -> dict[str, int]:
         """Candidatos de tentativas encerradas que não viraram artefato (gerações vencidas)."""
         with self._factory() as session, session.begin():
             loose = attempts_with_loose_candidates(session, self._config.batch_size)
@@ -288,6 +288,7 @@ class Maintenance:
                 )
             ).all()
         discarded = 0
+        files_not_removed = 0
         for row in ended:
             keys = run_transaction(
                 self._factory,
@@ -295,10 +296,14 @@ class Maintenance:
             )
             if keys is None:
                 continue
-            for key in keys:
-                remove_file_after_commit(self._storage, key)
+            files_not_removed += sum(
+                not remove_file_after_commit(self._storage, key) for key in keys
+            )
             discarded += 1
-        return discarded
+        return {
+            "candidates_discarded": discarded,
+            "candidate_files_not_removed": files_not_removed,
+        }
 
     # Áreas de trabalho ------------------------------------------------------------------
 
@@ -334,10 +339,9 @@ class Maintenance:
     # Retenção --------------------------------------------------------------------------
 
     def apply_retention(self) -> dict[str, int]:
+        incomplete = expire_incomplete_uploads(self._new_session(), self._storage)
         counts = {
-            "incomplete_uploads_expired": expire_incomplete_uploads(
-                self._new_session(), self._storage
-            ),
+            "incomplete_uploads_expired": incomplete.uploads,
             "unused_uploads_expired": expire_unused_uploads(self._new_session()),
             "artifacts_expired": expire_artifacts(self._new_session()),
         }
@@ -355,6 +359,8 @@ class Maintenance:
             )
         counts["objects_purged"] = report.objects
         counts["bytes_purged"] = report.bytes
+        # A linha já saiu e nada repete a remoção: o alerta de causa lê esta contagem (3.7).
+        counts["purge_files_not_removed"] = len(incomplete.failed_keys) + len(report.failed_keys)
         # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
         reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)
         counts["capacity_pools_corrected"] = reconciled.pools_corrected
