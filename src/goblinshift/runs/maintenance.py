@@ -44,6 +44,7 @@ from goblinshift.files.retention import (
     file_backlog,
     purge_deleted_objects,
     reconcile_capacity,
+    remove_file_after_commit,
 )
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
@@ -291,7 +292,7 @@ class Maintenance:
             if keys is None:
                 continue
             for key in keys:
-                self._storage.delete(key)
+                remove_file_after_commit(self._storage, key)
             discarded += 1
         return discarded
 

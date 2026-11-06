@@ -32,9 +32,10 @@ limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
 limit_req_status 429;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
-# na partida: durante o rollout (deploy/rollout-api.sh) há dois containers `api`, o Nginx alterna
-# entre eles e, se um recusar a conexão, tenta o outro (proxy_next_upstream padrão: error timeout,
-# nunca repetindo métodos não idempotentes). O rollout espera esse `valid` antes de parar a API velha.
+# na partida. No rollout da pilha local (deploy/rollout-api.sh), que a publicação pelo Coolify não
+# usa, há dois containers `api`, o Nginx alterna entre eles e, se um recusar a conexão, tenta o
+# outro (proxy_next_upstream padrão: error timeout, nunca repetindo métodos não idempotentes). O
+# rollout espera esse `valid` antes de parar a API velha.
 resolver 127.0.0.11 valid=5s ipv6=off;
 
 # O mime.types da imagem não conhece o GLB da abertura (ADR 030): sem isto sairia
