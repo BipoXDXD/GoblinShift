@@ -4,8 +4,7 @@ Recebe a configuração já mesclada e interpolada (`docker compose config --for
 que daria a um container acesso ao host ou a outro projeto da VPS compartilhada (ADR 011): modo
 privilegiado, capabilities extras, namespaces do host ou de outro container, dispositivos,
 confinamento desligado e montagens fora de uma allowlist explícita. A lista vazia é o único
-resultado aceito; os desvios do gateway, pendentes de decisão do dono (ADR 034), continuam sendo
-violações e só estão fixados em `tests/test_compose_host_policy.py`.
+resultado aceito. A única exceção é a dos volumes do Caddy do gateway (ADR 034).
 
 Os JSON de `deploy/coolify/`, que são o que a produção executa, passam por essa mesma política e
 ainda precisam de imagem fixada por digest, sem `build` (`coolify_policy_violations`).
@@ -39,6 +38,11 @@ UNCONFINED_SECURITY_OPTS = frozenset(
 )
 HARMLESS_MOUNT_TYPES = frozenset({"volume", "tmpfs"})
 PINNED_IMAGE = re.compile(r"[^@]+@sha256:[0-9a-f]{64}")
+# Exceção do ADR 034: `external` protege os certificados do gateway. Vale só para estas chaves, com
+# estes nomes exatos, neste projeto e neste serviço; nome reservado em qualquer outro lugar reprova.
+PROTECTED_VOLUMES = {"caddy_data": "edge_caddy_data", "caddy_config": "edge_caddy_config"}
+PROTECTED_VOLUME_PROJECT = "edge"
+PROTECTED_VOLUME_SERVICE = "proxy"
 
 
 @dataclass(frozen=True)
@@ -53,10 +57,13 @@ class HostPaths:
 
 def host_policy_violations(config: Mapping[str, Any], host: HostPaths) -> list[str]:
     violations: list[str] = []
+    project = config.get("name")
     for name, service in (config.get("services") or {}).items():
         violations += [f"{name}: {problem}" for problem in service_option_problems(service)]
         violations += [f"{name}: {problem}" for problem in service_mount_problems(service, host)]
-    violations += list(top_level_volume_problems(config.get("volumes") or {}, config.get("name")))
+        if project == PROTECTED_VOLUME_PROJECT and name != PROTECTED_VOLUME_SERVICE:
+            violations += [f"{name}: {problem}" for problem in protected_mount_problems(service)]
+    violations += list(top_level_volume_problems(config.get("volumes") or {}, project))
     violations += list(file_source_problems("secret", config.get("secrets") or {}, is_secret_file))
     violations += list(
         file_source_problems("config", config.get("configs") or {}, host.is_repository_config)
@@ -108,6 +115,12 @@ def service_mount_problems(service: Mapping[str, Any], host: HostPaths) -> Itera
             yield f"mount {mount_type}"
 
 
+def protected_mount_problems(service: Mapping[str, Any]) -> Iterator[str]:
+    for mount in service.get("volumes") or []:
+        if mount.get("type") == "volume" and mount.get("source") in PROTECTED_VOLUMES:
+            yield f"monta {mount['source']}"
+
+
 def is_allowed_bind(source: str, read_only: bool, host: HostPaths) -> bool:
     if not is_normalized(source):
         return False
@@ -119,16 +132,27 @@ def is_allowed_bind(source: str, read_only: bool, host: HostPaths) -> bool:
 def top_level_volume_problems(volumes: Mapping[str, Any], project: str | None) -> Iterator[str]:
     for name, volume in volumes.items():
         volume = volume or {}
+        protected = is_protected_volume(name, volume, project)
         # Volume de outro projeto da VPS (ADR 011).
-        if volume.get("external"):
+        if volume.get("external") and not protected:
             yield f"volume {name}: external"
         # `name` monta um volume que já existe mesmo sem `external`: vale o nome, não a chave.
         real_name = volume.get("name")
         if real_name is not None and not real_name.startswith(f"{project}_"):
             yield f"volume {name}: nome {real_name} fora do projeto {project}"
+        elif real_name in PROTECTED_VOLUMES.values() and not protected:
+            yield f"volume {name}: nome reservado {real_name}"
         # O driver `local` com `o: bind` e `device` monta qualquer caminho do host.
         if volume.get("driver_opts"):
             yield f"volume {name}: driver_opts"
+
+
+def is_protected_volume(name: str, volume: Mapping[str, Any], project: str | None) -> bool:
+    return (
+        project == PROTECTED_VOLUME_PROJECT
+        and volume.get("external") is True
+        and volume.get("name") == PROTECTED_VOLUMES.get(name)
+    )
 
 
 def file_source_problems(

@@ -17,7 +17,7 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -308,6 +308,56 @@ def test_volume_com_nome_alheio_injetado_no_compose_de_producao_e_reprovado(tmp_
     assert violations == ["volume alias: nome coolify-db fora do projeto goblinshift"]
 
 
+EDGE_VOLUME = {"external": True, "name": "edge_caddy_data"}
+
+
+def edge_config(key: str, volume: dict[str, Any], *, service: str = "proxy") -> dict[str, Any]:
+    mount = {"type": "volume", "source": key, "target": "/data"}
+    return {"name": "edge", "services": {service: {"volumes": [mount]}}, "volumes": {key: volume}}
+
+
+def test_excecao_do_adr_034_aceita_o_volume_registrado() -> None:
+    assert host_policy_violations(edge_config("caddy_data", EDGE_VOLUME), HOST) == []
+
+
+def test_excecao_do_adr_034_nao_vale_em_outro_servico() -> None:
+    config = edge_config("caddy_data", EDGE_VOLUME, service="outro")
+
+    assert host_policy_violations(config, HOST) == ["outro: monta caddy_data"]
+
+
+def test_excecao_do_adr_034_nao_vale_em_outra_chave() -> None:
+    assert host_policy_violations(edge_config("dados", EDGE_VOLUME), HOST) == [
+        "volume dados: external",
+        "volume dados: nome reservado edge_caddy_data",
+    ]
+
+
+def test_excecao_do_adr_034_nao_vale_em_outro_projeto() -> None:
+    config = {**edge_config("caddy_data", EDGE_VOLUME), "name": "goblinshift"}
+
+    assert host_policy_violations(config, HOST) == [
+        "volume caddy_data: external",
+        "volume caddy_data: nome edge_caddy_data fora do projeto goblinshift",
+    ]
+
+
+def test_excecao_do_adr_034_exige_external_verdadeiro() -> None:
+    volume = {"external": False, "name": "edge_caddy_data"}
+
+    assert host_policy_violations(edge_config("caddy_data", volume), HOST) == [
+        "volume caddy_data: nome reservado edge_caddy_data"
+    ]
+
+
+def test_excecao_do_adr_034_nao_dispensa_driver_opts() -> None:
+    volume = {**EDGE_VOLUME, "driver_opts": {"type": "none", "o": "bind", "device": "/"}}
+
+    assert host_policy_violations(edge_config("caddy_data", volume), HOST) == [
+        "volume caddy_data: driver_opts"
+    ]
+
+
 def test_volume_externo_e_reprovado() -> None:
     # Volume de outro projeto da VPS (ADR 011).
     config = config_with(
@@ -372,35 +422,19 @@ def test_todas_as_violacoes_sao_listadas() -> None:
 
 COOLIFY_DIR = ROOT / "deploy" / "coolify"
 DIGEST = "a" * 64
-# O que o gateway tem fora da política, pendente de decisão do dono (ADR 034). Não é exceção: a
-# política segue reprovando. A lista exata e GATEWAY_MOUNTS impedem que os desvios cresçam ou mudem.
-GATEWAY_DEVIATIONS = (
-    # Configuração do Caddy versionada, só para leitura, mas fora de <repositório>/docker.
-    f"proxy: bind {ROOT}/deploy/coolify/Caddyfile",
-    f"proxy: bind {ROOT}/deploy/coolify/sites",
-    # Dados do Caddy no volume do próprio projeto `edge`, não de outro projeto da VPS.
-    "volume caddy_config: external",
-    "volume caddy_data: external",
-)
-# A mensagem da política não diz o alvo nem `read_only`, e não vê o nome real do volume.
-GATEWAY_MOUNTS = {
-    f"{ROOT}/deploy/coolify/Caddyfile": ("/etc/caddy/Caddyfile", True),
-    f"{ROOT}/deploy/coolify/sites": ("/etc/caddy/conf.d", True),
-    "caddy_config": ("/config", False),
-    "caddy_data": ("/data", False),
-}
-GATEWAY_VOLUME_NAMES = {"caddy_config": "edge_caddy_config", "caddy_data": "edge_caddy_data"}
 GATEWAY_SERVICE = "proxy"
-CADDYFILE = f"{ROOT}/deploy/coolify/Caddyfile"
-SITES = f"{ROOT}/deploy/coolify/sites"
-EXPECTED_DEVIATIONS: dict[str, tuple[str, ...]] = {
-    "app.json": (),
-    "infra.json": (),
-    "gateway.json": GATEWAY_DEVIATIONS,
-}
-COOLIFY_NAMES = tuple(EXPECTED_DEVIATIONS)
+CADDYFILE = f"{ROOT}/docker/gateway/Caddyfile"
+SITES = f"{ROOT}/docker/gateway/sites"
+# A política não olha o alvo das montagens: é o que este teste acrescenta para o gateway.
+GATEWAY_MOUNTS = [
+    ("bind", CADDYFILE, "/etc/caddy/Caddyfile", True),
+    ("bind", SITES, "/etc/caddy/conf.d", True),
+    ("volume", "caddy_data", "/data", False),
+    ("volume", "caddy_config", "/config", False),
+]
 # O projeto é a referência do nome dos volumes: trocá-lo mudaria o que conta como "do projeto".
 EXPECTED_PROJECTS = {"app.json": "goblinshift", "infra.json": "goblinshift", "gateway.json": "edge"}
+COOLIFY_NAMES = tuple(EXPECTED_PROJECTS)
 # Cada sabotagem é a mudança no serviço e o problema que a política precisa apontar.
 SABOTAGES: list[tuple[dict[str, Any], str]] = [
     ({"privileged": True}, "privileged"),
@@ -436,9 +470,8 @@ def rendered(document: dict[str, Any]) -> dict[str, Any]:
     return compose_config(["-"], environment, stdin=text)
 
 
-def new_problems(document: dict[str, Any], name: str) -> list[str]:
-    violations = coolify_policy_violations(rendered(document), HOST)
-    return [problem for problem in violations if problem not in EXPECTED_DEVIATIONS[name]]
+def problems_of(document: dict[str, Any]) -> list[str]:
+    return coolify_policy_violations(rendered(document), HOST)
 
 
 def first_service(document: dict[str, Any]) -> str:
@@ -459,40 +492,6 @@ def sabotaged(document: dict[str, Any], service: str, changes: dict[str, Any]) -
 def with_mount(document: dict[str, Any], service: str, mount: Any) -> dict[str, Any]:
     current = document["services"][service].get("volumes", [])
     return sabotaged(document, service, {"volumes": [*current, mount]})
-
-
-def gateway_deviation_problems(config: dict[str, Any]) -> list[str]:
-    return [
-        problem
-        for name, service in config["services"].items()
-        for mount in service.get("volumes", [])
-        for problem in gateway_mount_problems(name, mount, config.get("volumes", {}))
-    ]
-
-
-def gateway_mount_problems(
-    service: str, mount: dict[str, Any], volumes: dict[str, Any]
-) -> Iterator[str]:
-    source = mount.get("source", "")
-    if mount["type"] == "volume":
-        # A chave é só um apelido no arquivo: o Docker monta o volume pelo nome real.
-        real_name = volumes.get(source, {}).get("name")
-        if source not in GATEWAY_VOLUME_NAMES:
-            yield f"{service}: volume {source} com nome {real_name}"
-            return
-        if real_name != GATEWAY_VOLUME_NAMES[source]:
-            yield f"{service}: {source} com nome {real_name}"
-            return
-    if source not in GATEWAY_MOUNTS:
-        return
-    if service != GATEWAY_SERVICE:
-        yield f"{service}: monta {source}"
-        return
-    target, read_only = GATEWAY_MOUNTS[source]
-    if mount["target"] != target:
-        yield f"{service}: {source} em {mount['target']}"
-    if bool(mount.get("read_only")) != read_only:
-        yield f"{service}: {source} com read_only={not read_only}"
 
 
 def gateway_mount(document: dict[str, Any], index: int) -> dict[str, Any]:
@@ -520,6 +519,10 @@ def renamed_volume(document: dict[str, Any], volume: str, name: str) -> None:
     document["volumes"][volume]["name"] = name
 
 
+def not_external(document: dict[str, Any], volume: str) -> None:
+    del document["volumes"][volume]["external"]
+
+
 def declared_alias(document: dict[str, Any], name: str, *, external: bool = False) -> None:
     alias: dict[str, Any] = {"name": name}
     if external:
@@ -537,113 +540,128 @@ def alias_in_proxy(document: dict[str, Any], name: str) -> None:
     document["services"][GATEWAY_SERVICE]["volumes"].append("alias:/alias")
 
 
+def gateway_mounts(config: dict[str, Any]) -> list[tuple[str, str, str, bool]]:
+    return [
+        (mount["type"], mount["source"], mount["target"], bool(mount.get("read_only")))
+        for mount in config["services"][GATEWAY_SERVICE]["volumes"]
+    ]
+
+
 GatewayMutation = Callable[[dict[str, Any]], None]
-GATEWAY_MUTATIONS: list[tuple[str, GatewayMutation, str]] = [
+GATEWAY_POLICY_MUTATIONS: list[tuple[str, GatewayMutation, list[str]]] = [
     (
         "Caddyfile_gravavel",
         lambda document: bind_without_read_only(document, 0),
-        f"proxy: {CADDYFILE} com read_only=False",
+        [f"proxy: bind {CADDYFILE}"],
     ),
     (
         "sites_gravavel",
         lambda document: bind_without_read_only(document, 1),
-        f"proxy: {SITES} com read_only=False",
+        [f"proxy: bind {SITES}"],
     ),
     (
-        "Caddyfile_em_outro_alvo",
-        lambda document: bind_with_target(document, 0, "/etc/passwd"),
-        f"proxy: {CADDYFILE} em /etc/passwd",
+        "caddy_data_de_outro_projeto",
+        lambda document: renamed_volume(document, "caddy_data", "coolify-db"),
+        ["volume caddy_data: external", "volume caddy_data: nome coolify-db fora do projeto edge"],
     ),
     (
-        "sites_em_outro_alvo",
-        lambda document: bind_with_target(document, 1, "/srv"),
-        f"proxy: {SITES} em /srv",
+        "caddy_config_de_outro_projeto",
+        lambda document: renamed_volume(document, "caddy_config", "coolify-db"),
+        [
+            "volume caddy_config: external",
+            "volume caddy_config: nome coolify-db fora do projeto edge",
+        ],
     ),
+    (
+        "chave_caddy_data_com_o_nome_do_outro_volume",
+        lambda document: renamed_volume(document, "caddy_data", "edge_caddy_config"),
+        ["volume caddy_data: external", "volume caddy_data: nome reservado edge_caddy_config"],
+    ),
+    (
+        "caddy_data_sem_external",
+        lambda document: not_external(document, "caddy_data"),
+        ["volume caddy_data: nome reservado edge_caddy_data"],
+    ),
+    (
+        "caddy_config_sem_external",
+        lambda document: not_external(document, "caddy_config"),
+        ["volume caddy_config: nome reservado edge_caddy_config"],
+    ),
+    (
+        "alias_do_volume_real_em_outro_servico",
+        lambda document: alias_in_other_service(document, "edge_caddy_data"),
+        ["volume alias: nome reservado edge_caddy_data"],
+    ),
+    (
+        "alias_externo_do_volume_real_em_outro_servico",
+        lambda document: alias_in_other_service(document, "edge_caddy_config", external=True),
+        ["volume alias: external", "volume alias: nome reservado edge_caddy_config"],
+    ),
+    (
+        "alias_do_volume_real_no_proxy",
+        lambda document: alias_in_proxy(document, "edge_caddy_data"),
+        ["volume alias: nome reservado edge_caddy_data"],
+    ),
+    (
+        "alias_de_outro_projeto_no_proxy",
+        lambda document: alias_in_proxy(document, "coolify-db"),
+        ["volume alias: nome coolify-db fora do projeto edge"],
+    ),
+    (
+        "caddy_data_em_outro_servico",
+        lambda document: service_mounting(document, "caddy_data:/data"),
+        ["outro: monta caddy_data"],
+    ),
+    (
+        "caddy_config_em_outro_servico",
+        lambda document: service_mounting(document, "caddy_config:/config"),
+        ["outro: monta caddy_config"],
+    ),
+]
+GATEWAY_MOUNT_MUTATIONS: list[tuple[str, GatewayMutation]] = [
+    ("Caddyfile_em_outro_alvo", lambda document: bind_with_target(document, 0, "/etc/passwd")),
+    ("sites_em_outro_alvo", lambda document: bind_with_target(document, 1, "/srv")),
     (
         "caddy_data_em_outro_alvo",
         lambda document: proxy_with_volumes(document, "caddy_data:/outro", "caddy_config:/config"),
-        "proxy: caddy_data em /outro",
     ),
     (
         "caddy_config_so_leitura",
         lambda document: proxy_with_volumes(
             document, "caddy_data:/data", "caddy_config:/config:ro"
         ),
-        "proxy: caddy_config com read_only=True",
-    ),
-    (
-        "caddy_data_de_outro_projeto",
-        lambda document: renamed_volume(document, "caddy_data", "coolify-db"),
-        "proxy: caddy_data com nome coolify-db",
-    ),
-    (
-        "caddy_config_de_outro_projeto",
-        lambda document: renamed_volume(document, "caddy_config", "coolify-db"),
-        "proxy: caddy_config com nome coolify-db",
-    ),
-    (
-        "chave_caddy_data_com_o_nome_do_outro_volume",
-        lambda document: renamed_volume(document, "caddy_data", "edge_caddy_config"),
-        "proxy: caddy_data com nome edge_caddy_config",
-    ),
-    (
-        "alias_do_volume_real_em_outro_servico",
-        lambda document: alias_in_other_service(document, "edge_caddy_data"),
-        "outro: volume alias com nome edge_caddy_data",
-    ),
-    (
-        "alias_externo_do_volume_real_em_outro_servico",
-        lambda document: alias_in_other_service(document, "edge_caddy_config", external=True),
-        "outro: volume alias com nome edge_caddy_config",
-    ),
-    (
-        "alias_do_volume_real_no_proxy",
-        lambda document: alias_in_proxy(document, "edge_caddy_data"),
-        "proxy: volume alias com nome edge_caddy_data",
-    ),
-    (
-        "alias_de_outro_projeto_no_proxy",
-        lambda document: alias_in_proxy(document, "coolify-db"),
-        "proxy: volume alias com nome coolify-db",
-    ),
-    (
-        "caddy_data_em_outro_servico",
-        lambda document: service_mounting(document, "caddy_data:/data"),
-        "outro: monta caddy_data",
-    ),
-    (
-        "caddy_config_em_outro_servico",
-        lambda document: service_mounting(document, "caddy_config:/config"),
-        "outro: monta caddy_config",
-    ),
-    (
-        "Caddyfile_em_outro_servico",
-        lambda document: service_mounting(
-            document, "./deploy/coolify/Caddyfile:/etc/caddy/Caddyfile:ro"
-        ),
-        f"outro: monta {CADDYFILE}",
     ),
 ]
 
 
-def test_os_desvios_do_gateway_mantem_a_forma_registrada() -> None:
-    config = rendered(coolify_document("gateway.json"))
-
-    assert gateway_deviation_problems(config) == []
+def test_o_gateway_mantem_as_montagens_registradas() -> None:
+    assert gateway_mounts(rendered(coolify_document("gateway.json"))) == GATEWAY_MOUNTS
 
 
 @pytest.mark.parametrize(
-    ("mutate", "problem"),
-    [(mutate, problem) for _, mutate, problem in GATEWAY_MUTATIONS],
-    ids=[case for case, _, _ in GATEWAY_MUTATIONS],
+    "mutate",
+    [mutate for _, mutate in GATEWAY_MOUNT_MUTATIONS],
+    ids=[case for case, _ in GATEWAY_MOUNT_MUTATIONS],
 )
-def test_mudanca_na_forma_dos_desvios_do_gateway_e_reprovada(
-    mutate: GatewayMutation, problem: str
+def test_mudanca_nas_montagens_do_gateway_e_reprovada(mutate: GatewayMutation) -> None:
+    document = coolify_document("gateway.json")
+    mutate(document)
+
+    assert gateway_mounts(rendered(document)) != GATEWAY_MOUNTS
+
+
+@pytest.mark.parametrize(
+    ("mutate", "problems"),
+    [(mutate, problems) for _, mutate, problems in GATEWAY_POLICY_MUTATIONS],
+    ids=[case for case, _, _ in GATEWAY_POLICY_MUTATIONS],
+)
+def test_furo_na_excecao_do_gateway_e_reprovado(
+    mutate: GatewayMutation, problems: list[str]
 ) -> None:
     document = coolify_document("gateway.json")
     mutate(document)
 
-    assert gateway_deviation_problems(rendered(document)) == [problem]
+    assert problems_of(document) == problems
 
 
 def project_problems(config: dict[str, Any], name: str) -> list[str]:
@@ -680,7 +698,7 @@ def test_volume_nao_externo_com_nome_alheio_no_json_e_reprovado(
     document = coolify_document(name)
     alias_in_other_service(document, volume_name)
 
-    assert new_problems(document, name) == [
+    assert problems_of(document) == [
         f"volume alias: nome {volume_name} fora do projeto {EXPECTED_PROJECTS[name]}"
     ]
 
@@ -693,7 +711,7 @@ def test_todo_json_do_coolify_passa_pela_politica() -> None:
 def test_o_compose_em_json_da_producao_respeita_a_politica_do_host(name: str) -> None:
     config = rendered(coolify_document(name))
 
-    assert coolify_policy_violations(config, HOST) == list(EXPECTED_DEVIATIONS[name])
+    assert coolify_policy_violations(config, HOST) == []
 
 
 @pytest.mark.parametrize("name", COOLIFY_NAMES)
@@ -714,7 +732,7 @@ def test_sabotagem_em_opcao_do_json_e_reprovada(
     document = coolify_document(name)
     service = first_service(document)
 
-    problems = new_problems(sabotaged(document, service, changes), name)
+    problems = problems_of(sabotaged(document, service, changes))
 
     assert problems == [f"{service}: {problem}"]
 
@@ -729,7 +747,7 @@ def test_sabotagem_em_montagem_do_json_e_reprovada(name: str, mount: Any, proble
     document = coolify_document(name)
     service = first_service(document)
 
-    problems = new_problems(with_mount(document, service, mount), name)
+    problems = problems_of(with_mount(document, service, mount))
 
     assert problems == [f"{service}: {problem}"]
 
@@ -741,7 +759,7 @@ def test_a_politica_alcanca_todos_os_servicos_do_json(name: str) -> None:
     for service in services:
         document = sabotaged(document, service, {"privileged": True})
 
-    problems = new_problems(document, name)
+    problems = problems_of(document)
 
     assert sorted(problems) == sorted(f"{service}: privileged" for service in services)
 

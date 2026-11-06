@@ -43,8 +43,8 @@ Reforços deste ADR:
 
    Os JSON de `deploy/coolify/` (`app.json`, `infra.json` e `gateway.json`), que são o que a produção executa, passam pela mesma política depois do `docker compose config` e ainda precisam de imagem fixada por digest, sem `build`.
 
-   **Pendente de decisão do dono:** o `gateway.json` hoje descumpre esta decisão em quatro pontos, registrados aqui sem exceção formal: os binds só de leitura de `deploy/coolify/Caddyfile` e `deploy/coolify/sites`, fora de `<repositório>/docker/`, e os volumes `external` `caddy_data` e `caddy_config`, que a decisão proíbe. A política continua reprovando os quatro. O teste só fixa o estado atual para que não cresçam nem mudem: lista exata, alvos, `read_only`, projeto `edge` e cada montagem resolvida pelo nome real do volume, com `edge_caddy_data` e `edge_caddy_config` aceitos só nas chaves `caddy_data` e `caddy_config` do serviço `proxy`. A pendência se encerra de um destes modos: o gateway deixa de precisar deles, ou o dono os aceita e a política muda como manda a seção [Consequências](#consequências).
-2. **CODEOWNERS** em `deploy/`, `compose*.yaml` e `.github/workflows/`, com `@BipoXDXD`, para que toda mudança nesses caminhos peça a revisão do dono.
+   **Exceção formal, por decisão do dono (2026-11-06):** `caddy_data` e `caddy_config` continuam `external` no `gateway.json`. A exceção vale só para essas chaves, no projeto `edge`, no serviço `proxy`, com os nomes exatos `edge_caddy_data` e `edge_caddy_config`, e está em `tests/compose_host_policy.py`. Qualquer outro `external` continua reprovado, e esses nomes reprovam em qualquer outra chave, mesmo sem `external`. O motivo é proteger os certificados. Num ensaio local com o Compose 5.6.1, `docker compose down -v` apagou o volume sem `external` e preservou o volume com `external`. No código público do Coolify (ramo v4.x), fora do modo Raw, o parser renomeia o volume não externo para `{uuid}_{volume}` e usa o externo como foi escrito; essa leitura não foi conferida na versão instalada. Os binds do gateway não precisam de exceção: foram para `docker/gateway/`, só de leitura.
+2. **CODEOWNERS** em `deploy/`, `docker/gateway/`, `compose*.yaml` e `.github/workflows/`, com `@BipoXDXD`, para que toda mudança nesses caminhos peça a revisão do dono.
 
 ## Alternativas descartadas
 
@@ -58,7 +58,7 @@ Reforços deste ADR:
 
 - Um commit malicioso ou um engano na `main`, um token do GitHub comprometido ou um PR mergeado sem revisão continuam valendo root na VPS, com acesso aos containers e dados do StillOn. Risco aceito: projeto de portfólio, um só mantenedor, serviço fechado até a abertura (ADR 023).
 - O fitness test pega o **erro honesto** (um `privileged` ou um bind de `/` copiado de um exemplo). Não detém um atacante, que altera o teste no mesmo commit. O mesmo vale para o CODEOWNERS: com um só dono, ele marca os caminhos sensíveis e pede revisão, mas não exige um segundo par de olhos. Ligar "Require review from Code Owners" travaria os PRs do próprio dono.
-- Mudança legítima que precise de algo fora da allowlist (outro bind, outra capability) muda a política em `tests/compose_host_policy.py` no mesmo PR, citando este ADR. Os desvios do gateway pendentes de decisão (reforço 1) já existiam no `gateway.json` quando a política passou a cobrir os JSON do Coolify; não são precedente, e aceitá-los segue esta mesma regra.
+- Mudança legítima que precise de algo fora da allowlist (outro bind, outra capability) muda a política em `tests/compose_host_policy.py` no mesmo PR, citando este ADR.
 
 ### Gatilhos para revisar e ir para a alternativa B
 
