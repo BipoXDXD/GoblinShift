@@ -6,7 +6,7 @@ Aplicação e infraestrutura têm recursos separados para que uma publicação d
 
 A configuração de preparação da migração, sem escritores em segundo plano, já não existe: `app.json` traz os serviços completos, com `worker` e `maintenance`.
 
-Cada serviço tem `container_name` fixo, então uma publicação substitui a API e o Nginx, sem duas versões lado a lado. O efeito disso em produção nunca foi medido ([README](../../README.md#publicação-em-produção)).
+Cada serviço tem `container_name` fixo, então uma publicação substitui a API e o Nginx, sem duas versões lado a lado. Não há medição registrada do efeito disso em produção ([README](../../README.md#publicação-em-produção)).
 
 Segredos de interpolação são configurados como variáveis privadas no Coolify. O modo Raw conserva o isolamento por serviço das variáveis e dos arquivos de segredo. Não adicionar env_file global a todos os serviços.
 
