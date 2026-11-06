@@ -79,7 +79,13 @@ export default defineConfig({
   retries: E2E.vps ? 1 : 0,
   // O runner do GitHub tem 4 vCPUs e o padrão do Playwright usaria só 2; as specs esperam mais a
   // rede falsa e os quadros do que a CPU.
-  ...(RUN_PHASE === "gpu" ? { workers: 1 } : process.env["CI"] ? { workers: 4 } : {}),
+  // Contra a API real, a chave é uma conta só, e a conta tem uma execução ativa por vez: dois
+  // workers disputariam essa vaga (409) e o limite de leituras por minuto (429).
+  ...(RUN_PHASE === "gpu" || (E2E.remote && !E2E.vps)
+    ? { workers: 1 }
+    : process.env["CI"]
+      ? { workers: 4 }
+      : {}),
   // Cada spec tem poucos segundos; um teste preso falha cedo em vez de comer o orçamento.
   timeout: E2E.vps ? 60_000 : 20_000,
   expect: { timeout: 5_000 },

@@ -5,6 +5,7 @@ import { parse, toGamut, wcagContrast } from "culori";
 
 import { CSV_FILES } from "../fixtures/files";
 import { BancadaPage } from "../pages/BancadaPage";
+import { E2E } from "../support/env";
 import { SCREENS } from "../support/screens";
 import { expect, test, THEMES, useTheme } from "../support/test";
 
@@ -13,6 +14,8 @@ const MIN_RING_CONTRAST = 3;
 // Teto de paradas por tela, só para pegar armadilha de foco: a maior é o Histórico com uma página
 // cheia (25 linhas com o link da execução e o "Reusar configuração", mais filtros e moldura).
 const MAX_TAB_STOPS = 100;
+// O bloco de execuções recentes da Oficina, só presente em conta com execuções.
+const RECENT_RUN_STOP = /, criada em |^Ver o histórico completo$/;
 
 /** O que o navegador desenhou para o elemento focado, lido no próprio navegador. */
 interface FocusStop {
@@ -58,7 +61,9 @@ test("Oficina: o Tab segue a leitura, do pular para o conteúdo aos cartões @ke
   await page.goto("/");
   // A tela é um chunk lazy: o Tab só começa com ela pintada, senão percorre a moldura vazia.
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  const names = (await tabThrough(page)).map((stop) => stop.name);
+  const stops = (await tabThrough(page)).map((stop) => stop.name);
+  // A conta real acumula as execuções das outras specs; a API falsa começa sem nenhuma.
+  const names = E2E.remote ? stops.filter((name) => !RECENT_RUN_STOP.test(name)) : stops;
   expect(names).toEqual([
     "Pular para o conteúdo",
     "GoblinShift",

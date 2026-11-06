@@ -25,6 +25,14 @@ interface Journey {
   readonly expectedParameters: Record<string, unknown>;
   /** Saída avulsa a baixar; `null` quando o nome não vem da entrada (PDF Press: só o pacote). */
   readonly singleDownload?: null;
+  /** Saída avulsa na API real, que renomeia; a falsa repete o nome do primeiro da lista. */
+  readonly realOutput?: Output;
+}
+
+/** Uma saída para baixar: o texto do link e o nome que o download recebe. */
+interface Output {
+  readonly link: string;
+  readonly fileName: string;
 }
 
 const JOURNEYS: readonly Journey[] = [
@@ -45,6 +53,7 @@ const JOURNEYS: readonly Journey[] = [
       await bancada.fill("Largura máxima, em pixels", "800");
     },
     expectedParameters: { output_format: "jpeg", max_width: 800 },
+    realOutput: { link: "images/azul.jpg", fileName: "azul.jpg" },
   },
   {
     recipeId: "downloads-detox",
@@ -54,6 +63,7 @@ const JOURNEYS: readonly Journey[] = [
       await bancada.fill("Prefixo da numeração", "lote");
     },
     expectedParameters: { name_mode: "indexed", name_prefix: "lote" },
+    realOutput: { link: "tables/lote-001.csv", fileName: "lote-001.csv" },
   },
   {
     recipeId: "pdf-press",
@@ -62,8 +72,14 @@ const JOURNEYS: readonly Journey[] = [
       await bancada.choose("O que fazer com os PDFs", "Montar um PDF com as páginas escolhidas");
       await bancada.press("Adicionar página");
       await bancada.choose("PDF da página 1", "contrato.pdf");
+      // Um PDF sem nenhuma página escolhida conclui com aviso na API real: os dois entram.
+      await bancada.press("Adicionar página");
+      await bancada.choose("PDF da página 2", "anexo.pdf");
     },
-    expectedParameters: { operation: "select", select: [{ page_number: 1 }] },
+    expectedParameters: {
+      operation: "select",
+      select: [{ page_number: 1 }, { page_number: 1 }],
+    },
     singleDownload: null,
   },
 ];
@@ -93,9 +109,10 @@ for (const journey of JOURNEYS) {
       expectCommand(api, journey, [second.name, first.name]);
     }
 
-    await expectDownload(page, execucao, `${journey.recipeId}.zip`);
+    await expectDownload(page, execucao, sameName(`${journey.recipeId}.zip`));
     if (journey.singleDownload !== null) {
-      await expectDownload(page, execucao, second.name);
+      const real = api === null ? journey.realOutput : undefined;
+      await expectDownload(page, execucao, real ?? sameName(second.name));
     }
   });
 }
@@ -135,7 +152,7 @@ test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ve
     ]);
   await expect(page.locator("img[src^='blob:']")).toHaveCount(0);
 
-  await expectDownload(page, execucao, "media-mill.zip");
+  await expectDownload(page, execucao, sameName("media-mill.zip"));
 });
 
 function expectCommand(api: FakeApi, journey: Journey, order: readonly string[]): void {
@@ -146,9 +163,13 @@ function expectCommand(api: FakeApi, journey: Journey, order: readonly string[])
   expect(command?.parameters).toMatchObject(journey.expectedParameters);
 }
 
-async function expectDownload(page: Page, execucao: ExecucaoPage, fileName: string): Promise<void> {
-  const download = await execucao.download(fileName);
-  expect(download.suggestedFilename()).toBe(fileName);
+function sameName(name: string): Output {
+  return { link: name, fileName: name };
+}
+
+async function expectDownload(page: Page, execucao: ExecucaoPage, output: Output): Promise<void> {
+  const download = await execucao.download(output.link);
+  expect(download.suggestedFilename()).toBe(output.fileName);
   expect(statSync(await download.path()).size).toBeGreaterThan(0);
   // Download por navegação não tira a pessoa da tela da execução.
   await expect(page).toHaveURL(/\/execucoes\//);
