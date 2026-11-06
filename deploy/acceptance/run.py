@@ -158,31 +158,35 @@ def run_with_maintenance_suspended(
 ) -> list[Outcome]:
     """Roda as sondas com a manutenção parada; o último resultado diz se ela voltou ao ar.
 
-    Manutenção que já estava parada fica como estava. Se uma sonda levantar exceção, ou o processo
-    receber SIGTERM, a manutenção volta antes de a saída seguir, e uma falha nessa volta é impressa
-    no stderr.
+    Manutenção que já estava parada fica como estava. O SIGTERM durante as sondas vira saída 143.
+    Na parada e no religamento ele espera o comando terminar, para a manutenção não ficar parada:
+    ela volta, com o estado relido, antes de a saída seguir. Exceção de sonda tem o mesmo caminho,
+    e uma falha nessa volta é impressa no stderr. Só o SIGKILL não deixa limpar.
     """
     docker = docker or _docker_output
     containers = _service_ids(docker, MAINTENANCE_SERVICE)
-    if not containers:
-        return [
-            *probes(),
-            Outcome(MAINTENANCE_CRITERION, True, "não estava rodando: deixada como estava"),
-        ]
-    print(
-        f"manutenção parada durante as sondas; se este teste for morto sem poder limpar (SIGKILL), "
-        f"religue com: {_restart_command(containers)}\n"
-    )
-    docker("stop", f"--time={MAINTENANCE_STOP_S}", *containers)
-    try:
-        with _sigterm_as_exit():
+    with _sigterm_as_exit():
+        if not containers:
+            return [
+                *probes(),
+                Outcome(MAINTENANCE_CRITERION, True, "não estava rodando: deixada como estava"),
+            ]
+        print(
+            f"manutenção parada durante as sondas; se este teste for morto sem poder limpar "
+            f"(SIGKILL), religue com: {_restart_command(containers)}\n"
+        )
+        stopped = False
+        try:
+            with _sigterm_blocked():
+                docker("stop", f"--time={MAINTENANCE_STOP_S}", *containers)
+                stopped = True
             outcomes = probes()
-    except BaseException:
-        restored = _restart_maintenance(docker, containers)
-        if not restored.passed:
-            print(f"FALHOU  {restored.criterion}: {restored.evidence}", file=sys.stderr)
-        raise
-    return [*outcomes, _restart_maintenance(docker, containers)]
+            return [*outcomes, _restart_maintenance(docker, containers)]
+        except BaseException:
+            restored = _restart_maintenance(docker, containers, await_stop=not stopped)
+            if not restored.passed:
+                print(f"FALHOU  {restored.criterion}: {restored.evidence}", file=sys.stderr)
+            raise
 
 
 @contextmanager
@@ -194,6 +198,8 @@ def _sigterm_as_exit() -> Iterator[None]:
     """
 
     def exit_on_sigterm(signum: int, _frame: FrameType | None) -> None:
+        # Uma vez só: a limpeza que esta saída dispara precisa ir até o fim.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         raise SystemExit(128 + signum)
 
     previous = signal.signal(signal.SIGTERM, exit_on_sigterm)
@@ -203,16 +209,42 @@ def _sigterm_as_exit() -> Iterator[None]:
         signal.signal(signal.SIGTERM, previous)
 
 
-def _restart_maintenance(docker: Callable[..., str], containers: list[str]) -> Outcome:
-    recovery = f"religue com: {_restart_command(containers)}"
+@contextmanager
+def _sigterm_blocked() -> Iterator[None]:
+    """Adia o SIGTERM até o fim do bloco, para este processo e para os clientes `docker` dele.
+
+    O sinal do systemd vai ao cgroup inteiro. A máscara é herdada pelos filhos, então o comando em
+    curso termina em vez de morrer pela metade, e o sinal pendente chega na saída do bloco.
+    """
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
     try:
-        docker("start", *containers)
-        states = docker(
-            "inspect", "--type=container", "--format={{.State.Running}}", *containers
-        ).split()
-    except subprocess.CalledProcessError as error:
-        detail = (error.stderr or "").strip()[-200:]
-        return Outcome(MAINTENANCE_CRITERION, False, f"docker {error.cmd[1]}: {detail}; {recovery}")
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+def _restart_maintenance(
+    docker: Callable[..., str], containers: list[str], *, await_stop: bool = False
+) -> Outcome:
+    """Religa e relê o estado; `await_stop` cobre a parada que não terminou.
+
+    Um `docker stop` interrompido não cancela a parada no daemon, e o `start` feito durante ela sai
+    com 0 sem mudar nada. O `stop` repetido espera a parada acabar.
+    """
+    recovery = f"religue com: {_restart_command(containers)}"
+    with _sigterm_blocked():
+        try:
+            if await_stop:
+                docker("stop", f"--time={MAINTENANCE_STOP_S}", *containers)
+            docker("start", *containers)
+            states = docker(
+                "inspect", "--type=container", "--format={{.State.Running}}", *containers
+            ).split()
+        except subprocess.CalledProcessError as error:
+            detail = (error.stderr or "").strip()[-200:]
+            return Outcome(
+                MAINTENANCE_CRITERION, False, f"docker {error.cmd[1]}: {detail}; {recovery}"
+            )
     if states != ["true"] * len(containers):
         return Outcome(MAINTENANCE_CRITERION, False, f"Running={states}; {recovery}")
     return Outcome(MAINTENANCE_CRITERION, True, f"container {' '.join(containers)} rodando")
@@ -423,10 +455,8 @@ def check_app_without_docker_socket() -> Outcome:
 def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     attempt = uuid.uuid4()
     name = profile.container_name(attempt)
-    docker = DockerCli()
     area = host.config.work_area
-    create_attempt_dir(host, attempt)
-    try:
+    with attempt_workspace(host, attempt) as docker:
         # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
         options = profile.run_options(
@@ -455,10 +485,41 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
         duration_s = time.monotonic() - started
         state = _inspect(name)
         output = _logs(name)
-    finally:
-        docker.remove(name)
-        workarea.remove_attempt_dir(area, attempt)
     return ProbeRun(state, _json_lines(output), output[-500:], duration_s, timed_out)
+
+
+@contextmanager
+def attempt_workspace(host: Host, attempt: uuid.UUID) -> Iterator[DockerCli]:
+    """Cria a área da tentativa e, ao sair do bloco, descarta o container e a área.
+
+    Exceção ou SIGTERM do bloco seguem como vieram: a falha da limpeza vai só para o stderr, para
+    não trocar a saída 143 que o scheduled.sh repassa.
+    """
+    docker = DockerCli()
+    create_attempt_dir(host, attempt)
+    try:
+        yield docker
+    except BaseException:
+        try:
+            _discard_attempt(docker, host.config.work_area, attempt)
+        except Exception as error:
+            print(
+                f"tentativa {attempt} não descartada: {type(error).__name__}: {error}",
+                file=sys.stderr,
+            )
+        raise
+    _discard_attempt(docker, host.config.work_area, attempt)
+
+
+def _discard_attempt(docker: DockerCli, area: Path, attempt: uuid.UUID) -> None:
+    """Para antes de remover: o SIGTERM do cgroup mata o `docker wait`, não o container."""
+    name = profile.container_name(attempt)
+    with _sigterm_blocked():
+        try:
+            docker.stop(name, STOP_GRACE_S)
+            docker.remove(name)
+        finally:
+            workarea.remove_attempt_dir(area, attempt)
 
 
 def create_attempt_dir(host: Host, attempt: uuid.UUID) -> None:

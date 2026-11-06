@@ -39,12 +39,11 @@ from acceptance.run import (
     WORKER_UID,
     Host,
     Outcome,
-    create_attempt_dir,
+    attempt_workspace,
     run_with_maintenance_suspended,
 )
 from executor_ctl import profile, workarea
 from executor_ctl.config import DEFAULT_CONFIG_PATH, load_config
-from executor_ctl.docker_cli import DockerCli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "goblinshift-executor:medicao"
@@ -166,9 +165,7 @@ def measure(
     attempt = uuid.uuid4()
     name = profile.container_name(attempt)
     area = host.config.work_area
-    docker = DockerCli()
-    create_attempt_dir(host, attempt)
-    try:
+    with attempt_workspace(host, attempt) as docker:
         work_dir = workarea.attempt_dir(area, attempt)
         _fill_work_dir(work_dir, fixtures, expected, host.group_id)
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
@@ -191,9 +188,6 @@ def measure(
         duration_s = time.monotonic() - started
         exit_code = int(_docker("inspect", "--format", "{{.State.ExitCode}}", name).strip())
         summary = _summary(work_dir / profile.OUTPUT_DIR / "report.json")
-    finally:
-        docker.remove(name)
-        workarea.remove_attempt_dir(area, attempt)
     return judge(
         exit_code=exit_code,
         duration_s=duration_s,

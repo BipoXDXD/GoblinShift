@@ -7,8 +7,9 @@
 # O worker fica parado durante o teste: as sondas enchem a área de trabalho, que só admite uma
 # tentativa por vez (README, "Teste de aceitação do ambiente"). Ele volta no fim, também quando
 # a aceitação reprova ou o serviço recebe SIGTERM (parada, reinício da máquina ou TimeoutStartSec:
-# container parado por `docker stop` não volta com `restart: unless-stopped`); se não voltar, o
-# resultado é /fail. A manutenção, o próprio run.py suspende e religa (ADR 017).
+# container parado por `docker stop` não volta com `restart: unless-stopped`). O estado é relido
+# depois do `start`; se ele não voltar, o resultado é /fail. Só o SIGKILL não deixa religar. A
+# manutenção, o próprio run.py suspende e religa (ADR 017).
 #
 # Roda da cópia que o deploy/acceptance/install.sh faz em /usr/local/lib/goblinshift (do root), nunca
 # do checkout, que pertence ao usuário goblinshift; o lib.sh e o pacote vêm da mesma cópia.
@@ -30,9 +31,27 @@ APP_PROJECT=goblinshift
 WORKER_STOP_S=30
 SIGTERM_EXIT=143
 
+# restart_workers: religa e confere; sai com erro se algum não ficou rodando. Interrompido, o
+# cliente do `docker stop` pode ter morrido com a parada ainda em curso no daemon. O `start` nessa
+# hora sai com 0 sem mudar nada, e o worker para em seguida: o `stop` repetido espera a parada.
+restart_workers() {
+  local states state
+  if ((interrupted)); then
+    docker stop --time="$WORKER_STOP_S" "${workers[@]}" >/dev/null || return 1
+  fi
+  docker start "${workers[@]}" >/dev/null || return 1
+  states="$(docker inspect --type=container --format='{{.State.Running}}' "${workers[@]}")" ||
+    return 1
+  [[ -n "$states" ]] || return 1
+  for state in $states; do
+    [[ "$state" == true ]] || return 1
+  done
+}
+
 healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"
 
-# Com o trap, o bash termina o comando em curso e segue até religar o worker e pingar /fail.
+# O SIGTERM do systemd vai ao cgroup inteiro: o `docker` e o python em curso morrem ou limpam por
+# conta própria, e este bash, com o trap, só anota e segue até religar o worker e pingar /fail.
 interrupted=0
 trap 'interrupted=1' TERM INT
 
@@ -45,7 +64,7 @@ running="$(docker ps --quiet \
 mapfile -t workers < <(printf '%s' "$running")
 
 if ((${#workers[@]})); then
-  echo "worker parado durante o teste; se ele for morto sem poder limpar (SIGKILL), religue com:" \
+  echo "worker parado durante o teste; se este script morrer por SIGKILL, religue com:" \
     "docker start ${workers[*]}"
   docker stop --time="$WORKER_STOP_S" "${workers[@]}" >/dev/null || status=$?
 fi
@@ -54,7 +73,8 @@ if ((status == 0 && interrupted == 0)); then
   (cd "$DEPLOY" && python3 -E -s -B -m acceptance.run) || status=$?
 fi
 if ((${#workers[@]})); then
-  docker start "${workers[@]}" >/dev/null || {
+  # O sinal no meio da volta mata o cliente em curso: repete, agora sabendo da interrupção.
+  restart_workers || { ((interrupted)) && restart_workers; } || {
     echo "o worker não voltou; religue com: docker start ${workers[*]}" >&2
     ((status != 0)) || status=1
   }

@@ -38,6 +38,33 @@ case "$1" in
   ps) [ -n "$FAKE_WORKER" ] && echo "$FAKE_WORKER"; exit "${FAKE_PS_RC:-0}" ;;
   stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
   start) exit "${FAKE_START_RC:-0}" ;;
+  inspect) echo "${FAKE_RUNNING-true}"; exit "${FAKE_INSPECT_RC:-0}" ;;
+esac
+"""
+# O daemon: o primeiro `stop` começa uma parada que sobrevive à morte do cliente, e `start` durante
+# ela não faz nada e sai com 0 (NotModified). Só o `stop` seguinte espera a parada terminar.
+FAKE_DAEMON_DOCKER = """#!/bin/sh
+case "$1" in
+  stop)
+    if [ ! -e "$FAKE_DAEMON/stopping" ]; then
+      : >"$FAKE_DAEMON/stopping"
+      echo "docker stop $2 $3" >>"$FAKE_CALLS"
+      sleep 30
+    fi
+    echo "docker stop $2 $3" >>"$FAKE_CALLS"
+    rm -f "$FAKE_DAEMON/running"
+    ;;
+  start)
+    echo "docker start $2" >>"$FAKE_CALLS"
+    [ -e "$FAKE_DAEMON/stopping" ] && [ -e "$FAKE_DAEMON/running" ] && exit 0
+    : >"$FAKE_DAEMON/running"
+    rm -f "$FAKE_DAEMON/stopping"
+    ;;
+  inspect)
+    echo "docker inspect" >>"$FAKE_CALLS"
+    [ -e "$FAKE_DAEMON/running" ] && echo true || echo false
+    ;;
+  ps) echo "$FAKE_WORKER" ;;
 esac
 """
 FAKE_PYTHON = """#!/bin/sh
@@ -82,10 +109,16 @@ def script_env(fakes: Path, url: str | None, worker: str) -> dict[str, str]:
 
 
 def scheduled(
-    fakes: Path, *, url: str | None = CHECK_URL, worker: str = WORKER, **rc: int
+    fakes: Path,
+    *,
+    url: str | None = CHECK_URL,
+    worker: str = WORKER,
+    running: str = "true",
+    **rc: int,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     env = {
         **script_env(fakes, url, worker),
+        "FAKE_RUNNING": running,
         **{f"FAKE_{name.upper()}_RC": str(code) for name, code in rc.items()},
     }
     result = subprocess.run(  # noqa: S603 - script do repositório
@@ -126,6 +159,10 @@ def interrupted(fakes: Path, *, reached: str, group: bool, **env: str) -> tuple[
     return code, calls.read_text().splitlines()
 
 
+def worker_state() -> str:
+    return f"docker inspect --type=container --format={{{{.State.Running}}}} {WORKER}"
+
+
 def worker_lookup() -> str:
     return (
         "docker ps --quiet --filter=label=com.docker.compose.project=goblinshift"
@@ -146,6 +183,7 @@ def test_sucesso_pinga_start_e_sucesso_com_o_worker_parado_durante_o_teste(fakes
         f"docker stop --time=30 {WORKER}",
         "python3 -E -s -B -m acceptance.run (em deploy)",
         f"docker start {WORKER}",
+        worker_state(),
         f"curl {CHECK_URL}",
     ]
 
@@ -156,7 +194,7 @@ def test_aceitacao_reprovada_pinga_fail_religa_o_worker_e_sai_com_o_codigo_dela(
     result, calls = scheduled(fakes, acceptance=1)
 
     assert result.returncode == 1
-    assert calls[-2:] == [f"docker start {WORKER}", f"curl {CHECK_URL}/fail"]
+    assert calls[-3:] == [f"docker start {WORKER}", worker_state(), f"curl {CHECK_URL}/fail"]
 
 
 def test_worker_que_nao_rodava_fica_como_estava(fakes: Path) -> None:
@@ -177,7 +215,7 @@ def test_worker_que_nao_parou_impede_a_aceitacao(fakes: Path) -> None:
 
     assert result.returncode != 0
     assert not any(call.startswith("python3") for call in calls)
-    assert calls[-2:] == [f"docker start {WORKER}", f"curl {CHECK_URL}/fail"]
+    assert calls[-3:] == [f"docker start {WORKER}", worker_state(), f"curl {CHECK_URL}/fail"]
 
 
 def test_worker_que_nao_volta_reprova_mesmo_com_a_aceitacao_aprovada(fakes: Path) -> None:
@@ -192,15 +230,63 @@ def test_sigterm_na_aceitacao_religa_o_worker_e_pinga_fail(fakes: Path) -> None:
     code, calls = interrupted(fakes, reached="python3", group=True, FAKE_ACCEPTANCE_SLEEP_S="30")
 
     assert code == SIGTERM_EXIT
-    assert calls[-2:] == [f"docker start {WORKER}", f"curl {CHECK_URL}/fail"]
+    assert calls[-4:] == [
+        f"docker stop --time=30 {WORKER}",
+        f"docker start {WORKER}",
+        worker_state(),
+        f"curl {CHECK_URL}/fail",
+    ]
 
 
-def test_sigterm_na_parada_do_worker_nao_comeca_a_aceitacao(fakes: Path) -> None:
+def test_sigterm_entre_comandos_nao_comeca_a_aceitacao(fakes: Path) -> None:
     code, calls = interrupted(fakes, reached="docker stop", group=False, FAKE_STOP_SLEEP_S="1")
 
     assert code == SIGTERM_EXIT
     assert not [call for call in calls if call.startswith("python3")]
-    assert calls[-2:] == [f"docker start {WORKER}", f"curl {CHECK_URL}/fail"]
+    assert calls[-2:] == [worker_state(), f"curl {CHECK_URL}/fail"]
+
+
+def test_sigterm_no_cliente_do_stop_espera_a_parada_antes_de_religar(fakes: Path) -> None:
+    daemon = fakes / "daemon"
+    daemon.mkdir()
+    (daemon / "running").touch()
+    docker = fakes / "bin" / "docker"
+    docker.write_text(FAKE_DAEMON_DOCKER)
+
+    code, calls = interrupted(fakes, reached="docker stop", group=True, FAKE_DAEMON=str(daemon))
+
+    assert code == SIGTERM_EXIT
+    assert (daemon / "running").exists()
+    assert calls[-5:] == [
+        f"docker stop --time=30 {WORKER}",
+        f"docker stop --time=30 {WORKER}",
+        f"docker start {WORKER}",
+        "docker inspect",
+        f"curl {CHECK_URL}/fail",
+    ]
+
+
+@pytest.mark.parametrize("state", ["false", ""])
+def test_worker_que_nao_ficou_rodando_reprova_mesmo_com_o_start_aceito(
+    fakes: Path, state: str
+) -> None:
+    result, calls = scheduled(fakes, running=state)
+
+    assert result.returncode == 1
+    assert "o worker não voltou" in result.stderr
+    assert calls[-2:] == [worker_state(), f"curl {CHECK_URL}/fail"]
+
+
+def test_estado_do_worker_ilegivel_reprova(fakes: Path) -> None:
+    result, calls = scheduled(fakes, inspect=1)
+
+    assert result.returncode == 1
+    assert calls[-1] == f"curl {CHECK_URL}/fail"
+
+
+def test_servico_tem_prazo_de_parada_acima_da_limpeza() -> None:
+    # A parada da manutenção (60 s) e a limpeza passam perto dos 90 s padrão do systemd.
+    assert unit(SERVICE)["Service"]["TimeoutStopSec"] == "3min"
 
 
 def test_lista_de_workers_ilegivel_reprova_sem_rodar_a_aceitacao(fakes: Path) -> None:
