@@ -16,12 +16,13 @@ import unicodedata
 # extensão gigante impediria o `OutputDir` de encurtar o radical para caber em 180 bytes.
 MAX_EXTENSION_BYTES = 16
 _UNSAFE_REPLACEMENT = "_"
-# Cc: controles (NUL, quebra de linha, DEL); Cf: formato invisível (bidi, largura zero, BOM).
-_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf"})
+# Cc: controles (NUL, quebra de linha, DEL); Cf: formato invisível (bidi, largura zero, BOM);
+# Cs: surrogate solto, que não tem representação em UTF-8.
+_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})
 
 
 def has_unsafe_char(text: str) -> bool:
-    """Se há controle ou formato invisível: o que um nome de saída nunca pode conter."""
+    """Se há controle, formato invisível ou surrogate solto: o que um nome nunca pode conter."""
     return any(unicodedata.category(char) in _UNSAFE_CATEGORIES for char in text)
 
 
