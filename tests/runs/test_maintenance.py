@@ -208,6 +208,41 @@ def test_falha_ao_apagar_um_candidato_nao_perde_os_demais(
 
     assert counts["candidates_discarded"] == 1
     assert set(attempted) == candidates
+    assert counts["candidates_left_on_disk"] == 1
+
+
+def test_candidato_preso_ao_encerrar_a_run_conta_no_ciclo_e_nao_no_seguinte(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        candidate = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+    storage.create_exclusive(candidate.storage_key, [b"x"], 1)
+    cancel_run(factory, storage, owner, run_id)
+    expire_lease(factory, run_id)
+    delete = storage.delete
+
+    def refuse_candidate(key: str) -> None:
+        if key == candidate.storage_key:
+            raise PermissionError("disco recusou")
+        delete(key)
+
+    monkeypatch.setattr(storage, "delete", refuse_candidate)
+    worker = maintenance(factory, storage, local_runner(work_root))
+
+    first = worker.run_cycle()
+    second = worker.run_cycle()
+
+    assert run_row(factory, run_id)["status"] == "canceled"
+    assert first["candidates_left_on_disk"] == 1
+    assert second["candidates_left_on_disk"] == 0
 
 
 def test_candidatos_de_tentativa_encerrada_sao_descartados(
