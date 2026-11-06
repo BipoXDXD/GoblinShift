@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 from sqlalchemy import func, select, update
@@ -19,7 +20,7 @@ from goblinshift.files.uploads import get_upload
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
-from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.maintenance import UNREADABLE_LOG_SAMPLE, Maintenance, MaintenanceConfig
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.runner import LocalRunner
@@ -427,6 +428,60 @@ def test_disco_com_eio_nao_trava_a_manutencao_e_o_cursor_anda(
     assert {"capacity_pools_corrected", "runs_deleted", "storage_global_max_bytes"} <= (
         first.keys()
     )
+
+
+def storage_keys(factory: sessionmaker[Session]) -> list[str]:
+    with factory() as session:
+        return list(
+            session.execute(
+                select(stored_object.c.storage_key).order_by(stored_object.c.id)
+            ).scalars()
+        )
+
+
+def test_lote_so_com_ilegiveis_alerta_com_errno_e_chave(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ready_upload(factory, storage, create_user(factory, "conta"), b"abc")
+    [key] = storage_keys(factory)
+    mark_mounted(storage)
+    cycles = Maintenance(factory, EioStorage(storage.root), local_runner(work_root))
+
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+        counts = cycles.run_cycle()
+
+    assert (counts["objects_missing_absent"], counts["objects_missing_unreadable"]) == (0, 1)
+    assert alert_fields(caplog, "objects_unreadable") == [
+        {
+            "alert": "objects_unreadable",
+            "unreadable": 1,
+            "errnos": {"EIO": 1},
+            "sample": [{"storage_key": key, "errno_name": "EIO"}],
+        }
+    ]
+
+
+def test_disco_inteiro_ilegivel_gera_uma_linha_de_log_com_amostra_limitada(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for number in range(UNREADABLE_LOG_SAMPLE + 1):
+        ready_upload(factory, storage, create_user(factory, f"conta-{number}"), b"abc")
+    mark_mounted(storage)
+    cycles = Maintenance(factory, EioStorage(storage.root), local_runner(work_root))
+
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+        cycles.run_cycle()
+
+    [fields] = alert_fields(caplog, "objects_unreadable")
+    assert fields["unreadable"] == UNREADABLE_LOG_SAMPLE + 1
+    assert fields["errnos"] == {"EIO": UNREADABLE_LOG_SAMPLE + 1}
+    assert len(cast("list[object]", fields["sample"])) == UNREADABLE_LOG_SAMPLE
 
 
 def test_falha_da_varredura_nao_leva_as_outras_etapas(

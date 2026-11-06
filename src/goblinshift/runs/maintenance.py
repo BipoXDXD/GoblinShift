@@ -18,8 +18,9 @@ recusa iniciar com a área suja, então a área de uma tentativa encerrada não 
 import logging
 import time
 import uuid
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
 
@@ -87,6 +88,9 @@ from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 50
+# Quantos objetos ilegíveis vão nomeados no log do lote: com o disco inteiro devolvendo erro, a
+# contagem por errno diz o resto sem uma linha por objeto a cada ciclo.
+UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
 
@@ -385,6 +389,12 @@ class Maintenance:
         return {**_sweep_counts(sweep), "missing_sweep_failed": 0}
 
     def _report_sweep(self, sweep: MissingSweep) -> None:
+        if sweep.unreadable:
+            # Nada é marcado por erro de disco: o errno e a chave só ficam aqui.
+            logger.warning(
+                "objetos ilegíveis no storage",
+                extra={"fields": _unreadable_fields(sweep)},
+            )
         if sweep.storage_unreachable:
             # Sem a sentinela de montagem: filesystem do storage desmontado ou trocado.
             logger.warning(
@@ -528,6 +538,16 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _unreadable_fields(sweep: MissingSweep) -> dict[str, object]:
+    """Campos do alerta do lote: uma linha só, com a amostra limitada e a contagem por errno."""
+    return {
+        "alert": "objects_unreadable",
+        "unreadable": sweep.unreadable,
+        "errnos": dict(Counter(found.errno_name for found in sweep.unreadable_objects)),
+        "sample": [asdict(found) for found in sweep.unreadable_objects[:UNREADABLE_LOG_SAMPLE]],
+    }
 
 
 def _sweep_counts(sweep: MissingSweep) -> dict[str, int]:
