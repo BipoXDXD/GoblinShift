@@ -1,5 +1,6 @@
 """Expiração em lote e remoção física com limitador (1.7 e 3.4)."""
 
+import logging
 import uuid
 from datetime import timedelta
 
@@ -7,6 +8,7 @@ import pytest
 from sqlalchemy import Table, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files import retention
 from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
 from goblinshift.files.errors import UploadNotFoundError
 from goblinshift.files.objects import hold, release
@@ -112,6 +114,27 @@ def test_upload_incompleto_vencido_perde_linha_e_objeto(
     with factory() as session:
         assert get_upload(session, owner, fresh.id).deleted_at is None
     assert object_states(factory) == {"pending": 1}
+
+
+def test_falha_ao_apagar_um_incompleto_nao_perde_os_demais(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = create_user(factory, "a")
+    for intent in (create_intent(factory, owner), create_intent(factory, owner)):
+        expire_row(factory, upload, intent.id)
+    attempted: list[str] = []
+
+    def refuse_first(key: str) -> None:
+        attempted.append(key)
+        if len(attempted) == 1:
+            raise PermissionError("disco recusou")
+
+    monkeypatch.setattr(storage, "delete", refuse_first)
+
+    with factory() as session:
+        assert expire_incomplete_uploads(session, storage) == 2
+
+    assert len(set(attempted)) == 2
 
 
 def test_upload_incompleto_excluido_sai_sem_esperar_o_prazo(
@@ -293,6 +316,31 @@ def test_exclusao_com_uso_aberto_so_remove_o_arquivo_depois_do_release(
     assert object_of(factory, view.id)[0] == "deleted"
     with pytest.raises(ObjectMissingError):
         storage.stat(key)
+
+
+def test_falha_ao_apagar_o_arquivo_registra_a_chave_para_o_operador(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, view.id)
+    _, key = object_of(factory, view.id)
+
+    def refuse_delete(_key: str) -> None:
+        raise PermissionError("disco recusou")
+
+    monkeypatch.setattr(storage, "delete", refuse_delete)
+    with factory() as session, caplog.at_level(logging.WARNING, logger=retention.__name__):
+        report = purge_deleted_objects(session, storage)
+
+    assert report.failed_keys == (key,)
+    records = [r for r in caplog.records if getattr(r, "fields", {}).get("storage_key") == key]
+    assert [r.fields["alert"] for r in records] == ["purge_file_not_removed"]  # type: ignore[attr-defined]
+    assert records[0].exc_info is not None
 
 
 def test_download_em_andamento_segura_a_remocao_do_artefato_excluido(

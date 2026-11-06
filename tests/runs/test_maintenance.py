@@ -172,6 +172,44 @@ def test_stopping_com_lease_vencido_para_o_executor_e_confirma(
     assert open_run_uses(factory, run_id) == 0
 
 
+def test_falha_ao_apagar_um_candidato_nao_perde_os_demais(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        first = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+        second = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+    storage.create_exclusive(first.storage_key, [b"x"], 1)
+    storage.create_exclusive(second.storage_key, [b"y"], 1)
+    expire_lease(factory, run_id)
+    delete = storage.delete
+    candidates = {first.storage_key, second.storage_key}
+    attempted: list[str] = []
+
+    def refuse_first_candidate(key: str) -> None:
+        if key in candidates:
+            attempted.append(key)
+            if len(attempted) == 1:
+                raise PermissionError("disco recusou")
+        delete(key)
+
+    monkeypatch.setattr(storage, "delete", refuse_first_candidate)
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert counts["candidates_discarded"] == 1
+    assert set(attempted) == candidates
+
+
 def test_candidatos_de_tentativa_encerrada_sao_descartados(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
