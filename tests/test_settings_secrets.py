@@ -27,6 +27,14 @@ SECRET = "s" * 32
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 ORIGIN = "https://goblinshift.dev"
 BOOT_TIMEOUT_SECONDS = 60
+ROOT = Path(__file__).resolve().parent.parent
+PASSWORD_CANARY = "CANARY-senha-do-banco-na-variavel"  # noqa: S105 (valor de teste)
+PASSWORD_IN_FILE = "senha-do-arquivo"  # noqa: S105 (valor de teste)
+DEV_PASSWORD = "goblinshift"  # noqa: S105 (padrão da pilha local, não é segredo)
+API_COMMAND = [
+    sys.executable, "-m", "uvicorn", "goblinshift.entrypoints.api.app:create_app",
+    "--factory", "--host", "127.0.0.1", "--port", "0",
+]  # fmt: skip
 
 SECRET_FILES = (
     "google_client_secret_file",
@@ -48,6 +56,7 @@ def _production(tmp_path: Path, **overrides: Any) -> Settings:
     values: dict[str, Any] = {
         "environment": "production",
         "db_port": 1,
+        "db_password_file": _secret_file(tmp_path, "db_password", PASSWORD_IN_FILE),
         "cursor_secret": SecretStr(SECRET),
         "user_hash_secret": SecretStr(SECRET),
         "runner": "executor_ctl",
@@ -62,6 +71,37 @@ def _production(tmp_path: Path, **overrides: Any) -> Settings:
     }
     values.update(overrides)
     return Settings.model_validate(values)
+
+
+def _production_env(settings: Settings) -> dict[str, str]:
+    """O ambiente de produção de um processo real, sem o arquivo de senha do banco."""
+    return {
+        "PATH": os.environ["PATH"],
+        "GS_ENVIRONMENT": "production",
+        "GS_CURSOR_SECRET": SECRET,
+        "GS_USER_HASH_SECRET": SECRET,
+        "GS_RUNNER": "executor_ctl",
+        "GS_EXECUTOR_IMAGE": EXECUTOR_IMAGE,
+        "GS_PUBLIC_ORIGIN": ORIGIN,
+        "GS_GOOGLE_CLIENT_ID": "id-google",
+        "GS_GITHUB_CLIENT_ID": "id-github",
+        "GS_GOOGLE_CLIENT_SECRET_FILE": str(settings.google_client_secret_file),
+        "GS_GITHUB_CLIENT_SECRET_FILE": str(settings.github_client_secret_file),
+        "GS_CSRF_SECRET_FILE": str(settings.csrf_secret_file),
+        "GS_LOGIN_COOKIE_SECRET_FILE": str(settings.login_cookie_secret_file),
+    }
+
+
+def _run_process(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - comando fixo do próprio teste, sem shell
+        command,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=BOOT_TIMEOUT_SECONDS,
+        cwd=ROOT,
+    )
 
 
 def test_producao_completa_sobe(tmp_path: Path) -> None:
@@ -124,36 +164,106 @@ def test_caminho_de_segredo_que_e_diretorio_nao_sobe(tmp_path: Path, missing: st
 def test_boot_real_sem_segredo_sai_com_erro_que_nomeia_a_variavel(tmp_path: Path) -> None:
     """O mesmo comando da imagem: o processo termina, e a última linha diz o que falta."""
     settings = _production(tmp_path, github_client_secret_file=tmp_path / "nao-existe")
-    env = {
-        "PATH": os.environ["PATH"],
-        "GS_ENVIRONMENT": "production",
-        "GS_CURSOR_SECRET": SECRET,
-        "GS_USER_HASH_SECRET": SECRET,
-        "GS_RUNNER": "executor_ctl",
-        "GS_EXECUTOR_IMAGE": EXECUTOR_IMAGE,
-        "GS_PUBLIC_ORIGIN": ORIGIN,
-        "GS_GOOGLE_CLIENT_ID": "id-google",
-        "GS_GITHUB_CLIENT_ID": "id-github",
-        "GS_GOOGLE_CLIENT_SECRET_FILE": str(settings.google_client_secret_file),
-        "GS_GITHUB_CLIENT_SECRET_FILE": str(settings.github_client_secret_file),
-        "GS_CSRF_SECRET_FILE": str(settings.csrf_secret_file),
-        "GS_LOGIN_COOKIE_SECRET_FILE": str(settings.login_cookie_secret_file),
-    }
+    env = {**_production_env(settings), "GS_DB_PASSWORD_FILE": str(settings.db_password_file)}
 
-    result = subprocess.run(
-        [sys.executable, "-m", "uvicorn", "goblinshift.entrypoints.api.app:create_app",
-         "--factory", "--host", "127.0.0.1", "--port", "0"],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-        timeout=BOOT_TIMEOUT_SECONDS,
-    )  # fmt: skip
+    result = _run_process(API_COMMAND, env)
 
     assert result.returncode != 0
     last_line = result.stderr.strip().splitlines()[-1]
     assert last_line.startswith("goblinshift.platform.settings.MissingSecretError:")
     assert "GS_GITHUB_CLIENT_SECRET_FILE" in last_line
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(API_COMMAND, id="api"),
+        pytest.param([sys.executable, "-m", "alembic", "upgrade", "head"], id="migrate"),
+        pytest.param([sys.executable, "-m", "goblinshift.entrypoints.worker"], id="worker"),
+        pytest.param(
+            [sys.executable, "-m", "goblinshift.entrypoints.maintenance"], id="maintenance"
+        ),
+        pytest.param(
+            [sys.executable, "-m", "goblinshift.entrypoints.admin_cli", "create-user",
+             "--display-name", "Sem arquivo"],
+            id="gs-admin",
+        ),
+    ],
+)  # fmt: skip
+def test_processo_real_em_producao_sem_o_arquivo_de_senha_nao_sobe(
+    tmp_path: Path, command: list[str]
+) -> None:
+    """Todo processo que abre o banco para antes de conectar, sem mostrar a senha da variável."""
+    env = {**_production_env(_production(tmp_path)), "GS_DB_PASSWORD": PASSWORD_CANARY}
+
+    result = _run_process(command, env)
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "GS_DB_PASSWORD_FILE é obrigatório em produção" in output
+    assert PASSWORD_CANARY not in output
+
+
+def test_producao_le_a_senha_do_banco_do_arquivo_sem_a_quebra_de_linha(tmp_path: Path) -> None:
+    assert _production(tmp_path).database_url.password == PASSWORD_IN_FILE
+
+
+def test_producao_sem_o_arquivo_de_senha_nao_sobe(tmp_path: Path) -> None:
+    with pytest.raises(MissingSecretError, match="GS_DB_PASSWORD_FILE"):
+        create_app(_production(tmp_path, db_password_file=None))
+
+
+def test_producao_nao_aceita_a_senha_em_variavel_no_lugar_do_arquivo(tmp_path: Path) -> None:
+    settings = _production(tmp_path, db_password_file=None, db_password=PASSWORD_CANARY)
+
+    with pytest.raises(MissingSecretError, match="GS_DB_PASSWORD_FILE") as caught:
+        _ = settings.database_url
+
+    assert PASSWORD_CANARY not in str(caught.value)
+
+
+@pytest.mark.parametrize("environment", ["development", "test", "production"])
+def test_arquivo_de_senha_inexistente_nao_sobe(tmp_path: Path, environment: str) -> None:
+    settings = Settings.model_validate(
+        {"environment": environment, "db_password_file": tmp_path / "nao-existe"}
+    )
+
+    with pytest.raises(MissingSecretError, match="GS_DB_PASSWORD_FILE"):
+        _ = settings.database_url
+
+
+@pytest.mark.parametrize("environment", ["development", "test", "production"])
+def test_arquivo_de_senha_vazio_nao_sobe(tmp_path: Path, environment: str) -> None:
+    empty = _secret_file(tmp_path, "vazio", "  ")
+    settings = Settings.model_validate({"environment": environment, "db_password_file": empty})
+
+    with pytest.raises(MissingSecretError, match="GS_DB_PASSWORD_FILE"):
+        _ = settings.database_url
+
+
+@pytest.mark.parametrize("environment", ["development", "test"])
+def test_fora_de_producao_o_banco_usa_a_senha_padrao_sem_o_arquivo(
+    environment: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GS_DB_PASSWORD", raising=False)
+    monkeypatch.delenv("GS_DB_PASSWORD_FILE", raising=False)
+
+    settings = Settings.model_validate({"environment": environment})
+
+    assert settings.database_url.password == DEV_PASSWORD
+
+
+@pytest.mark.parametrize("environment", ["development", "test"])
+def test_fora_de_producao_o_arquivo_de_senha_vence_a_senha_padrao(
+    tmp_path: Path, environment: str
+) -> None:
+    password_file = _secret_file(tmp_path, "db_password", PASSWORD_IN_FILE)
+
+    settings = Settings.model_validate(
+        {"environment": environment, "db_password_file": password_file}
+    )
+
+    assert settings.database_url.password == PASSWORD_IN_FILE
 
 
 @pytest.mark.parametrize("key_file", ["csrf_secret_file", "login_cookie_secret_file"])
