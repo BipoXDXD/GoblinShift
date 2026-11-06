@@ -183,7 +183,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
       - name: Chromium headless e dependências do sistema
-        run: npx playwright install --with-deps --only-shell chromium
+        run: |
+          ../scripts/ci-apt-sem-azure.sh
+          npx playwright install --with-deps --only-shell chromium
       - name: Build
         run: npm run build
       - name: Conferir partição exata das specs por ID e projeto
