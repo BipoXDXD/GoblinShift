@@ -134,6 +134,9 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_missing_sweep_skipped",
     "maintenance_missing_governor_tripped",
     "maintenance_objects_marked_missing",
+    "maintenance_objects_missing_unreadable",
+    "maintenance_purge_files_not_removed",
+    "maintenance_candidate_files_not_removed",
 )
 
 
@@ -203,6 +206,22 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         "causa-objetos-ausentes",
         "Objetos marcados missing: o arquivo sumiu do storage montado. Esperado depois de "
         "restaurar o banco de um backup; fora disso, investigue. Veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _MaintenanceCause(
+        "causa-objetos-ilegiveis",
+        "Varredura de objetos ausentes com objetos ilegíveis: o disco devolveu erro que não é "
+        "ausência (EIO, permissão). O log da manutenção traz errno e chaves; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _MaintenanceCause(
+        "causa-arquivos-nao-removidos",
+        "Arquivo ficou no disco depois de a linha sair do banco, e nada repete a remoção. O log "
+        "da manutenção traz a chave; veja o runbook em deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
