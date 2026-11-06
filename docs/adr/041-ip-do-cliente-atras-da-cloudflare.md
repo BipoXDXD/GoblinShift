@@ -1,6 +1,6 @@
 # ADR 041. IP do cliente atrás da Cloudflare, resolvido no site do gateway
 
-- **Estado:** aceito e publicado no gateway em 2026-11-05, por decisão do dono do serviço
+- **Estado:** aceito e publicado no gateway em 2026-11-05, por decisão do dono do serviço. A [extensão ao `stillon.tech`](#extensão-ao-stillontech) está no repositório e aguarda a janela de publicação
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8)
 - **Relacionado:** [ADR 014](014-proxy-de-borda-caddy.md) (contrato de confiança entre a borda e os projetos)
 
@@ -11,7 +11,7 @@ Em produção o caminho é Cloudflare → Traefik do Coolify (TCP com TLS passth
 O conserto tem de cumprir três condições:
 
 1. O IP informado só vale vindo das faixas oficiais da Cloudflare: quem chega direto na origem não forja IP.
-2. Os outros sites do gateway não mudam. O gateway atende `stillon.tech`, e o Caddy do StillOn confia no que recebe dele.
+2. Cada site do gateway adota a regra por decisão própria: mudar um site não altera o outro. O gateway atende `stillon.tech`, e o Caddy do StillOn confia no que recebe dele.
 3. Sem tocar na VPS neste PR.
 
 ## Alternativas
@@ -19,7 +19,7 @@ O conserto tem de cumprir três condições:
 | Alternativa | Prós | Contras |
 |-------------|------|---------|
 | **A. `trusted_proxies` global** com as faixas e `client_ip_headers CF-Connecting-IP` no servidor da 443 | É o recurso próprio do Caddy; `{client_ip}` e os logs do gateway passam a ter o cliente | `trusted_proxies` é opção de servidor, não de site: vale para todos os sites da 443 e muda o que o StillOn recebe. Exige mudar o `Caddyfile` e decidir nos dois repositórios (ADR 014). O arquivo é um bind de arquivo único, então uma troca por renomeação não chega ao processo em execução; aplicar exige [copiar para dentro do container](#mudança-no-caddyfile) ou recriá-lo, com todos os sites juntos |
-| **B. Matcher `remote_ip` no site do GoblinShift** (escolhida) | Escopo por site: só `goblinshift.dev` lê a lista. `Caddyfile` e `gateway.json` ficam intactos. Publica com `caddy reload`, sem recriar o container. O site deixa de depender do `trusted_proxies` global, inclusive do IP aposentado | Mais linhas no site. `{client_ip}` e o log do próprio Caddy continuam com a borda. Um segundo site que queira o mesmo repete o bloco |
+| **B. Matcher `remote_ip` no site do GoblinShift** (escolhida) | Escopo por site: só quem importa a lista a lê. `Caddyfile` e `gateway.json` ficam intactos. Publica com `caddy reload`, sem recriar o container. O site deixa de depender do `trusted_proxies` global, inclusive do IP aposentado | Mais linhas no site. `{client_ip}` e o log do próprio Caddy continuam com a borda. Um segundo site que queira o mesmo repete o bloco |
 | **C. Resolver no Nginx** (`set_real_ip_from` com as faixas e `real_ip_header CF-Connecting-IP`) | Fica no código do projeto e publica com a imagem | Não funciona sozinho: o par do Nginx é sempre o gateway, nunca a Cloudflare. Quem valida a origem precisa ver a conexão de origem, e só o gateway vê. Sem isso, qualquer um forjaria o cabeçalho |
 | **D. Módulo `caddy-cloudflare-ip`** | Faixas atualizadas sozinhas | Exige build próprio do Caddy em lugar da imagem oficial por digest, atualiza a confiança sem revisão e continua global como A |
 
@@ -34,9 +34,15 @@ Alternativa B. Em `docker/gateway/sites/goblinshift.dev.caddy`, o matcher `@clou
 - **Regex estrita de endereço, não classe de caracteres:** `....` ou `deadbeef` passariam por uma classe, o Nginx não os entenderia e o `$remote_addr` viraria o gateway, juntando quem os enviasse num só balde do `limit_req`. Formas que a Cloudflare não envia, como `::ffff:192.0.2.1`, também são recusadas e caem no caso de quem conectou.
 - **`{remote_host}`, não `{client_ip}`:** `{client_ip}` obedece ao `trusted_proxies` global, que na data desta decisão ainda tinha o IP aposentado, de onde um `X-Forwarded-For` forjado seria aceito.
 - **O `CF-Connecting-IP` para no gateway:** ele é removido do pedido ao Nginx, porque ali já não há como saber quem o escreveu.
-- **Lista em `docker/gateway/sites/cloudflare-ips.conf`:** a extensão `.conf` fica fora do glob `*.caddy` do `Caddyfile`, e só o site do GoblinShift a importa. Como o diretório `sites/` é um bind de diretório, o arquivo novo não exige mudar o `gateway.json`.
+- **Lista em `docker/gateway/sites/cloudflare-ips.conf`:** a extensão `.conf` fica fora do glob `*.caddy` do `Caddyfile`, e só os sites `goblinshift.dev` e `stillon.tech` a importam. Como o diretório `sites/` é um bind de diretório, o arquivo novo não exige mudar o `gateway.json`.
 
 O Nginx, o uvicorn e a auditoria não mudam: continuam confiando só no IP fixo do gateway, recebem um IP só e já tratam IPv6.
+
+### Extensão ao `stillon.tech`
+
+O `stillon.tech` tinha o mesmo defeito: com `X-Forwarded-For {client_ip}`, o StillOn recebia a borda da Cloudflare e contava por borda. Em 2026-11-06, `docker/gateway/sites/stillon.tech.caddy` passou a aplicar a regra acima com o mesmo bloco, e só o domínio e o destino (`172.31.0.3:80`) diferem. `lb_try_duration`, `lb_try_interval` e o redirect de `www` continuam.
+
+O arquivo é o mesmo que o StillOn prova na cadeia completa dele, em `deploy/ci/checar-borda-cloudflare.sh`. Nenhuma automação compara os dois repositórios: uma mudança neste site precisa ser levada à cópia de lá.
 
 ## Publicação
 
@@ -77,7 +83,7 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
    ```sh
    SITES=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/conf.d"}}{{.Source}}{{end}}{{end}}')
    echo "$SITES"
-   grep -rlE 'goblinshift\.dev\.caddy|deploy/coolify/sites|docker/gateway/sites' /etc/coolify-release /var/lib/coolify-release /etc/goblinshift 2>/dev/null
+   grep -rlE 'goblinshift\.dev\.caddy|stillon\.tech\.caddy|deploy/coolify/sites|docker/gateway/sites' /etc/coolify-release /var/lib/coolify-release /etc/goblinshift 2>/dev/null
    ```
 2. Obter os bytes aprovados de um clone novo do repositório público, fora do checkout do Coolify, e confirmar que o commit está na `main`:
    ```sh
@@ -119,6 +125,10 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 9. Remover o clone: `rm -rf "$CLONE"`. O `$BACKUP` fica até a correção ser dada como estável.
 
 **Reversão:** `cp -a "$BACKUP/." "$SITES/"` e repetir os passos 5 e 6. O `cloudflare-ips.conf` que sobrar não faz efeito, porque nada mais o importa. Se o `git_commit_sha` foi alterado, gravar de volta o valor lido antes do merge. Trecho inválido não derruba nada: o `reload` recusa e a configuração anterior fica no ar (ADR 014).
+
+### Publicar o site do StillOn
+
+O merge da [extensão](#extensão-ao-stillontech) não publica nada: o gateway segue no commit fixo até a janela de publicação. Nela, repita [Depois do merge](#depois-do-merge) só com o `stillon.tech.caddy`, porque o `cloudflare-ips.conf` já está no gateway, e com um `BACKUP` próprio no passo 3. No passo 8, `https://stillon.tech/healthz` deve dar `200`, e `https://goblinshift.dev/livez` deve responder como antes.
 
 ### Mudança no `Caddyfile`
 
@@ -182,14 +192,14 @@ Enquanto a lista estiver atrasada, uma faixa nova da Cloudflare cai no caso de q
 
 ## Consequências
 
-- `limit_req`, auditoria e antiabuso passam a contar por cliente real. Quem hoje divide uma borda com muitos clientes deixa de dividir a cota; clientes atrás do mesmo NAT continuam dividindo.
+- `limit_req`, auditoria e antiabuso passam a contar por cliente real, e o mesmo vale para os limites do StillOn quando a extensão for publicada. Quem hoje divide uma borda com muitos clientes deixa de dividir a cota; clientes atrás do mesmo NAT continuam dividindo.
 - O `limit_req` conta por endereço. Em IPv6, um cliente com um /64 inteiro tem muitos endereços, então o limite é mais fraco que em IPv4. Já era assim para quem chegava direto; agora vale também para quem vem pela Cloudflare. Agrupar por prefixo fica para outra decisão.
 - **Risco aceito:** as faixas são da Cloudflare, não desta conta. Outro cliente da Cloudflare pode apontar uma zona dele para a origem, mas o `CF-Connecting-IP` continua escrito pela Cloudflare, então ele só informa o próprio IP. Fechar esse caminho exige Authenticated Origin Pulls, que fica fora deste ADR.
-- **Resolvido em 2026-11-05:** o `trusted_proxies` global tinha o IP da VPS aposentada, cancelada e sujeita a reatribuição, e um `X-Forwarded-For` forjado vindo dele valia para quem usa `{client_ip}`, como o `stillon.tech`. O dono autorizou a remoção: no `Caddyfile`, o servidor da 443 ficou sem proxy confiável, e o das demais portas, só com o Traefik. Em produção isso só vale depois da [publicação do `Caddyfile`](#mudança-no-caddyfile). O `{remote_host}` do site do GoblinShift continua como está.
+- **Resolvido em 2026-11-05:** o `trusted_proxies` global tinha o IP da VPS aposentada, cancelada e sujeita a reatribuição, e um `X-Forwarded-For` forjado vindo dele valia para quem usava `{client_ip}`, como o `stillon.tech` antes da extensão. O dono autorizou a remoção: no `Caddyfile`, o servidor da 443 ficou sem proxy confiável, e o das demais portas, só com o Traefik. Em produção isso só vale depois da [publicação do `Caddyfile`](#mudança-no-caddyfile). O `{remote_host}` dos sites continua como está.
 - `deploy/edge/` é o caminho anterior ao Coolify e fica como está: não está no fluxo de produção descrito em [`deploy/coolify/README.md`](../../deploy/coolify/README.md).
 
 ## Compliance
 
-- `tests/test_gateway_client_ip.py` sobe a imagem do `gateway.json` com a configuração versionada e simula cada origem por PROXY protocol v2, como o Traefik: IP válido da faixa em IPv4 e IPv6, IP forjado de fora da faixa, fronteira da faixa, VPS aposentada, cabeçalho ausente, repetido ou inválido, toda forma comprimida de IPv6, e o `stillon.tech` sem mudança.
+- `tests/test_gateway_client_ip.py` sobe a imagem do `gateway.json` com a configuração versionada e simula cada origem por PROXY protocol v2, como o Traefik: IP válido da faixa em IPv4 e IPv6, IP forjado de fora da faixa, fronteira da faixa, VPS aposentada, cabeçalho ausente, repetido ou inválido e toda forma comprimida de IPv6. As provas de origem e de cabeçalho rodam em `goblinshift.dev` e `stillon.tech`, o contrato exige a mesma regra nos dois sites, e o redirect de `www.stillon.tech` é conferido no gateway real.
 - `tests/test_cloudflare_ips_script.py` cobre a validação da lista e o formato do arquivo versionado.
 - `tests/test_nginx_auth_limit.py` confere que um IPv6 informado pela borda chega à API pelo Nginx real.

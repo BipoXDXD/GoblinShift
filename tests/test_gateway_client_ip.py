@@ -29,6 +29,7 @@ SITES = GATEWAY / "sites"
 CLOUDFLARE_LIST = SITES / "cloudflare-ips.conf"
 GOBLINSHIFT = "goblinshift.dev"
 STILLON = "stillon.tech"
+SITES_BEHIND_CLOUDFLARE = (GOBLINSHIFT, STILLON)
 DOCKER_TIMEOUT_SECONDS = 60
 SOCKET_TIMEOUT_SECONDS = 5
 READY_TIMEOUT_SECONDS = 30
@@ -127,8 +128,8 @@ def _proxy_header(source: str) -> bytes:
 class Gateway:
     port: int
 
-    def echo(self, host: str, source: str, *headers: str) -> dict[str, str]:
-        """Faz um pedido vindo de `source` e devolve o que o destino recebeu do gateway."""
+    def request(self, host: str, source: str, *headers: str) -> str:
+        """Faz um pedido vindo de `source` e devolve a resposta inteira do gateway."""
         lines = ["GET / HTTP/1.1", f"Host: {host}", "Connection: close", *headers, "", ""]
         # O certificado vem da CA descartável do container de teste, só em 127.0.0.1.
         context = ssl.create_default_context()
@@ -141,7 +142,12 @@ class Gateway:
                 response = b""
                 while chunk := tls.recv(4096):
                     response += chunk
-        match = re.search(r"xff=(?P<xff>\S*) cf=(?P<cf>.*)$", response.decode())
+        return response.decode()
+
+    def echo(self, host: str, source: str, *headers: str) -> dict[str, str]:
+        """Faz um pedido vindo de `source` e devolve o que o destino recebeu do gateway."""
+        response = self.request(host, source, *headers)
+        match = re.search(r"xff=(?P<xff>\S*) cf=(?P<cf>.*)$", response)
         assert match is not None, response
         return match.groupdict()
 
@@ -152,6 +158,7 @@ def _wait_until_ready(gateway: Gateway) -> None:
         try:
             gateway.echo(GOBLINSHIFT, DIRECT_V4)
             gateway.echo(STILLON, DIRECT_V4)
+            gateway.request(f"www.{STILLON}", DIRECT_V4)
             return
         except OSError, AssertionError:
             if time.monotonic() >= deadline:
@@ -224,27 +231,31 @@ def test_lista_nao_e_importada_como_site_pelo_glob_do_gateway() -> None:
     assert CLOUDFLARE_LIST.suffix != ".caddy"
 
 
-def test_lista_so_vale_no_site_do_goblinshift() -> None:
-    assert "cloudflare-ips.conf" in (SITES / "goblinshift.dev.caddy").read_text()
-    for path in [SITES / "stillon.tech.caddy", GATEWAY / "Caddyfile", COOLIFY / "gateway.json"]:
+def test_lista_so_vale_nos_sites_atras_da_cloudflare() -> None:
+    for host in SITES_BEHIND_CLOUDFLARE:
+        site = (SITES / f"{host}.caddy").read_text()
+        assert "import cloudflare-ips.conf\n" in site, host
+        assert "header_up -CF-Connecting-IP\n" in site, host
+    for path in [GATEWAY / "Caddyfile", COOLIFY / "gateway.json"]:
         text = path.read_text()
         assert "cloudflare-ips.conf" not in text, path
         assert "CF-Connecting-IP" not in text, path
 
 
-def test_site_do_stillon_fica_como_estava() -> None:
-    assert (SITES / "stillon.tech.caddy").read_text() == (
-        "stillon.tech {\n"
-        " reverse_proxy 172.31.0.3:80 {\n"
-        "  header_up X-Forwarded-For {client_ip}\n"
-        "  lb_try_duration 5s\n"
-        "  lb_try_interval 250ms\n"
-        " }\n"
-        "}\n"
-        "www.stillon.tech {\n"
-        " redir https://stillon.tech{uri} 308\n"
-        "}\n"
-    )
+def test_site_do_stillon_tem_a_mesma_regra_do_site_do_goblinshift() -> None:
+    goblinshift = (SITES / "goblinshift.dev.caddy").read_text()
+    expected = goblinshift.replace(GOBLINSHIFT, STILLON).replace("172.31.0.4:80", "172.31.0.3:80")
+
+    assert (SITES / "stillon.tech.caddy").read_text() == expected
+
+
+def test_site_do_stillon_mantem_destino_tentativas_e_redirect() -> None:
+    site = (SITES / "stillon.tech.caddy").read_text()
+
+    assert "reverse_proxy 172.31.0.3:80 {\n" in site
+    assert "lb_try_duration 5s\n" in site
+    assert "lb_try_interval 250ms\n" in site
+    assert site.endswith("www.stillon.tech {\n redir https://stillon.tech{uri} 308\n}\n")
 
 
 def test_a_vps_aposentada_nao_e_mais_proxy_confiavel() -> None:
@@ -291,8 +302,11 @@ def test_regex_recusa_o_que_nao_e_endereco(value: str) -> None:
 
 # --- Gateway real ------------------------------------------------------------------------------
 
+each_site = pytest.mark.parametrize("host", SITES_BEHIND_CLOUDFLARE)
+
 
 @pytest.mark.gateway
+@each_site
 @pytest.mark.parametrize(
     ("edge", "client"),
     [
@@ -307,16 +321,21 @@ def test_regex_recusa_o_que_nao_e_endereco(value: str) -> None:
         (CLOUDFLARE_V4, "1:2:3:4:5:6:7:8"),
     ],
 )
-def test_ip_informado_pela_cloudflare_vale(gateway: Gateway, edge: str, client: str) -> None:
-    received = gateway.echo(GOBLINSHIFT, edge, f"CF-Connecting-IP: {client}")
+def test_ip_informado_pela_cloudflare_vale(
+    gateway: Gateway, host: str, edge: str, client: str
+) -> None:
+    received = gateway.echo(host, edge, f"CF-Connecting-IP: {client}")
 
     assert received["xff"] == client
 
 
 @pytest.mark.gateway
-def test_cadeia_do_x_forwarded_for_nao_substitui_o_ip_da_cloudflare(gateway: Gateway) -> None:
+@each_site
+def test_cadeia_do_x_forwarded_for_nao_substitui_o_ip_da_cloudflare(
+    gateway: Gateway, host: str
+) -> None:
     received = gateway.echo(
-        GOBLINSHIFT,
+        host,
         CLOUDFLARE_V4,
         f"CF-Connecting-IP: {CLIENT_V4}",
         f"X-Forwarded-For: {FORGED}, {CLIENT_V4}",
@@ -326,21 +345,25 @@ def test_cadeia_do_x_forwarded_for_nao_substitui_o_ip_da_cloudflare(gateway: Gat
 
 
 @pytest.mark.gateway
-def test_cabecalho_da_cloudflare_nao_segue_para_o_nginx(gateway: Gateway) -> None:
-    received = gateway.echo(GOBLINSHIFT, CLOUDFLARE_V4, f"CF-Connecting-IP: {CLIENT_V4}")
+@each_site
+def test_cabecalho_da_cloudflare_nao_segue_ao_destino(gateway: Gateway, host: str) -> None:
+    received = gateway.echo(host, CLOUDFLARE_V4, f"CF-Connecting-IP: {CLIENT_V4}")
 
     assert received["cf"] == ""
 
 
 @pytest.mark.gateway
+@each_site
 @pytest.mark.parametrize(
     "source", [DIRECT_V4, DIRECT_V6, JUST_OUTSIDE_V4, JUST_OUTSIDE_V6, RETIRED_VPS]
 )
 @pytest.mark.parametrize("header", ["CF-Connecting-IP", "X-Forwarded-For"])
-def test_ip_forjado_de_fora_da_faixa_e_ignorado(gateway: Gateway, source: str, header: str) -> None:
-    received = gateway.echo(GOBLINSHIFT, source, f"{header}: {FORGED}")
+def test_ip_forjado_de_fora_da_faixa_e_ignorado(
+    gateway: Gateway, host: str, source: str, header: str
+) -> None:
+    received = gateway.echo(host, source, f"{header}: {FORGED}")
 
-    assert received["xff"] == source
+    assert received == {"xff": source, "cf": ""}
 
 
 @pytest.mark.gateway
@@ -351,6 +374,7 @@ def test_x_forwarded_for_vindo_da_vps_aposentada_nao_vale_no_stillon(gateway: Ga
 
 
 @pytest.mark.gateway
+@each_site
 @pytest.mark.parametrize(
     "headers",
     [
@@ -366,16 +390,16 @@ def test_x_forwarded_for_vindo_da_vps_aposentada_nao_vale_no_stillon(gateway: Ga
     ],
 )
 def test_borda_da_cloudflare_sem_ip_utilizavel_vale_como_quem_conectou(
-    gateway: Gateway, headers: tuple[str, ...]
+    gateway: Gateway, host: str, headers: tuple[str, ...]
 ) -> None:
-    received = gateway.echo(GOBLINSHIFT, CLOUDFLARE_V4, *headers)
+    received = gateway.echo(host, CLOUDFLARE_V4, *headers)
 
-    assert received["xff"] == CLOUDFLARE_V4
+    assert received == {"xff": CLOUDFLARE_V4, "cf": ""}
 
 
 @pytest.mark.gateway
-@pytest.mark.parametrize("source", [CLOUDFLARE_V4, CLOUDFLARE_V6, DIRECT_V4])
-def test_stillon_continua_recebendo_quem_conectou(gateway: Gateway, source: str) -> None:
-    received = gateway.echo(STILLON, source, f"CF-Connecting-IP: {CLIENT_V4}")
+def test_www_do_stillon_redireciona_para_o_dominio(gateway: Gateway) -> None:
+    response = gateway.request(f"www.{STILLON}", DIRECT_V4)
 
-    assert received == {"xff": source, "cf": CLIENT_V4}
+    assert response.startswith("HTTP/1.1 308 ")
+    assert "location: https://stillon.tech/\r\n" in response.lower()
