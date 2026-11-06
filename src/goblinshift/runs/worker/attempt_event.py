@@ -75,6 +75,12 @@ def _is_duration(value: object) -> bool:
 
 def read_regular_file(path: Path, max_bytes: int) -> bytes | None:
     """Conteúdo do arquivo regular; `None` se falta, não é regular ou passa de `max_bytes`."""
+    data = read_regular_prefix(path, max_bytes + 1)
+    return data if data is not None and len(data) <= max_bytes else None
+
+
+def read_regular_prefix(path: Path, max_bytes: int) -> bytes | None:
+    """Até `max_bytes` do início do arquivo regular; `None` se falta ou não é regular."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         # Antes do `fdopen`, que recusa diretório sem fechar o descritor recebido.
@@ -82,8 +88,7 @@ def read_regular_file(path: Path, max_bytes: int) -> bytes | None:
             os.close(fd)
             return None
         with os.fdopen(fd, "rb") as source:
-            data = source.read(max_bytes + 1)
+            return source.read(max_bytes)
     except OSError:
         # Ausente, symlink (ELOOP) ou ilegível.
         return None
-    return data if len(data) <= max_bytes else None

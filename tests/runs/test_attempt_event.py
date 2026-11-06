@@ -15,6 +15,7 @@ from goblinshift.runs.worker.attempt_event import (
     TIMINGS_MAX_BYTES,
     links_to_acceptance,
     read_executor_timings,
+    read_regular_prefix,
 )
 
 TRACE_ID = 0x4BF92F3577B34DA6A3CE929D0E0E4736
@@ -128,6 +129,34 @@ def test_diretorio_nao_tem_tempos(tmp_path: Path) -> None:
     path.mkdir()
 
     assert read_executor_timings(path) == {}
+
+
+# --- prefixo de arquivo regular ------------------------------------------------------------------
+
+
+def test_prefixo_corta_no_teto(tmp_path: Path) -> None:
+    path = tmp_path / "progress.jsonl"
+    path.write_bytes(b"abcdef")
+
+    assert read_regular_prefix(path, 4) == b"abcd"
+
+
+def test_prefixo_de_arquivo_menor_que_o_teto_e_o_arquivo(tmp_path: Path) -> None:
+    path = tmp_path / "progress.jsonl"
+    path.write_bytes(b"ab")
+
+    assert read_regular_prefix(path, 4) == b"ab"
+
+
+def test_prefixo_de_diretorio_nao_existe(tmp_path: Path) -> None:
+    assert read_regular_prefix(tmp_path, 4) is None
+
+
+def test_prefixo_de_fifo_nao_existe(tmp_path: Path) -> None:
+    path = tmp_path / "progress.jsonl"
+    os.mkfifo(path)
+
+    assert read_regular_prefix(path, 4) is None
 
 
 # --- link para o trace da aceitação ---------------------------------------------------------------

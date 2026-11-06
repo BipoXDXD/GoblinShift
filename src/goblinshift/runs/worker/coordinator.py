@@ -32,7 +32,6 @@ import json
 import logging
 import os
 import random
-import stat
 import time
 import uuid
 from collections import Counter
@@ -425,15 +424,10 @@ class Coordinator:
         """
         total = len(claimed.input_upload_ids)
         progress = self._runner.work_dir(claimed.attempt_id) / "progress.jsonl"
-        try:
-            fd = os.open(progress, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        except OSError:
-            # Ausente, symlink (ELOOP) ou ilegível: o progresso é informativo, conta zero.
+        data = attempt_event.read_regular_prefix(progress, PROGRESS_MAX_BYTES)
+        if data is None:
+            # O progresso é informativo: sem leitura, conta zero.
             return 0
-        with os.fdopen(fd, "rb") as lines:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                return 0
-            data = lines.read(PROGRESS_MAX_BYTES)
         return min(data.count(b"\n"), total)
 
     # 4. Desfecho -----------------------------------------------------------------------
