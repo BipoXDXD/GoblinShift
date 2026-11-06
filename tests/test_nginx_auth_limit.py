@@ -152,6 +152,7 @@ def test_prefixos_ipv6_diferentes_nao_dividem_o_limite(
     [
         pytest.param("198.51.100.30", "::ffff:198.51.100.30", id="ipv4-e-mapeado"),
         pytest.param("::ffff:c633:641f", "198.51.100.31", id="mapeado-em-hexadecimal-e-ipv4"),
+        pytest.param("::ffff:8.8.10.4", "8.8.10.4", id="mapeado-com-byte-0a-e-ipv4"),
     ],
 )
 def test_ipv4_mapeado_em_ipv6_conta_como_o_proprio_ipv4(
