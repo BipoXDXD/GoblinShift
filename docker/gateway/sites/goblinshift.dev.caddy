@@ -7,6 +7,14 @@ goblinshift.dev {
   import cloudflare-ips.conf
   vars_regexp {header.CF-Connecting-IP} `^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}|:(?::[0-9A-Fa-f]{1,4}){1,7}|::)$`
  }
+ # Só o erro do próprio proxy chega aqui. A resposta de erro do Nginx ou da API passa como veio.
+ handle_errors {
+  header -Server
+  header Cache-Control no-store
+  header Content-Type "text/plain; charset=utf-8"
+  header Retry-After 30
+  respond "Serviço temporariamente indisponível. Tente novamente em instantes." 503
+ }
  # `route` executa na ordem escrita, sem depender da ordenação de diretivas do Caddy: o valor
  # padrão vem antes da troca pelo IP informado.
  route {
@@ -15,7 +23,9 @@ goblinshift.dev {
   reverse_proxy 172.31.0.4:80 {
    header_up X-Forwarded-For {vars.client_address}
    header_up -CF-Connecting-IP
-   lb_try_duration 5s
+   # A troca de containers vira espera em vez de erro (ADR 044). Sem `lb_retry_match`, o Caddy
+   # só repete método diferente de GET quando a conexão não se estabeleceu, e aí nada foi enviado.
+   lb_try_duration 30s
    lb_try_interval 250ms
   }
  }
