@@ -12,7 +12,7 @@ O caminho em produção é Cloudflare → Traefik do Coolify → gateway Caddy �
 
 | Alternativa | Prós | Contras |
 |-------------|------|---------|
-| **A. Certificado de origem da Cloudflare** (escolhida) | Feito para este trecho; arquivo simples, carregado por `caddy reload`; sem imagem nova e sem mudar `gateway.json` nem `Caddyfile` | Só a Cloudflare o reconhece, então vale para o tráfego que passa por ela; é mais uma chave para guardar |
+| **A. Certificado de origem da Cloudflare** (escolhida) | Feito para este trecho; arquivo simples, que entra com o `caddy reload` dos sites; sem imagem nova e sem mudar `gateway.json` nem `Caddyfile` | Só a Cloudflare o reconhece, então vale para o tráfego que passa por ela; é mais uma chave para guardar |
 | **B. Certificado público por validação de DNS** | Reconhecido por qualquer cliente | Exige imagem própria do Caddy, em lugar da oficial por digest, e um token que edita o DNS guardado no servidor |
 | **C. Encerrar o TLS no Traefik** | Um só lugar cuida dos certificados | Refaz o passthrough e o PROXY protocol, de que depende o IP do cliente do ADR 041 |
 
@@ -31,7 +31,7 @@ Com isso, a confiança no gateway fica assim:
 
 ## Publicação
 
-O merge não publica nada: como no [ADR 041](041-ip-do-cliente-atras-da-cloudflare.md#publicação), o gateway segue no commit fixo até a publicação dele. Os arquivos do certificado entram no volume antes de os sites serem carregados, e o `caddy validate` recusa a configuração enquanto faltar algum.
+O merge não publica nada: como no [ADR 041](041-ip-do-cliente-atras-da-cloudflare.md#publicação), o gateway segue no commit fixo até a publicação dele. Os arquivos do certificado entram no volume antes de os sites serem carregados, e o `caddy validate` recusa a configuração enquanto faltar algum. Depois de carregados, trocar só os dois arquivos não muda a configuração: o `caddy reload` responde sucesso sem relê-los, e a troca pede `caddy reload --force`.
 
 ## Consequências
 

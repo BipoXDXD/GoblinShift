@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,10 @@ BOT = "github-actions[bot]"
 STRANGER = "alguem-de-fora"
 ISSUE_NUMBER = 7
 STEP_TIMEOUT_SECONDS = 10
+# Como o runner chama o bash: sem `shell:` não há pipefail, e falha no `gh` antes do `jq` passaria
+# por "nenhuma issue aberta".
+RUNNER_BASH = ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c"]
+RUNNER_DEFAULT_SHELL = ["bash", "-e", "-c"]
 
 
 def workflow() -> dict[Any, Any]:
@@ -135,10 +140,12 @@ def _run_report_step(
     tmp_path: Path,
     issues: list[dict[str, Any]],
     comment_pages: tuple[list[dict[str, Any]], ...] = ([],),
+    failing_read: str = "nenhuma-leitura",
 ) -> str:
     """Executa o passo real com um `gh` falso e devolve o que ele registrou.
 
-    Cada lista vira uma página, concatenada como no `gh api --paginate`.
+    Cada lista vira uma página, concatenada como no `gh api --paginate`. O passo roda no shell que
+    o workflow declara, e a leitura cujo caminho casar com `failing_read` falha.
     """
     calls = tmp_path / "gh-chamadas"
     calls.touch()
@@ -148,6 +155,7 @@ def _run_report_step(
     fake.write_text(
         "#!/bin/bash\n"
         f'printf "%s\\n" "$*" >> "{calls}"\n'
+        f'if [[ "$1" == api && "$*" == *{failing_read}* ]]; then exit 1; fi\n'
         'case "$1 $*" in\n'
         f'  issue*) cat >> "{calls}" ;;\n'
         f'  *"/comments"*) cat "{tmp_path}/comments.json" ;;\n'
@@ -158,9 +166,10 @@ def _run_report_step(
     step = jobs()["report"]["steps"][0]
     jq = shutil.which("jq")
     assert jq is not None
+    shell = RUNNER_BASH if step.get("shell") == "bash" else RUNNER_DEFAULT_SHELL
     subprocess.run(  # noqa: S603 - executa o passo do próprio workflow, sem entrada externa
-        ["bash", "-eo", "pipefail", "-c", step["run"]],  # noqa: S607
-        check=True,
+        [*shell, step["run"]],
+        check=False,
         timeout=STEP_TIMEOUT_SECONDS,
         env={
             "PATH": f"{tmp_path}:{Path(jq).parent}:/usr/bin:/bin",
@@ -171,6 +180,20 @@ def _run_report_step(
         },
     )
     return calls.read_text()
+
+
+def test_passo_da_issue_declara_bash_para_ter_pipefail() -> None:
+    assert jobs()["report"]["steps"][0]["shell"] == "bash"
+
+
+@pytest.mark.parametrize(
+    "failing_read", ["dono/repo/issues", "/comments"], ids=["lista-de-issues", "comentarios"]
+)
+def test_falha_ao_ler_o_github_nao_cria_nem_comenta(tmp_path: Path, failing_read: str) -> None:
+    calls = _run_report_step(tmp_path, [_issue(issue_title())], failing_read=failing_read)
+
+    assert "issue create" not in calls
+    assert "issue comment" not in calls
 
 
 def test_autor_filtrado_e_o_do_proprio_workflow() -> None:

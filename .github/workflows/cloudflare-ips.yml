@@ -63,6 +63,9 @@ jobs:
       issues: write # abre a issue de divergência
     steps:
       - name: Abrir a issue ou comentar nela se a divergência mudou
+        # Declarado para ter pipefail: sem ele, falha do `gh` antes do `jq` pareceria lista vazia
+        # e duplicaria a issue.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           # O repositório é público: só conta o que o próprio workflow escreveu, senão uma issue

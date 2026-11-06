@@ -98,7 +98,7 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
    install -d -m 700 "$BACKUP"
    cp -a "$SITES/." "$BACKUP/"
    ```
-4. Instalar os dois arquivos e conferir os bytes, sem editar no host:
+4. Confira antes os arquivos do [ADR 043](043-confianca-no-gateway.md) no volume. Instalar os dois arquivos e conferir os bytes, sem editar no host:
    ```sh
    for arquivo in cloudflare-ips.conf goblinshift.dev.caddy; do
      install -m 644 "$CLONE/docker/gateway/sites/$arquivo" "$SITES/$arquivo"
@@ -112,7 +112,7 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
    docker exec edge-proxy-1 caddy validate --config /tmp/Caddyfile.novo --adapter caddyfile
    ```
 6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile`, depois `docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo`.
-7. Alinhar o recurso do gateway ao commit, para um Redeploy futuro não devolver o bug. Alinhar é só gravar o campo; quem recria o container é o Redeploy ou o `instant_deploy`, e nenhum dos dois entra aqui:
+7. Confira antes os arquivos do [ADR 043](043-confianca-no-gateway.md) no volume. Alinhar o recurso do gateway ao commit, para um Redeploy futuro não devolver o bug. Alinhar é só gravar o campo; quem recria o container é o Redeploy ou o `instant_deploy`, e nenhum dos dois entra aqui:
    - **Fora de janela, não mova `git_commit_sha`** enquanto o recurso não tiver sido publicado com `docker/gateway/`: o campo fica como está, e até a janela um Redeploy devolve a configuração antiga. O restante deste passo vale só dentro de uma janela ou depois dela.
    - Se `git_commit_sha` for `HEAD`, não há o que gravar: o próximo Redeploy clona a `main`, com os mesmos bytes.
    - Se for um commit fixo, gravar o novo:
@@ -124,11 +124,11 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 8. Conferir: de uma rede conhecida, `curl -sS -o /dev/null -w '%{http_code}\n' https://goblinshift.dev/livez` deve dar `200`, e o log do Nginx deve trazer o /24 daquela rede em `client`, não `172.69.x.0`. `https://stillon.tech` deve responder como antes.
 9. Remover o clone: `rm -rf "$CLONE"`. O `$BACKUP` fica até a correção ser dada como estável.
 
-**Reversão:** `cp -a "$BACKUP/." "$SITES/"` e repetir os passos 5 e 6. O `cloudflare-ips.conf` que sobrar não faz efeito, porque nada mais o importa. Se o `git_commit_sha` foi alterado, gravar de volta o valor lido antes do merge. Trecho inválido não derruba nada: o `reload` recusa e a configuração anterior fica no ar (ADR 014).
+**Reversão:** `cp -a "$BACKUP/." "$SITES/"` e repetir os passos 5 e 6. O `cloudflare-ips.conf` que sobrar não faz efeito, porque nada mais o importa. Se o `git_commit_sha` foi alterado, gravar de volta o valor lido antes do merge. No `reload`, trecho inválido não derruba nada: ele recusa e a configuração anterior fica no ar. Isso não vale para recriar ou reiniciar o container, que não tem configuração anterior a manter e não sobe com a inválida (ADR 014).
 
 ### Publicar o site do StillOn
 
-O merge da [extensão](#extensão-ao-stillontech) não publica nada: o gateway segue no commit fixo até a janela de publicação. Nela, repita [Depois do merge](#depois-do-merge) só com o `stillon.tech.caddy`, porque o `cloudflare-ips.conf` já está no gateway, e com um `BACKUP` próprio no passo 3. No passo 8, `https://stillon.tech/healthz` deve dar `200`, e `https://goblinshift.dev/livez` deve responder como antes.
+O merge da [extensão](#extensão-ao-stillontech) não publica nada: o gateway segue no commit fixo até a janela de publicação. Confira antes os arquivos do [ADR 043](043-confianca-no-gateway.md) no volume. Nela, repita [Depois do merge](#depois-do-merge) só com o `stillon.tech.caddy`, porque o `cloudflare-ips.conf` já está no gateway, e com um `BACKUP` próprio no passo 3. No passo 8, `https://stillon.tech/healthz` deve dar `200`, e `https://goblinshift.dev/livez` deve responder como antes.
 
 ### Mudança no `Caddyfile`
 
