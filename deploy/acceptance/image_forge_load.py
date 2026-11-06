@@ -235,6 +235,7 @@ def _install(path: Path, data: bytes, group_id: int) -> None:
 
 
 def _summary(report: Path) -> dict[str, int] | None:
+    # Sem relatório legível o critério reprova, com o código de saída na evidência.
     try:
         document = json.loads(report.read_text(encoding="utf-8"))
     except (OSError, ValueError):
