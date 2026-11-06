@@ -14,4 +14,4 @@ Os quatro serviços contínuos da aplicação têm healthcheck no Compose. A API
 
 Manter backups e restauração verificada antes de atualizar uma versão. Não apontar tráfego para a origem com dados antigos após o destino aceitar escritas. Uma reversão precisa primeiro preservar e transferir o estado novo.
 
-A configuração do gateway (`Caddyfile` e `sites/`) não passa pela release da CI, que só troca imagens: publicar `sites/`, publicar o `Caddyfile` e atualizar a lista de faixas da Cloudflare seguem os passos do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md).
+A configuração do gateway (`docker/gateway/Caddyfile` e `docker/gateway/sites/`) não passa pela release da CI, que só troca imagens: publicar `sites/`, publicar o `Caddyfile` e atualizar a lista de faixas da Cloudflare seguem os passos do [ADR 041](../../docs/adr/041-ip-do-cliente-atras-da-cloudflare.md).

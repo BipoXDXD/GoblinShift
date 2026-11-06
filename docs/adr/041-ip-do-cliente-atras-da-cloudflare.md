@@ -27,14 +27,14 @@ O Traefik não entra na comparação: o roteador é TCP com passthrough, então 
 
 ## Decisão
 
-Alternativa B. Em `deploy/coolify/sites/goblinshift.dev.caddy`, o matcher `@cloudflare` exige as duas coisas: conexão vinda de uma faixa da lista e `CF-Connecting-IP` com exatamente um endereço IPv4 ou IPv6. Só nesse caso o `X-Forwarded-For` enviado ao Nginx é o `CF-Connecting-IP`. Em todos os outros, é `{remote_host}`, o IP da conexão depois do PROXY protocol.
+Alternativa B. Em `docker/gateway/sites/goblinshift.dev.caddy`, o matcher `@cloudflare` exige as duas coisas: conexão vinda de uma faixa da lista e `CF-Connecting-IP` com exatamente um endereço IPv4 ou IPv6. Só nesse caso o `X-Forwarded-For` enviado ao Nginx é o `CF-Connecting-IP`. Em todos os outros, é `{remote_host}`, o IP da conexão depois do PROXY protocol.
 
 - **`CF-Connecting-IP`, não `X-Forwarded-For`:** é um valor só, escrito pela Cloudflare. O `X-Forwarded-For` é uma cadeia que começa no que o cliente mandou.
 - **`vars_regexp` sobre o placeholder, não `header_regexp`:** o `header_regexp` aceita o pedido se qualquer linha do cabeçalho casar, e o valor repetido chegaria inteiro ao Nginx. O placeholder junta as linhas com vírgula, e a regex recusa esse valor.
 - **Regex estrita de endereço, não classe de caracteres:** `....` ou `deadbeef` passariam por uma classe, o Nginx não os entenderia e o `$remote_addr` viraria o gateway, juntando quem os enviasse num só balde do `limit_req`. Formas que a Cloudflare não envia, como `::ffff:192.0.2.1`, também são recusadas e caem no caso de quem conectou.
 - **`{remote_host}`, não `{client_ip}`:** `{client_ip}` obedece ao `trusted_proxies` global, que na data desta decisão ainda tinha o IP aposentado, de onde um `X-Forwarded-For` forjado seria aceito.
 - **O `CF-Connecting-IP` para no gateway:** ele é removido do pedido ao Nginx, porque ali já não há como saber quem o escreveu.
-- **Lista em `deploy/coolify/sites/cloudflare-ips.conf`:** a extensão `.conf` fica fora do glob `*.caddy` do `Caddyfile`, e só o site do GoblinShift a importa. Como o diretório `sites/` é um bind de diretório, o arquivo novo não exige mudar o `gateway.json`.
+- **Lista em `docker/gateway/sites/cloudflare-ips.conf`:** a extensão `.conf` fica fora do glob `*.caddy` do `Caddyfile`, e só o site do GoblinShift a importa. Como o diretório `sites/` é um bind de diretório, o arquivo novo não exige mudar o `gateway.json`.
 
 O Nginx, o uvicorn e a auditoria não mudam: continuam confiando só no IP fixo do gateway, recebem um IP só e já tratam IPv6.
 
@@ -51,6 +51,8 @@ TOKEN=$(cat /etc/coolify-release/api-token)
 API=http://127.0.0.1:8000/api/v1/applications/$UUID
 ```
 
+**Caminho novo.** O `Caddyfile` e `sites/` saíram de `deploy/coolify/` para `docker/gateway/`, e o `gateway.json` do repositório já aponta para lá. Os binds de um container em execução continuam no caminho da publicação dele, até o recurso ser publicado de novo. Por isso os passos abaixo leem o caminho do host por `docker inspect`, e os arquivos novos vêm do clone em `docker/gateway/`. Enquanto o recurso não for publicado com o caminho novo, o passo 7 de [Depois do merge](#depois-do-merge) e o bloco de [Mudança no `Caddyfile`](#mudança-no-caddyfile) não gravam `git_commit_sha`: mover o commit só faz parte de uma janela que recria o container.
+
 ### Antes do merge
 
 Se o recurso do gateway publicar a cada push, o merge recria o container e derruba todos os sites por alguns segundos. O padrão do Coolify para auto-deploy é ligado, então isto **bloqueia o merge** até ser respondido:
@@ -65,7 +67,7 @@ Se o recurso do gateway publicar a cada push, o merge recria o container e derru
 | "Deploy on push" (`is_auto_deploy_enabled` verdadeiro) | Mudar para manual **antes** do merge, repetir os passos 1 e 2 e só então fazer o merge. Pela API: `curl -fsS -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"is_auto_deploy_enabled":false}' "$API"` |
 | Não deu para saber | Não fazer o merge |
 
-Watch Paths não é saída: esta mudança toca justamente `deploy/coolify/sites/`. Depois de desligado, o auto-deploy fica desligado, porque a configuração do gateway é publicada à mão (veja [`deploy/coolify/release/README.md`](../../deploy/coolify/release/README.md)).
+Watch Paths não é saída: esta mudança toca justamente `docker/gateway/sites/`. Depois de desligado, o auto-deploy fica desligado, porque a configuração do gateway é publicada à mão (veja [`deploy/coolify/release/README.md`](../../deploy/coolify/release/README.md)).
 
 ### Depois do merge
 
@@ -75,7 +77,7 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
    ```sh
    SITES=$(docker inspect edge-proxy-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/caddy/conf.d"}}{{.Source}}{{end}}{{end}}')
    echo "$SITES"
-   grep -rlE 'goblinshift\.dev\.caddy|deploy/coolify/sites' /etc/coolify-release /var/lib/coolify-release /etc/goblinshift 2>/dev/null
+   grep -rlE 'goblinshift\.dev\.caddy|deploy/coolify/sites|docker/gateway/sites' /etc/coolify-release /var/lib/coolify-release /etc/goblinshift 2>/dev/null
    ```
 2. Obter os bytes aprovados de um clone novo do repositório público, fora do checkout do Coolify, e confirmar que o commit está na `main`:
    ```sh
@@ -93,8 +95,8 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
 4. Instalar os dois arquivos e conferir os bytes, sem editar no host:
    ```sh
    for arquivo in cloudflare-ips.conf goblinshift.dev.caddy; do
-     install -m 644 "$CLONE/deploy/coolify/sites/$arquivo" "$SITES/$arquivo"
-     cmp "$CLONE/deploy/coolify/sites/$arquivo" "$SITES/$arquivo"
+     install -m 644 "$CLONE/docker/gateway/sites/$arquivo" "$SITES/$arquivo"
+     cmp "$CLONE/docker/gateway/sites/$arquivo" "$SITES/$arquivo"
    done
    ```
 5. Validar a partir do `Caddyfile` do host, nunca o de `/etc/caddy`: o container pode estar preso a uma versão antiga, e recarregá-la desfaria a última [mudança no `Caddyfile`](#mudança-no-caddyfile):
@@ -105,6 +107,7 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
    ```
 6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile`, depois `docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo`.
 7. Alinhar o recurso do gateway ao commit, para um Redeploy futuro não devolver o bug. Alinhar é só gravar o campo; quem recria o container é o Redeploy ou o `instant_deploy`, e nenhum dos dois entra aqui:
+   - **Fora de janela, não mova `git_commit_sha`** enquanto o recurso não tiver sido publicado com `docker/gateway/`: o campo fica como está, e até a janela um Redeploy devolve a configuração antiga. O restante deste passo vale só dentro de uma janela ou depois dela.
    - Se `git_commit_sha` for `HEAD`, não há o que gravar: o próximo Redeploy clona a `main`, com os mesmos bytes.
    - Se for um commit fixo, gravar o novo:
      ```sh
@@ -141,7 +144,7 @@ echo "CLONE=$CLONE"
 git clone --quiet https://github.com/BipoXDXD/GoblinShift.git "$CLONE"
 git -C "$CLONE" merge-base --is-ancestor "$COMMIT" origin/main || { echo "commit fora da main" >&2; exit 1; }
 git -C "$CLONE" checkout --quiet "$COMMIT"
-NOVO=$CLONE/deploy/coolify/Caddyfile
+NOVO=$CLONE/docker/gateway/Caddyfile
 test -s "$NOVO"
 
 BACKUP=/root/gateway-backup-caddyfile-$(date -u +%Y%m%dT%H%M%SZ)
@@ -164,6 +167,8 @@ echo "configuração em execução salva em $BACKUP.config.json"
 ```
 
 Se o bloco parar antes do `reload`, a produção não mudou; remova o `CLONE` impresso. Para reverter depois, use os caminhos impressos: copie `$BACKUP.em-uso` para `/tmp/Caddyfile.novo` do container, repita o `validate` e o `reload`, e rode `cp "$BACKUP" "$ORIGEM"`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
+
+**Fora de janela, não mova `git_commit_sha`** enquanto o recurso não tiver sido publicado com `docker/gateway/`. O bloco acima muda o `Caddyfile` do host e a configuração em execução, mas o commit fixo do recurso continua o antigo: até a janela, um Redeploy devolve a configuração antiga.
 
 ## Atualizar a lista
 
