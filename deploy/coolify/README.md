@@ -2,9 +2,11 @@
 
 A publicação usa aplicações Git Compose em modo Raw, com repositório preservado e sem comando de start customizado. Os containers reais são pertencentes ao recurso no Coolify. Não há observador substituindo a aplicação.
 
-Aplicação e infraestrutura têm recursos separados para que uma publicação da aplicação não pare o banco. As definições compartilham o nome Compose original, usam redes e volumes externos e não executam remoção de órfãos. Os binds privados existem previamente no host; suas credenciais não ficam no repositório. Cada imagem é fixada por digest e deve estar previamente importada e validada; `pull_policy: never` impede trocar a imagem durante o corte.
+Aplicação e infraestrutura têm recursos separados para que uma publicação da aplicação não pare o banco. As definições compartilham o nome Compose original, usam redes externas e guardam os dados em binds do host, sem volumes nomeados, e não executam remoção de órfãos. Só o gateway, um recurso próprio de nome `edge`, tem volumes externos. Os binds privados existem previamente no host; suas credenciais não ficam no repositório. Cada imagem é fixada por digest e deve estar previamente importada e validada; `pull_policy: never` impede trocar a imagem durante o corte.
 
-A configuração de preparação não executa escritores em segundo plano. Depois da cópia final consistente, a configuração definitiva deve habilitar os serviços completos antes da mudança de DNS.
+A configuração de preparação da migração, sem escritores em segundo plano, já não existe: `app.json` traz os serviços completos, com `worker` e `maintenance`.
+
+Cada serviço tem `container_name` fixo, então uma publicação substitui a API e o Nginx, sem duas versões lado a lado. O efeito disso em produção nunca foi medido ([README](../../README.md#publicação-em-produção)).
 
 Segredos de interpolação são configurados como variáveis privadas no Coolify. O modo Raw conserva o isolamento por serviço das variáveis e dos arquivos de segredo. Não adicionar env_file global a todos os serviços.
 
