@@ -24,7 +24,8 @@ source "$DEPLOY/backup/lib.sh"
 require_env ACCEPTANCE_HEALTHCHECK_URL
 
 APP_PROJECT=goblinshift
-# O stop_grace_period do worker no compose.yaml: tempo para a tentativa em curso encerrar.
+# O stop_grace_period do worker no compose.yaml. A tentativa em curso que não terminar nesse
+# prazo leva SIGKILL e volta pelo lease vencido.
 WORKER_STOP_S=30
 
 healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"

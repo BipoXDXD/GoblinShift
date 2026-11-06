@@ -35,7 +35,7 @@ x-app: &app
   logging: *logging
 
 # Storage privado (docs/GoblinShiftPlan.md, 3.6): local num volume; na VPS, o filesystem de
-# tamanho fixo /srv/goblinshift/storage (deploy/release.sh).
+# tamanho fixo /srv/goblinshift/storage.
 x-storage: &storage
   ${GS_STORAGE_DATA:-storage}:/var/lib/goblinshift/storage
 
@@ -123,7 +123,8 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
-    # Mais que o prazo de parada do executor (10 s) para a tentativa em curso encerrar.
+    # O SIGTERM não interrompe a tentativa em curso. Este prazo é menor que o teto dela (10 min):
+    # a que não terminar a tempo leva SIGKILL e volta pelo lease vencido.
     stop_grace_period: 30s
     restart: unless-stopped
 
