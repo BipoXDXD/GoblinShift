@@ -36,7 +36,11 @@ jobs:
       - name: Instalar o age (backup) e o FFmpeg completo (vídeos sintéticos do Media Mill)
         # O FFmpeg do runner só gera e confere fixtures; a receita, na imagem do executor, usa o
         # build mínimo do ADR 036.
-        run: sudo apt-get update -q && sudo apt-get install -yq age ffmpeg
+        timeout-minutes: 10
+        run: |
+          scripts/ci-apt-sem-azure.sh
+          sudo apt-get update -q
+          sudo apt-get install -yq age ffmpeg
       - name: Ruff (lint)
         run: uv run ruff check .
       - name: Ruff (formatação)
@@ -261,6 +265,7 @@ jobs:
           curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
           echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          scripts/ci-apt-sem-azure.sh
           sudo apt-get update -q
           sudo apt-get install -yq "runsc=${GVISOR_VERSION}"
           runsc --version | head -n 1
@@ -275,7 +280,11 @@ jobs:
           sudo systemctl restart docker
           docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
       - name: FFmpeg completo (gera os vídeos sintéticos dos testes do Media Mill na imagem)
-        run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+        timeout-minutes: 10
+        run: |
+          scripts/ci-apt-sem-azure.sh
+          sudo apt-get update -q
+          sudo apt-get install -yq ffmpeg
       - name: Testes do executor-ctl e da imagem do executor sob runsc
         env:
           GS_TEST_RUNTIME: runsc
