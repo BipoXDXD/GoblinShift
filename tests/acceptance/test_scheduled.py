@@ -37,7 +37,13 @@ echo "docker $*" >>"$FAKE_CALLS"
 case "$1" in
   ps) [ -n "$FAKE_WORKER" ] && echo "$FAKE_WORKER"; exit "${FAKE_PS_RC:-0}" ;;
   stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
-  start) exit "${FAKE_START_RC:-0}" ;;
+  start)
+    if [ -n "$FAKE_START_SLEEP_S" ] && [ ! -e "$FAKE_CALLS.start" ]; then
+      : >"$FAKE_CALLS.start"
+      sleep "$FAKE_START_SLEEP_S"
+    fi
+    exit "${FAKE_START_RC:-0}"
+    ;;
   inspect) echo "${FAKE_RUNNING-true}"; exit "${FAKE_INSPECT_RC:-0}" ;;
 esac
 """
@@ -262,6 +268,19 @@ def test_sigterm_no_cliente_do_stop_espera_a_parada_antes_de_religar(fakes: Path
         f"docker stop --time=30 {WORKER}",
         f"docker start {WORKER}",
         "docker inspect",
+        f"curl {CHECK_URL}/fail",
+    ]
+
+
+def test_sigterm_no_cliente_do_start_repete_o_religamento(fakes: Path) -> None:
+    code, calls = interrupted(fakes, reached="docker start", group=True, FAKE_START_SLEEP_S="30")
+
+    assert code == SIGTERM_EXIT
+    assert calls[-5:] == [
+        f"docker start {WORKER}",
+        f"docker stop --time=30 {WORKER}",
+        f"docker start {WORKER}",
+        worker_state(),
         f"curl {CHECK_URL}/fail",
     ]
 

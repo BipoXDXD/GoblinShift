@@ -144,9 +144,6 @@ import sys
 
 from acceptance import run
 
-ran = []
-
-
 def docker(*args):
     print(args[0], file=sys.stderr, flush=True)
     if args[0] == sys.argv[1]:
@@ -171,7 +168,7 @@ run.run_with_maintenance_suspended(probes, docker)
         ("inspect", ["ps", "stop", "sondas", "start", "inspect", "start", "inspect"]),
     ],
 )
-def test_sigterm_outside_the_probes_is_deferred_until_the_state_is_read(
+def test_sigterm_outside_the_probes_waits_for_this_process_to_read_the_state(
     command: str, calls: list[str]
 ) -> None:
     result = subprocess.run(  # noqa: S603 - script fixo acima
@@ -184,6 +181,47 @@ def test_sigterm_outside_the_probes_is_deferred_until_the_state_is_read(
     )
 
     assert result.stderr.split() == calls
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+SECOND_SIGTERM_DURING_RESTART = """
+import os
+import signal
+import subprocess
+import sys
+import time
+
+from acceptance import run
+
+
+def docker(*args):
+    if args[0] == "start":
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise subprocess.CalledProcessError(1, ["docker", *args], stderr="sem memória")
+    return "m4nt\\n" if args[0] == "ps" else "true\\n"
+
+
+def probes():
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(30)
+
+
+run.run_with_maintenance_suspended(probes, docker)
+"""
+
+
+def test_second_sigterm_does_not_cut_the_report_of_the_failed_restart() -> None:
+    result = subprocess.run(  # noqa: S603 - script fixo acima
+        [sys.executable, "-B", "-c", SECOND_SIGTERM_DURING_RESTART],
+        cwd=DEPLOY_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert "FALHOU" in result.stderr
+    assert "sem memória" in result.stderr
     assert result.returncode == 128 + signal.SIGTERM
 
 

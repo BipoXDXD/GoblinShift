@@ -159,9 +159,10 @@ def run_with_maintenance_suspended(
     """Roda as sondas com a manutenção parada; o último resultado diz se ela voltou ao ar.
 
     Manutenção que já estava parada fica como estava. O SIGTERM durante as sondas vira saída 143.
-    Na parada e no religamento ele espera o comando terminar, para a manutenção não ficar parada:
-    ela volta, com o estado relido, antes de a saída seguir. Exceção de sonda tem o mesmo caminho,
-    e uma falha nessa volta é impressa no stderr. Só o SIGKILL não deixa limpar.
+    Na parada e no religamento, este processo só trata o sinal ao fim do comando, mas o cliente
+    `docker` pode ter morrido com ele: a parada interrompida é repetida (`await_stop`), e a
+    manutenção volta, com o estado relido, antes de a saída seguir. Exceção de sonda tem o mesmo
+    caminho, e uma falha nessa volta é impressa no stderr. Só o SIGKILL não deixa limpar.
     """
     docker = docker or _docker_output
     containers = _service_ids(docker, MAINTENANCE_SERVICE)
@@ -211,10 +212,11 @@ def _sigterm_as_exit() -> Iterator[None]:
 
 @contextmanager
 def _sigterm_blocked() -> Iterator[None]:
-    """Adia o SIGTERM até o fim do bloco, para este processo e para os clientes `docker` dele.
+    """Adia o SIGTERM até o fim do bloco, só para este processo.
 
-    O sinal do systemd vai ao cgroup inteiro. A máscara é herdada pelos filhos, então o comando em
-    curso termina em vez de morrer pela metade, e o sinal pendente chega na saída do bloco.
+    Serve para o processo ler o resultado do comando antes de sair; o sinal pendente chega na saída
+    do bloco. Não protege o cliente `docker`: o runtime do Go não deixa bloquear SIGTERM, e ele
+    morre com o sinal do cgroup mesmo herdando a máscara. Quem cobre isso é o `await_stop`.
     """
     previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
     try:
