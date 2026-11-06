@@ -198,7 +198,10 @@ def test_verify_recusa_tentativa_fora_do_runsc(
     assert verify(fake_docker, tmp_path, f"runsc\n{other}\n", "2\n") != 0
 
 
-@pytest.mark.parametrize(("recorded", "attempts"), [("runsc\n", "2\n"), ("runsc\nrunsc\n", "1\n")])
+@pytest.mark.parametrize(
+    ("recorded", "attempts"),
+    [("runsc\n", "2\n"), ("runsc\nrunsc\n", "1\n"), ("runsc\nrunsc\nrunc\n", "2\n")],
+)
 def test_verify_recusa_contagem_diferente_do_banco(
     fake_docker: Path, tmp_path: Path, recorded: str, attempts: str
 ) -> None:
