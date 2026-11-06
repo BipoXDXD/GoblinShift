@@ -5,7 +5,10 @@ linha no banco; com a manutenção no ar, ela para e remove a sonda no ciclo seg
 um falso que registra os comandos, porque o script inteiro só roda na VPS.
 """
 
+import signal
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from acceptance import run
@@ -13,6 +16,7 @@ from acceptance.run import Outcome
 
 from executor_ctl import profile
 
+DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 MAINTENANCE = "c0ffee"
 PROBE_OUTCOME = Outcome("sonda", True, "ok")
 
@@ -88,6 +92,52 @@ def test_maintenance_restarted_when_a_probe_raises() -> None:
         run.run_with_maintenance_suspended(probes, docker)
 
     assert docker.commands() == ["ps", "stop", "start", "inspect"]
+
+
+SIGTERM_DURING_PROBES = """
+import os
+import signal
+import sys
+import time
+
+from acceptance import run
+
+
+def docker(*args):
+    print(args[0], file=sys.stderr, flush=True)
+    return "m4nt\\n" if args[0] == "ps" else "true\\n"
+
+
+def probes():
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(30)
+
+
+run.run_with_maintenance_suspended(probes, docker)
+"""
+
+
+def test_maintenance_restarted_when_sigterm_arrives_during_probes() -> None:
+    # Processo próprio: sem o tratamento do sinal, o SIGTERM mata quem o recebe.
+    result = subprocess.run(  # noqa: S603 - script fixo acima
+        [sys.executable, "-B", "-c", SIGTERM_DURING_PROBES],
+        cwd=DEPLOY_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.stderr.split() == ["ps", "stop", "start", "inspect"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_probes_leave_the_sigterm_handler_as_it_was() -> None:
+    before = signal.getsignal(signal.SIGTERM)
+
+    run.run_with_maintenance_suspended(lambda: [PROBE_OUTCOME], FakeDocker())
+
+    assert signal.getsignal(signal.SIGTERM) == before
 
 
 def test_restart_failure_fails_the_acceptance_with_recovery_command() -> None:

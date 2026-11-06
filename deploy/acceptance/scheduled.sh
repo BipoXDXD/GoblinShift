@@ -6,8 +6,9 @@
 #
 # O worker fica parado durante o teste: as sondas enchem a área de trabalho, que só admite uma
 # tentativa por vez (README, "Teste de aceitação do ambiente"). Ele volta no fim, também quando
-# a aceitação reprova; se não voltar, o resultado é /fail. A manutenção, o próprio run.py
-# suspende e religa (ADR 017).
+# a aceitação reprova ou o serviço recebe SIGTERM (parada, reinício da máquina ou TimeoutStartSec:
+# container parado por `docker stop` não volta com `restart: unless-stopped`); se não voltar, o
+# resultado é /fail. A manutenção, o próprio run.py suspende e religa (ADR 017).
 #
 # Roda da cópia que o deploy/acceptance/install.sh faz em /usr/local/lib/goblinshift (do root), nunca
 # do checkout, que pertence ao usuário goblinshift; o lib.sh e o pacote vêm da mesma cópia.
@@ -27,20 +28,28 @@ APP_PROJECT=goblinshift
 # O stop_grace_period do worker no compose.yaml. A tentativa em curso que não terminar nesse
 # prazo leva SIGKILL e volta pelo lease vencido.
 WORKER_STOP_S=30
+SIGTERM_EXIT=143
 
 healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" "/start"
 
-mapfile -t workers < <(docker ps --quiet \
-  --filter="label=com.docker.compose.project=${APP_PROJECT}" \
-  --filter="label=com.docker.compose.service=worker")
+# Com o trap, o bash termina o comando em curso e segue até religar o worker e pingar /fail.
+interrupted=0
+trap 'interrupted=1' TERM INT
 
 status=0
+# Em variável, e não em `< <(...)`: a substituição de processo esconde a falha do `docker ps`, e
+# uma lista vazia por erro pareceria worker parado.
+running="$(docker ps --quiet \
+  --filter="label=com.docker.compose.project=${APP_PROJECT}" \
+  --filter="label=com.docker.compose.service=worker")" || status=$?
+mapfile -t workers < <(printf '%s' "$running")
+
 if ((${#workers[@]})); then
-  echo "worker parado durante o teste; se ele for interrompido à força, religue com:" \
+  echo "worker parado durante o teste; se ele for morto sem poder limpar (SIGKILL), religue com:" \
     "docker start ${workers[*]}"
   docker stop --time="$WORKER_STOP_S" "${workers[@]}" >/dev/null || status=$?
 fi
-if ((status == 0)); then
+if ((status == 0 && interrupted == 0)); then
   # -E e -s: sem variáveis PYTHON* nem site do usuário; o pacote vem só do cwd, que é do root.
   (cd "$DEPLOY" && python3 -E -s -B -m acceptance.run) || status=$?
 fi
@@ -50,6 +59,7 @@ if ((${#workers[@]})); then
     ((status != 0)) || status=1
   }
 fi
+((interrupted == 0 || status != 0)) || status=$SIGTERM_EXIT
 
 if ((status == 0)); then
   healthcheck_ping "$ACCEPTANCE_HEALTHCHECK_URL" ""

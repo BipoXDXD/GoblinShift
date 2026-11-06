@@ -9,7 +9,9 @@ import configparser
 import os
 import re
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -28,17 +30,19 @@ CONFIG_FILE = "/etc/goblinshift/acceptance.env"
 CHECK_URL = "https://hc-ping.com/0b1c2d3e-CANARY-aceitacao"
 WORKER = "w0rk3r"
 SCRIPT_TIMEOUT_S = 30
+SIGTERM_EXIT = 128 + signal.SIGTERM
 
 FAKE_DOCKER = """#!/bin/sh
 echo "docker $*" >>"$FAKE_CALLS"
 case "$1" in
-  ps) [ -n "$FAKE_WORKER" ] && echo "$FAKE_WORKER"; exit 0 ;;
-  stop) exit "${FAKE_STOP_RC:-0}" ;;
+  ps) [ -n "$FAKE_WORKER" ] && echo "$FAKE_WORKER"; exit "${FAKE_PS_RC:-0}" ;;
+  stop) sleep "${FAKE_STOP_SLEEP_S:-0}"; exit "${FAKE_STOP_RC:-0}" ;;
   start) exit "${FAKE_START_RC:-0}" ;;
 esac
 """
 FAKE_PYTHON = """#!/bin/sh
 echo "python3 $* (em $(basename "$PWD"))" >>"$FAKE_CALLS"
+sleep "${FAKE_ACCEPTANCE_SLEEP_S:-0}"
 exit "${FAKE_ACCEPTANCE_RC:-0}"
 """
 FAKE_CURL = """#!/bin/sh
@@ -65,18 +69,25 @@ def fakes(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def scheduled(
-    fakes: Path, *, url: str | None = CHECK_URL, worker: str = WORKER, **rc: int
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+def script_env(fakes: Path, url: str | None, worker: str) -> dict[str, str]:
     env = {
         "PATH": f"{fakes / 'bin'}:{os.environ['PATH']}",
         "FAKE_CALLS": str(fakes / "calls"),
         "FAKE_ARGV": str(fakes / "argv"),
         "FAKE_WORKER": worker,
-        **{f"FAKE_{name.upper()}_RC": str(code) for name, code in rc.items()},
     }
     if url is not None:
         env["ACCEPTANCE_HEALTHCHECK_URL"] = url
+    return env
+
+
+def scheduled(
+    fakes: Path, *, url: str | None = CHECK_URL, worker: str = WORKER, **rc: int
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    env = {
+        **script_env(fakes, url, worker),
+        **{f"FAKE_{name.upper()}_RC": str(code) for name, code in rc.items()},
+    }
     result = subprocess.run(  # noqa: S603 - script do repositório
         ["bash", str(SCRIPT)],  # noqa: S607 - o bash do PATH, como na unit
         env=env,
@@ -87,6 +98,32 @@ def scheduled(
     )
     calls = fakes / "calls"
     return result, calls.read_text().splitlines() if calls.exists() else []
+
+
+def interrupted(fakes: Path, *, reached: str, group: bool, **env: str) -> tuple[int, list[str]]:
+    """Roda o script e manda SIGTERM assim que a chamada `reached` aparecer no registro.
+
+    O systemd sinaliza o cgroup inteiro (`group`); o sinal só no bash cobre o instante entre dois
+    comandos. O novo grupo de processos deixa o sinal longe do pytest.
+    """
+    process = subprocess.Popen(  # noqa: S603 - script do repositório
+        ["bash", str(SCRIPT)],  # noqa: S607 - o bash do PATH, como na unit
+        env={**script_env(fakes, CHECK_URL, WORKER), **env},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    calls = fakes / "calls"
+    deadline = time.monotonic() + SCRIPT_TIMEOUT_S
+    while not (calls.exists() and reached in calls.read_text()):
+        assert time.monotonic() < deadline, f"o script não chegou a {reached}"
+        time.sleep(0.01)
+    if group:
+        os.killpg(process.pid, signal.SIGTERM)
+    else:
+        process.send_signal(signal.SIGTERM)
+    code = process.wait(timeout=SCRIPT_TIMEOUT_S)
+    return code, calls.read_text().splitlines()
 
 
 def worker_lookup() -> str:
@@ -149,6 +186,28 @@ def test_worker_que_nao_volta_reprova_mesmo_com_a_aceitacao_aprovada(fakes: Path
     assert result.returncode != 0
     assert calls[-1] == f"curl {CHECK_URL}/fail"
     assert f"docker start {WORKER}" in result.stderr
+
+
+def test_sigterm_na_aceitacao_religa_o_worker_e_pinga_fail(fakes: Path) -> None:
+    code, calls = interrupted(fakes, reached="python3", group=True, FAKE_ACCEPTANCE_SLEEP_S="30")
+
+    assert code == SIGTERM_EXIT
+    assert calls[-2:] == [f"docker start {WORKER}", f"curl {CHECK_URL}/fail"]
+
+
+def test_sigterm_na_parada_do_worker_nao_comeca_a_aceitacao(fakes: Path) -> None:
+    code, calls = interrupted(fakes, reached="docker stop", group=False, FAKE_STOP_SLEEP_S="1")
+
+    assert code == SIGTERM_EXIT
+    assert not [call for call in calls if call.startswith("python3")]
+    assert calls[-2:] == [f"docker start {WORKER}", f"curl {CHECK_URL}/fail"]
+
+
+def test_lista_de_workers_ilegivel_reprova_sem_rodar_a_aceitacao(fakes: Path) -> None:
+    result, calls = scheduled(fakes, worker="", ps=1)
+
+    assert result.returncode == 1
+    assert calls == [f"curl {CHECK_URL}/start", worker_lookup(), f"curl {CHECK_URL}/fail"]
 
 
 def test_sem_a_url_nao_roda_nada(fakes: Path) -> None:

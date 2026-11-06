@@ -36,14 +36,17 @@ Usa só a biblioteca padrão e roda no Python do host (3.12 no Ubuntu 24.04).
 import grp
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 from executor_ctl import profile, workarea
@@ -155,8 +158,9 @@ def run_with_maintenance_suspended(
 ) -> list[Outcome]:
     """Roda as sondas com a manutenção parada; o último resultado diz se ela voltou ao ar.
 
-    Manutenção que já estava parada fica como estava. Se uma sonda levantar exceção, a manutenção
-    volta antes de a exceção seguir, e uma falha nessa volta é impressa no stderr.
+    Manutenção que já estava parada fica como estava. Se uma sonda levantar exceção, ou o processo
+    receber SIGTERM, a manutenção volta antes de a saída seguir, e uma falha nessa volta é impressa
+    no stderr.
     """
     docker = docker or _docker_output
     containers = _service_ids(docker, MAINTENANCE_SERVICE)
@@ -166,18 +170,37 @@ def run_with_maintenance_suspended(
             Outcome(MAINTENANCE_CRITERION, True, "não estava rodando: deixada como estava"),
         ]
     print(
-        f"manutenção parada durante as sondas; se este teste for interrompido à força, "
+        f"manutenção parada durante as sondas; se este teste for morto sem poder limpar (SIGKILL), "
         f"religue com: {_restart_command(containers)}\n"
     )
     docker("stop", f"--time={MAINTENANCE_STOP_S}", *containers)
     try:
-        outcomes = probes()
+        with _sigterm_as_exit():
+            outcomes = probes()
     except BaseException:
         restored = _restart_maintenance(docker, containers)
         if not restored.passed:
             print(f"FALHOU  {restored.criterion}: {restored.evidence}", file=sys.stderr)
         raise
     return [*outcomes, _restart_maintenance(docker, containers)]
+
+
+@contextmanager
+def _sigterm_as_exit() -> Iterator[None]:
+    """SIGTERM vira `SystemExit`, que passa pelos `finally` e pelo `except BaseException`.
+
+    Sem isso o processo morre na hora, e um container parado por `docker stop` não volta sozinho
+    com `restart: unless-stopped`.
+    """
+
+    def exit_on_sigterm(signum: int, _frame: FrameType | None) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, exit_on_sigterm)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _restart_maintenance(docker: Callable[..., str], containers: list[str]) -> Outcome:
@@ -487,6 +510,7 @@ def _judge(run: ProbeRun, criterion: str, passed: bool, evidence: str) -> Outcom
 
 
 def _json_lines(output: str) -> list[dict[str, Any]]:
+    # A saída mistura os relatórios da sonda com texto do runtime; sem nenhum, `_judge` reprova.
     reports = []
     for line in output.splitlines():
         try:
