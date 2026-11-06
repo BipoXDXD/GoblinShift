@@ -254,6 +254,60 @@ def test_volume_nomeado_com_driver_opts_e_reprovado() -> None:
     assert host_policy_violations(config, HOST) == ["volume raiz: driver_opts"]
 
 
+@pytest.mark.parametrize(
+    "volume_name",
+    ["coolify-db", "edge_caddy_data", "goblinshift", "goblinshift-pg", "x_goblinshift_pg"],
+)
+def test_volume_com_nome_fora_do_projeto_e_reprovado(volume_name: str) -> None:
+    config = config_with({}, name="goblinshift", volumes={"alias": {"name": volume_name}})
+
+    assert host_policy_violations(config, HOST) == [
+        f"volume alias: nome {volume_name} fora do projeto goblinshift"
+    ]
+
+
+def test_volume_externo_com_nome_fora_do_projeto_aponta_os_dois_problemas() -> None:
+    config = config_with(
+        {}, name="goblinshift", volumes={"alias": {"external": True, "name": "coolify-db"}}
+    )
+
+    assert host_policy_violations(config, HOST) == [
+        "volume alias: external",
+        "volume alias: nome coolify-db fora do projeto goblinshift",
+    ]
+
+
+def test_volume_com_nome_e_sem_projeto_e_reprovado() -> None:
+    config = config_with({}, volumes={"alias": {"name": "coolify-db"}})
+
+    assert host_policy_violations(config, HOST) == [
+        "volume alias: nome coolify-db fora do projeto None"
+    ]
+
+
+@pytest.mark.parametrize("volume", [{"name": "goblinshift_pgdata"}, {"name": "goblinshift_x"}, {}])
+def test_volume_do_proprio_projeto_e_aceito(volume: dict[str, Any]) -> None:
+    config = config_with({}, name="goblinshift", volumes={"pgdata": volume})
+
+    assert host_policy_violations(config, HOST) == []
+
+
+def test_o_compose_de_producao_fica_no_projeto_goblinshift() -> None:
+    assert merged_config()["name"] == "goblinshift"
+
+
+def test_volume_com_nome_alheio_injetado_no_compose_de_producao_e_reprovado(tmp_path: Path) -> None:
+    injected = tmp_path / "compose.injected.yaml"
+    injected.write_text(
+        "services:\n  worker:\n    volumes: ['alias:/alias']\n"
+        "volumes:\n  alias:\n    name: coolify-db\n"
+    )
+
+    violations = host_policy_violations(merged_config(injected), HOST)
+
+    assert violations == ["volume alias: nome coolify-db fora do projeto goblinshift"]
+
+
 def test_volume_externo_e_reprovado() -> None:
     # Volume de outro projeto da VPS (ADR 011).
     config = config_with(
@@ -345,6 +399,8 @@ EXPECTED_DEVIATIONS: dict[str, tuple[str, ...]] = {
     "gateway.json": GATEWAY_DEVIATIONS,
 }
 COOLIFY_NAMES = tuple(EXPECTED_DEVIATIONS)
+# O projeto é a referência do nome dos volumes: trocá-lo mudaria o que conta como "do projeto".
+EXPECTED_PROJECTS = {"app.json": "goblinshift", "infra.json": "goblinshift", "gateway.json": "edge"}
 # Cada sabotagem é a mudança no serviço e o problema que a política precisa apontar.
 SABOTAGES: list[tuple[dict[str, Any], str]] = [
     ({"privileged": True}, "privileged"),
@@ -406,21 +462,27 @@ def with_mount(document: dict[str, Any], service: str, mount: Any) -> dict[str, 
 
 
 def gateway_deviation_problems(config: dict[str, Any]) -> list[str]:
-    problems = [
+    return [
         problem
         for name, service in config["services"].items()
         for mount in service.get("volumes", [])
-        for problem in gateway_mount_problems(name, mount)
+        for problem in gateway_mount_problems(name, mount, config.get("volumes", {}))
     ]
-    for volume, expected in GATEWAY_VOLUME_NAMES.items():
-        name = config["volumes"][volume]["name"]
-        if name != expected:
-            problems.append(f"volume {volume}: name {name}")
-    return problems
 
 
-def gateway_mount_problems(service: str, mount: dict[str, Any]) -> Iterator[str]:
+def gateway_mount_problems(
+    service: str, mount: dict[str, Any], volumes: dict[str, Any]
+) -> Iterator[str]:
     source = mount.get("source", "")
+    if mount["type"] == "volume":
+        # A chave é só um apelido no arquivo: o Docker monta o volume pelo nome real.
+        real_name = volumes.get(source, {}).get("name")
+        if source not in GATEWAY_VOLUME_NAMES:
+            yield f"{service}: volume {source} com nome {real_name}"
+            return
+        if real_name != GATEWAY_VOLUME_NAMES[source]:
+            yield f"{service}: {source} com nome {real_name}"
+            return
     if source not in GATEWAY_MOUNTS:
         return
     if service != GATEWAY_SERVICE:
@@ -456,6 +518,23 @@ def proxy_with_volumes(document: dict[str, Any], *mounts: str) -> None:
 
 def renamed_volume(document: dict[str, Any], volume: str, name: str) -> None:
     document["volumes"][volume]["name"] = name
+
+
+def declared_alias(document: dict[str, Any], name: str, *, external: bool = False) -> None:
+    alias: dict[str, Any] = {"name": name}
+    if external:
+        alias["external"] = True
+    document["volumes"] = {**document.get("volumes", {}), "alias": alias}
+
+
+def alias_in_other_service(document: dict[str, Any], name: str, *, external: bool = False) -> None:
+    declared_alias(document, name, external=external)
+    service_mounting(document, "alias:/data")
+
+
+def alias_in_proxy(document: dict[str, Any], name: str) -> None:
+    declared_alias(document, name)
+    document["services"][GATEWAY_SERVICE]["volumes"].append("alias:/alias")
 
 
 GatewayMutation = Callable[[dict[str, Any]], None]
@@ -495,12 +574,37 @@ GATEWAY_MUTATIONS: list[tuple[str, GatewayMutation, str]] = [
     (
         "caddy_data_de_outro_projeto",
         lambda document: renamed_volume(document, "caddy_data", "coolify-db"),
-        "volume caddy_data: name coolify-db",
+        "proxy: caddy_data com nome coolify-db",
     ),
     (
         "caddy_config_de_outro_projeto",
         lambda document: renamed_volume(document, "caddy_config", "coolify-db"),
-        "volume caddy_config: name coolify-db",
+        "proxy: caddy_config com nome coolify-db",
+    ),
+    (
+        "chave_caddy_data_com_o_nome_do_outro_volume",
+        lambda document: renamed_volume(document, "caddy_data", "edge_caddy_config"),
+        "proxy: caddy_data com nome edge_caddy_config",
+    ),
+    (
+        "alias_do_volume_real_em_outro_servico",
+        lambda document: alias_in_other_service(document, "edge_caddy_data"),
+        "outro: volume alias com nome edge_caddy_data",
+    ),
+    (
+        "alias_externo_do_volume_real_em_outro_servico",
+        lambda document: alias_in_other_service(document, "edge_caddy_config", external=True),
+        "outro: volume alias com nome edge_caddy_config",
+    ),
+    (
+        "alias_do_volume_real_no_proxy",
+        lambda document: alias_in_proxy(document, "edge_caddy_data"),
+        "proxy: volume alias com nome edge_caddy_data",
+    ),
+    (
+        "alias_de_outro_projeto_no_proxy",
+        lambda document: alias_in_proxy(document, "coolify-db"),
+        "proxy: volume alias com nome coolify-db",
     ),
     (
         "caddy_data_em_outro_servico",
@@ -540,6 +644,45 @@ def test_mudanca_na_forma_dos_desvios_do_gateway_e_reprovada(
     mutate(document)
 
     assert gateway_deviation_problems(rendered(document)) == [problem]
+
+
+def project_problems(config: dict[str, Any], name: str) -> list[str]:
+    return [] if config["name"] == EXPECTED_PROJECTS[name] else [f"projeto {config['name']}"]
+
+
+@pytest.mark.parametrize("name", COOLIFY_NAMES)
+def test_cada_json_mantem_o_projeto_registrado(name: str) -> None:
+    assert project_problems(rendered(coolify_document(name)), name) == []
+
+
+@pytest.mark.parametrize("name", COOLIFY_NAMES)
+def test_trocar_o_projeto_do_json_e_reprovado(name: str) -> None:
+    document = coolify_document(name)
+    document["name"] = "coolify"
+
+    assert project_problems(rendered(document), name) == ["projeto coolify"]
+
+
+@pytest.mark.parametrize(
+    ("name", "volume_name"),
+    [
+        ("app.json", "coolify-db"),
+        ("app.json", "edge_caddy_data"),
+        ("infra.json", "coolify-db"),
+        ("infra.json", "edge_caddy_data"),
+        ("gateway.json", "coolify-db"),
+        ("gateway.json", "goblinshift_pgdata"),
+    ],
+)
+def test_volume_nao_externo_com_nome_alheio_no_json_e_reprovado(
+    name: str, volume_name: str
+) -> None:
+    document = coolify_document(name)
+    alias_in_other_service(document, volume_name)
+
+    assert new_problems(document, name) == [
+        f"volume alias: nome {volume_name} fora do projeto {EXPECTED_PROJECTS[name]}"
+    ]
 
 
 def test_todo_json_do_coolify_passa_pela_politica() -> None:

@@ -56,7 +56,7 @@ def host_policy_violations(config: Mapping[str, Any], host: HostPaths) -> list[s
     for name, service in (config.get("services") or {}).items():
         violations += [f"{name}: {problem}" for problem in service_option_problems(service)]
         violations += [f"{name}: {problem}" for problem in service_mount_problems(service, host)]
-    violations += list(top_level_volume_problems(config.get("volumes") or {}))
+    violations += list(top_level_volume_problems(config.get("volumes") or {}, config.get("name")))
     violations += list(file_source_problems("secret", config.get("secrets") or {}, is_secret_file))
     violations += list(
         file_source_problems("config", config.get("configs") or {}, host.is_repository_config)
@@ -116,12 +116,16 @@ def is_allowed_bind(source: str, read_only: bool, host: HostPaths) -> bool:
     return read_only and (source in READ_ONLY_BINDS or host.is_repository_config(source))
 
 
-def top_level_volume_problems(volumes: Mapping[str, Any]) -> Iterator[str]:
+def top_level_volume_problems(volumes: Mapping[str, Any], project: str | None) -> Iterator[str]:
     for name, volume in volumes.items():
         volume = volume or {}
         # Volume de outro projeto da VPS (ADR 011).
         if volume.get("external"):
             yield f"volume {name}: external"
+        # `name` monta um volume que já existe mesmo sem `external`: vale o nome, não a chave.
+        real_name = volume.get("name")
+        if real_name is not None and not real_name.startswith(f"{project}_"):
+            yield f"volume {name}: nome {real_name} fora do projeto {project}"
         # O driver `local` com `o: bind` e `device` monta qualquer caminho do host.
         if volume.get("driver_opts"):
             yield f"volume {name}: driver_opts"

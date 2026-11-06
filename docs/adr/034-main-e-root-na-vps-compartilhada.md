@@ -38,12 +38,12 @@ Reforços deste ADR:
    - `pid`, `network_mode`, `ipc`, `userns_mode`, `uts` ou `cgroup` iguais a `host` ou `container:…`, porque o namespace de outro container alcança o StillOn;
    - `security_opt` que desliga confinamento (`seccomp`, `apparmor` ou `systempaths` `unconfined`, e `label:disable`);
    - bind mount fora da allowlist. Para escrita: `storage`, `pg/data`, `telemetry/data`, `exec-work` e `/run/goblinshift`. Só leitura: `pg`, `storage`, `telemetry` e arquivos em `<repositório>/docker/`;
-   - outros tipos de montagem, volume nomeado `external` ou com `driver_opts`;
+   - outros tipos de montagem, volume nomeado `external` ou com `driver_opts`, e volume com `name` fora do projeto Compose, com ou sem `external`, porque `name` monta um volume que já existe;
    - secret fora de `/srv/goblinshift/secrets/` e config fora de `<repositório>/docker/`.
 
    Os JSON de `deploy/coolify/` (`app.json`, `infra.json` e `gateway.json`), que são o que a produção executa, passam pela mesma política depois do `docker compose config` e ainda precisam de imagem fixada por digest, sem `build`.
 
-   **Pendente de decisão do dono:** o `gateway.json` hoje descumpre esta decisão em quatro pontos, registrados aqui sem exceção formal: os binds só de leitura de `deploy/coolify/Caddyfile` e `deploy/coolify/sites`, fora de `<repositório>/docker/`, e os volumes `external` `caddy_data` e `caddy_config`, que a decisão proíbe. A política continua reprovando os quatro. O teste só fixa o estado atual (lista exata, alvos, `read_only`, nomes `edge_caddy_data` e `edge_caddy_config` e o `proxy` como único serviço a montá-los) para que não cresçam nem mudem. A pendência se encerra de um destes modos: o gateway deixa de precisar deles, ou o dono os aceita e a política muda como manda a seção [Consequências](#consequências).
+   **Pendente de decisão do dono:** o `gateway.json` hoje descumpre esta decisão em quatro pontos, registrados aqui sem exceção formal: os binds só de leitura de `deploy/coolify/Caddyfile` e `deploy/coolify/sites`, fora de `<repositório>/docker/`, e os volumes `external` `caddy_data` e `caddy_config`, que a decisão proíbe. A política continua reprovando os quatro. O teste só fixa o estado atual para que não cresçam nem mudem: lista exata, alvos, `read_only`, projeto `edge` e cada montagem resolvida pelo nome real do volume, com `edge_caddy_data` e `edge_caddy_config` aceitos só nas chaves `caddy_data` e `caddy_config` do serviço `proxy`. A pendência se encerra de um destes modos: o gateway deixa de precisar deles, ou o dono os aceita e a política muda como manda a seção [Consequências](#consequências).
 2. **CODEOWNERS** em `deploy/`, `compose*.yaml` e `.github/workflows/`, com `@BipoXDXD`, para que toda mudança nesses caminhos peça a revisão do dono.
 
 ## Alternativas descartadas
