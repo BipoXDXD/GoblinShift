@@ -238,11 +238,6 @@ jobs:
     name: Executor sob gVisor
     needs: [checks]
     runs-on: ubuntu-24.04
-    env:
-      # Mesma versão da VPS (docs/adr/004-container-gvisor-por-tentativa.md). O repositório do
-      # gVisor publica cada release como uma suíte própria, então a versão fica fixada aqui.
-      GVISOR_SUITE: "20261005"
-      GVISOR_VERSION: "20261005.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -255,25 +250,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - name: Instalar o runsc (repositório oficial do gVisor, a mesma origem de deploy/gvisor.sh)
-        run: |
-          keyring=/usr/share/keyrings/gvisor-archive-keyring.gpg
-          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
-            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
-          sudo apt-get update -q
-          sudo apt-get install -yq "runsc=${GVISOR_VERSION}"
-          runsc --version | head -n 1
-      - name: Registrar o runtime runsc no Docker do runner
-        # O runner é efêmero e só roda este job, então reiniciar o Docker aqui não derruba nada.
-        # Na VPS isso nunca se faz: lá o Docker é só recarregado (deploy/gvisor.sh), porque o host
-        # é compartilhado com outro projeto.
-        run: |
-          if ! docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; then
-            sudo runsc install
-          fi
-          sudo systemctl restart docker
-          docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+      - name: Instalar o runsc e registrá-lo no Docker do runner
+        run: scripts/ci-install-runsc.sh
       - name: FFmpeg completo (gera os vídeos sintéticos dos testes do Media Mill na imagem)
         run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
       - name: Testes do executor-ctl e da imagem do executor sob runsc
