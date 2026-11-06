@@ -24,7 +24,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 COOLIFY = ROOT / "deploy" / "coolify"
-SITES = COOLIFY / "sites"
+GATEWAY = ROOT / "docker" / "gateway"
+SITES = GATEWAY / "sites"
 CLOUDFLARE_LIST = SITES / "cloudflare-ips.conf"
 GOBLINSHIFT = "goblinshift.dev"
 STILLON = "stillon.tech"
@@ -102,7 +103,7 @@ def _copy_gateway_config(target: Path, subnet: str) -> None:
     """Copia a configuração versionada, adaptada só no que depende do ambiente de teste."""
     sites = target / "conf.d"
     sites.mkdir(parents=True)
-    caddyfile = (COOLIFY / "Caddyfile").read_text()
+    caddyfile = (GATEWAY / "Caddyfile").read_text()
     caddyfile = _replace_once(
         caddyfile, " cert_issuer acme {\n  disable_http_challenge\n }\n", TEST_ISSUER
     )
@@ -219,13 +220,13 @@ def test_lista_versionada_tem_as_duas_familias_e_so_faixas_publicas() -> None:
 
 
 def test_lista_nao_e_importada_como_site_pelo_glob_do_gateway() -> None:
-    assert "import /etc/caddy/conf.d/*.caddy" in (COOLIFY / "Caddyfile").read_text()
+    assert "import /etc/caddy/conf.d/*.caddy" in (GATEWAY / "Caddyfile").read_text()
     assert CLOUDFLARE_LIST.suffix != ".caddy"
 
 
 def test_lista_so_vale_no_site_do_goblinshift() -> None:
     assert "cloudflare-ips.conf" in (SITES / "goblinshift.dev.caddy").read_text()
-    for path in [SITES / "stillon.tech.caddy", COOLIFY / "Caddyfile", COOLIFY / "gateway.json"]:
+    for path in [SITES / "stillon.tech.caddy", GATEWAY / "Caddyfile", COOLIFY / "gateway.json"]:
         text = path.read_text()
         assert "cloudflare-ips.conf" not in text, path
         assert "CF-Connecting-IP" not in text, path
@@ -247,7 +248,7 @@ def test_site_do_stillon_fica_como_estava() -> None:
 
 
 def test_a_vps_aposentada_nao_e_mais_proxy_confiavel() -> None:
-    caddyfile = (COOLIFY / "Caddyfile").read_text()
+    caddyfile = (GATEWAY / "Caddyfile").read_text()
 
     assert RETIRED_VPS not in caddyfile
     assert "trusted_proxies static 172.16.1.6/32\n" in caddyfile
