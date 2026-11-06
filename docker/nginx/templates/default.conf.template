@@ -27,8 +27,16 @@ map $forwarded_proto $hsts {
 }
 
 # /auth/* (3.8): cada início de login grava uma linha em `login_state` sem autenticação. 10 por
-# minuto por cliente real, com rajada de 10 para o vai e volta do login.
-limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
+# minuto por cliente real, com rajada de 10 para o vai e volta do login. O cliente é o endereço em
+# IPv4 e o /64 em IPv6, porque um só cliente costuma ter o /64 inteiro (ADR 041). A regex lê os bytes
+# do endereço, não o texto, então nenhuma grafia de IPv6 muda a chave: 8 bytes são o /64, e um IPv4
+# mapeado em IPv6 conta como o próprio IPv4, senão todos eles cairiam no mesmo /64.
+map $binary_remote_addr $auth_limit_key {
+    "~(?s)^\x00{10}\xff\xff(?<mapped_v4>.{4})$" $mapped_v4;
+    "~(?s)^(?<v6_net>.{8}).{8}$"                $v6_net;
+    default                                     $binary_remote_addr;
+}
+limit_req_zone $auth_limit_key zone=auth:10m rate=10r/m;
 limit_req_status 429;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
