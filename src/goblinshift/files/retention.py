@@ -73,7 +73,7 @@ class IncompleteUploadsExpiry:
 def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     """Apaga o arquivo de uma linha já confirmada; `False` se ele ficou no disco.
 
-    A linha não volta, então a chave só existe aqui: a falha vira alerta com ela e não impede
+    Nada repete a remoção depois do commit: a falha vira alerta com a chave e não impede
     que o resto do lote saia do disco.
     """
     try:

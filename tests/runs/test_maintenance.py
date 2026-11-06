@@ -311,7 +311,7 @@ def test_arquivo_que_fica_no_disco_entra_na_contagem_do_ciclo(
     first = cycles.run_cycle()
     second = cycles.run_cycle()
 
-    # Um do expurgo e um do upload incompleto. As linhas saíram: nenhuma volta os repete.
+    # Um do expurgo, já `deleted`, e um pendente, sem linha: nenhuma volta os repete.
     assert first["purge_files_not_removed"] == 2
     assert second["purge_files_not_removed"] == 0
 
@@ -525,6 +525,8 @@ def test_falha_da_varredura_nao_leva_as_outras_etapas(
         counts = cycles.run_cycle()
 
     assert counts["missing_sweep_failed"] == 1
+    # Sentinela ilegível não é objeto ilegível: `causa-objetos-ilegiveis` não a vê.
+    assert counts["objects_missing_unreadable"] == 0
     assert {"objects_purged", "capacity_pools_corrected", "runs_deleted"} <= counts.keys()
     assert "storage_global_max_bytes" in counts
     assert any(r.exc_info for r in caplog.records)

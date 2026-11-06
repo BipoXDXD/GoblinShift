@@ -359,7 +359,7 @@ class Maintenance:
             )
         counts["objects_purged"] = report.objects
         counts["bytes_purged"] = report.bytes
-        # A linha já saiu e nada repete a remoção: o alerta de causa lê esta contagem (3.7).
+        # Com o banco já confirmado, nada repete a remoção: o alerta de causa lê isto (3.7).
         counts["purge_files_not_removed"] = len(incomplete.failed_keys) + len(report.failed_keys)
         # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
         reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)

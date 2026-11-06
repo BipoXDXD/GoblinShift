@@ -220,8 +220,8 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
     ),
     _MaintenanceCause(
         "causa-arquivos-nao-removidos",
-        "Arquivo ficou no disco depois de a linha sair do banco, e nada repete a remoção. O log "
-        "da manutenção traz a chave; veja o runbook em deploy/openobserve/README.md.",
+        "Arquivo ficou no disco depois de a exclusão ser confirmada no banco, e nada repete a "
+        "remoção. O log da manutenção traz a chave; veja o runbook.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
