@@ -25,7 +25,7 @@ goblinshift.dev {
    header_up -CF-Connecting-IP
    # A troca de containers vira espera em vez de erro (ADR 044). Sem `lb_retry_match`, o Caddy
    # só repete método diferente de GET quando a conexão não se estabeleceu, e aí nada foi enviado.
-   lb_try_duration 30s
+   lb_try_duration 25s
    lb_try_interval 250ms
   }
  }

@@ -21,8 +21,8 @@ A publicação da aplicação remove os containers antes de subir os novos. Até
 
 Alternativa B, só em `docker/gateway/sites/goblinshift.dev.caddy`. O site do StillOn não muda.
 
-- **Espera:** `lb_try_duration 30s`, abaixo do limite de leitura da Cloudflare. Como a última tentativa começa antes do fim do prazo, o tempo de conexão do Caddy pode se somar a ele.
-- **Fim da espera:** `handle_errors` responde 503 com texto fixo, `Retry-After: 30` e `Cache-Control: no-store`, sem o cabeçalho `Server`. O texto não diz causa nem previsão.
+- **Espera:** `lb_try_duration 25s`, abaixo do limite de leitura da Cloudflare. Como a última tentativa começa antes do fim do prazo, o tempo de conexão do Caddy pode se somar a ele, e a soma precisa caber no prazo de 30 s da SPA (`web/src/api/client.ts`). Sem essa folga, o front veria o próprio timeout, nunca o 503.
+- **Fim da espera:** `handle_errors` responde 503 com texto fixo, `Retry-After: 30` e `Cache-Control: no-store`, sem o cabeçalho `Server`. O texto não diz causa nem previsão. O `Retry-After` fica maior que o prazo de propósito: repetir antes só poria outro pedido em espera.
 - **Só o erro do proxy:** `handle_errors` trata o que o próprio gateway não conseguiu entregar. Uma resposta 4xx ou 5xx do Nginx ou da API passa como veio, com o problem+json da API.
 
 ### Como um pedido não é reenviado
@@ -39,8 +39,10 @@ O GET pode ser repetido mesmo depois de chegar ao Nginx, porque é o padrão do 
 
 - Uma queda real demora o prazo inteiro para responder, em vez de falhar logo. A troca de `fail fast` por espera é aceita com o volume atual e deve ser revista com carga.
 - Um pedido em voo no instante da parada ainda falha, agora com 503. Se ele alterava estado, pode ter sido executado: repetir com segurança depende do `Idempotency-Key`.
-- Cliente com timeout menor que a espera vê o próprio timeout.
-- Pedidos em espera ocupam memória do gateway, que é compartilhado. Isso não foi medido sob carga.
+- A espera só cobre troca menor que o prazo. Acima dele, o cliente recebe o 503.
+- Cliente com timeout menor que a espera vê o próprio timeout. Um POST abandonado assim ainda pode ser entregue quando o Nginx volta, e o reenvio sem `Idempotency-Key` pode executar duas vezes. Isso vale se a conexão de origem for HTTP/1.1, o que não foi confirmado.
+- Não há limite de pedidos em espera. O teto real é o `mem_limit` do gateway, compartilhado com o outro site, e o consumo não foi medido.
+- A Cloudflare tem limite próprio de escrita de 30 s, separado do de leitura, e ele continua valendo para o que passa pela espera.
 - Nginx de pé com a API fora continua respondendo o erro do próprio Nginx. Esse caso não passa pela espera.
 - `deploy/edge/` é o caminho anterior ao Coolify e fica como está (ADR 041).
 

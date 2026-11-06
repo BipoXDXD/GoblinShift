@@ -26,6 +26,7 @@ from tests.test_gateway_client_ip import (
     DIRECT_V4,
     DOCKER_TIMEOUT_SECONDS,
     GOBLINSHIFT,
+    ROOT,
     SITES,
     STILLON,
     _copy_gateway_config,
@@ -36,13 +37,15 @@ from tests.test_gateway_client_ip import (
 )
 
 SITE = SITES / f"{GOBLINSHIFT}.caddy"
-WAIT_SECONDS = 30
+WAIT_SECONDS = 25
+RETRY_AFTER_SECONDS = 30
+SPA_CLIENT = ROOT / "web" / "src" / "api" / "client.ts"
 # Teto de leitura da Cloudflare fora do plano Enterprise: esperar mais perderia a resposta.
 CLOUDFLARE_READ_TIMEOUT_SECONDS = 125
 # Mais que a espera anterior somada à última tentativa de conexão: com ela, o pedido falharia.
 OUTAGE_SECONDS = 10
-# A última tentativa começa antes do fim da espera e tem o tempo de conexão padrão do Caddy.
-WAIT_OVERRUN_SECONDS = 5
+# A última tentativa começa antes do fim da espera e tem o tempo de conexão padrão do Caddy, de 3 s.
+WAIT_OVERRUN_SECONDS = 4
 SOCKET_TIMEOUT_SECONDS = WAIT_SECONDS + 2 * WAIT_OVERRUN_SECONDS
 READY_TIMEOUT_SECONDS = 30
 READY_POLL_SECONDS = 0.2
@@ -262,6 +265,13 @@ def test_espera_configurada_fica_abaixo_do_limite_de_leitura_da_cloudflare() -> 
     assert int(match[1]) < CLOUDFLARE_READ_TIMEOUT_SECONDS
 
 
+def test_503_chega_antes_do_prazo_da_spa() -> None:
+    match = re.search(r"DEFAULT_TIMEOUT_MS = (\d+)_000;", SPA_CLIENT.read_text())
+
+    assert match is not None
+    assert int(match[1]) > WAIT_SECONDS + WAIT_OVERRUN_SECONDS
+
+
 @pytest.mark.parametrize("directive", ["lb_retry_match", "lb_retries"])
 def test_site_nao_amplia_o_que_o_caddy_repete(directive: str) -> None:
     assert directive not in _site_directives()
@@ -304,7 +314,7 @@ def test_esgotada_a_espera_responde_503(exhausted: dict[str, Reply], name: str) 
 def test_503_pede_nova_tentativa_e_nao_entra_em_cache(exhausted: dict[str, Reply]) -> None:
     headers = exhausted["GET"].headers
 
-    assert headers["retry-after"] == str(WAIT_SECONDS)
+    assert headers["retry-after"] == str(RETRY_AFTER_SECONDS)
     assert headers["cache-control"] == "no-store"
     assert headers["content-type"] == "text/plain; charset=utf-8"
 
