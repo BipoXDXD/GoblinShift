@@ -27,6 +27,7 @@ from tests.compose_host_policy import (
     HostPaths,
     coolify_policy_violations,
     host_policy_violations,
+    is_protected_volume,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -153,6 +154,7 @@ def bind(source: str, target: str = "/mnt", *, read_only: bool = False) -> dict[
         ({"volumes_from": ["stillon-app"]}, "app: volumes_from"),
         ({"cgroup_parent": "/system.slice"}, "app: cgroup_parent"),
         ({"cgroup": "host"}, "app: cgroup=host"),
+        ({"use_api_socket": True}, "app: use_api_socket"),
     ],
     ids=lambda value: value if isinstance(value, str) else None,
 )
@@ -169,6 +171,7 @@ def test_opcao_que_abre_o_host_e_reprovada(service: dict[str, Any], expected: st
         {"pid": "service:worker"},
         {"privileged": False},
         {"cap_add": []},
+        {"use_api_socket": False},
     ],
 )
 def test_opcao_que_nao_abre_o_host_e_aceita(service: dict[str, Any]) -> None:
@@ -358,6 +361,11 @@ def test_excecao_do_adr_034_nao_dispensa_driver_opts() -> None:
     ]
 
 
+def test_chave_fora_da_excecao_nao_e_protegida_nem_sem_nome() -> None:
+    # Sem a chave na exceção, `None == None` aceitaria um volume sem `name`.
+    assert not is_protected_volume("dados", {"external": True}, "edge")
+
+
 def test_volume_externo_e_reprovado() -> None:
     # Volume de outro projeto da VPS (ADR 011).
     config = config_with(
@@ -444,6 +452,7 @@ SABOTAGES: list[tuple[dict[str, Any], str]] = [
     ({"image": "caddy:2"}, "image sem digest: caddy:2"),
     ({"image": "${GS_APP_IMAGE:-ghcr.io/x/y:latest}"}, "image sem digest: ghcr.io/x/y:latest"),
     ({"build": "."}, "build"),
+    ({"use_api_socket": True}, "use_api_socket"),
 ]
 SABOTAGED_MOUNTS: list[tuple[Any, str]] = [
     ("/var/run/docker.sock:/var/run/docker.sock", "bind /var/run/docker.sock"),

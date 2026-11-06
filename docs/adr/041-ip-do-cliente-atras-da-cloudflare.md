@@ -107,6 +107,7 @@ Os passos rodam na VPS. `$COMMIT` é o commit de merge, copiado da página do PR
    ```
 6. Aplicar: `docker exec edge-proxy-1 caddy reload --config /tmp/Caddyfile.novo --adapter caddyfile`, depois `docker exec edge-proxy-1 rm -f /tmp/Caddyfile.novo`.
 7. Alinhar o recurso do gateway ao commit, para um Redeploy futuro não devolver o bug. Alinhar é só gravar o campo; quem recria o container é o Redeploy ou o `instant_deploy`, e nenhum dos dois entra aqui:
+   - **Fora de janela, não mova `git_commit_sha`** enquanto o recurso não tiver sido publicado com `docker/gateway/`: o campo fica como está, e até a janela um Redeploy devolve a configuração antiga. O restante deste passo vale só dentro de uma janela ou depois dela.
    - Se `git_commit_sha` for `HEAD`, não há o que gravar: o próximo Redeploy clona a `main`, com os mesmos bytes.
    - Se for um commit fixo, gravar o novo:
      ```sh
@@ -166,6 +167,8 @@ echo "configuração em execução salva em $BACKUP.config.json"
 ```
 
 Se o bloco parar antes do `reload`, a produção não mudou; remova o `CLONE` impresso. Para reverter depois, use os caminhos impressos: copie `$BACKUP.em-uso` para `/tmp/Caddyfile.novo` do container, repita o `validate` e o `reload`, e rode `cp "$BACKUP" "$ORIGEM"`. Com o bloco terminado, alinhe o `git_commit_sha` e confira como nos passos 7 e 8, depois remova o `CLONE`. Reverter depois do alinhamento inclui gravar de volta o commit de `$BACKUP.commit`.
+
+**Fora de janela, não mova `git_commit_sha`** enquanto o recurso não tiver sido publicado com `docker/gateway/`. O bloco acima muda o `Caddyfile` do host e a configuração em execução, mas o commit fixo do recurso continua o antigo: até a janela, um Redeploy devolve a configuração antiga.
 
 ## Atualizar a lista
 

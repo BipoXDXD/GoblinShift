@@ -34,7 +34,7 @@ Barreiras que já existem:
 Reforços deste ADR:
 
 1. **Fitness function do Compose de produção** (`tests/test_compose_host_policy.py`, com a política em `tests/compose_host_policy.py`). Roda o `docker compose config` real sobre `compose.yaml` + `compose.prod.yaml`, com os caminhos que o `deploy/compose.sh` exporta na VPS. Reprova:
-   - `privileged`, `cap_add`, `devices`, `volumes_from` e `cgroup_parent`;
+   - `privileged`, `cap_add`, `devices`, `volumes_from`, `cgroup_parent` e `use_api_socket`;
    - `pid`, `network_mode`, `ipc`, `userns_mode`, `uts` ou `cgroup` iguais a `host` ou `container:…`, porque o namespace de outro container alcança o StillOn;
    - `security_opt` que desliga confinamento (`seccomp`, `apparmor` ou `systempaths` `unconfined`, e `label:disable`);
    - bind mount fora da allowlist. Para escrita: `storage`, `pg/data`, `telemetry/data`, `exec-work` e `/run/goblinshift`. Só leitura: `pg`, `storage`, `telemetry` e arquivos em `<repositório>/docker/`;
@@ -43,7 +43,7 @@ Reforços deste ADR:
 
    Os JSON de `deploy/coolify/` (`app.json`, `infra.json` e `gateway.json`), que são o que a produção executa, passam pela mesma política depois do `docker compose config` e ainda precisam de imagem fixada por digest, sem `build`.
 
-   **Exceção formal, por decisão do dono (2026-11-06):** `caddy_data` e `caddy_config` continuam `external` no `gateway.json`. A exceção vale só para essas chaves, no projeto `edge`, no serviço `proxy`, com os nomes exatos `edge_caddy_data` e `edge_caddy_config`, e está em `tests/compose_host_policy.py`. Qualquer outro `external` continua reprovado, e esses nomes reprovam em qualquer outra chave, mesmo sem `external`. O motivo é proteger os certificados. Num ensaio local com o Compose 5.6.1, `docker compose down -v` apagou o volume sem `external` e preservou o volume com `external`. No código público do Coolify (ramo v4.x), fora do modo Raw, o parser renomeia o volume não externo para `{uuid}_{volume}` e usa o externo como foi escrito; essa leitura não foi conferida na versão instalada. Os binds do gateway não precisam de exceção: foram para `docker/gateway/`, só de leitura.
+   **Exceção formal, por decisão do dono (2026-11-06):** `caddy_data` e `caddy_config` continuam `external` no `gateway.json`. A exceção vale só para essas chaves, no projeto `edge`, no serviço `proxy`, com os nomes exatos `edge_caddy_data` e `edge_caddy_config`, e está em `tests/compose_host_policy.py`. Qualquer outro `external` continua reprovado, e esses nomes reprovam em qualquer outra chave, mesmo sem `external`. O motivo é proteger os certificados. Num ensaio local com o Compose 5.6.1, `docker compose down -v` apagou o volume sem `external` e preservou o volume com `external`. No código público do Coolify (ramo v4.x), fora do modo Raw, o parser renomeia o volume não externo para `{uuid}_{volume}` e usa o externo como foi escrito. Essa leitura vale a partir da v4.4.0 e deixa de valer se o recurso tiver storage com o nome antigo, e não foi conferida na versão instalada. Por isso é pré-condição de toda janela do gateway conferir a versão instalada do Coolify e os storages do recurso antes de publicar. Os binds do gateway não precisam de exceção: foram para `docker/gateway/`, só de leitura.
 2. **CODEOWNERS** em `deploy/`, `docker/gateway/`, `compose*.yaml` e `.github/workflows/`, com `@BipoXDXD`, para que toda mudança nesses caminhos peça a revisão do dono.
 
 ## Alternativas descartadas

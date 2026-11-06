@@ -103,6 +103,9 @@ def service_option_problems(service: Mapping[str, Any]) -> Iterator[str]:
         yield "volumes_from"
     if service.get("cgroup_parent"):
         yield "cgroup_parent"
+    # Compose repassa ao container o acesso à API do Docker.
+    if service.get("use_api_socket"):
+        yield "use_api_socket"
 
 
 def service_mount_problems(service: Mapping[str, Any], host: HostPaths) -> Iterator[str]:
@@ -150,6 +153,7 @@ def top_level_volume_problems(volumes: Mapping[str, Any], project: str | None) -
 def is_protected_volume(name: str, volume: Mapping[str, Any], project: str | None) -> bool:
     return (
         project == PROTECTED_VOLUME_PROJECT
+        and name in PROTECTED_VOLUMES
         and volume.get("external") is True
         and volume.get("name") == PROTECTED_VOLUMES.get(name)
     )
