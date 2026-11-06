@@ -261,6 +261,57 @@ jobs:
         # executor_image sempre existem, então zero testes indica um seletor quebrado.
         run: uv run pytest -m "executor_ctl or executor_image" -q
 
+  e2e-gvisor:
+    name: Jornadas reais sob gVisor (Playwright)
+    # O caminho navegador, Nginx, API, worker, executor-ctl do host e container gVisor. O job
+    # e2e usa API falsa, e o Compose local, o Runner sem sandbox. Em paralelo, como o OpenObserve:
+    # fora do orçamento de 5 min do commit stage. Nenhum segredo: conta e chave nascem e morrem
+    # na pilha descartável do runner.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Instalar o runsc e registrá-lo no Docker do runner
+        run: scripts/ci-install-runsc.sh
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Versão do Playwright (chave do cache do navegador)
+        id: playwright
+        working-directory: web
+        run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      - name: Chromium headless e dependências do sistema
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Pilha com o executor-ctl do host sob gVisor
+        run: scripts/e2e-gvisor.sh up
+      - name: Specs contra a API real (desktop e celular, só Chromium)
+        # Falha também se alguma tentativa do banco não tiver rodado sob runsc.
+        run: scripts/e2e-gvisor.sh journeys
+      - name: Logs da pilha e do executor-ctl
+        if: failure()
+        run: scripts/e2e-gvisor.sh logs "$RUNNER_TEMP/e2e-gvisor-logs"
+      - name: Relatório, traces e logs da falha
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-gvisor
+          path: |
+            web/playwright-report/
+            web/test-results/
+            ${{ runner.temp }}/e2e-gvisor-logs/
+          retention-days: 7
+
   image:
     name: Imagem
     # O contrato também: publicar uma API que dá 500 ou foge da spec quebraria os clientes gerados.

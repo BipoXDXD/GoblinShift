@@ -1,0 +1,38 @@
+# Pilha do job "Jornadas reais sob gVisor (Playwright)": compose.yaml mais o que liga o worker ao
+# executor-ctl do host, como em compose.prod.yaml. Só serve ao scripts/e2e-gvisor.sh, no runner
+# efêmero da CI. tests/test_e2e_gvisor_job.py confere que o trecho do executor não diverge da
+# produção. O resto de compose.prod.yaml (login, rede da borda, discos da VPS) fica de fora: as
+# jornadas entram por chave de API, e o que elas provam é o caminho da receita até o gVisor.
+x-executor-env: &executor-env
+  GS_RUNNER: executor_ctl
+  GS_EXECUTOR_IMAGE: ${GS_EXECUTOR_IMAGE:?gravada no .env pelo scripts/e2e-gvisor.sh (imagem do executor por digest)}
+
+x-executor-client: &executor-client
+  group_add: ["61001"]
+  volumes:
+    - type: bind
+      source: /run/goblinshift
+      target: /run/goblinshift
+      bind: {create_host_path: false}
+    - type: bind
+      source: /srv/goblinshift/exec-work
+      target: /var/lib/goblinshift/exec-work
+      bind: {create_host_path: false}
+
+services:
+  api:
+    environment:
+      <<: *executor-env
+  worker:
+    <<: *executor-client
+    environment:
+      <<: *executor-env
+      GS_WORK_ROOT: /var/lib/goblinshift/exec-work
+  maintenance:
+    <<: *executor-client
+    environment:
+      <<: *executor-env
+      GS_WORK_ROOT: /var/lib/goblinshift/exec-work
+  nginx:
+    ports:
+      - "127.0.0.1:80:80"
