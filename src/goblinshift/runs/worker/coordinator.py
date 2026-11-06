@@ -214,7 +214,11 @@ class Coordinator:
             _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
             self._abandon(claimed)
             return None
-        complete_after_commit(self._factory, self._storage, applied, self._on_finished)
+        left_on_disk = complete_after_commit(
+            self._factory, self._storage, applied, self._on_finished
+        )
+        if left_on_disk:
+            attempt_event.record({"attempt.candidates_left_on_disk": left_on_disk})
         self.remove_work(claimed)
         _record_end(started, applied.state.status, error=applied.state.error_code)
         _log_attempt(claimed, applied.state.status, started, error=applied.state.error_code)

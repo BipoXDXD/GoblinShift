@@ -60,6 +60,7 @@ As sete causas da manutenção leem o span `maintenance.cycle` (`goblinshift.ent
 | `maintenance.missing_sweep_skipped` | `1` se faltou a sentinela de montagem e nada foi conferido (causa `gs-causa-storage-sem-sentinela`) |
 | `maintenance.missing_governor_tripped` | `1` se o limitador travou o lote e nada foi marcado: mais da metade ausente, um lote pequeno (abaixo de 10) inteiro ausente a partir de dois, ou ilegível junto com ausente (causa `gs-causa-limitador-de-ausentes`) |
 | `maintenance.missing_sweep_failed` | `1` se a varredura falhou na volta (log `varredura de ausentes falhou` com o traceback); o resto do ciclo segue |
+| `maintenance.candidates_left_on_disk` | candidatos descartados que o disco recusou apagar na volta; cada um no log `arquivo não removido do disco`, com a chave (`alert = purge_file_not_removed`) |
 | `maintenance.<etapa>` | o que cada etapa fez na volta (`runs_deleted`, `runs_anonymized`, `file_rows_deleted`, `objects_purged`, `leases_reconciled`, …) |
 | `duration_ms` | duração da volta |
 
@@ -91,6 +92,7 @@ O worker emite um span `attempt` por tentativa (`goblinshift.runs.worker.attempt
 | `attempt.inputs`, `attempt.outputs`, `attempt.output_bytes`, `attempt.rejected` | entradas, saídas de conteúdo (quantidade e bytes) e rejeições do relatório; nunca nomes |
 | `attempt.rejected.<CODE>` | rejeições por código, um atributo por código do catálogo fechado `ItemRejectionCode` presente no relatório |
 | `queue_wait_ms` | da elegibilidade da Run (`eligible_at`, que na retentativa inclui o jitter) ao início da tentativa, pelo relógio do banco |
+| `attempt.candidates_left_on_disk` | só se algum ficou: candidatos descartados que o disco recusou apagar no fim da tentativa; cada um no log `arquivo não removido do disco`, com a chave (`alert = purge_file_not_removed`) |
 | `attempt.stop_reason` | razão de parada persistida quando a tentativa termina por parada (`CANCELED`, `DEADLINE_EXCEEDED`) |
 | `attempt.cancel_latency_ms` | só no cancelamento: do `cancel_requested_at` até o coordenador confirmar a parada, pelo relógio do banco |
 | `duration_ms` | duração da tentativa no worker |

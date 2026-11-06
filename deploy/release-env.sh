@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Grava no host a versão implantada: a tag da aplicação e a imagem do executor por digest
-# (docs/GoblinShiftPlan.md, 3.8). Chamado pelo release.sh antes do primeiro comando do Compose; o
-# deploy/compose.sh lê o arquivo, para que todo comando do Compose de produção, do deploy ou do
-# operador, use a mesma versão.
+# (docs/GoblinShiftPlan.md, 3.8). Só o deploy/release.sh, morto, o chama: na publicação pelo
+# Coolify, a versão fica nas variáveis do recurso. O deploy/compose.sh lê o arquivo, para que todo
+# comando dele use a mesma versão.
 #
 # Os valores são validados antes de gravar, porque o arquivo é lido como --env-file: uma quebra de
 # linha num deles acrescentaria outra variável. A escrita é atômica (temporário + mv), e o arquivo

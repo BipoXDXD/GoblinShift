@@ -18,6 +18,8 @@ COMMAND_TIMEOUT_S = 30.0
 _MAX_DETAIL_CHARS = 300
 # O Docker escreve "0001-01-01T00:00:00Z" para um horário que ainda não aconteceu.
 _UNSET_TIME_PREFIX = "0001-01-01"
+# Só o que nomeia o container: "connect: no such file or directory" é socket ausente, não ausência.
+_MISSING_MARKERS = ("no such container", "no such object")
 _RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})")
 _DOCKER_STATES: dict[str, State] = {
     "created": "created",
@@ -100,7 +102,8 @@ class DockerCli:
         result = self._execute(["rm", name])
         if result.returncode == 0 or _is_missing(result.stderr):
             return
-        if "is running" in result.stderr:
+        # "container is running": o erro de conexão também diz "if the daemon is running".
+        if "container is running" in result.stderr:
             raise ContainerRunningError(_detail(result.stderr))
         raise _unexpected("rm", result)
 
@@ -158,7 +161,8 @@ def _optional_time(value: object) -> str | None:
 
 
 def _is_missing(stderr: str) -> bool:
-    return "no such" in stderr.lower()
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _MISSING_MARKERS)
 
 
 def _detail(stderr: str) -> str:

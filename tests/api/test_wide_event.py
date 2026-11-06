@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -19,6 +20,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.api.cookies import SESSION_COOKIE
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.entrypoints.api.wide_event import RateLimitClass, rate_limit_class
 from goblinshift.files.storage import FileStorage
@@ -27,6 +29,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from openobserve.catalog import slo_named
 from tests.api.files_support import bearer, new_account, publish
+from tests.api.session_support import open_session, session_headers
 from tests.api.support import add_test_routes
 from tests.identity.support import new_key, new_user, prepare_database
 from tests.runs.support import ready_inputs
@@ -102,6 +105,73 @@ def test_evento_de_requisicao_autenticada_tem_conta_credencial_e_consultas(
     assert event["db.query.count"] >= 2
     assert event["db.query.duration_ms"] >= 0
     assert event["duration_ms"] > 0
+
+
+def test_evento_de_sessao_aceita_tem_conta_e_credencial_sem_o_id_nem_os_tokens(
+    traced: Traced,
+) -> None:
+    user_id = new_user(traced.factory)
+    issued = open_session(traced.app, user_id)
+    traced.clear()
+
+    response = traced.client.get("/api/v1/me", headers=session_headers(traced.app, issued))
+
+    assert response.status_code == 200
+    event = traced.main_event()
+    assert event["auth.via"] == "session"
+    assert event["user.hash"] == UserHasher(traced.app.state.settings.user_hash_key()).hash(user_id)
+    for span in traced.spans():
+        text = _span_text(span)
+        for secret in (str(user_id), user_id.hex, issued.token, issued.csrf_token):
+            assert secret not in text
+
+
+def test_logout_com_sessao_aceita_tem_conta_e_credencial(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    traced.clear()
+
+    response = traced.client.post("/auth/logout", headers=session_headers(traced.app, issued))
+
+    assert response.status_code == 204
+    event = traced.main_event()
+    assert event["auth.via"] == "session"
+    assert "user.hash" in event
+
+
+def test_mutacao_recusada_pelo_csrf_nao_e_atribuida_a_conta_do_cookie(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    headers = session_headers(traced.app, issued, csrf_header="token-errado")
+    traced.clear()
+
+    response = traced.client.post("/auth/logout-all", headers=headers)
+
+    assert response.status_code == 403
+    event = traced.main_event()
+    assert event["error.code"] == "CSRF_FAILED"
+    assert "user.hash" not in event
+    assert "auth.via" not in event
+
+
+def test_sessao_encerrada_e_desconhecida_sao_iguais_e_sem_conta_no_evento(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    assert (
+        traced.client.post("/auth/logout", headers=session_headers(traced.app, issued)).status_code
+        == 204
+    )
+    traced.clear()
+
+    ended = traced.client.get("/api/v1/me", headers={"Cookie": f"{SESSION_COOKIE}={issued.token}"})
+    ended_event = traced.main_event()
+    traced.clear()
+    unknown = traced.client.get("/api/v1/me", headers={"Cookie": f"{SESSION_COOKIE}={'S' * 43}"})
+    unknown_event = traced.main_event()
+
+    assert (ended.status_code, unknown.status_code) == (401, 401)
+    assert _problem_without_request_id(ended) == _problem_without_request_id(unknown)
+    for event in (ended_event, unknown_event):
+        assert event["error.code"] == "AUTHENTICATION_REQUIRED"
+        assert "user.hash" not in event
+        assert "auth.via" not in event
 
 
 def test_evento_nunca_traz_o_owner_id(traced: Traced) -> None:
@@ -347,6 +417,15 @@ def test_rotas_com_classe_explicita_existem_na_aplicacao(traced: Traced) -> None
     assert ("PUT", "/api/v1/uploads/{upload_id}/content") in routes
     assert ("GET", "/api/v1/artifacts/{artifact_id}/download") in routes
     assert ("POST", "/api/v1/runs") in routes
+
+
+def _problem_without_request_id(response: httpx.Response) -> dict[str, Any]:
+    """O corpo do erro sem o que muda a cada requisição."""
+    return {
+        key: value
+        for key, value in response.json().items()
+        if key not in {"request_id", "instance", "trace_id"}
+    }
 
 
 def _span_text(span: ReadableSpan) -> str:
