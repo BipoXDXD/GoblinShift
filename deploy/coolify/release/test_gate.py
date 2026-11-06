@@ -58,6 +58,45 @@ class GateTests(unittest.TestCase):
                 gate.validate(self.ci_run, self.jobs, "stillon", sha)
 
 
+class GoblinShiftGateTests(unittest.TestCase):
+    GVISOR_JOURNEYS = "Jornadas reais sob gVisor (Playwright)"
+
+    def setUp(self) -> None:
+        self.ci_run = {
+            "head_sha": SHA,
+            "head_branch": "main",
+            "event": "push",
+            "path": ".github/workflows/ci.yml",
+            "head_repository": {"full_name": "BipoXDXD/GoblinShift"},
+            "status": "completed",
+            "conclusion": "success",
+        }
+        self.jobs = [
+            *(
+                {"name": name, "status": "completed", "conclusion": "success"}
+                for name in gate.REQUIRED["goblinshift"]
+            ),
+            *(
+                {"name": name, "status": "completed", "conclusion": "skipped"}
+                for name in gate.LEGACY_SKIPS
+            ),
+        ]
+
+    def test_all_jobs_with_browser_journeys_under_gvisor_succeed(self) -> None:
+        self.assertEqual(gate.validate(self.ci_run, self.jobs, "goblinshift", SHA), SHA)
+
+    def test_browser_journeys_under_gvisor_cannot_be_missing_or_skipped(self) -> None:
+        others = [job for job in self.jobs if job["name"] != self.GVISOR_JOURNEYS]
+        skipped = {
+            "name": self.GVISOR_JOURNEYS,
+            "status": "completed",
+            "conclusion": "skipped",
+        }
+        for jobs in [others, [*others, skipped]]:
+            with self.subTest(jobs=len(jobs)), self.assertRaises(ValueError):
+                gate.validate(self.ci_run, jobs, "goblinshift", SHA)
+
+
 class SupersededReleaseTests(unittest.TestCase):
     def test_superseded_release_is_successful_noop_before_any_ci_query(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
