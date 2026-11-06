@@ -41,7 +41,9 @@ Reforços deste ADR:
    - outros tipos de montagem, volume nomeado `external` ou com `driver_opts`;
    - secret fora de `/srv/goblinshift/secrets/` e config fora de `<repositório>/docker/`.
 
-   Os JSON de `deploy/coolify/` (`app.json`, `infra.json` e `gateway.json`), que são o que a produção executa, passam pela mesma política depois do `docker compose config` e ainda precisam de imagem fixada por digest. O `gateway.json` tem quatro desvios fixados no teste, sem exceção na política: os binds só de leitura de `deploy/coolify/Caddyfile` e `deploy/coolify/sites` e os volumes externos `caddy_data` e `caddy_config`, do próprio projeto `edge`.
+   Os JSON de `deploy/coolify/` (`app.json`, `infra.json` e `gateway.json`), que são o que a produção executa, passam pela mesma política depois do `docker compose config` e ainda precisam de imagem fixada por digest, sem `build`.
+
+   **Pendente de decisão do dono:** o `gateway.json` hoje descumpre esta decisão em quatro pontos, registrados aqui sem exceção formal: os binds só de leitura de `deploy/coolify/Caddyfile` e `deploy/coolify/sites`, fora de `<repositório>/docker/`, e os volumes `external` `caddy_data` e `caddy_config`, que a decisão proíbe. A política continua reprovando os quatro. O teste só fixa o estado atual (lista exata, alvos, `read_only`, nomes `edge_caddy_data` e `edge_caddy_config` e o `proxy` como único serviço a montá-los) para que não cresçam nem mudem. A pendência se encerra de um destes modos: o gateway deixa de precisar deles, ou o dono os aceita e a política muda como manda a seção [Consequências](#consequências).
 2. **CODEOWNERS** em `deploy/`, `compose*.yaml` e `.github/workflows/`, com `@BipoXDXD`, para que toda mudança nesses caminhos peça a revisão do dono.
 
 ## Alternativas descartadas
@@ -56,7 +58,7 @@ Reforços deste ADR:
 
 - Um commit malicioso ou um engano na `main`, um token do GitHub comprometido ou um PR mergeado sem revisão continuam valendo root na VPS, com acesso aos containers e dados do StillOn. Risco aceito: projeto de portfólio, um só mantenedor, serviço fechado até a abertura (ADR 023).
 - O fitness test pega o **erro honesto** (um `privileged` ou um bind de `/` copiado de um exemplo). Não detém um atacante, que altera o teste no mesmo commit. O mesmo vale para o CODEOWNERS: com um só dono, ele marca os caminhos sensíveis e pede revisão, mas não exige um segundo par de olhos. Ligar "Require review from Code Owners" travaria os PRs do próprio dono.
-- Mudança legítima que precise de algo fora da allowlist (outro bind, outra capability) muda a política em `tests/compose_host_policy.py` no mesmo PR, citando este ADR.
+- Mudança legítima que precise de algo fora da allowlist (outro bind, outra capability) muda a política em `tests/compose_host_policy.py` no mesmo PR, citando este ADR. Os desvios do gateway pendentes de decisão (reforço 1) já existiam no `gateway.json` quando a política passou a cobrir os JSON do Coolify; não são precedente, e aceitá-los segue esta mesma regra.
 
 ### Gatilhos para revisar e ir para a alternativa B
 
