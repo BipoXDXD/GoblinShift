@@ -40,6 +40,8 @@ Reforços deste ADR:
    - bind mount fora da allowlist. Para escrita: `storage`, `pg/data`, `telemetry/data`, `exec-work` e `/run/goblinshift`. Só leitura: `pg`, `storage`, `telemetry` e arquivos em `<repositório>/docker/`;
    - outros tipos de montagem, volume nomeado `external` ou com `driver_opts`;
    - secret fora de `/srv/goblinshift/secrets/` e config fora de `<repositório>/docker/`.
+
+   Os JSON de `deploy/coolify/` (`app.json`, `infra.json` e `gateway.json`), que são o que a produção executa, passam pela mesma política depois do `docker compose config` e ainda precisam de imagem fixada por digest. O `gateway.json` tem quatro desvios fixados no teste, sem exceção na política: os binds só de leitura de `deploy/coolify/Caddyfile` e `deploy/coolify/sites` e os volumes externos `caddy_data` e `caddy_config`, do próprio projeto `edge`.
 2. **CODEOWNERS** em `deploy/`, `compose*.yaml` e `.github/workflows/`, com `@BipoXDXD`, para que toda mudança nesses caminhos peça a revisão do dono.
 
 ## Alternativas descartadas
