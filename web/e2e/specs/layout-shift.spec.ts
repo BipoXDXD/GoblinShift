@@ -77,7 +77,7 @@ interface Screen {
 
 const OFICINA: Screen = {
   path: "/",
-  ready: (page) => page.getByRole("link", { name: /CSV Janitor/ }),
+  ready: (page) => page.getByRole("link", { name: "Abrir a Bancada da CSV Janitor" }),
 };
 const BANCADA: Screen = {
   path: "/bancada/csv-janitor",

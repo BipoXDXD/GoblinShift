@@ -3,7 +3,8 @@ import type { BrowserContext } from "@playwright/test";
 /**
  * Põe a chave de API em cada pedido para a API, no processo do Playwright (plano da fatia 7, 4.2).
  * O bundle, o storage e os cookies nunca a veem: o navegador manda o pedido sem credencial e o
- * Playwright acrescenta o cabeçalho no caminho, inclusive nos downloads por navegação.
+ * Playwright acrescenta o cabeçalho no caminho, inclusive nos downloads por navegação. O
+ * `a[download]` passa por fora disso no Chromium (ExecucaoPage.download).
  *
  * Registrada depois da API falsa, roda antes dela (o Playwright chama a última rota primeiro) e
  * passa o pedido adiante com `fallback`: para a API falsa no modo local e para a rede no remoto.

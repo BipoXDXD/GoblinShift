@@ -67,20 +67,22 @@ test("Esc com o salvamento em voo não esconde o 409, e o diálogo reabre depois
 
 test("Esc com a exclusão em voo não fecha; a falha aparece na Oficina e o diálogo reabre", async ({
   page,
-}) => {
+}, testInfo) => {
+  // Por projeto e apagado no fim: contra a API real, a conta é a mesma entre os dois projetos.
+  const name = `Clientes do mês ${testInfo.project.name}`;
   const bancada = new BancadaPage(page);
   await bancada.open("csv-janitor");
   await page.getByRole("button", { name: "Salvar preset" }).click();
-  await page.getByLabel("Nome do preset").fill("Clientes do mês");
+  await page.getByLabel("Nome do preset").fill(name);
   await page.getByLabel("Nome do preset").press("Enter");
-  await expect(page.getByText("Preset Clientes do mês salvo.")).toBeVisible();
+  await expect(page.getByText(`Preset ${name} salvo.`)).toBeVisible();
   await page.goto("/");
   const presets = page.getByRole("region", { name: "Presets" });
   const held = holdRequest(page, "**/api/v1/presets/*", "DELETE");
 
-  const remove = presets.getByRole("button", { name: "Excluir o preset Clientes do mês" });
+  const remove = presets.getByRole("button", { name: `Excluir o preset ${name}` });
   await remove.click();
-  const dialog = page.getByRole("dialog", { name: "Excluir o preset Clientes do mês?" });
+  const dialog = page.getByRole("dialog", { name: `Excluir o preset ${name}?` });
   const confirm = dialog.getByRole("button", { name: "Excluir preset" });
   await confirm.click();
   const deletion = await held;
@@ -94,4 +96,7 @@ test("Esc com a exclusão em voo não fecha; a falha aparece na Oficina e o diá
   await expect(dialog).toBeHidden();
   await remove.click();
   await expect(dialog).toBeVisible();
+  await page.unroute("**/api/v1/presets/*");
+  await confirm.click();
+  await expect(remove).toHaveCount(0);
 });

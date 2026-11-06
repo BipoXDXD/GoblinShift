@@ -2,7 +2,7 @@
 //
 // - Local (padrão, o do CI): o build de dist/ servido por e2e/server/serve-dist.ts e a API falsa
 //   no processo do Playwright. A chave é um canário gerado a cada execução.
-// - Remoto (E2E_BASE_URL definido): a SPA e a API reais, no Compose ou na VPS. A chave vem de
+// - Remoto (E2E_BASE_URL definido): a SPA e a API reais do Compose local, com escrita. A chave vem de
 //   GS_E2E_API_KEY, que só este processo lê (decisão U2 do plano de fechamento da fatia 7).
 // - VPS (E2E_VPS=1, com E2E_BASE_URL): só specs/vps.spec.ts, as jornadas de leitura, no Chromium e
 //   no Firefox. A chave é opcional: sem ela, as jornadas que exigem conta são puladas com o motivo.
@@ -10,6 +10,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { assertLocalWriteTarget } from "./writeTarget.ts";
 
 const PRODUCTION_ORIGIN = "https://goblinshift.dev";
 
@@ -49,6 +51,9 @@ function readEnv(): E2EEnv {
   const apiKey = process.env["GS_E2E_API_KEY"] ?? "";
   if (apiKey === "" && !vps) {
     throw new Error("E2E_BASE_URL exige GS_E2E_API_KEY com a chave da conta de teste.");
+  }
+  if (!vps) {
+    assertLocalWriteTarget(remoteUrl);
   }
   // A chave da conta de teste da VPS só vai para a produção, nunca para um host apontado à mão.
   if (vps && apiKey !== "" && new URL(remoteUrl).origin !== PRODUCTION_ORIGIN) {
