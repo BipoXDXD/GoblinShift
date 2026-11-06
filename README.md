@@ -95,6 +95,8 @@ Esse modo foi exercitado em 2026-11-05 contra o Compose local em um Mac: 116 tes
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
+Dependências e código também passam por análise própria, fora do `ci.yml` e do gate da release ([ADR 042](docs/adr/042-auditoria-de-dependencias-e-codeql-fora-do-gate.md)): o `pip-audit` lê o `uv.lock` inteiro e o CodeQL analisa Python e TypeScript, em todo PR e toda semana.
+
 ## CSV Janitor pela linha de comando
 
 A receita de tabelas ([1.3](docs/GoblinShiftPlan.md#s1-3)) é uma biblioteca pura em `goblinshift.processing.csv_janitor`, só com a biblioteca padrão. A CLI chama a mesma função que o executor vai chamar:

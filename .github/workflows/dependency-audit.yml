@@ -1,0 +1,44 @@
+name: Auditoria de dependências
+
+# pip-audit contra o uv.lock inteiro (ADR 042). Fora do ci.yml de propósito: o gate da release exige
+# exatamente os jobs de lá, e uma CVE publicada hoje, sem mudança no repositório, não pode travar a
+# publicação da correção. A execução semanal acha a CVE nova mesmo sem nenhum PR aberto.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # O Python vem do setup-python (.python-version), como no ci.yml.
+  UV_PYTHON_DOWNLOADS: never
+
+jobs:
+  pip-audit:
+    name: Dependências Python (pip-audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Exportar o lock, com hashes, de todos os grupos
+        run: >-
+          uv export --locked --all-groups --no-emit-project --format requirements.txt
+          --output-file "$RUNNER_TEMP/requirements.txt"
+      - name: pip-audit
+        # Versão fixada, como a do zizmor. Sem `--ignore-vuln`: uma CVE que não se aplica é decisão
+        # escrita em ADR, não uma exceção silenciosa neste comando.
+        run: uvx pip-audit@2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" --require-hashes --disable-pip
