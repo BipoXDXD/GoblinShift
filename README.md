@@ -155,9 +155,13 @@ Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api
 
 A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Contas criadas pelo `gs-admin` são do operador e não passam pelo aceite dos termos; as do login web recebem `403 TERMS_NOT_ACCEPTED` até aceitar a versão vigente pela sessão (`POST /api/v1/me/terms:accept`; [ADR 029](docs/adr/029-aceite-versionado-dos-termos.md)). Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
 
-## Deploy sem queda
+## Publicação em produção
 
-A produção é publicada só pelo Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)). O caminho antigo por SSH está morto: o `deploy/deploy.sh` só recusa, o `deploy/release.sh` não tem quem o chame e o job `deploy` da CI fica pulado, porque o gate de release exige esse resultado (`deploy/coolify/release/gate.py`). O `deploy/rollout-api.sh` sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga. O Nginx, que leva o build da SPA, é recriado a cada versão; enquanto ele volta, a borda repete a conexão (`lb_try_duration` em `deploy/edge/conf.d/goblinshift.caddy`). Para conferir localmente, com a pilha de pé:
+A produção é publicada só pelo Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)). O caminho antigo por SSH está morto: o `deploy/deploy.sh` só recusa, o `deploy/release.sh` não tem quem o chame e o job `deploy` da CI fica pulado, porque o gate de release exige esse resultado (`deploy/coolify/release/gate.py`).
+
+**Em produção**, a release grava as imagens novas no recurso da aplicação, o Coolify executa `compose up -d` e o receptor só registra sucesso depois de conferir a saúde e a imagem dos containers ([`deploy/coolify/release/receiver.py`](deploy/coolify/release/receiver.py)). Cada serviço tem `container_name` fixo em `deploy/coolify/app.json`, então a API e o Nginx, que leva o build da SPA, são substituídos, sem duas versões lado a lado. Nada garante uma troca sem queda. Enquanto o Nginx volta, a borda repete a falha de conexão por até 5 s (`lb_try_duration` no site do GoblinShift, montado pelo `deploy/coolify/gateway.json`); isso não cobre a API fora do ar com o Nginx de pé. Não há medição registrada da indisponibilidade de uma publicação em produção, e o repositório não tem número para ela.
+
+**Na pilha local**, o `deploy/rollout-api.sh` sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga. Ele depende de escalar o serviço `api`, o que o `container_name` fixo da produção impede, e não faz parte da publicação: só o `scripts/check-zero-downtime.sh` e o `deploy/release.sh`, morto, o chamam, e a CI não roda essa prova. A única medição registrada é local, de 2026-10-13 (commit `1719798`): 0 falhas em 7083 requisições a `/readyz`, em quatro trocas, contra 34 respostas 502 em 1309 no jeito anterior, um `compose up` com o Nginx fixando o IP da API. Esses números não dizem nada sobre a produção. Para repetir a prova, com a pilha de pé:
 
 ```bash
 ./scripts/check-zero-downtime.sh   # troca a API sob carga e falha se alguma resposta não for 200
@@ -195,12 +199,12 @@ O `chmod 755` é necessário: o `mktemp -d` cria o diretório com 700, e quem pr
 
 ### Segredos do login
 
-O login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração do `app.env` e os segredos de arquivos em `/srv/goblinshift/secrets/` (diretório `700`, dono `goblinshift`). Os arquivos ficam com modo `644` dentro desse diretório, como o `db_password`, porque o container lê com o UID da aplicação; com `600` a API não sobe. Só o container `api` recebe esses valores, montados em `/run/secrets/<nome>` (`compose.prod.yaml`).
+Em produção, o login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração de variáveis privadas do Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)) e os segredos de arquivos em `/srv/goblinshift/secrets/` (diretório `700`, dono `goblinshift`). Os arquivos ficam com modo `644` dentro desse diretório, como o `db_password`, porque o container lê com o UID da aplicação; com `600` a API não sobe. Só o container `api` recebe esses valores, montados em `/run/secrets/<nome>` (`deploy/coolify/app.json`).
 
 | Nome | Onde | Quem grava |
 |---|---|---|
-| `GS_PUBLIC_ORIGIN` (`https://goblinshift.dev`), `GS_GOOGLE_CLIENT_ID`, `GS_GITHUB_CLIENT_ID` | `app.env` | operador; os IDs não são segredo |
-| `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | `app.env` | operador |
+| `GS_PUBLIC_ORIGIN` (`https://goblinshift.dev`), `GS_GOOGLE_CLIENT_ID`, `GS_GITHUB_CLIENT_ID` | variável no Coolify | operador; os IDs não são segredo |
+| `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | variável no Coolify | operador |
 | `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
 | `csrf_secret`, `login_cookie_secret` | arquivo | operador, com `openssl rand -hex 32` (abaixo); a publicação pelo Coolify não os cria |
 
@@ -391,7 +395,7 @@ src/goblinshift/
   presets/           presets privados da conta, com revisão (criar, listar, substituir, excluir)
 migrations/          Alembic (expand/contract)
 docker/              imagens da aplicação, do executor e do Nginx com a SPA; OpenTelemetry Collector
-deploy/              provisionamento da VPS, gVisor, deploy chamado pela CI, backup do banco, SLOs e alertas e teste de aceitação do ambiente
+deploy/              provisionamento da VPS, gVisor, publicação pelo Coolify, backup do banco, SLOs e alertas e teste de aceitação do ambiente
 web/                 interface React (Vite + TypeScript); src/api é o único ponto que fala com a API
 ```
 

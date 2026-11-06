@@ -88,9 +88,14 @@ def _docker(*args: str) -> str:
     return result.stdout
 
 
-def _gateway_image() -> str:
+def _gateway_proxy() -> dict[str, Any]:
     gateway = json.loads((COOLIFY / "gateway.json").read_text())
-    image: str = gateway["services"]["proxy"]["image"]
+    proxy: dict[str, Any] = gateway["services"]["proxy"]
+    return proxy
+
+
+def _gateway_image() -> str:
+    image: str = _gateway_proxy()["image"]
     return image
 
 
@@ -125,6 +130,7 @@ def _proxy_header(source: str) -> bytes:
 
 @dataclass(frozen=True)
 class Gateway:
+    container: str
     port: int
 
     def echo(self, host: str, source: str, *headers: str) -> dict[str, str]:
@@ -184,7 +190,7 @@ def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Gateway]:
             "-v", f"{workdir / 'caddy'}:/etc/caddy:ro", image,
         )  # fmt: skip
         published = _docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1]
-        running = Gateway(int(published))
+        running = Gateway(proxy, int(published))
         _wait_until_ready(running)
         yield running
     finally:
@@ -379,3 +385,11 @@ def test_stillon_continua_recebendo_quem_conectou(gateway: Gateway, source: str)
     received = gateway.echo(STILLON, source, f"CF-Connecting-IP: {CLIENT_V4}")
 
     assert received == {"xff": source, "cf": CLIENT_V4}
+
+
+@pytest.mark.gateway
+def test_healthcheck_do_json_passa_no_gateway_real(gateway: Gateway) -> None:
+    kind, *command = _gateway_proxy()["healthcheck"]["test"]
+
+    assert kind == "CMD"
+    _docker("exec", gateway.container, *command)
