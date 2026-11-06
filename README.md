@@ -86,7 +86,7 @@ npx playwright install --only-shell chromium   # uma vez
 npm run build && npm run e2e
 npm run e2e:sabotage                           # Devil's Advocate: planta um defeito por spec e exige a falha
 E2E_BASE_URL=http://localhost GS_E2E_API_KEY=... npm run e2e          # contra o Compose, com a API real
-E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   # contra a VPS (só pelo domínio)
+E2E_VPS=1 E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   # contra a VPS, só leitura
 ```
 
 No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado, o CLS da Execução e a jornada do Media Mill, cujos MP4 de fixture são falsos) são puladas, e a suíte roda com um worker: a conta tem uma execução ativa por vez. Contra o Compose, a conta sai do `gs-admin` com `create-user` e `issue-key`, com todos os escopos (`--scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write`). Cada rodada consome 12 das 30 execuções diárias da conta; para repetir mais vezes na mesma conta local, use `gs-admin set-limits --user <id> --runs-per-24h <n>`.

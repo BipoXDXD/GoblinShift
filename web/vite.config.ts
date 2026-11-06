@@ -50,8 +50,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    // As specs do Playwright (e2e/) rodam com o próprio runner, num navegador de verdade.
-    exclude: [...configDefaults.exclude, "e2e/**"],
+    // As specs do Playwright rodam com o próprio runner; aqui entra só a lógica pura de e2e/support.
+    exclude: [...configDefaults.exclude, "e2e/specs/**", "e2e/pages/**"],
     // Sem isso o Vitest troca todo CSS por módulo vazio, inclusive o `?raw` que o teste de
     // contraste e o de licenças leem; os componentes não importam CSS.
     css: { include: [/(tokens|fonts)\.css/] },
