@@ -89,7 +89,9 @@ E2E_BASE_URL=http://localhost GS_E2E_API_KEY=... npm run e2e          # contra o
 E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   # contra a VPS (só pelo domínio)
 ```
 
-No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado e o CLS da Execução) são puladas. Esse modo ainda não foi exercitado contra a API real.
+No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado, o CLS da Execução e a jornada do Media Mill, cujos MP4 de fixture são falsos) são puladas, e a suíte roda com um worker: a conta tem uma execução ativa por vez. Contra o Compose, a conta sai do `gs-admin` com `create-user` e `issue-key`, com todos os escopos (`--scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write`). Cada rodada consome 12 das 30 execuções diárias da conta; para repetir mais vezes na mesma conta local, use `gs-admin set-limits --user <id> --runs-per-24h <n>`.
+
+Esse modo foi exercitado em 2026-11-05 contra o Compose local em um Mac: 116 testes passaram e 418 foram pulados, em desktop e celular, com envio, fila, receita e download pela API real, numa conta nova. O Compose usa o Runner local, um subprocesso do worker: o caminho navegador → API real com gVisor continua sem rodada. A chave entra por rota do Playwright, e o Chromium baixa `a[download]` por fora dela, então só nesse modo a spec tira o atributo antes do clique.
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
