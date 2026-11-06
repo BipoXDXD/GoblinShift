@@ -123,6 +123,7 @@ class Stack:
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         started = time.monotonic()
         with socket.create_connection(("127.0.0.1", self.port), SOCKET_TIMEOUT_SECONDS) as raw:
             raw.sendall(_proxy_header(DIRECT_V4))
