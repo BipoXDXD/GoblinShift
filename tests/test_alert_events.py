@@ -12,6 +12,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from goblinshift.platform import telemetry
 from goblinshift.platform.telemetry import AlertEventCounter, configure_logging
 
 logger = logging.getLogger("tests.alert_events")
@@ -82,6 +83,19 @@ def test_log_sem_o_campo_alert_nao_conta(
 @pytest.mark.usefixtures("counting")
 def test_evento_fora_de_um_span_nao_derruba_quem_registra() -> None:
     alert_event("run_without_reservation")
+
+
+@pytest.mark.usefixtures("counting")
+def test_falha_do_contador_nao_chega_a_quem_registra_o_evento(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_span() -> None:
+        raise RuntimeError("telemetria quebrada")
+
+    monkeypatch.setattr(telemetry, "get_current_span", broken_span)
+    monkeypatch.setattr(logging, "raiseExceptions", False)
+
+    alert_event("purge_file_not_removed")
 
 
 @pytest.fixture

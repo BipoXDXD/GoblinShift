@@ -53,10 +53,16 @@ class AlertEventCounter(logging.Handler):
 
     Os logs não são exportados: o alerta de causa lê o atributo no stream de traces. Só o nome e a
     contagem saem; os campos do evento (chaves, IDs) ficam no log. Sem span gravando, como numa CLI
-    ou com os traces desligados, o evento fica só no log.
+    ou com os traces desligados, o evento fica só no log. Uma falha aqui não chega a quem registrou.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._count(record)
+        except Exception:
+            self.handleError(record)
+
+    def _count(self, record: logging.LogRecord) -> None:
         fields = getattr(record, "fields", None)
         event = fields.get("alert") if isinstance(fields, dict) else None
         span = get_current_span()

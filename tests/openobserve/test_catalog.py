@@ -39,6 +39,18 @@ LOG_EVENT_ALERTS = {
     "storage_unreachable": "gs-causa-storage-sem-sentinela",
     "upload_without_reservation": "gs-causa-sem-reserva",
 }
+# Evento que a causa lê pela contagem do `maintenance.cycle`, não por `alert_<evento>`. Só cabe a
+# quem é emitido dentro da manutenção: fora dela, a contagem do ciclo não enxerga o evento.
+CYCLE_COUNTERS = {
+    "account_deletion_overdue": "maintenance_accounts_deletion_overdue",
+    "missing_governor": "maintenance_missing_governor_tripped",
+    "missing_sweep_failed": "maintenance_missing_sweep_failed",
+    "objects_missing": "maintenance_objects_marked_missing",
+    "objects_unreadable": "maintenance_objects_missing_unreadable",
+    "purge_governor": "maintenance_purge_limit_reached",
+    "storage_unreachable": "maintenance_missing_sweep_skipped",
+}
+MAINTENANCE_MODULES = {"entrypoints/maintenance.py", "runs/maintenance.py"}
 
 
 def test_os_tres_slos_do_plano_com_as_metas() -> None:
@@ -213,14 +225,31 @@ def test_contadores_lidos_pelas_causas_sao_declarados() -> None:
             assert column in CAUSE_COLUMNS, f"{alert.name}: {column}"
 
 
+def modules_emitting_log_events() -> dict[str, set[str]]:
+    modules: dict[str, set[str]] = {}
+    for path in SRC.rglob("*.py"):
+        for event in re.findall(r'"alert": "(\w+)"', path.read_text(encoding="utf-8")):
+            modules.setdefault(event, set()).add(path.relative_to(SRC).as_posix())
+    return modules
+
+
 def test_todo_evento_de_alerta_do_log_tem_um_alerta_no_catalogo() -> None:
     # Os logs não são exportados: evento novo sem alerta fica invisível fora da VPS.
-    sources = (path.read_text(encoding="utf-8") for path in SRC.rglob("*.py"))
-    events = {event for source in sources for event in re.findall(r'"alert": "(\w+)"', source)}
     names = {alert.name for alert in alerts(stream="s", prefix=PREFIX)}
 
-    assert events == set(LOG_EVENT_ALERTS)
+    assert set(modules_emitting_log_events()) == set(LOG_EVENT_ALERTS)
     assert set(LOG_EVENT_ALERTS.values()) <= names
+
+
+@pytest.mark.parametrize(("event", "name"), LOG_EVENT_ALERTS.items(), ids=lambda value: value)
+def test_o_alerta_le_o_proprio_evento(event: str, name: str) -> None:
+    by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}
+    sql = by_name[name].sql
+
+    if f"alert_{event}" in sql:
+        return
+    assert CYCLE_COUNTERS[event] in sql
+    assert modules_emitting_log_events()[event] <= MAINTENANCE_MODULES
 
 
 @pytest.mark.parametrize("name", ABSENCE_ALERTS)

@@ -389,6 +389,7 @@ def test_arquivo_que_ficou_no_disco_dispara_por_qualquer_origem(
         purge_files_not_removed=0, candidates_left_on_disk=0, age_s=2 * MINUTE_S
     )
     traces.flush()
+    declare_columns(telemetry.api, stream)
 
     assert bool(cause_rows(telemetry, "causa-arquivos-nao-removidos", stream)) is fires
 
@@ -416,6 +417,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         1.0,
     )
     traces.flush()
+    declare_columns(telemetry.api, stream)
 
     for name in (
         "causa-execucao-presa",
@@ -461,6 +463,7 @@ def test_falha_repetida_da_manutencao_dispara(
         ("causa-capacidade-divergente", "alert.capacity_over_max"),
         ("causa-sem-reserva", "alert.upload_without_reservation"),
         ("causa-sem-reserva", "alert.run_without_reservation"),
+        ("causa-arquivos-nao-removidos", "alert.purge_file_not_removed"),
     ],
 )
 @pytest.mark.parametrize(("value", "fires"), [(0, False), (1, True)])
@@ -478,6 +481,24 @@ def test_evento_de_alerta_contado_em_qualquer_span_main_dispara(
 
 
 # --- Ausência: a telemetria que deveria chegar e não chegou -------------------------------------
+
+
+def test_arquivo_perdido_num_ciclo_que_falha_dispara_pelo_contador_de_eventos(
+    telemetry: Telemetry,
+) -> None:
+    stream = unique_stream("ciclofalho")
+    traces = telemetry.traces(stream)
+    # As contagens do ciclo que levantou exceção não entram no span; o evento do log, sim.
+    traces.span(
+        "maintenance.cycle",
+        MINUTE_S,
+        {"main": True, "maintenance.failed_cycles": 1, "alert.purge_file_not_removed": 1},
+        5.0,
+    )
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    assert cause_rows(telemetry, "causa-arquivos-nao-removidos", stream)
 
 
 @pytest.mark.parametrize(

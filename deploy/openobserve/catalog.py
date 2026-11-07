@@ -139,6 +139,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_candidates_left_on_disk",
     "maintenance_missing_sweep_failed",
     "maintenance_failed_cycles",
+    "alert_purge_file_not_removed",
     "alert_capacity_divergence",
     "alert_capacity_over_max",
     "alert_upload_without_reservation",
@@ -229,7 +230,7 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
     _SpanCause(
         "causa-arquivos-nao-removidos",
         "Arquivo ficou no disco depois de a exclusão ser confirmada no banco, e nada repete a "
-        "remoção. O log da manutenção traz a chave; veja o runbook.",
+        "remoção. O log do processo traz a chave; veja o runbook.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
