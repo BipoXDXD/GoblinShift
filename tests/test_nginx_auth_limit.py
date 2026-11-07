@@ -3,8 +3,8 @@
 Cada `GET /auth/login/{provider}` grava uma linha em `login_state` sem autenticação, então o
 Nginx limita `/auth/*` por cliente: 10 por minuto, com rajada de 10. O cliente é o IP que a borda
 informa no X-Forwarded-For; de quem não é a borda, o cabeçalho é ignorado, para ninguém escapar do
-limite (nem forjar o IP da auditoria) trocando o valor a cada pedido. A API falsa ecoa, em
-`API_ECHO`, o X-Forwarded-For que recebeu.
+limite (nem forjar o IP da auditoria) trocando o valor a cada pedido. Em IPv6 o cliente é o /64
+(ADR 041). A API falsa ecoa, em `API_ECHO`, o X-Forwarded-For que recebeu.
 """
 
 import json
@@ -103,6 +103,72 @@ def test_quem_nao_e_a_borda_nao_escapa_do_limite_trocando_o_ip_informado(
 
     assert used_up == [HTTP_NO_CONTENT] * AUTH_ALLOWED_IN_A_ROW
     assert spoofed == [HTTP_TOO_MANY_REQUESTS]
+
+
+def _used_up_then(stack: NginxLogs, first: str, second: str) -> int:
+    """Esgota a cota de `first` e devolve o status de um pedido de `second`."""
+    path = "/auth/login/google"
+    used_up = _statuses(stack, stack.edge, path, AUTH_ALLOWED_IN_A_ROW, f"X-Forwarded-For: {first}")
+    assert used_up == [HTTP_NO_CONTENT] * AUTH_ALLOWED_IN_A_ROW
+    return _statuses(stack, stack.edge, path, 1, f"X-Forwarded-For: {second}")[0]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param(
+            "2001:db8:a:1::", "2001:db8:a:1:ffff:ffff:ffff:ffff", id="primeiro-e-ultimo-do-64"
+        ),
+        pytest.param("2001:0DB8:000A:0002::1", "2001:db8:a:2:0:0:0:2", id="grafias-diferentes"),
+        pytest.param("2001:db8:b::1", "2001:db8:b:0:1:2:3:4", id="prefixo-com-grupo-zero"),
+        pytest.param("2001:db8::1", "2001:db8::ffff:0:0:2", id="prefixo-com-dois-grupos-zero"),
+        pytest.param("2001::1", "2001::5:6:7:8", id="prefixo-curto"),
+        pytest.param("::2", "::3", id="so-zeros-no-prefixo"),
+    ],
+)
+def test_enderecos_ipv6_do_mesmo_64_dividem_o_limite(
+    stack: NginxLogs, first: str, second: str
+) -> None:
+    assert _used_up_then(stack, first, second) == HTTP_TOO_MANY_REQUESTS
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param("2001:db8:c:10::1", "2001:db8:c:11::1", id="64-vizinhos"),
+        pytest.param("2001:db8:d::1", "2001:db8:d:1::1", id="grupo-zero-e-vizinho"),
+        pytest.param("2001:0:0:1:2:3:4:5", "2001:0:0:2:2:3:4:5", id="compressao-antes-do-limite"),
+        pytest.param("::e:1:2:3:4:5", "::e:2:2:3:4:5", id="prefixo-comprimido-no-inicio"),
+    ],
+)
+def test_prefixos_ipv6_diferentes_nao_dividem_o_limite(
+    stack: NginxLogs, first: str, second: str
+) -> None:
+    assert _used_up_then(stack, first, second) == HTTP_NO_CONTENT
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param("198.51.100.30", "::ffff:198.51.100.30", id="ipv4-e-mapeado"),
+        pytest.param("::ffff:c633:641f", "198.51.100.31", id="mapeado-em-hexadecimal-e-ipv4"),
+        pytest.param("::ffff:8.8.10.4", "8.8.10.4", id="mapeado-com-byte-0a-e-ipv4"),
+    ],
+)
+def test_ipv4_mapeado_em_ipv6_conta_como_o_proprio_ipv4(
+    stack: NginxLogs, first: str, second: str
+) -> None:
+    assert _used_up_then(stack, first, second) == HTTP_TOO_MANY_REQUESTS
+
+
+def test_ipv4_mapeados_diferentes_nao_dividem_o_limite(stack: NginxLogs) -> None:
+    status = _used_up_then(stack, "::ffff:198.51.100.40", "::ffff:198.51.100.41")
+
+    assert status == HTTP_NO_CONTENT
+
+
+def test_ipv4_conta_por_endereco_e_nao_por_rede(stack: NginxLogs) -> None:
+    assert _used_up_then(stack, "198.51.100.50", "198.51.100.51") == HTTP_NO_CONTENT
 
 
 def test_429_de_auth_e_problem_json_com_retry_after(stack: NginxLogs) -> None:

@@ -9,6 +9,6 @@ WHERE main = 'true'
   AND operation_name = 'maintenance.cycle'
   AND (
     TRY_CAST(maintenance_purge_files_not_removed AS BIGINT) > 0
-    OR TRY_CAST(maintenance_candidate_files_not_removed AS BIGINT) > 0
+    OR TRY_CAST(maintenance_candidates_left_on_disk AS BIGINT) > 0
   )
 HAVING count(*) > 0

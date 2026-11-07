@@ -136,7 +136,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_objects_marked_missing",
     "maintenance_objects_missing_unreadable",
     "maintenance_purge_files_not_removed",
-    "maintenance_candidate_files_not_removed",
+    "maintenance_candidates_left_on_disk",
     "maintenance_missing_sweep_failed",
     "maintenance_failed_cycles",
     "alert_capacity_divergence",
