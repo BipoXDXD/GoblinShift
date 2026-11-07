@@ -29,7 +29,7 @@ Não há lista de CVEs ignoradas. Se uma CVE não se aplicar ao projeto, a exce�
 - Um achado não impede a publicação. Quem responde a ele é o PR de correção, ou o aviso de falha da execução semanal.
 - A primeira análise do CodeQL varre o código todo. O PR só anota linhas que ele mesmo muda, mas o resultado completo fica na aba de segurança e precisa de triagem.
 - O `uvx` instala o `pip-audit` pela versão, sem hash, como já acontece com o zizmor. Pôr a ferramenta no `uv.lock` traria dezenas de pacotes para o lock que ela mesma audita.
-- Para que um achado bloqueie o merge, o ruleset da `main` precisa listar os checks novos. É configuração do GitHub, fora deste repositório.
+- Para que um achado bloqueie o merge, o ruleset da `main` precisa listar os checks novos. É configuração do GitHub, fora deste repositório. O [ADR 044](044-auditoria-e-codeql-obrigatorios-no-merge.md) fez isso.
 
 ## Compliance
 
