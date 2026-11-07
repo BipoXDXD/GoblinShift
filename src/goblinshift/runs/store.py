@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift import capacity
 from goblinshift.files.candidates import discard_candidates
 from goblinshift.files.objects import release
+from goblinshift.files.retention import remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
@@ -306,18 +307,18 @@ def complete_after_commit(
     storage: FileStorage,
     applied: Applied,
     on_finished: RunFinishedHook | None = None,
-) -> None:
+) -> int:
     """O que a transição deixou para depois do commit: arquivos descartados, usos e o evento.
 
     `release_pending` só vem de transição para estado terminal (`ReleaseReservations`), então é
     também o sinal de que esta transição terminou a Run e o evento de término sai uma vez.
+
+    Devolve quantos candidatos ficaram no disco, para o evento de quem chamou. Cada um vira órfão
+    sob `runs/{run}/g{n}/`: só ocupa espaço, e o alerta de `remove_file_after_commit` traz a chave.
     """
-    for key in applied.discarded_keys:
-        try:
-            storage.delete(key)
-        except OSError:
-            # O arquivo vira órfão sob `runs/{run}/g{n}/`: só ocupa espaço, e o log o aponta.
-            logger.warning("candidato descartado ficou no disco", extra={"fields": {"key": key}})
+    left_on_disk = [
+        key for key in applied.discarded_keys if not remove_file_after_commit(storage, key)
+    ]
     if applied.release_pending:
         run_transaction(
             factory,
@@ -325,6 +326,7 @@ def complete_after_commit(
         )
         if on_finished is not None:
             on_finished(applied.run_id)
+    return len(left_on_disk)
 
 
 def _reserve_published_objects(session: Session, run_id: uuid.UUID) -> None:

@@ -302,6 +302,14 @@ def test_progresso_que_e_symlink_nao_e_seguido(
     assert summary == {"progress": {"processed": 0, "total": 1}}
 
 
+def test_progresso_que_e_diretorio_conta_zero(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    summary = _progress_after_renew(factory, storage, work_root, lambda progress: progress.mkdir())
+
+    assert summary == {"progress": {"processed": 0, "total": 1}}
+
+
 def test_progresso_nunca_passa_do_total_de_entradas(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:

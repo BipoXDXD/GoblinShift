@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Segredos da aplicação no lugar antes do deploy seguir (docs/GoblinShiftPlan.md; README,
-# "Segredos do login"). Chamado pelo release.sh a cada deploy, antes do `migrate`: assim um
-# segredo faltando para o deploy sem mexer no banco, em vez de derrubar a API nova no rollout.
+# "Segredos do login"). Só o deploy/release.sh, morto, o chama: a publicação pelo Coolify não
+# passa por aqui. Rodava antes do `migrate`: assim um segredo faltando parava o deploy sem mexer
+# no banco, em vez de derrubar a API nova.
 #
 # - Gera, uma vez, os que a própria aplicação cria, e nunca troca um que já existe: no app.env, o
 #   do cursor de paginação (3.3) e o do `user.hash` dos eventos amplos (3.7); em arquivo, ao lado

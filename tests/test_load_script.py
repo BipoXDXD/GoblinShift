@@ -22,7 +22,9 @@ SCENARIOS = LOAD_DIR / "scenarios"
 AUTH_LOGIN = ROOT / "src" / "goblinshift" / "entrypoints" / "api" / "auth_login.py"
 SCENARIO_NAMES = ("jornada", "fila", "transferencias", "limite-por-conta", "limite-auth")
 LIMIT_SCENARIOS = ("limite-por-conta", "limite-auth")
-SCRIPT_TIMEOUT_SECONDS = 10
+# O `node --check` leva cerca de 0,1 s, mas já passou de 10 s em runner de CI lento. O teto só
+# pega processo travado: erro de sintaxe e recusa de alvo aparecem no código de saída.
+SCRIPT_TIMEOUT_SECONDS = 60
 
 
 def _scenario(name: str) -> str:

@@ -118,6 +118,35 @@ def test_stop_e_remove_de_container_inexistente_sao_sucesso(tmp_path: Path) -> N
     docker.remove("gs-exec-x")
 
 
+# Texto real do CLI do Docker 29 com o socket ausente: tem "no such", mas não fala do container.
+DAEMON_UNREACHABLE = (
+    "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is "
+    "correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file "
+    "or directory\n"
+)
+
+
+def test_inspect_com_daemon_inacessivel_nao_vira_absent(tmp_path: Path) -> None:
+    docker = fake_docker(tmp_path, DAEMON_UNREACHABLE, 1)
+
+    with pytest.raises(DockerUnavailableError):
+        docker.inspect("gs-exec-x")
+
+
+def test_stop_com_daemon_inacessivel_nao_vira_sucesso(tmp_path: Path) -> None:
+    docker = fake_docker(tmp_path, DAEMON_UNREACHABLE, 1)
+
+    with pytest.raises(DockerUnavailableError):
+        docker.stop("gs-exec-x", grace_s=1)
+
+
+def test_remove_com_daemon_inacessivel_nao_vira_sucesso(tmp_path: Path) -> None:
+    docker = fake_docker(tmp_path, DAEMON_UNREACHABLE, 1)
+
+    with pytest.raises(DockerUnavailableError):
+        docker.remove("gs-exec-x")
+
+
 def test_remove_de_container_rodando_e_recusado(tmp_path: Path) -> None:
     docker = fake_docker(
         tmp_path,
