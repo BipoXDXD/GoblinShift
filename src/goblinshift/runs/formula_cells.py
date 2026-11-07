@@ -3,9 +3,9 @@
 O relatório traz todas as colunas de saída com células que parecem fórmula; o banco guarda só as
 `MAX_COLUMNS` de maior contagem (empate na ordem da saída) e quantas ficaram de fora. O nome da
 coluna é dado do usuário: fica como texto, com teto de `MAX_COLUMN_NAME_CHARS` caracteres e sem
-controle nem formato invisível (o JSONB do PostgreSQL recusa NUL, e bidi disfarça o texto
-exibido). Cabeçalho vazio ou só de espaços vira nome nulo. Some com `run_input.details` na
-retenção de 30 dias.
+controle, formato invisível nem surrogate solto (o JSONB do PostgreSQL recusa NUL e surrogate, e
+bidi disfarça o texto exibido). Cabeçalho vazio ou só de espaços vira nome nulo. Some com
+`run_input.details` na retenção de 30 dias.
 """
 
 from collections.abc import Iterable

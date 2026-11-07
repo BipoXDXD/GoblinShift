@@ -131,6 +131,19 @@ def test_has_unsafe_char_cobre_controle_e_formato(text: str, expected: bool) -> 
     assert has_unsafe_char(text) is expected
 
 
+@pytest.mark.parametrize("char", ["\ud800", "\udbff", "\udc00", "\udfff"])
+def test_has_unsafe_char_cobre_surrogate_solto(char: str) -> None:
+    assert has_unsafe_char(f"a{char}b")
+
+
+def test_has_unsafe_char_aceita_caractere_fora_do_plano_basico() -> None:
+    assert not has_unsafe_char("a\U0001f600b")
+
+
+def test_radical_troca_surrogate_solto() -> None:
+    assert safe_stem("a\ud800b.txt", FALLBACK) == "a_b"
+
+
 @given(st.text())
 def test_radical_e_extensao_nunca_tem_controle_formato_nem_separador(original: str) -> None:
     pieces = safe_stem(original, FALLBACK) + extension_of(original)

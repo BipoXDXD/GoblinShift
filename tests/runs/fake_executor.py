@@ -7,6 +7,7 @@
   roda o executor real.
 - `exit <código>`: sai com o código, sem tocar no diretório.
 - `fail-deterministic <código>`: escreve `failure.json` com o código e sai com 3.
+- `fail-raw <conteúdo>`: escreve `failure.json` com o conteúdo literal e sai com 3.
 - `ignore-term <s>`: ignora SIGTERM, avisa na saída (`IGNORING_TERM`) e dorme (obriga o SIGKILL
   depois da carência).
 - `tamper-package`: roda o executor real e acrescenta ao ZIP de out/ uma entrada que o
@@ -45,6 +46,9 @@ def run(argv: list[str]) -> int:
         case "fail-deterministic":
             failure = {"code": rest[0], "detail": "falha provocada pelo teste"}
             (Path(work_dir) / "failure.json").write_text(json.dumps(failure), encoding="utf-8")
+            return 3
+        case "fail-raw":
+            (Path(work_dir) / "failure.json").write_text(rest[0], encoding="utf-8")
             return 3
         case "tamper-package":
             code = real_executor([work_dir])
