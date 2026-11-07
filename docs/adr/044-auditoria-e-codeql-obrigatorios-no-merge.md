@@ -12,13 +12,13 @@ O ADR 042 deixou `pip-audit` e CodeQL fora do gate da release e registrou que um
 
 | Alternativa | Prós | Contras |
 |-------------|------|---------|
-| **A. Obrigatórios no ruleset** (escolhida) | Nenhum PR entra com CVE conhecida no lock ou alerta novo do CodeQL. O gate da release e o `ci.yml` não mudam | Uma CVE nova reprova o `pip-audit` em todo PR até a correção entrar. Merge fica mais lento |
+| **A. Obrigatórios no ruleset** (escolhida) | Nenhum PR entra com CVE conhecida no lock nem com alerta novo do CodeQL acima dos limiares. O gate da release e o `ci.yml` não mudam | Uma CVE nova reprova o `pip-audit` em todo PR até a correção entrar. Merge fica mais lento |
 | **B. Manter fora do ruleset** | Merge nunca espera uma CVE recém-publicada | Achado depende de alguém olhar a execução. O aviso vem depois do merge |
 | **C. Só o `pip-audit` obrigatório** | Menos checks no merge | Alerta novo do CodeQL segue entrando |
 
 ## Decisão
 
-Alternativa A. O ruleset da `main` passa a exigir `Dependências Python (pip-audit)`, `CodeQL (python)`, `CodeQL (javascript-typescript)` e o check `CodeQL` da análise de código, que é o que reprova alerta novo. Os dois jobs de análise só provam que a análise rodou.
+Alternativa A. O ruleset da `main` exige os checks `Dependências Python (pip-audit)`, `CodeQL (python)` e `CodeQL (javascript-typescript)`, e ganha a regra de code scanning para a ferramenta CodeQL, com limiares `errors` e `high_or_higher`. Os dois jobs só provam que a análise rodou. Quem barra alerta novo é a regra, que considera os resultados das duas linguagens; o check agregado `CodeQL` pode concluir antes do segundo envio, por isso não é usado.
 
 O ADR 042 continua valendo para a release: esses checks seguem fora de `REQUIRED`, e uma CVE nova não impede publicar uma versão já mesclada.
 
