@@ -75,8 +75,8 @@ class Settings(BaseSettings):
     db_port: int = 5432
     db_name: str = "goblinshift"
     db_user: str = "goblinshift"
-    # Em produção a senha vem de um arquivo de segredo do Compose (GS_DB_PASSWORD_FILE),
-    # nunca de variável de ambiente ou do repositório.
+    # Em produção a senha vem só de um arquivo de segredo do Compose (GS_DB_PASSWORD_FILE),
+    # nunca de variável de ambiente ou do repositório. Este padrão é da pilha local e dos testes.
     db_password: SecretStr = SecretStr("goblinshift")
     db_password_file: Path | None = None
 
@@ -258,17 +258,20 @@ class Settings(BaseSettings):
             raise ExecutorConfigError("GS_RUNNER=executor_ctl exige GS_EXECUTOR_IMAGE")
         return self.executor_image
 
+    def database_password(self) -> str:
+        """Senha do banco; em produção, só do arquivo, cuja falta impede a subida do processo."""
+        if self.db_password_file is not None:
+            return _read_secret("GS_DB_PASSWORD_FILE", self.db_password_file)
+        if self.environment == "production":
+            raise MissingSecretError("GS_DB_PASSWORD_FILE é obrigatório em produção")
+        return self.db_password.get_secret_value()
+
     @cached_property
     def database_url(self) -> URL:
-        password = (
-            self.db_password_file.read_text().strip()
-            if self.db_password_file is not None
-            else self.db_password.get_secret_value()
-        )
         return URL.create(
             "postgresql+psycopg",
             username=self.db_user,
-            password=password,
+            password=self.database_password(),
             host=self.db_host,
             port=self.db_port,
             database=self.db_name,
