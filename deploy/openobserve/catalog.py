@@ -122,8 +122,8 @@ class Alert:
 
 DISK_STREAM = "system_filesystem_utilization"
 
-# Atributos do span `maintenance.cycle` que as causas abaixo leem, com os nomes do OpenObserve
-# ("." vira "_"); o provisionamento os declara no stream junto com os dos SLOs.
+# Atributos dos spans que as causas abaixo leem, com os nomes do OpenObserve ("." vira "_"); o
+# provisionamento os declara no stream junto com os dos SLOs.
 CAUSE_COLUMNS: tuple[str, ...] = (
     "main",
     "maintenance_runs_stuck_stopping",
@@ -137,6 +137,12 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_objects_missing_unreadable",
     "maintenance_purge_files_not_removed",
     "maintenance_candidate_files_not_removed",
+    "maintenance_missing_sweep_failed",
+    "maintenance_failed_cycles",
+    "alert_capacity_divergence",
+    "alert_capacity_over_max",
+    "alert_upload_without_reservation",
+    "alert_run_without_reservation",
 )
 
 
@@ -153,6 +159,8 @@ class _SpanCause:
 
 # Avaliadas a cada 5 min; a manutenção emite um span a cada 30 s.
 _SPAN_CAUSE_FREQUENCY_MINUTES = 5
+# Mais longo que a suspensão da manutenção pelas sondas da aceitação, que é esperada (ADR 017).
+ABSENCE_PERIOD_MINUTES = 30
 SPAN_CAUSES: tuple[_SpanCause, ...] = (
     _SpanCause(
         "causa-execucao-presa",
@@ -226,11 +234,59 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
+    _SpanCause(
+        "causa-varredura-falhou",
+        "Varredura de objetos ausentes falhando em três voltas ou mais nos últimos 10 min. O "
+        "traceback está no log da manutenção; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-ciclos-falhando",
+        "Ciclo da manutenção falhando em três voltas ou mais nos últimos 10 min. O log da "
+        "manutenção traz o ciclo e o traceback; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-capacidade-divergente",
+        "Livro-razão de capacidade divergente dos pools ou acima do teto. A reconciliação corrige "
+        "o pool, mas a origem precisa ser achada; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-sem-reserva",
+        "Upload ou publicação sem reserva de capacidade: a operação seguiu e a reconciliação adota "
+        "o objeto, mas isso só cabe a registros antigos. Veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-manutencao-sem-ciclo",
+        "Nenhuma volta da manutenção concluída em 30 min: processo parado ou travado. Veja o "
+        "runbook em deploy/openobserve/README.md.",
+        period_minutes=ABSENCE_PERIOD_MINUTES,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-sem-traces",
+        "Nenhum evento chegou ao stream de traces em 30 min: confira a exportação da aplicação e "
+        "o Collector. Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=ABSENCE_PERIOD_MINUTES,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
 )
 
 
 def alerts(stream: str, prefix: str) -> list[Alert]:
-    """Todos os alertas: queima por SLO e nível, causas conhecidas e o heartbeat."""
+    """Todos os alertas: queima por SLO e nível, causas, ausência de telemetria e o heartbeat."""
     return [
         *(
             _burn_alert(slo, level, rate, stream, prefix)

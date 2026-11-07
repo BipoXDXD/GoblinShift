@@ -410,6 +410,8 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
             "maintenance.objects_missing_unreadable": 1,
             "maintenance.purge_files_not_removed": 1,
             "maintenance.candidate_files_not_removed": 1,
+            "maintenance.missing_sweep_failed": 1,
+            "maintenance.failed_cycles": 1,
         },
         1.0,
     )
@@ -424,5 +426,116 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-objetos-ausentes",
         "causa-objetos-ilegiveis",
         "causa-arquivos-nao-removidos",
+        "causa-varredura-falhou",
+        "causa-ciclos-falhando",
     ):
         assert not cause_rows(telemetry, name, stream), name
+
+
+# Três voltas: uma falha isolada se resolve na volta seguinte (30 s).
+@pytest.mark.parametrize(
+    ("cause", "counter"),
+    [
+        ("causa-ciclos-falhando", "failed_cycles"),
+        ("causa-varredura-falhou", "missing_sweep_failed"),
+    ],
+)
+@pytest.mark.parametrize(("failing", "fires"), [(2, False), (3, True)])
+def test_falha_repetida_da_manutencao_dispara(
+    telemetry: Telemetry, cause: str, counter: str, failing: int, fires: bool
+) -> None:
+    stream = unique_stream("falhando")
+    traces = telemetry.traces(stream)
+    for minute in range(failing):
+        traces.maintenance_cycle(**{counter: 1}, age_s=(minute + 1) * MINUTE_S)
+    traces.maintenance_cycle(**{counter: 0}, age_s=5 * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, cause, stream)) is fires
+
+
+@pytest.mark.parametrize(
+    ("cause", "attribute"),
+    [
+        ("causa-capacidade-divergente", "alert.capacity_divergence"),
+        ("causa-capacidade-divergente", "alert.capacity_over_max"),
+        ("causa-sem-reserva", "alert.upload_without_reservation"),
+        ("causa-sem-reserva", "alert.run_without_reservation"),
+    ],
+)
+@pytest.mark.parametrize(("value", "fires"), [(0, False), (1, True)])
+def test_evento_de_alerta_contado_em_qualquer_span_main_dispara(
+    telemetry: Telemetry, cause: str, attribute: str, value: int, fires: bool
+) -> None:
+    stream = unique_stream("evento")
+    traces = telemetry.traces(stream)
+    traces.span("attempt", MINUTE_S, {"main": True, attribute: value}, 1.0)
+    traces.span("attempt", 2 * MINUTE_S, {"main": False, attribute: 1}, 1.0)
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    assert bool(cause_rows(telemetry, cause, stream)) is fires
+
+
+# --- Ausência: a telemetria que deveria chegar e não chegou -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("age_min", "fires"),
+    [
+        (2, False),
+        (29, False),  # ainda dentro dos 30 min
+        (31, True),  # última volta fora do período: parada ou travada
+    ],
+)
+def test_manutencao_sem_ciclo(telemetry: Telemetry, age_min: int, fires: bool) -> None:
+    stream = unique_stream("semciclo")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(age_s=age_min * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-manutencao-sem-ciclo", stream)) is fires
+
+
+def test_trafego_nao_substitui_o_ciclo_da_manutencao(telemetry: Telemetry) -> None:
+    stream = unique_stream("soapi")
+    traces = telemetry.traces(stream)
+    traces.acceptance(202)
+    traces.flush()
+
+    assert cause_rows(telemetry, "causa-manutencao-sem-ciclo", stream)
+
+
+@pytest.mark.parametrize(("age_min", "fires"), [(2, False), (31, True)])
+def test_sem_traces(telemetry: Telemetry, age_min: int, fires: bool) -> None:
+    stream = unique_stream("semtraces")
+    traces = telemetry.traces(stream)
+    traces.acceptance(202, age_s=age_min * MINUTE_S)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-sem-traces", stream)) is fires
+
+
+def test_a_semente_do_provisionamento_nao_conta_como_telemetria(telemetry: Telemetry) -> None:
+    stream = unique_stream("semente")
+    declare_columns(telemetry.api, stream)
+
+    assert cause_rows(telemetry, "causa-sem-traces", stream)
+    assert cause_rows(telemetry, "causa-manutencao-sem-ciclo", stream)
+
+
+@pytest.mark.parametrize("name", ["causa-sem-traces", "causa-manutencao-sem-ciclo"])
+def test_ausencia_devolve_linha_num_periodo_sem_nenhum_dado(
+    telemetry: Telemetry, name: str
+) -> None:
+    # Como o heartbeat: sem linha, o alerta de ausência nunca dispararia justo quando deve.
+    stream = unique_stream("vazio")
+    declare_columns(telemetry.api, stream)
+    alert = next(a for a in alerts(stream=stream, prefix="t-") if a.name == f"t-{name}")
+    future_us = now_us() + 24 * HOUR_S * US_PER_S
+
+    rows = telemetry.api.search(
+        alert.sql, alert.stream_type, future_us, future_us + HOUR_S * US_PER_S
+    )
+
+    assert len(rows) == 1

@@ -1,6 +1,7 @@
 """Catálogo de SLOs e alertas (docs/GoblinShiftPlan.md, 3.7), sem OpenObserve."""
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,27 @@ from openobserve.catalog import (
 from openobserve.provision import TRACE_COLUMNS
 
 PREFIX = "gs-"
+SRC = Path(__file__).resolve().parents[2] / "src" / "goblinshift"
+
+ABSENCE_ALERTS = ("gs-causa-manutencao-sem-ciclo", "gs-causa-sem-traces")
+# As sondas da aceitação param a manutenção por até 20 min, com a API sem tráfego (ADR 017).
+ACCEPTANCE_SUSPENSION_MINUTES = 20
+
+# Cada evento `alert=` do log e o alerta que o torna visível fora da VPS.
+LOG_EVENT_ALERTS = {
+    "account_deletion_overdue": "gs-causa-exclusao-de-conta-atrasada",
+    "capacity_divergence": "gs-causa-capacidade-divergente",
+    "capacity_over_max": "gs-causa-capacidade-divergente",
+    "missing_governor": "gs-causa-limitador-de-ausentes",
+    "missing_sweep_failed": "gs-causa-varredura-falhou",
+    "objects_missing": "gs-causa-objetos-ausentes",
+    "objects_unreadable": "gs-causa-objetos-ilegiveis",
+    "purge_file_not_removed": "gs-causa-arquivos-nao-removidos",
+    "purge_governor": "gs-causa-limitador-de-exclusoes",
+    "run_without_reservation": "gs-causa-sem-reserva",
+    "storage_unreachable": "gs-causa-storage-sem-sentinela",
+    "upload_without_reservation": "gs-causa-sem-reserva",
+}
 
 
 def test_os_tres_slos_do_plano_com_as_metas() -> None:
@@ -66,6 +88,12 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-objetos-ausentes",
         "gs-causa-objetos-ilegiveis",
         "gs-causa-arquivos-nao-removidos",
+        "gs-causa-varredura-falhou",
+        "gs-causa-ciclos-falhando",
+        "gs-causa-capacidade-divergente",
+        "gs-causa-sem-reserva",
+        "gs-causa-manutencao-sem-ciclo",
+        "gs-causa-sem-traces",
         "gs-heartbeat",
     }
 
@@ -146,6 +174,9 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
         "gs-causa-objetos-ausentes",
         "gs-causa-objetos-ilegiveis",
         "gs-causa-arquivos-nao-removidos",
+        "gs-causa-varredura-falhou",
+        "gs-causa-ciclos-falhando",
+        "gs-causa-manutencao-sem-ciclo",
     }
     chosen = [a for a in alerts(stream="s", prefix=PREFIX) if a.name in names]
 
@@ -170,12 +201,50 @@ def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
         "gs-causa-objetos-ausentes",
         "gs-causa-objetos-ilegiveis",
         "gs-causa-arquivos-nao-removidos",
+        "gs-causa-varredura-falhou",
     ):
         assert by_name[name].destination is DestinationKey.WARNING, name
 
 
-def test_contadores_lidos_pelas_causas_da_manutencao_sao_declarados() -> None:
+def test_contadores_lidos_pelas_causas_sao_declarados() -> None:
     # Coluna fora de CAUSE_COLUMNS não existe no stream quando o provisionamento valida a consulta.
     for alert in alerts(stream="s", prefix=PREFIX):
-        for column in re.findall(r"\bmaintenance_\w+", alert.sql):
+        for column in re.findall(r"\b(?:maintenance|alert)_\w+", alert.sql):
             assert column in CAUSE_COLUMNS, f"{alert.name}: {column}"
+
+
+def test_todo_evento_de_alerta_do_log_tem_um_alerta_no_catalogo() -> None:
+    # Os logs não são exportados: evento novo sem alerta fica invisível fora da VPS.
+    sources = (path.read_text(encoding="utf-8") for path in SRC.rglob("*.py"))
+    events = {event for source in sources for event in re.findall(r'"alert": "(\w+)"', source)}
+    names = {alert.name for alert in alerts(stream="s", prefix=PREFIX)}
+
+    assert events == set(LOG_EVENT_ALERTS)
+    assert set(LOG_EVENT_ALERTS.values()) <= names
+
+
+@pytest.mark.parametrize("name", ABSENCE_ALERTS)
+def test_ausencia_tolera_a_suspensao_da_manutencao_pela_aceitacao(name: str) -> None:
+    by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}
+
+    assert by_name[name].period_minutes > ACCEPTANCE_SUSPENSION_MINUTES
+
+
+@pytest.mark.parametrize(
+    "name", (*ABSENCE_ALERTS, "gs-causa-ciclos-falhando"), ids=lambda name: name
+)
+def test_o_que_cala_os_outros_alertas_vai_ao_destino_urgente(name: str) -> None:
+    by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}
+
+    assert by_name[name].destination is DestinationKey.URGENT
+
+
+@pytest.mark.parametrize("name", ABSENCE_ALERTS)
+def test_ausencia_le_o_stream_de_traces_e_dispara_sem_nenhuma_linha(name: str) -> None:
+    by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}
+
+    alert = by_name[name]
+    assert (alert.stream_type, alert.stream_name) == ("traces", "s")
+    assert "HAVING count(*) = 0" in alert.sql
+    # A semente do provisionamento (`main = false`) não pode contar como telemetria viva.
+    assert "main = 'true'" in alert.sql

@@ -21,13 +21,21 @@ Todos os nomes começam com `gs-`. O que tem esse prefixo e saiu do catálogo é
 | `gs-causa-objetos-ausentes` | `causa-objetos-ausentes.sql` (span da manutenção) | 10 min / a cada 5 min | `gs-aviso` |
 | `gs-causa-objetos-ilegiveis` | `causa-objetos-ilegiveis.sql` (span da manutenção) | 10 min / a cada 5 min | `gs-aviso` |
 | `gs-causa-arquivos-nao-removidos` | `causa-arquivos-nao-removidos.sql` (span da manutenção) | 10 min / a cada 5 min | `gs-aviso` |
+| `gs-causa-varredura-falhou` | `causa-varredura-falhou.sql` (span da manutenção, três voltas ou mais) | 10 min / a cada 5 min | `gs-aviso` |
+| `gs-causa-ciclos-falhando` | `causa-ciclos-falhando.sql` (span da manutenção, três voltas ou mais) | 10 min / a cada 5 min | `gs-urgente` |
+| `gs-causa-capacidade-divergente` | `causa-capacidade-divergente.sql` (contadores de eventos) | 10 min / a cada 5 min | `gs-aviso` |
+| `gs-causa-sem-reserva` | `causa-sem-reserva.sql` (contadores de eventos) | 10 min / a cada 5 min | `gs-aviso` |
+| `gs-causa-manutencao-sem-ciclo` | `causa-manutencao-sem-ciclo.sql` (ausência do span da manutenção) | 30 min / a cada 5 min | `gs-urgente` |
+| `gs-causa-sem-traces` | `causa-sem-traces.sql` (ausência de eventos no stream) | 30 min / a cada 5 min | `gs-urgente` |
 | `gs-heartbeat` | `heartbeat.sql`, sempre verdadeiro (stream de métricas) | 60 min / a cada 60 min | `gs-heartbeat` |
 
 `<slo>` é `aceitacao` (meta 99,5%), `execucao` (99%) ou `download` (99,5%). Os critérios de elegível e bom estão comentados em cada `<slo>.eventos.sql`.
 
 **Queima em duas janelas.** O alerta dispara quando a última hora **e** os últimos 15 minutos queimam o orçamento a 2x (aviso) ou 4x (urgente) o ritmo permitido. Com meta `1 - 1/N`, isso é `ruins * N >= taxa * elegíveis` em cada janela, em inteiros. Cada janela só conta com um mínimo de elegíveis (aceitação e download: 101 na hora e 26 nos 15 min; execução: 51 e 13), escolhido para que **uma falha isolada nunca dispare** (`tests/openobserve/test_catalog.py` confere isso para cada SLO e nível). Com pouco tráfego, a queima simplesmente não dispara: é o comportamento pedido em 3.7.
 
-**Silêncio.** Depois de notificar, o urgente fica quieto por 60 min e o aviso por 180 min; a fila cheia por 60 min e o disco por 240 min. Das causas da manutenção: execução presa e exclusão atrasada, 60 min; limitador de exclusões, as quatro da varredura de ausentes e arquivos não removidos, 180 min; capacidade global, 240 min.
+**Ausência.** `gs-causa-manutencao-sem-ciclo` e `gs-causa-sem-traces` disparam com a contagem em zero, ao contrário das outras causas. O heartbeat prova que o OpenObserve avalia alertas e alcança a internet; estes dois provam que os traces que os outros alertas leem continuam chegando. O período de 30 min passa da suspensão da manutenção pelas sondas da aceitação ([ADR 017](../../docs/adr/017-aceitacao-suspende-a-manutencao.md)).
+
+**Silêncio.** Depois de notificar, o urgente fica quieto por 60 min e o aviso por 180 min; a fila cheia por 60 min e o disco por 240 min. Das outras causas: execução presa, exclusão atrasada, ciclos falhando e as duas de ausência, 60 min; limitador de exclusões, as cinco da varredura de ausentes, arquivos não removidos, capacidade divergente e sem reserva, 180 min; capacidade global, 240 min.
 
 ### O evento de término da Run
 
@@ -46,13 +54,13 @@ O SLO de execução lê o span `run.finished`, que o worker e a manutenção emi
 
 ### O evento por volta da manutenção
 
-As nove causas da manutenção leem o span `maintenance.cycle` (`goblinshift.entrypoints.maintenance.run_cycles`), emitido a cada volta (30 s) com as contagens dos dois ciclos, o de execuções e arquivos e o de contas. Contrato, conferido por `tests/runs/test_maintenance_cycle_event.py` e `tests/runs/test_maintenance_history.py`:
+As causas da manutenção leem o span `maintenance.cycle` (`goblinshift.entrypoints.maintenance.run_cycles`), emitido a cada volta (30 s) com as contagens dos dois ciclos, o de execuções e arquivos e o de contas. Contrato, conferido por `tests/runs/test_maintenance_cycle_event.py` e `tests/runs/test_maintenance_history.py`:
 
 | Atributo | Valor |
 |---|---|
 | nome do span | `maintenance.cycle`, do começo ao fim da volta |
 | `main` | `true` |
-| `maintenance.failed_cycles` | ciclos que falharam na volta (o span fica com status de erro; a mensagem só no log) |
+| `maintenance.failed_cycles` | ciclos que falharam na volta (o span fica com status de erro; a mensagem só no log; causa `gs-causa-ciclos-falhando`) |
 | `maintenance.runs_stuck_stopping` | Runs em `stopping` desde antes de 10 min (o primeiro entre o cancelamento e o prazo) |
 | `maintenance.purge_limit_reached` | `1` se o limitador cortou o expurgo da volta, `0` se não |
 | `maintenance.accounts_deletion_overdue` | contas com `DELETE /me` pedido há 20 h ou mais |
@@ -61,12 +69,24 @@ As nove causas da manutenção leem o span `maintenance.cycle` (`goblinshift.ent
 | `maintenance.objects_missing_checked`, `maintenance.objects_missing_absent`, `maintenance.objects_missing_unreadable`, `maintenance.objects_marked_missing` | a varredura de objetos ausentes da volta: conferidos no disco, ausentes, ilegíveis (`stat` com erro que não é ausência; o objeto fica como está; causa `gs-causa-objetos-ilegiveis`) e marcados `missing` (causa `gs-causa-objetos-ausentes`) |
 | `maintenance.missing_sweep_skipped` | `1` se faltou a sentinela de montagem e nada foi conferido (causa `gs-causa-storage-sem-sentinela`) |
 | `maintenance.missing_governor_tripped` | `1` se o limitador travou o lote e nada foi marcado: mais da metade ausente, um lote pequeno (abaixo de 10) inteiro ausente a partir de dois, ou ilegível junto com ausente (causa `gs-causa-limitador-de-ausentes`) |
-| `maintenance.missing_sweep_failed` | `1` se a varredura falhou na volta (log `varredura de ausentes falhou` com o traceback); o resto do ciclo segue |
+| `maintenance.missing_sweep_failed` | `1` se a varredura falhou na volta (log `varredura de ausentes falhou` com o traceback); o resto do ciclo segue (causa `gs-causa-varredura-falhou`) |
 | `maintenance.purge_files_not_removed`, `maintenance.candidate_files_not_removed` | arquivos que ficaram no disco na volta, depois da transação que os tirou de uso: os do expurgo e dos uploads incompletos, e os de candidatos descartados (causa `gs-causa-arquivos-nao-removidos`) |
 | `maintenance.<etapa>` | o que cada etapa fez na volta (`runs_deleted`, `runs_anonymized`, `file_rows_deleted`, `objects_purged`, `leases_reconciled`, …) |
 | `duration_ms` | duração da volta |
 
 Sem PII: só contagens e bytes. As chaves de storage ficam só no log da manutenção.
+
+### Contadores de eventos do log
+
+Os logs dos containers não são exportados. Cada evento com o campo `alert` no log soma 1 no atributo `alert.<evento>` do span em curso (`goblinshift.platform.telemetry.AlertEventCounter`, ligado em `configure_logging`): o `maintenance.cycle` na manutenção, o evento amplo da requisição na API e o `attempt` no worker. Só o nome e a contagem saem; os IDs e as chaves ficam no log. Sem span gravando (uma CLI, por exemplo), o evento fica só no log.
+
+| Atributo | Quem emite | Causa |
+|---|---|---|
+| `alert.capacity_divergence`, `alert.capacity_over_max` | manutenção | `gs-causa-capacidade-divergente` |
+| `alert.upload_without_reservation` | API | `gs-causa-sem-reserva` |
+| `alert.run_without_reservation` | worker | `gs-causa-sem-reserva` |
+
+Os outros eventos `alert=` também somam, e as causas deles leem as contagens do `maintenance.cycle`. `tests/openobserve/test_catalog.py` reprova evento novo sem alerta no catálogo.
 
 ### Roteiro das causas da manutenção
 
@@ -76,9 +96,15 @@ Sem PII: só contagens e bytes. As chaves de storage ficam só no log da manuten
 - **Storage sem a sentinela** (`gs-causa-storage-sem-sentinela`). Falta `.goblinshift-storage` na raiz dos objetos, quase sempre o filesystem `/srv/goblinshift/storage` desmontado (`mountpoint /srv/goblinshift/storage`; o fstab usa `nofail`). Nada é marcado `missing`, mas a aplicação grava no disco do sistema. Monte o filesystem e reimplante. Só depois de conferir a montagem, a sentinela também pode ser gravada à mão com `deploy/storage-mark.sh` (leia o aviso de perigo no cabeçalho do script: não rode da cópia em `/srv/goblinshift/app`), que recusa sem montagem. Logo depois do primeiro deploy que trouxe a sentinela, o aviso para sozinho.
 - **Limitador de ausentes** (`gs-causa-limitador-de-ausentes`). A varredura achou ausentes demais num lote e não marcou nada: o log `limitador de ausentes acionado` traz conferidos, ausentes e ilegíveis. Com ilegíveis, o disco devolve erro: veja `dmesg` e o filesystem antes de qualquer coisa. Sem ilegíveis, confira se o storage montado é o certo. Se é, e o banco foi restaurado de propósito de um backup mais antigo que os arquivos (3.8), desligue o limitador até a varredura dar a volta: defina `GS_MISSING_SWEEP_MAX_ABSENT_RATIO=1` como variável no recurso da aplicação no Coolify (o `deploy/coolify/app.json` a repassa à manutenção) e publique; erro de disco junto com ausente continua travando. Depois remova a variável e publique de novo para voltar ao normal.
 - **Objetos marcados missing** (`gs-causa-objetos-ausentes`). Arquivos sumiram do storage montado, abaixo do limitador. Esperado depois de restaurar o banco; fora disso, investigue o que apagou arquivos fora do expurgo. `missing` é final, e a reserva do objeto já foi liberada.
-- **Objetos ilegíveis** (`gs-causa-objetos-ilegiveis`). O `stat` falhou com erro que não é ausência; o objeto fica como está e a varredura volta nele na próxima passada. O log `objetos ilegíveis no storage` traz `errnos` (contagem por errno) e `sample` (até 5 chaves com o errno de cada). `EIO` indica o disco: veja `dmesg` e o filesystem antes de qualquer coisa, porque o storage não tem backup. `EACCES` indica dono ou permissão do caminho, quase sempre depois de mexer no filesystem à mão. Esta causa só vê erro no `stat` de objeto: sentinela ilegível derruba a varredura antes disso e aparece só em `maintenance.missing_sweep_failed`, que nenhuma causa lê.
+- **Objetos ilegíveis** (`gs-causa-objetos-ilegiveis`). O `stat` falhou com erro que não é ausência; o objeto fica como está e a varredura volta nele na próxima passada. O log `objetos ilegíveis no storage` traz `errnos` (contagem por errno) e `sample` (até 5 chaves com o errno de cada). `EIO` indica o disco: veja `dmesg` e o filesystem antes de qualquer coisa, porque o storage não tem backup. `EACCES` indica dono ou permissão do caminho, quase sempre depois de mexer no filesystem à mão. Esta causa só vê erro no `stat` de objeto: sentinela ilegível derruba a varredura antes disso e aparece em `gs-causa-varredura-falhou`.
 - **Arquivos não removidos** (`gs-causa-arquivos-nao-removidos`). A remoção falhou depois do commit, e nada repete a tentativa: o objeto do expurgo já está `deleted`, e o pendente (upload incompleto ou candidato) já perdeu a linha. O arquivo fica no disco e passa da retenção prometida. Cada falha está no log `arquivo não removido do disco`, com `storage_key` e o traceback. Corrija a causa (disco ou permissão) e apague cada chave à mão, conferindo antes que nenhuma linha fora de `deleted` em `stored_object` aponta para ela.
 - **Capacidade global perto do teto.** As reservas passam de 85% dos 20 GiB do ambiente. Veja as contas que mais ocupam (`gs-admin usage --user <id>`; `gs-admin set-limits` ajusta o teto de uma conta) e o disco do storage; se o uso é legítimo, suba o teto do pool global com cuidado com o disco real.
+- **Varredura falhando** (`gs-causa-varredura-falhou`). O log `varredura de ausentes falhou` traz o traceback. Erro de banco tende a passar sozinho; erro de leitura da sentinela indica o filesystem do storage, e aí vale o mesmo roteiro de objetos ilegíveis. O resto do ciclo continua rodando.
+- **Ciclos falhando** (`gs-causa-ciclos-falhando`). O log `ciclo de manutenção falhou` traz `cycle` (`execuções` ou `contas`) e o traceback. Enquanto a falha durar, as contagens daquele ciclo faltam no span, então as causas que dependem delas não valem como sinal de que está tudo bem. Corrija a causa no banco ou no storage; a volta seguinte retoma sozinha.
+- **Capacidade divergente** (`gs-causa-capacidade-divergente`). Os logs `livro-razão de capacidade divergente` (`pools_corrected`, `objects_adopted`, `adoptions_refused`) e `livro-razão acima do teto do pool` trazem o tamanho. A reconciliação regrava o pool sozinha; o que pede investigação é a origem, porque uma reserva deixou de ser gravada ou liberada. Adoção recusada ou pool acima do teto voltam a cada volta até a capacidade ser ajustada.
+- **Sem reserva** (`gs-causa-sem-reserva`). O log `upload sem reserva de capacidade` traz `upload_id` (API) e `publicação sem reserva de capacidade` traz `run_id` (worker). A operação seguiu e a reconciliação adota o objeto. Isso só cabe a upload ou Run anteriores à migração 0006; se o registro for mais novo, é defeito.
+- **Manutenção sem ciclo** (`gs-causa-manutencao-sem-ciclo`). Nenhuma volta terminou em 30 min. Se `gs-causa-sem-traces` não disparou junto, os traces chegam e o problema é a manutenção: `sudo docker ps --all --filter name=goblinshift-maintenance` e `sudo docker logs --tail 100 goblinshift-maintenance-1`. Container parado por uma aceitação interrompida à força volta com `sudo docker start goblinshift-maintenance-1` (ADR 017). Log parado no meio da volta com o container de pé é volta travada: registre o que ela fazia e reinicie o container.
+- **Sem traces** (`gs-causa-sem-traces`). Nenhum evento chegou ao stream, e a manutenção sem ciclo costuma disparar junto. Comece pela exportação: `sudo docker logs --tail 100 goblinshift-otel-collector-1` e `OTEL_EXPORTER_OTLP_ENDPOINT` nos processos da aplicação. 503 repetido no log do Collector depois de um pico é o limite de ingestão descrito em "Atualizar o OpenObserve". Enquanto isso, os SLOs ficam sem dados, então confira o serviço pelos monitores externos.
 
 ### Span `attempt`
 
@@ -564,4 +590,4 @@ uv run pytest tests/openobserve -m "not openobserve"   # catálogo, segredos e r
 uv run pytest -m openobserve                           # OpenObserve e Collector reais (Testcontainers)
 ```
 
-Os testes com Docker (também na CI, no job paralelo "SLOs e alertas (OpenObserve)", fora do orçamento do commit stage; o cenário do agendador leva cerca de 2 min) sobem a mesma imagem do OpenObserve e do Collector do `compose.yaml`, com a configuração real do Collector, e provam: o SLI de cada consulta com valores calculados à mão; os limites da queima (exatamente 4x dispara, logo abaixo não; mínimo de eventos em cada janela; queima que já parou); a fila cheia sustentada; o disco acima de 85% só no ponto de montagem cheio; as nove causas lidas do span da manutenção (execução presa, limitador de exclusões, exclusão atrasada, capacidade global acima de 85% o período todo, storage sem sentinela, limitador de ausentes, objetos marcados `missing`, objetos ilegíveis e arquivos não removidos); e, com o agendador de verdade, que a queima e a causa notificam sob erro e que o tráfego normal só produz o heartbeat. Só nos testes o OpenObserve roda com `ZO_SKIP_SSRF_CHECKS`, porque o receptor de webhooks está num IP privado.
+Os testes com Docker (também na CI, no job paralelo "SLOs e alertas (OpenObserve)", fora do orçamento do commit stage; o cenário do agendador leva cerca de 2 min) sobem a mesma imagem do OpenObserve e do Collector do `compose.yaml`, com a configuração real do Collector, e provam: o SLI de cada consulta com valores calculados à mão; os limites da queima (exatamente 4x dispara, logo abaixo não; mínimo de eventos em cada janela; queima que já parou); a fila cheia sustentada; o disco acima de 85% só no ponto de montagem cheio; as causas lidas do span da manutenção (execução presa, limitador de exclusões, exclusão atrasada, capacidade global acima de 85% o período todo, storage sem sentinela, limitador de ausentes, objetos marcados `missing`, objetos ilegíveis, arquivos não removidos, varredura e ciclos falhando em três voltas); os contadores de eventos em qualquer span `main`; a ausência de voltas e de traces, inclusive num período sem nenhum dado; e, com o agendador de verdade, que a queima, a causa e a ausência notificam e que o tráfego normal só produz o heartbeat. Só nos testes o OpenObserve roda com `ZO_SKIP_SSRF_CHECKS`, porque o receptor de webhooks está num IP privado.

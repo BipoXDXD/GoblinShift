@@ -1,13 +1,14 @@
 """Alertas agendados de verdade: a queima e a causa disparam sob erro, o normal fica quieto.
 
-Um cenário só, porque o agendador do OpenObserve avalia no máximo a cada minuto: dois streams
-recebem tráfego ao mesmo tempo e os alertas de cada um notificam caminhos próprios do receptor.
+Um cenário só, porque o agendador do OpenObserve avalia no máximo a cada minuto: três streams
+ficam prontos ao mesmo tempo e os alertas de cada um notificam caminhos próprios do receptor.
 
 - "queima": 200 POST /runs nos últimos minutos, 20 deles com 500. São 10% de ruins, 20x o
   orçamento de 0,5%: aviso e urgente da aceitação disparam. O alerta de disco também está
-  aqui e vê o tmpfs da telemetria 88% cheio.
+  aqui e vê o tmpfs da telemetria 88% cheio. Há traces, mas nenhuma volta da manutenção.
 - "normal": 200 POST /runs com 1 só ruim (0,5%, exatamente o ritmo permitido, abaixo do aviso
-  de 2x), downloads bons e recusas de política. Só o heartbeat notifica.
+  de 2x), downloads bons, recusas de política e uma volta da manutenção. Só o heartbeat notifica.
+- "silêncio": só a semente do provisionamento. Os dois alertas de ausência disparam.
 
 O teste espera dois heartbeats do "normal" depois das notificações da "queima": cada alerta foi
 avaliado pelo menos uma vez com os dados já gravados.
@@ -36,6 +37,7 @@ FIRING_TIMEOUT_S = 240.0
 RECENT_S = 3 * 60
 BURNING = "queima-"
 NORMAL = "normal-"
+SILENT = "silencio-"
 
 
 def fast(catalog: list[Alert]) -> list[Alert]:
@@ -57,7 +59,7 @@ class Scenario:
 
 @pytest.fixture(scope="module")
 def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
-    burning, normal = unique_stream("queima"), unique_stream("normal")
+    burning, normal, silent = (unique_stream(s) for s in ("queima", "normal", "silencio"))
     _write_burning_traffic(telemetry, burning)
     _write_normal_traffic(telemetry, normal)
     started = time.monotonic()
@@ -66,9 +68,15 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     normal_catalog = [
         a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
     ]
+    silent_catalog = [
+        a
+        for a in alerts(stream=silent, prefix=SILENT)
+        if a.name in (f"{SILENT}causa-sem-traces", f"{SILENT}causa-manutencao-sem-ciclo")
+    ]
     for prefix, catalog in (
         (BURNING, alerts(stream=burning, prefix=BURNING)),
         (NORMAL, normal_catalog),
+        (SILENT, silent_catalog),
     ):
         provision(
             telemetry.api,
@@ -79,18 +87,25 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     result = Scenario(receiver, started)
 
     def burning_notified() -> bool | None:
-        urgent = result.texts(BURNING, DestinationKey.URGENT)
-        done = "queima-slo-aceitacao-urgente" in urgent and "queima-causa-disco" in urgent
-        return True if done else None
+        burning_urgent = result.texts(BURNING, DestinationKey.URGENT)
+        silent_urgent = result.texts(SILENT, DestinationKey.URGENT)
+        expected = (
+            "queima-slo-aceitacao-urgente" in burning_urgent,
+            "queima-causa-disco" in burning_urgent,
+            "queima-causa-manutencao-sem-ciclo" in burning_urgent,
+            "silencio-causa-sem-traces" in silent_urgent,
+            "silencio-causa-manutencao-sem-ciclo" in silent_urgent,
+        )
+        return True if all(expected) else None
 
-    wait_until(burning_notified, "notificações da queima e do disco", FIRING_TIMEOUT_S)
+    wait_until(burning_notified, "notificações da queima, do disco e da ausência", FIRING_TIMEOUT_S)
     after = time.monotonic()
     wait_until(
         lambda: True if len(receiver.at(f"{NORMAL}heartbeat", after)) >= 2 else None,
         "duas avaliações do cenário normal",
         FIRING_TIMEOUT_S,
     )
-    for prefix in (BURNING, NORMAL):
+    for prefix in (BURNING, NORMAL, SILENT):
         provision(telemetry.api, alerts=[], destinations={}, prefix=prefix)
     return result
 
@@ -117,6 +132,7 @@ def _write_normal_traffic(telemetry: Telemetry, stream: str) -> None:
         traces.download(200, age_s=RECENT_S)
     for _ in range(60):
         traces.run_finished(age_s=RECENT_S)
+    traces.maintenance_cycle(age_s=RECENT_S)
     traces.flush()
 
 
@@ -127,6 +143,20 @@ def test_queima_de_aceitacao_dispara_o_urgente_e_o_aviso(scenario: Scenario) -> 
 
 def test_disco_acima_de_85_porcento_dispara_o_alerta_de_causa(scenario: Scenario) -> None:
     assert "queima-causa-disco" in scenario.texts(BURNING, DestinationKey.URGENT)
+
+
+def test_manutencao_parada_dispara_mesmo_com_traces_chegando(scenario: Scenario) -> None:
+    urgent = scenario.texts(BURNING, DestinationKey.URGENT)
+
+    assert "queima-causa-manutencao-sem-ciclo" in urgent
+    assert "queima-causa-sem-traces" not in urgent
+
+
+def test_stream_sem_telemetria_dispara_os_dois_alertas_de_ausencia(scenario: Scenario) -> None:
+    urgent = scenario.texts(SILENT, DestinationKey.URGENT)
+
+    assert "silencio-causa-sem-traces" in urgent
+    assert "silencio-causa-manutencao-sem-ciclo" in urgent
 
 
 def test_slos_sem_queima_nao_disparam_no_stream_com_erro(scenario: Scenario) -> None:
