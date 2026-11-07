@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 
 import pytest
 
-from openobserve.catalog import Alert, DestinationKey, alerts
+from openobserve.catalog import SPAN_CAUSES, Alert, DestinationKey, alerts
 from openobserve.provision import provision
 from tests.openobserve.conftest import (
     Notification,
@@ -38,6 +38,7 @@ RECENT_S = 3 * 60
 BURNING = "queima-"
 NORMAL = "normal-"
 SILENT = "silencio-"
+ABSENCE_CAUSES = ("causa-sem-traces", "causa-manutencao-sem-ciclo")
 
 
 def fast(catalog: list[Alert]) -> list[Alert]:
@@ -68,13 +69,19 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     normal_catalog = [
         a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
     ]
-    silent_catalog = [
-        a
-        for a in alerts(stream=silent, prefix=SILENT)
-        if a.name in (f"{SILENT}causa-sem-traces", f"{SILENT}causa-manutencao-sem-ciclo")
+    # O agendador avalia uma quantidade limitada de alertas por vez: com 49 alertas, cada um volta
+    # a cada 110 s, não a cada minuto, e a espera abaixo fica no limite. O cenário "queima" não tem
+    # span da manutenção, e só o "normal" precisa das causas lidas dele.
+    idle_causes = {
+        f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
+    }
+    burning_catalog = [
+        a for a in alerts(stream=burning, prefix=BURNING) if a.name not in idle_causes
     ]
+    silent_names = {f"{SILENT}{name}" for name in ABSENCE_CAUSES}
+    silent_catalog = [a for a in alerts(stream=silent, prefix=SILENT) if a.name in silent_names]
     for prefix, catalog in (
-        (BURNING, alerts(stream=burning, prefix=BURNING)),
+        (BURNING, burning_catalog),
         (NORMAL, normal_catalog),
         (SILENT, silent_catalog),
     ):
