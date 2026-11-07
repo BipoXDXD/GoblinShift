@@ -1,9 +1,9 @@
-# ADR 042. Publicação em produção pelo Coolify: registro da troca e destino do caminho por SSH
+# ADR 045. Publicação em produção pelo Coolify: registro da troca e destino do caminho por SSH
 
-- **Estado:** Proposto (2026-11-05). A decisão é do dono. Este ADR não altera código, workflows, ADRs anteriores nem a VPS.
+- **Estado:** Aceito (2026-11-07). Este ADR não altera código, workflows, ADRs anteriores nem a VPS.
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (deploy e VPS)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md) (só o `executor-ctl` fala com o Docker pelo executor), [ADR 011](011-vps-kvm2-compartilhada.md) (VPS compartilhada), [ADR 022](022-backup-externo.md) (atualização de 2026-11-05: o backup saiu do checkout), [ADR 033](033-segredos-de-deploy-no-environment-production.md) (segredos do deploy no environment `production`), [ADR 034](034-main-e-root-na-vps-compartilhada.md) ("main = root" aceito), [ADR 041](041-ip-do-cliente-atras-da-cloudflare.md) (procedimento de leitura da configuração Git do Coolify)
-- **Se aceito:** os ADR 033 e 034 passam a "Substituído em parte" num PR próprio. Hoje eles continuam descrevendo chave SSH e `deploy/deploy.sh`.
+- **Próximo passo:** os ADR 033 e 034 passam a "Substituído em parte" num PR próprio. Hoje eles continuam descrevendo chave SSH e `deploy/deploy.sh`.
 
 ## Contexto
 
