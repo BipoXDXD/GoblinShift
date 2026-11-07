@@ -141,8 +141,8 @@ CAUSE_COLUMNS: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
-class _MaintenanceCause:
-    """Causa lida do span por volta da manutenção: um arquivo SQL e a política de aviso."""
+class _SpanCause:
+    """Causa lida do stream de traces: um arquivo SQL e a política de aviso."""
 
     name: str
     description: str
@@ -152,9 +152,9 @@ class _MaintenanceCause:
 
 
 # Avaliadas a cada 5 min; a manutenção emite um span a cada 30 s.
-_MAINTENANCE_FREQUENCY_MINUTES = 5
-MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
-    _MaintenanceCause(
+_SPAN_CAUSE_FREQUENCY_MINUTES = 5
+SPAN_CAUSES: tuple[_SpanCause, ...] = (
+    _SpanCause(
         "causa-execucao-presa",
         "Execução presa em stopping há mais de 10 min: o executor não confirmou a parada e a "
         "Run segura a vaga da tentativa. Veja o runbook em deploy/openobserve/README.md.",
@@ -162,7 +162,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=60,
         destination=DestinationKey.URGENT,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-limitador-de-exclusoes",
         "Limitador de exclusões da manutenção acionado: havia mais de 500 objetos ou 2 GiB a "
         "remover numa volta. Confira se a exclusão em massa é legítima; veja o runbook.",
@@ -170,7 +170,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-exclusao-de-conta-atrasada",
         "Exclusão de conta pedida há 20 h ou mais e ainda não concluída; o prazo do DELETE /me é "
         "24 h. Veja o runbook em deploy/openobserve/README.md.",
@@ -178,7 +178,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=60,
         destination=DestinationKey.URGENT,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-capacidade-global",
         "Armazenamento reservado no ambiente acima de 85% do teto global nos últimos 15 min. "
         "Veja o runbook em deploy/openobserve/README.md.",
@@ -186,7 +186,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=240,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-storage-sem-sentinela",
         "Varredura de objetos ausentes suspensa: falta a sentinela de montagem na raiz do "
         "storage, quase sempre o filesystem desmontado. Veja o runbook.",
@@ -194,7 +194,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-limitador-de-ausentes",
         "Limitador da varredura de objetos ausentes acionado: arquivos demais sumidos num lote e "
         "nada marcado. Storage errado ou backup antigo restaurado; veja o runbook.",
@@ -202,7 +202,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-objetos-ausentes",
         "Objetos marcados missing: o arquivo sumiu do storage montado. Esperado depois de "
         "restaurar o banco de um backup; fora disso, investigue. Veja o runbook.",
@@ -210,7 +210,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-objetos-ilegiveis",
         "Varredura de objetos ausentes com objetos ilegíveis: o disco devolveu erro que não é "
         "ausência (EIO, permissão). O log da manutenção traz errno e chaves; veja o runbook.",
@@ -218,7 +218,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-arquivos-nao-removidos",
         "Arquivo ficou no disco depois de a exclusão ser confirmada no banco, e nada repete a "
         "remoção. O log da manutenção traz a chave; veja o runbook.",
@@ -265,7 +265,7 @@ def alerts(stream: str, prefix: str) -> list[Alert]:
             silence_minutes=240,
             destination=DestinationKey.URGENT,
         ),
-        *(_maintenance_alert(cause, stream, prefix) for cause in MAINTENANCE_CAUSES),
+        *(_span_alert(cause, stream, prefix) for cause in SPAN_CAUSES),
         Alert(
             name=f"{prefix}heartbeat",
             description="Heartbeat dos alertas: pinga o healthchecks.io a cada hora.",
@@ -280,7 +280,7 @@ def alerts(stream: str, prefix: str) -> list[Alert]:
     ]
 
 
-def _maintenance_alert(cause: _MaintenanceCause, stream: str, prefix: str) -> Alert:
+def _span_alert(cause: _SpanCause, stream: str, prefix: str) -> Alert:
     return Alert(
         name=f"{prefix}{cause.name}",
         description=cause.description,
@@ -288,7 +288,7 @@ def _maintenance_alert(cause: _MaintenanceCause, stream: str, prefix: str) -> Al
         stream_name=stream,
         sql=_render(f"{cause.name}.sql", stream=stream),
         period_minutes=cause.period_minutes,
-        frequency_minutes=_MAINTENANCE_FREQUENCY_MINUTES,
+        frequency_minutes=_SPAN_CAUSE_FREQUENCY_MINUTES,
         silence_minutes=cause.silence_minutes,
         destination=cause.destination,
     )
