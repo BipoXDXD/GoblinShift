@@ -12,19 +12,20 @@ O ADR 042 deixou `pip-audit` e CodeQL fora do gate da release e registrou que um
 
 | Alternativa | Prós | Contras |
 |-------------|------|---------|
-| **A. Obrigatórios no ruleset** (escolhida) | Nenhum PR entra com CVE conhecida no lock nem com alerta novo do CodeQL acima dos limiares. O gate da release e o `ci.yml` não mudam | Uma CVE nova reprova o `pip-audit` em todo PR até a correção entrar. Merge fica mais lento |
+| **A. Obrigatórios no ruleset** (escolhida) | Nenhum PR entra com CVE conhecida no lock, e alerta novo do CodeQL reprova o PR. O gate da release e o `ci.yml` não mudam | Uma CVE nova reprova o `pip-audit` em todo PR até a correção entrar. Merge fica mais lento |
 | **B. Manter fora do ruleset** | Merge nunca espera uma CVE recém-publicada | Achado depende de alguém olhar a execução. O aviso vem depois do merge |
 | **C. Só o `pip-audit` obrigatório** | Menos checks no merge | Alerta novo do CodeQL segue entrando |
 
 ## Decisão
 
-Alternativa A. O ruleset da `main` exige os checks `Dependências Python (pip-audit)`, `CodeQL (python)` e `CodeQL (javascript-typescript)`, e ganha a regra de code scanning para a ferramenta CodeQL, com limiares `errors` e `high_or_higher`. Os dois jobs só provam que a análise rodou. Quem barra alerta novo é a regra, que considera os resultados das duas linguagens; o check agregado `CodeQL` pode concluir antes do segundo envio, por isso não é usado.
+Alternativa A. O ruleset da `main` exige `Dependências Python (pip-audit)`, `CodeQL (python)`, `CodeQL (javascript-typescript)` e o check `CodeQL` da análise de código. Os dois jobs provam que a análise rodou; quem reprova alerta novo é o check `CodeQL`.
 
 O ADR 042 continua valendo para a release: esses checks seguem fora de `REQUIRED`, e uma CVE nova não impede publicar uma versão já mesclada.
 
 ## Consequências
 
 - Quando uma CVE nova reprovar o `pip-audit`, o PR de correção é o primeiro da fila: ele atualiza o `uv.lock` e passa no próprio check. Os demais esperam ou atualizam a branch depois.
+- O check `CodeQL` pode concluir antes de terminar o envio da segunda linguagem, então um alerta novo pode passar. A regra de code scanning do ruleset é a alternativa mais forte, mas exige análise na `main`, e o `codeql.yml` não roda em push. Adotá-la pede primeiro gerar essa base.
 - CVE sem versão corrigida trava todo merge até haver exceção escrita em ADR, como o ADR 042 pede. Essa exceção é decisão do dono.
 - O ruleset é configuração do GitHub, fora deste repositório. Mudar o nome de um desses jobs exige ajustar o ruleset no mesmo momento, ou todo PR fica esperando um check que não vem.
 
