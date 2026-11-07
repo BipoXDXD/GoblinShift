@@ -600,6 +600,17 @@ def test_coluna_de_cabecalho_vazio_e_coletada_sem_nome(tmp_path: Path) -> None:
     assert collected.report.items[0].formula_cells == FormulaCells((ColumnCells(None, 2),), 0)
 
 
+def test_nome_de_coluna_com_surrogate_solto_e_normalizado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["warnings"] = [formula_warning([{"name": "a\ud800b", "cells": 2}])]
+    write_out(out, [item], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].formula_cells == FormulaCells((ColumnCells("a�b", 2),), 0)
+
+
 def test_aviso_de_formula_sem_colunas_do_executor_anterior_e_aceito(tmp_path: Path) -> None:
     out = tmp_path / "out"
     write_out(out, [ok_item(0, "a.csv", warnings=1)], {"a.csv": b"1"})

@@ -66,7 +66,7 @@ para os titulares. Conferido contra o código e contra a produção na mesma dat
   de falha de rede. Era a omissão mais grave: entrou nos itens 2, 3.4, 3.5, 4, 6, 7 e 9 do Aviso.
 - **O e-mail não passa pelo ImprovMX.** Os MX são `mx.zoho.com`, `mx2.zoho.com` e `mx3.zoho.com`, e
   o SPF inclui `zohomail.com`. O Aviso passou a citar a Zoho e deixou de citar ImprovMX e Gmail.
-- **IP visto pelo serviço.** `deploy/coolify/Caddyfile` confia em `X-Forwarded-For` só de
+- **IP visto pelo serviço.** `docker/gateway/Caddyfile` confia em `X-Forwarded-For` só de
   `179.197.70.102` e `172.16.1.6`, sem as faixas da Cloudflare. Não foi verificado se o IP
   gravado em produção é o do usuário ou o da borda. O Aviso continua correto como limite do que
   guardamos, mas, se for o da borda, a auditoria perde utilidade antiabuso.

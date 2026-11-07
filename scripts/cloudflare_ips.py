@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 IPV4_URL = "https://www.cloudflare.com/ips-v4"
 IPV6_URL = "https://www.cloudflare.com/ips-v6"
-SITES = Path(__file__).resolve().parent.parent / "deploy" / "coolify" / "sites"
+SITES = Path(__file__).resolve().parent.parent / "docker" / "gateway" / "sites"
 LIST_FILE = SITES / "cloudflare-ips.conf"
 FETCH_TIMEOUT_SECONDS = 30
 USER_AGENT = "goblinshift-cloudflare-ips"

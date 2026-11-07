@@ -51,7 +51,9 @@ jobs:
       - run: npm ci
         working-directory: web
       - name: Chromium, Firefox e dependências do sistema
-        run: npx playwright install --with-deps chromium firefox
+        run: |
+          ../scripts/ci-apt-sem-azure.sh
+          npx playwright install --with-deps chromium firefox
         working-directory: web
       - name: Conta de teste
         env:
