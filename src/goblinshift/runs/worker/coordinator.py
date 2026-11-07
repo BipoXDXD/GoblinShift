@@ -32,7 +32,6 @@ import json
 import logging
 import os
 import random
-import stat
 import time
 import uuid
 from collections import Counter
@@ -96,6 +95,7 @@ from goblinshift.runs.worker.collection import (
     collect_outputs,
 )
 from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.strict_json import parse_strict_json
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,11 @@ class Coordinator:
             _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
             self._abandon(claimed)
             return None
-        complete_after_commit(self._factory, self._storage, applied, self._on_finished)
+        left_on_disk = complete_after_commit(
+            self._factory, self._storage, applied, self._on_finished
+        )
+        if left_on_disk:
+            attempt_event.record({"attempt.candidates_left_on_disk": left_on_disk})
         self.remove_work(claimed)
         _record_end(started, applied.state.status, error=applied.state.error_code)
         _log_attempt(claimed, applied.state.status, started, error=applied.state.error_code)
@@ -424,15 +428,10 @@ class Coordinator:
         """
         total = len(claimed.input_upload_ids)
         progress = self._runner.work_dir(claimed.attempt_id) / "progress.jsonl"
-        try:
-            fd = os.open(progress, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        except OSError:
-            # Ausente, symlink (ELOOP) ou ilegível: o progresso é informativo, conta zero.
+        data = attempt_event.read_regular_prefix(progress, PROGRESS_MAX_BYTES)
+        if data is None:
+            # O progresso é informativo: sem leitura, conta zero.
             return 0
-        with os.fdopen(fd, "rb") as lines:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                return 0
-            data = lines.read(PROGRESS_MAX_BYTES)
         return min(data.count(b"\n"), total)
 
     # 4. Desfecho -----------------------------------------------------------------------
@@ -697,16 +696,22 @@ class Coordinator:
 
     def _failure_code(self, claimed: ClaimedAttempt) -> ErrorCode | None:
         """Código de `failure.json`; fora do catálogo de falhas determinísticas → `None`."""
-        path = self._runner.work_dir(claimed.attempt_id) / "failure.json"
-        try:
-            with path.open("rb") as source:
-                document = json.loads(source.read(FAILURE_MAX_BYTES))
-        except OSError, ValueError:
-            return None
-        code = document.get("code") if isinstance(document, dict) else None
-        if code not in {c.value for c in DETERMINISTIC_CODES}:
-            return None
-        return ErrorCode(code)
+        return read_failure_code(self._runner.work_dir(claimed.attempt_id) / "failure.json")
+
+
+def read_failure_code(path: Path) -> ErrorCode | None:
+    """Código de `failure.json`; fora do catálogo de falhas determinísticas → `None`."""
+    data = attempt_event.read_regular_file(path, FAILURE_MAX_BYTES)
+    if data is None:
+        return None
+    try:
+        document = parse_strict_json(data)
+    except ValueError:
+        return None
+    code = document.get("code") if isinstance(document, dict) else None
+    if not isinstance(code, str) or code not in {c.value for c in DETERMINISTIC_CODES}:
+        return None
+    return ErrorCode(code)
 
 
 def _create_for_executor(path: Path) -> BinaryIO:

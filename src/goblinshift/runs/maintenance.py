@@ -134,10 +134,14 @@ class Maintenance:
         # Onde a varredura de ausentes parou. Só em memória: reiniciar o processo recomeça do
         # primeiro objeto, o que custa uma volta a mais e nada mais.
         self._missing_resume_after: uuid.UUID | None = None
+        # Candidatos que ficaram no disco no ciclo em curso. Em atributo porque vêm de vários
+        # passos, por `_decide`, cujo retorno já é a transição.
+        self._candidates_left_on_disk = 0
 
     def run_cycle(self) -> dict[str, int]:
         """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
         started = time.monotonic()
+        self._candidates_left_on_disk = 0
         counts = {
             "leases_reconciled": self.reconcile_expired_leases(),
             "queue_expired": self.expire_queue(),
@@ -149,6 +153,7 @@ class Maintenance:
             **self.mark_missing_objects(),
             **self.measure(),
         }
+        counts["candidates_left_on_disk"] = self._candidates_left_on_disk
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de manutenção", extra={"fields": fields})
@@ -288,7 +293,6 @@ class Maintenance:
                 )
             ).all()
         discarded = 0
-        files_not_removed = 0
         for row in ended:
             keys = run_transaction(
                 self._factory,
@@ -296,14 +300,11 @@ class Maintenance:
             )
             if keys is None:
                 continue
-            files_not_removed += sum(
-                not remove_file_after_commit(self._storage, key) for key in keys
-            )
+            for key in keys:
+                if not remove_file_after_commit(self._storage, key):
+                    self._candidates_left_on_disk += 1
             discarded += 1
-        return {
-            "candidates_discarded": discarded,
-            "candidate_files_not_removed": files_not_removed,
-        }
+        return {"candidates_discarded": discarded}
 
     # Áreas de trabalho ------------------------------------------------------------------
 
@@ -523,7 +524,9 @@ class Maintenance:
         except LostFencing:
             return None
         if applied is not None:
-            complete_after_commit(self._factory, self._storage, applied, self._on_finished)
+            self._candidates_left_on_disk += complete_after_commit(
+                self._factory, self._storage, applied, self._on_finished
+            )
         return applied
 
     def _confirm_stopped(self, session: Session, run_id: uuid.UUID, first: Applied) -> Applied:

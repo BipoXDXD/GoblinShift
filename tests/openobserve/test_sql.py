@@ -384,9 +384,9 @@ def test_arquivo_que_ficou_no_disco_dispara_por_qualquer_origem(
 ) -> None:
     stream = unique_stream("orfaos")
     traces = telemetry.traces(stream)
-    traces.maintenance_cycle(purge_files_not_removed=purge, candidate_files_not_removed=candidate)
+    traces.maintenance_cycle(purge_files_not_removed=purge, candidates_left_on_disk=candidate)
     traces.maintenance_cycle(
-        purge_files_not_removed=0, candidate_files_not_removed=0, age_s=2 * MINUTE_S
+        purge_files_not_removed=0, candidates_left_on_disk=0, age_s=2 * MINUTE_S
     )
     traces.flush()
 
@@ -409,7 +409,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
             "maintenance.objects_marked_missing": 1,
             "maintenance.objects_missing_unreadable": 1,
             "maintenance.purge_files_not_removed": 1,
-            "maintenance.candidate_files_not_removed": 1,
+            "maintenance.candidates_left_on_disk": 1,
         },
         1.0,
     )

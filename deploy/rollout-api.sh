@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Troca os containers da API sem queda (docs/GoblinShiftPlan.md, 3.8).
+# Troca os containers da API na pilha local, sem derrubar as requisições em curso. Não faz parte
+# da publicação: a produção sai pelo Coolify (deploy/coolify/README.md), e o `container_name` fixo
+# de deploy/coolify/app.json impede escalar o serviço `api` como este script faz.
 #
 # Sobe containers novos ao lado dos atuais, espera o healthcheck deles, dá tempo ao Nginx de
 # enxergá-los pelo DNS do Docker e só então para os antigos com SIGTERM. Se algo falhar antes
@@ -7,7 +9,7 @@
 # segundos; o expand/contract das migrações já conta com isso.
 #
 # Uso: deploy/rollout-api.sh <comando compose…>
-#   ex.: deploy/rollout-api.sh docker compose -f compose.yaml -f compose.prod.yaml
+#   ex.: deploy/rollout-api.sh docker compose
 set -euo pipefail
 
 (($# > 0)) || { echo "uso: rollout-api.sh <comando compose…>" >&2; exit 64; }

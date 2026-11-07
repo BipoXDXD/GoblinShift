@@ -302,6 +302,9 @@ def _session_from_cookie(request: Request, session: Session, now: datetime) -> P
         return None
     if request.method not in SAFE_METHODS:
         _verify_csrf(request, session, resolved, now)
+    # Depois do CSRF: o cookie vai junto no pedido forjado por outro site, e a recusa não é da
+    # conta. Ela fica na auditoria.
+    record_principal(resolved.owner_id, resolved.via)
     return resolved
 
 

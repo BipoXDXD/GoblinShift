@@ -673,6 +673,14 @@ def test_furo_na_excecao_do_gateway_e_reprovado(
     assert problems_of(document) == problems
 
 
+def test_gateway_sonda_a_saude_a_cada_segundo_na_subida() -> None:
+    # O Traefik só roteia container healthy: sem sondagem rápida, a primeira sonda vem no `interval`
+    # e cada recriação do gateway deixa os sites fora do ar por esse tempo.
+    healthcheck = rendered(coolify_document("gateway.json"))["services"]["proxy"]["healthcheck"]
+
+    assert (healthcheck["start_period"], healthcheck["start_interval"]) == ("30s", "1s")
+
+
 def project_problems(config: dict[str, Any], name: str) -> list[str]:
     return [] if config["name"] == EXPECTED_PROJECTS[name] else [f"projeto {config['name']}"]
 
