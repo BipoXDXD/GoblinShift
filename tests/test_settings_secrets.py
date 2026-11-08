@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PASSWORD_CANARY = "CANARY-senha-do-banco-na-variavel"  # noqa: S105 (valor de teste)
 PASSWORD_IN_FILE = "senha-do-arquivo"  # noqa: S105 (valor de teste)
 DEV_PASSWORD = "goblinshift"  # noqa: S105 (padrão da pilha local, não é segredo)
+ADMIN_COMMAND = [sys.executable, "-m", "goblinshift.entrypoints.admin_cli"]
 API_COMMAND = [
     sys.executable, "-m", "uvicorn", "goblinshift.entrypoints.api.app:create_app",
     "--factory", "--host", "127.0.0.1", "--port", "0",
@@ -217,6 +218,29 @@ def test_ambiente_dos_processos_reais_aponta_para_uma_porta_fechada(
     settings = Settings()
 
     assert (settings.db_host, settings.db_port) == ("127.0.0.1", 1)
+
+
+def test_gs_admin_sem_o_arquivo_de_senha_sai_com_uma_linha_e_sem_a_senha(tmp_path: Path) -> None:
+    env = {**_production_env(_production(tmp_path)), "GS_DB_PASSWORD": PASSWORD_CANARY}
+
+    result = _run_process([*ADMIN_COMMAND, "create-user", "--display-name", "Sem arquivo"], env)
+
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == ["gs-admin: GS_DB_PASSWORD_FILE é obrigatório em produção"]
+
+
+def test_gs_admin_sem_segredo_pedido_pelo_comando_sai_com_uma_linha(tmp_path: Path) -> None:
+    """O segredo que só o comando usa falta depois de o engine existir, e sai do mesmo jeito."""
+    settings = _production(tmp_path)
+    env = {**_production_env(settings), "GS_DB_PASSWORD_FILE": str(settings.db_password_file)}
+    del env["GS_USER_HASH_SECRET"]
+
+    result = _run_process([*ADMIN_COMMAND, "find-user", "--user-hash", "a" * 64], env)
+
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == ["gs-admin: GS_USER_HASH_SECRET é obrigatório em produção"]
 
 
 def test_producao_le_a_senha_do_banco_do_arquivo_sem_a_quebra_de_linha(tmp_path: Path) -> None:
