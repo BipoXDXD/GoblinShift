@@ -44,7 +44,7 @@ def test_nome_no_teto_fica_intacto_e_um_acima_e_cortado_com_reticencias() -> Non
     assert summary.columns[1].name == "y" * (MAX_COLUMN_NAME_CHARS - 1) + "…"
 
 
-@pytest.mark.parametrize("char", ["\x00", "\t", "\u202e", "\u200b"])
+@pytest.mark.parametrize("char", ["\x00", "\t", "\u202e", "\u200b", "\ud800", "\udfff"])
 def test_controle_e_formato_invisivel_viram_caractere_de_substituicao(char: str) -> None:
     summary = FormulaCells.of([(f"a{char}b", 1)])
 

@@ -1,0 +1,45 @@
+name: CodeQL
+
+# SAST de Python e JavaScript/TypeScript (ADR 042), gratuito em repositório público. Fora do ci.yml
+# pelo mesmo motivo da auditoria de dependências: o gate da release exige exatamente os jobs de lá.
+# A execução semanal, na main, é a linha de base contra a qual os PRs são comparados.
+on:
+  pull_request:
+  schedule:
+    - cron: "41 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # O único job que grava resultados na aba de segurança.
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          # Cópia fixada de terceiro (scripts/update-swagger-ui.sh): não é código deste projeto.
+          config: |
+            paths-ignore:
+              - src/goblinshift/entrypoints/api/swagger_ui
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}

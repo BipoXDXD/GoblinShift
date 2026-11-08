@@ -297,6 +297,20 @@ def test_falha_deterministica_termina_failed_com_o_codigo_e_sem_retry(
     assert open_run_uses(factory, run_id) == 0
 
 
+def test_failure_json_com_code_que_nao_e_string_vira_falha_transitoria(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root, "fail-raw", '{"code": ["OUTPUT_LIMIT_EXCEEDED"]}')
+
+    coordinator(factory, storage, runner).run(claim(factory, storage))
+
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"]) == ("running", "retry_wait")
+    [only] = attempts(factory, run_id)
+    assert only["error_code"] == "EXECUTOR_UNAVAILABLE"
+
+
 def test_falha_transitoria_reagenda_e_a_segunda_tentativa_publica(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path, tmp_path: Path
 ) -> None:

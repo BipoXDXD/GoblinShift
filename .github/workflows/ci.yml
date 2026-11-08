@@ -36,7 +36,11 @@ jobs:
       - name: Instalar o age (backup) e o FFmpeg completo (vídeos sintéticos do Media Mill)
         # O FFmpeg do runner só gera e confere fixtures; a receita, na imagem do executor, usa o
         # build mínimo do ADR 036.
-        run: sudo apt-get update -q && sudo apt-get install -yq age ffmpeg
+        timeout-minutes: 10
+        run: |
+          scripts/ci-apt-sem-azure.sh
+          sudo apt-get update -q
+          sudo apt-get install -yq age ffmpeg
       - name: Ruff (lint)
         run: uv run ruff check .
       - name: Ruff (formatação)
@@ -151,12 +155,13 @@ jobs:
 
   e2e:
     name: Interface no navegador (Playwright)
-    # Em paralelo com web. As duas suítes levaram quase 9 min nos runners;
-    # o limite inclui preparo, capturas e finalização, sem reduzir testes.
+    # Em paralelo com web. As duas suítes levaram quase 9 min nos runners, e o
+    # limite de 12 min já estourou em runner lento, cancelando o CI. O limite
+    # inclui preparo, capturas e finalização, sem reduzir testes.
     # A API é falsa e o build usa os cabeçalhos de produção do Nginx
     # (web/e2e/server/serve-dist.ts).
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -178,7 +183,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
       - name: Chromium headless e dependências do sistema
-        run: npx playwright install --with-deps --only-shell chromium
+        run: |
+          ../scripts/ci-apt-sem-azure.sh
+          npx playwright install --with-deps --only-shell chromium
       - name: Build
         run: npm run build
       - name: Conferir partição exata das specs por ID e projeto
@@ -261,6 +268,7 @@ jobs:
           curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
           echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          scripts/ci-apt-sem-azure.sh
           sudo apt-get update -q
           sudo apt-get install -yq "runsc=${GVISOR_VERSION}"
           runsc --version | head -n 1
@@ -275,7 +283,11 @@ jobs:
           sudo systemctl restart docker
           docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
       - name: FFmpeg completo (gera os vídeos sintéticos dos testes do Media Mill na imagem)
-        run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+        timeout-minutes: 10
+        run: |
+          scripts/ci-apt-sem-azure.sh
+          sudo apt-get update -q
+          sudo apt-get install -yq ffmpeg
       - name: Testes do executor-ctl e da imagem do executor sob runsc
         env:
           GS_TEST_RUNTIME: runsc
