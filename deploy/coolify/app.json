@@ -18,6 +18,8 @@
         "GS_DB_PASSWORD_FILE": "/run/secrets/db_password",
         "GS_ENVIRONMENT": "production",
         "GS_STORAGE_ROOT": "/var/lib/goblinshift/storage/objects",
+        "OTEL_BSP_MAX_EXPORT_BATCH_SIZE": "2048",
+        "OTEL_BSP_MAX_QUEUE_SIZE": "8192",
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
         "OTEL_SERVICE_NAME": "goblinshift-api",
         "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",

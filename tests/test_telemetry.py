@@ -1,16 +1,24 @@
 """Telemetria (docs/GoblinShiftPlan.md, 3.7): hash, IP truncado, erro do banco e spans de banco."""
 
-from collections.abc import Iterator
+import json
+import sqlite3
+import subprocess
+import sys
+import threading
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 from uuid import UUID
 
 import pytest
 import yaml
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, Status, StatusCode
 from pydantic import SecretStr, ValidationError
@@ -19,6 +27,7 @@ from sqlalchemy.exc import OperationalError
 
 from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.platform import telemetry
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import (
     UserHasher,
@@ -279,3 +288,178 @@ def test_sonda_readyz_nao_gera_span_de_banco(traced_app: TracedApp) -> None:
 
     assert response.status_code == 200
     assert traced_app.exporter.get_finished_spans() == ()
+
+
+# Eventos `exception` dos spans do SQLAlchemy: o banco fora do ar não pode expor a conexão
+
+
+def _refuse_connection() -> NoReturn:
+    raise sqlite3.OperationalError(f'connection to server at "{CANARY}", port 5432 failed')
+
+
+def _failed_connect_spans(traced_app: TracedApp) -> list[ReadableSpan]:
+    return [s for s in traced_app.database_spans() if s.name == "connect" and s.events]
+
+
+def _otlp_payload(spans: Sequence[ReadableSpan]) -> bytes:
+    """Os bytes que o exportador OTLP de produção enviaria."""
+    payload: bytes = encode_spans(spans).SerializeToString()
+    return payload
+
+
+def test_excecao_do_connect_sai_redigida_no_export(traced_app: TracedApp) -> None:
+    refused = create_engine("sqlite://", creator=_refuse_connection)
+
+    with pytest.raises(OperationalError):
+        refused.connect()
+
+    (span,) = _failed_connect_spans(traced_app)
+    (event,) = span.events
+    assert event.name == "exception"
+    assert event.attributes is not None
+    assert event.attributes["exception.message"] == REDACTED_DB_ERROR
+    assert event.attributes["exception.stacktrace"] == REDACTED_DB_ERROR
+    assert event.attributes["exception.type"] == "sqlalchemy.exc.OperationalError"
+    assert span.status.description == REDACTED_DB_ERROR
+    payload = _otlp_payload([span])
+    assert CANARY.encode() not in payload
+    assert b"Traceback" not in payload
+
+
+def test_postgres_recusado_nao_expoe_a_conexao_no_evento(traced_app: TracedApp) -> None:
+    refused = create_engine("postgresql+psycopg://usuario:senha-secreta@127.0.0.1:1/banco")
+
+    with pytest.raises(OperationalError):
+        refused.connect()
+
+    (span,) = _failed_connect_spans(traced_app)
+    payload = _otlp_payload([span])
+    assert b"senha-secreta" not in payload
+    assert b"Connection refused" not in payload
+    assert b"port 1" not in payload
+    assert b"Traceback" not in payload
+
+
+def test_evento_de_outra_instrumentacao_mantem_o_detalhe() -> None:
+    exporter = InMemorySpanExporter()
+    processor = make_span_processor(exporter)
+    assert processor is not None
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    span = provider.get_tracer("opentelemetry.instrumentation.asgi").start_span("GET /x")
+
+    span.record_exception(ValueError("detalhe"))
+    span.end()
+
+    (exported,) = exporter.get_finished_spans()
+    assert exported.events[0].attributes is not None
+    assert exported.events[0].attributes["exception.message"] == "detalhe"
+
+
+# Boot da API quando a instrumentação do banco falha
+
+
+# `sys.modules[...] = None` faz o import falhar como numa imagem sem o greenlet. Processo novo
+# porque o SQLAlchemy só levanta esse erro no primeiro import de `sqlalchemy.ext.asyncio`.
+BOOT_WITHOUT_GREENLET = """
+import sys
+sys.modules["greenlet"] = None
+from fastapi import FastAPI
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from sqlalchemy import create_engine, text
+from goblinshift.platform.settings import Settings
+from goblinshift.platform.telemetry import configure_logging, configure_tracing
+
+configure_logging()
+engine = create_engine("sqlite://")
+exporter = InMemorySpanExporter()
+configure_tracing(FastAPI(), engine, Settings.model_validate({"environment": "test"}), exporter)
+with engine.connect() as conn:
+    assert conn.execute(text("SELECT 1")).scalar_one() == 1
+print("SPANS", [span.name for span in exporter.get_finished_spans()])
+"""
+
+
+def test_falha_da_instrumentacao_nao_derruba_o_boot_e_fica_no_log() -> None:
+    result = subprocess.run(  # noqa: S603 (só o próprio interpretador, com código fixo)
+        [sys.executable, "-c", BOOT_WITHOUT_GREENLET],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "SPANS []" in result.stdout
+    logged = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]
+    assert [entry["level"] for entry in logged] == ["ERROR"]
+    assert "spans de banco" in logged[0]["message"]
+    assert "greenlet" in logged[0]["exception"]
+
+
+# Fila do exportador da API
+
+
+BSP_SETTINGS = ("OTEL_BSP_MAX_QUEUE_SIZE", "OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+# Média medida com Postgres real: consultas e `connect` da requisição mais o evento amplo.
+SPANS_PER_REQUEST = 13
+STALLED_COLLECTOR_S = 30
+REQUESTS_PER_S = 20
+
+
+def _published_api_environment() -> dict[str, str]:
+    app = json.loads((ROOT / "deploy" / "coolify" / "app.json").read_text(encoding="utf-8"))
+    environment: dict[str, str] = app["services"]["api"]["environment"]
+    return environment
+
+
+@pytest.mark.parametrize("name", BSP_SETTINGS)
+def test_compose_e_coolify_dao_a_mesma_fila_a_api(name: str) -> None:
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+
+    assert compose["services"]["api"]["environment"][name] == _published_api_environment()[name]
+
+
+class _GatedExporter(SpanExporter):
+    """Coletor parado até o teste abrir a porta; conta os eventos amplos que recebe."""
+
+    gate = threading.Event()
+    received_main = 0
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        self.gate.wait()
+        _GatedExporter.received_main += sum(
+            1 for span in spans if (span.attributes or {}).get("main") is True
+        )
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        self.gate.set()
+
+
+def test_fila_publicada_guarda_os_eventos_com_o_coletor_parado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    published = _published_api_environment()
+    for name in BSP_SETTINGS:
+        monkeypatch.setenv(name, published[name])
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", _GatedExporter)
+    monkeypatch.setattr(_GatedExporter, "gate", threading.Event())
+    monkeypatch.setattr(_GatedExporter, "received_main", 0)
+    processor = make_span_processor(None)
+    assert processor is not None
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer(SQLALCHEMY_SCOPE)
+    requests = STALLED_COLLECTOR_S * REQUESTS_PER_S
+
+    for _ in range(requests):
+        for _ in range(SPANS_PER_REQUEST - 1):
+            tracer.start_span("SELECT goblinshift").end()
+        tracer.start_span("POST /api/v1/runs", attributes={"main": True}).end()
+    _GatedExporter.gate.set()
+    provider.force_flush()
+    provider.shutdown()
+
+    assert _GatedExporter.received_main == requests

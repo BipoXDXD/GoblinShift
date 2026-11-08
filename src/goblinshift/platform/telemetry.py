@@ -14,13 +14,16 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import sqlalchemy
+import sqlalchemy.engine.create
 from fastapi import FastAPI
 from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
+from opentelemetry.sdk.trace import Event, ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
 from opentelemetry.trace import Span, Status, StatusCode, get_current_span
@@ -29,6 +32,8 @@ from sqlalchemy import Engine
 from goblinshift.platform.settings import Settings
 
 ALERT_ATTRIBUTE_PREFIX = "alert."
+
+logger = logging.getLogger(__name__)
 
 
 class JsonFormatter(logging.Formatter):
@@ -92,6 +97,8 @@ _QUERY_ATTRIBUTES = ("url.query",)
 _CLIENT_ADDRESS_ATTRIBUTES = ("net.peer.ip", "client.address", "http.client_ip")
 _SQLALCHEMY_SCOPE = "opentelemetry.instrumentation.sqlalchemy"
 REDACTED_DATABASE_ERROR = "database error (detail redacted)"
+_EXCEPTION_EVENT = "exception"
+_EXCEPTION_DETAIL_ATTRIBUTES = ("exception.message", "exception.stacktrace")
 # Header que o cliente escreve como quiser: nenhum header entra no evento (3.7).
 _USER_AGENT_ATTRIBUTES = ("http.user_agent", "user_agent.original")
 
@@ -178,12 +185,14 @@ def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
 
 
 class DatabaseErrorRedactingProcessor(SpanProcessor):
-    """Troca a descrição do erro dos spans do SQLAlchemy por um texto fixo antes de exportar.
+    """Troca o detalhe dos erros dos spans do SQLAlchemy por um texto fixo antes de exportar.
 
     A instrumentação grava `str(exceção)` no status, e o PostgreSQL põe valores na mensagem:
-    `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O código do erro
-    da requisição já está no evento amplo (`error.code`) e a consulta, parametrizada, em
-    `db.statement`. O span terminado é imutável, então o processador repassa uma cópia.
+    `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O span `connect`
+    também ganha um evento `exception`, cuja mensagem e pilha trazem host, porta e usuário. O
+    código do erro da requisição já está no evento amplo (`error.code`), a consulta, parametrizada,
+    em `db.statement`, e o tipo da exceção fica no evento. O span terminado é imutável, então o
+    processador repassa uma cópia.
     """
 
     def __init__(self, inner: SpanProcessor) -> None:
@@ -206,7 +215,8 @@ def _without_database_error_detail(span: ReadableSpan) -> ReadableSpan:
     scope = span.instrumentation_scope
     if scope is None or scope.name != _SQLALCHEMY_SCOPE:
         return span
-    if span.status.status_code is not StatusCode.ERROR:
+    failed = span.status.status_code is StatusCode.ERROR
+    if not failed and not any(event.name == _EXCEPTION_EVENT for event in span.events):
         return span
     return ReadableSpan(
         name=span.name,
@@ -214,14 +224,22 @@ def _without_database_error_detail(span: ReadableSpan) -> ReadableSpan:
         parent=span.parent,
         resource=span.resource,
         attributes=span.attributes,
-        events=span.events,
+        events=tuple(_without_exception_detail(event) for event in span.events),
         links=span.links,
         kind=span.kind,
-        status=Status(StatusCode.ERROR, REDACTED_DATABASE_ERROR),
+        status=Status(StatusCode.ERROR, REDACTED_DATABASE_ERROR) if failed else span.status,
         start_time=span.start_time,
         end_time=span.end_time,
         instrumentation_scope=scope,
     )
+
+
+def _without_exception_detail(event: Event) -> Event:
+    if event.name != _EXCEPTION_EVENT or event.attributes is None:
+        return event
+    redacted = {name: REDACTED_DATABASE_ERROR for name in _EXCEPTION_DETAIL_ATTRIBUTES}
+    attributes = {name: redacted.get(name, value) for name, value in event.attributes.items()}
+    return Event(event.name, attributes, event.timestamp)
 
 
 def configure_tracing(
@@ -243,12 +261,30 @@ def configure_tracing(
         # tempos do envio já estão no evento amplo.
         exclude_spans=["receive", "send"],
     )
-    # `skip_dep_check`: a 0.66b2, última publicada, ainda recusa o SQLAlchemy 2.1, embora o código
-    # dela funcione nele (tests/test_telemetry.py). O suporte oficial já está no main do projeto
-    # (open-telemetry/opentelemetry-python-contrib#5120); saiu a versão, sai este parâmetro.
-    SQLAlchemyInstrumentor().instrument(
-        engine=engine, tracer_provider=provider, skip_dep_check=True
-    )
+    _instrument_database(engine, provider)
+
+
+def _instrument_database(engine: Engine, provider: TracerProvider) -> None:
+    """Liga os spans de banco; uma falha aqui custa só esses spans, nunca o boot da API."""
+    try:
+        # `skip_dep_check`: a 0.66b2, última publicada, ainda recusa o SQLAlchemy 2.1, embora o
+        # código dela funcione nele (tests/test_telemetry.py). O suporte oficial já está no main
+        # do projeto (open-telemetry/opentelemetry-python-contrib#5120); saiu a versão, sai este
+        # parâmetro.
+        SQLAlchemyInstrumentor().instrument(
+            engine=engine, tracer_provider=provider, skip_dep_check=True
+        )
+    except Exception:
+        logger.exception("instrumentação do banco falhou: a API segue sem spans de banco")
+        _remove_partial_database_instrumentation()
+
+
+def _remove_partial_database_instrumentation() -> None:
+    # `instrument()` substitui as funções uma a uma e, ao falhar no meio, não marca nada como
+    # instrumentado: `uninstrument()` não desfaria o que já foi trocado.
+    for module in (sqlalchemy, sqlalchemy.engine, sqlalchemy.engine.create):
+        unwrap(module, "create_engine")
+    unwrap(Engine, "connect")
 
 
 def make_tracer_provider(
