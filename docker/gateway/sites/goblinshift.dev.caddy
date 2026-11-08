@@ -1,4 +1,5 @@
 goblinshift.dev {
+ tls /data/origin-ca/goblinshift.dev.pem /data/origin-ca/goblinshift.dev.key
  # Só uma conexão das faixas da Cloudflare informa o cliente, e com um único endereço IPv4 ou
  # IPv6. A regex vai sobre o placeholder, que junta cabeçalhos repetidos com vírgula: o
  # header_regexp aceitaria o pedido se só uma das linhas casasse.
@@ -21,5 +22,6 @@ goblinshift.dev {
  }
 }
 www.goblinshift.dev {
+ tls /data/origin-ca/goblinshift.dev.pem /data/origin-ca/goblinshift.dev.key
  redir https://goblinshift.dev{uri} 308
 }

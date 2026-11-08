@@ -1,4 +1,4 @@
-"""Vencimento do certificado TLS da borda (rede de segurança da renovação automática do Caddy).
+"""Vencimento do certificado TLS que o público recebe (rede de segurança, seja quem for o emissor).
 
 Só biblioteca padrão: roda no Python do runner do GitHub Actions, sem instalar nada.
 """
@@ -7,8 +7,7 @@ import socket
 import ssl
 from datetime import UTC, datetime, timedelta
 
-# Abaixo disso o alarme toca: o Caddy renova com cerca de 30 dias de folga, então 14 dias
-# restantes já significam semanas de renovação falhando.
+# Abaixo disso o alarme toca: 14 dias dão tempo de agir antes do vencimento.
 MIN_DAYS_LEFT = 14
 CONNECT_TIMEOUT_SECONDS = 10
 
