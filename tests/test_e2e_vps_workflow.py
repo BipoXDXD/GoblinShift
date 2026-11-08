@@ -88,3 +88,47 @@ def test_o_ci_chama_depois_do_deploy_sem_herdar_os_segredos() -> None:
     assert job["needs"] == ["deploy"]
     assert job["uses"] == "./.github/workflows/e2e-vps.yml"
     assert job["secrets"] == {"E2E_VPS_API_KEY": "${{ secrets.E2E_VPS_API_KEY }}"}
+
+
+# --- Depois da release (e2e-vps-pos-release.yml) ------------------------------------------------
+
+
+def after_release() -> dict[Any, Any]:
+    return load("e2e-vps-pos-release.yml")
+
+
+def after_release_job() -> dict[str, Any]:
+    job: dict[str, Any] = after_release()["jobs"]["vps"]
+    return job
+
+
+def test_as_jornadas_rodam_depois_de_cada_release_do_coolify() -> None:
+    # O `vps-smoke` do ci.yml depende do `deploy`, pulado de propósito: sem este gatilho, a borda e
+    # as jornadas de leitura não rodam em release nenhuma, e a CI segue verde.
+    triggers = after_release()[True]
+
+    assert set(triggers) == {"workflow_run"}
+    assert triggers["workflow_run"] == {
+        "workflows": [load("coolify.yml")["name"]],
+        "types": ["completed"],
+        "branches": ["main"],
+    }
+
+
+def test_so_a_release_bem_sucedida_da_main_dispara_as_jornadas() -> None:
+    condition = " ".join(after_release_job()["if"].split())
+
+    assert condition == (
+        "github.event.workflow_run.conclusion == 'success' && "
+        "github.event.workflow_run.event != 'pull_request' && "
+        "github.event.workflow_run.head_branch == 'main' && "
+        "github.event.workflow_run.head_repository.full_name == github.repository"
+    )
+
+
+def test_depois_da_release_chama_as_jornadas_sem_herdar_os_segredos() -> None:
+    job = after_release_job()
+
+    assert job["uses"] == "./.github/workflows/e2e-vps.yml"
+    assert job["secrets"] == {"E2E_VPS_API_KEY": "${{ secrets.E2E_VPS_API_KEY }}"}
+    assert after_release()["permissions"] == {"contents": "read"}
