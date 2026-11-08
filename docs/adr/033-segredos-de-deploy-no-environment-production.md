@@ -2,7 +2,7 @@
 
 ## Status
 
-Aceito.
+Substituído em parte pelo [ADR 045](045-publicacao-em-producao-pelo-coolify.md), 2026-11-07: o caminho por SSH (o job `deploy` do `ci.yml`, os segredos `VPS_SSH_KEY` e `VPS_KNOWN_HOSTS` e as variáveis `VPS_HOST` e `VPS_USER`) passa a legado, e a regra de manter os segredos de publicação no environment `production`, restrito à `main`, continua valendo. Antes: aceito.
 
 ## Contexto
 
