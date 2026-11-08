@@ -1,6 +1,7 @@
 """Telemetria (docs/GoblinShiftPlan.md, 3.7): hash, IP truncado, erro do banco e spans de banco."""
 
 import json
+import logging
 import sqlite3
 import subprocess
 import sys
@@ -8,23 +9,31 @@ import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
+import sqlalchemy
+import sqlalchemy.engine.create
+import sqlalchemy.ext.asyncio
+import wrapt
 import yaml
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.trace import Link, SpanKind, Status, StatusCode
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.event import listen as real_listen
 from sqlalchemy.exc import OperationalError
 
+from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.platform import telemetry
@@ -33,6 +42,7 @@ from goblinshift.platform.telemetry import (
     UserHasher,
     configure_tracing,
     make_span_processor,
+    make_tracer_provider,
     truncate_client_address,
 )
 
@@ -177,6 +187,7 @@ def test_sem_exportador_nem_endpoint_nao_ha_processador(monkeypatch: pytest.Monk
 
 
 CANARY = f"CANARY-{UUID(int=11)}"
+TEST_SETTINGS = Settings.model_validate({"environment": "test"})
 REVISION = "rev-teste"
 QUERY_ROUTE = "/consulta"
 
@@ -397,69 +408,261 @@ def test_falha_da_instrumentacao_nao_derruba_o_boot_e_fica_no_log() -> None:
     assert "greenlet" in logged[0]["exception"]
 
 
-# Fila do exportador da API
+# Falhas em qualquer ponto da instrumentação do banco
 
 
-BSP_SETTINGS = ("OTEL_BSP_MAX_QUEUE_SIZE", "OTEL_BSP_MAX_EXPORT_BATCH_SIZE")
+TRACER_LISTEN = "opentelemetry.instrumentation.sqlalchemy.engine.listen"
+
+
+def _no_database_spans_after_failure(exporter: InMemorySpanExporter, engine: Engine) -> None:
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT 1")).scalar_one() == 1
+    engine.dispose()
+    assert exporter.get_finished_spans() == ()
+
+
+def test_qualquer_excecao_do_instrumentor_fica_no_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def fail(_self: SQLAlchemyInstrumentor, **_kwargs: object) -> NoReturn:
+        raise RuntimeError("instrumentor quebrado")
+
+    monkeypatch.setattr(SQLAlchemyInstrumentor, "instrument", fail)
+    engine = create_engine("sqlite://")
+    exporter = InMemorySpanExporter()
+
+    with caplog.at_level(logging.ERROR):
+        configure_tracing(FastAPI(), engine, TEST_SETTINGS, exporter)
+
+    assert "instrumentação do banco falhou" in caplog.text
+    _no_database_spans_after_failure(exporter, engine)
+
+
+def test_falha_no_meio_dos_listeners_desfaz_tudo(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = iter(range(10))
+
+    def listen_failing_on_third(*args: Any, **kwargs: Any) -> None:
+        if next(calls) == 2:
+            raise RuntimeError("terceiro listener")
+        real_listen(*args, **kwargs)
+
+    monkeypatch.setattr(TRACER_LISTEN, listen_failing_on_third)
+    engine = create_engine("sqlite://")
+    exporter = InMemorySpanExporter()
+
+    configure_tracing(FastAPI(), engine, TEST_SETTINGS, exporter)
+
+    for wrapped in (
+        sqlalchemy.create_engine,
+        sqlalchemy.engine.create_engine,
+        sqlalchemy.engine.create.create_engine,
+        sqlalchemy.ext.asyncio.create_async_engine,
+        Engine.connect,
+    ):
+        assert not isinstance(wrapped, wrapt.BaseObjectProxy)
+    _no_database_spans_after_failure(exporter, engine)
+
+
+# A cópia redigida preserva o resto do span
+
+
+def test_copia_redigida_preserva_identidade_e_hierarquia() -> None:
+    exporter = InMemorySpanExporter()
+    processor = make_span_processor(exporter)
+    assert processor is not None
+    resource = Resource.create({"service.name": "copia"})
+    provider = TracerProvider(resource=resource)
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer(SQLALCHEMY_SCOPE)
+    linked = tracer.start_span("ligado")
+
+    with tracer.start_as_current_span("pai") as parent:
+        span = tracer.start_span(
+            "SELECT goblinshift",
+            kind=SpanKind.CLIENT,
+            attributes={"db.system": "postgresql"},
+            links=[Link(linked.get_span_context())],
+            start_time=1_000,
+        )
+        span.set_status(Status(StatusCode.ERROR, "detalhe"))
+        span.end(end_time=2_000)
+
+    exported = next(s for s in exporter.get_finished_spans() if s.name == "SELECT goblinshift")
+    assert exported.status.description == REDACTED_DB_ERROR
+    assert exported.parent is not None
+    assert exported.parent.span_id == parent.get_span_context().span_id
+    assert exported.context is not None
+    assert exported.context.span_id == span.get_span_context().span_id
+    assert exported.kind is SpanKind.CLIENT
+    assert (exported.start_time, exported.end_time) == (1_000, 2_000)
+    assert exported.attributes == {"db.system": "postgresql"}
+    assert [link.context.span_id for link in exported.links] == [linked.get_span_context().span_id]
+    assert exported.resource.attributes["service.name"] == "copia"
+    assert exported.instrumentation_scope is not None
+    assert exported.instrumentation_scope.name == SQLALCHEMY_SCOPE
+
+
+# Caminho de produção: `BatchSpanProcessor` com o exportador OTLP, sem `exporter` injetado
+
+
 # Média medida com Postgres real: consultas e `connect` da requisição mais o evento amplo.
 SPANS_PER_REQUEST = 13
 STALLED_COLLECTOR_S = 30
 REQUESTS_PER_S = 20
-
-
-def _published_api_environment() -> dict[str, str]:
-    app = json.loads((ROOT / "deploy" / "coolify" / "app.json").read_text(encoding="utf-8"))
-    environment: dict[str, str] = app["services"]["api"]["environment"]
-    return environment
-
-
-@pytest.mark.parametrize("name", BSP_SETTINGS)
-def test_compose_e_coolify_dao_a_mesma_fila_a_api(name: str) -> None:
-    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
-
-    assert compose["services"]["api"]["environment"][name] == _published_api_environment()[name]
+API_QUEUE_SIZE = 8192
+API_BATCH_SIZE = 2048
 
 
 class _GatedExporter(SpanExporter):
-    """Coletor parado até o teste abrir a porta; conta os eventos amplos que recebe."""
+    """Coletor que só recebe depois que o teste abre a porta; guarda os lotes recebidos."""
 
-    gate = threading.Event()
-    received_main = 0
+    def __init__(self) -> None:
+        self.gate = threading.Event()
+        self.batches: list[list[ReadableSpan]] = []
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         self.gate.wait()
-        _GatedExporter.received_main += sum(
-            1 for span in spans if (span.attributes or {}).get("main") is True
-        )
+        self.batches.append(list(spans))
         return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:
         self.gate.set()
 
+    def spans(self) -> list[ReadableSpan]:
+        return [span for batch in self.batches for span in batch]
 
-def test_fila_publicada_guarda_os_eventos_com_o_coletor_parado(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    published = _published_api_environment()
-    for name in BSP_SETTINGS:
-        monkeypatch.setenv(name, published[name])
+
+@dataclass(frozen=True)
+class ProductionTracing:
+    provider: TracerProvider
+    exporter: _GatedExporter
+
+
+@pytest.fixture
+def production(monkeypatch: pytest.MonkeyPatch) -> Iterator[ProductionTracing]:
+    exporter = _GatedExporter()
+    providers: list[TracerProvider] = []
+    real_make_tracer_provider = telemetry.make_tracer_provider
+
+    def keep_provider(*args: Any, **kwargs: Any) -> TracerProvider | None:
+        provider = real_make_tracer_provider(*args, **kwargs)
+        assert provider is not None
+        providers.append(provider)
+        return provider
+
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
-    monkeypatch.setattr(telemetry, "OTLPSpanExporter", _GatedExporter)
-    monkeypatch.setattr(_GatedExporter, "gate", threading.Event())
-    monkeypatch.setattr(_GatedExporter, "received_main", 0)
-    processor = make_span_processor(None)
-    assert processor is not None
-    provider = TracerProvider()
-    provider.add_span_processor(processor)
-    tracer = provider.get_tracer(SQLALCHEMY_SCOPE)
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", lambda: exporter)
+    monkeypatch.setattr(telemetry, "make_tracer_provider", keep_provider)
+    engine = create_engine("sqlite://")
+    configure_tracing(FastAPI(), engine, TEST_SETTINGS)
+    try:
+        yield ProductionTracing(providers[0], exporter)
+    finally:
+        exporter.gate.set()
+        SQLAlchemyInstrumentor().uninstrument()
+        providers[0].shutdown()
+        engine.dispose()
+
+
+def test_redacao_vale_no_exportador_de_producao(production: ProductionTracing) -> None:
+    production.exporter.gate.set()
+    refused = create_engine("sqlite://", creator=_refuse_connection)
+
+    with pytest.raises(OperationalError):
+        refused.connect()
+    production.provider.force_flush()
+
+    spans = production.exporter.spans()
+    (span,) = [s for s in spans if s.name == "connect" and s.events]
+    assert span.status.description == REDACTED_DB_ERROR
+    assert span.events[0].attributes is not None
+    assert span.events[0].attributes["exception.message"] == REDACTED_DB_ERROR
+    payload = _otlp_payload(spans)
+    assert CANARY.encode() not in payload
+    assert b"Traceback" not in payload
+
+
+def test_fila_da_api_guarda_os_eventos_e_exporta_em_lotes_de_2048(
+    production: ProductionTracing,
+) -> None:
+    tracer = production.provider.get_tracer(SQLALCHEMY_SCOPE)
     requests = STALLED_COLLECTOR_S * REQUESTS_PER_S
 
     for _ in range(requests):
         for _ in range(SPANS_PER_REQUEST - 1):
             tracer.start_span("SELECT goblinshift").end()
         tracer.start_span("POST /api/v1/runs", attributes={"main": True}).end()
-    _GatedExporter.gate.set()
-    provider.force_flush()
-    provider.shutdown()
+    production.exporter.gate.set()
+    production.provider.force_flush()
 
-    assert _GatedExporter.received_main == requests
+    received = [s for s in production.exporter.spans() if (s.attributes or {}).get("main") is True]
+    assert len(received) == requests
+    assert max(len(batch) for batch in production.exporter.batches) == API_BATCH_SIZE
+
+
+def _record_queue_limits(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Troca o `BatchSpanProcessor` por um registro dos limites que cada processo escolheu."""
+    recorded: list[dict[str, Any]] = []
+
+    def record(exporter: SpanExporter, **limits: Any) -> SimpleSpanProcessor:
+        recorded.append(limits)
+        return SimpleSpanProcessor(exporter)
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
+    monkeypatch.setattr(telemetry, "BatchSpanProcessor", record)
+    return recorded
+
+
+def test_api_escolhe_a_fila_maior_na_imagem(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded = _record_queue_limits(monkeypatch)
+    engine = create_engine("sqlite://")
+
+    try:
+        configure_tracing(FastAPI(), engine, TEST_SETTINGS)
+    finally:
+        SQLAlchemyInstrumentor().uninstrument()
+        engine.dispose()
+
+    assert recorded == [{"max_queue_size": API_QUEUE_SIZE, "max_export_batch_size": API_BATCH_SIZE}]
+
+
+def test_sem_escolha_a_fila_fica_no_padrao_do_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded = _record_queue_limits(monkeypatch)
+
+    provider = make_tracer_provider(TEST_SETTINGS, "goblinshift-worker")
+
+    assert provider is not None
+    provider.shutdown()
+    assert recorded == [{"max_queue_size": None, "max_export_batch_size": None}]
+
+
+def test_worker_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def no_provider(*_args: object, **kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(worker, "make_tracer_provider", no_provider)
+
+    with worker.process_tracer(TEST_SETTINGS, "goblinshift-worker"):
+        pass
+
+    assert calls == [{}]
+
+
+def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class ProviderRequestedError(Exception):
+        pass
+
+    def stop_at_provider(*_args: object, **kwargs: object) -> NoReturn:
+        calls.append(kwargs)
+        raise ProviderRequestedError
+
+    monkeypatch.setattr(maintenance, "make_tracer_provider", stop_at_provider)
+
+    with pytest.raises(ProviderRequestedError):
+        maintenance.serve(TEST_SETTINGS, Mock(), threading.Event())
+
+    assert calls == [{}]

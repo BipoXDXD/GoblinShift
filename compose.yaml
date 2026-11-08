@@ -92,10 +92,6 @@ services:
     environment:
       <<: *app-env
       GS_STORAGE_ROOT: /var/lib/goblinshift/storage/objects
-      # Só a API exporta um span por consulta. O lote maior é o que escoa um Collector lento; a
-      # fila segura 30 s dele parado a 20 req/s, ao custo de 45 MiB cheia (medições no PR #204).
-      OTEL_BSP_MAX_QUEUE_SIZE: "8192"
-      OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "2048"
     volumes: [*storage]
     depends_on:
       migrate:

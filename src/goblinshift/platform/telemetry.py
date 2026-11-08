@@ -10,6 +10,8 @@ import ipaddress
 import json
 import logging
 import os
+import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -21,6 +23,7 @@ from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.instrumentation.sqlalchemy.engine import EngineTracer
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan, SpanProcessor, TracerProvider
@@ -169,7 +172,24 @@ def _host_of(scope: dict[str, Any]) -> str:
     return f"{server[0]}:{server[1]}" if server else ""
 
 
-def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
+@dataclass(frozen=True)
+class SpanQueueLimits:
+    """Limites do `BatchSpanProcessor`; `None` deixa o padrão do SDK (fila 2048, lote 512)."""
+
+    max_queue_size: int | None = None
+    max_export_batch_size: int | None = None
+
+
+SDK_DEFAULT_SPAN_QUEUE = SpanQueueLimits()
+# Só a API exporta um span por consulta ao banco. O lote maior é o que escoa um Collector lento;
+# a fila segura 30 s dele parado a 20 req/s e custa cerca de 45 MiB cheia. Fica no código porque
+# a produção recebe novas imagens, não novas variáveis do Compose.
+API_SPAN_QUEUE = SpanQueueLimits(max_queue_size=8192, max_export_batch_size=2048)
+
+
+def make_span_processor(
+    exporter: SpanExporter | None, queue: SpanQueueLimits = SDK_DEFAULT_SPAN_QUEUE
+) -> SpanProcessor | None:
     """Processador que exporta os spans; sem `exporter` e sem endpoint OTLP, nenhum.
 
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
@@ -178,7 +198,11 @@ def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
     if exporter is not None:
         inner = SimpleSpanProcessor(exporter)
     elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        inner = BatchSpanProcessor(OTLPSpanExporter())
+        inner = BatchSpanProcessor(
+            OTLPSpanExporter(),
+            max_queue_size=queue.max_queue_size,
+            max_export_batch_size=queue.max_export_batch_size,
+        )
     else:
         return None
     return DatabaseErrorRedactingProcessor(inner)
@@ -249,7 +273,7 @@ def configure_tracing(
 
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
-    provider = make_tracer_provider(settings, "goblinshift-api", exporter)
+    provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
         return
     FastAPIInstrumentor.instrument_app(
@@ -280,21 +304,29 @@ def _instrument_database(engine: Engine, provider: TracerProvider) -> None:
 
 
 def _remove_partial_database_instrumentation() -> None:
-    # `instrument()` substitui as funções uma a uma e, ao falhar no meio, não marca nada como
-    # instrumentado: `uninstrument()` não desfaria o que já foi trocado.
+    # `instrument()` troca as funções e registra os listeners um a um e, ao falhar no meio, não
+    # marca nada como instrumentado: `uninstrument()` não desfaria o que já foi feito.
     for module in (sqlalchemy, sqlalchemy.engine, sqlalchemy.engine.create):
         unwrap(module, "create_engine")
     unwrap(Engine, "connect")
+    # Fora de `sys.modules` quando foi o próprio import dele que falhou.
+    asyncio_module = sys.modules.get("sqlalchemy.ext.asyncio")
+    if asyncio_module is not None:
+        unwrap(asyncio_module, "create_async_engine")
+    EngineTracer.remove_all_event_listeners()  # type: ignore[no-untyped-call]  # lib sem tipos
 
 
 def make_tracer_provider(
-    settings: Settings, default_service: str, exporter: SpanExporter | None = None
+    settings: Settings,
+    default_service: str,
+    exporter: SpanExporter | None = None,
+    queue: SpanQueueLimits = SDK_DEFAULT_SPAN_QUEUE,
 ) -> TracerProvider | None:
     """Provider com o resource do serviço; `None` sem `exporter` e sem endpoint OTLP.
 
     Quem cria o provider chama `shutdown()` ao sair, para exportar o lote pendente.
     """
-    processor = make_span_processor(exporter)
+    processor = make_span_processor(exporter, queue)
     if processor is None:
         return None
     resource = Resource.create(
