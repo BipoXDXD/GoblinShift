@@ -22,6 +22,9 @@ PROD_FILES = ("compose.yaml", "compose.prod.yaml")
 DEV_FILES = ("compose.yaml", "compose.override.yaml")
 COMPOSE_TIMEOUT_SECONDS = 60
 MOUNT_ROOT = "/run/secrets"
+DB_PASSWORD_PATH = f"{MOUNT_ROOT}/db_password"
+# `storage-init` não lê a configuração (roda `install`), mas herda o mesmo bloco de ambiente.
+APP_SERVICES = ("api", "maintenance", "migrate", "storage-init", "worker")
 WEB_SECRETS = {
     "google_client_secret": "GS_GOOGLE_CLIENT_SECRET_FILE",
     "github_client_secret": "GS_GITHUB_CLIENT_SECRET_FILE",
@@ -91,6 +94,32 @@ def production(secrets_dir: Path) -> dict[str, Any]:
 
 def secret_targets(service: dict[str, Any]) -> dict[str, str]:
     return {secret["source"]: secret["target"] for secret in service.get("secrets", [])}
+
+
+def test_todo_servico_da_aplicacao_recebe_o_arquivo_de_senha_do_banco(
+    production: dict[str, Any],
+) -> None:
+    """Sem o arquivo, a aplicação não sobe em produção (`Settings.database_password`)."""
+    for name in APP_SERVICES:
+        service = production["services"][name]
+        assert service["environment"]["GS_DB_PASSWORD_FILE"] == DB_PASSWORD_PATH, name
+        assert secret_targets(service)["db_password"] == DB_PASSWORD_PATH, name
+
+
+def test_todo_servico_da_aplicacao_no_coolify_recebe_o_arquivo_de_senha_do_banco() -> None:
+    """A produção publicada: o `app.json` não passa pela fusão dos arquivos do Compose."""
+    published = json.loads((ROOT / "deploy/coolify/app.json").read_text(encoding="utf-8"))
+    app_services = {
+        name: service
+        for name, service in published["services"].items()
+        if "GS_APP_IMAGE" in service["image"]
+    }
+
+    assert set(app_services) == set(APP_SERVICES)
+    for name, service in app_services.items():
+        assert service["environment"]["GS_ENVIRONMENT"] == "production", name
+        assert service["environment"]["GS_DB_PASSWORD_FILE"] == DB_PASSWORD_PATH, name
+        assert secret_targets(service)["db_password"] == DB_PASSWORD_PATH, name
 
 
 def test_api_recebe_a_origem_publica_e_os_ids_de_cliente(production: dict[str, Any]) -> None:
