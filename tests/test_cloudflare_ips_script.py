@@ -5,7 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from scripts.cloudflare_ips import IPV4_URL, IPV6_URL, LIST_FILE, parse_ranges, render, update
+from scripts.cloudflare_ips import (
+    IPV4_URL,
+    IPV6_URL,
+    LIST_FILE,
+    describe_drift,
+    main,
+    parse_ranges,
+    read_ranges,
+    render,
+    update,
+)
 
 OFFICIAL = {IPV4_URL: "173.245.48.0/20\n103.21.244.0/22\n", IPV6_URL: "2400:cb00::/32\n"}
 
@@ -69,3 +79,93 @@ def test_lista_versionada_tem_o_formato_gerado_pelo_script() -> None:
     ]
 
     assert text == render(ranges)
+
+
+def _versioned(tmp_path: Path, responses: dict[str, str]) -> Path:
+    target = tmp_path / "cloudflare-ips.conf"
+    update(responses.__getitem__, target)
+    return target
+
+
+def test_lista_versionada_pode_ser_lida_de_volta() -> None:
+    assert render(read_ranges(LIST_FILE)) == LIST_FILE.read_text()
+
+
+def test_linha_desconhecida_no_arquivo_e_recusada(tmp_path: Path) -> None:
+    target = tmp_path / "cloudflare-ips.conf"
+    target.write_text("# comentário\nremote_ip 173.245.48.0/20\nimport outra-coisa\n")
+
+    with pytest.raises(ValueError, match="import outra-coisa"):
+        read_ranges(target)
+
+
+def test_listas_iguais_nao_geram_relatorio(tmp_path: Path) -> None:
+    assert describe_drift(OFFICIAL.__getitem__, _versioned(tmp_path, OFFICIAL)) == ""
+
+
+def test_ordem_diferente_nao_e_divergencia(tmp_path: Path) -> None:
+    reordered = {**OFFICIAL, IPV4_URL: "103.21.244.0/22\n173.245.48.0/20\n"}
+
+    assert describe_drift(reordered.__getitem__, _versioned(tmp_path, OFFICIAL)) == ""
+
+
+def test_relatorio_aponta_faixa_nova_e_faixa_que_saiu(tmp_path: Path) -> None:
+    target = _versioned(tmp_path, OFFICIAL)
+    changed = {**OFFICIAL, IPV4_URL: "173.245.48.0/20\n104.16.0.0/13\n"}
+
+    report = describe_drift(changed.__getitem__, target)
+
+    assert "**Só nas listas oficiais:**\n\n- `104.16.0.0/13`\n" in report
+    assert "**Só no arquivo versionado:**\n\n- `103.21.244.0/22`\n" in report
+    assert "2400:cb00::/32" not in report
+
+
+def test_faixa_so_nova_nao_cita_o_lado_vazio(tmp_path: Path) -> None:
+    target = _versioned(tmp_path, OFFICIAL)
+    changed = {**OFFICIAL, IPV6_URL: "2400:cb00::/32\n2606:4700::/32\n"}
+
+    report = describe_drift(changed.__getitem__, target)
+
+    assert "- `2606:4700::/32`\n" in report
+    assert "Só no arquivo versionado" not in report
+
+
+@pytest.mark.parametrize("broken_url", [IPV4_URL, IPV6_URL], ids=["falha-na-v4", "falha-na-v6"])
+def test_resposta_invalida_da_fonte_nao_vira_divergencia(tmp_path: Path, broken_url: str) -> None:
+    target = _versioned(tmp_path, OFFICIAL)
+    responses = {**OFFICIAL, broken_url: "<html>erro</html>\n"}
+
+    with pytest.raises(ValueError, match="does not appear to be"):
+        describe_drift(responses.__getitem__, target)
+
+
+def test_comparar_grava_o_relatorio_sem_alterar_a_lista(tmp_path: Path) -> None:
+    target = _versioned(tmp_path, OFFICIAL)
+    before = target.read_text()
+    changed = {**OFFICIAL, IPV4_URL: "173.245.48.0/20\n104.16.0.0/13\n"}
+    report = tmp_path / "relatorio.md"
+
+    main(["--drift-report", str(report)], changed.__getitem__, target)
+
+    assert "`104.16.0.0/13`" in report.read_text()
+    assert target.read_text() == before
+
+
+def test_comparar_sem_divergencia_nao_cria_relatorio(tmp_path: Path) -> None:
+    report = tmp_path / "relatorio.md"
+
+    main(["--drift-report", str(report)], OFFICIAL.__getitem__, _versioned(tmp_path, OFFICIAL))
+
+    assert not report.exists()
+
+
+def test_sem_argumentos_a_lista_e_regravada(tmp_path: Path) -> None:
+    target = tmp_path / "cloudflare-ips.conf"
+
+    main([], OFFICIAL.__getitem__, target)
+
+    assert read_ranges(target) == [
+        ip_network("173.245.48.0/20"),
+        ip_network("103.21.244.0/22"),
+        ip_network("2400:cb00::/32"),
+    ]

@@ -12,9 +12,11 @@ from goblinshift.identity import (
     IssuedSession,
     Principal,
     Scope,
+    SessionRefusal,
     authenticate_api_key,
     authenticate_session,
     csrf_token_matches,
+    resolve_session,
     revoke_all_credentials,
     revoke_session,
     start_session,
@@ -158,6 +160,95 @@ def test_token_desconhecido_ou_malformado_nao_autentica(
     _start(factory, new_user(factory))
 
     assert _authenticate(factory, token, NOW) is None
+
+
+# --- Motivo da recusa -------------------------------------------------------------------------
+
+
+def _resolve(
+    factory: sessionmaker[Session], token: str, now: datetime
+) -> Principal | SessionRefusal:
+    with unit_of_work(factory) as session:
+        return resolve_session(session, token, now)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("", id="vazio"),
+        pytest.param("A" * 42, id="curto"),
+        pytest.param("é" * 43, id="nao-ascii"),
+        pytest.param("A" * 42 + "\x00", id="nul"),
+    ],
+)
+def test_token_fora_do_formato_e_recusado_como_malformado(
+    factory: sessionmaker[Session], token: str
+) -> None:
+    assert _resolve(factory, token, NOW) is SessionRefusal.MALFORMED
+
+
+def test_token_bem_formado_sem_sessao_e_recusado_como_desconhecido(
+    factory: sessionmaker[Session],
+) -> None:
+    assert _resolve(factory, "A" * 43, NOW) is SessionRefusal.UNKNOWN
+
+
+def test_sessao_valida_resolve_para_o_principal(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    issued = _start(factory, user_id)
+
+    resolved = _resolve(factory, issued.token, NOW)
+
+    assert isinstance(resolved, Principal)
+    assert resolved.owner_id == user_id
+
+
+def test_recusa_por_inatividade_vale_na_fronteira_de_30_min(
+    factory: sessionmaker[Session],
+) -> None:
+    issued = _start(factory, new_user(factory))
+
+    resolved = _resolve(factory, issued.token, NOW + timedelta(minutes=30))
+
+    assert resolved is SessionRefusal.IDLE_EXPIRED
+
+
+def test_recusa_pelo_teto_absoluto_vence_a_inatividade(factory: sessionmaker[Session]) -> None:
+    # Perto do teto, a inatividade é cortada nele: os dois prazos coincidem.
+    login = NOW - timedelta(hours=7, minutes=50)
+    issued = _start(factory, new_user(factory), authenticated_at=login)
+
+    resolved = _resolve(factory, issued.token, NOW + timedelta(minutes=10))
+
+    assert resolved is SessionRefusal.ABSOLUTE_EXPIRED
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        pytest.param({"status": "blocked"}, id="bloqueada"),
+        pytest.param({"deletion_requested_at": NOW}, id="em-exclusao"),
+    ],
+)
+def test_conta_indisponivel_e_recusada_com_um_so_motivo(
+    factory: sessionmaker[Session], values: dict[str, object]
+) -> None:
+    user_id = new_user(factory)
+    issued = _start(factory, user_id)
+    with unit_of_work(factory) as session:
+        session.execute(update(app_user).where(app_user.c.id == user_id).values(**values))
+
+    assert _resolve(factory, issued.token, NOW) is SessionRefusal.ACCOUNT_UNAVAILABLE
+
+
+def test_revogacao_vence_a_expiracao_no_motivo(factory: sessionmaker[Session]) -> None:
+    issued = _start(factory, new_user(factory))
+    with unit_of_work(factory) as session:
+        revoke_session(session, issued.session_id, NOW)
+
+    resolved = _resolve(factory, issued.token, NOW + timedelta(hours=9))
+
+    assert resolved is SessionRefusal.REVOKED
 
 
 # --- Expiração --------------------------------------------------------------------------------

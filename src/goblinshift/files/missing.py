@@ -15,9 +15,10 @@ a varredura da manutenção marca, nunca uma requisição de usuário, e ela só
 de montagem presente (`FileStorage.is_mounted`) e com no máximo `max_absent_ratio` do lote
 ausente (num lote pequeno, sem todos ausentes): muito arquivo sumido de uma vez indica storage
 errado, não arquivo perdido, e quem decide é o administrador. Erro de disco que não seja ausência
-deixa o objeto como está.
+deixa o objeto como está, e o relatório guarda a chave e o errno para quem investiga.
 """
 
+import errno
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -39,6 +40,17 @@ GOVERNOR_MIN_SAMPLE = 10
 _SMALL_LOT_MIN_ALL_ABSENT = 2
 # `max_absent_ratio` a partir do qual o limitador de ausentes fica desligado.
 _GOVERNOR_OFF = 1.0
+# `OSError` sem errno, ou com um que a plataforma não nomeia.
+_UNKNOWN_ERRNO = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class UnreadableObject:
+    """Objeto cujo `stat` falhou por erro de disco que não é ausência."""
+
+    storage_key: str
+    # `EIO`, `EACCES`: só o nome, porque a mensagem do `OSError` traz o caminho no disco.
+    errno_name: str
 
 
 @dataclass(frozen=True)
@@ -46,7 +58,7 @@ class MissingSweep:
     checked: int
     absent: int
     # O `stat` falhou por outro motivo (EIO, permissão): nem ausente nem marcado; o próximo volta.
-    unreadable: int
+    unreadable_objects: tuple[UnreadableObject, ...]
     marked: int
     # Último ID do lote, se ele veio cheio; `None` quando a varredura chegou ao fim e recomeça.
     resume_after: uuid.UUID | None
@@ -54,6 +66,10 @@ class MissingSweep:
     storage_unreachable: bool
     # Ausentes demais no lote: nada foi marcado, e o mesmo lote volta no ciclo seguinte.
     governor_tripped: bool
+
+    @property
+    def unreadable(self) -> int:
+        return len(self.unreadable_objects)
 
     @classmethod
     def idle(
@@ -63,7 +79,7 @@ class MissingSweep:
         return cls(
             checked=0,
             absent=0,
-            unreadable=0,
+            unreadable_objects=(),
             marked=0,
             resume_after=resume_after,
             storage_unreachable=storage_unreachable,
@@ -127,12 +143,12 @@ def sweep_missing_objects(
         return MissingSweep.idle(resume_after=after, storage_unreachable=True)
     presence = {row.id: _presence(storage, row.storage_key) for row in rows}
     absent = [object_id for object_id, found in presence.items() if found is _Presence.ABSENT]
-    unreadable = sum(found is _Presence.UNREADABLE for found in presence.values())
-    if _too_many_absent(len(absent), unreadable, len(rows), max_absent_ratio):
+    unreadable = tuple(found for found in presence.values() if isinstance(found, UnreadableObject))
+    if _too_many_absent(len(absent), len(unreadable), len(rows), max_absent_ratio):
         return MissingSweep(
             checked=len(rows),
             absent=len(absent),
-            unreadable=unreadable,
+            unreadable_objects=unreadable,
             marked=0,
             resume_after=after,
             storage_unreachable=False,
@@ -145,7 +161,7 @@ def sweep_missing_objects(
     return MissingSweep(
         checked=len(rows),
         absent=len(absent),
-        unreadable=unreadable,
+        unreadable_objects=unreadable,
         marked=marked,
         resume_after=rows[-1].id if len(rows) == limit else None,
         storage_unreachable=False,
@@ -177,15 +193,14 @@ def _too_many_absent(absent: int, unreadable: int, checked: int, max_absent_rati
 class _Presence(Enum):
     PRESENT = auto()
     ABSENT = auto()
-    UNREADABLE = auto()
 
 
-def _presence(storage: FileStorage, key: str) -> _Presence:
+def _presence(storage: FileStorage, key: str) -> _Presence | UnreadableObject:
     try:
         storage.stat(key)
     except ObjectMissingError:
         return _Presence.ABSENT
-    except OSError:
+    except OSError as error:
         # Erro de disco não prova ausência: o objeto fica como está, e a varredura segue.
-        return _Presence.UNREADABLE
+        return UnreadableObject(key, errno.errorcode.get(error.errno or 0, _UNKNOWN_ERRNO))
     return _Presence.PRESENT
