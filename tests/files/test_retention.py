@@ -107,7 +107,7 @@ def test_upload_incompleto_vencido_perde_linha_e_objeto(
     expire_row(factory, upload, stale.id)
 
     with factory() as session:
-        assert expire_incomplete_uploads(session, storage) == 1
+        assert expire_incomplete_uploads(session, storage).uploads == 1
 
     with pytest.raises(UploadNotFoundError), factory() as session:
         get_upload(session, owner, stale.id)
@@ -132,9 +132,12 @@ def test_falha_ao_apagar_um_incompleto_nao_perde_os_demais(
     monkeypatch.setattr(storage, "delete", refuse_first)
 
     with factory() as session:
-        assert expire_incomplete_uploads(session, storage) == 2
+        report = expire_incomplete_uploads(session, storage)
 
+    assert report.uploads == 2
     assert len(set(attempted)) == 2
+    # A linha já saiu: o relatório é o único jeito de quem chama contar o que ficou no disco.
+    assert report.failed_keys == (attempted[0],)
 
 
 def test_upload_incompleto_excluido_sai_sem_esperar_o_prazo(
@@ -146,7 +149,7 @@ def test_upload_incompleto_excluido_sai_sem_esperar_o_prazo(
         request_deletion(session, owner, intent.id)
 
     with factory() as session:
-        assert expire_incomplete_uploads(session, storage) == 1
+        assert expire_incomplete_uploads(session, storage).uploads == 1
 
     assert object_states(factory) == {}
 

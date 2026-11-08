@@ -5,8 +5,8 @@ nele no fim da requisição:
 
 - o middleware mede bytes recebidos e enviados, `duration_ms`, o primeiro byte e se a resposta
   terminou, e lê `request_id` e a classe de taxa;
-- as rotas e dependências registram conta, credencial, código de erro e aceitação, pelas funções
-  `record_*`, que não fazem nada fora de uma requisição;
+- as rotas e dependências registram conta, credencial, motivo da recusa da sessão, código de erro
+  e aceitação, pelas funções `record_*`, que não fazem nada fora de uma requisição;
 - `count_queries` soma as consultas ao banco feitas durante a requisição.
 
 O que nunca entra: conteúdo, nomes de arquivo, valores de parâmetros, query string, headers,
@@ -89,6 +89,12 @@ def record_principal(owner_id: UUID, via: str) -> None:
     if current is not None:
         current.owner_id = owner_id
         current.auth_via = via
+
+
+def record_auth_refusal(reason: str) -> None:
+    current = _current.get()
+    if current is not None:
+        current.extra["auth.refusal"] = reason
 
 
 def record_error(code: str) -> None:
