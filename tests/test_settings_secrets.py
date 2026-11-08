@@ -78,6 +78,9 @@ def _production_env(settings: Settings) -> dict[str, str]:
     return {
         "PATH": os.environ["PATH"],
         "GS_ENVIRONMENT": "production",
+        # Porta fechada: numa regressão, a falha é imediata e não alcança outro Postgres da máquina.
+        "GS_DB_HOST": "127.0.0.1",
+        "GS_DB_PORT": str(settings.db_port),
         "GS_CURSOR_SECRET": SECRET,
         "GS_USER_HASH_SECRET": SECRET,
         "GS_RUNNER": "executor_ctl",
@@ -202,6 +205,18 @@ def test_processo_real_em_producao_sem_o_arquivo_de_senha_nao_sobe(
     assert result.returncode != 0
     assert "GS_DB_PASSWORD_FILE é obrigatório em produção" in output
     assert PASSWORD_CANARY not in output
+
+
+def test_ambiente_dos_processos_reais_aponta_para_uma_porta_fechada(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Numa regressão, o processo falha rápido em vez de achar o Postgres de outro projeto."""
+    for name, value in _production_env(_production(tmp_path)).items():
+        monkeypatch.setenv(name, value)
+
+    settings = Settings()
+
+    assert (settings.db_host, settings.db_port) == ("127.0.0.1", 1)
 
 
 def test_producao_le_a_senha_do_banco_do_arquivo_sem_a_quebra_de_linha(tmp_path: Path) -> None:
