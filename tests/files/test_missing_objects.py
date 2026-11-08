@@ -12,6 +12,7 @@ from goblinshift.files.artifacts import get_artifact, publish_artifact
 from goblinshift.files.missing import (
     GOVERNOR_MIN_SAMPLE,
     MissingSweep,
+    UnreadableObject,
     mark_missing,
     sweep_missing_objects,
 )
@@ -214,6 +215,41 @@ def test_objeto_ilegivel_conta_a_parte_e_a_varredura_segue(
     assert (second.checked, second.unreadable, second.marked) == (1, 0, 1)
     assert state_of(factory, objects[0][0]) == ObjectState.COMMITTED
     assert state_of(factory, objects[2][0]) == ObjectState.MISSING
+
+
+class RefusingStorage(FileStorage):
+    """Storage cujo `stat` falha sempre com o erro dado."""
+
+    def __init__(self, base: FileStorage, error: OSError) -> None:
+        super().__init__(base.root)
+        self._error = error
+
+    def stat(self, key: str) -> ObjectStat:
+        raise self._error
+
+
+@pytest.mark.parametrize(
+    ("error", "errno_name"),
+    [
+        pytest.param(OSError(errno.EIO, "erro de disco"), "EIO", id="eio"),
+        pytest.param(PermissionError(errno.EACCES, "recusado"), "EACCES", id="eacces"),
+        pytest.param(OSError("sem errno"), "UNKNOWN", id="sem-errno"),
+    ],
+)
+def test_lote_so_com_ilegiveis_guarda_errno_e_chave_de_cada_objeto(
+    factory: sessionmaker[Session], storage: FileStorage, error: OSError, errno_name: str
+) -> None:
+    objects = sorted_objects(factory, storage, 2)
+    mark_mounted(storage)
+
+    report = sweep(factory, RefusingStorage(storage, error), limit=2)
+
+    assert report.absent == 0
+    assert report.unreadable == 2
+    assert report.unreadable_objects == (
+        UnreadableObject(objects[0][1], errno_name),
+        UnreadableObject(objects[1][1], errno_name),
+    )
 
 
 def test_varredura_ignora_objetos_que_nao_estao_confirmados(

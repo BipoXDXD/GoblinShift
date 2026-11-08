@@ -17,7 +17,7 @@ FROM nginx:1.30.6@sha256:f12e4e280502f79dae4488c9f677ab3ebe8a7079818bbfbf3242f23
 RUN apt-get update -q \
  && apt-get install -yq --no-install-recommends --only-upgrade \
       curl=8.14.1-2+deb13u7 libcurl4t64=8.14.1-2+deb13u7 libexpat1=2.9.0-1~deb13u1 libbrotli1=1.1.0-2+deb13u1 \
-      apt=3.0.4 libapt-pkg7.0=3.0.4 \
+      apt=3.0.4 libapt-pkg7.0=3.0.4 zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
  && rm -rf /var/lib/apt/lists/*
 # Liga o pacote do GHCR ao repositório: ele herda a visibilidade e o acesso do Actions.
 LABEL org.opencontainers.image.source=https://github.com/BipoXDXD/GoblinShift

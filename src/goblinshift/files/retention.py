@@ -8,9 +8,10 @@ Ordem entre banco e disco: o estado é confirmado no banco primeiro e o arquivo 
 do commit. Se o processo cair no meio, sobra um arquivo órfão, que só ocupa espaço; a ordem
 inversa poderia deixar uma linha apontando para um arquivo que já não existe caso o commit
 falhasse, e quem confiasse na linha leria um objeto sumido. As falhas de remoção vão para o
-relatório, não são engolidas.
+relatório e para o log, com a chave, e não interrompem o lote.
 """
 
+import logging
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -40,6 +41,8 @@ from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 
+logger = logging.getLogger(__name__)
+
 # Retenção longa (1.7): o nome do upload sai 30 dias depois da criação (só depois da exclusão) e
 # as linhas de arquivos já removidos do disco, aos 90, junto com o histórico das execuções.
 NAME_AFTER = timedelta(days=30)
@@ -60,7 +63,32 @@ class PurgeReport:
     failed_keys: tuple[str, ...]
 
 
-def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
+@dataclass(frozen=True)
+class IncompleteUploadsExpiry:
+    uploads: int
+    # As linhas já saíram: estas chaves só existem aqui, e os arquivos delas ficaram no disco.
+    failed_keys: tuple[str, ...]
+
+
+def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
+    """Apaga o arquivo de uma linha já confirmada; `False` se ele ficou no disco.
+
+    Nada repete a remoção depois do commit: a falha vira alerta com a chave e não impede
+    que o resto do lote saia do disco.
+    """
+    try:
+        storage.delete(key)
+    except OSError:
+        logger.warning(
+            "arquivo não removido do disco",
+            exc_info=True,
+            extra={"fields": {"alert": "purge_file_not_removed", "storage_key": key}},
+        )
+        return False
+    return True
+
+
+def expire_incomplete_uploads(session: Session, storage: FileStorage) -> IncompleteUploadsExpiry:
     """Remove linha e objeto de uploads incompletos vencidos ou excluídos (1.7: "1 hora").
 
     Upload incompleto nunca chegou a uma execução nem tem conteúdo confirmado, então não há
@@ -89,9 +117,10 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> int:
                     stored_object.c.state == ObjectState.PENDING,
                 )
             )
-    for row in rows:
-        storage.delete(row.storage_key)
-    return len(rows)
+    failed_keys = tuple(
+        row.storage_key for row in rows if not remove_file_after_commit(storage, row.storage_key)
+    )
+    return IncompleteUploadsExpiry(uploads=len(rows), failed_keys=failed_keys)
 
 
 def expire_unused_uploads(session: Session) -> int:
@@ -165,12 +194,11 @@ def purge_deleted_objects(session: Session, storage: FileStorage) -> PurgeReport
                 .values(state=ObjectState.DELETED)
             )
             capacity.release_many(session, holder=capacity.HolderKind.OBJECT, holder_ids=object_ids)
-    failed_keys = []
-    for candidate in chosen:
-        try:
-            storage.delete(candidate.storage_key)
-        except OSError:
-            failed_keys.append(candidate.storage_key)
+    failed_keys = [
+        candidate.storage_key
+        for candidate in chosen
+        if not remove_file_after_commit(storage, candidate.storage_key)
+    ]
     return PurgeReport(
         objects=len(chosen),
         bytes=sum(c.size_bytes for c in chosen),

@@ -4,29 +4,35 @@ Os spans saem para um `InMemorySpanExporter`, o mesmo caminho do exportador OTLP
 """
 
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx2 import Response
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.api.cookies import SESSION_COOKIE
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.entrypoints.api.wide_event import RateLimitClass, rate_limit_class
 from goblinshift.files.storage import FileStorage
-from goblinshift.identity import Scope
+from goblinshift.identity import Scope, revoke_session
+from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from openobserve.catalog import slo_named
 from tests.api.files_support import bearer, new_account, publish
+from tests.api.session_support import open_session, session_headers
 from tests.api.support import add_test_routes
 from tests.identity.support import new_key, new_user, prepare_database
 from tests.runs.support import ready_inputs
@@ -104,6 +110,73 @@ def test_evento_de_requisicao_autenticada_tem_conta_credencial_e_consultas(
     assert event["duration_ms"] > 0
 
 
+def test_evento_de_sessao_aceita_tem_conta_e_credencial_sem_o_id_nem_os_tokens(
+    traced: Traced,
+) -> None:
+    user_id = new_user(traced.factory)
+    issued = open_session(traced.app, user_id)
+    traced.clear()
+
+    response = traced.client.get("/api/v1/me", headers=session_headers(traced.app, issued))
+
+    assert response.status_code == 200
+    event = traced.main_event()
+    assert event["auth.via"] == "session"
+    assert event["user.hash"] == UserHasher(traced.app.state.settings.user_hash_key()).hash(user_id)
+    for span in traced.spans():
+        text = _span_text(span)
+        for secret in (str(user_id), user_id.hex, issued.token, issued.csrf_token):
+            assert secret not in text
+
+
+def test_logout_com_sessao_aceita_tem_conta_e_credencial(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    traced.clear()
+
+    response = traced.client.post("/auth/logout", headers=session_headers(traced.app, issued))
+
+    assert response.status_code == 204
+    event = traced.main_event()
+    assert event["auth.via"] == "session"
+    assert "user.hash" in event
+
+
+def test_mutacao_recusada_pelo_csrf_nao_e_atribuida_a_conta_do_cookie(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    headers = session_headers(traced.app, issued, csrf_header="token-errado")
+    traced.clear()
+
+    response = traced.client.post("/auth/logout-all", headers=headers)
+
+    assert response.status_code == 403
+    event = traced.main_event()
+    assert event["error.code"] == "CSRF_FAILED"
+    assert "user.hash" not in event
+    assert "auth.via" not in event
+
+
+def test_sessao_encerrada_e_desconhecida_sao_iguais_e_sem_conta_no_evento(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    assert (
+        traced.client.post("/auth/logout", headers=session_headers(traced.app, issued)).status_code
+        == 204
+    )
+    traced.clear()
+
+    ended = traced.client.get("/api/v1/me", headers={"Cookie": f"{SESSION_COOKIE}={issued.token}"})
+    ended_event = traced.main_event()
+    traced.clear()
+    unknown = traced.client.get("/api/v1/me", headers={"Cookie": f"{SESSION_COOKIE}={'S' * 43}"})
+    unknown_event = traced.main_event()
+
+    assert (ended.status_code, unknown.status_code) == (401, 401)
+    assert _problem_without_request_id(ended) == _problem_without_request_id(unknown)
+    for event in (ended_event, unknown_event):
+        assert event["error.code"] == "AUTHENTICATION_REQUIRED"
+        assert "user.hash" not in event
+        assert "auth.via" not in event
+
+
 def test_evento_nunca_traz_o_owner_id(traced: Traced) -> None:
     user_id, auth = new_account(traced.factory)
     traced.clear()
@@ -138,6 +211,62 @@ def test_requisicao_sem_credencial_nao_tem_conta_e_traz_o_codigo_de_erro(traced:
     assert event["error.code"] == "AUTHENTICATION_REQUIRED"
     assert "user.hash" not in event
     assert "auth.via" not in event
+
+
+def session_header(token: str) -> dict[str, str]:
+    return {"Cookie": f"{SESSION_COOKIE}={token}"}
+
+
+def problem_without_request_id(response: Response) -> dict[str, object]:
+    body: dict[str, object] = response.json()
+    return {key: value for key, value in body.items() if key != "request_id"}
+
+
+def test_sessao_revogada_registra_o_motivo_so_no_evento_da_requisicao(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    with unit_of_work(traced.factory) as session:
+        revoke_session(session, issued.session_id, datetime.now(UTC))
+    traced.clear()
+
+    with caplog.at_level(logging.DEBUG, logger="goblinshift"):
+        response = traced.client.get("/api/v1/me", headers=session_header(issued.token))
+
+    assert response.status_code == 401
+    event = traced.main_event()
+    assert event["auth.refusal"] == "revoked"
+    assert event["error.code"] == "AUTHENTICATION_REQUIRED"
+    # Sem o token no evento e sem linha de log: um cookie vencido repetido não gera ruído.
+    assert issued.token not in str(event)
+    assert not [r for r in caplog.records if r.name.startswith("goblinshift.identity")]
+
+
+def test_motivo_da_recusa_nao_muda_a_resposta_ao_cliente(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    with unit_of_work(traced.factory) as session:
+        revoke_session(session, issued.session_id, datetime.now(UTC))
+    traced.clear()
+
+    revoked = traced.client.get("/api/v1/me", headers=session_header(issued.token))
+    revoked_reason = traced.main_event()["auth.refusal"]
+    traced.clear()
+    unknown = traced.client.get("/api/v1/me", headers=session_header("A" * 43))
+    unknown_reason = traced.main_event()["auth.refusal"]
+
+    assert (revoked_reason, unknown_reason) == ("revoked", "unknown")
+    assert revoked.status_code == unknown.status_code == 401
+    assert problem_without_request_id(revoked) == problem_without_request_id(unknown)
+
+
+def test_sessao_aceita_nao_traz_motivo_de_recusa(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    traced.clear()
+
+    response = traced.client.get("/api/v1/me", headers=session_header(issued.token))
+
+    assert response.status_code == 200
+    assert "auth.refusal" not in traced.main_event()
 
 
 def test_escopo_insuficiente_traz_a_conta_e_o_codigo(traced: Traced) -> None:
@@ -347,6 +476,15 @@ def test_rotas_com_classe_explicita_existem_na_aplicacao(traced: Traced) -> None
     assert ("PUT", "/api/v1/uploads/{upload_id}/content") in routes
     assert ("GET", "/api/v1/artifacts/{artifact_id}/download") in routes
     assert ("POST", "/api/v1/runs") in routes
+
+
+def _problem_without_request_id(response: httpx.Response) -> dict[str, Any]:
+    """O corpo do erro sem o que muda a cada requisição."""
+    return {
+        key: value
+        for key, value in response.json().items()
+        if key not in {"request_id", "instance", "trace_id"}
+    }
 
 
 def _span_text(span: ReadableSpan) -> str:

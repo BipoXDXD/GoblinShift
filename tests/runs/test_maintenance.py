@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 from sqlalchemy import func, select, update
@@ -15,15 +16,15 @@ from goblinshift.files.missing import GOVERNOR_MIN_SAMPLE
 from goblinshift.files.states import Availability, ObjectState
 from goblinshift.files.storage import FileStorage, ObjectStat
 from goblinshift.files.tables import stored_object, upload
-from goblinshift.files.uploads import get_upload
+from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
-from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.maintenance import UNREADABLE_LOG_SAMPLE, Maintenance, MaintenanceConfig
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.runner import LocalRunner
-from tests.files.support import mark_mounted, ready_upload
+from tests.files.support import create_intent, mark_mounted, ready_upload
 from tests.runs.worker_support import (
     LEASE,
     attempts,
@@ -172,6 +173,79 @@ def test_stopping_com_lease_vencido_para_o_executor_e_confirma(
     assert open_run_uses(factory, run_id) == 0
 
 
+def test_falha_ao_apagar_um_candidato_nao_perde_os_demais(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        first = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+        second = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+    storage.create_exclusive(first.storage_key, [b"x"], 1)
+    storage.create_exclusive(second.storage_key, [b"y"], 1)
+    expire_lease(factory, run_id)
+    delete = storage.delete
+    candidates = {first.storage_key, second.storage_key}
+    attempted: list[str] = []
+
+    def refuse_first_candidate(key: str) -> None:
+        if key in candidates:
+            attempted.append(key)
+            if len(attempted) == 1:
+                raise PermissionError("disco recusou")
+        delete(key)
+
+    monkeypatch.setattr(storage, "delete", refuse_first_candidate)
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert counts["candidates_discarded"] == 1
+    assert set(attempted) == candidates
+    assert counts["candidates_left_on_disk"] == 1
+
+
+def test_candidato_preso_ao_encerrar_a_run_conta_no_ciclo_e_nao_no_seguinte(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        candidate = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+    storage.create_exclusive(candidate.storage_key, [b"x"], 1)
+    cancel_run(factory, storage, owner, run_id)
+    expire_lease(factory, run_id)
+    delete = storage.delete
+
+    def refuse_candidate(key: str) -> None:
+        if key == candidate.storage_key:
+            raise PermissionError("disco recusou")
+        delete(key)
+
+    monkeypatch.setattr(storage, "delete", refuse_candidate)
+    worker = maintenance(factory, storage, local_runner(work_root))
+
+    first = worker.run_cycle()
+    second = worker.run_cycle()
+
+    assert run_row(factory, run_id)["status"] == "canceled"
+    assert first["candidates_left_on_disk"] == 1
+    assert second["candidates_left_on_disk"] == 0
+
+
 def test_candidatos_de_tentativa_encerrada_sao_descartados(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
@@ -247,6 +321,33 @@ def test_ciclo_inclui_a_retencao_de_arquivos(
         "artifacts_expired",
         "objects_purged",
     } <= counts.keys()
+
+
+def test_arquivo_que_fica_no_disco_entra_na_contagem_do_ciclo(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    ready = ready_upload(factory, storage, owner, b"abc")
+    intent = create_intent(factory, owner)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, ready.id)
+        request_deletion(session, owner, intent.id)
+
+    def refuse_delete(_key: str) -> None:
+        raise PermissionError("disco recusou")
+
+    monkeypatch.setattr(storage, "delete", refuse_delete)
+    cycles = maintenance(factory, storage, local_runner(work_root))
+
+    first = cycles.run_cycle()
+    second = cycles.run_cycle()
+
+    # Um do expurgo, já `deleted`, e um pendente, sem linha: nenhuma volta os repete.
+    assert first["purge_files_not_removed"] == 2
+    assert second["purge_files_not_removed"] == 0
 
 
 # --- Objetos ausentes do storage (1.7, 3.8) ---------------------------------------------------
@@ -391,6 +492,60 @@ def test_disco_com_eio_nao_trava_a_manutencao_e_o_cursor_anda(
     )
 
 
+def storage_keys(factory: sessionmaker[Session]) -> list[str]:
+    with factory() as session:
+        return list(
+            session.execute(
+                select(stored_object.c.storage_key).order_by(stored_object.c.id)
+            ).scalars()
+        )
+
+
+def test_lote_so_com_ilegiveis_alerta_com_errno_e_chave(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ready_upload(factory, storage, create_user(factory, "conta"), b"abc")
+    [key] = storage_keys(factory)
+    mark_mounted(storage)
+    cycles = Maintenance(factory, EioStorage(storage.root), local_runner(work_root))
+
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+        counts = cycles.run_cycle()
+
+    assert (counts["objects_missing_absent"], counts["objects_missing_unreadable"]) == (0, 1)
+    assert alert_fields(caplog, "objects_unreadable") == [
+        {
+            "alert": "objects_unreadable",
+            "unreadable": 1,
+            "errnos": {"EIO": 1},
+            "sample": [{"storage_key": key, "errno_name": "EIO"}],
+        }
+    ]
+
+
+def test_disco_inteiro_ilegivel_gera_uma_linha_de_log_com_amostra_limitada(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for number in range(UNREADABLE_LOG_SAMPLE + 1):
+        ready_upload(factory, storage, create_user(factory, f"conta-{number}"), b"abc")
+    mark_mounted(storage)
+    cycles = Maintenance(factory, EioStorage(storage.root), local_runner(work_root))
+
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+        cycles.run_cycle()
+
+    [fields] = alert_fields(caplog, "objects_unreadable")
+    assert fields["unreadable"] == UNREADABLE_LOG_SAMPLE + 1
+    assert fields["errnos"] == {"EIO": UNREADABLE_LOG_SAMPLE + 1}
+    assert len(cast("list[object]", fields["sample"])) == UNREADABLE_LOG_SAMPLE
+
+
 def test_falha_da_varredura_nao_leva_as_outras_etapas(
     factory: sessionmaker[Session],
     storage: FileStorage,
@@ -404,6 +559,8 @@ def test_falha_da_varredura_nao_leva_as_outras_etapas(
         counts = cycles.run_cycle()
 
     assert counts["missing_sweep_failed"] == 1
+    # Sentinela ilegível não é objeto ilegível: `causa-objetos-ilegiveis` não a vê.
+    assert counts["objects_missing_unreadable"] == 0
     assert {"objects_purged", "capacity_pools_corrected", "runs_deleted"} <= counts.keys()
     assert "storage_global_max_bytes" in counts
     assert any(r.exc_info for r in caplog.records)
