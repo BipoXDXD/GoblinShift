@@ -17,10 +17,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 
 FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
-# Sobe só o apt até a base oficial trazer a correção da CVE-2026-109518 (fixa em 3.0.4), que
-# barra a release no Trivy. Nada usa o apt em tempo de execução.
+# Sobe o apt e a zlib até a base oficial trazer as correções da CVE-2026-109518 (apt 3.0.4) e das
+# CVE-2026-76844 e CVE-2026-85091 (zlib1g deb13u1), que barram a release no Trivy.
 RUN apt-get update -qq \
- && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 \
+ && apt-get install -yq --no-install-recommends --only-upgrade apt libapt-pkg7.0 zlib1g \
  && rm -rf /var/lib/apt/lists/*
 # Packaging tools are build-only. Remove their bundled dependency copies from runtime.
 RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
