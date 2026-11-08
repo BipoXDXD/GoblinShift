@@ -303,7 +303,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
       - name: Chromium headless e dependências do sistema
         working-directory: web
-        run: npx playwright install --with-deps --only-shell chromium
+        run: |
+          ../scripts/ci-apt-sem-azure.sh
+          npx playwright install --with-deps --only-shell chromium
       - name: Pilha com o executor-ctl do host sob gVisor
         run: scripts/e2e-gvisor.sh up
       - name: Specs contra a API real (desktop e celular, só Chromium)
