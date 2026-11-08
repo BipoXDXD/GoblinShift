@@ -103,7 +103,8 @@ class Settings(BaseSettings):
     # Runner local, em subprocesso sem sandbox, é de desenvolvimento e testes.
     runner: Literal["local", "executor_ctl"] = "local"
     # Imagem do executor que a aceitação fixa na Run e o worker manda no `start`. API, worker e
-    # manutenção leem a mesma variável, exportada pelo deploy (deploy/release.sh).
+    # manutenção leem a mesma variável, definida pela release do Coolify
+    # (deploy/coolify/release/receiver.py).
     executor_image: str | None = Field(default=None, pattern=EXECUTOR_IMAGE_PATTERN)
     executor_ctl_socket: Path = Path("/run/goblinshift/executor-ctl.sock")
     executor_group_id: int = EXECUTOR_GROUP_ID

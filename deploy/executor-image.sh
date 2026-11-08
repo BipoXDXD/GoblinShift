@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Baixa a imagem do executor da tag implantada, resolve o digest dela e o põe na allowlist do
-# executor-ctl (docs/GoblinShiftPlan.md, 3.6 e 3.8). Chamado pelo release.sh, como o usuário
-# `goblinshift`; imprime a referência `<repo>@sha256:<digest>` no stdout, para o Compose.
+# executor-ctl (docs/GoblinShiftPlan.md, 3.6 e 3.8). Só o deploy/release.sh, morto, o chama: na
+# publicação pelo Coolify, quem grava a allowlist é deploy/coolify/release/receiver.py. Roda como
+# o usuário `goblinshift`; imprime a referência `<repo>@sha256:<digest>` no stdout, para o Compose.
 #
 # A allowlist guarda o digest novo e o anterior, para que tentativas já aceitas com o digest
 # antigo ainda possam terminar; nunca mais que dois. A escrita é atômica (temporário + mv), porque

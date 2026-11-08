@@ -16,6 +16,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.artifacts import create_candidate_object
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.telemetry import UserHasher
@@ -208,6 +209,40 @@ def test_disco_cheio_no_executor_e_limite_de_recurso_deterministico(
     # O executor de teste não gravou telemetry.json: os tempos dele ficam de fora.
     assert "inspect_ms" not in attributes
     assert "collect_ms" not in attributes
+
+
+def test_candidato_preso_no_disco_conta_no_evento_da_tentativa(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    with unit_of_work(factory) as session:
+        candidate = create_candidate_object(
+            session, owner, run_id, claimed.attempt_id, claimed.generation
+        )
+    storage.create_exclusive(candidate.storage_key, [b"x"], 1)
+    delete = storage.delete
+
+    def refuse_candidate(key: str) -> None:
+        if key == candidate.storage_key:
+            raise PermissionError("disco recusou")
+        delete(key)
+
+    monkeypatch.setattr(storage, "delete", refuse_candidate)
+
+    traced_coordinator(factory, storage, local_runner(work_root, "exit", "6"), exporter).run(
+        claimed
+    )
+
+    assert run_row(factory, run_id)["status"] == "failed"
+    attributes = only_attempt_span(exporter).attributes
+    assert attributes is not None
+    assert attributes["attempt.candidates_left_on_disk"] == 1
 
 
 def test_sem_tracer_o_coordenador_funciona_igual(
