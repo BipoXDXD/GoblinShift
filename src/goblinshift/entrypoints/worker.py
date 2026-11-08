@@ -47,6 +47,7 @@ def main() -> int:
     try:
         runner = build_runner(settings)
         settings.user_hash_key()
+        settings.database_password()
     except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("worker não sobe: %s", error)
         return EXIT_CONFIGURATION
