@@ -5,6 +5,7 @@ geradas com o FFmpeg (test_recipe.py) provam que o JSON de verdade tem esta form
 """
 
 import json
+from fractions import Fraction
 from typing import Any
 
 import pytest
@@ -315,6 +316,12 @@ def test_audio_sem_taxa_ou_canais_e_formato_nao_suportado(overrides: dict[str, A
             b'{"streams": [{"codec_type": "video", "width": "x"}], "format": {}}',
             id="largura-texto",
         ),
+        pytest.param(probe_json([video(width="1920")]), id="largura-texto-em-faixa-completa"),
+        pytest.param(probe_json([video(width=True)]), id="largura-booleana"),
+        pytest.param(probe_json([video(side_data_list={})]), id="side-data-nao-lista"),
+        pytest.param(probe_json([video()], duration="inf"), id="duracao-infinita"),
+        pytest.param(probe_json([video()], duration="nan"), id="duracao-nan"),
+        pytest.param(probe_json([video(avg_frame_rate="x/1")]), id="taxa-nao-numerica"),
     ],
 )
 def test_saida_do_ffprobe_fora_do_esperado_e_formato_nao_suportado(data: bytes) -> None:
@@ -322,3 +329,21 @@ def test_saida_do_ffprobe_fora_do_esperado_e_formato_nao_suportado(data: bytes) 
         parse_probe(data)
 
     assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+def test_sem_media_declarada_a_taxa_vem_de_r_frame_rate() -> None:
+    stream = video(r_frame_rate="30/1")
+    del stream["avg_frame_rate"]
+
+    [parsed] = parse_probe(probe_json([stream])).videos
+
+    assert parsed.frame_rate == Fraction(30, 1)
+
+
+def test_sem_nenhuma_taxa_declarada_a_faixa_fica_sem_taxa() -> None:
+    stream = video()
+    del stream["avg_frame_rate"], stream["r_frame_rate"]
+
+    [parsed] = parse_probe(probe_json([stream])).videos
+
+    assert parsed.frame_rate is None
