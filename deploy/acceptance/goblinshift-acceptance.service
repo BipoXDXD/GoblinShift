@@ -19,6 +19,9 @@ ExecStart=/usr/local/lib/goblinshift/acceptance/scheduled.sh
 Environment=DOCKER_CONFIG=/usr/local/lib/goblinshift/docker-config
 # As sondas somam até ~27 min no pior caso (disco 15 min, as outras 12 min) mais o pull da imagem.
 TimeoutStartSec=1h
+# Depois do SIGTERM o teste ainda para a sonda, religa a manutenção (a parada dela leva até 60 s) e
+# religa o worker.
+TimeoutStopSec=3min
 Nice=10
 UMask=0077
 

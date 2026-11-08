@@ -993,7 +993,7 @@ Pillow é conferido por dimensões, orientação e transparência; CSV por valor
 
 **Alertas.** Só o que é acionável, importante e urgente ([B29](GoblinShiftReferencias.md#l-9), cap. 10). Há dois tipos:
 - *Queima de orçamento* (sintoma): alerta relativo sobre janelas de 15 minutos e de 1 hora. Queima de 2× o ritmo permitido, sustentada, gera aviso; 4× ou mais gera alerta urgente. Uma janela só dispara com um mínimo de eventos elegíveis, porque, com pouco tráfego, uma falha em vinte requisições não pode acordar ninguém.
-- *Causas conhecidas com ação clara*: filesystem de storage, do PostgreSQL ou da telemetria acima de 85%; backup diário que falhou; teste de aceitação do ambiente falhando; fila global cheia por mais de 15 minutos; execução presa em `stopping` por mais de 10 minutos; certificado TLS a menos de 14 dias de vencer; limitador de exclusões da manutenção acionado.
+- *Causas conhecidas com ação clara*: filesystem de storage, do PostgreSQL ou da telemetria acima de 85%; backup diário que falhou; teste de aceitação do ambiente falhando; fila global cheia por mais de 15 minutos; execução presa em `stopping` por mais de 10 minutos; certificado TLS a menos de 14 dias de vencer; limitador de exclusões da manutenção acionado; manutenção com ciclos falhando ou sem concluir voltas; stream de traces sem eventos.
 
 Consumo de conta perto da cota não é alerta, é informação no painel.
 
@@ -1195,6 +1195,7 @@ Cada linha vira um ADR curto no repositório (`docs/adr/`), com contexto, altern
 | 041 | IP do cliente resolvido por site no gateway, em `goblinshift.dev` e `stillon.tech`: `CF-Connecting-IP` só de conexões das faixas oficiais da Cloudflare, lista versionada e valor com um único IPv4 ou IPv6; fora disso, o IP da conexão | `trusted_proxies` global; resolver no Nginx; módulo `caddy-cloudflare-ip` | Só o gateway vê a conexão de origem, e `trusted_proxies` vale por servidor: no site, `limit_req`, auditoria e antiabuso contam por cliente, e cada site adota a regra por conta própria |
 | 042 | *Em revisão.* `pip-audit` contra o `uv.lock` e CodeQL em workflows próprios, em PR e toda semana, sem lista de CVEs ignoradas | Jobs no `ci.yml` exigidos pelo gate; CodeQL em default setup | Uma CVE nova, sem mudança no repositório, não trava a publicação da correção; o gate e o orçamento do commit stage não mudam |
 | 043 | Certificado de origem da Cloudflare no domínio e no `www` de cada site do gateway, com a chave só no volume de dados, e a confiança de cada trecho (Cloudflare, Traefik, cliente, projetos) descrita num lugar só | Certificado público por validação de DNS; encerrar o TLS no Traefik | Feito para o trecho entre a Cloudflare e o gateway, sem imagem própria do Caddy nem token de DNS no servidor, e sem refazer o passthrough de que depende o IP do cliente ([ADR 041](adr/041-ip-do-cliente-atras-da-cloudflare.md)) |
+| 044 | `pip-audit` e CodeQL obrigatórios no merge pelo ruleset da `main`, seguindo fora do gate da release | Manter fora do ruleset; só o `pip-audit` | Nenhum PR entra com CVE conhecida, e alerta novo do CodeQL reprova o PR; uma CVE nova espera o PR de correção entrar primeiro |
 
 [↑ Sumário](#sumario)
 
