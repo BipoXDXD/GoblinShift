@@ -1,19 +1,28 @@
-"""Peças puras da telemetria (docs/GoblinShiftPlan.md, 3.7): hash, IP truncado e erro do banco."""
+"""Telemetria (docs/GoblinShiftPlan.md, 3.7): hash, IP truncado, erro do banco e spans de banco."""
 
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 import yaml
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import Status, StatusCode
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from pydantic import SecretStr, ValidationError
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.exc import OperationalError
 
+from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import (
     UserHasher,
+    configure_tracing,
     make_span_processor,
     truncate_client_address,
 )
@@ -153,3 +162,120 @@ def test_sem_exportador_nem_endpoint_nao_ha_processador(monkeypatch: pytest.Monk
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
 
     assert make_span_processor(None) is None
+
+
+# Spans de banco com a instrumentação real da API, sobre SQLite para não depender de Docker
+
+
+CANARY = f"CANARY-{UUID(int=11)}"
+REVISION = "rev-teste"
+QUERY_ROUTE = "/consulta"
+
+
+@dataclass(frozen=True)
+class TracedApp:
+    app: FastAPI
+    engine: Engine
+    exporter: InMemorySpanExporter
+
+    def database_spans(self) -> list[ReadableSpan]:
+        return [
+            span
+            for span in self.exporter.get_finished_spans()
+            if span.instrumentation_scope is not None
+            and span.instrumentation_scope.name == SQLALCHEMY_SCOPE
+        ]
+
+    def statements(self) -> list[str]:
+        return [
+            str(span.attributes["db.statement"])
+            for span in self.database_spans()
+            if span.attributes is not None and "db.statement" in span.attributes
+        ]
+
+
+@pytest.fixture
+def traced_app(tmp_path: Path) -> Iterator[TracedApp]:
+    # Arquivo, não `sqlite://`: as rotas síncronas rodam em outra thread e o banco em memória é
+    # por conexão.
+    engine = create_engine(f"sqlite:///{tmp_path / 'telemetria.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        conn.execute(text("INSERT INTO alembic_version VALUES (:r)"), {"r": REVISION})
+        conn.execute(text("CREATE TABLE t (k VARCHAR(80) PRIMARY KEY)"))
+    app = FastAPI()
+    app.include_router(health.router)
+    app.state.engine = engine
+    app.state.code_heads = frozenset({REVISION})
+    app.state.known_revisions = frozenset({REVISION})
+
+    @app.get(QUERY_ROUTE)
+    def query(request: Request) -> dict[str, int]:
+        with request.app.state.engine.connect() as conn:
+            return {"valor": conn.execute(text("SELECT 1")).scalar_one()}
+
+    exporter = InMemorySpanExporter()
+    configure_tracing(app, engine, Settings.model_validate({"environment": "test"}), exporter)
+    try:
+        yield TracedApp(app, engine, exporter)
+    finally:
+        # O instrumentor é global: sem isso, os próximos testes continuariam exportando aqui.
+        SQLAlchemyInstrumentor().uninstrument()
+        engine.dispose()
+
+
+def test_consulta_gera_span_de_banco_no_sqlalchemy_em_uso(traced_app: TracedApp) -> None:
+    with traced_app.engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+
+    spans = [s for s in traced_app.database_spans() if s.name.startswith("SELECT")]
+    assert [s.kind for s in spans] == [SpanKind.CLIENT]
+    assert traced_app.statements() == ["SELECT 1"]
+    assert spans[0].attributes is not None
+    assert spans[0].attributes["db.system"] == "sqlite"
+
+
+def test_parametros_da_consulta_nao_vao_ao_span(traced_app: TracedApp) -> None:
+    with traced_app.engine.begin() as conn:
+        conn.execute(text("INSERT INTO t (k) VALUES (:k)"), {"k": CANARY})
+        conn.execute(text("SELECT k FROM t WHERE k = :k"), {"k": CANARY})
+
+    assert traced_app.statements() == [
+        "INSERT INTO t (k) VALUES (?)",
+        "SELECT k FROM t WHERE k = ?",
+    ]
+    for span in traced_app.database_spans():
+        assert CANARY not in span.to_json()
+
+
+def test_erro_real_do_banco_sai_com_a_descricao_redigida(traced_app: TracedApp) -> None:
+    with pytest.raises(OperationalError), traced_app.engine.connect() as conn:
+        conn.execute(text("SELECT k FROM tabela_que_nao_existe WHERE k = :k"), {"k": CANARY})
+
+    failed = [s for s in traced_app.database_spans() if s.status.status_code is StatusCode.ERROR]
+    assert [s.status.description for s in failed] == [REDACTED_DB_ERROR]
+    assert CANARY not in failed[0].to_json()
+
+
+def test_span_de_banco_e_filho_da_requisicao_e_nao_conta_como_evento(
+    traced_app: TracedApp,
+) -> None:
+    with TestClient(traced_app.app) as client:
+        assert client.get(QUERY_ROUTE).status_code == 200
+
+    spans = traced_app.exporter.get_finished_spans()
+    (main,) = [s for s in spans if (s.attributes or {}).get("main") is True]
+    database_spans = traced_app.database_spans()
+    assert traced_app.statements() == ["SELECT 1"]
+    for span in database_spans:
+        assert span.parent is not None
+        assert span.parent.span_id == main.context.span_id
+        assert "main" not in (span.attributes or {})
+
+
+def test_sonda_readyz_nao_gera_span_de_banco(traced_app: TracedApp) -> None:
+    with TestClient(traced_app.app) as client:
+        response = client.get("/readyz")
+
+    assert response.status_code == 200
+    assert traced_app.exporter.get_finished_spans() == ()

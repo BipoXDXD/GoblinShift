@@ -268,6 +268,23 @@ def test_o_que_cala_os_outros_alertas_vai_ao_destino_urgente(name: str) -> None:
     assert by_name[name].destination is DestinationKey.URGENT
 
 
+@pytest.mark.parametrize("slo", SLOS, ids=lambda slo: slo.name)
+def test_sli_e_queima_so_contam_o_evento_amplo(slo: Slo) -> None:
+    # A API também exporta um span por consulta ao banco, no mesmo stream.
+    assert "main = 'true'" in slo.sli_sql("s")
+    assert "main = 'true'" in slo.burn_sql("s", 14)
+
+
+def test_todo_alerta_sobre_traces_so_conta_o_evento_amplo() -> None:
+    trace_alerts = [
+        alert for alert in alerts(stream="s", prefix=PREFIX) if alert.stream_type == "traces"
+    ]
+
+    assert trace_alerts
+    for alert in trace_alerts:
+        assert "main = 'true'" in alert.sql, alert.name
+
+
 @pytest.mark.parametrize("name", ABSENCE_ALERTS)
 def test_ausencia_le_o_stream_de_traces_e_dispara_sem_nenhuma_linha(name: str) -> None:
     by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}

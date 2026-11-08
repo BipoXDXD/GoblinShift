@@ -243,9 +243,12 @@ def configure_tracing(
         # tempos do envio já estão no evento amplo.
         exclude_spans=["receive", "send"],
     )
-    # Hoje não instrumenta nada: a instrumentação declara suporte só até o SQLAlchemy 2.0 e, no
-    # 2.1, desiste com um aviso no log. O processador acima já protege o dia em que ligar.
-    SQLAlchemyInstrumentor().instrument(engine=engine, tracer_provider=provider)
+    # `skip_dep_check`: a 0.66b2, última publicada, ainda recusa o SQLAlchemy 2.1, embora o código
+    # dela funcione nele (tests/test_telemetry.py). O suporte oficial já está no main do projeto
+    # (open-telemetry/opentelemetry-python-contrib#5120); saiu a versão, sai este parâmetro.
+    SQLAlchemyInstrumentor().instrument(
+        engine=engine, tracer_provider=provider, skip_dep_check=True
+    )
 
 
 def make_tracer_provider(
