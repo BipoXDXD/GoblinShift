@@ -64,6 +64,8 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-storage-sem-sentinela",
         "gs-causa-limitador-de-ausentes",
         "gs-causa-objetos-ausentes",
+        "gs-causa-objetos-ilegiveis",
+        "gs-causa-arquivos-nao-removidos",
         "gs-heartbeat",
     }
 
@@ -142,6 +144,8 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
         "gs-causa-storage-sem-sentinela",
         "gs-causa-limitador-de-ausentes",
         "gs-causa-objetos-ausentes",
+        "gs-causa-objetos-ilegiveis",
+        "gs-causa-arquivos-nao-removidos",
     }
     chosen = [a for a in alerts(stream="s", prefix=PREFIX) if a.name in names]
 
@@ -164,5 +168,14 @@ def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
         "gs-causa-storage-sem-sentinela",
         "gs-causa-limitador-de-ausentes",
         "gs-causa-objetos-ausentes",
+        "gs-causa-objetos-ilegiveis",
+        "gs-causa-arquivos-nao-removidos",
     ):
         assert by_name[name].destination is DestinationKey.WARNING, name
+
+
+def test_contadores_lidos_pelas_causas_da_manutencao_sao_declarados() -> None:
+    # Coluna fora de CAUSE_COLUMNS não existe no stream quando o provisionamento valida a consulta.
+    for alert in alerts(stream="s", prefix=PREFIX):
+        for column in re.findall(r"\bmaintenance_\w+", alert.sql):
+            assert column in CAUSE_COLUMNS, f"{alert.name}: {column}"
