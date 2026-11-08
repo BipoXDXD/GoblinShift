@@ -261,6 +261,22 @@ def test_producao_nao_aceita_a_senha_em_variavel_no_lugar_do_arquivo(tmp_path: P
     assert PASSWORD_CANARY not in str(caught.value)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lê qualquer arquivo")
+def test_arquivo_de_senha_ilegivel_nao_sobe_e_nao_culpa_a_api(tmp_path: Path) -> None:
+    """A API, o worker e a migração leem o mesmo arquivo: a mensagem não cita um processo só."""
+    unreadable = _secret_file(tmp_path, "ilegivel", PASSWORD_IN_FILE)
+    unreadable.chmod(0)
+    settings = _production(tmp_path, db_password_file=unreadable)
+
+    with pytest.raises(MissingSecretError) as caught:
+        _ = settings.database_url
+
+    assert str(caught.value) == (
+        "GS_DB_PASSWORD_FILE aponta para um arquivo que o processo não pode ler "
+        "(no host, use modo 644)"
+    )
+
+
 @pytest.mark.parametrize("environment", ["development", "test", "production"])
 def test_arquivo_de_senha_inexistente_nao_sobe(tmp_path: Path, environment: str) -> None:
     settings = Settings.model_validate(
