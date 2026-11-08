@@ -166,14 +166,6 @@ def test_validade_em_ponto_flutuante_no_payload_assinado_e_recusada() -> None:
         decode_cursor(signed_payload(x=1791979200.0), SCOPE, secret=SECRET, now=NOW)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason=(
-        "bug: _parse_payload compara a versão com `!=`; true e 1.0 são iguais a 1 em Python e "
-        "passam como versão 1, ao contrário de _is_int e _integer nos outros parsers"
-    ),
-)
 @pytest.mark.parametrize(
     "version",
     [pytest.param(True, id="booleano"), pytest.param(1.0, id="ponto-flutuante")],
@@ -183,14 +175,6 @@ def test_versao_igual_a_1_so_por_coercao_e_recusada(version: object) -> None:
         decode_cursor(signed_payload(v=version), SCOPE, secret=SECRET, now=NOW)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason=(
-        "bug: _parse_payload aceita `t` sem fuso; encode_cursor só emite timestamptz com fuso, e "
-        "no keyset o instante ingênuo seria interpretado no fuso da sessão do PostgreSQL"
-    ),
-)
 def test_data_sem_fuso_no_payload_assinado_e_recusada() -> None:
     with pytest.raises(InvalidCursorError):
         decode_cursor(signed_payload(t="2026-10-13T11:59:30.123456"), SCOPE, secret=SECRET, now=NOW)
