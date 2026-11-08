@@ -1,0 +1,34 @@
+name: Jornadas na VPS depois da release
+
+# Roda a borda da SPA e as jornadas de leitura (e2e-vps.yml) contra o site no ar depois de cada
+# release do Coolify. O job vps-smoke do ci.yml as chama só depois do deploy legado, pulado de
+# propósito: sem este gatilho, elas não rodariam em release nenhuma e a CI seguiria verde.
+#
+# Falha aparece como execução reprovada do workflow; a jornada com escrita (e2e-producao.yml) é a
+# que avisa pelo healthchecks.io.
+on:
+  # Fronteira revisada, como a da jornada com escrita: o checkout é o padrão, sempre a main, e nada
+  # do evento escolhe o código. O job só confere a conclusão da release.
+  workflow_run: # zizmor: ignore[dangerous-triggers] sem checkout nem artefato do evento; ver acima
+    workflows: [Coolify release]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  vps:
+    name: Jornadas na VPS (pós-release)
+    # O `pull_request` do coolify.yml passaria pelo filtro `branches` num fork com branch `main`.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    # `./`, como no vps-smoke do ci.yml: resolve para o mesmo commit deste workflow.
+    uses: ./.github/workflows/e2e-vps.yml # zizmor: ignore[self-repository]
+    # Nada de `secrets: inherit`: dentro dele, o job no environment production lê o secret do
+    # environment, que vence este.
+    secrets:
+      E2E_VPS_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
