@@ -791,6 +791,22 @@ def test_segunda_entrada_apontada_para_o_fim_do_arquivo_e_recusada(
         collect(out)
 
 
+_LOCAL_NAME_LENGTH, _LOCAL_EXTRA_LENGTH = 26, 28
+
+
+def test_campo_extra_so_no_cabecalho_local_com_o_central_limpo_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    centrals = _central_positions(data)
+    name_length = _read(_U16, data, _LOCAL_NAME_LENGTH)
+    _insert_keeping_offsets_coherent(data, _LOCAL_FIXED_BYTES + name_length, centrals[1:])
+    struct.pack_into(_U16, data, _LOCAL_EXTRA_LENGTH, len(_HIDDEN))
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="cabeçalho local diferente"):
+        collect(out)
+
+
 # --- Heartbeat: um por bloco lido, em cada leitura longa ------------------------------------------
 
 CHUNK = 2

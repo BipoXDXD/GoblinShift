@@ -118,3 +118,51 @@ def test_github_corpo_acima_do_teto_e_recusado_sem_ler_o_json() -> None:
 
     with pytest.raises(InvalidProviderIdentityError, match="grande"):
         github_identity(body)
+
+
+def _github_body_of_size(size: int) -> bytes:
+    padding = "x" * (size - len(github_body(bio="")))
+    return github_body(bio=padding)
+
+
+def test_github_corpo_com_exatamente_o_teto_e_aceito() -> None:
+    body = _github_body_of_size(65_536)
+
+    assert len(body) == 65_536
+    assert github_identity(body).subject == "583231"
+
+
+def test_github_corpo_um_byte_acima_do_teto_e_recusado() -> None:
+    body = _github_body_of_size(65_537)
+
+    assert len(body) == 65_537
+    with pytest.raises(InvalidProviderIdentityError, match="grande"):
+        github_identity(body)
+
+
+@pytest.mark.parametrize(
+    ("user_id", "subject"),
+    [
+        pytest.param(1, "1", id="menor-id"),
+        pytest.param(9223372036854775807, "9223372036854775807", id="maior-bigint"),
+    ],
+)
+def test_github_id_nas_fronteiras_do_bigint_positivo_e_aceito(user_id: int, subject: str) -> None:
+    assert github_identity(github_body(id=user_id)).subject == subject
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        pytest.param("1" * 255, id="255-caracteres"),
+        pytest.param("!", id="primeiro-ascii-visivel"),
+        pytest.param("~", id="ultimo-ascii-visivel"),
+    ],
+)
+def test_google_sub_na_fronteira_do_oidc_e_aceito(subject: str) -> None:
+    assert google_identity({"iss": GOOGLE_ISSUER, "sub": subject}).subject == subject
+
+
+def test_google_sub_com_del_e_recusado() -> None:
+    with pytest.raises(InvalidProviderIdentityError):
+        google_identity({"iss": GOOGLE_ISSUER, "sub": "a\x7fb"})
