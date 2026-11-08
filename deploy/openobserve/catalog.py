@@ -122,8 +122,8 @@ class Alert:
 
 DISK_STREAM = "system_filesystem_utilization"
 
-# Atributos do span `maintenance.cycle` que as causas abaixo leem, com os nomes do OpenObserve
-# ("." vira "_"); o provisionamento os declara no stream junto com os dos SLOs.
+# Atributos dos spans que as causas abaixo leem, com os nomes do OpenObserve ("." vira "_"); o
+# provisionamento os declara no stream junto com os dos SLOs.
 CAUSE_COLUMNS: tuple[str, ...] = (
     "main",
     "maintenance_runs_stuck_stopping",
@@ -137,12 +137,19 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_objects_missing_unreadable",
     "maintenance_purge_files_not_removed",
     "maintenance_candidates_left_on_disk",
+    "maintenance_missing_sweep_failed",
+    "maintenance_failed_cycles",
+    "alert_purge_file_not_removed",
+    "alert_capacity_divergence",
+    "alert_capacity_over_max",
+    "alert_upload_without_reservation",
+    "alert_run_without_reservation",
 )
 
 
 @dataclass(frozen=True)
-class _MaintenanceCause:
-    """Causa lida do span por volta da manutenção: um arquivo SQL e a política de aviso."""
+class _SpanCause:
+    """Causa lida do stream de traces: um arquivo SQL e a política de aviso."""
 
     name: str
     description: str
@@ -152,9 +159,11 @@ class _MaintenanceCause:
 
 
 # Avaliadas a cada 5 min; a manutenção emite um span a cada 30 s.
-_MAINTENANCE_FREQUENCY_MINUTES = 5
-MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
-    _MaintenanceCause(
+_SPAN_CAUSE_FREQUENCY_MINUTES = 5
+# Mais longo que a suspensão da manutenção pelas sondas da aceitação, que é esperada (ADR 017).
+ABSENCE_PERIOD_MINUTES = 30
+SPAN_CAUSES: tuple[_SpanCause, ...] = (
+    _SpanCause(
         "causa-execucao-presa",
         "Execução presa em stopping há mais de 10 min: o executor não confirmou a parada e a "
         "Run segura a vaga da tentativa. Veja o runbook em deploy/openobserve/README.md.",
@@ -162,7 +171,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=60,
         destination=DestinationKey.URGENT,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-limitador-de-exclusoes",
         "Limitador de exclusões da manutenção acionado: havia mais de 500 objetos ou 2 GiB a "
         "remover numa volta. Confira se a exclusão em massa é legítima; veja o runbook.",
@@ -170,7 +179,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-exclusao-de-conta-atrasada",
         "Exclusão de conta pedida há 20 h ou mais e ainda não concluída; o prazo do DELETE /me é "
         "24 h. Veja o runbook em deploy/openobserve/README.md.",
@@ -178,7 +187,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=60,
         destination=DestinationKey.URGENT,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-capacidade-global",
         "Armazenamento reservado no ambiente acima de 85% do teto global nos últimos 15 min. "
         "Veja o runbook em deploy/openobserve/README.md.",
@@ -186,7 +195,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=240,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-storage-sem-sentinela",
         "Varredura de objetos ausentes suspensa: falta a sentinela de montagem na raiz do "
         "storage, quase sempre o filesystem desmontado. Veja o runbook.",
@@ -194,7 +203,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-limitador-de-ausentes",
         "Limitador da varredura de objetos ausentes acionado: arquivos demais sumidos num lote e "
         "nada marcado. Storage errado ou backup antigo restaurado; veja o runbook.",
@@ -202,7 +211,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-objetos-ausentes",
         "Objetos marcados missing: o arquivo sumiu do storage montado. Esperado depois de "
         "restaurar o banco de um backup; fora disso, investigue. Veja o runbook.",
@@ -210,7 +219,7 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-objetos-ilegiveis",
         "Varredura de objetos ausentes com objetos ilegíveis: o disco devolveu erro que não é "
         "ausência (EIO, permissão). O log da manutenção traz errno e chaves; veja o runbook.",
@@ -218,19 +227,67 @@ MAINTENANCE_CAUSES: tuple[_MaintenanceCause, ...] = (
         silence_minutes=180,
         destination=DestinationKey.WARNING,
     ),
-    _MaintenanceCause(
+    _SpanCause(
         "causa-arquivos-nao-removidos",
         "Arquivo ficou no disco depois de a exclusão ser confirmada no banco, e nada repete a "
-        "remoção. O log da manutenção traz a chave; veja o runbook.",
+        "remoção. O log do processo traz a chave; veja o runbook.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-varredura-falhou",
+        "Varredura de objetos ausentes falhando em três voltas ou mais nos últimos 10 min. O "
+        "traceback está no log da manutenção; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-ciclos-falhando",
+        "Ciclo da manutenção falhando em três voltas ou mais nos últimos 10 min. O log da "
+        "manutenção traz o ciclo e o traceback; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-capacidade-divergente",
+        "Livro-razão de capacidade divergente dos pools ou acima do teto. A reconciliação corrige "
+        "o pool, mas a origem precisa ser achada; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-sem-reserva",
+        "Upload ou publicação sem reserva de capacidade: a operação seguiu e a reconciliação adota "
+        "o objeto, mas isso só cabe a registros antigos. Veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-manutencao-sem-ciclo",
+        "Nenhuma volta da manutenção concluída em 30 min: processo parado ou travado. Veja o "
+        "runbook em deploy/openobserve/README.md.",
+        period_minutes=ABSENCE_PERIOD_MINUTES,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-sem-traces",
+        "Nenhum evento chegou ao stream de traces em 30 min: confira a exportação da aplicação e "
+        "o Collector. Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=ABSENCE_PERIOD_MINUTES,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
     ),
 )
 
 
 def alerts(stream: str, prefix: str) -> list[Alert]:
-    """Todos os alertas: queima por SLO e nível, causas conhecidas e o heartbeat."""
+    """Todos os alertas: queima por SLO e nível, causas, ausência de telemetria e o heartbeat."""
     return [
         *(
             _burn_alert(slo, level, rate, stream, prefix)
@@ -265,7 +322,7 @@ def alerts(stream: str, prefix: str) -> list[Alert]:
             silence_minutes=240,
             destination=DestinationKey.URGENT,
         ),
-        *(_maintenance_alert(cause, stream, prefix) for cause in MAINTENANCE_CAUSES),
+        *(_span_alert(cause, stream, prefix) for cause in SPAN_CAUSES),
         Alert(
             name=f"{prefix}heartbeat",
             description="Heartbeat dos alertas: pinga o healthchecks.io a cada hora.",
@@ -280,7 +337,7 @@ def alerts(stream: str, prefix: str) -> list[Alert]:
     ]
 
 
-def _maintenance_alert(cause: _MaintenanceCause, stream: str, prefix: str) -> Alert:
+def _span_alert(cause: _SpanCause, stream: str, prefix: str) -> Alert:
     return Alert(
         name=f"{prefix}{cause.name}",
         description=cause.description,
@@ -288,7 +345,7 @@ def _maintenance_alert(cause: _MaintenanceCause, stream: str, prefix: str) -> Al
         stream_name=stream,
         sql=_render(f"{cause.name}.sql", stream=stream),
         period_minutes=cause.period_minutes,
-        frequency_minutes=_MAINTENANCE_FREQUENCY_MINUTES,
+        frequency_minutes=_SPAN_CAUSE_FREQUENCY_MINUTES,
         silence_minutes=cause.silence_minutes,
         destination=cause.destination,
     )
