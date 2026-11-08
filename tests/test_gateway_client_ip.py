@@ -148,6 +148,7 @@ class Gateway:
         lines = ["GET / HTTP/1.1", f"Host: {host}", "Connection: close", *headers, "", ""]
         # O certificado vem da CA descartável do container de teste, só em 127.0.0.1.
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
         with socket.create_connection(("127.0.0.1", self.port), SOCKET_TIMEOUT_SECONDS) as raw:
@@ -354,6 +355,7 @@ def _served_certificate(port: int, host: str) -> bytes:
     """Certificado que o gateway entrega no handshake com este SNI, em DER."""
     # Certificado autoassinado do teste: quem confere é a comparação com o arquivo.
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     with socket.create_connection(("127.0.0.1", port), SOCKET_TIMEOUT_SECONDS) as raw:
