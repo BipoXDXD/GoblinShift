@@ -18,8 +18,9 @@ recusa iniciar com a área suja, então a área de uma tentativa encerrada não 
 import logging
 import time
 import uuid
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
 
@@ -87,6 +88,9 @@ from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 50
+# Quantos objetos ilegíveis vão nomeados no log do lote: com o disco inteiro devolvendo erro, a
+# contagem por errno diz o resto sem uma linha por objeto a cada ciclo.
+UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
 
@@ -143,7 +147,7 @@ class Maintenance:
             "queue_expired": self.expire_queue(),
             "deadlines": self.apply_deadlines(),
             "holds_released": self.release_orphan_holds(),
-            "candidates_discarded": self.discard_stale_candidates(),
+            **self.discard_stale_candidates(),
             "work_areas_removed": self.sweep_work_areas(),
             **self.apply_retention(),
             **self.mark_missing_objects(),
@@ -279,7 +283,7 @@ class Maintenance:
             )
         return len(terminal)
 
-    def discard_stale_candidates(self) -> int:
+    def discard_stale_candidates(self) -> dict[str, int]:
         """Candidatos de tentativas encerradas que não viraram artefato (gerações vencidas)."""
         with self._factory() as session, session.begin():
             loose = attempts_with_loose_candidates(session, self._config.batch_size)
@@ -300,7 +304,7 @@ class Maintenance:
                 if not remove_file_after_commit(self._storage, key):
                     self._candidates_left_on_disk += 1
             discarded += 1
-        return discarded
+        return {"candidates_discarded": discarded}
 
     # Áreas de trabalho ------------------------------------------------------------------
 
@@ -336,10 +340,9 @@ class Maintenance:
     # Retenção --------------------------------------------------------------------------
 
     def apply_retention(self) -> dict[str, int]:
+        incomplete = expire_incomplete_uploads(self._new_session(), self._storage)
         counts = {
-            "incomplete_uploads_expired": expire_incomplete_uploads(
-                self._new_session(), self._storage
-            ),
+            "incomplete_uploads_expired": incomplete.uploads,
             "unused_uploads_expired": expire_unused_uploads(self._new_session()),
             "artifacts_expired": expire_artifacts(self._new_session()),
         }
@@ -357,6 +360,8 @@ class Maintenance:
             )
         counts["objects_purged"] = report.objects
         counts["bytes_purged"] = report.bytes
+        # Com o banco já confirmado, nada repete a remoção: o alerta de causa lê isto (3.7).
+        counts["purge_files_not_removed"] = len(incomplete.failed_keys) + len(report.failed_keys)
         # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
         reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)
         counts["capacity_pools_corrected"] = reconciled.pools_corrected
@@ -391,6 +396,12 @@ class Maintenance:
         return {**_sweep_counts(sweep), "missing_sweep_failed": 0}
 
     def _report_sweep(self, sweep: MissingSweep) -> None:
+        if sweep.unreadable:
+            # Nada é marcado por erro de disco: o errno e a chave só ficam aqui.
+            logger.warning(
+                "objetos ilegíveis no storage",
+                extra={"fields": _unreadable_fields(sweep)},
+            )
         if sweep.storage_unreachable:
             # Sem a sentinela de montagem: filesystem do storage desmontado ou trocado.
             logger.warning(
@@ -536,6 +547,16 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _unreadable_fields(sweep: MissingSweep) -> dict[str, object]:
+    """Campos do alerta do lote: uma linha só, com a amostra limitada e a contagem por errno."""
+    return {
+        "alert": "objects_unreadable",
+        "unreadable": sweep.unreadable,
+        "errnos": dict(Counter(found.errno_name for found in sweep.unreadable_objects)),
+        "sample": [asdict(found) for found in sweep.unreadable_objects[:UNREADABLE_LOG_SAMPLE]],
+    }
 
 
 def _sweep_counts(sweep: MissingSweep) -> dict[str, int]:

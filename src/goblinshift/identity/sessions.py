@@ -15,9 +15,11 @@ import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import Row, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from goblinshift.identity.csrf import issue_csrf_token
@@ -37,6 +39,17 @@ _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}")
 _TOKEN_LENGTH = 43
 # A sessão usa as permissões da conta: todos os escopos (1.6).
 _SESSION_SCOPES = frozenset(Scope)
+
+
+class SessionRefusal(StrEnum):
+    """Por que um cookie não autenticou: só para a telemetria, o cliente recebe o mesmo 401."""
+
+    MALFORMED = "malformed"
+    UNKNOWN = "unknown"
+    REVOKED = "revoked"
+    IDLE_EXPIRED = "idle_expired"
+    ABSOLUTE_EXPIRED = "absolute_expired"
+    ACCOUNT_UNAVAILABLE = "account_unavailable"
 
 
 @dataclass(frozen=True)
@@ -90,12 +103,18 @@ def start_session(
 
 
 def authenticate_session(session: Session, token: str, now: datetime) -> Principal | None:
-    """Principal com todos os escopos, ou None para token desconhecido, vencido ou revogado.
+    """Principal com todos os escopos, ou None para token desconhecido, vencido ou revogado."""
+    resolved = resolve_session(session, token, now)
+    return resolved if isinstance(resolved, Principal) else None
+
+
+def resolve_session(session: Session, token: str, now: datetime) -> Principal | SessionRefusal:
+    """Como `authenticate_session`, mas diz por que recusou, para quem registra o motivo.
 
     Registrar o uso faz parte de autenticar: é o que estende a inatividade.
     """
     if len(token) != _TOKEN_LENGTH or _TOKEN_PATTERN.fullmatch(token) is None:
-        return None
+        return SessionRefusal.MALFORMED
     presented_hash = _hash_token(token)
     row = session.execute(
         select(
@@ -115,16 +134,10 @@ def authenticate_session(session: Session, token: str, now: datetime) -> Princip
     # A busca é pelo hash: quem envia o token não controla os bytes do hash, então o tempo do
     # índice nada revela do segredo. A comparação explícita fecha o contrato de 3.6.
     if row is None or not hmac.compare_digest(row.secret_hash, presented_hash):
-        return None
-    usable = (
-        row.revoked_at is None
-        and now < row.idle_expires_at
-        and now < row.absolute_expires_at
-        and row.status == ACTIVE_STATUS
-        and row.deletion_requested_at is None
-    )
-    if not usable:
-        return None
+        return SessionRefusal.UNKNOWN
+    refusal = _refusal(row, now)
+    if refusal is not None:
+        return refusal
     _record_use(session, row.id, now)
     return Principal(
         owner_id=row.user_id,
@@ -156,6 +169,18 @@ def revoke_all_credentials(session: Session, owner_id: UUID, now: datetime) -> N
         .where(api_key.c.owner_id == owner_id, api_key.c.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+
+
+def _refusal(row: Row[Any, *tuple[Any, ...]], now: datetime) -> SessionRefusal | None:
+    if row.revoked_at is not None:
+        return SessionRefusal.REVOKED
+    if row.status != ACTIVE_STATUS or row.deletion_requested_at is not None:
+        return SessionRefusal.ACCOUNT_UNAVAILABLE
+    if now >= row.absolute_expires_at:
+        return SessionRefusal.ABSOLUTE_EXPIRED
+    if now >= row.idle_expires_at:
+        return SessionRefusal.IDLE_EXPIRED
+    return None
 
 
 def _record_use(session: Session, session_id: UUID, now: datetime) -> None:

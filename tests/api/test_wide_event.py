@@ -4,6 +4,7 @@ Os spans saem para um `InMemorySpanExporter`, o mesmo caminho do exportador OTLP
 """
 
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ import httpx2 as httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx2 import Response
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -24,7 +26,8 @@ from goblinshift.entrypoints.api.cookies import SESSION_COOKIE
 from goblinshift.entrypoints.api.dependencies import current_time
 from goblinshift.entrypoints.api.wide_event import RateLimitClass, rate_limit_class
 from goblinshift.files.storage import FileStorage
-from goblinshift.identity import Scope
+from goblinshift.identity import Scope, revoke_session
+from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from openobserve.catalog import slo_named
@@ -208,6 +211,62 @@ def test_requisicao_sem_credencial_nao_tem_conta_e_traz_o_codigo_de_erro(traced:
     assert event["error.code"] == "AUTHENTICATION_REQUIRED"
     assert "user.hash" not in event
     assert "auth.via" not in event
+
+
+def session_header(token: str) -> dict[str, str]:
+    return {"Cookie": f"{SESSION_COOKIE}={token}"}
+
+
+def problem_without_request_id(response: Response) -> dict[str, object]:
+    body: dict[str, object] = response.json()
+    return {key: value for key, value in body.items() if key != "request_id"}
+
+
+def test_sessao_revogada_registra_o_motivo_so_no_evento_da_requisicao(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    with unit_of_work(traced.factory) as session:
+        revoke_session(session, issued.session_id, datetime.now(UTC))
+    traced.clear()
+
+    with caplog.at_level(logging.DEBUG, logger="goblinshift"):
+        response = traced.client.get("/api/v1/me", headers=session_header(issued.token))
+
+    assert response.status_code == 401
+    event = traced.main_event()
+    assert event["auth.refusal"] == "revoked"
+    assert event["error.code"] == "AUTHENTICATION_REQUIRED"
+    # Sem o token no evento e sem linha de log: um cookie vencido repetido não gera ruído.
+    assert issued.token not in str(event)
+    assert not [r for r in caplog.records if r.name.startswith("goblinshift.identity")]
+
+
+def test_motivo_da_recusa_nao_muda_a_resposta_ao_cliente(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    with unit_of_work(traced.factory) as session:
+        revoke_session(session, issued.session_id, datetime.now(UTC))
+    traced.clear()
+
+    revoked = traced.client.get("/api/v1/me", headers=session_header(issued.token))
+    revoked_reason = traced.main_event()["auth.refusal"]
+    traced.clear()
+    unknown = traced.client.get("/api/v1/me", headers=session_header("A" * 43))
+    unknown_reason = traced.main_event()["auth.refusal"]
+
+    assert (revoked_reason, unknown_reason) == ("revoked", "unknown")
+    assert revoked.status_code == unknown.status_code == 401
+    assert problem_without_request_id(revoked) == problem_without_request_id(unknown)
+
+
+def test_sessao_aceita_nao_traz_motivo_de_recusa(traced: Traced) -> None:
+    issued = open_session(traced.app, new_user(traced.factory))
+    traced.clear()
+
+    response = traced.client.get("/api/v1/me", headers=session_header(issued.token))
+
+    assert response.status_code == 200
+    assert "auth.refusal" not in traced.main_event()
 
 
 def test_escopo_insuficiente_traz_a_conta_e_o_codigo(traced: Traced) -> None:

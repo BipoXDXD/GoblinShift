@@ -28,6 +28,7 @@ from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from goblinshift.entrypoints.api.wide_event import (
     RateLimitClass,
     rate_limit_class,
+    record_auth_refusal,
     record_principal,
     record_rate_limit,
 )
@@ -41,14 +42,15 @@ from goblinshift.identity import (
     RequestClass,
     RequestLimitExceededError,
     Scope,
+    SessionRefusal,
     authenticate_api_key,
-    authenticate_session,
     count_request,
     cross_site_request,
     csrf_pair_matches,
     csrf_token_matches,
     find_account,
     record_audit_event,
+    resolve_session,
 )
 from goblinshift.platform.settings import WebIdentityConfig
 
@@ -126,7 +128,10 @@ def authenticate(request: Request, session: DbSession, now: Now) -> Principal:
     Os dois juntos são ambíguos → 400. Mutação por cookie passa pelo CSRF (403 `CSRF_FAILED`);
     a chave não usa cookie e dispensa o CSRF. Mesma resposta para credencial malformada,
     desconhecida, expirada, revogada ou de conta bloqueada: o cliente não aprende qual foi o
-    caso, o log do servidor registra.
+    caso. No servidor, o motivo da recusa da sessão vai no evento amplo da requisição
+    (`auth.refusal`), sem linha de log, porque um cookie vencido se repete a cada requisição; a
+    chave conhecida recusada vai ao log pelo identificador público, e a malformada ou desconhecida
+    fica só como o 401 do evento.
 
     Toda requisição autenticada conta no limite por conta e classe de rota (1.7); acima dele,
     429 `RATE_LIMITED` com `Retry-After`. Depois, conta do login sem o aceite dos termos vigentes
@@ -291,15 +296,16 @@ def _session_from_cookie(request: Request, session: Session, now: datetime) -> P
     if token is None:
         return None
     with session.begin():
-        principal = authenticate_session(session, token, now)
-    if principal is None:
+        resolved = resolve_session(session, token, now)
+    if isinstance(resolved, SessionRefusal):
+        record_auth_refusal(resolved.value)
         return None
     if request.method not in SAFE_METHODS:
-        _verify_csrf(request, session, principal, now)
+        _verify_csrf(request, session, resolved, now)
     # Depois do CSRF: o cookie vai junto no pedido forjado por outro site, e a recusa não é da
     # conta. Ela fica na auditoria.
-    record_principal(principal.owner_id, principal.via)
-    return principal
+    record_principal(resolved.owner_id, resolved.via)
+    return resolved
 
 
 def _verify_csrf(request: Request, session: Session, principal: Principal, now: datetime) -> None:
