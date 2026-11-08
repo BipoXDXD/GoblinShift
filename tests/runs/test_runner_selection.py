@@ -111,3 +111,30 @@ def test_processos_nao_sobem_em_producao_sem_o_segredo_do_user_hash(
 
     assert exit_code == 2
     assert "GS_USER_HASH_SECRET" in caplog.text
+
+
+@pytest.mark.parametrize("process", [worker_main, maintenance_main])
+def test_processos_nao_sobem_em_producao_sem_o_arquivo_de_senha_do_banco(
+    process: Callable[[], int],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("GS_ENVIRONMENT", "production")
+    monkeypatch.setenv("GS_RUNNER", "executor_ctl")
+    monkeypatch.setenv("GS_EXECUTOR_IMAGE", IMAGE)
+    monkeypatch.setenv("GS_USER_HASH_SECRET", "u" * 32)
+    monkeypatch.delenv("GS_DB_PASSWORD_FILE", raising=False)
+    monkeypatch.setattr("goblinshift.entrypoints.worker.configure_logging", lambda: None)
+    monkeypatch.setattr("goblinshift.entrypoints.maintenance.configure_logging", lambda: None)
+
+    # Quem passasse da checagem entraria no laço de serviço e prenderia a suíte.
+    def serve_must_not_run(*_args: object) -> None:
+        pytest.fail("o processo passou da checagem do arquivo de senha do banco")
+
+    monkeypatch.setattr("goblinshift.entrypoints.worker.serve", serve_must_not_run)
+    monkeypatch.setattr("goblinshift.entrypoints.maintenance.serve", serve_must_not_run)
+
+    exit_code = process()
+
+    assert exit_code == 2
+    assert "GS_DB_PASSWORD_FILE" in caplog.text

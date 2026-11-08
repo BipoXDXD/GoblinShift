@@ -70,6 +70,7 @@ curl -fsS --max-time 1 "http://127.0.0.1:${PORT}/readyz" >/dev/null ||
   { echo "contract-test: a API não ficou pronta" >&2; cat "$WORK/api.log" >&2; exit 1; }
 
 user_id="$(uv run gs-admin create-user --display-name "Contrato")"
+# O token sai no stdout; o stderr só traz o aviso com o id público. Falha para no `set -e`.
 key="$(uv run gs-admin issue-key --user "$user_id" \
   --scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write --days 1 2>/dev/null)"
 
