@@ -3,6 +3,9 @@
 Sem banco: os ciclos são funções falsas, e o span vai para um `InMemorySpanExporter`.
 """
 
+import logging
+from collections.abc import Iterator
+
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -10,6 +13,9 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from goblinshift.entrypoints.maintenance import CYCLE_SPAN, run_cycles
+from goblinshift.platform.telemetry import AlertEventCounter
+
+logger = logging.getLogger("tests.maintenance_cycle_event")
 
 
 @pytest.fixture
@@ -62,3 +68,25 @@ def test_ciclo_que_falha_nao_impede_o_outro_e_marca_o_span(
     # A mensagem da exceção pode trazer valores do banco: o evento leva só o nome do ciclo.
     assert "banco fora" not in str(span.status.description)
     assert not span.events
+
+
+@pytest.fixture
+def counting() -> Iterator[None]:
+    handler = AlertEventCounter()
+    logger.addHandler(handler)
+    yield
+    logger.removeHandler(handler)
+
+
+@pytest.mark.usefixtures("counting")
+def test_evento_de_alerta_de_um_ciclo_que_depois_falha_chega_ao_span_da_volta(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    def broken() -> dict[str, int]:
+        logger.warning("divergente", extra={"fields": {"alert": "capacity_divergence"}})
+        raise RuntimeError("banco fora")
+
+    run_cycles(provider.get_tracer("t"), (("execuções", broken),))
+
+    [span] = exporter.get_finished_spans()
+    assert dict(span.attributes or {})["alert.capacity_divergence"] == 1

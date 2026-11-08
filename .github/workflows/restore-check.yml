@@ -29,7 +29,8 @@ jobs:
   revisions:
     name: Revisões do Alembic conhecidas pelo código
     # Instala as dependências do projeto (código do PyPI) longe dos secrets: o job da restauração
-    # recebe só a lista de revisões.
+    # recebe só a lista de revisões. Sem a variável o workflow passa pulado; quem avisa é a falta
+    # do ping mensal no healthchecks.io.
     if: vars.BACKUP_S3_BUCKET != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10

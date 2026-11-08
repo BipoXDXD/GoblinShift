@@ -23,10 +23,12 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import Span, Status, StatusCode
+from opentelemetry.trace import Span, Status, StatusCode, get_current_span
 from sqlalchemy import Engine
 
 from goblinshift.platform.settings import Settings
+
+ALERT_ATTRIBUTE_PREFIX = "alert."
 
 
 class JsonFormatter(logging.Formatter):
@@ -46,10 +48,35 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
+class AlertEventCounter(logging.Handler):
+    """Soma cada evento `alert=` do log no atributo `alert.<evento>` do span corrente.
+
+    Os logs não são exportados: o alerta de causa lê o atributo no stream de traces. Só o nome e a
+    contagem saem; os campos do evento (chaves, IDs) ficam no log. Sem span gravando, como numa CLI
+    ou com os traces desligados, o evento fica só no log. Uma falha aqui não chega a quem registrou.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._count(record)
+        except Exception:
+            self.handleError(record)
+
+    def _count(self, record: logging.LogRecord) -> None:
+        fields = getattr(record, "fields", None)
+        event = fields.get("alert") if isinstance(fields, dict) else None
+        span = get_current_span()
+        if event is None or not span.is_recording():
+            return
+        attribute = f"{ALERT_ATTRIBUTE_PREFIX}{event}"
+        present = getattr(span, "attributes", None) or {}
+        span.set_attribute(attribute, present.get(attribute, 0) + 1)
+
+
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
-    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a

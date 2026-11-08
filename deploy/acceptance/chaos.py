@@ -433,7 +433,10 @@ def worker_state(worker: str) -> dict[str, Any]:
 
 
 def ensure_worker_running(worker: str) -> float:
-    """Descongela ou reinicia o worker e espera ele rodar; devolve quanto demorou."""
+    """Descongela ou reinicia o worker e espera ele rodar; devolve quanto demorou.
+
+    `check=False` nos comandos: quem decide é o estado relido a cada volta, e o prazo vira erro.
+    """
     started = time.monotonic()
     while time.monotonic() - started < WORKER_START_TIMEOUT_S:
         state = worker_state(worker)

@@ -3,6 +3,7 @@
 # pacote do FFmpeg por dezenas de minutos e estoura o tempo dos jobs. Roda só na CI.
 set -euo pipefail
 
+# O grep sai com 1 quando nenhum arquivo cita o espelho, e aí não há o que trocar.
 mapfile -d '' -t arquivos < <(sudo grep -rlZ azure.archive.ubuntu.com /etc/apt || true)
 if ((${#arquivos[@]} > 0)); then
   sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g' "${arquivos[@]}"

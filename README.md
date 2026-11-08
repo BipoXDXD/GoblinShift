@@ -95,7 +95,7 @@ Esse modo foi exercitado em 2026-11-05 contra o Compose local em um Mac: 116 tes
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
-Dependências e código também passam por análise própria, fora do `ci.yml` e do gate da release ([ADR 042](docs/adr/042-auditoria-de-dependencias-e-codeql-fora-do-gate.md)): o `pip-audit` lê o `uv.lock` inteiro e o CodeQL analisa Python e TypeScript, em todo PR e toda semana.
+Dependências e código também passam por análise própria, fora do `ci.yml` e do gate da release ([ADR 042](docs/adr/042-auditoria-de-dependencias-e-codeql-fora-do-gate.md)): o `pip-audit` lê o `uv.lock` inteiro e o CodeQL analisa Python e TypeScript, em todo PR e toda semana. No merge, os dois são obrigatórios pelo ruleset da `main` ([ADR 044](docs/adr/044-auditoria-e-codeql-obrigatorios-no-merge.md)).
 
 ## CSV Janitor pela linha de comando
 
@@ -159,7 +159,7 @@ A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais púb
 
 A produção é publicada só pelo Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)). O caminho antigo por SSH está morto: o `deploy/deploy.sh` só recusa, o `deploy/release.sh` não tem quem o chame e o job `deploy` da CI fica pulado, porque o gate de release exige esse resultado (`deploy/coolify/release/gate.py`).
 
-**Em produção**, a release grava as imagens novas no recurso da aplicação, o Coolify executa `compose up -d` e o receptor só registra sucesso depois de conferir a saúde e a imagem dos containers ([`deploy/coolify/release/receiver.py`](deploy/coolify/release/receiver.py)). Cada serviço tem `container_name` fixo em `deploy/coolify/app.json`, então a API e o Nginx, que leva o build da SPA, são substituídos, sem duas versões lado a lado. Nada garante uma troca sem queda. Enquanto o Nginx volta, a borda repete a falha de conexão por até 5 s (`lb_try_duration` no site do GoblinShift, montado pelo `deploy/coolify/gateway.json`); isso não cobre a API fora do ar com o Nginx de pé. Não há medição registrada da indisponibilidade de uma publicação em produção, e o repositório não tem número para ela.
+**Em produção**, a release grava as imagens novas no recurso da aplicação, o Coolify para os containers do recurso, sobe a versão nova com `compose up -d`, e o receptor só registra sucesso depois de conferir a saúde e a imagem dos containers ([`deploy/coolify/release/receiver.py`](deploy/coolify/release/receiver.py)). A publicação recria os containers do recurso, e pode haver indisponibilidade curta durante a troca. Cada serviço tem `container_name` fixo em `deploy/coolify/app.json`, então a API e o Nginx, que leva o build da SPA, são substituídos, sem duas versões lado a lado. Nada garante uma troca sem queda. Enquanto o Nginx volta, a borda repete a falha de conexão por até 5 s (`lb_try_duration` no site do GoblinShift, montado pelo `deploy/coolify/gateway.json`); isso não cobre a API fora do ar com o Nginx de pé. Não há medição registrada da indisponibilidade de uma publicação em produção, e o repositório não tem número para ela.
 
 **Na pilha local**, o `deploy/rollout-api.sh` sobe a API nova ao lado da antiga e só para a antiga depois que a nova está saudável e o Nginx já a enxerga. Ele depende de escalar o serviço `api`, o que o `container_name` fixo da produção impede, e não faz parte da publicação: só o `scripts/check-zero-downtime.sh` e o `deploy/release.sh`, morto, o chamam, e a CI não roda essa prova. A única medição registrada é local, de 2026-10-13 (commit `1719798`): 0 falhas em 7083 requisições a `/readyz`, em quatro trocas, contra 34 respostas 502 em 1309 no jeito anterior, um `compose up` com o Nginx fixando o IP da API. Esses números não dizem nada sobre a produção. Para repetir a prova, com a pilha de pé:
 
@@ -220,7 +220,7 @@ chmod 644 google_client_secret github_client_secret
 
 Rotação:
 - *client secrets*: gerar um novo no console do provedor, sobrescrever o arquivo (mantendo o modo 644), rodar `sudo docker restart goblinshift-api-1`, conferir um login e só então revogar o antigo;
-- `csrf_secret`: sobrescrever o arquivo com `openssl rand -hex 32` (mantendo o modo 644) e rodar `sudo docker restart goblinshift-api-1`. A API só lê esses arquivos na partida, e uma publicação do Coolify pode não recriá-la. Não apague o arquivo: nada o recria na publicação. Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
+- `csrf_secret`: sobrescrever o arquivo com `openssl rand -hex 32` (mantendo o modo 644) e rodar `sudo docker restart goblinshift-api-1`. A API só lê esses arquivos na partida. Não apague o arquivo: nada o recria na publicação. Invalida os tokens CSRF em uso: a próxima mutação de cada sessão falha até um novo login;
 - `login_cookie_secret`: o mesmo procedimento. Só derruba os logins em andamento.
 
 ## Imagem do executor
