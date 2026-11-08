@@ -125,7 +125,7 @@ def test_payload_assinado_a_mao_e_aceito_quando_bem_formado() -> None:
     ("raw", "message"),
     [
         pytest.param(b"nao e json", "payload do cursor inválido", id="nao-json"),
-        pytest.param(b"\xff\xfe", "payload do cursor inválido", id="bytes-invalidos"),
+        pytest.param(b"\xff", "payload do cursor inválido", id="bytes-invalidos"),
         pytest.param(b"[]", "versão de cursor desconhecida", id="lista"),
         pytest.param(without("v"), "versão de cursor desconhecida", id="sem-versao"),
         pytest.param(without("x"), "payload do cursor inválido", id="sem-validade"),
