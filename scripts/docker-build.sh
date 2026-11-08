@@ -1,5 +1,7 @@
 #!/bin/sh
 # Local = arquitetura do daemon; release = AMD64 + ARM64 sem importação local.
+# sh POSIX, sem pipefail: os pipes daqui começam em printf, que não falha, e terminam no comando
+# que decide o status.
 set -eu
 
 fail() { printf '%s\n' "docker-build: $*" >&2; exit 2; }

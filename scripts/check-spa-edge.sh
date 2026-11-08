@@ -57,6 +57,8 @@ expect_header_contains() {
   fi
 }
 
+# O `|| true` nas chamadas abaixo não esconde nada: `fail` já contou a falha, e sem ele o `set -e`
+# pararia na primeira, em vez de listar todas.
 # Cabeçalhos que toda resposta da SPA leva (spa-headers.conf).
 expect_spa_headers() {
   local path="$1"
