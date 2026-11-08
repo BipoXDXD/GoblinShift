@@ -5,7 +5,10 @@ linha no banco; com a manutenção no ar, ela para e remove a sonda no ciclo seg
 um falso que registra os comandos, porque o script inteiro só roda na VPS.
 """
 
+import signal
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from acceptance import run
@@ -13,6 +16,7 @@ from acceptance.run import Outcome
 
 from executor_ctl import profile
 
+DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 MAINTENANCE = "c0ffee"
 PROBE_OUTCOME = Outcome("sonda", True, "ok")
 
@@ -24,16 +28,21 @@ class FakeDocker:
         running: tuple[str, ...] = (MAINTENANCE,),
         start_fails: bool = False,
         running_after_start: str = "true",
+        stop_failures: int = 0,
     ) -> None:
         self.calls: list[tuple[str, ...]] = []
         self._running = running
         self._start_fails = start_fails
         self._running_after_start = running_after_start
+        self._stop_failures = stop_failures
 
     def __call__(self, *args: str) -> str:
         self.calls.append(args)
         if args[0] == "ps":
             return "\n".join(self._running) + "\n"
+        if args[0] == "stop" and self._stop_failures:
+            self._stop_failures -= 1
+            raise subprocess.CalledProcessError(143, ["docker", *args], stderr="")
         if args[0] == "start" and self._start_fails:
             raise subprocess.CalledProcessError(1, ["docker", *args], stderr="sem memória")
         if args[0] == "inspect":
@@ -88,6 +97,151 @@ def test_maintenance_restarted_when_a_probe_raises() -> None:
         run.run_with_maintenance_suspended(probes, docker)
 
     assert docker.commands() == ["ps", "stop", "start", "inspect"]
+
+
+SIGTERM_DURING_PROBES = """
+import os
+import signal
+import sys
+import time
+
+from acceptance import run
+
+
+def docker(*args):
+    print(args[0], file=sys.stderr, flush=True)
+    return "m4nt\\n" if args[0] == "ps" else "true\\n"
+
+
+def probes():
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(30)
+
+
+run.run_with_maintenance_suspended(probes, docker)
+"""
+
+
+def test_maintenance_restarted_when_sigterm_arrives_during_probes() -> None:
+    # Processo próprio: sem o tratamento do sinal, o SIGTERM mata quem o recebe.
+    result = subprocess.run(  # noqa: S603 - script fixo acima
+        [sys.executable, "-B", "-c", SIGTERM_DURING_PROBES],
+        cwd=DEPLOY_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.stderr.split() == ["ps", "stop", "start", "inspect"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+SIGTERM_IN_DOCKER_CALL = """
+import os
+import signal
+import sys
+
+from acceptance import run
+
+def docker(*args):
+    print(args[0], file=sys.stderr, flush=True)
+    if args[0] == sys.argv[1]:
+        os.kill(os.getpid(), signal.SIGTERM)
+    return "m4nt\\n" if args[0] == "ps" else "true\\n"
+
+
+def probes():
+    print("sondas", file=sys.stderr, flush=True)
+    return []
+
+
+run.run_with_maintenance_suspended(probes, docker)
+"""
+
+
+@pytest.mark.parametrize(
+    ("command", "calls"),
+    [
+        ("stop", ["ps", "stop", "start", "inspect"]),
+        ("start", ["ps", "stop", "sondas", "start", "inspect", "start", "inspect"]),
+        ("inspect", ["ps", "stop", "sondas", "start", "inspect", "start", "inspect"]),
+    ],
+)
+def test_sigterm_outside_the_probes_waits_for_this_process_to_read_the_state(
+    command: str, calls: list[str]
+) -> None:
+    result = subprocess.run(  # noqa: S603 - script fixo acima
+        [sys.executable, "-B", "-c", SIGTERM_IN_DOCKER_CALL, command],
+        cwd=DEPLOY_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert result.stderr.split() == calls
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+SECOND_SIGTERM_DURING_RESTART = """
+import os
+import signal
+import subprocess
+import sys
+import time
+
+from acceptance import run
+
+
+def docker(*args):
+    if args[0] == "start":
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise subprocess.CalledProcessError(1, ["docker", *args], stderr="sem memória")
+    return "m4nt\\n" if args[0] == "ps" else "true\\n"
+
+
+def probes():
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(30)
+
+
+run.run_with_maintenance_suspended(probes, docker)
+"""
+
+
+def test_second_sigterm_does_not_cut_the_report_of_the_failed_restart() -> None:
+    result = subprocess.run(  # noqa: S603 - script fixo acima
+        [sys.executable, "-B", "-c", SECOND_SIGTERM_DURING_RESTART],
+        cwd=DEPLOY_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+
+    assert "FALHOU" in result.stderr
+    assert "sem memória" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_stop_that_did_not_finish_is_repeated_before_the_restart() -> None:
+    # Cliente morto não interrompe a parada no daemon: o `start` não mudaria nada e ela terminaria
+    # depois, com a manutenção parada e o `inspect` já lido.
+    docker = FakeDocker(stop_failures=1)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        run.run_with_maintenance_suspended(lambda: [PROBE_OUTCOME], docker)
+
+    assert docker.commands() == ["ps", "stop", "stop", "start", "inspect"]
+
+
+def test_probes_leave_the_sigterm_handler_as_it_was() -> None:
+    before = signal.getsignal(signal.SIGTERM)
+
+    run.run_with_maintenance_suspended(lambda: [PROBE_OUTCOME], FakeDocker())
+
+    assert signal.getsignal(signal.SIGTERM) == before
 
 
 def test_restart_failure_fails_the_acceptance_with_recovery_command() -> None:
