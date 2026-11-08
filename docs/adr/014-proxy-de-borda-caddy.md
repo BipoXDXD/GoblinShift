@@ -2,7 +2,7 @@
 
 - **Estado:** aceito (2026-10-13); domínio do GoblinShift acrescentado em 2026-10-14; acesso pelo IP retirado em 2026-10-15
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8)
-- **Relacionado:** [ADR 011](011-vps-kvm2-compartilhada.md); [ADR 041](041-ip-do-cliente-atras-da-cloudflare.md) (no gateway do Coolify, o site do GoblinShift aceita o IP informado pela Cloudflare); no outro projeto, a spec `2026-10-13-vps-compartilhada` do StillOn
+- **Relacionado:** [ADR 011](011-vps-kvm2-compartilhada.md); [ADR 043](043-confianca-no-gateway.md) (certificado de origem no gateway do Coolify); [ADR 041](041-ip-do-cliente-atras-da-cloudflare.md) (no gateway do Coolify, os sites do GoblinShift e do StillOn aceitam o IP informado pela Cloudflare); no outro projeto, a spec `2026-10-13-vps-compartilhada` do StillOn
 
 ## Contexto
 
