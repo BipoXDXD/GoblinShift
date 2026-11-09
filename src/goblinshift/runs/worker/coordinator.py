@@ -8,7 +8,8 @@ o coordenador recebe `LostFencing`, registra e para sem escrever mais nada.
 Passos:
 1. `prepare`: o Runner cria a área vazia; as entradas do storage são copiadas para `inputs/`,
    conferindo SHA-256 e tamanho, `job.json` recebe os parâmetros fixados na aceitação e
-   `context.json`, a imagem do executor fixada na Run (para o manifesto, ADR 021).
+   `context.json`, a imagem do executor fixada na Run (para o manifesto, ADR 021). Erro de E/S
+   aqui (disco cheio, storage ilegível) é infraestrutura: falha transitória na hora.
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
    `processing`.
@@ -278,6 +279,12 @@ class Coordinator:
                 contents = held_input_contents(session, claimed.owner_id, claimed.input_upload_ids)
         except HeldContentMissingError as error:
             raise PreparationError(str(error)) from error
+        try:
+            self._fill_work_area(claimed, contents)
+        except OSError as error:
+            raise PreparationError(f"área de trabalho: {error}") from error
+
+    def _fill_work_area(self, claimed: ClaimedAttempt, contents: list[HeldContent]) -> None:
         work_dir = self._runner.create_work_dir(claimed.attempt_id)
         inputs_dir = work_dir / "inputs"
         entries = [
