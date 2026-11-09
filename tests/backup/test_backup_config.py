@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,9 +51,30 @@ def test_servico_roda_como_usuario_da_aplicacao_com_o_script_instalado_pelo_root
 def test_timer_e_diario_com_folga_e_recupera_execucao_perdida() -> None:
     timer = unit("goblinshift-pg-backup.timer")["Timer"]
 
-    assert timer["OnCalendar"] == "*-*-* 06:00:00 UTC"
+    assert timer["OnCalendar"] == "*-*-* 03:05:00 UTC"
     assert timer["Persistent"] == "true"
     assert timer["RandomizedDelaySec"] == "30min"
+
+
+@pytest.mark.parametrize(
+    ("document", "current_schedule"),
+    [
+        ("docs/adr/022-backup-externo.md", "foi substituído em 2026-11-09"),
+        ("docs/adr/022-backup-externo.md", "## Atualização de 2026-11-09"),
+        ("docs/legal/lia-j25-backup.md", "Dump diário às 03:05 UTC"),
+        ("deploy/acceptance/goblinshift-acceptance.timer", "(03:05 a 03:35 UTC)"),
+    ],
+)
+def test_documento_cita_o_horario_vigente_do_backup(document: str, current_schedule: str) -> None:
+    assert current_schedule in (ROOT / document).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "document",
+    ["docs/legal/lia-j25-backup.md", "deploy/acceptance/goblinshift-acceptance.timer"],
+)
+def test_documento_vigente_nao_cita_o_horario_antigo_do_backup(document: str) -> None:
+    assert "06:00" not in (ROOT / document).read_text(encoding="utf-8")
 
 
 def test_instalador_exige_o_que_o_script_exige_fora_o_que_a_unit_define() -> None:
