@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import psycopg
 from fastapi import FastAPI
 from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -33,6 +34,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from goblinshift.platform.settings import Settings
 
 ALERT_ATTRIBUTE_PREFIX = "alert."
+UVICORN_ERROR_LOGGER = "uvicorn.error"
+_DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
 
 
 class JsonFormatter(logging.Formatter):
@@ -53,17 +56,17 @@ class JsonFormatter(logging.Formatter):
 
 
 def omit_database_error_detail(record: logging.LogRecord) -> bool:
-    """Filtro de logger: exceção com erro de banco na cadeia sai só com tipos e frames.
+    """Filtro de log: exceção com erro de banco na cadeia sai só com tipos e frames.
 
-    A mensagem do SQLAlchemy traz host, SQL e o `DETAIL` do PostgreSQL, com valores do usuário
-    (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar `exc_info`:
-    o registro continua com a exceção. Qualquer outra exceção sai inteira.
+    A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
+    do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
+    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira.
     """
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
     chain = list(_exception_chain(exception))
-    if any(isinstance(item, SQLAlchemyError) for item in chain):
+    if any(isinstance(item, _DATABASE_ERRORS) for item in chain):
         record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
     return True
 
@@ -119,7 +122,10 @@ class AlertEventCounter(logging.Handler):
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
+    handler.addFilter(omit_database_error_detail)
     logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
+    # O Uvicorn escreve por handlers próprios, fora do root (`propagate: False`).
+    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_database_error_detail)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a
