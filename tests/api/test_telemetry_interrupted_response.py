@@ -274,8 +274,8 @@ def test_rota_comum_que_falha_antes_da_resposta_sai_sem_eventos_e_sem_detalhe(
 
     response = traced.client.get(f"{TEST_ROUTES}/plain-fails")
 
-    assert response.status_code == 500
-    assert response.json()["code"] == "INTERNAL_ERROR"
+    assert response.status_code == 503
+    assert response.json()["code"] == "SERVICE_UNAVAILABLE"
     _assert_no_canary_in_otlp(traced)
     assert traced.exporter.main_span().events == ()
 

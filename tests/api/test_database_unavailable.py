@@ -233,13 +233,26 @@ def test_log_de_pool_esgotado_nao_tem_sqlstate(
     assert record.__dict__["fields"] == {"error.type": "TimeoutError", "sqlstate": None}
 
 
-def test_erro_de_programacao_mantem_o_log_de_erro_inesperado(
+def test_erro_nao_temporario_registra_so_tipo_e_sqlstate(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.ERROR, logger=LOGGER):
         response = client.get("/_db/sqlstate/55000")
 
+    assert_problem(response, 500, "INTERNAL_ERROR")
     [record] = _records_with(caplog, UNEXPECTED_LOG)
+    assert record.levelno == logging.ERROR
     assert response.json()["request_id"] in record.getMessage()
-    assert record.exc_info is not None
+    assert record.__dict__["fields"] == {"error.type": "OperationalError", "sqlstate": "55000"}
+    assert record.exc_info is None
     assert _records_with(caplog, UNAVAILABLE_LOG) == []
+
+
+def test_log_do_erro_nao_temporario_fica_sem_consulta_e_valores(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.ERROR, logger=LOGGER):
+        client.get("/_db/sqlstate/55000")
+
+    for leaked in (CANARY, "secret_hash"):
+        assert leaked not in caplog.text

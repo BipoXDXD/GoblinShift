@@ -81,8 +81,7 @@ def test_erro_de_programacao_no_postgres_responde_500(
     assert_problem(response, 500, "INTERNAL_ERROR")
     assert "retry-after" not in response.headers
     [record] = [r for r in caplog.records if r.name == LOGGER]
-    assert record.exc_info is not None
-    assert record.exc_info[1].orig.sqlstate == sqlstate  # type: ignore[union-attr]
+    assert record.__dict__["fields"]["sqlstate"] == sqlstate
 
 
 @pytest.mark.parametrize(

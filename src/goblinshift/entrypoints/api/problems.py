@@ -239,9 +239,6 @@ def install_problem_handlers(app: FastAPI) -> None:
     app.exception_handler(ApiProblem)(_handle_api_problem)
     app.exception_handler(RequestValidationError)(_handle_validation_error)
     app.exception_handler(StarletteHTTPException)(_handle_http_exception)
-    # Pool esgotado e banco fora do ar são falha temporária da dependência (1.6 e 3.2), não bug.
-    app.exception_handler(PoolTimeoutError)(_handle_pool_timeout)
-    app.exception_handler(OperationalError)(_handle_operational_error)
 
 
 def problem_response(
@@ -275,7 +272,7 @@ def problem_response(
 
 
 class RequestContextMiddleware:
-    """Gera o `request_id` e transforma exceção inesperada em 500 genérico.
+    """Gera o `request_id` e transforma exceção não tratada em 503 (banco) ou 500 genérico.
 
     ASGI puro, e não `BaseHTTPMiddleware`, para não enfileirar o corpo das respostas por
     streaming. A exceção é registrada no log com o `request_id`; o cliente recebe só o
@@ -302,19 +299,45 @@ class RequestContextMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
-        except Exception:
-            logger.exception("erro inesperado na requisição %s", request_id)
+        except Exception as exc:
             # Com a resposta já começada não há como trocar o status; a conexão é cortada.
             if response_started:
+                logger.exception("erro inesperado na requisição %s", request_id)
                 record_error(ProblemCode.INTERNAL_ERROR.value)
                 raise
-            response = problem_response(
-                code=ProblemCode.INTERNAL_ERROR,
-                detail=f"Erro interno. Informe o request_id {request_id} ao suporte.",
-                instance=scope["path"],
-                request_id=request_id,
-            )
+            response = _unhandled_error_response(exc, scope["path"], request_id)
             await response(scope, receive, send_with_request_id)
+
+
+def _unhandled_error_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
+    """Decide a resposta de exceção que chegou ao middleware antes de a resposta começar.
+
+    Fica aqui, e não em `exception_handler`, porque o Starlette troca por `RuntimeError` a
+    exceção com handler registrado que ocorre depois de a resposta começar.
+    """
+    if isinstance(exc, PoolTimeoutError):
+        return _database_unavailable_response(exc, None, instance, request_id)
+    if not isinstance(exc, OperationalError):
+        logger.exception("erro inesperado na requisição %s", request_id)
+        return _internal_error_response(instance, request_id)
+    sqlstate: str | None = getattr(exc.orig, "sqlstate", None)
+    if _is_database_unavailable(exc, sqlstate):
+        return _database_unavailable_response(exc, sqlstate, instance, request_id)
+    logger.error(
+        "erro inesperado na requisição %s",
+        request_id,
+        extra={"fields": _database_error_fields(exc, sqlstate)},
+    )
+    return _internal_error_response(instance, request_id)
+
+
+def _internal_error_response(instance: str, request_id: str) -> JSONResponse:
+    return problem_response(
+        code=ProblemCode.INTERNAL_ERROR,
+        detail=f"Erro interno. Informe o request_id {request_id} ao suporte.",
+        instance=instance,
+        request_id=request_id,
+    )
 
 
 def request_id_of(request: Request) -> str:
@@ -335,18 +358,6 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse
     )
 
 
-async def _handle_pool_timeout(request: Request, exc: PoolTimeoutError) -> JSONResponse:
-    return _database_unavailable_response(request, exc, sqlstate=None)
-
-
-async def _handle_operational_error(request: Request, exc: OperationalError) -> JSONResponse:
-    sqlstate: str | None = getattr(exc.orig, "sqlstate", None)
-    if not _is_database_unavailable(exc, sqlstate):
-        # Sobe até o `RequestContextMiddleware`: é bug, com o 500 e o log de qualquer outro.
-        raise exc
-    return _database_unavailable_response(request, exc, sqlstate)
-
-
 def _is_database_unavailable(exc: OperationalError, sqlstate: str | None) -> bool:
     # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
     if exc.connection_invalidated or sqlstate is None:
@@ -360,22 +371,27 @@ def _is_database_unavailable(exc: OperationalError, sqlstate: str | None) -> boo
 
 
 def _database_unavailable_response(
-    request: Request, exc: PoolTimeoutError | OperationalError, sqlstate: str | None
+    exc: PoolTimeoutError | OperationalError, sqlstate: str | None, instance: str, request_id: str
 ) -> JSONResponse:
-    request_id = request_id_of(request)
-    # Só tipo e SQLSTATE: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
     logger.error(
         "banco indisponível na requisição %s",
         request_id,
-        extra={"fields": {"error.type": type(exc).__name__, "sqlstate": sqlstate}},
+        extra={"fields": _database_error_fields(exc, sqlstate)},
     )
     return problem_response(
         code=ProblemCode.SERVICE_UNAVAILABLE,
         detail="O serviço está temporariamente indisponível; tente de novo depois do Retry-After.",
-        instance=request.url.path,
+        instance=instance,
         request_id=request_id,
         headers={"Retry-After": str(DATABASE_RETRY_AFTER_SECONDS)},
     )
+
+
+def _database_error_fields(
+    exc: PoolTimeoutError | OperationalError, sqlstate: str | None
+) -> dict[str, str | None]:
+    # Só tipo e SQLSTATE: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
+    return {"error.type": type(exc).__name__, "sqlstate": sqlstate}
 
 
 async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
