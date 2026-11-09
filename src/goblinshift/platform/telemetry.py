@@ -10,25 +10,36 @@ import ipaddress
 import json
 import logging
 import os
+import re
+import traceback
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import psycopg
 from fastapi import FastAPI
 from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
 from opentelemetry.trace import Span, Status, StatusCode, get_current_span
 from sqlalchemy import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from goblinshift.platform.settings import Settings
 
 ALERT_ATTRIBUTE_PREFIX = "alert."
+UVICORN_ERROR_LOGGER = "uvicorn.error"
+_DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
+_POOL_LOGGER_PREFIX = "sqlalchemy.pool"
+# O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
+_PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
 
 
 class JsonFormatter(logging.Formatter):
@@ -44,8 +55,51 @@ class JsonFormatter(logging.Formatter):
         if isinstance(fields, dict):
             entry.update(fields)
         if record.exc_info:
-            entry["exception"] = self.formatException(record.exc_info)
+            entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
+
+
+def omit_database_error_detail(record: logging.LogRecord) -> bool:
+    """Filtro de log: exceção com erro de banco na cadeia sai só com tipos e frames.
+
+    A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
+    do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
+    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira. As mensagens
+    do pool perdem o repr da conexão.
+    """
+    if record.name.startswith(_POOL_LOGGER_PREFIX):
+        record.msg = _PSYCOPG_CONNECTION_REPR.sub("<psycopg connection>", record.getMessage())
+        record.args = None
+    exception = record.exc_info[1] if record.exc_info else None
+    if exception is None:
+        return True
+    chain = list(_exception_chain(exception))
+    if any(isinstance(item, _DATABASE_ERRORS) for item in chain):
+        record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
+    return True
+
+
+def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
+    """A exceção e as que o traceback mostraria: causa, contexto e membros de grupo."""
+    pending = [exception]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        linked = current.__cause__ if current.__suppress_context__ else current.__context__
+        if linked is not None:
+            pending.append(linked)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+
+
+def _type_and_frames(exception: BaseException) -> str:
+    frames = "".join(traceback.format_tb(exception.__traceback__))
+    kind = type(exception)
+    return f"Traceback (most recent call last):\n{frames}{kind.__module__}.{kind.__qualname__}"
 
 
 class AlertEventCounter(logging.Handler):
@@ -76,7 +130,10 @@ class AlertEventCounter(logging.Handler):
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
+    handler.addFilter(omit_database_error_detail)
     logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
+    # O Uvicorn escreve por handlers próprios, fora do root (`propagate: False`).
+    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_database_error_detail)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a
@@ -119,6 +176,61 @@ def truncate_client_address(address: str) -> str:
         ip = ip.ipv4_mapped
     bits = IPV4_PREFIX_BITS if isinstance(ip, ipaddress.IPv4Address) else IPV6_PREFIX_BITS
     return str(ipaddress.ip_network(f"{ip}/{bits}", strict=False).network_address)
+
+
+REDACTED_EXCEPTION_DETAIL = "exception detail redacted"
+_EXCEPTION_EVENT_NAME = "exception"
+# O que resta do evento: o tipo, que agrupa as falhas, e `exception.escaped`, que o SDK grava sempre
+# como "False", mesmo quando a exceção escapa, e fica só para o evento manter a forma da convenção.
+_EXCEPTION_ATTRIBUTES_KEPT = ("exception.type", "exception.escaped")
+
+
+def _without_main_exception_detail(span: ReadableSpan) -> ReadableSpan:
+    """Tira do span `main` o detalhe da exceção de uma resposta já começada.
+
+    Sem resposta iniciada, o `RequestContextMiddleware` troca a exceção por um 500 e ela não chega
+    à instrumentação. Com o status já enviado ela sobe, e a instrumentação grava `str(exceção)` e a
+    pilha no evento `exception` e no status; no SQLAlchemy, `str()` traz host, SQL e parâmetros.
+    O span terminado é imutável, então sai uma cópia.
+
+    O status só é trocado quando há evento `exception`, o que preserva o texto fixo do ciclo de
+    manutenção. Limite: com `OTEL_SPAN_EVENT_COUNT_LIMIT=0`, que não configuramos, não há evento
+    e o `str(exceção)` ficaria no status.
+    """
+    is_main = (span.attributes or {}).get("main") is True
+    if not is_main or not any(event.name == _EXCEPTION_EVENT_NAME for event in span.events):
+        return span
+    failed = span.status.status_code is StatusCode.ERROR
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=span.attributes,
+        events=tuple(_redacted_exception_event(event) for event in span.events),
+        links=span.links,
+        kind=span.kind,
+        status=Status(StatusCode.ERROR, REDACTED_EXCEPTION_DETAIL) if failed else span.status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+def _redacted_exception_event(event: SdkEvent) -> SdkEvent:
+    if event.name != _EXCEPTION_EVENT_NAME:
+        return event
+    attributes = event.attributes or {}
+    kept = {name: attributes[name] for name in _EXCEPTION_ATTRIBUTES_KEPT if name in attributes}
+    return SdkEvent(
+        event.name,
+        {
+            **kept,
+            "exception.message": REDACTED_EXCEPTION_DETAIL,
+            "exception.stacktrace": REDACTED_EXCEPTION_DETAIL,
+        },
+        event.timestamp,
+    )
 
 
 def _start_main_event(span: Span, scope: dict[str, Any]) -> None:
@@ -174,16 +286,17 @@ def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
         inner = BatchSpanProcessor(OTLPSpanExporter())
     else:
         return None
-    return DatabaseErrorRedactingProcessor(inner)
+    return ExceptionDetailRedactingProcessor(inner)
 
 
-class DatabaseErrorRedactingProcessor(SpanProcessor):
-    """Troca a descrição do erro dos spans do SQLAlchemy por um texto fixo antes de exportar.
+class ExceptionDetailRedactingProcessor(SpanProcessor):
+    """Tira o detalhe das exceções dos spans do SQLAlchemy e dos `main` antes de exportar.
 
     A instrumentação grava `str(exceção)` no status, e o PostgreSQL põe valores na mensagem:
     `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O código do erro
     da requisição já está no evento amplo (`error.code`) e a consulta, parametrizada, em
-    `db.statement`. O span terminado é imutável, então o processador repassa uma cópia.
+    `db.statement`. Nos spans `main`, ver `_without_main_exception_detail`. O span terminado é
+    imutável, então o processador repassa uma cópia.
     """
 
     def __init__(self, inner: SpanProcessor) -> None:
@@ -193,7 +306,7 @@ class DatabaseErrorRedactingProcessor(SpanProcessor):
         self._inner.on_start(span, parent_context)
 
     def on_end(self, span: ReadableSpan) -> None:
-        self._inner.on_end(_without_database_error_detail(span))
+        self._inner.on_end(_without_main_exception_detail(_without_database_error_detail(span)))
 
     def shutdown(self) -> None:
         self._inner.shutdown()

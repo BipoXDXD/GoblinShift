@@ -37,6 +37,8 @@ def make_engine(settings: Settings) -> Engine:
         # Pool esgotado vira 503 rápido em vez de requisição pendurada.
         pool_timeout=settings.db_pool_timeout_s,
         pool_pre_ping=True,
+        # Sem os valores das consultas na mensagem dos erros, que vai para o log (3.7).
+        hide_parameters=True,
         connect_args={"options": options, "connect_timeout": settings.db_connect_timeout_s},
     )
 

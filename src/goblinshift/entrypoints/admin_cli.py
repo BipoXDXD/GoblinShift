@@ -32,7 +32,8 @@ fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com 
 e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
-Sai com 0 em sucesso, 1 se a conta ou a chave não existir e 2 em erro de uso.
+Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
+segredo obrigatório, com uma linha em stderr que nomeia a variável.
 """
 
 import argparse
@@ -73,7 +74,7 @@ from goblinshift.identity.accounts import (
     list_pending_accounts,
 )
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
@@ -88,6 +89,7 @@ from goblinshift.runs.store import db_now
 EXIT_OK = 0
 EXIT_NOT_FOUND = 1
 EXIT_USAGE = 2
+EXIT_MISSING_SECRET = 3
 # HMAC-SHA256 em hexadecimal, como o `UserHasher` escreve nos eventos.
 _USER_HASH = re.compile(r"[0-9a-f]{64}")
 _FROM_STDIN = "-"
@@ -109,6 +111,13 @@ type Command = Callable[[argparse.Namespace, _Context], int]
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _argument_parser().parse_args(argv)
+    try:
+        return _run_command(args)
+    except MissingSecretError as error:
+        return _fail(EXIT_MISSING_SECRET, str(error))
+
+
+def _run_command(args: argparse.Namespace) -> int:
     command: Command = args.command
     settings = Settings()
     engine = make_engine(settings)
