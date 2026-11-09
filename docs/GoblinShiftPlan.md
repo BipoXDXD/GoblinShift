@@ -933,6 +933,7 @@ Chaves são enviadas em `Authorization: Bearer`, nunca na URL. API key não é I
 | status | `GET /v1/attempts/{id}` | `200` Status |
 | stop | `POST /v1/attempts/{id}/stop` `{"grace_s": 0..10}` | `200` Status após SIGTERM, carência e SIGKILL; ausente ou terminado é sucesso |
 | remove | `DELETE /v1/attempts/{id}` | `204`; apaga container e `<area>/<id>`; repetir é sucesso; `409 still_running` com o container vivo |
+| image | `GET /v1/image?ref=<ref>@sha256:<hex>` | `200 {"present": bool}`, só leitura e sem corpo; ausente no daemon é `present: false`. `400 invalid_request`, `403 image_not_allowed` (antes do Docker), `503 docker_unavailable` |
 
 Status: `{"state": "absent"|"created"|"running"|"exited", "exit_code", "oom_killed", "started_at", "finished_at"}`. Implementação em `deploy/executor_ctl/` (só biblioteca padrão, Python do host), instalada por `deploy/executor-ctl/install.sh` como `goblinshift-executor-ctl.service`.
 

@@ -20,6 +20,8 @@ _MAX_DETAIL_CHARS = 300
 _UNSET_TIME_PREFIX = "0001-01-01"
 # Só o que nomeia o container: "connect: no such file or directory" é socket ausente, não ausência.
 _MISSING_MARKERS = ("no such container", "no such object")
+# Só o que nomeia a imagem; qualquer outro erro do `image inspect` é daemon indisponível.
+_IMAGE_MISSING_MARKER = "no such image"
 _RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})")
 _DOCKER_STATES: dict[str, State] = {
     "created": "created",
@@ -80,6 +82,15 @@ class DockerCli:
                 return ContainerStatus.absent()
             raise _unexpected("inspect", result)
         return parse_inspect(result.stdout)
+
+    def image_present(self, reference: str) -> bool:
+        """Se o daemon tem a imagem; só "no such image" significa ausente."""
+        result = self._execute(["image", "inspect", "--format={{.Id}}", reference])
+        if result.returncode == 0:
+            return True
+        if _IMAGE_MISSING_MARKER in result.stderr.lower():
+            return False
+        raise _unexpected("image inspect", result)
 
     def run(self, arguments: list[str]) -> None:
         result = self._execute(arguments)
