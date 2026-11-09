@@ -430,6 +430,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-arquivos-nao-removidos",
         "causa-varredura-falhou",
         "causa-ciclos-falhando",
+        "causa-executor-nao-iniciou",
     ):
         assert not cause_rows(telemetry, name, stream), name
 
@@ -478,6 +479,26 @@ def test_evento_de_alerta_contado_em_qualquer_span_main_dispara(
     declare_columns(telemetry.api, stream)
 
     assert bool(cause_rows(telemetry, cause, stream)) is fires
+
+
+# Uma Run sem imagem no daemon falha quatro starts em cerca de 2 min (MAX_CLAIMS, com jitter de até
+# 30 s entre eles); um start isolado que se recupera na retentativa não pede ninguém.
+@pytest.mark.parametrize(("failing", "fires"), [(2, False), (3, True), (4, True)])
+def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
+    telemetry: Telemetry, failing: int, fires: bool
+) -> None:
+    stream = unique_stream("executor")
+    attribute = "alert.executor_start_failed"
+    traces = telemetry.traces(stream)
+    for minute in range(failing):
+        traces.span("attempt", (minute + 1) * MINUTE_S, {"main": True, attribute: 1}, 1.0)
+    # Tentativa normal e span que não é o principal nunca contam.
+    traces.span("attempt", MINUTE_S, {"main": True, attribute: 0}, 1.0)
+    traces.span("attempt", MINUTE_S, {"main": False, attribute: 1}, 1.0)
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    assert bool(cause_rows(telemetry, "causa-executor-nao-iniciou", stream)) is fires
 
 
 # --- Ausência: a telemetria que deveria chegar e não chegou -------------------------------------

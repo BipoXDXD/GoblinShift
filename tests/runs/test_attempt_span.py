@@ -4,6 +4,8 @@ Um span `main` por tentativa, ligado por link ao trace da aceitação gravado na
 medidas pelo executor e pelo worker. Nunca nomes de arquivo nem parâmetros.
 """
 
+import logging
+import os
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -19,19 +21,24 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.files.artifacts import create_candidate_object
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import AlertEventCounter, UserHasher
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.tables import run
+from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.coordinator import Coordinator
+from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from goblinshift.runs.worker.runner import Runner
+from tests.runs.fake_executor_ctl import IMAGE, FakeExecutorCtl
 from tests.runs.worker_support import (
     INVALID,
+    LEASE,
     VALID,
     attempts,
     claim,
     coordinator_config,
     create_user,
     local_runner,
+    make_eligible_now,
     queue_run,
     run_row,
 )
@@ -243,6 +250,48 @@ def test_candidato_preso_no_disco_conta_no_evento_da_tentativa(
     attributes = only_attempt_span(exporter).attributes
     assert attributes is not None
     assert attributes["attempt.candidates_left_on_disk"] == 1
+
+
+@pytest.fixture
+def counting_alert_events() -> Iterator[None]:
+    coordinator_logger = logging.getLogger("goblinshift.runs.worker.coordinator")
+    handler = AlertEventCounter()
+    coordinator_logger.addHandler(handler)
+    yield
+    coordinator_logger.removeHandler(handler)
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_executor_que_nao_inicia_conta_em_cada_tentativa_ate_o_infra_poison(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    tmp_path: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    # Imagem fora do daemon: o `--pull=never` faz o executor-ctl responder 503 a todo start.
+    area = tmp_path / "exec-work"
+    area.mkdir()
+    ctl = FakeExecutorCtl(area, docker_down=True)
+    runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+    run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
+    coordinator = traced_coordinator(factory, storage, runner, exporter)
+
+    try:
+        for _ in range(4):
+            coordinator.run(claim(factory, storage))
+            make_eligible_now(factory, run_id)
+        assert claim_next(factory, storage, LEASE) is None
+    finally:
+        ctl.close()
+
+    row = run_row(factory, run_id)
+    assert (row["status"], row["error_code"]) == ("failed", "INFRA_POISON")
+    counts = [
+        dict(span.attributes or {}).get("alert.executor_start_failed")
+        for span in exporter.get_finished_spans()
+        if span.name == "attempt"
+    ]
+    assert counts == [1, 1, 1, 1]
 
 
 def test_sem_tracer_o_coordenador_funciona_igual(

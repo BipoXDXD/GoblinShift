@@ -144,6 +144,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_capacity_over_max",
     "alert_upload_without_reservation",
     "alert_run_without_reservation",
+    "alert_executor_start_failed",
 )
 
 
@@ -266,6 +267,14 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-executor-nao-iniciou",
+        "Executor recusado em três tentativas ou mais nos últimos 10 min: as Runs terminam em "
+        "INFRA_POISON. Comece pela imagem do executor no daemon; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
     ),
     _SpanCause(
         "causa-manutencao-sem-ciclo",
