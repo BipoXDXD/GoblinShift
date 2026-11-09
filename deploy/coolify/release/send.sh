@@ -12,11 +12,21 @@ mkdir "$stage/images"
 python3 "$script_dir/send.py" requested > "$stage/requested.tsv"
 while IFS=$'\t' read -r role reference; do
   crane manifest "$reference" > "$stage/index.json"
-  if jq -e 'has("manifests")' "$stage/index.json" >/dev/null; then
-    digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$stage/index.json")
-  else
-    digest=$(crane digest "$reference")
-  fi
+  # Exit 1 is jq's only "not an index" answer; any other failure means the manifest was unreadable.
+  has_manifests_rc=0
+  jq -e 'has("manifests")' "$stage/index.json" >/dev/null 2>&1 || has_manifests_rc=$?
+  case "$has_manifests_rc" in
+    0)
+      digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$stage/index.json")
+      ;;
+    1)
+      digest=$(crane digest "$reference")
+      ;;
+    *)
+      printf 'Cannot classify registry manifest for role %s (jq exit %s)\n' "$role" "$has_manifests_rc" >&2
+      exit 1
+      ;;
+  esac
   [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
   repository=${reference%@*}
   repository=${repository%:*}
