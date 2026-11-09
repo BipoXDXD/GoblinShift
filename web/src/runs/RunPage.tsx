@@ -288,7 +288,7 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
                         <a
                           href={artifactDownloadPath(artifact.artifact_id)}
                           download={artifact.file_name}
-                          className="font-mono text-sm"
+                          className="inline-flex min-h-11 items-center font-mono text-sm"
                         >
                           {T.results.download(artifact.file_name)}
                         </a>

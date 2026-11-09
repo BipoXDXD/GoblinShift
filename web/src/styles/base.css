@@ -53,8 +53,10 @@
     font-family: var(--font-mono);
   }
 
-  /* Controles de texto: embutidos (sombra no topo), borda de 2 px com 3:1 e 44 px de altura. */
-  input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"]),
+  /* Controles de texto: embutidos (sombra no topo), borda de 2 px com 3:1 e 44 px de altura. O
+     :where mantém esta regra leve, para [aria-invalid] e :disabled, abaixo, valerem também no
+     input (baseCss.test.ts). */
+  input:where(:not([type="checkbox"], [type="radio"], [type="file"], [type="range"])),
   select,
   textarea {
     display: block;
@@ -76,6 +78,19 @@
 
   [aria-invalid="true"] {
     border-color: var(--danger-fg);
+  }
+
+  /* O estilo acima cobre o do navegador: sem isto, o campo desabilitado parece editável. Vazio,
+     ele não tem texto para mostrar a cor: fundo liso e borda tracejada avisam sem depender dela.
+     A cor da borda fica de fora para não apagar a de erro. */
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    border-style: dashed;
+    background-color: var(--surface);
+    box-shadow: none;
+    color: var(--fg-subtle);
+    cursor: not-allowed;
   }
 
   ::placeholder {

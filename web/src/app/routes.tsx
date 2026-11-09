@@ -7,6 +7,7 @@ import { Layout } from "./Layout";
 import { NotFoundPage } from "./NotFoundPage";
 import type { PageTitleHandle } from "./pageTitle";
 import { PATHS } from "./paths";
+import { RootFailure, RouteFailure } from "./RouteFailure";
 
 export interface AppServices {
   readonly uploadServices: UploadServices;
@@ -25,10 +26,11 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
   return [
     {
       element: <Layout now={now} notice={notice} />,
+      errorElement: <RootFailure />,
       // Na primeira carga o router espera o chunk da tela antes de pintar; é um pedido curto, e
       // um indicador ali piscaria. Sem este componente o React Router avisa no console.
       HydrateFallback: EmptyFallback,
-      children: [
+      children: withRouteFailure([
         {
           path: PATHS.home,
           lazy: async () => {
@@ -125,9 +127,17 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         { path: "*", element: <NotFoundPage />, handle: titled(TEXT.notFound.title) },
-      ],
+      ]),
     },
   ];
+}
+
+/**
+ * Falha ao abrir uma tela, dentro da moldura. Sem isso, um chunk que não vem (aba aberta durante
+ * uma publicação) cai na tela padrão do React Router, em inglês e sem navegação.
+ */
+function withRouteFailure(screens: RouteObject[]): RouteObject[] {
+  return [{ errorElement: <RouteFailure />, children: screens }];
 }
 
 /** Título da aba da rota (Layout); a Oficina fica só com o nome do site. */

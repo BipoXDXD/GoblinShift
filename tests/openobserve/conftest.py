@@ -301,6 +301,15 @@ class SpanWriter:
         span.end(end_time=start_ns + int(duration_ms * NS_PER_MS))
         self.written += 1
 
+    def database_query(self, *, age_s: float = 60.0) -> None:
+        """Uma consulta da instrumentação do SQLAlchemy: span sem nenhum atributo `main`."""
+        self.span(
+            "SELECT goblinshift",
+            age_s,
+            {"db.system": "postgresql", "db.statement": "SELECT 1", "db.operation": "SELECT"},
+            1.0,
+        )
+
     def request(
         self,
         method: str,

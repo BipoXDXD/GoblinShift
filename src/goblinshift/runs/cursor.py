@@ -1,8 +1,8 @@
 """Cursor opaco da listagem de execuções (docs/GoblinShiftPlan.md, 1.6 e 3.3).
 
-O cursor carrega a posição de keyset `(created_at, id)`, os filtros e a direção da consulta que o
-gerou, e vale 24 horas. É assinado com HMAC-SHA256 para que o cliente não forje posições nem troque
-filtros sem a API perceber; não é cifrado, porque só contém o que o próprio dono já viu.
+O cursor carrega a posição de keyset `(created_at, id)`, os filtros, a direção e o dono da consulta
+que o gerou, e vale 24 horas. É assinado com HMAC-SHA256 para que o cliente não forje posições nem
+troque filtros sem a API perceber; não é cifrado, porque só contém o que o próprio dono já viu.
 
 Formato: `base64url(payload JSON) "." base64url(HMAC)`, sem padding.
 """
@@ -30,7 +30,7 @@ class InvalidCursorError(ValueError):
 
 
 class CursorScopeMismatchError(InvalidCursorError):
-    """O cursor foi emitido para outros filtros ou outra direção."""
+    """O cursor foi emitido para outros filtros, outra direção ou outra conta."""
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,7 @@ def _parse_payload(raw: bytes) -> _Payload:
         payload = json.loads(raw)
     except ValueError as error:
         raise InvalidCursorError("payload do cursor inválido") from error
-    if not isinstance(payload, dict) or payload.get("v") != _FORMAT_VERSION:
+    if not isinstance(payload, dict) or not _is_current_version(payload.get("v")):
         raise InvalidCursorError("versão de cursor desconhecida")
     expires_at, created_at, run_id = payload.get("x"), payload.get("t"), payload.get("i")
     if not isinstance(expires_at, int) or not isinstance(created_at, str):
@@ -98,7 +98,15 @@ def _parse_payload(raw: bytes) -> _Payload:
         position = Position(datetime.fromisoformat(created_at), UUID(run_id))
     except ValueError as error:
         raise InvalidCursorError("posição do cursor inválida") from error
+    # Sem fuso, o PostgreSQL interpretaria o instante no fuso da sessão ao comparar o keyset.
+    if position.created_at.tzinfo is None:
+        raise InvalidCursorError("posição do cursor inválida")
     return _Payload(payload.get("d"), payload.get("f"), expires_at, position)
+
+
+def _is_current_version(raw: object) -> bool:
+    # `True == 1` e `1.0 == 1` em Python, mas `encode_cursor` só emite o inteiro.
+    return isinstance(raw, int) and not isinstance(raw, bool) and raw == _FORMAT_VERSION
 
 
 def _sign(body: str, secret: bytes) -> bytes:

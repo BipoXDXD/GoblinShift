@@ -592,6 +592,8 @@ def _inputs_changed(out: Path, change: str) -> object:
             manifest["recipe"]["id"] = "image-forge"
         case "receita-com-chave-extra":
             manifest["recipe"]["url"] = "https://exemplo.invalid"
+        case "entrada-nao-objeto":
+            inputs[0] = "a.csv"
     return manifest
 
 
@@ -608,6 +610,7 @@ def _inputs_changed(out: Path, change: str) -> object:
         "chave-extra-no-topo",
         "outra-receita",
         "receita-com-chave-extra",
+        "entrada-nao-objeto",
     ],
 )
 def test_manifesto_com_entradas_ou_receita_fora_do_relatorio_e_recusado(
@@ -633,6 +636,174 @@ def test_nome_com_bytes_utf8_invalidos_e_a_flag_e_recusado(tmp_path: Path) -> No
     rewrite_package(out, entries)
 
     with pytest.raises(CollectionError, match="pacote"):
+        collect(out)
+
+
+# --- Estrutura byte a byte: cada desvio é recusado pela regra que o descreve ---------------------
+
+# Deslocamentos do APPNOTE 4.3: fim do diretório central, entrada central e cabeçalho local.
+_END_BYTES = 22
+_END_DIRECTORY_SIZE, _END_DIRECTORY_AT = 12, 16
+_CENTRAL_FIXED_BYTES = 46
+_CENTRAL_COMPRESSED, _CENTRAL_NAME_LENGTH, _CENTRAL_LOCAL_AT = 20, 28, 42
+_LOCAL_COMPRESSED, _LOCAL_FIXED_BYTES = 18, 30
+_U16, _U32 = "<H", "<I"
+_HIDDEN = b"conteudo escondido"
+
+
+def _read(fmt: str, data: bytearray, at: int) -> int:
+    value: int = struct.unpack_from(fmt, data, at)[0]
+    return value
+
+
+def _central_positions(data: bytearray) -> list[int]:
+    """Onde começa cada entrada do diretório central de um pacote sem extras nem comentários."""
+    end_at = len(data) - _END_BYTES
+    at = _read(_U32, data, end_at + _END_DIRECTORY_AT)
+    positions = []
+    while at < end_at:
+        positions.append(at)
+        at += _CENTRAL_FIXED_BYTES + _read(_U16, data, at + _CENTRAL_NAME_LENGTH)
+    return positions
+
+
+def _insert_keeping_offsets_coherent(data: bytearray, at: int, centrals: list[int]) -> None:
+    """Insere bytes em `at` e corrige os ponteiros, para só a lacuna ficar fora do contrato."""
+    for central in centrals:
+        local_at = _read(_U32, data, central + _CENTRAL_LOCAL_AT)
+        struct.pack_into(_U32, data, central + _CENTRAL_LOCAL_AT, local_at + len(_HIDDEN))
+    end_at = len(data) - _END_BYTES
+    directory_at = _read(_U32, data, end_at + _END_DIRECTORY_AT)
+    struct.pack_into(_U32, data, end_at + _END_DIRECTORY_AT, directory_at + len(_HIDDEN))
+    data[at:at] = _HIDDEN
+
+
+def test_bytes_escondidos_entre_duas_entradas_sao_recusados(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    centrals = _central_positions(data)
+    second_local = _read(_U32, data, centrals[1] + _CENTRAL_LOCAL_AT)
+    _insert_keeping_offsets_coherent(data, second_local, centrals[1:])
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="dados fora das entradas"):
+        collect(out)
+
+
+def test_bytes_escondidos_antes_do_diretorio_central_sao_recusados(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    directory_at = _read(_U32, data, len(data) - _END_BYTES + _END_DIRECTORY_AT)
+    _insert_keeping_offsets_coherent(data, directory_at, [])
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="dados fora das entradas"):
+        collect(out)
+
+
+@pytest.mark.parametrize(
+    ("kept", "message"),
+    [
+        pytest.param(45, "diretório central truncado", id="menos-que-a-parte-fixa"),
+        pytest.param(46, "nome ou flags fora do contrato", id="so-a-parte-fixa"),
+    ],
+)
+def test_ultima_entrada_cortada_do_diretorio_central_e_recusada(
+    tmp_path: Path, kept: int, message: str
+) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    end_at = len(data) - _END_BYTES
+    size = _read(_U32, data, end_at + _END_DIRECTORY_SIZE)
+    last = _central_positions(data)[-1]
+    removed = end_at - (last + kept)
+    struct.pack_into(_U32, data, end_at + _END_DIRECTORY_SIZE, size - removed)
+    del data[last + kept : end_at]
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match=message):
+        collect(out)
+
+
+def test_assinatura_errada_no_diretorio_central_e_recusada(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    data[_central_positions(data)[0] + 3] ^= 0xFF
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="diretório central fora do contrato"):
+        collect(out)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("extra", id="campo-extra"),
+        pytest.param("comment", id="comentario"),
+    ],
+)
+def test_campo_opcional_na_ultima_entrada_central_e_recusado(tmp_path: Path, field: str) -> None:
+    out = valid_out(tmp_path)
+    entries = package_entries(out)
+    setattr(entries[-1][0], field, b"\x99\x99\x01\x00x")
+    rewrite_package(out, entries)
+
+    with pytest.raises(CollectionError, match="diretório central fora do contrato"):
+        collect(out)
+
+
+def test_bytes_depois_da_ultima_entrada_central_sao_recusados(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    end_at = len(data) - _END_BYTES
+    size = _read(_U32, data, end_at + _END_DIRECTORY_SIZE)
+    struct.pack_into(_U32, data, end_at + _END_DIRECTORY_SIZE, size + len(_HIDDEN))
+    data[end_at:end_at] = _HIDDEN
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="central além das entradas"):
+        collect(out)
+
+
+@pytest.mark.parametrize(
+    ("available", "message"),
+    [
+        pytest.param(29, "cabeçalho local truncado", id="um-byte-a-menos"),
+        pytest.param(30, "cabeçalho local diferente", id="cabecalho-inteiro"),
+    ],
+)
+def test_segunda_entrada_apontada_para_o_fim_do_arquivo_e_recusada(
+    tmp_path: Path, available: int, message: str
+) -> None:
+    # A primeira entrada declara, nos dois cabeçalhos, um tamanho que empurra a segunda até o fim.
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    first, second = _central_positions(data)[:2]
+    name_length = _read(_U16, data, first + _CENTRAL_NAME_LENGTH)
+    second_local = len(data) - available
+    forged_size = second_local - _LOCAL_FIXED_BYTES - name_length
+    struct.pack_into(_U32, data, _LOCAL_COMPRESSED, forged_size)
+    struct.pack_into(_U32, data, first + _CENTRAL_COMPRESSED, forged_size)
+    struct.pack_into(_U32, data, second + _CENTRAL_LOCAL_AT, second_local)
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match=message):
+        collect(out)
+
+
+_LOCAL_NAME_LENGTH, _LOCAL_EXTRA_LENGTH = 26, 28
+
+
+def test_campo_extra_so_no_cabecalho_local_com_o_central_limpo_e_recusado(tmp_path: Path) -> None:
+    out = valid_out(tmp_path)
+    data = bytearray((out / PACKAGE).read_bytes())
+    centrals = _central_positions(data)
+    name_length = _read(_U16, data, _LOCAL_NAME_LENGTH)
+    _insert_keeping_offsets_coherent(data, _LOCAL_FIXED_BYTES + name_length, centrals[1:])
+    struct.pack_into(_U16, data, _LOCAL_EXTRA_LENGTH, len(_HIDDEN))
+    (out / PACKAGE).write_bytes(bytes(data))
+
+    with pytest.raises(CollectionError, match="cabeçalho local diferente"):
         collect(out)
 
 

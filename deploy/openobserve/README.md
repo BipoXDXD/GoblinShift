@@ -153,7 +153,7 @@ O OpenObserve roda na própria VPS: se ela cair, ninguém avisa. Por isso estes 
 | `jornada com escrita` | healthchecks.io | 7 dias / 1 dia | workflow `e2e-producao` (upload, execução e download em produção depois de cada release e toda quarta; sucesso ou `/fail`, e nada quando a rodada é pulada por falta de cota) | secret de repositório `E2E_WRITE_HEALTHCHECK_URL` |
 | `/readyz` | Worker `goblinshift-uptime` da Cloudflare | 2 min; alerta depois de 2 falhas | `GET /readyz` esperando 200, com aviso direto no Discord ([deploy/uptime](../uptime/README.md)) | secret `DISCORD_WEBHOOK_URL` do Worker |
 
-A tolerância de 2 h dos checks do backup e da aceitação cobre o sorteio de até 30 min dos timers (`RandomizedDelaySec`) e a até 1 h de teste. A aceitação semanal para o worker por cerca de 10 a 30 minutos, no domingo de madrugada (07:30 UTC mais o sorteio, depois da janela do backup): as execuções aceitas nesse intervalo esperam na fila. Detalhes e instalação no README da raiz, "Teste de aceitação do ambiente".
+A tolerância de 2 h do check da aceitação cobre o sorteio de até 30 min do timer (`RandomizedDelaySec`) e a até 1 h de teste; o timer do backup não tem sorteio. A aceitação semanal para o worker por cerca de 10 a 30 minutos, no domingo de madrugada (07:30 UTC mais o sorteio, depois da janela do backup): as execuções aceitas nesse intervalo esperam na fila. Detalhes e instalação no README da raiz, "Teste de aceitação do ambiente".
 
 ## Segredos
 
