@@ -25,6 +25,7 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import Link, SpanContext, StatusCode, TraceFlags
 from psycopg import Error as PsycopgError
 from psycopg import OperationalError as PsycopgOperationalError
+from psycopg import errors as pg_errors
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 from uvicorn.logging import DefaultFormatter
@@ -82,6 +83,13 @@ class Canaries:
             f"/* {self.sql} */ SELECT 1 WHERE %(id)s IS NOT NULL",
             {"id": self.parameter},
             Exception(f'connection to server at "{self.host}", port 5432 failed'),
+        )
+
+    def permanent_database_error(self) -> OperationalError:
+        return OperationalError(
+            f"/* {self.sql} */ SELECT currval(%(id)s)",
+            {"id": self.parameter},
+            pg_errors.lookup("55000")(f'currval em "{self.host}"'),
         )
 
     def storage_error(self) -> OSError:
@@ -151,6 +159,10 @@ def _download_routes(canaries: Canaries) -> APIRouter:
     @router.get("/plain-fails")
     def plain_fails() -> None:
         raise_database_error()
+
+    @router.get("/plain-fails-permanent")
+    def plain_fails_permanent() -> None:
+        raise canaries.permanent_database_error()
 
     @router.get("/plain-fails-outside-database")
     def plain_fails_outside_database() -> None:
@@ -288,8 +300,8 @@ def test_rota_comum_que_falha_antes_da_resposta_sai_sem_eventos_e_sem_detalhe(
 
     response = traced.client.get(f"{TEST_ROUTES}/plain-fails")
 
-    assert response.status_code == 500
-    assert response.json()["code"] == "INTERNAL_ERROR"
+    assert response.status_code == 503
+    assert response.json()["code"] == "SERVICE_UNAVAILABLE"
     _assert_no_canary_in_otlp(traced)
     assert traced.exporter.main_span().events == ()
 
@@ -324,7 +336,7 @@ def test_log_do_500_comum_com_erro_de_banco_nao_traz_canario(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    traced.client.get(f"{TEST_ROUTES}/plain-fails")
+    traced.client.get(f"{TEST_ROUTES}/plain-fails-permanent")
 
     _assert_no_canary_in_logs(traced)
 
@@ -334,11 +346,11 @@ def test_log_do_erro_de_banco_mantem_o_tipo_e_os_frames(
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    traced.client.get(f"{TEST_ROUTES}/plain-fails")
+    traced.client.get(f"{TEST_ROUTES}/plain-fails-permanent")
 
     output = traced.log.getvalue()
     assert OPERATIONAL_ERROR_TYPE in output
-    assert "raise_database_error" in output
+    assert "plain_fails_permanent" in output
     [record] = [r for r in caplog.records if r.name.endswith(".problems")]
     assert record.exc_info is not None
 

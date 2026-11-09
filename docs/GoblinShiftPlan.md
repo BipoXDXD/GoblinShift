@@ -993,7 +993,7 @@ Pillow é conferido por dimensões, orientação e transparência; CSV por valor
 
 **Alertas.** Só o que é acionável, importante e urgente ([B29](GoblinShiftReferencias.md#l-9), cap. 10). Há dois tipos:
 - *Queima de orçamento* (sintoma): alerta relativo sobre janelas de 15 minutos e de 1 hora. Queima de 2× o ritmo permitido, sustentada, gera aviso; 4× ou mais gera alerta urgente. Uma janela só dispara com um mínimo de eventos elegíveis, porque, com pouco tráfego, uma falha em vinte requisições não pode acordar ninguém.
-- *Causas conhecidas com ação clara*: filesystem de storage, do PostgreSQL ou da telemetria acima de 85%; backup diário que falhou; teste de aceitação do ambiente falhando; fila global cheia por mais de 15 minutos; execução presa em `stopping` por mais de 10 minutos; certificado TLS a menos de 14 dias de vencer; limitador de exclusões da manutenção acionado; manutenção com ciclos falhando ou sem concluir voltas; stream de traces sem eventos.
+- *Causas conhecidas com ação clara*: filesystem de storage, do PostgreSQL ou da telemetria acima de 85%; backup diário que falhou; teste de aceitação do ambiente falhando; fila global cheia por mais de 15 minutos; execução presa em `stopping` por mais de 10 minutos; certificado TLS a menos de 14 dias de vencer; limitador de exclusões da manutenção acionado; manutenção com ciclos falhando ou sem concluir voltas; executor que não inicia em três tentativas; stream de traces sem eventos.
 
 Consumo de conta perto da cota não é alerta, é informação no painel.
 
