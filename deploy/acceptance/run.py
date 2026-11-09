@@ -21,7 +21,7 @@ As sondas precisam de um comando e de uma montagem a mais (o probe.py), que o pr
 executor-ctl de propósito não aceita. Por isso o teste não passa pelo socket para rodá-las: monta o
 `docker run` com as MESMAS opções do perfil de produção (`executor_ctl.profile.run_options`) e as
 mesmas regras da área (`executor_ctl.workarea`), lidas da configuração instalada. O socket é
-conferido à parte; as quatro operações são cobertas pelos testes de integração
+conferido à parte; as operações são cobertas pelos testes de integração
 (tests/executor_ctl), que a CI roda sob runsc.
 
 Por serem idênticas a uma tentativa de produção (`<área>/<uuid>` e `gs-exec-<uuid>`) mas sem linha

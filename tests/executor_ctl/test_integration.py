@@ -1,4 +1,4 @@
-"""executor-ctl com Docker real: as quatro operações sobre containers de verdade.
+"""executor-ctl com Docker real: as operações contra um daemon de verdade.
 
 O runtime vem de GS_TEST_RUNTIME (padrão runc, o que existe no Mac); a CI roda também com
 runsc, o runtime de produção. A imagem de teste é construída aqui, com um executor de mentira
