@@ -12,12 +12,15 @@ mkdir "$stage/images"
 python3 "$script_dir/send.py" requested > "$stage/requested.tsv"
 while IFS=$'\t' read -r role reference; do
   crane manifest "$reference" > "$stage/index.json"
-  # Exit 1 is jq's only "not an index" answer; any other failure means the manifest was unreadable.
+  # Exit 1 is the only "not an index" answer. `has` alone also answers false for a null document.
   has_manifests_rc=0
-  jq -e 'has("manifests")' "$stage/index.json" >/dev/null 2>&1 || has_manifests_rc=$?
+  jq -e 'if type == "object" then has("manifests") else error("not an object") end' "$stage/index.json" >/dev/null 2>&1 || has_manifests_rc=$?
   case "$has_manifests_rc" in
     0)
-      digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$stage/index.json")
+      digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$stage/index.json" 2>/dev/null) || {
+        printf 'Cannot resolve the linux/amd64 digest from the index for role %s\n' "$role" >&2
+        exit 1
+      }
       ;;
     1)
       digest=$(crane digest "$reference")

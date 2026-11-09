@@ -1,11 +1,13 @@
 """send.sh and the workflow scan step tell an OCI index from a single image by jq's exit status.
 
-Only status 1 means "not an index". Any other failure must stop the release instead of falling
-through to `crane digest`. Registry and transport commands are stubs; jq and bash are real.
+Only status 1 on a JSON object means "not an index". Any other failure must stop the release
+instead of falling through to `crane digest`, and jq's own diagnostics must stay out of the log.
+Registry and transport commands are stubs; jq and bash are real.
 """
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -30,6 +32,10 @@ CANARY = "CANARY-7f3a91"
 ROLE_COUNT = 3
 FIRST_ROLE = "app"
 ERROR_MESSAGE = rf"^Cannot classify registry manifest for role {FIRST_ROLE} \(jq exit \d+\)$"
+INDEX_ERROR_MESSAGE = (
+    rf"^Cannot resolve the linux/amd64 digest from the index for role {FIRST_ROLE}$"
+)
+TOOLS_BESIDES_JQ = ("bash", "cat", "dirname", "find", "mkdir", "mktemp", "rm", "tar")
 
 INDEX_MANIFEST = json.dumps(
     {
@@ -146,7 +152,28 @@ def write_manifests(manifests_dir: Path, manifests: list[str | None]) -> None:
             (manifests_dir / str(call)).write_text(manifest)
 
 
-def run_target(target: Target, manifests: list[str | None]) -> Outcome:
+def search_path_with_jq(bin_dir: Path) -> str:
+    return f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+
+
+def search_path_without_jq(bin_dir: Path) -> str:
+    """Only the other tools, so the jq call gets a real `command not found` (status 127)."""
+    for tool in TOOLS_BESIDES_JQ:
+        located = shutil.which(tool)
+        if located is None:
+            raise FileNotFoundError(tool)
+        (bin_dir / tool).symlink_to(located)
+    return str(bin_dir)
+
+
+SearchPath = Callable[[Path], str]
+
+
+def run_target(
+    target: Target,
+    manifests: list[str | None],
+    search_path: SearchPath = search_path_with_jq,
+) -> Outcome:
     with tempfile.TemporaryDirectory() as raw_root:
         root = Path(raw_root)
         stub_dir = root / "stub"
@@ -163,7 +190,7 @@ def run_target(target: Target, manifests: list[str | None]) -> Outcome:
         (stub_dir / "requested.tsv").write_text(REQUESTED_ROLES)
         (stub_dir / "calls.log").touch()
         environment = {
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "PATH": search_path(bin_dir),
             "STUB_DIR": str(stub_dir),
             "STUB_SINGLE_DIGEST": SINGLE_DIGEST,
             "TMPDIR": str(work_dir),
@@ -175,7 +202,7 @@ def run_target(target: Target, manifests: list[str | None]) -> Outcome:
             "DEPLOY_KNOWN_HOSTS": str(stub_dir / "known_hosts"),
             "TRIVY_IMAGE": "trivy-stub",
         }
-        completed = subprocess.run(
+        completed = subprocess.run(  # noqa: S603 - argv fixo do teste, sem shell
             target(stub_dir),
             env=environment,
             capture_output=True,
@@ -188,6 +215,15 @@ def run_target(target: Target, manifests: list[str | None]) -> Outcome:
 
 
 class ManifestClassificationTests(unittest.TestCase):
+    def assert_release_stopped(self, outcome: Outcome, message: str) -> None:
+        self.assertEqual(outcome.returncode, 1, outcome.stderr)
+        self.assertRegex(outcome.stderr.strip(), message)
+        self.assertNotIn(CANARY, outcome.stdout + outcome.stderr)
+        self.assertEqual(outcome.called("crane digest"), ())
+        self.assertEqual(outcome.called("crane pull"), ())
+        self.assertEqual(outcome.called("docker"), ())
+        self.assertEqual(outcome.called("ssh"), ())
+
     def test_index_resolves_platform_digest_without_asking_the_registry(self) -> None:
         for target in TARGETS:
             with self.subTest(target=target.__name__):
@@ -221,19 +257,40 @@ class ManifestClassificationTests(unittest.TestCase):
             "absent_file": None,
             "empty_file": "",
             "json_array": f'["{CANARY}"]',
+            "null_literal": "null",
         }
         for target in TARGETS:
             for case, manifest in unreadable.items():
                 with self.subTest(target=target.__name__, case=case):
                     outcome = run_target(target, [manifest] * ROLE_COUNT)
 
-                    self.assertEqual(outcome.returncode, 1, outcome.stderr)
-                    self.assertRegex(outcome.stderr.strip(), ERROR_MESSAGE)
-                    self.assertNotIn(CANARY, outcome.stdout + outcome.stderr)
-                    self.assertEqual(outcome.called("crane digest"), ())
-                    self.assertEqual(outcome.called("crane pull"), ())
-                    self.assertEqual(outcome.called("docker"), ())
-                    self.assertEqual(outcome.called("ssh"), ())
+                    self.assert_release_stopped(outcome, ERROR_MESSAGE)
+
+    def test_missing_jq_stops_the_release(self) -> None:
+        for target in TARGETS:
+            with self.subTest(target=target.__name__):
+                outcome = run_target(target, [INDEX_MANIFEST] * ROLE_COUNT, search_path_without_jq)
+
+                self.assert_release_stopped(outcome, ERROR_MESSAGE)
+
+    def test_index_without_one_amd64_digest_stops_the_release(self) -> None:
+        linux = {"os": "linux", "architecture": "amd64"}
+        amd64 = {"digest": INDEX_DIGEST, "platform": linux}
+        arm64 = {"digest": OTHER_PLATFORM_DIGEST, "platform": {**linux, "architecture": "arm64"}}
+        unusable: dict[str, object] = {
+            "manifests_string": CANARY,
+            "manifests_null": None,
+            "no_amd64": [arm64],
+            "two_amd64": [amd64, amd64],
+        }
+        for target in TARGETS:
+            for case, manifests in unusable.items():
+                with self.subTest(target=target.__name__, case=case):
+                    manifest = json.dumps({"manifests": manifests})
+
+                    outcome = run_target(target, [manifest] * ROLE_COUNT)
+
+                    self.assert_release_stopped(outcome, INDEX_ERROR_MESSAGE)
 
 
 if __name__ == "__main__":
