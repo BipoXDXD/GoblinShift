@@ -32,8 +32,10 @@ from starlette.routing import Match
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from goblinshift.entrypoints.api.wide_event import record_error
+from goblinshift.platform.telemetry import omit_database_error_detail
 
 logger = logging.getLogger(__name__)
+UVICORN_ERROR_LOGGER = "uvicorn.error"
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
@@ -221,6 +223,9 @@ class ApiProblem(Exception):  # noqa: N818
 
 
 def install_problem_handlers(app: FastAPI) -> None:
+    # O Uvicorn loga de novo a exceção que sobe depois de a resposta começar.
+    for logger_name in (__name__, UVICORN_ERROR_LOGGER):
+        logging.getLogger(logger_name).addFilter(omit_database_error_detail)
     app.add_middleware(RequestContextMiddleware)
     app.exception_handler(ApiProblem)(_handle_api_problem)
     app.exception_handler(RequestValidationError)(_handle_validation_error)

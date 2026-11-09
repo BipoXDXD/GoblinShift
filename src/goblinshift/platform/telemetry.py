@@ -10,6 +10,8 @@ import ipaddress
 import json
 import logging
 import os
+import traceback
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -26,6 +28,7 @@ from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
 from opentelemetry.trace import Span, Status, StatusCode, get_current_span
 from sqlalchemy import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from goblinshift.platform.settings import Settings
 
@@ -45,8 +48,47 @@ class JsonFormatter(logging.Formatter):
         if isinstance(fields, dict):
             entry.update(fields)
         if record.exc_info:
-            entry["exception"] = self.formatException(record.exc_info)
+            entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
+
+
+def omit_database_error_detail(record: logging.LogRecord) -> bool:
+    """Filtro de logger: exceção com erro de banco na cadeia sai só com tipos e frames.
+
+    A mensagem do SQLAlchemy traz host, SQL e o `DETAIL` do PostgreSQL, com valores do usuário
+    (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar `exc_info`:
+    o registro continua com a exceção. Qualquer outra exceção sai inteira.
+    """
+    exception = record.exc_info[1] if record.exc_info else None
+    if exception is None:
+        return True
+    chain = list(_exception_chain(exception))
+    if any(isinstance(item, SQLAlchemyError) for item in chain):
+        record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
+    return True
+
+
+def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
+    """A exceção e as que o traceback mostraria: causa, contexto e membros de grupo."""
+    pending = [exception]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        linked = current.__cause__ if current.__suppress_context__ else current.__context__
+        if linked is not None:
+            pending.append(linked)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+
+
+def _type_and_frames(exception: BaseException) -> str:
+    frames = "".join(traceback.format_tb(exception.__traceback__))
+    kind = type(exception)
+    return f"Traceback (most recent call last):\n{frames}{kind.__module__}.{kind.__qualname__}"
 
 
 class AlertEventCounter(logging.Handler):

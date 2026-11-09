@@ -19,10 +19,15 @@ from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import StatusCode
-from sqlalchemy.exc import OperationalError
+from psycopg import Error as PsycopgError
+from psycopg import OperationalError as PsycopgOperationalError
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError
+from uvicorn.logging import DefaultFormatter
 
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.transfers import DownloadResponse, TransferTimeouts
+from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import JsonFormatter
 
@@ -133,6 +138,10 @@ def _download_routes(canaries: Canaries) -> APIRouter:
     def plain_fails() -> None:
         raise_database_error()
 
+    @router.get("/plain-fails-outside-database")
+    def plain_fails_outside_database() -> None:
+        raise canaries.storage_error()
+
     return router
 
 
@@ -220,13 +229,6 @@ def test_download_interrompido_continua_no_log_com_o_request_id_e_a_excecao(
     assert isinstance(record.exc_info[1], OperationalError)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "vazamento conhecido: o log leva str(exceção) com host, SQL e parâmetros; "
-        "mudar isso é decisão do dono (custo de diagnóstico)"
-    ),
-)
 def test_log_do_download_interrompido_nao_traz_canario(
     traced: Traced, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -269,3 +271,172 @@ def test_rota_comum_que_falha_antes_da_resposta_sai_sem_eventos_e_sem_detalhe(
     assert response.json()["code"] == "INTERNAL_ERROR"
     _assert_no_canary_in_otlp(traced)
     assert traced.exporter.main_span().events == ()
+
+
+# Log: erro de banco só com tipo e frames; o resto, por inteiro
+
+
+def _json_log(caplog: pytest.LogCaptureFixture) -> str:
+    formatter = JsonFormatter()
+    return "\n".join(formatter.format(record) for record in caplog.records)
+
+
+def _uvicorn_log(caplog: pytest.LogCaptureFixture, error: BaseException) -> str:
+    """O que o Uvicorn escreve ao receber a exceção da aplicação, com o formatador dele."""
+    logging.getLogger("uvicorn.error").error("Exception in ASGI application\n", exc_info=error)
+    [record] = [r for r in caplog.records if r.name == "uvicorn.error"]
+    return DefaultFormatter("%(levelprefix)s %(message)s", use_colors=False).format(record)
+
+
+def _raised(error: Exception) -> Exception:
+    try:
+        raise error
+    except Exception as caught:
+        return caught
+
+
+def test_log_do_500_comum_com_erro_de_banco_nao_traz_canario(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    traced.client.get(f"{TEST_ROUTES}/plain-fails")
+
+    _assert_no_canary_in_logs(traced, caplog)
+
+
+def test_log_do_erro_de_banco_mantem_o_tipo_e_os_frames(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    traced.client.get(f"{TEST_ROUTES}/plain-fails")
+
+    output = _json_log(caplog)
+    assert OPERATIONAL_ERROR_TYPE in output
+    assert "raise_database_error" in output
+    [record] = [r for r in caplog.records if r.name.endswith(".problems")]
+    assert record.exc_info is not None
+
+
+@pytest.mark.parametrize(
+    "route",
+    ["interrupted", "plain-fails-outside-database"],
+)
+def test_excecao_que_nao_e_de_banco_continua_no_log_por_inteiro(
+    traced: Traced, caplog: pytest.LogCaptureFixture, route: str
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    traced.client.get(f"{TEST_ROUTES}/{route}")
+
+    assert f"OSError: falha ao ler {traced.canaries.path}" in _json_log(caplog)
+
+
+def test_uvicorn_nao_escreve_o_detalhe_do_erro_de_banco(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    output = _uvicorn_log(caplog, _raised(traced.canaries.database_error()))
+
+    assert [canary for canary in traced.canaries.all() if canary in output] == []
+    assert OPERATIONAL_ERROR_TYPE in output
+    assert "Exception in ASGI application" in output
+
+
+def test_uvicorn_escreve_por_inteiro_a_excecao_que_nao_e_de_banco(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    output = _uvicorn_log(caplog, _raised(traced.canaries.storage_error()))
+
+    assert f"OSError: falha ao ler {traced.canaries.path}" in output
+
+
+def _wrapped_with_cause(canaries: Canaries) -> Exception:
+    try:
+        raise canaries.database_error()
+    except OperationalError as error:
+        try:
+            raise RuntimeError("falha ao encerrar") from error
+        except RuntimeError as wrapper:
+            return wrapper
+
+
+def _wrapped_with_context(canaries: Canaries) -> Exception:
+    try:
+        raise canaries.database_error()
+    except OperationalError:
+        try:
+            raise RuntimeError("falha ao encerrar")  # noqa: B904 - o teste exige o contexto implícito
+        except RuntimeError as wrapper:
+            return wrapper
+
+
+def _grouped(canaries: Canaries) -> Exception:
+    return _raised(ExceptionGroup("grupo", [_raised(canaries.database_error())]))
+
+
+@pytest.mark.parametrize("build", [_wrapped_with_cause, _wrapped_with_context, _grouped])
+def test_erro_de_banco_em_qualquer_ponto_da_cadeia_tira_as_mensagens(
+    traced: Traced,
+    caplog: pytest.LogCaptureFixture,
+    build: Callable[[Canaries], Exception],
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    output = _uvicorn_log(caplog, build(traced.canaries))
+
+    assert [canary for canary in traced.canaries.all() if canary in output] == []
+    assert OPERATIONAL_ERROR_TYPE in output
+
+
+def test_excecao_que_descarta_o_erro_de_banco_com_from_none_fica_inteira(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+    canaries = traced.canaries
+    try:
+        raise canaries.database_error()
+    except OperationalError:
+        try:
+            raise ValueError(f"sem relação {canaries.path}") from None
+        except ValueError as replaced:
+            output = _uvicorn_log(caplog, replaced)
+
+    assert f"ValueError: sem relação {canaries.path}" in output
+    assert canaries.sql not in output
+
+
+# Engine: `hide_parameters`
+
+
+def test_engine_nao_poe_o_parametro_na_mensagem_do_erro() -> None:
+    canary = _new_canary()
+    engine = make_engine(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+
+    # Como o `Connection` constrói o erro do driver, com o valor do engine.
+    error = DBAPIError.instance(
+        "SELECT 1 WHERE %(k)s IS NOT NULL",
+        {"k": canary},
+        PsycopgOperationalError("falhou"),
+        PsycopgError,
+        hide_parameters=engine.hide_parameters,
+    )
+
+    assert canary not in str(error)
+    assert "SQL parameters hidden" in str(error)
+
+
+@pytest.mark.integration
+def test_erro_real_do_postgres_nao_traz_o_parametro(db_settings: Settings) -> None:
+    canary = _new_canary()
+    engine = make_engine(db_settings)
+
+    with engine.connect() as conn, pytest.raises(DBAPIError) as caught:
+        conn.execute(text("SELECT 1 / 0, CAST(:k AS text)"), {"k": canary})
+
+    assert canary not in str(caught.value)
+    assert "SQL parameters hidden" in str(caught.value)
