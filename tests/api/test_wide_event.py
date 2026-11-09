@@ -334,7 +334,8 @@ def test_consulta_que_falha_entra_na_contagem_e_nao_deixa_inicio_pendente(traced
 def test_sem_spans_de_send_e_receive(traced: Traced) -> None:
     traced.client.post(ECHO, json={"text": "x"})
 
-    assert len(traced.spans()) == 1
+    # As consultas da requisição têm spans próprios; aqui só interessa o que veio do ASGI.
+    assert len([s for s in traced.spans() if "db.system" not in (s.attributes or {})]) == 1
 
 
 # POST /runs: aceitação e replay
@@ -445,6 +446,8 @@ def test_canario_em_credencial_cookie_agente_chave_query_nome_e_parametro_nunca_
 
     spans = traced.spans()
     assert len([s for s in spans if (s.attributes or {}).get("main") is True]) == 5
+    # Sem consulta exportada, a busca do canário abaixo não provaria nada sobre os parâmetros.
+    assert any("db.statement" in (s.attributes or {}) for s in spans)
     for span in spans:
         assert "CANARY-" not in _span_text(span), span.name
 
