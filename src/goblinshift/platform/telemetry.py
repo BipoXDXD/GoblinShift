@@ -10,6 +10,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import traceback
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -36,6 +37,9 @@ from goblinshift.platform.settings import Settings
 ALERT_ATTRIBUTE_PREFIX = "alert."
 UVICORN_ERROR_LOGGER = "uvicorn.error"
 _DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
+_POOL_LOGGER_PREFIX = "sqlalchemy.pool"
+# O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
+_PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
 
 
 class JsonFormatter(logging.Formatter):
@@ -60,8 +64,12 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
 
     A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
     do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
-    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira.
+    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira. As mensagens
+    do pool perdem o repr da conexão.
     """
+    if record.name.startswith(_POOL_LOGGER_PREFIX):
+        record.msg = _PSYCOPG_CONNECTION_REPR.sub("<psycopg connection>", record.getMessage())
+        record.args = None
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
