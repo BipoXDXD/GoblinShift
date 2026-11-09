@@ -87,7 +87,7 @@ def _parse_payload(raw: bytes) -> _Payload:
         payload = json.loads(raw)
     except ValueError as error:
         raise InvalidCursorError("payload do cursor inválido") from error
-    if not isinstance(payload, dict) or payload.get("v") != _FORMAT_VERSION:
+    if not isinstance(payload, dict) or not _is_current_version(payload.get("v")):
         raise InvalidCursorError("versão de cursor desconhecida")
     expires_at, created_at, run_id = payload.get("x"), payload.get("t"), payload.get("i")
     if not isinstance(expires_at, int) or not isinstance(created_at, str):
@@ -98,7 +98,15 @@ def _parse_payload(raw: bytes) -> _Payload:
         position = Position(datetime.fromisoformat(created_at), UUID(run_id))
     except ValueError as error:
         raise InvalidCursorError("posição do cursor inválida") from error
+    # Sem fuso, o PostgreSQL interpretaria o instante no fuso da sessão ao comparar o keyset.
+    if position.created_at.tzinfo is None:
+        raise InvalidCursorError("posição do cursor inválida")
     return _Payload(payload.get("d"), payload.get("f"), expires_at, position)
+
+
+def _is_current_version(raw: object) -> bool:
+    # `True == 1` e `1.0 == 1` em Python, mas `encode_cursor` só emite o inteiro.
+    return isinstance(raw, int) and not isinstance(raw, bool) and raw == _FORMAT_VERSION
 
 
 def _sign(body: str, secret: bytes) -> bytes:
