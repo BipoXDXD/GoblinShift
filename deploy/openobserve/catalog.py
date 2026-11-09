@@ -139,6 +139,8 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_candidates_left_on_disk",
     "maintenance_missing_sweep_failed",
     "maintenance_failed_cycles",
+    "maintenance_executor_image_missing",
+    "maintenance_executor_image_probe_failed",
     "alert_purge_file_not_removed",
     "alert_capacity_divergence",
     "alert_capacity_over_max",
@@ -277,6 +279,22 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-imagem-executor-ausente",
+        "A imagem do executor saiu do daemon e a próxima Run vai falhar: o executor-ctl não baixa "
+        "imagem. Refaça a release ou o docker pull do digest; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-sonda-imagem-falhou",
+        "A sonda da imagem do executor falhou em dez voltas ou mais nos últimos 10 min: Docker ou "
+        "executor-ctl parados. O log da manutenção traz o motivo; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
     ),
     _SpanCause(
         "causa-manutencao-sem-ciclo",
