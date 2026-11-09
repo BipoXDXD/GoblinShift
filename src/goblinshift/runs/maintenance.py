@@ -374,7 +374,8 @@ class Maintenance:
         """Apaga os temporários que uma queda deixou no storage e mede o que ficou no diretório.
 
         Eles ficam fora do livro-razão e do `file_backlog`. Isolada do resto do ciclo, como a
-        varredura de ausentes: uma falha de disco fica no log e em `tmp_parts_sweep_failed`.
+        varredura de ausentes: uma falha de disco, no diretório ou em um arquivo, fica no log e
+        em `tmp_parts_sweep_failed`.
         """
         # O `mtime` vem do relógio desta máquina, e não do banco: é com ele que se compara.
         modified_before = time.time() - STALE_TEMPORARY_TTL.total_seconds()
@@ -394,7 +395,7 @@ class Maintenance:
             "tmp_parts_removed": sweep.removed,
             "tmp_parts": sweep.remaining,
             "tmp_parts_bytes": sweep.remaining_bytes,
-            "tmp_parts_sweep_failed": 0,
+            "tmp_parts_sweep_failed": int(sweep.failed > 0),
         }
 
     def mark_missing_objects(self) -> dict[str, int]:

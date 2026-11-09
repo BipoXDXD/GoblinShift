@@ -613,3 +613,30 @@ def test_falha_ao_varrer_temporarios_nao_impede_o_resto_do_ciclo(
     assert counts["tmp_parts_removed"] == 0
     assert "storage_global_max_bytes" in counts
     assert "limpeza de temporários falhou" in caplog.messages
+
+
+def test_falha_ao_apagar_um_temporario_marca_o_ciclo_e_limpa_os_demais(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old = timedelta(hours=2)
+    for name in (f"{'a' * 32}.part", f"{'b' * 32}.part"):
+        plant_temporary(storage, name, old, b"ab")
+    original = Path.unlink
+    denied = iter([PermissionError(errno.EACCES, "recusado")])
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        for failure in denied:
+            raise failure
+        original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert counts["tmp_parts_removed"] == 1
+    assert counts["tmp_parts"] == 1
+    assert counts["tmp_parts_bytes"] == len(b"ab")
+    assert counts["tmp_parts_sweep_failed"] == 1

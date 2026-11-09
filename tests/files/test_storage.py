@@ -1,6 +1,8 @@
 """Storage em filesystem (docs/GoblinShiftPlan.md, 3.2 e 3.6), sem banco."""
 
+import errno
 import hashlib
+import logging
 import os
 import stat
 import time
@@ -167,6 +169,8 @@ OTHER_PART_NAME = f"{'b' * 32}.part"
 THIRD_PART_NAME = f"{'c' * 32}.part"
 NO_LIMIT = 500
 NOTHING = TemporarySweep(removed=0, remaining=0, remaining_bytes=0)
+STORAGE_LOGGER = "goblinshift.files.storage"
+REMOVAL_FAILED = "temporário não removido"
 
 
 def plant_temporary(
@@ -256,7 +260,14 @@ def test_varredura_remove_no_maximo_o_teto_e_conta_o_que_sobrou(
 
 
 @pytest.mark.parametrize(
-    "name", ["abc.part", ".part", f"{'a' * 32}.txt", f"{'A' * 32}.part", f"{'a' * 33}.part"]
+    "name",
+    [
+        "abc.part",
+        ".part",
+        f"{'a' * 32}.txt",
+        f"{'A' * 32}.part",
+        f"{'a' * 33}.part",
+    ],
 )
 def test_varredura_ignora_nome_que_nao_e_de_temporario_do_storage(
     tmp_path: Path, name: str
@@ -309,3 +320,66 @@ def test_varredura_nao_atinge_o_temporario_de_uma_gravacao_em_curso(tmp_path: Pa
     assert sweeps[0].remaining == 1
     with storage.open("uploads/em-curso") as stored:
         assert stored.read() == b"primeira partesegunda parte"
+
+
+def fail_unlink(monkeypatch: pytest.MonkeyPatch, times: int) -> None:
+    """As `times` primeiras remoções recusam; `unlink` de um arquivo não falha sozinho no POSIX."""
+    original = Path.unlink
+    denied = iter(range(times))
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        if next(denied, None) is not None:
+            raise PermissionError(errno.EACCES, "recusado", str(self))
+        original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+
+def plant_stale_parts(storage: FileStorage, content: bytes) -> None:
+    for name in (PART_NAME, OTHER_PART_NAME, THIRD_PART_NAME):
+        plant_temporary(storage, name, CUTOFF - 10, content)
+
+
+def removal_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage() == REMOVAL_FAILED]
+
+
+def test_falha_ao_apagar_um_temporario_nao_impede_os_demais_e_fica_registrada(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=1)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    [survivor] = list((tmp_path / ".tmp").iterdir())
+    [failure] = removal_failures(caplog)
+    assert sweep == TemporarySweep(removed=2, remaining=1, remaining_bytes=2, failed=1)
+    assert failure.__dict__["fields"] == {"tmp_part": survivor.name}
+    assert failure.exc_info is not None
+    assert failure.exc_info[0] is PermissionError
+
+
+def test_tentativas_que_falham_contam_no_teto_da_varredura(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=3)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, 2)
+
+    assert sweep == TemporarySweep(removed=0, remaining=3, remaining_bytes=6, failed=2)
+    assert len(removal_failures(caplog)) == 2
+    assert len(list((tmp_path / ".tmp").iterdir())) == 3
+
+
+def test_erro_ao_listar_o_diretorio_de_temporarios_continua_subindo(tmp_path: Path) -> None:
+    # `.tmp` como arquivo: `scandir` levanta `NotADirectoryError` de verdade.
+    (tmp_path / ".tmp").write_bytes(b"")
+
+    with pytest.raises(NotADirectoryError):
+        FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT)

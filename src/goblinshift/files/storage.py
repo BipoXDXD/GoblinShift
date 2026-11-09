@@ -14,6 +14,7 @@ SIGKILL. `sweep_stale_temporaries` é a limpeza que a manutenção faz deles.
 """
 
 import hashlib
+import logging
 import os
 import re
 import uuid
@@ -22,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from stat import S_ISREG
 from typing import BinaryIO
+
+logger = logging.getLogger(__name__)
 
 # Segmentos só com caracteres seguros e sem começar por ponto: barra `.`, `..`, ocultos e o
 # diretório de temporários. O comprimento total limita o caminho bem abaixo do PATH_MAX.
@@ -72,6 +75,8 @@ class TemporarySweep:
     # O que ficou no diretório: gravações em curso e o que passou do teto da varredura.
     remaining: int
     remaining_bytes: int
+    # Temporários vencidos que o sistema recusou apagar; também contam em `remaining`.
+    failed: int = 0
 
 
 class FileStorage:
@@ -144,19 +149,23 @@ class FileStorage:
 
         O corte precisa ser maior que o intervalo em que uma gravação viva pode ficar sem escrever.
         Compara com o `mtime`, então `modified_before` vem do relógio da própria máquina. Falha
-        de E/S sobe; arquivo que some durante a varredura é sucesso (o estado final é o mesmo).
+        ao listar o diretório sobe; a de um arquivo fica no log e em `failed`, sem parar os
+        demais, e conta no teto, que limita as tentativas e o log de cada varredura. Arquivo que
+        some durante a varredura é sucesso (o estado final é o mesmo).
         """
         removed = 0
+        failed = 0
         remaining = 0
         remaining_bytes = 0
         for entry, info in self._temporary_parts():
-            if info.st_mtime < modified_before and removed < limit:
-                Path(entry.path).unlink(missing_ok=True)
-                removed += 1
-            else:
-                remaining += 1
-                remaining_bytes += info.st_size
-        return TemporarySweep(removed, remaining, remaining_bytes)
+            if info.st_mtime < modified_before and removed + failed < limit:
+                if _unlink_temporary(entry):
+                    removed += 1
+                    continue
+                failed += 1
+            remaining += 1
+            remaining_bytes += info.st_size
+        return TemporarySweep(removed, remaining, remaining_bytes, failed)
 
     def _temporary_parts(self) -> list[tuple[os.DirEntry[str], os.stat_result]]:
         """Temporários do storage: arquivos comuns com o nome gerado, sem seguir symlink."""
@@ -187,6 +196,17 @@ class FileStorage:
         missing = [d for d in [directory, *directory.parents] if not d.exists()]
         for path in reversed(missing):
             path.mkdir(mode=_DIR_MODE, exist_ok=True)
+
+
+def _unlink_temporary(entry: os.DirEntry[str]) -> bool:
+    try:
+        Path(entry.path).unlink(missing_ok=True)
+    except OSError:
+        logger.warning(
+            "temporário não removido", exc_info=True, extra={"fields": {"tmp_part": entry.name}}
+        )
+        return False
+    return True
 
 
 def _is_valid_key(key: str) -> bool:
