@@ -124,7 +124,8 @@ def truncate_client_address(address: str) -> str:
 
 REDACTED_EXCEPTION_DETAIL = "exception detail redacted"
 _EXCEPTION_EVENT_NAME = "exception"
-# O que resta do evento: o tipo, que agrupa as falhas, e se a exceção escapou do span.
+# O que resta do evento: o tipo, que agrupa as falhas, e `exception.escaped`, que o SDK grava sempre
+# como "False", mesmo quando a exceção escapa, e fica só para o evento manter a forma da convenção.
 _EXCEPTION_ATTRIBUTES_KEPT = ("exception.type", "exception.escaped")
 
 
@@ -135,6 +136,10 @@ def _without_main_exception_detail(span: ReadableSpan) -> ReadableSpan:
     à instrumentação. Com o status já enviado ela sobe, e a instrumentação grava `str(exceção)` e a
     pilha no evento `exception` e no status; no SQLAlchemy, `str()` traz host, SQL e parâmetros.
     O span terminado é imutável, então sai uma cópia.
+
+    O status só é trocado quando há evento `exception`, o que preserva o texto fixo do ciclo de
+    manutenção. Limite: com `OTEL_SPAN_EVENT_COUNT_LIMIT=0`, que não configuramos, não há evento
+    e o `str(exceção)` ficaria no status.
     """
     is_main = (span.attributes or {}).get("main") is True
     if not is_main or not any(event.name == _EXCEPTION_EVENT_NAME for event in span.events):
@@ -225,16 +230,17 @@ def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
         inner = BatchSpanProcessor(OTLPSpanExporter())
     else:
         return None
-    return DatabaseErrorRedactingProcessor(inner)
+    return ExceptionDetailRedactingProcessor(inner)
 
 
-class DatabaseErrorRedactingProcessor(SpanProcessor):
-    """Troca a descrição do erro dos spans do SQLAlchemy por um texto fixo antes de exportar.
+class ExceptionDetailRedactingProcessor(SpanProcessor):
+    """Tira o detalhe das exceções dos spans do SQLAlchemy e dos `main` antes de exportar.
 
     A instrumentação grava `str(exceção)` no status, e o PostgreSQL põe valores na mensagem:
     `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O código do erro
     da requisição já está no evento amplo (`error.code`) e a consulta, parametrizada, em
-    `db.statement`. O span terminado é imutável, então o processador repassa uma cópia.
+    `db.statement`. Nos spans `main`, ver `_without_main_exception_detail`. O span terminado é
+    imutável, então o processador repassa uma cópia.
     """
 
     def __init__(self, inner: SpanProcessor) -> None:
