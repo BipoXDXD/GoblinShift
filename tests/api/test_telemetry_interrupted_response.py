@@ -512,8 +512,11 @@ def test_erro_real_do_postgres_nao_traz_o_parametro(db_settings: Settings) -> No
     canary = _new_canary()
     engine = make_engine(db_settings)
 
-    with engine.connect() as conn, pytest.raises(DBAPIError) as caught:
-        conn.execute(text("SELECT 1 / 0, CAST(:k AS text)"), {"k": canary})
+    try:
+        with engine.connect() as conn, pytest.raises(DBAPIError) as caught:
+            conn.execute(text("SELECT 1 / 0, CAST(:k AS text)"), {"k": canary})
+    finally:
+        engine.dispose()
 
     assert canary not in str(caught.value)
     assert "SQL parameters hidden" in str(caught.value)
