@@ -1,8 +1,8 @@
 """Cursor opaco da listagem de execuções (docs/GoblinShiftPlan.md, 1.6 e 3.3).
 
-O cursor carrega a posição de keyset `(created_at, id)`, os filtros e a direção da consulta que o
-gerou, e vale 24 horas. É assinado com HMAC-SHA256 para que o cliente não forje posições nem troque
-filtros sem a API perceber; não é cifrado, porque só contém o que o próprio dono já viu.
+O cursor carrega a posição de keyset `(created_at, id)`, os filtros, a direção e o dono da consulta
+que o gerou, e vale 24 horas. É assinado com HMAC-SHA256 para que o cliente não forje posições nem
+troque filtros sem a API perceber; não é cifrado, porque só contém o que o próprio dono já viu.
 
 Formato: `base64url(payload JSON) "." base64url(HMAC)`, sem padding.
 """
@@ -30,7 +30,7 @@ class InvalidCursorError(ValueError):
 
 
 class CursorScopeMismatchError(InvalidCursorError):
-    """O cursor foi emitido para outros filtros ou outra direção."""
+    """O cursor foi emitido para outros filtros, outra direção ou outra conta."""
 
 
 @dataclass(frozen=True)
