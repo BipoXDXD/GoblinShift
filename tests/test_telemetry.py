@@ -438,6 +438,32 @@ def test_qualquer_excecao_do_instrumentor_fica_no_log(
     _no_database_spans_after_failure(exporter, engine)
 
 
+def test_falha_na_limpeza_nao_derruba_o_boot_nem_esconde_o_erro_original(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def fail_instrument(_self: SQLAlchemyInstrumentor, **_kwargs: object) -> NoReturn:
+        raise RuntimeError("instrumentor quebrado")
+
+    def fail_unwrap(*_args: object) -> NoReturn:
+        raise RuntimeError("limpeza quebrada")
+
+    monkeypatch.setattr(SQLAlchemyInstrumentor, "instrument", fail_instrument)
+    monkeypatch.setattr(telemetry, "unwrap", fail_unwrap)
+    engine = create_engine("sqlite://")
+
+    with caplog.at_level(logging.ERROR):
+        configure_tracing(FastAPI(), engine, TEST_SETTINGS, InMemorySpanExporter())
+
+    engine.dispose()
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [
+        "instrumentação do banco falhou: a API segue sem spans de banco",
+        "limpeza da instrumentação do banco falhou: podem sobrar spans de banco",
+    ]
+    assert "instrumentor quebrado" in caplog.text
+    assert "limpeza quebrada" in caplog.text
+
+
 def test_falha_no_meio_dos_listeners_desfaz_tudo(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = iter(range(10))
 
@@ -637,27 +663,27 @@ def test_sem_escolha_a_fila_fica_no_padrao_do_sdk(monkeypatch: pytest.MonkeyPatc
 
 
 def test_worker_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, object]] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def no_provider(*_args: object, **kwargs: object) -> None:
-        calls.append(kwargs)
+    def no_provider(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
 
     monkeypatch.setattr(worker, "make_tracer_provider", no_provider)
 
     with worker.process_tracer(TEST_SETTINGS, "goblinshift-worker"):
         pass
 
-    assert calls == [{}]
+    assert calls == [((TEST_SETTINGS, "goblinshift-worker"), {})]
 
 
 def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, object]] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     class ProviderRequestedError(Exception):
         pass
 
-    def stop_at_provider(*_args: object, **kwargs: object) -> NoReturn:
-        calls.append(kwargs)
+    def stop_at_provider(*args: object, **kwargs: object) -> NoReturn:
+        calls.append((args, kwargs))
         raise ProviderRequestedError
 
     monkeypatch.setattr(maintenance, "make_tracer_provider", stop_at_provider)
@@ -665,4 +691,4 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(ProviderRequestedError):
         maintenance.serve(TEST_SETTINGS, Mock(), threading.Event())
 
-    assert calls == [{}]
+    assert calls == [((TEST_SETTINGS, "goblinshift-maintenance"), {})]

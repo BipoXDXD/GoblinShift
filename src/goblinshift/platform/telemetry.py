@@ -300,7 +300,14 @@ def _instrument_database(engine: Engine, provider: TracerProvider) -> None:
         )
     except Exception:
         logger.exception("instrumentação do banco falhou: a API segue sem spans de banco")
+        _clean_up_failed_instrumentation()
+
+
+def _clean_up_failed_instrumentation() -> None:
+    try:
         _remove_partial_database_instrumentation()
+    except Exception:
+        logger.exception("limpeza da instrumentação do banco falhou: podem sobrar spans de banco")
 
 
 def _remove_partial_database_instrumentation() -> None:
