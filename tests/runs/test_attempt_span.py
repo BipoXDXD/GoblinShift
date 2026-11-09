@@ -19,7 +19,7 @@ from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import create_candidate_object
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, StorageError
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.telemetry import AlertEventCounter, UserHasher
 from goblinshift.runs.cancellation import cancel_run
@@ -292,6 +292,66 @@ def test_executor_que_nao_inicia_conta_em_cada_tentativa_ate_o_infra_poison(
         if span.name == "attempt"
     ]
     assert counts == [1, 1, 1, 1]
+
+
+def assert_ended_without_refused_start(exporter: InMemorySpanExporter, outcome: str) -> None:
+    attributes = dict(only_attempt_span(exporter).attributes or {})
+    assert attributes["attempt.outcome"] == outcome
+    assert "alert.executor_start_failed" not in attributes
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_start_bem_sucedido_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(
+        claim(factory, storage)
+    )
+
+    assert_ended_without_refused_start(exporter, "succeeded")
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_cancelamento_antes_do_start_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    cancel_run(factory, storage, owner, run_id)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert_ended_without_refused_start(exporter, "canceled")
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_preparacao_que_falha_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+
+    def refuse_open(_key: str) -> None:
+        raise StorageError("storage recusou")
+
+    monkeypatch.setattr(storage, "open", refuse_open)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert_ended_without_refused_start(exporter, "running")
 
 
 def test_sem_tracer_o_coordenador_funciona_igual(

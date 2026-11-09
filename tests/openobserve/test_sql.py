@@ -397,25 +397,28 @@ def test_arquivo_que_ficou_no_disco_dispara_por_qualquer_origem(
 def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Telemetry) -> None:
     stream = unique_stream("outro")
     traces = telemetry.traces(stream)
-    traces.span(
-        "outra.coisa",
-        60,
-        {
-            "main": True,
-            "maintenance.runs_stuck_stopping": 3,
-            "maintenance.purge_limit_reached": 1,
-            "maintenance.accounts_deletion_overdue": 1,
-            "maintenance.missing_sweep_skipped": 1,
-            "maintenance.missing_governor_tripped": 1,
-            "maintenance.objects_marked_missing": 1,
-            "maintenance.objects_missing_unreadable": 1,
-            "maintenance.purge_files_not_removed": 1,
-            "maintenance.candidates_left_on_disk": 1,
-            "maintenance.missing_sweep_failed": 1,
-            "maintenance.failed_cycles": 1,
-        },
-        1.0,
-    )
+    # Três spans: as causas com `HAVING count(*) >= 3` só disparariam a partir daí.
+    for minute in range(3):
+        traces.span(
+            "outra.coisa",
+            (minute + 1) * MINUTE_S,
+            {
+                "main": True,
+                "maintenance.runs_stuck_stopping": 3,
+                "maintenance.purge_limit_reached": 1,
+                "maintenance.accounts_deletion_overdue": 1,
+                "maintenance.missing_sweep_skipped": 1,
+                "maintenance.missing_governor_tripped": 1,
+                "maintenance.objects_marked_missing": 1,
+                "maintenance.objects_missing_unreadable": 1,
+                "maintenance.purge_files_not_removed": 1,
+                "maintenance.candidates_left_on_disk": 1,
+                "maintenance.missing_sweep_failed": 1,
+                "maintenance.failed_cycles": 1,
+                "alert.executor_start_failed": 1,
+            },
+            1.0,
+        )
     traces.flush()
     declare_columns(telemetry.api, stream)
 

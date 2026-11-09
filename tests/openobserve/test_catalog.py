@@ -215,6 +215,7 @@ def test_executor_que_nao_inicia_avisa_no_destino_urgente_lendo_o_span_da_tentat
     assert (alert.stream_type, alert.stream_name) == ("traces", "s")
     assert "alert_executor_start_failed" in CAUSE_COLUMNS
     assert "operation_name = 'attempt'" in alert.sql
+    assert (alert.period_minutes, alert.frequency_minutes, alert.silence_minutes) == (10, 5, 60)
 
 
 def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
