@@ -267,6 +267,7 @@ def test_varredura_remove_no_maximo_o_teto_e_conta_o_que_sobrou(
         f"{'a' * 32}.txt",
         f"{'A' * 32}.part",
         f"{'a' * 33}.part",
+        f"{'a' * 32}.part.bak",
     ],
 )
 def test_varredura_ignora_nome_que_nao_e_de_temporario_do_storage(
@@ -383,3 +384,23 @@ def test_erro_ao_listar_o_diretorio_de_temporarios_continua_subindo(tmp_path: Pa
 
     with pytest.raises(NotADirectoryError):
         FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+
+def test_temporario_que_some_antes_do_unlink_conta_como_removido_e_nao_como_falha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_temporary(storage, PART_NAME, CUTOFF - 10)
+    original = Path.unlink
+
+    def unlink_after_another_process(self: Path, missing_ok: bool = False) -> None:
+        os.unlink(self)
+        original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink_after_another_process)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    assert sweep == TemporarySweep(removed=1, remaining=0, remaining_bytes=0, failed=0)
+    assert removal_failures(caplog) == []
