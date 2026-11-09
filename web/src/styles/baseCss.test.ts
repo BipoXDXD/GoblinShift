@@ -55,6 +55,20 @@ describe("campo desabilitado", () => {
     expect(body).toContain("cursor: not-allowed");
   });
 
+  // O campo vazio não tem texto para mostrar a cor: quem avisa é o fundo, a borda e o relevo.
+  it.each(CONTROLS)("%s desabilitado muda fundo, borda e relevo", (control) => {
+    const { body } = ruleFor(`${control}:disabled`);
+
+    expect(body).toContain("background-color: var(--surface)");
+    expect(body).toContain("border-style: dashed");
+    expect(body).toContain("box-shadow: none");
+  });
+
+  // :disabled pesa mais que [aria-invalid]: se trocasse a cor da borda, apagaria a borda de erro.
+  it("não troca a cor da borda, para a borda de erro continuar valendo", () => {
+    expect(ruleFor("input:disabled").body).not.toContain("border-color");
+  });
+
   it.each(controlSelectors())("a cor de desabilitado vence a cor normal em %s", (selector) => {
     expect(compare(specificityOf("input:disabled"), specificityOf(selector))).toBeGreaterThan(0);
   });

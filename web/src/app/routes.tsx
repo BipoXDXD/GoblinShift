@@ -2,12 +2,12 @@ import type { RouteObject } from "react-router";
 
 import type { SiteNotice } from "../notice/notice";
 import type { UploadServices } from "../upload/useUploadBatch";
-import { ProblemAlert } from "../components/feedback/ProblemAlert";
 import { TEXT } from "../text";
 import { Layout } from "./Layout";
 import { NotFoundPage } from "./NotFoundPage";
 import type { PageTitleHandle } from "./pageTitle";
 import { PATHS } from "./paths";
+import { RootFailure, RouteFailure } from "./RouteFailure";
 
 export interface AppServices {
   readonly uploadServices: UploadServices;
@@ -26,6 +26,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
   return [
     {
       element: <Layout now={now} notice={notice} />,
+      errorElement: <RootFailure />,
       // Na primeira carga o router espera o chunk da tela antes de pintar; é um pedido curto, e
       // um indicador ali piscaria. Sem este componente o React Router avisa no console.
       HydrateFallback: EmptyFallback,
@@ -136,7 +137,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
  * uma publicação) cai na tela padrão do React Router, em inglês e sem navegação.
  */
 function withRouteFailure(screens: RouteObject[]): RouteObject[] {
-  return [{ errorElement: <ProblemAlert failure={{ kind: "internal" }} />, children: screens }];
+  return [{ errorElement: <RouteFailure />, children: screens }];
 }
 
 /** Título da aba da rota (Layout); a Oficina fica só com o nome do site. */
