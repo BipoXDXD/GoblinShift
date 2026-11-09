@@ -20,6 +20,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
@@ -121,6 +122,56 @@ def truncate_client_address(address: str) -> str:
     return str(ipaddress.ip_network(f"{ip}/{bits}", strict=False).network_address)
 
 
+REDACTED_EXCEPTION_DETAIL = "exception detail redacted"
+_EXCEPTION_EVENT_NAME = "exception"
+# O que resta do evento: o tipo, que agrupa as falhas, e se a exceção escapou do span.
+_EXCEPTION_ATTRIBUTES_KEPT = ("exception.type", "exception.escaped")
+
+
+def _without_main_exception_detail(span: ReadableSpan) -> ReadableSpan:
+    """Tira do span `main` o detalhe da exceção de uma resposta já começada.
+
+    Sem resposta iniciada, o `RequestContextMiddleware` troca a exceção por um 500 e ela não chega
+    à instrumentação. Com o status já enviado ela sobe, e a instrumentação grava `str(exceção)` e a
+    pilha no evento `exception` e no status; no SQLAlchemy, `str()` traz host, SQL e parâmetros.
+    O span terminado é imutável, então sai uma cópia.
+    """
+    is_main = (span.attributes or {}).get("main") is True
+    if not is_main or not any(event.name == _EXCEPTION_EVENT_NAME for event in span.events):
+        return span
+    failed = span.status.status_code is StatusCode.ERROR
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=span.attributes,
+        events=tuple(_redacted_exception_event(event) for event in span.events),
+        links=span.links,
+        kind=span.kind,
+        status=Status(StatusCode.ERROR, REDACTED_EXCEPTION_DETAIL) if failed else span.status,
+        start_time=span.start_time,
+        end_time=span.end_time,
+        instrumentation_scope=span.instrumentation_scope,
+    )
+
+
+def _redacted_exception_event(event: SdkEvent) -> SdkEvent:
+    if event.name != _EXCEPTION_EVENT_NAME:
+        return event
+    attributes = event.attributes or {}
+    kept = {name: attributes[name] for name in _EXCEPTION_ATTRIBUTES_KEPT if name in attributes}
+    return SdkEvent(
+        event.name,
+        {
+            **kept,
+            "exception.message": REDACTED_EXCEPTION_DETAIL,
+            "exception.stacktrace": REDACTED_EXCEPTION_DETAIL,
+        },
+        event.timestamp,
+    )
+
+
 def _start_main_event(span: Span, scope: dict[str, Any]) -> None:
     # Convenção "main = true": o span da requisição é o evento amplo dela. O resto dele vem do
     # middleware do evento amplo, no fim da requisição.
@@ -193,7 +244,7 @@ class DatabaseErrorRedactingProcessor(SpanProcessor):
         self._inner.on_start(span, parent_context)
 
     def on_end(self, span: ReadableSpan) -> None:
-        self._inner.on_end(_without_database_error_detail(span))
+        self._inner.on_end(_without_main_exception_detail(_without_database_error_detail(span)))
 
     def shutdown(self) -> None:
         self._inner.shutdown()
