@@ -8,6 +8,9 @@ Criação exclusiva sem expor arquivo parcial: o conteúdo vai para um temporár
 (`O_CREAT | O_EXCL`), recebe `fsync` e só então ganha a chave final por `os.link`, que falha com
 `EEXIST` se a chave já existe. Um `rename` sobrescreveria em silêncio; o `link` é atômico e nunca
 sobrescreve, em Linux e macOS.
+
+Queda do processo no meio da gravação deixa o temporário para trás: o `finally` não roda no
+SIGKILL. `sweep_stale_temporaries` é a limpeza que a manutenção faz deles.
 """
 
 import hashlib
@@ -25,6 +28,8 @@ from typing import BinaryIO
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 _MAX_KEY_LENGTH = 512
 _TMP_DIR_NAME = ".tmp"
+# Só o nome que `create_exclusive` gera: a limpeza nunca apaga outra coisa do diretório.
+_TMP_PART_NAME = re.compile(r"[0-9a-f]{32}\.part")
 # Gravada na raiz pelo `storage-mark` (compose.yaml), no filesystem já montado.
 MOUNT_MARKER = ".goblinshift-storage"
 _DIR_MODE = 0o700
@@ -59,6 +64,14 @@ class ContentTooLargeError(StorageError):
 @dataclass(frozen=True)
 class ObjectStat:
     size_bytes: int
+
+
+@dataclass(frozen=True)
+class TemporarySweep:
+    removed: int
+    # O que ficou no diretório: gravações em curso e o que passou do teto da varredura.
+    remaining: int
+    remaining_bytes: int
 
 
 class FileStorage:
@@ -125,6 +138,43 @@ class FileStorage:
     def delete(self, key: str) -> None:
         """Remove o objeto; remover o que já não existe é sucesso (o estado final é o mesmo)."""
         self._path_for(key).unlink(missing_ok=True)
+
+    def sweep_stale_temporaries(self, modified_before: float, limit: int) -> TemporarySweep:
+        """Apaga até `limit` temporários sem modificação desde `modified_before` (epoch, em s).
+
+        O corte precisa ser maior que o intervalo em que uma gravação viva pode ficar sem escrever.
+        Compara com o `mtime`, então `modified_before` vem do relógio da própria máquina. Falha
+        de E/S sobe; arquivo que some durante a varredura é sucesso (o estado final é o mesmo).
+        """
+        removed = 0
+        remaining = 0
+        remaining_bytes = 0
+        for entry, info in self._temporary_parts():
+            if info.st_mtime < modified_before and removed < limit:
+                Path(entry.path).unlink(missing_ok=True)
+                removed += 1
+            else:
+                remaining += 1
+                remaining_bytes += info.st_size
+        return TemporarySweep(removed, remaining, remaining_bytes)
+
+    def _temporary_parts(self) -> list[tuple[os.DirEntry[str], os.stat_result]]:
+        """Temporários do storage: arquivos comuns com o nome gerado, sem seguir symlink."""
+        try:
+            entries = list(os.scandir(self._tmp_dir))
+        except FileNotFoundError:
+            return []
+        parts = []
+        for entry in entries:
+            if not _TMP_PART_NAME.fullmatch(entry.name):
+                continue
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if S_ISREG(info.st_mode):
+                parts.append((entry, info))
+        return parts
 
     def _path_for(self, key: str) -> Path:
         if not _is_valid_key(key):
