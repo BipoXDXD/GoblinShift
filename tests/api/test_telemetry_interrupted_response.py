@@ -10,15 +10,18 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
-from opentelemetry.trace import StatusCode
+from opentelemetry.trace import Link, SpanContext, StatusCode, TraceFlags
 from psycopg import Error as PsycopgError
 from psycopg import OperationalError as PsycopgOperationalError
 from sqlalchemy import text
@@ -29,7 +32,10 @@ from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.transfers import DownloadResponse, TransferTimeouts
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
-from goblinshift.platform.telemetry import JsonFormatter
+from goblinshift.platform.telemetry import JsonFormatter, make_span_processor
+from goblinshift.runs.worker import attempt_event
+from goblinshift.runs.worker.claim import ClaimedAttempt
+from goblinshift.runs.worker.coordinator import Coordinator
 
 TEST_ROUTES = "/api/v1/_test"
 TIMEOUTS = TransferTimeouts(total=timedelta(seconds=10), idle=timedelta(seconds=10))
@@ -169,7 +175,9 @@ def _assert_no_canary_in_otlp(traced: Traced) -> None:
 def _assert_no_canary_in_logs(traced: Traced, caplog: pytest.LogCaptureFixture) -> None:
     formatter = JsonFormatter()
     output = "\n".join(formatter.format(record) for record in caplog.records)
-    assert caplog.records
+    if not caplog.records:
+        # Fora de `AssertionError`: sem log, o `xfail` do vazamento não pode absorver a falha.
+        pytest.fail("nenhum log capturado: o cenário não chegou ao erro")
     leaked = [canary for canary in traced.canaries.all() if canary in output]
     assert leaked == []
 
@@ -440,3 +448,114 @@ def test_erro_real_do_postgres_nao_traz_o_parametro(db_settings: Settings) -> No
 
     assert canary not in str(caught.value)
     assert "SQL parameters hidden" in str(caught.value)
+
+
+# Processador: o que a redação preserva, e o span `attempt` do worker
+
+
+def _provider_exporting_to(exporter: OtlpBytesExporter) -> TracerProvider:
+    processor = make_span_processor(exporter)
+    assert processor is not None
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    return provider
+
+
+def test_span_sem_main_mantem_o_detalhe_da_excecao() -> None:
+    exporter = OtlpBytesExporter()
+    span = _provider_exporting_to(exporter).get_tracer("outra").start_span("x")
+
+    span.record_exception(ValueError("detalhe"))
+    span.end()
+
+    (exported,) = exporter.spans
+    (event,) = _exception_events(exported)
+    assert event["exception.message"] == "detalhe"
+    assert exported.status.status_code is StatusCode.UNSET
+
+
+def test_span_main_preserva_links_eventos_comuns_e_instantes() -> None:
+    exporter = OtlpBytesExporter()
+    link = Link(SpanContext(1, 2, is_remote=True, trace_flags=TraceFlags(TraceFlags.SAMPLED)))
+    tracer = _provider_exporting_to(exporter).get_tracer("x")
+    span = tracer.start_span("x", attributes={"main": True}, links=[link])
+
+    span.add_event("antes", {"k": 1}, timestamp=111)
+    span.record_exception(ValueError("segredo"), timestamp=222)
+    span.add_event("depois", timestamp=333)
+    span.end()
+
+    (exported,) = exporter.spans
+    assert [(event.name, event.timestamp) for event in exported.events] == [
+        ("antes", 111),
+        ("exception", 222),
+        ("depois", 333),
+    ]
+    assert dict(exported.events[0].attributes or {}) == {"k": 1}
+    assert [item.context.span_id for item in exported.links] == [2]
+
+
+def test_excecao_capturada_no_span_main_nao_inventa_erro_no_status() -> None:
+    exporter = OtlpBytesExporter()
+    span = (
+        _provider_exporting_to(exporter).get_tracer("x").start_span("x", attributes={"main": True})
+    )
+
+    span.record_exception(ValueError("segredo"))
+    span.end()
+
+    (exported,) = exporter.spans
+    assert exported.status.status_code is StatusCode.UNSET
+    assert exported.status.description is None
+
+
+def test_atributo_extra_do_evento_de_excecao_nao_sai() -> None:
+    canary = _new_canary()
+    exporter = OtlpBytesExporter()
+    span = (
+        _provider_exporting_to(exporter).get_tracer("x").start_span("x", attributes={"main": True})
+    )
+
+    span.record_exception(ValueError("segredo"), attributes={"extra": canary})
+    span.end()
+
+    assert canary.encode() not in bytes(exporter.payload)
+
+
+def _claimed_attempt() -> ClaimedAttempt:
+    return cast(
+        ClaimedAttempt,
+        SimpleNamespace(
+            run_id=uuid.uuid4(),
+            attempt_id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            number=1,
+            generation=1,
+            recipe_id="receita",
+            recipe_version=1,
+            input_upload_ids=(),
+            queue_wait_ms=1.0,
+            traceparent="00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        ),
+    )
+
+
+def test_span_attempt_do_worker_sai_sem_o_detalhe(monkeypatch: pytest.MonkeyPatch) -> None:
+    canaries = Canaries(_new_canary(), _new_canary(), _new_canary(), _new_canary())
+    exporter = OtlpBytesExporter()
+    tracer = _provider_exporting_to(exporter).get_tracer("goblinshift.worker")
+    coordinator = Coordinator(MagicMock(), MagicMock(), MagicMock(), MagicMock(), tracer=tracer)
+
+    def fail(_claimed: ClaimedAttempt) -> None:
+        raise canaries.database_error()
+
+    monkeypatch.setattr(coordinator, "_run_traced", fail)
+
+    with pytest.raises(OperationalError):
+        coordinator.run(_claimed_attempt())
+
+    assert [c for c in canaries.all() if c.encode() in bytes(exporter.payload)] == []
+    (attempt,) = exporter.spans
+    assert attempt.name == attempt_event.SPAN_NAME
+    assert len(attempt.links) == 1
+    _assert_detail_redacted_keeping_type(attempt, OPERATIONAL_ERROR_TYPE)
