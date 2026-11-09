@@ -39,6 +39,15 @@ logger = logging.getLogger(__name__)
 
 # Espera sugerida quando o banco ou o pool não atende: da ordem do `pool_timeout` de 5 s.
 DATABASE_RETRY_AFTER_SECONDS = 5
+# O psycopg põe em `OperationalError` também erros de programação (55000, 3B001, 2F005, 54000...);
+# só estes SQLSTATEs dizem que repetir a requisição pode dar certo. 40001 e 40P01 desfazem a
+# transação inteira, e é a contenção que os causa: chegam aqui ao esgotar as tentativas de
+# `runs/store.py` ou em rota sem retry.
+_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({"08", "53", "57"})
+_UNAVAILABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
+# Da classe 08, mas é parâmetro errado no SQL (`bind message supplies...`), não falha de conexão.
+_PROTOCOL_VIOLATION_SQLSTATE = "08P01"
+_SQLSTATE_CLASS_LENGTH = 2
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
@@ -198,7 +207,7 @@ def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
 
 
 # Respostas de erro comuns a toda rota autenticada.
-PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500)
+PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500, 503)
 
 
 # O nome segue o termo "problem" da RFC 9457, que é o que a classe representa.
@@ -231,8 +240,8 @@ def install_problem_handlers(app: FastAPI) -> None:
     app.exception_handler(RequestValidationError)(_handle_validation_error)
     app.exception_handler(StarletteHTTPException)(_handle_http_exception)
     # Pool esgotado e banco fora do ar são falha temporária da dependência (1.6 e 3.2), não bug.
-    app.exception_handler(PoolTimeoutError)(_handle_database_unavailable)
-    app.exception_handler(OperationalError)(_handle_database_unavailable)
+    app.exception_handler(PoolTimeoutError)(_handle_pool_timeout)
+    app.exception_handler(OperationalError)(_handle_operational_error)
 
 
 def problem_response(
@@ -326,15 +335,39 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse
     )
 
 
-async def _handle_database_unavailable(
-    request: Request, exc: PoolTimeoutError | OperationalError
+async def _handle_pool_timeout(request: Request, exc: PoolTimeoutError) -> JSONResponse:
+    return _database_unavailable_response(request, exc, sqlstate=None)
+
+
+async def _handle_operational_error(request: Request, exc: OperationalError) -> JSONResponse:
+    sqlstate: str | None = getattr(exc.orig, "sqlstate", None)
+    if not _is_database_unavailable(exc, sqlstate):
+        # Sobe até o `RequestContextMiddleware`: é bug, com o 500 e o log de qualquer outro.
+        raise exc
+    return _database_unavailable_response(request, exc, sqlstate)
+
+
+def _is_database_unavailable(exc: OperationalError, sqlstate: str | None) -> bool:
+    # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
+    if exc.connection_invalidated or sqlstate is None:
+        return True
+    if sqlstate == _PROTOCOL_VIOLATION_SQLSTATE:
+        return False
+    return (
+        sqlstate in _UNAVAILABLE_SQLSTATES
+        or sqlstate[:_SQLSTATE_CLASS_LENGTH] in _UNAVAILABLE_SQLSTATE_CLASSES
+    )
+
+
+def _database_unavailable_response(
+    request: Request, exc: PoolTimeoutError | OperationalError, sqlstate: str | None
 ) -> JSONResponse:
     request_id = request_id_of(request)
-    # Só o tipo: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
+    # Só tipo e SQLSTATE: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
     logger.error(
         "banco indisponível na requisição %s",
         request_id,
-        extra={"fields": {"error.type": type(exc).__name__}},
+        extra={"fields": {"error.type": type(exc).__name__, "sqlstate": sqlstate}},
     )
     return problem_response(
         code=ProblemCode.SERVICE_UNAVAILABLE,
