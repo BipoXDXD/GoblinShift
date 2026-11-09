@@ -12,9 +12,9 @@ mkdir "$stage/images"
 python3 "$script_dir/send.py" requested > "$stage/requested.tsv"
 while IFS=$'\t' read -r role reference; do
   crane manifest "$reference" > "$stage/index.json"
-  # Exit 1 is the only "not an index" answer. `has` alone also answers false for a null document.
+  # Slurp so the whole file decides, not its last document; exit 1 alone means "not an index".
   has_manifests_rc=0
-  jq -e 'if type == "object" then has("manifests") else error("not an object") end' "$stage/index.json" >/dev/null 2>&1 || has_manifests_rc=$?
+  jq -se 'if length == 1 and (.[0] | type == "object") then .[0] | has("manifests") else error("expected one JSON object") end' "$stage/index.json" >/dev/null 2>&1 || has_manifests_rc=$?
   case "$has_manifests_rc" in
     0)
       digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$stage/index.json" 2>/dev/null) || {

@@ -1,8 +1,8 @@
 """send.sh and the workflow scan step tell an OCI index from a single image by jq's exit status.
 
-Only status 1 on a JSON object means "not an index". Any other failure must stop the release
-instead of falling through to `crane digest`, and jq's own diagnostics must stay out of the log.
-Registry and transport commands are stubs; jq and bash are real.
+Only status 1 on exactly one JSON object means "not an index". Any other failure must stop the
+release instead of falling through to `crane digest`, and jq's own diagnostics must stay out of
+the log. Registry and transport commands are stubs; jq and bash are real.
 """
 
 import json
@@ -258,6 +258,12 @@ class ManifestClassificationTests(unittest.TestCase):
             "empty_file": "",
             "json_array": f'["{CANARY}"]',
             "null_literal": "null",
+            "only_whitespace": " \n",
+            "index_then_object": f"{INDEX_MANIFEST}\n{SINGLE_MANIFEST}",
+            "object_then_index": f"{SINGLE_MANIFEST}\n{INDEX_MANIFEST}",
+            "index_then_null": f"{INDEX_MANIFEST}\nnull",
+            "null_then_index": f"null\n{INDEX_MANIFEST}",
+            "two_objects": f"{SINGLE_MANIFEST}\n{SINGLE_MANIFEST}",
         }
         for target in TARGETS:
             for case, manifest in unreadable.items():
