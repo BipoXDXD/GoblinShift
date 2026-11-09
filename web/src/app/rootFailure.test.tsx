@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
@@ -32,9 +32,12 @@ describe("falha na própria moldura", () => {
     expect(screen.queryByText("Unexpected Application Error!")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(CANARY);
     expect(document.body.textContent).not.toContain(STACK_FRAME);
-    expect(consoleError).toHaveBeenCalledWith(
-      "Falha ao abrir a tela:",
-      expect.objectContaining({ message: CANARY }),
-    );
+    // O registro sai num efeito, que pode rodar depois de o aviso aparecer.
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "Falha ao abrir a tela:",
+        expect.objectContaining({ message: CANARY }),
+      );
+    });
   });
 });

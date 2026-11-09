@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
@@ -68,10 +68,13 @@ describe("falha ao abrir uma tela", () => {
 
       await screen.findByRole("alert");
 
-      expect(consoleError).toHaveBeenCalledWith(
-        LOG_LABEL,
-        expect.objectContaining({ message: canary }),
-      );
+      // O registro sai num efeito, que pode rodar depois de o aviso aparecer.
+      await waitFor(() => {
+        expect(consoleError).toHaveBeenCalledWith(
+          LOG_LABEL,
+          expect.objectContaining({ message: canary }),
+        );
+      });
     },
     10_000,
   );
