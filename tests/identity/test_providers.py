@@ -48,7 +48,15 @@ def test_google_nome_de_exibicao_e_fixo_mesmo_com_claims_de_perfil() -> None:
         {"iss": GOOGLE_ISSUER, "sub": "12\x0034"},
         {"iss": GOOGLE_ISSUER, "sub": "conta com espaço"},
     ],
-    ids=["emissor", "sem-sub", "sub-vazio", "sub-numero", "sub-longo", "sub-nul", "sub-espaco"],
+    ids=[
+        "emissor",
+        "sem-sub",
+        "sub-vazio",
+        "sub-numero",
+        "sub-longo",
+        "sub-nul",
+        "sub-espaco-e-nao-ascii",
+    ],
 )
 def test_google_claims_invalidas_sao_recusadas(claims: dict[str, object]) -> None:
     with pytest.raises(InvalidProviderIdentityError):
@@ -168,8 +176,8 @@ def test_google_sub_com_del_e_recusado() -> None:
         google_identity({"iss": GOOGLE_ISSUER, "sub": "a\x7fb"})
 
 
-# O caso "sub-espaco" acima também tem `ç` e seria recusado mesmo que o espaço passasse; aqui, e
-# nos casos seguintes, só o caractere em teste difere de um `sub` válido.
+# O caso "sub-espaco-e-nao-ascii" acima mistura dois motivos de recusa; aqui, e nos casos
+# seguintes, tudo o que não está em teste é ASCII visível.
 @pytest.mark.parametrize(
     "subject",
     [
@@ -221,6 +229,8 @@ def test_google_sub_com_caractere_de_controle_e_recusado(subject: str) -> None:
         pytest.param("1092837465\u3000", id="espaco-ideografico"),
         pytest.param("1092\u200b837465", id="largura-zero"),
         pytest.param("\uff11092837465", id="digito-largo"),
+        pytest.param("1092837465\u212a", id="kelvin-dobra-para-k"),
+        pytest.param("1092837465\u017f", id="s-longo-dobra-para-s"),
         pytest.param("1" * 254 + "é", id="nao-ascii-dentro-do-teto"),
         pytest.param("\ud800", id="surrogate-isolado"),
     ],
@@ -228,10 +238,6 @@ def test_google_sub_com_caractere_de_controle_e_recusado(subject: str) -> None:
 def test_google_sub_fora_do_ascii_e_recusado(subject: str) -> None:
     with pytest.raises(InvalidProviderIdentityError):
         google_identity({"iss": GOOGLE_ISSUER, "sub": subject})
-
-
-def test_google_sub_de_um_caractere_e_aceito() -> None:
-    assert google_identity({"iss": GOOGLE_ISSUER, "sub": "1"}).subject == "1"
 
 
 def test_google_sub_preserva_a_caixa_sem_normalizar() -> None:
