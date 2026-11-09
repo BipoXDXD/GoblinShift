@@ -65,6 +65,15 @@ class ExecutorService:
                 _log.info("container já existia; adotado", extra={"attempt_id": str(attempt_id)})
         return self._docker.inspect(name)
 
+    def image_present(self, image: str) -> bool:
+        """Se o daemon tem a imagem; só das que a política autoriza.
+
+        A allowlist vem antes do Docker: o host é compartilhado, e sem ela um cliente do socket
+        descobriria quais imagens de outros projetos estão no daemon.
+        """
+        require_allowed(self._config.images_file, image)
+        return self._docker.image_present(image)
+
     def status(self, attempt_id: uuid.UUID) -> ContainerStatus:
         return self._docker.inspect(profile.container_name(attempt_id))
 

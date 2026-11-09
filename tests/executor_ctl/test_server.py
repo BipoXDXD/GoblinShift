@@ -2,7 +2,9 @@
 
 import http.client
 import json
+import socket as socketlib
 import stat
+import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -68,7 +70,17 @@ def test_attempt_id_que_nao_e_uuid_canonico_da_400(ctl_socket: Path, attempt_id:
 
 @pytest.mark.parametrize(
     "path",
-    [f"/v1/attempts/{ATTEMPT}/logs", f"/v1/attempts/{ATTEMPT}?x=1", "/", "/v1/attempts/"],
+    [
+        f"/v1/attempts/{ATTEMPT}/logs",
+        f"/v1/attempts/{ATTEMPT}?x=1",
+        "/",
+        "/v1/attempts/",
+        "/v1/image",
+        "/v1/image?",
+        "/v1/image?x=1",
+        f"/v1/image/{ALLOWED}",
+        f"/v1/images?ref={ALLOWED}",
+    ],
 )
 def test_rota_desconhecida_da_404(ctl_socket: Path, path: str) -> None:
     response = call(ctl_socket, "GET", path)
@@ -183,3 +195,129 @@ def test_cliente_lento_e_desconectado_sem_derrubar_o_servidor(ctl_socket: Path) 
             stalled.getresponse()
     finally:
         stalled.close()
+
+
+def image_path(ref: str) -> str:
+    return f"/v1/image?ref={ref}"
+
+
+def recording_docker(
+    tmp_path: Path, stderr: str = "", exit_code: int = 0
+) -> tuple[DockerCli, Path]:
+    """Um "docker" que grava os argumentos: prova o que chegou (ou não) ao CLI."""
+    calls = tmp_path / "docker-calls.jsonl"
+    script = tmp_path / "docker-gravador"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        f"with open({str(calls)!r}, 'a') as file:\n"
+        "    file.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"sys.exit({exit_code})\n"
+    )
+    script.chmod(0o755)
+    return DockerCli(binary=str(script)), calls
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+@pytest.mark.parametrize(
+    ("stderr", "exit_code", "present"),
+    [
+        ("", 0, True),
+        ("Error response from daemon: No such image: x\n", 1, False),
+    ],
+)
+def test_sonda_responde_200_com_so_o_booleano_presente_ou_ausente(
+    tmp_path: Path, socket_dir: Path, stderr: str, exit_code: int, present: bool
+) -> None:
+    docker, calls = recording_docker(tmp_path, stderr, exit_code)
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+
+    with running_server(config, docker) as socket:
+        response = call(socket, "GET", image_path(ALLOWED))
+
+    assert response.status == 200
+    assert response.body == {"present": present}
+    assert json.loads(calls.read_text()) == ["image", "inspect", "--format={{.Id}}", ALLOWED]
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+@pytest.mark.parametrize(
+    "ref",
+    [
+        OTHER_IMAGE,
+        "ghcr.io/outro-projeto/app@sha256:" + "a" * 64,
+        "postgres@sha256:" + "b" * 64,
+    ],
+    ids=["mesmo-repositorio", "outro-projeto", "imagem-publica"],
+)
+def test_sonda_de_ref_fora_da_allowlist_da_403_sem_chegar_ao_docker(
+    tmp_path: Path, socket_dir: Path, ref: str
+) -> None:
+    # O "docker" responde 0: se a allowlist não barrasse, a resposta seria 200 com present=true.
+    docker, calls = recording_docker(tmp_path)
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+
+    with running_server(config, docker) as socket:
+        response = call(socket, "GET", image_path(ref))
+
+    assert response.status == 403
+    assert response.body == {"error": "image_not_allowed", "detail": response.body["detail"]}
+    assert not calls.exists()
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_sonda_com_docker_ausente_da_503_e_nunca_diz_ausente(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+
+    with running_server(config, DockerCli(binary=str(tmp_path / "sem-docker"))) as socket:
+        response = call(socket, "GET", image_path(ALLOWED))
+
+    assert response.status == 503
+    assert response.body == {"error": "docker_unavailable", "detail": response.body["detail"]}
+    assert "Traceback" not in json.dumps(response.body)
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "",
+        "python:3.14",
+        ALLOWED[:-1],
+        ALLOWED + "0",
+        ALLOWED.upper(),
+        "--help",
+        "-x@sha256:" + "a" * 64,
+        ALLOWED + "&ref=" + OTHER_IMAGE,
+        ALLOWED + "#x",
+        ALLOWED.replace("@", "%40"),
+        ALLOWED + "%20--privileged",
+    ],
+)
+def test_sonda_com_ref_malformada_da_400_sem_devolver_a_ref(ctl_socket: Path, ref: str) -> None:
+    response = call(ctl_socket, "GET", image_path(ref))
+
+    assert response.status == 400
+    assert response.body == {"error": "invalid_request", "detail": response.body["detail"]}
+    assert not ref or ref not in response.body["detail"]
+
+
+def test_sonda_com_ref_com_nul_da_400(ctl_socket: Path) -> None:
+    # O cliente http.client recusa byte de controle na URL; aqui ele vai cru pelo socket.
+    with socketlib.socket(socketlib.AF_UNIX) as raw:
+        raw.settimeout(5)
+        raw.connect(str(ctl_socket))
+        raw.sendall(b"GET /v1/image?ref=a\x00b HTTP/1.1\r\nHost: x\r\n\r\n")
+        answer = raw.recv(4096)
+
+    assert answer.startswith(b"HTTP/1.1 400")
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+def test_sonda_so_aceita_get(ctl_socket: Path, method: str) -> None:
+    response = call(ctl_socket, method, image_path(ALLOWED), {})
+
+    assert response.status == 405
+    assert response.body["error"] == "method_not_allowed"

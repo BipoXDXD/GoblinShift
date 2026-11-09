@@ -144,6 +144,41 @@ def ctl(executor_image: str, tmp_path: Path, socket_dir: Path) -> Iterator[Ctl]:
         )
 
 
+def image_probe(socket: Path, image: str) -> Response:
+    return call(socket, "GET", f"/v1/image?ref={image}")
+
+
+def test_sonda_ve_a_imagem_que_esta_no_daemon(ctl: Ctl) -> None:
+    response = image_probe(ctl.socket, ctl.image)
+
+    assert (response.status, response.body) == (200, {"present": True})
+
+
+def test_sonda_de_digest_que_o_daemon_nao_tem_e_ausente(
+    executor_image: str, tmp_path: Path, socket_dir: Path
+) -> None:
+    # Fixa o texto real do stderr: para o daemon, digest apagado e nunca baixado são o mesmo caso.
+    absent = executor_image.split("@")[0] + "@sha256:" + "0" * 64
+    config = make_config(tmp_path, socket_dir, allowed=[executor_image, absent])
+
+    with running_server(config, DockerCli()) as socket:
+        response = image_probe(socket, absent)
+
+    assert (response.status, response.body) == (200, {"present": False})
+
+
+def test_sonda_com_daemon_inacessivel_da_503(
+    ctl: Ctl, monkeypatch: pytest.MonkeyPatch, socket_dir: Path
+) -> None:
+    # Texto real com "no such file or directory": não pode ser lido como imagem ausente.
+    with monkeypatch.context() as patched:
+        patched.setenv("DOCKER_HOST", f"unix://{socket_dir}/sem-docker.sock")
+        response = image_probe(ctl.socket, ctl.image)
+
+    assert response.status == 503
+    assert response.body["error"] == "docker_unavailable"
+
+
 def containers_of(attempt_id: uuid.UUID) -> list[str]:
     return docker(
         "ps", "--all", "--quiet", f"--filter=label=goblinshift.attempt={attempt_id}"
