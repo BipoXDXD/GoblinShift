@@ -208,7 +208,8 @@ def list_runs(
     """
     if not 1 <= limit <= MAX_PAGE_SIZE:
         raise ValueError(f"limit fora de [1, {MAX_PAGE_SIZE}]")
-    scope = filters.cursor_scope()
+    # Com o dono no escopo, o cursor de uma conta não vale na listagem de outra.
+    scope = {**filters.cursor_scope(), "owner_id": str(owner_id)}
     query = _select_views().where(run.c.owner_id == owner_id, *_filter_conditions(filters))
     if cursor is not None:
         after = decode_cursor(cursor, scope, secret=secret, now=now)
