@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -315,19 +315,17 @@ def _unhandled_error_response(exc: Exception, instance: str, request_id: str) ->
     Fica aqui, e não em `exception_handler`, porque o Starlette troca por `RuntimeError` a
     exceção com handler registrado que ocorre depois de a resposta começar.
     """
-    if isinstance(exc, PoolTimeoutError):
-        return _database_unavailable_response(exc, None, instance, request_id)
-    if not isinstance(exc, OperationalError):
+    if _is_database_unavailable(exc):
+        return _database_unavailable_response(exc, instance, request_id)
+    if isinstance(exc, OperationalError):
+        logger.error(
+            "erro inesperado na requisição %s",
+            request_id,
+            exc_info=exc,
+            extra={"fields": _database_error_fields(exc)},
+        )
+    else:
         logger.exception("erro inesperado na requisição %s", request_id)
-        return _internal_error_response(instance, request_id)
-    sqlstate: str | None = getattr(exc.orig, "sqlstate", None)
-    if _is_database_unavailable(exc, sqlstate):
-        return _database_unavailable_response(exc, sqlstate, instance, request_id)
-    logger.error(
-        "erro inesperado na requisição %s",
-        request_id,
-        extra={"fields": _database_error_fields(exc, sqlstate)},
-    )
     return _internal_error_response(instance, request_id)
 
 
@@ -358,9 +356,17 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse
     )
 
 
-def _is_database_unavailable(exc: OperationalError, sqlstate: str | None) -> bool:
+def _is_database_unavailable(exc: Exception) -> bool:
+    if isinstance(exc, PoolTimeoutError):
+        return True
+    # A conexão perdida vale para qualquer classe do driver: 25P03 chega como `InternalError`.
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    if not isinstance(exc, OperationalError):
+        return False
+    sqlstate = _sqlstate_of(exc)
     # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
-    if exc.connection_invalidated or sqlstate is None:
+    if sqlstate is None:
         return True
     if sqlstate == _PROTOCOL_VIOLATION_SQLSTATE:
         return False
@@ -370,13 +376,15 @@ def _is_database_unavailable(exc: OperationalError, sqlstate: str | None) -> boo
     )
 
 
-def _database_unavailable_response(
-    exc: PoolTimeoutError | OperationalError, sqlstate: str | None, instance: str, request_id: str
-) -> JSONResponse:
+def _sqlstate_of(exc: Exception) -> str | None:
+    return getattr(getattr(exc, "orig", None), "sqlstate", None)
+
+
+def _database_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
     logger.error(
         "banco indisponível na requisição %s",
         request_id,
-        extra={"fields": _database_error_fields(exc, sqlstate)},
+        extra={"fields": _database_error_fields(exc)},
     )
     return problem_response(
         code=ProblemCode.SERVICE_UNAVAILABLE,
@@ -387,11 +395,9 @@ def _database_unavailable_response(
     )
 
 
-def _database_error_fields(
-    exc: PoolTimeoutError | OperationalError, sqlstate: str | None
-) -> dict[str, str | None]:
+def _database_error_fields(exc: Exception) -> dict[str, str | None]:
     # Só tipo e SQLSTATE: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
-    return {"error.type": type(exc).__name__, "sqlstate": sqlstate}
+    return {"error.type": type(exc).__name__, "sqlstate": _sqlstate_of(exc)}
 
 
 async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

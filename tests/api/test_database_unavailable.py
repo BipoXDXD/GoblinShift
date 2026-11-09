@@ -53,6 +53,8 @@ def _session_that_cannot_connect() -> Iterator[None]:
 
 # Fora da allowlist: só a conexão invalidada pode tornar este erro um 503.
 UNLISTED_SQLSTATE = "58030"
+# O psycopg levanta como `InternalError`, fora da família de `OperationalError`.
+IDLE_SESSION_KILLED = "25P03"
 
 # Erros do driver sem SQLSTATE: falha ao conectar ou conexão perdida, e o que não é disso.
 DRIVER_ERRORS: dict[str, Exception] = {
@@ -95,8 +97,8 @@ def client(offline_client: TestClient, exhausted_pool: Engine) -> TestClient:
     def server_error(sqlstate: str) -> None:
         raise _wrapped(_server_error(sqlstate))
 
-    def invalidated_connection() -> None:
-        raise _wrapped(_server_error(UNLISTED_SQLSTATE), connection_invalidated=True)
+    def invalidated_connection(sqlstate: str) -> None:
+        raise _wrapped(_server_error(sqlstate), connection_invalidated=True)
 
     def driver_error(name: str) -> None:
         raise _wrapped(DRIVER_ERRORS[name])
@@ -107,7 +109,7 @@ def client(offline_client: TestClient, exhausted_pool: Engine) -> TestClient:
     app.add_api_route("/_db/connection-refused", connection_refused)
     app.add_api_route("/_db/pool-exhausted", pool_exhausted)
     app.add_api_route("/_db/sqlstate/{sqlstate}", server_error)
-    app.add_api_route("/_db/invalidated-connection", invalidated_connection)
+    app.add_api_route("/_db/invalidated/{sqlstate}", invalidated_connection)
     app.add_api_route("/_db/driver/{name}", driver_error)
     app.add_api_route("/_db/in-dependency", in_dependency)
     return offline_client
@@ -137,7 +139,8 @@ def _assert_internal_error(client: TestClient, path: str) -> None:
         "/_db/connection-refused",
         "/_db/pool-exhausted",
         "/_db/in-dependency",
-        "/_db/invalidated-connection",
+        f"/_db/invalidated/{UNLISTED_SQLSTATE}",
+        f"/_db/invalidated/{IDLE_SESSION_KILLED}",
         "/_db/driver/connection-failed",
         "/_db/driver/connection-timeout",
     ],
@@ -187,6 +190,10 @@ def test_operational_error_que_nao_e_indisponibilidade_responde_500(
     assert issubclass(pg_errors.lookup(sqlstate), psycopg.OperationalError)
 
     _assert_internal_error(client, f"/_db/sqlstate/{sqlstate}")
+
+
+def test_internal_error_com_a_conexao_viva_responde_500(client: TestClient) -> None:
+    _assert_internal_error(client, f"/_db/sqlstate/{IDLE_SESSION_KILLED}")
 
 
 @pytest.mark.parametrize("name", ["data", "internal", "integrity", "programming", "not-supported"])
@@ -244,7 +251,7 @@ def test_erro_nao_temporario_registra_so_tipo_e_sqlstate(
     assert record.levelno == logging.ERROR
     assert response.json()["request_id"] in record.getMessage()
     assert record.__dict__["fields"] == {"error.type": "OperationalError", "sqlstate": "55000"}
-    assert record.exc_info is None
+    assert record.exc_info is not None
     assert _records_with(caplog, UNAVAILABLE_LOG) == []
 
 

@@ -5,6 +5,7 @@ servidor real prova qual SQLSTATE cada situação produz.
 """
 
 import logging
+import time
 
 import pytest
 from fastapi import FastAPI, Request
@@ -35,6 +36,7 @@ PROGRAMMING_ERRORS: dict[str, list[str]] = {
     "08P01": ["SELECT %(value)s::int, $2::int"],
 }
 STATEMENT_TIMEOUT: list[str] = ["SET LOCAL statement_timeout = '10ms'", "SELECT pg_sleep(5)"]
+IDLE_IN_TRANSACTION_TIMEOUT_S = 0.2
 BACKEND_TERMINATED: list[str] = ["SELECT pg_terminate_backend(pg_backend_pid())"]
 
 
@@ -55,6 +57,13 @@ def pg_client(app: FastAPI, client: TestClient) -> TestClient:
     def backend_terminated(request: Request) -> None:
         _run(request.app.state.engine, BACKEND_TERMINATED)
 
+    def idle_in_transaction_timeout(request: Request) -> None:
+        with request.app.state.engine.begin() as connection:
+            connection.exec_driver_sql("SET LOCAL idle_in_transaction_session_timeout = '10ms'")
+            # Só o relógio do servidor derruba a sessão ociosa; não há o que injetar.
+            time.sleep(IDLE_IN_TRANSACTION_TIMEOUT_S)
+            connection.exec_driver_sql("SELECT 1")
+
     def lock_timeout(request: Request) -> None:
         engine = request.app.state.engine
         with engine.begin() as holder:
@@ -68,6 +77,7 @@ def pg_client(app: FastAPI, client: TestClient) -> TestClient:
     app.add_api_route("/_pg/statement-timeout", statement_timeout)
     app.add_api_route("/_pg/backend-terminated", backend_terminated)
     app.add_api_route("/_pg/lock-timeout", lock_timeout)
+    app.add_api_route("/_pg/idle-in-transaction-timeout", idle_in_transaction_timeout)
     return client
 
 
@@ -90,6 +100,7 @@ def test_erro_de_programacao_no_postgres_responde_500(
         ("/_pg/statement-timeout", "57014"),
         ("/_pg/lock-timeout", "55P03"),
         ("/_pg/backend-terminated", "57P01"),
+        ("/_pg/idle-in-transaction-timeout", "25P03"),
     ],
 )
 def test_indisponibilidade_no_postgres_responde_503(
