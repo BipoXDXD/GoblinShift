@@ -120,8 +120,11 @@ WORKER_FILE_MODE = 0o640
 DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
-# Conexão caída, `lock_timeout`, `statement_timeout`, pool esgotado: passam sozinhos. Erro de SQL ou
-# de constraint é defeito, e repetir não resolve.
+# Erros que não encerram a supervisão. Conexão caída, `lock_timeout`, `statement_timeout` e pool
+# esgotado passam sozinhos. `OperationalError` também traz os que pedem ação de fora: senha recusada
+# (28P01), disco cheio (53100), E/S (58030), limite do servidor (54000). A lista os inclui de
+# propósito: desistir abandonaria um executor vivo, e repetir só custa um aviso, porque o teto da
+# tentativa e o fencing encerram a espera. Erro de SQL ou de constraint é defeito, e sobe.
 _TRANSIENT_DATABASE_ERRORS = (OperationalError, PoolTimeoutError)
 
 

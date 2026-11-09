@@ -18,9 +18,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import psycopg
 import pytest
+from psycopg import errors as psycopg_errors
 from sqlalchemy import Engine, select
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -233,6 +235,37 @@ def test_pool_esgotado_na_renovacao_tambem_e_transitorio(
     renewals: list[Status] = []
     worker = worker_without_database(_RunningUntilRenewed(renewals, renewals_needed=1))
     failures = iter([PoolTimeoutError("pool esgotado")])
+
+    def renew(_claimed: ClaimedAttempt) -> Status:
+        for failure in failures:
+            raise failure
+        renewals.append(Status.RUNNING)
+        return Status.RUNNING
+
+    monkeypatch.setattr(worker, "renew_lease", renew)
+
+    status = worker.supervise(attempt_without_database())
+
+    assert status.exit_code == 0
+    assert renewals == [Status.RUNNING]
+
+
+@pytest.mark.parametrize(
+    "sqlstate",
+    [
+        pytest.param("28P01", id="senha-recusada"),
+        pytest.param("53100", id="disco-cheio"),
+        pytest.param("54000", id="limite-do-servidor"),
+        pytest.param("58030", id="erro-de-e-s"),
+    ],
+)
+def test_erro_operacional_que_pede_acao_de_fora_tambem_nao_abandona_o_executor(
+    monkeypatch: pytest.MonkeyPatch, sqlstate: str
+) -> None:
+    renewals: list[Status] = []
+    worker = worker_without_database(_RunningUntilRenewed(renewals, renewals_needed=1))
+    driver_error = psycopg_errors.lookup(sqlstate)()
+    failures = iter([DBAPIError.instance("stmt", {}, driver_error, psycopg.Error)])
 
     def renew(_claimed: ClaimedAttempt) -> Status:
         for failure in failures:
