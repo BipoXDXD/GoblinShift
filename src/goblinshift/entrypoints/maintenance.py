@@ -39,6 +39,7 @@ from goblinshift.runs.worker.runner import Runner
 logger = logging.getLogger("goblinshift.maintenance")
 
 EXIT_OK = 0
+EXIT_FAILURE = 1
 EXIT_CONFIGURATION = 2
 
 type _Clock = Callable[[], datetime]
@@ -66,7 +67,12 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
-    serve(settings, runner, shutdown)
+    try:
+        serve(settings, runner, shutdown)
+    except Exception:
+        # Ver `worker.main`: a mensagem crua do banco não pode ir para o stderr.
+        logger.exception("manutenção encerrada por erro")
+        return EXIT_FAILURE
     return EXIT_OK
 
 

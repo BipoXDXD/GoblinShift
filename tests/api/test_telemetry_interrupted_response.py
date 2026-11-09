@@ -6,6 +6,7 @@ que o `OTLPSpanExporter` enviaria, depois do mesmo processador da produção.
 
 import io
 import logging
+import threading
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -22,12 +23,22 @@ from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import Link, SpanContext, StatusCode, TraceFlags
-from sqlalchemy.exc import OperationalError
+from psycopg import Error as PsycopgError
+from psycopg import OperationalError as PsycopgOperationalError
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError
+from uvicorn.logging import DefaultFormatter
 
+from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.transfers import DownloadResponse, TransferTimeouts
+from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
-from goblinshift.platform.telemetry import JsonFormatter, make_span_processor
+from goblinshift.platform.telemetry import (
+    JsonFormatter,
+    make_span_processor,
+    omit_database_error_detail,
+)
 from goblinshift.runs.worker import attempt_event
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.coordinator import Coordinator
@@ -95,9 +106,11 @@ class FileFailingAfterFirstChunk(io.BytesIO):
 
 @dataclass
 class Traced:
+    app: FastAPI
     client: TestClient
     exporter: OtlpBytesExporter
     canaries: Canaries
+    log: io.StringIO
 
 
 def _new_canary() -> str:
@@ -139,6 +152,10 @@ def _download_routes(canaries: Canaries) -> APIRouter:
     def plain_fails() -> None:
         raise_database_error()
 
+    @router.get("/plain-fails-outside-database")
+    def plain_fails_outside_database() -> None:
+        raise canaries.storage_error()
+
     return router
 
 
@@ -150,9 +167,16 @@ def traced() -> Iterator[Traced]:
         Settings(environment="test", db_port=1, db_connect_timeout_s=1), span_exporter=exporter
     )
     app.include_router(_download_routes(canaries))
+    # O handler real de `configure_logging`, com a saída trocada: filtro e formatador de produção.
+    log = io.StringIO()
+    handler = next(
+        h for h in logging.getLogger().handlers if isinstance(h.formatter, JsonFormatter)
+    )
+    assert isinstance(handler, logging.StreamHandler)
+    handler.setStream(log)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            yield Traced(client, exporter, canaries)
+            yield Traced(app, client, exporter, canaries, log)
     finally:
         SQLAlchemyInstrumentor().uninstrument()
 
@@ -163,11 +187,9 @@ def _assert_no_canary_in_otlp(traced: Traced) -> None:
     assert leaked == []
 
 
-def _assert_no_canary_in_logs(traced: Traced, caplog: pytest.LogCaptureFixture) -> None:
-    formatter = JsonFormatter()
-    output = "\n".join(formatter.format(record) for record in caplog.records)
-    if not caplog.records:
-        # Fora de `AssertionError`: sem log, o `xfail` do vazamento não pode absorver a falha.
+def _assert_no_canary_in_logs(traced: Traced) -> None:
+    output = traced.log.getvalue()
+    if not output:
         pytest.fail("nenhum log capturado: o cenário não chegou ao erro")
     leaked = [canary for canary in traced.canaries.all() if canary in output]
     assert leaked == []
@@ -228,14 +250,6 @@ def test_download_interrompido_continua_no_log_com_o_request_id_e_a_excecao(
     assert isinstance(record.exc_info[1], OperationalError)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "vazamento conhecido: o log leva str(exceção) com host, SQL e parâmetros; "
-        "mudar isso é decisão do dono (custo de diagnóstico)"
-    ),
-)
 def test_log_do_download_interrompido_nao_traz_canario(
     traced: Traced, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -243,7 +257,7 @@ def test_log_do_download_interrompido_nao_traz_canario(
 
     traced.client.get(f"{TEST_ROUTES}/interrupted-close-fails")
 
-    _assert_no_canary_in_logs(traced, caplog)
+    _assert_no_canary_in_logs(traced)
 
 
 def test_on_close_que_falha_depois_do_download_completo_sai_sem_o_detalhe_no_otlp(
@@ -278,6 +292,397 @@ def test_rota_comum_que_falha_antes_da_resposta_sai_sem_eventos_e_sem_detalhe(
     assert response.json()["code"] == "SERVICE_UNAVAILABLE"
     _assert_no_canary_in_otlp(traced)
     assert traced.exporter.main_span().events == ()
+
+
+# Log: erro de banco só com tipo e frames; o resto, por inteiro
+
+
+def _uvicorn_log(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> str:
+    """O que o Uvicorn escreve ao receber a exceção: handler próprio, sem passar pelo root."""
+    logger = logging.getLogger("uvicorn.error")
+    monkeypatch.setattr(logger, "propagate", False)
+    output = io.StringIO()
+    handler = logging.StreamHandler(output)
+    handler.setFormatter(DefaultFormatter("%(levelprefix)s %(message)s", use_colors=False))
+    logger.addHandler(handler)
+    try:
+        logger.error("Exception in ASGI application\n", exc_info=error)
+    finally:
+        logger.removeHandler(handler)
+    return output.getvalue()
+
+
+def _raised(error: Exception) -> Exception:
+    try:
+        raise error
+    except Exception as caught:
+        return caught
+
+
+def test_log_do_500_comum_com_erro_de_banco_nao_traz_canario(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    traced.client.get(f"{TEST_ROUTES}/plain-fails")
+
+    _assert_no_canary_in_logs(traced)
+
+
+def test_log_do_erro_de_banco_mantem_o_tipo_e_os_frames(
+    traced: Traced, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    traced.client.get(f"{TEST_ROUTES}/plain-fails")
+
+    output = traced.log.getvalue()
+    assert OPERATIONAL_ERROR_TYPE in output
+    assert "raise_database_error" in output
+    [record] = [r for r in caplog.records if r.name.endswith(".problems")]
+    assert record.exc_info is not None
+
+
+@pytest.mark.parametrize(
+    "route",
+    ["interrupted", "plain-fails-outside-database"],
+)
+def test_excecao_que_nao_e_de_banco_continua_no_log_por_inteiro(
+    traced: Traced, caplog: pytest.LogCaptureFixture, route: str
+) -> None:
+    caplog.set_level(logging.ERROR)
+
+    traced.client.get(f"{TEST_ROUTES}/{route}")
+
+    assert f"OSError: falha ao ler {traced.canaries.path}" in traced.log.getvalue()
+
+
+def test_uvicorn_nao_escreve_o_detalhe_do_erro_de_banco(
+    traced: Traced, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _uvicorn_log(monkeypatch, _raised(traced.canaries.database_error()))
+
+    assert [canary for canary in traced.canaries.all() if canary in output] == []
+    assert OPERATIONAL_ERROR_TYPE in output
+    assert "Exception in ASGI application" in output
+
+
+def test_uvicorn_escreve_por_inteiro_a_excecao_que_nao_e_de_banco(
+    traced: Traced, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _uvicorn_log(monkeypatch, _raised(traced.canaries.storage_error()))
+
+    assert f"OSError: falha ao ler {traced.canaries.path}" in output
+
+
+def _wrapped_with_cause(canaries: Canaries) -> Exception:
+    try:
+        raise canaries.database_error()
+    except OperationalError as error:
+        try:
+            raise RuntimeError("falha ao encerrar") from error
+        except RuntimeError as wrapper:
+            return wrapper
+
+
+def _wrapped_with_context(canaries: Canaries) -> Exception:
+    try:
+        raise canaries.database_error()
+    except OperationalError:
+        try:
+            raise RuntimeError("falha ao encerrar")
+        except RuntimeError as wrapper:
+            return wrapper
+
+
+def _grouped(canaries: Canaries) -> Exception:
+    return _raised(ExceptionGroup("grupo", [_raised(canaries.database_error())]))
+
+
+def _nested_group(canaries: Canaries) -> Exception:
+    inner = ExceptionGroup("dentro", [_raised(canaries.database_error())])
+    return _raised(ExceptionGroup("fora", [inner]))
+
+
+def _cycle(canaries: Canaries) -> Exception:
+    database_error = _raised(canaries.database_error())
+    other = ValueError(canaries.path)
+    database_error.__context__ = other
+    other.__context__ = database_error
+    return database_error
+
+
+@pytest.mark.parametrize(
+    "build", [_wrapped_with_cause, _wrapped_with_context, _grouped, _nested_group, _cycle]
+)
+def test_erro_de_banco_em_qualquer_ponto_da_cadeia_tira_as_mensagens(
+    traced: Traced,
+    monkeypatch: pytest.MonkeyPatch,
+    build: Callable[[Canaries], Exception],
+) -> None:
+    output = _uvicorn_log(monkeypatch, build(traced.canaries))
+
+    assert [canary for canary in traced.canaries.all() if canary in output] == []
+    assert OPERATIONAL_ERROR_TYPE in output
+
+
+def test_excecao_que_descarta_o_erro_de_banco_com_from_none_fica_inteira(
+    traced: Traced, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canaries = traced.canaries
+    try:
+        raise canaries.database_error()
+    except OperationalError:
+        try:
+            raise ValueError(f"sem relação {canaries.path}") from None
+        except ValueError as replaced:
+            output = _uvicorn_log(monkeypatch, replaced)
+
+    assert f"ValueError: sem relação {canaries.path}" in output
+    assert canaries.sql not in output
+
+
+# Log: o filtro vale para qualquer logger do processo
+
+
+NON_API_LOGGERS = [
+    "goblinshift.entrypoints.worker",
+    "goblinshift.entrypoints.maintenance",
+    "goblinshift.runs.worker.coordinator",
+]
+
+
+def _log_exception(logger_name: str, error: Exception) -> None:
+    try:
+        raise error
+    except Exception:
+        logging.getLogger(logger_name).exception("falha fora da requisição")
+
+
+@pytest.mark.parametrize("logger_name", NON_API_LOGGERS)
+def test_log_de_processo_fora_da_api_nao_traz_o_detalhe_do_erro_de_banco(
+    traced: Traced, logger_name: str
+) -> None:
+    _log_exception(logger_name, traced.canaries.database_error())
+
+    _assert_no_canary_in_logs(traced)
+    assert OPERATIONAL_ERROR_TYPE in traced.log.getvalue()
+
+
+@pytest.mark.parametrize("logger_name", NON_API_LOGGERS)
+def test_log_de_processo_fora_da_api_mantem_excecao_que_nao_e_de_banco(
+    traced: Traced, logger_name: str
+) -> None:
+    _log_exception(logger_name, ValueError(traced.canaries.path))
+
+    assert f"ValueError: {traced.canaries.path}" in traced.log.getvalue()
+
+
+def test_log_nao_traz_o_detalhe_de_erro_cru_do_psycopg(traced: Traced) -> None:
+    _log_exception(NON_API_LOGGERS[0], PsycopgOperationalError(traced.canaries.host))
+
+    _assert_no_canary_in_logs(traced)
+    assert "OperationalError" in traced.log.getvalue()
+
+
+def test_uvicorn_nao_escreve_o_detalhe_de_erro_cru_do_psycopg(
+    traced: Traced, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _uvicorn_log(monkeypatch, _raised(PsycopgOperationalError(traced.canaries.host)))
+
+    assert traced.canaries.host not in output
+
+
+def test_readyz_com_banco_fora_nao_loga_o_detalhe(
+    traced: Traced, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail() -> None:
+        raise traced.canaries.database_error()
+
+    monkeypatch.setattr(traced.app.state.engine, "connect", fail)
+
+    response = traced.client.get("/readyz")
+
+    assert response.status_code == 503
+    _assert_no_canary_in_logs(traced)
+    assert OPERATIONAL_ERROR_TYPE in traced.log.getvalue()
+
+
+def test_filtro_troca_o_texto_ja_em_cache_no_registro(traced: Traced) -> None:
+    error = _raised(traced.canaries.database_error())
+    record = logging.LogRecord("x", logging.ERROR, "x", 1, "m", None, (type(error), error, None))
+    record.exc_text = traced.canaries.sql
+
+    omit_database_error_detail(record)
+
+    assert traced.canaries.sql not in (record.exc_text or "")
+
+
+class _ConnectionWithRepr:
+    def __init__(self, host: str) -> None:
+        self._host = host
+
+    def __repr__(self) -> str:
+        return f"<psycopg.Connection [IDLE] (host={self._host} database=g) at 0x1>"
+
+
+def test_mensagem_do_pool_nao_traz_o_repr_da_conexao(traced: Traced) -> None:
+    connection = _ConnectionWithRepr(traced.canaries.host)
+    pool_logger = logging.getLogger("sqlalchemy.pool.impl.QueuePool")
+
+    pool_logger.error("Exception closing connection %r", connection)
+    pool_logger.error(f"non-checked-in connection {connection!r}")
+
+    output = traced.log.getvalue()
+    assert traced.canaries.host not in output
+    assert "Exception closing connection <psycopg connection>" in output
+
+
+# Processos: a exceção que escapa de `serve` vai para o log, não para o `sys.excepthook`
+
+
+@pytest.fixture
+def restored_root_logging() -> Iterator[None]:
+    root = logging.getLogger()
+    handlers = root.handlers[:]
+    level = root.level
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
+
+
+def _offline_settings() -> Settings:
+    return Settings(environment="test", db_port=1, db_connect_timeout_s=1)
+
+
+def _connection_refused(canary: str) -> PsycopgOperationalError:
+    return PsycopgOperationalError(f'connection to server at "{canary}", port 5432 failed')
+
+
+@pytest.fixture
+def worker_offline(monkeypatch: pytest.MonkeyPatch, restored_root_logging: None) -> None:
+    settings = _offline_settings()
+    monkeypatch.setattr(worker, "Settings", lambda: settings)
+    monkeypatch.setattr(worker, "build_runner", lambda _settings: MagicMock())
+    monkeypatch.setattr(worker, "shutdown_on_signals", threading.Event)
+
+
+def _assert_failed_without_canary(
+    exit_code: int, capsys: pytest.CaptureFixture[str], canary: str
+) -> None:
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert canary not in captured.err + captured.out
+    assert "OperationalError" in captured.err
+
+
+@pytest.mark.usefixtures("worker_offline")
+def test_worker_sem_banco_no_boot_sai_com_erro_e_sem_o_detalhe(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canary = _new_canary()
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise _connection_refused(canary)
+
+    monkeypatch.setattr("psycopg.connect", refuse)
+
+    _assert_failed_without_canary(worker.main(), capsys, canary)
+
+
+class _ListenerLosingTheConnection:
+    def __init__(self, canary: str) -> None:
+        self._canary = canary
+
+    def __enter__(self) -> _ListenerLosingTheConnection:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def wait(self, _timeout_s: float) -> bool:
+        raise _connection_refused(self._canary)
+
+
+@pytest.mark.usefixtures("worker_offline")
+def test_worker_ocioso_que_perde_o_banco_sai_com_erro_e_sem_o_detalhe(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canary = _new_canary()
+    monkeypatch.setattr(
+        worker, "QueueListener", lambda *_args: _ListenerLosingTheConnection(canary)
+    )
+    monkeypatch.setattr(worker, "_work_once", lambda *_args: False)
+
+    _assert_failed_without_canary(worker.main(), capsys, canary)
+
+
+@pytest.mark.usefixtures("worker_offline")
+def test_worker_mantem_inteira_a_excecao_que_nao_e_de_banco(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canary = _new_canary()
+
+    def fail(*_args: object) -> None:
+        raise ValueError(canary)
+
+    monkeypatch.setattr(worker, "serve", fail)
+
+    assert worker.main() != 0
+    assert f"ValueError: {canary}" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("restored_root_logging")
+def test_manutencao_que_falha_ao_subir_sai_com_erro_e_sem_o_detalhe(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canary = _new_canary()
+    settings = _offline_settings()
+
+    def fail(*_args: object) -> None:
+        raise _connection_refused(canary)
+
+    monkeypatch.setattr(maintenance, "Settings", lambda: settings)
+    monkeypatch.setattr(maintenance, "build_runner", lambda _settings: MagicMock())
+    monkeypatch.setattr("signal.signal", lambda *_args: None)
+    monkeypatch.setattr(maintenance, "FileStorage", fail)
+
+    _assert_failed_without_canary(maintenance.main(), capsys, canary)
+
+
+# Engine: `hide_parameters`
+
+
+def test_engine_nao_poe_o_parametro_na_mensagem_do_erro() -> None:
+    canary = _new_canary()
+    engine = make_engine(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+
+    # Como o `Connection` constrói o erro do driver, com o valor do engine.
+    error = DBAPIError.instance(
+        "SELECT 1 WHERE %(k)s IS NOT NULL",
+        {"k": canary},
+        PsycopgOperationalError("falhou"),
+        PsycopgError,
+        hide_parameters=engine.hide_parameters,
+    )
+
+    assert canary not in str(error)
+    assert "SQL parameters hidden" in str(error)
+
+
+@pytest.mark.integration
+def test_erro_real_do_postgres_nao_traz_o_parametro(db_settings: Settings) -> None:
+    canary = _new_canary()
+    engine = make_engine(db_settings)
+
+    try:
+        with engine.connect() as conn, pytest.raises(DBAPIError) as caught:
+            conn.execute(text("SELECT 1 / 0, CAST(:k AS text)"), {"k": canary})
+    finally:
+        engine.dispose()
+
+    assert canary not in str(caught.value)
+    assert "SQL parameters hidden" in str(caught.value)
 
 
 # Processador: o que a redação preserva, e o span `attempt` do worker
