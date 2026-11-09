@@ -144,6 +144,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_capacity_over_max",
     "alert_upload_without_reservation",
     "alert_run_without_reservation",
+    "alert_executor_start_failed",
 )
 
 
@@ -266,6 +267,16 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-executor-nao-iniciou",
+        "Executor recusado em três tentativas ou mais nos últimos 10 min: as Runs terminam em "
+        "INFRA_POISON. Área de trabalho suja (work_area_dirty) também conta, porque a Run se perde "
+        "do mesmo jeito. Leia o motivo no campo error do log executor não iniciou antes de agir: a "
+        "imagem no daemon é a primeira suspeita só com docker_unavailable; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
     ),
     _SpanCause(
         "causa-manutencao-sem-ciclo",
