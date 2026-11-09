@@ -26,6 +26,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
@@ -34,6 +36,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from goblinshift.entrypoints.api.wide_event import record_error
 
 logger = logging.getLogger(__name__)
+
+# Espera sugerida quando o banco ou o pool não atende: da ordem do `pool_timeout` de 5 s.
+DATABASE_RETRY_AFTER_SECONDS = 5
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
@@ -225,6 +230,9 @@ def install_problem_handlers(app: FastAPI) -> None:
     app.exception_handler(ApiProblem)(_handle_api_problem)
     app.exception_handler(RequestValidationError)(_handle_validation_error)
     app.exception_handler(StarletteHTTPException)(_handle_http_exception)
+    # Pool esgotado e banco fora do ar são falha temporária da dependência (1.6 e 3.2), não bug.
+    app.exception_handler(PoolTimeoutError)(_handle_database_unavailable)
+    app.exception_handler(OperationalError)(_handle_database_unavailable)
 
 
 def problem_response(
@@ -315,6 +323,25 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse
         request_id=request_id_of(request),
         headers=exc.headers,
         errors=exc.errors,
+    )
+
+
+async def _handle_database_unavailable(
+    request: Request, exc: PoolTimeoutError | OperationalError
+) -> JSONResponse:
+    request_id = request_id_of(request)
+    # Só o tipo: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
+    logger.error(
+        "banco indisponível na requisição %s",
+        request_id,
+        extra={"fields": {"error.type": type(exc).__name__}},
+    )
+    return problem_response(
+        code=ProblemCode.SERVICE_UNAVAILABLE,
+        detail="O serviço está temporariamente indisponível; tente de novo depois do Retry-After.",
+        instance=request.url.path,
+        request_id=request_id,
+        headers={"Retry-After": str(DATABASE_RETRY_AFTER_SECONDS)},
     )
 
 
