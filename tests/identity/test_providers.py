@@ -166,3 +166,77 @@ def test_google_sub_na_fronteira_do_oidc_e_aceito(subject: str) -> None:
 def test_google_sub_com_del_e_recusado() -> None:
     with pytest.raises(InvalidProviderIdentityError):
         google_identity({"iss": GOOGLE_ISSUER, "sub": "a\x7fb"})
+
+
+# O caso "sub-espaco" acima também tem `ç` e seria recusado mesmo que o espaço passasse; aqui, e
+# nos casos seguintes, só o caractere em teste difere de um `sub` válido.
+@pytest.mark.parametrize(
+    "subject",
+    [
+        pytest.param(" 1092837465", id="inicio"),
+        pytest.param("1092 837465", id="meio"),
+        pytest.param("1092837465 ", id="fim"),
+        pytest.param(" ", id="um-espaco"),
+        pytest.param("   ", id="so-espacos"),
+        pytest.param(" " * 255, id="so-espacos-no-teto"),
+        pytest.param(" " + "1" * 254, id="inicio-dentro-do-teto"),
+        pytest.param("1" * 254 + " ", id="fim-dentro-do-teto"),
+    ],
+)
+def test_google_sub_com_espaco_e_recusado_em_vez_de_normalizado(subject: str) -> None:
+    with pytest.raises(InvalidProviderIdentityError):
+        google_identity({"iss": GOOGLE_ISSUER, "sub": subject})
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        pytest.param("\x001092837465", id="nul-inicio"),
+        pytest.param("1092837465\x00", id="nul-fim"),
+        pytest.param("1092837465\x01", id="soh-fim"),
+        pytest.param("1092\x1f837465", id="us-vizinho-do-espaco"),
+        pytest.param("\t1092837465", id="tab-inicio"),
+        pytest.param("1092837465\t", id="tab-fim"),
+        pytest.param("\n1092837465", id="lf-inicio"),
+        pytest.param("1092\n837465", id="lf-meio"),
+        pytest.param("1092837465\n", id="lf-fim"),
+        pytest.param("1092837465\r", id="cr-fim"),
+        pytest.param("1092837465\r\n", id="crlf-fim"),
+        pytest.param("\x7f1092837465", id="del-inicio"),
+        pytest.param("1092837465\x7f", id="del-fim"),
+    ],
+)
+def test_google_sub_com_caractere_de_controle_e_recusado(subject: str) -> None:
+    with pytest.raises(InvalidProviderIdentityError):
+        google_identity({"iss": GOOGLE_ISSUER, "sub": subject})
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        pytest.param("1092837465\x80", id="primeiro-acima-do-ascii"),
+        pytest.param("1092837465\x85", id="nel"),
+        pytest.param("1092837465\xa0", id="nbsp"),
+        pytest.param("1092837465\u2003", id="em-space"),
+        pytest.param("1092837465\u3000", id="espaco-ideografico"),
+        pytest.param("1092\u200b837465", id="largura-zero"),
+        pytest.param("\uff11092837465", id="digito-largo"),
+        pytest.param("1" * 254 + "é", id="nao-ascii-dentro-do-teto"),
+        pytest.param("\ud800", id="surrogate-isolado"),
+    ],
+)
+def test_google_sub_fora_do_ascii_e_recusado(subject: str) -> None:
+    with pytest.raises(InvalidProviderIdentityError):
+        google_identity({"iss": GOOGLE_ISSUER, "sub": subject})
+
+
+def test_google_sub_de_um_caractere_e_aceito() -> None:
+    assert google_identity({"iss": GOOGLE_ISSUER, "sub": "1"}).subject == "1"
+
+
+def test_google_sub_preserva_a_caixa_sem_normalizar() -> None:
+    upper = google_identity({"iss": GOOGLE_ISSUER, "sub": "AbC-123"})
+    lower = google_identity({"iss": GOOGLE_ISSUER, "sub": "abc-123"})
+
+    assert upper.subject == "AbC-123"
+    assert lower.subject == "abc-123"
