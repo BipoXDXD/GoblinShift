@@ -323,14 +323,20 @@ def test_varredura_nao_atinge_o_temporario_de_uma_gravacao_em_curso(tmp_path: Pa
         assert stored.read() == b"primeira partesegunda parte"
 
 
-def fail_unlink(monkeypatch: pytest.MonkeyPatch, times: int) -> None:
-    """As `times` primeiras remoções recusam; `unlink` de um arquivo não falha sozinho no POSIX."""
+def fail_unlink(
+    monkeypatch: pytest.MonkeyPatch, times: int, error_code: int = errno.EACCES
+) -> None:
+    """As `times` primeiras remoções falham com `error_code`.
+
+    `OSError` escolhe a subclasse pelo errno: `EACCES` vira `PermissionError`, e `EROFS`, `EBUSY`
+    e `EIO` ficam `OSError` puro.
+    """
     original = Path.unlink
     denied = iter(range(times))
 
     def unlink(self: Path, missing_ok: bool = False) -> None:
         if next(denied, None) is not None:
-            raise PermissionError(errno.EACCES, "recusado", str(self))
+            raise OSError(error_code, "recusado", str(self))
         original(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", unlink)
@@ -361,6 +367,45 @@ def test_falha_ao_apagar_um_temporario_nao_impede_os_demais_e_fica_registrada(
     assert failure.__dict__["fields"] == {"tmp_part": survivor.name}
     assert failure.exc_info is not None
     assert failure.exc_info[0] is PermissionError
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [errno.EROFS, errno.EBUSY, errno.EIO],
+    ids=["disco-so-leitura", "arquivo-ocupado", "erro-de-entrada-e-saida"],
+)
+def test_erro_de_disco_ao_apagar_nao_para_a_varredura_e_fica_em_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_code: int,
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=1, error_code=error_code)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    [failure] = removal_failures(caplog)
+    assert sweep == TemporarySweep(removed=2, remaining=1, remaining_bytes=2, failed=1)
+    assert failure.exc_info is not None
+    error = failure.exc_info[1]
+    assert type(error) is OSError
+    assert error.errno == error_code
+
+
+def test_teto_da_varredura_soma_remocoes_e_falhas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=1)
+
+    sweep = storage.sweep_stale_temporaries(CUTOFF, 2)
+
+    assert sweep == TemporarySweep(removed=1, remaining=2, remaining_bytes=4, failed=1)
+    assert len(list((tmp_path / ".tmp").iterdir())) == 2
 
 
 def test_tentativas_que_falham_contam_no_teto_da_varredura(
