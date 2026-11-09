@@ -10,10 +10,14 @@ import ipaddress
 import json
 import logging
 import os
+import re
+import traceback
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import psycopg
 from fastapi import FastAPI
 from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -26,10 +30,16 @@ from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
 from opentelemetry.trace import Span, Status, StatusCode, get_current_span
 from sqlalchemy import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from goblinshift.platform.settings import Settings
 
 ALERT_ATTRIBUTE_PREFIX = "alert."
+UVICORN_ERROR_LOGGER = "uvicorn.error"
+_DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
+_POOL_LOGGER_PREFIX = "sqlalchemy.pool"
+# O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
+_PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
 
 
 class JsonFormatter(logging.Formatter):
@@ -45,8 +55,51 @@ class JsonFormatter(logging.Formatter):
         if isinstance(fields, dict):
             entry.update(fields)
         if record.exc_info:
-            entry["exception"] = self.formatException(record.exc_info)
+            entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
+
+
+def omit_database_error_detail(record: logging.LogRecord) -> bool:
+    """Filtro de log: exceção com erro de banco na cadeia sai só com tipos e frames.
+
+    A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
+    do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
+    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira. As mensagens
+    do pool perdem o repr da conexão.
+    """
+    if record.name.startswith(_POOL_LOGGER_PREFIX):
+        record.msg = _PSYCOPG_CONNECTION_REPR.sub("<psycopg connection>", record.getMessage())
+        record.args = None
+    exception = record.exc_info[1] if record.exc_info else None
+    if exception is None:
+        return True
+    chain = list(_exception_chain(exception))
+    if any(isinstance(item, _DATABASE_ERRORS) for item in chain):
+        record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
+    return True
+
+
+def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
+    """A exceção e as que o traceback mostraria: causa, contexto e membros de grupo."""
+    pending = [exception]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        linked = current.__cause__ if current.__suppress_context__ else current.__context__
+        if linked is not None:
+            pending.append(linked)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+
+
+def _type_and_frames(exception: BaseException) -> str:
+    frames = "".join(traceback.format_tb(exception.__traceback__))
+    kind = type(exception)
+    return f"Traceback (most recent call last):\n{frames}{kind.__module__}.{kind.__qualname__}"
 
 
 class AlertEventCounter(logging.Handler):
@@ -77,7 +130,10 @@ class AlertEventCounter(logging.Handler):
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
+    handler.addFilter(omit_database_error_detail)
     logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
+    # O Uvicorn escreve por handlers próprios, fora do root (`propagate: False`).
+    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_database_error_detail)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a

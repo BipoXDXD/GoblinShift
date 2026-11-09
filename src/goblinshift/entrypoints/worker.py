@@ -38,6 +38,7 @@ from goblinshift.runs.worker.runner import LocalRunner, Runner
 logger = logging.getLogger("goblinshift.worker")
 
 EXIT_OK = 0
+EXIT_FAILURE = 1
 EXIT_CONFIGURATION = 2
 
 
@@ -51,7 +52,13 @@ def main() -> int:
     except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("worker não sobe: %s", error)
         return EXIT_CONFIGURATION
-    serve(settings, runner, shutdown_on_signals())
+    try:
+        serve(settings, runner, shutdown_on_signals())
+    except Exception:
+        # Fronteira do processo, com o mesmo código de saída de antes: sem isto, o `sys.excepthook`
+        # escreveria no stderr a mensagem crua do banco, com host, porta e usuário.
+        logger.exception("worker encerrado por erro")
+        return EXIT_FAILURE
     return EXIT_OK
 
 
