@@ -71,7 +71,10 @@ def test_ciclo_que_falha_nao_impede_o_outro_e_marca_o_span(
 
 
 @pytest.fixture
-def counting() -> Iterator[None]:
+def counting(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # `create_app` deixa outro contador no logger raiz (configure_logging), e quase toda a suíte
+    # cria a app: sem cortar a propagação, cada evento seria contado duas vezes.
+    monkeypatch.setattr(logger, "propagate", False)
     handler = AlertEventCounter()
     logger.addHandler(handler)
     yield
