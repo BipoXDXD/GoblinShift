@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PASSWORD_CANARY = "CANARY-senha-do-banco-na-variavel"  # noqa: S105 (valor de teste)
 PASSWORD_IN_FILE = "senha-do-arquivo"  # noqa: S105 (valor de teste)
 DEV_PASSWORD = "goblinshift"  # noqa: S105 (padrão da pilha local, não é segredo)
+ADMIN_COMMAND = [sys.executable, "-m", "goblinshift.entrypoints.admin_cli"]
 API_COMMAND = [
     sys.executable, "-m", "uvicorn", "goblinshift.entrypoints.api.app:create_app",
     "--factory", "--host", "127.0.0.1", "--port", "0",
@@ -78,6 +79,9 @@ def _production_env(settings: Settings) -> dict[str, str]:
     return {
         "PATH": os.environ["PATH"],
         "GS_ENVIRONMENT": "production",
+        # Porta fechada: numa regressão, a falha é imediata e não alcança outro Postgres da máquina.
+        "GS_DB_HOST": "127.0.0.1",
+        "GS_DB_PORT": str(settings.db_port),
         "GS_CURSOR_SECRET": SECRET,
         "GS_USER_HASH_SECRET": SECRET,
         "GS_RUNNER": "executor_ctl",
@@ -204,6 +208,41 @@ def test_processo_real_em_producao_sem_o_arquivo_de_senha_nao_sobe(
     assert PASSWORD_CANARY not in output
 
 
+def test_ambiente_dos_processos_reais_aponta_para_uma_porta_fechada(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Numa regressão, o processo falha rápido em vez de achar o Postgres de outro projeto."""
+    for name, value in _production_env(_production(tmp_path)).items():
+        monkeypatch.setenv(name, value)
+
+    settings = Settings()
+
+    assert (settings.db_host, settings.db_port) == ("127.0.0.1", 1)
+
+
+def test_gs_admin_sem_o_arquivo_de_senha_sai_com_uma_linha_e_sem_a_senha(tmp_path: Path) -> None:
+    env = {**_production_env(_production(tmp_path)), "GS_DB_PASSWORD": PASSWORD_CANARY}
+
+    result = _run_process([*ADMIN_COMMAND, "create-user", "--display-name", "Sem arquivo"], env)
+
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == ["gs-admin: GS_DB_PASSWORD_FILE é obrigatório em produção"]
+
+
+def test_gs_admin_sem_segredo_pedido_pelo_comando_sai_com_uma_linha(tmp_path: Path) -> None:
+    """O segredo que só o comando usa falta depois de o engine existir, e sai do mesmo jeito."""
+    settings = _production(tmp_path)
+    env = {**_production_env(settings), "GS_DB_PASSWORD_FILE": str(settings.db_password_file)}
+    del env["GS_USER_HASH_SECRET"]
+
+    result = _run_process([*ADMIN_COMMAND, "find-user", "--user-hash", "a" * 64], env)
+
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == ["gs-admin: GS_USER_HASH_SECRET é obrigatório em produção"]
+
+
 def test_producao_le_a_senha_do_banco_do_arquivo_sem_a_quebra_de_linha(tmp_path: Path) -> None:
     assert _production(tmp_path).database_url.password == PASSWORD_IN_FILE
 
@@ -220,6 +259,22 @@ def test_producao_nao_aceita_a_senha_em_variavel_no_lugar_do_arquivo(tmp_path: P
         _ = settings.database_url
 
     assert PASSWORD_CANARY not in str(caught.value)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lê qualquer arquivo")
+def test_arquivo_de_senha_ilegivel_nao_sobe_e_nao_culpa_a_api(tmp_path: Path) -> None:
+    """A API, o worker e a migração leem o mesmo arquivo: a mensagem não cita um processo só."""
+    unreadable = _secret_file(tmp_path, "ilegivel", PASSWORD_IN_FILE)
+    unreadable.chmod(0)
+    settings = _production(tmp_path, db_password_file=unreadable)
+
+    with pytest.raises(MissingSecretError) as caught:
+        _ = settings.database_url
+
+    assert str(caught.value) == (
+        "GS_DB_PASSWORD_FILE aponta para um arquivo que o processo não pode ler "
+        "(no host, use modo 644)"
+    )
 
 
 @pytest.mark.parametrize("environment", ["development", "test", "production"])
