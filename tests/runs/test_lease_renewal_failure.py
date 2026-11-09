@@ -55,6 +55,8 @@ LOCK_TIMEOUT_MS = 100
 LONG_LEASE = timedelta(seconds=30)
 RETRY_WAIT_S = 5.0
 LOCK_NOT_AVAILABLE = "55P03"
+# Folga para a supervisão sem banco, que normalmente termina em milissegundos.
+SUPERVISION_LIMIT_S = 5.0
 
 
 @pytest.fixture
@@ -192,14 +194,21 @@ def test_log_da_falha_traz_o_sqlstate_e_nao_a_mensagem_do_banco(
 
 
 class _RunningUntilRenewed:
-    """Executor que roda até o lease ser renovado `renewals_needed` vezes com sucesso."""
+    """Executor que roda até o lease ser renovado `renewals_needed` vezes com sucesso.
+
+    Sem renovação bem-sucedida, a supervisão só terminaria no teto de 10 min da tentativa. O limite
+    reprova o teste antes disso, com `pytest.fail`, que nenhum `except Exception` captura.
+    """
 
     def __init__(self, renewals: list[Status], renewals_needed: int) -> None:
         self._renewals = renewals
         self._renewals_needed = renewals_needed
+        self._deadline = time.monotonic() + SUPERVISION_LIMIT_S
 
     def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
         del attempt_id
+        if time.monotonic() >= self._deadline:
+            pytest.fail("a supervisão não terminou dentro do limite do teste")
         if len(self._renewals) < self._renewals_needed:
             return ExecutorStatus(ExecutorPhase.RUNNING)
         return ExecutorStatus(ExecutorPhase.EXITED, exit_code=0)
