@@ -68,6 +68,7 @@ def test_sli_de_aceitacao(telemetry: Telemetry) -> None:
     traces.acceptance(200)  # fora: ?validate_only=true não cria Run
     traces.request("GET", RUNS_ROUTE, 500)  # fora: outra operação
     traces.request("POST", RUNS_ROUTE, 202, main=False)  # fora: não é o evento amplo
+    traces.database_query()  # fora: span de consulta, sem atributo `main`
     traces.flush()
 
     assert sli(telemetry, "aceitacao", stream) == (6, 2)
@@ -397,25 +398,28 @@ def test_arquivo_que_ficou_no_disco_dispara_por_qualquer_origem(
 def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Telemetry) -> None:
     stream = unique_stream("outro")
     traces = telemetry.traces(stream)
-    traces.span(
-        "outra.coisa",
-        60,
-        {
-            "main": True,
-            "maintenance.runs_stuck_stopping": 3,
-            "maintenance.purge_limit_reached": 1,
-            "maintenance.accounts_deletion_overdue": 1,
-            "maintenance.missing_sweep_skipped": 1,
-            "maintenance.missing_governor_tripped": 1,
-            "maintenance.objects_marked_missing": 1,
-            "maintenance.objects_missing_unreadable": 1,
-            "maintenance.purge_files_not_removed": 1,
-            "maintenance.candidates_left_on_disk": 1,
-            "maintenance.missing_sweep_failed": 1,
-            "maintenance.failed_cycles": 1,
-        },
-        1.0,
-    )
+    # Três spans: as causas com `HAVING count(*) >= 3` só disparariam a partir daí.
+    for minute in range(3):
+        traces.span(
+            "outra.coisa",
+            (minute + 1) * MINUTE_S,
+            {
+                "main": True,
+                "maintenance.runs_stuck_stopping": 3,
+                "maintenance.purge_limit_reached": 1,
+                "maintenance.accounts_deletion_overdue": 1,
+                "maintenance.missing_sweep_skipped": 1,
+                "maintenance.missing_governor_tripped": 1,
+                "maintenance.objects_marked_missing": 1,
+                "maintenance.objects_missing_unreadable": 1,
+                "maintenance.purge_files_not_removed": 1,
+                "maintenance.candidates_left_on_disk": 1,
+                "maintenance.missing_sweep_failed": 1,
+                "maintenance.failed_cycles": 1,
+                "alert.executor_start_failed": 1,
+            },
+            1.0,
+        )
     traces.flush()
     declare_columns(telemetry.api, stream)
 
@@ -430,6 +434,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-arquivos-nao-removidos",
         "causa-varredura-falhou",
         "causa-ciclos-falhando",
+        "causa-executor-nao-iniciou",
     ):
         assert not cause_rows(telemetry, name, stream), name
 
@@ -478,6 +483,26 @@ def test_evento_de_alerta_contado_em_qualquer_span_main_dispara(
     declare_columns(telemetry.api, stream)
 
     assert bool(cause_rows(telemetry, cause, stream)) is fires
+
+
+# Uma Run sem imagem no daemon falha quatro starts em cerca de 2 min (MAX_CLAIMS, com jitter de até
+# 30 s entre eles); um start isolado que se recupera na retentativa não pede ninguém.
+@pytest.mark.parametrize(("failing", "fires"), [(2, False), (3, True), (4, True)])
+def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
+    telemetry: Telemetry, failing: int, fires: bool
+) -> None:
+    stream = unique_stream("executor")
+    attribute = "alert.executor_start_failed"
+    traces = telemetry.traces(stream)
+    for minute in range(failing):
+        traces.span("attempt", (minute + 1) * MINUTE_S, {"main": True, attribute: 1}, 1.0)
+    # Tentativa normal e span que não é o principal nunca contam.
+    traces.span("attempt", MINUTE_S, {"main": True, attribute: 0}, 1.0)
+    traces.span("attempt", MINUTE_S, {"main": False, attribute: 1}, 1.0)
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    assert bool(cause_rows(telemetry, "causa-executor-nao-iniciou", stream)) is fires
 
 
 # --- Ausência: a telemetria que deveria chegar e não chegou -------------------------------------

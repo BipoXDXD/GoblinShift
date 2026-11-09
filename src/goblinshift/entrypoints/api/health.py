@@ -9,6 +9,7 @@ um "not_ready" vai para o log.
 import logging
 
 from fastapi import APIRouter, Request, Response
+from opentelemetry.instrumentation.utils import suppress_instrumentation
 from sqlalchemy.exc import SQLAlchemyError
 
 from goblinshift.platform.schema import read_db_heads, schema_is_ready
@@ -27,7 +28,9 @@ def livez() -> dict[str, str]:
 def readyz(request: Request, response: Response) -> dict[str, str]:
     state = request.app.state
     try:
-        with state.engine.connect() as conn:
+        # As sondas ficam fora dos traces, como a própria rota em `excluded_urls`: sem requisição
+        # exportada, cada consulta daqui viraria um trace sem pai, várias vezes por minuto.
+        with suppress_instrumentation(), state.engine.connect() as conn:
             db_heads = read_db_heads(conn)
     except SQLAlchemyError:
         logger.warning("readyz: banco indisponível", exc_info=True)

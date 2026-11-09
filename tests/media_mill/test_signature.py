@@ -64,3 +64,41 @@ def test_sem_assinatura_da_allowlist_e_recusado(header: bytes) -> None:
         detect_container(header)
 
     assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+def test_caixa_iso_de_exatamente_8_bytes_e_mov() -> None:
+    assert detect_container(b"\x00\x00\x00\x20ftyp") is Container.MOV
+
+
+def test_caixa_iso_cortada_em_7_bytes_e_recusada() -> None:
+    with pytest.raises(MediaRejected) as rejected:
+        detect_container(b"\x00\x00\x00\x20fty")
+
+    assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+WEBM_DOC_TYPE = b"\x42\x82\x84webm"
+
+
+def test_doctype_terminando_no_byte_64_e_webm() -> None:
+    header = EBML_MAGIC + b"\x00" * 53 + WEBM_DOC_TYPE
+
+    assert len(header) == 64
+    assert detect_container(header) is Container.WEBM
+
+
+def test_doctype_terminando_no_byte_65_fica_fora_da_janela_e_e_recusado() -> None:
+    header = EBML_MAGIC + b"\x00" * 54 + WEBM_DOC_TYPE
+
+    assert len(header) == 65
+    with pytest.raises(MediaRejected) as rejected:
+        detect_container(header)
+
+    assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+def test_magic_ebml_fora_do_inicio_e_recusado() -> None:
+    with pytest.raises(MediaRejected) as rejected:
+        detect_container(b"\x00" + EBML_MAGIC + WEBM_DOC_TYPE)
+
+    assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT

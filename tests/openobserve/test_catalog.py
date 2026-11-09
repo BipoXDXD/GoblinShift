@@ -29,6 +29,7 @@ LOG_EVENT_ALERTS = {
     "account_deletion_overdue": "gs-causa-exclusao-de-conta-atrasada",
     "capacity_divergence": "gs-causa-capacidade-divergente",
     "capacity_over_max": "gs-causa-capacidade-divergente",
+    "executor_start_failed": "gs-causa-executor-nao-iniciou",
     "missing_governor": "gs-causa-limitador-de-ausentes",
     "missing_sweep_failed": "gs-causa-varredura-falhou",
     "objects_missing": "gs-causa-objetos-ausentes",
@@ -104,6 +105,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-ciclos-falhando",
         "gs-causa-capacidade-divergente",
         "gs-causa-sem-reserva",
+        "gs-causa-executor-nao-iniciou",
         "gs-causa-manutencao-sem-ciclo",
         "gs-causa-sem-traces",
         "gs-heartbeat",
@@ -204,6 +206,18 @@ def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
     assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
 
 
+def test_executor_que_nao_inicia_avisa_no_destino_urgente_lendo_o_span_da_tentativa() -> None:
+    alert = next(
+        a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
+    )
+
+    assert alert.destination is DestinationKey.URGENT
+    assert (alert.stream_type, alert.stream_name) == ("traces", "s")
+    assert "alert_executor_start_failed" in CAUSE_COLUMNS
+    assert "operation_name = 'attempt'" in alert.sql
+    assert (alert.period_minutes, alert.frequency_minutes, alert.silence_minutes) == (10, 5, 60)
+
+
 def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
     by_name = {alert.name: alert for alert in alerts(stream="default", prefix=PREFIX)}
 
@@ -266,6 +280,23 @@ def test_o_que_cala_os_outros_alertas_vai_ao_destino_urgente(name: str) -> None:
     by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}
 
     assert by_name[name].destination is DestinationKey.URGENT
+
+
+@pytest.mark.parametrize("slo", SLOS, ids=lambda slo: slo.name)
+def test_sli_e_queima_so_contam_o_evento_amplo(slo: Slo) -> None:
+    # A API também exporta um span por consulta ao banco, no mesmo stream.
+    assert "main = 'true'" in slo.sli_sql("s")
+    assert "main = 'true'" in slo.burn_sql("s", 14)
+
+
+def test_todo_alerta_sobre_traces_so_conta_o_evento_amplo() -> None:
+    trace_alerts = [
+        alert for alert in alerts(stream="s", prefix=PREFIX) if alert.stream_type == "traces"
+    ]
+
+    assert trace_alerts
+    for alert in trace_alerts:
+        assert "main = 'true'" in alert.sql, alert.name
 
 
 @pytest.mark.parametrize("name", ABSENCE_ALERTS)

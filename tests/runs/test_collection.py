@@ -572,6 +572,24 @@ def test_dezesseis_contagens_sao_aceitas(tmp_path: Path) -> None:
     assert collected.report.items[0].counts == counts
 
 
+def test_nome_de_contagem_com_40_caracteres_e_aceito(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    counts = {"c" * 40: 1}
+    write_out(out, [ok_item(0, "a.csv", counts=counts)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].counts == counts
+
+
+def test_nome_de_contagem_com_41_caracteres_e_recusado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv", counts={"c" * 41: 1})], {"a.csv": b"1"})
+
+    with pytest.raises(CollectionError, match="nome de contagem"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
 def formula_warning(columns: object) -> dict[str, Any]:
     return {"code": "CSV_FORMULA_CELLS", "detail": "d", "columns": columns}
 
@@ -726,6 +744,103 @@ def test_preview_fora_do_formato_e_recusado(tmp_path: Path, path: str, content: 
     write_out(out, [with_preview(path, "a.csv")], {"a.csv": b"x", path: content})
 
     with pytest.raises(CollectionError, match="preview"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [pytest.param("", id="caminho-vazio"), pytest.param(7, id="caminho-nao-texto")],
+)
+def test_preview_com_caminho_que_nao_e_texto_preenchido_e_recusado(
+    tmp_path: Path, path: object
+) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["previews"] = [{"path": path, "of": "a.csv"}]
+    write_out(out, [item], {"a.csv": b"x"})
+
+    with pytest.raises(CollectionError, match="deve ser texto não vazio"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_item_com_status_desconhecido_e_recusado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "a.csv")
+    item["status"] = "skipped"
+    write_out(out, [item], {"a.csv": b"x"})
+
+    with pytest.raises(CollectionError, match="status desconhecido"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_out_ausente_e_recusado(tmp_path: Path) -> None:
+    with pytest.raises(CollectionError, match="out/ ausente"):
+        collect_outputs(tmp_path / "out", recipe_id=RECIPE, input_count=1)
+
+
+def test_out_que_e_arquivo_e_recusado(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    out.write_bytes(b"x")
+
+    with pytest.raises(CollectionError, match="não é diretório regular"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def test_out_que_e_symlink_para_diretorio_e_recusado(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    out = tmp_path / "out"
+    out.symlink_to(real, target_is_directory=True)
+
+    with pytest.raises(CollectionError, match="não é diretório regular"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+
+def preview_of_size(path: str, size: int) -> bytes:
+    """Conteúdo válido para o formato do preview, com exatamente `size` bytes."""
+    if path.endswith(".jpg"):
+        return b"\xff\xd8\xff" + b"0" * (size - 3)
+    if path.endswith(".json"):
+        return b'{"a":"' + b"x" * (size - 8) + b'"}'
+    return b"a" * size
+
+
+@pytest.mark.parametrize(
+    ("path", "size"),
+    [
+        pytest.param("previews/a.jpg", 524_288, id="jpg-512-kib"),
+        pytest.param("previews/a.csv", 65_536, id="csv-64-kib"),
+        pytest.param("previews/a.json", 65_536, id="json-64-kib"),
+    ],
+)
+def test_preview_com_exatamente_o_teto_do_formato_e_aceito(
+    tmp_path: Path, path: str, size: int
+) -> None:
+    out = tmp_path / "out"
+    content = preview_of_size(path, size)
+    write_out(out, [with_preview(path, "a.csv")], {"a.csv": b"x", path: content})
+
+    [preview] = collect_outputs(out, recipe_id=RECIPE, input_count=1).previews
+
+    assert (preview.file.name, preview.file.size) == (path, size)
+
+
+@pytest.mark.parametrize(
+    ("path", "size"),
+    [
+        pytest.param("previews/a.jpg", 524_289, id="jpg-um-byte-acima"),
+        pytest.param("previews/a.csv", 65_537, id="csv-um-byte-acima"),
+        pytest.param("previews/a.json", 65_537, id="json-um-byte-acima"),
+    ],
+)
+def test_preview_um_byte_acima_do_teto_do_formato_e_recusado(
+    tmp_path: Path, path: str, size: int
+) -> None:
+    out = tmp_path / "out"
+    content = preview_of_size(path, size)
+    write_out(out, [with_preview(path, "a.csv")], {"a.csv": b"x", path: content})
+
+    with pytest.raises(CollectionError, match="preview acima de"):
         collect_outputs(out, recipe_id=RECIPE, input_count=1)
 
 

@@ -42,7 +42,8 @@ GITHUB_ACCEPT = "application/vnd.github+json"
 # O `GET /user` tem poucos KiB; um corpo maior é lixo ou ataque e nem chega ao parser.
 MAX_GITHUB_USER_BYTES = 64 * 1024
 
-# `sub` do OIDC: até 255 caracteres ASCII visíveis (OpenID Connect Core, 2).
+# `sub`: o OpenID Connect Core (2) exige até 255 caracteres ASCII; aceitar só os visíveis, sem
+# espaço nem controle, é escolha do projeto.
 _OIDC_SUBJECT = r"^[\x21-\x7e]{1,255}$"
 # Regras de nome de usuário do GitHub: letras, dígitos e hífen, até 39 caracteres.
 _GITHUB_LOGIN = r"^[A-Za-z0-9-]{1,39}$"

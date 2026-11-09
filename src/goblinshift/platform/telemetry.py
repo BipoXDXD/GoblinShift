@@ -11,18 +11,24 @@ import json
 import logging
 import os
 import re
+import sys
 import traceback
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import psycopg
+import sqlalchemy
+import sqlalchemy.engine.create
 from fastapi import FastAPI
 from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from opentelemetry.instrumentation.sqlalchemy.engine import EngineTracer
+from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
@@ -40,6 +46,8 @@ _DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
 _POOL_LOGGER_PREFIX = "sqlalchemy.pool"
 # O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
 _PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
+
+logger = logging.getLogger(__name__)
 
 
 class JsonFormatter(logging.Formatter):
@@ -149,6 +157,8 @@ _QUERY_ATTRIBUTES = ("url.query",)
 _CLIENT_ADDRESS_ATTRIBUTES = ("net.peer.ip", "client.address", "http.client_ip")
 _SQLALCHEMY_SCOPE = "opentelemetry.instrumentation.sqlalchemy"
 REDACTED_DATABASE_ERROR = "database error (detail redacted)"
+_EXCEPTION_EVENT = "exception"
+_EXCEPTION_DETAIL_ATTRIBUTES = ("exception.message", "exception.stacktrace")
 # Header que o cliente escreve como quiser: nenhum header entra no evento (3.7).
 _USER_AGENT_ATTRIBUTES = ("http.user_agent", "user_agent.original")
 
@@ -274,7 +284,24 @@ def _host_of(scope: dict[str, Any]) -> str:
     return f"{server[0]}:{server[1]}" if server else ""
 
 
-def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
+@dataclass(frozen=True)
+class SpanQueueLimits:
+    """Limites do `BatchSpanProcessor`; `None` deixa o padrão do SDK (fila 2048, lote 512)."""
+
+    max_queue_size: int | None = None
+    max_export_batch_size: int | None = None
+
+
+SDK_DEFAULT_SPAN_QUEUE = SpanQueueLimits()
+# Só a API exporta um span por consulta ao banco. O lote maior é o que escoa um Collector lento;
+# a fila segura 30 s dele parado a 20 req/s e custa cerca de 45 MiB cheia. Fica no código porque
+# a produção recebe novas imagens, não novas variáveis do Compose.
+API_SPAN_QUEUE = SpanQueueLimits(max_queue_size=8192, max_export_batch_size=2048)
+
+
+def make_span_processor(
+    exporter: SpanExporter | None, queue: SpanQueueLimits = SDK_DEFAULT_SPAN_QUEUE
+) -> SpanProcessor | None:
     """Processador que exporta os spans; sem `exporter` e sem endpoint OTLP, nenhum.
 
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
@@ -283,7 +310,11 @@ def make_span_processor(exporter: SpanExporter | None) -> SpanProcessor | None:
     if exporter is not None:
         inner = SimpleSpanProcessor(exporter)
     elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-        inner = BatchSpanProcessor(OTLPSpanExporter())
+        inner = BatchSpanProcessor(
+            OTLPSpanExporter(),
+            max_queue_size=queue.max_queue_size,
+            max_export_batch_size=queue.max_export_batch_size,
+        )
     else:
         return None
     return ExceptionDetailRedactingProcessor(inner)
@@ -293,10 +324,12 @@ class ExceptionDetailRedactingProcessor(SpanProcessor):
     """Tira o detalhe das exceções dos spans do SQLAlchemy e dos `main` antes de exportar.
 
     A instrumentação grava `str(exceção)` no status, e o PostgreSQL põe valores na mensagem:
-    `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O código do erro
-    da requisição já está no evento amplo (`error.code`) e a consulta, parametrizada, em
-    `db.statement`. Nos spans `main`, ver `_without_main_exception_detail`. O span terminado é
-    imutável, então o processador repassa uma cópia.
+    `DETAIL: Key (email)=(...)`, `invalid input syntax for type uuid: "..."`. O span `connect`
+    também ganha um evento `exception`, cuja mensagem e pilha trazem host, porta e usuário. O
+    código do erro da requisição já está no evento amplo (`error.code`), a consulta, parametrizada,
+    em `db.statement`, e o tipo da exceção fica no evento. Nos spans `main`, ver
+    `_without_main_exception_detail`. O span terminado é imutável, então o processador repassa uma
+    cópia.
     """
 
     def __init__(self, inner: SpanProcessor) -> None:
@@ -319,7 +352,8 @@ def _without_database_error_detail(span: ReadableSpan) -> ReadableSpan:
     scope = span.instrumentation_scope
     if scope is None or scope.name != _SQLALCHEMY_SCOPE:
         return span
-    if span.status.status_code is not StatusCode.ERROR:
+    failed = span.status.status_code is StatusCode.ERROR
+    if not failed and not any(event.name == _EXCEPTION_EVENT for event in span.events):
         return span
     return ReadableSpan(
         name=span.name,
@@ -327,14 +361,22 @@ def _without_database_error_detail(span: ReadableSpan) -> ReadableSpan:
         parent=span.parent,
         resource=span.resource,
         attributes=span.attributes,
-        events=span.events,
+        events=tuple(_without_exception_detail(event) for event in span.events),
         links=span.links,
         kind=span.kind,
-        status=Status(StatusCode.ERROR, REDACTED_DATABASE_ERROR),
+        status=Status(StatusCode.ERROR, REDACTED_DATABASE_ERROR) if failed else span.status,
         start_time=span.start_time,
         end_time=span.end_time,
         instrumentation_scope=scope,
     )
+
+
+def _without_exception_detail(event: SdkEvent) -> SdkEvent:
+    if event.name != _EXCEPTION_EVENT or event.attributes is None:
+        return event
+    redacted = {name: REDACTED_DATABASE_ERROR for name in _EXCEPTION_DETAIL_ATTRIBUTES}
+    attributes = {name: redacted.get(name, value) for name, value in event.attributes.items()}
+    return SdkEvent(event.name, attributes, event.timestamp)
 
 
 def configure_tracing(
@@ -344,7 +386,7 @@ def configure_tracing(
 
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
-    provider = make_tracer_provider(settings, "goblinshift-api", exporter)
+    provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
         return
     FastAPIInstrumentor.instrument_app(
@@ -356,19 +398,55 @@ def configure_tracing(
         # tempos do envio já estão no evento amplo.
         exclude_spans=["receive", "send"],
     )
-    # Hoje não instrumenta nada: a instrumentação declara suporte só até o SQLAlchemy 2.0 e, no
-    # 2.1, desiste com um aviso no log. O processador acima já protege o dia em que ligar.
-    SQLAlchemyInstrumentor().instrument(engine=engine, tracer_provider=provider)
+    _instrument_database(engine, provider)
+
+
+def _instrument_database(engine: Engine, provider: TracerProvider) -> None:
+    """Liga os spans de banco; uma falha aqui custa só esses spans, nunca o boot da API."""
+    try:
+        # `skip_dep_check`: a 0.66b2, última publicada, ainda recusa o SQLAlchemy 2.1, embora o
+        # código dela funcione nele (tests/test_telemetry.py). O suporte oficial já está no main
+        # do projeto (open-telemetry/opentelemetry-python-contrib#5120); saiu a versão, sai este
+        # parâmetro.
+        SQLAlchemyInstrumentor().instrument(
+            engine=engine, tracer_provider=provider, skip_dep_check=True
+        )
+    except Exception:
+        logger.exception("instrumentação do banco falhou: a API segue sem spans de banco")
+        _clean_up_failed_instrumentation()
+
+
+def _clean_up_failed_instrumentation() -> None:
+    try:
+        _remove_partial_database_instrumentation()
+    except Exception:
+        logger.exception("limpeza da instrumentação do banco falhou: podem sobrar spans de banco")
+
+
+def _remove_partial_database_instrumentation() -> None:
+    # `instrument()` troca as funções e registra os listeners um a um e, ao falhar no meio, não
+    # marca nada como instrumentado: `uninstrument()` não desfaria o que já foi feito.
+    for module in (sqlalchemy, sqlalchemy.engine, sqlalchemy.engine.create):
+        unwrap(module, "create_engine")
+    unwrap(Engine, "connect")
+    # Fora de `sys.modules` quando foi o próprio import dele que falhou.
+    asyncio_module = sys.modules.get("sqlalchemy.ext.asyncio")
+    if asyncio_module is not None:
+        unwrap(asyncio_module, "create_async_engine")
+    EngineTracer.remove_all_event_listeners()  # type: ignore[no-untyped-call]  # lib sem tipos
 
 
 def make_tracer_provider(
-    settings: Settings, default_service: str, exporter: SpanExporter | None = None
+    settings: Settings,
+    default_service: str,
+    exporter: SpanExporter | None = None,
+    queue: SpanQueueLimits = SDK_DEFAULT_SPAN_QUEUE,
 ) -> TracerProvider | None:
     """Provider com o resource do serviço; `None` sem `exporter` e sem endpoint OTLP.
 
     Quem cria o provider chama `shutdown()` ao sair, para exportar o lote pendente.
     """
-    processor = make_span_processor(exporter)
+    processor = make_span_processor(exporter, queue)
     if processor is None:
         return None
     resource = Resource.create(

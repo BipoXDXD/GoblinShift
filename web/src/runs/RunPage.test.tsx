@@ -94,6 +94,7 @@ describe("Execução", () => {
     const link = await screen.findByRole("link", { name: "Baixar clientes.csv" });
     expect(link).toHaveAttribute("href", `/api/v1/artifacts/${ARTIFACT_ID}/download`);
     expect(link).toHaveAttribute("download", "clientes.csv");
+    expect(link).toHaveClass("min-h-11");
     const results = screen.getByRole("region", { name: "Resultados" });
     expect(within(results).getByText(/arquivo processado/)).toBeInTheDocument();
   });

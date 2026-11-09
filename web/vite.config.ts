@@ -54,7 +54,7 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "e2e/**/*.spec.ts"],
     // Sem isso o Vitest troca todo CSS por módulo vazio, inclusive o `?raw` que o teste de
     // contraste e o de licenças leem; os componentes não importam CSS.
-    css: { include: [/(tokens|fonts)\.css/] },
+    css: { include: [/(tokens|fonts|base)\.css/] },
     restoreMocks: true,
     unstubGlobals: true,
     coverage: {

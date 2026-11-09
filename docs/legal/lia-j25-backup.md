@@ -11,7 +11,7 @@
 |---|---|
 | Titulares | Todas as pessoas com conta e quem aparece nos eventos de segurança (J-23) |
 | Dados | Cópia lógica do banco inteiro (`pg_dump`): contas (provedor, sujeito, nome de exibição), sessões, chaves (só o hash), histórico de execuções, nomes de arquivo e parâmetros ainda não anulados (1.7: 30 dias), presets, eventos de segurança. **Sem arquivos**: uploads e resultados não têm backup |
-| Como | Dump diário às 06:00 UTC, cifrado com `age` na VPS antes de sair, para uma chave pública versionada; a chave privada não fica na VPS |
+| Como | Dump diário às 03:05 UTC, cifrado com `age` na VPS antes de sair, para uma chave pública versionada; a chave privada não fica na VPS |
 | Onde | Backblaze B2, região Estados Unidos (US East), bucket com Object Lock em modo compliance |
 | Prazo | Até 31 dias por versão: imutável por 30 dias (nem a conta dona apaga), ocultada nesse prazo e apagada 1 dia depois |
 | Quem acessa | Ninguém lê o conteúdo sem a chave privada. O teste mensal de restauração decifra o dump num runner efêmero do GitHub Actions, descartado ao fim |

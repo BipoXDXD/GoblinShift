@@ -266,7 +266,10 @@ class Coordinator:
         except RunnerError as error:
             # Toda recusa do start é de infraestrutura, inclusive imagem fora da allowlist do
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
-            logger.warning("executor não iniciou", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor não iniciou",
+                extra={"fields": {**_ids(claimed, error), "alert": "executor_start_failed"}},
+            )
             return self.fail_transiently(claimed)
         self.record_start(claimed)
         return self.finish(claimed, self.supervise(claimed))

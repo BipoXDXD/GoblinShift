@@ -26,6 +26,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
@@ -34,6 +36,18 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from goblinshift.entrypoints.api.wide_event import record_error
 
 logger = logging.getLogger(__name__)
+
+# Espera sugerida quando o banco ou o pool não atende: da ordem do `pool_timeout` de 5 s.
+DATABASE_RETRY_AFTER_SECONDS = 5
+# O psycopg põe em `OperationalError` também erros de programação (55000, 3B001, 2F005, 54000...);
+# só estes SQLSTATEs dizem que repetir a requisição pode dar certo. 40001 e 40P01 desfazem a
+# transação inteira, e é a contenção que os causa: chegam aqui ao esgotar as tentativas de
+# `runs/store.py` ou em rota sem retry.
+_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({"08", "53", "57"})
+_UNAVAILABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
+# Da classe 08, mas é parâmetro errado no SQL (`bind message supplies...`), não falha de conexão.
+_PROTOCOL_VIOLATION_SQLSTATE = "08P01"
+_SQLSTATE_CLASS_LENGTH = 2
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
@@ -193,7 +207,7 @@ def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
 
 
 # Respostas de erro comuns a toda rota autenticada.
-PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500)
+PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500, 503)
 
 
 # O nome segue o termo "problem" da RFC 9457, que é o que a classe representa.
@@ -258,7 +272,7 @@ def problem_response(
 
 
 class RequestContextMiddleware:
-    """Gera o `request_id` e transforma exceção inesperada em 500 genérico.
+    """Gera o `request_id` e transforma exceção não tratada em 503 (banco) ou 500 genérico.
 
     ASGI puro, e não `BaseHTTPMiddleware`, para não enfileirar o corpo das respostas por
     streaming. A exceção é registrada no log com o `request_id`; o cliente recebe só o
@@ -285,19 +299,43 @@ class RequestContextMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
-        except Exception:
-            logger.exception("erro inesperado na requisição %s", request_id)
+        except Exception as exc:
             # Com a resposta já começada não há como trocar o status; a conexão é cortada.
             if response_started:
+                logger.exception("erro inesperado na requisição %s", request_id)
                 record_error(ProblemCode.INTERNAL_ERROR.value)
                 raise
-            response = problem_response(
-                code=ProblemCode.INTERNAL_ERROR,
-                detail=f"Erro interno. Informe o request_id {request_id} ao suporte.",
-                instance=scope["path"],
-                request_id=request_id,
-            )
+            response = _unhandled_error_response(exc, scope["path"], request_id)
             await response(scope, receive, send_with_request_id)
+
+
+def _unhandled_error_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
+    """Decide a resposta de exceção que chegou ao middleware antes de a resposta começar.
+
+    Fica aqui, e não em `exception_handler`, porque o Starlette troca por `RuntimeError` a
+    exceção com handler registrado que ocorre depois de a resposta começar.
+    """
+    if _is_database_unavailable(exc):
+        return _database_unavailable_response(exc, instance, request_id)
+    if isinstance(exc, OperationalError):
+        logger.error(
+            "erro inesperado na requisição %s",
+            request_id,
+            exc_info=exc,
+            extra={"fields": _database_error_fields(exc)},
+        )
+    else:
+        logger.exception("erro inesperado na requisição %s", request_id)
+    return _internal_error_response(instance, request_id)
+
+
+def _internal_error_response(instance: str, request_id: str) -> JSONResponse:
+    return problem_response(
+        code=ProblemCode.INTERNAL_ERROR,
+        detail=f"Erro interno. Informe o request_id {request_id} ao suporte.",
+        instance=instance,
+        request_id=request_id,
+    )
 
 
 def request_id_of(request: Request) -> str:
@@ -316,6 +354,50 @@ async def _handle_api_problem(request: Request, exc: ApiProblem) -> JSONResponse
         headers=exc.headers,
         errors=exc.errors,
     )
+
+
+def _is_database_unavailable(exc: Exception) -> bool:
+    if isinstance(exc, PoolTimeoutError):
+        return True
+    # A conexão perdida vale para qualquer classe do driver: 25P03 chega como `InternalError`.
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    if not isinstance(exc, OperationalError):
+        return False
+    sqlstate = _sqlstate_of(exc)
+    # Sem SQLSTATE o servidor não chegou a responder: falha ao conectar ou conexão perdida.
+    if sqlstate is None:
+        return True
+    if sqlstate == _PROTOCOL_VIOLATION_SQLSTATE:
+        return False
+    return (
+        sqlstate in _UNAVAILABLE_SQLSTATES
+        or sqlstate[:_SQLSTATE_CLASS_LENGTH] in _UNAVAILABLE_SQLSTATE_CLASSES
+    )
+
+
+def _sqlstate_of(exc: Exception) -> str | None:
+    return getattr(getattr(exc, "orig", None), "sqlstate", None)
+
+
+def _database_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
+    logger.error(
+        "banco indisponível na requisição %s",
+        request_id,
+        extra={"fields": _database_error_fields(exc)},
+    )
+    return problem_response(
+        code=ProblemCode.SERVICE_UNAVAILABLE,
+        detail="O serviço está temporariamente indisponível; tente de novo depois do Retry-After.",
+        instance=instance,
+        request_id=request_id,
+        headers={"Retry-After": str(DATABASE_RETRY_AFTER_SECONDS)},
+    )
+
+
+def _database_error_fields(exc: Exception) -> dict[str, str | None]:
+    # Só tipo e SQLSTATE: a mensagem do driver pode trazer SQL e valores da consulta (3.7).
+    return {"error.type": type(exc).__name__, "sqlstate": _sqlstate_of(exc)}
 
 
 async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
