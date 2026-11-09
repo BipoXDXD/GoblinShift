@@ -23,7 +23,9 @@ dependencies = [
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.15.0",
-    "sqlalchemy>=2.1.4",
+    # `asyncio` traz o greenlet: a instrumentação importa `sqlalchemy.ext.asyncio` ao ligar, e sem ele
+    # a API não sobe com os traces ativos.
+    "sqlalchemy[asyncio]>=2.1.4",
     "uvicorn[standard]>=0.54.0",
 ]
 

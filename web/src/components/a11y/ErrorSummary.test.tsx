@@ -45,6 +45,14 @@ describe("ErrorSummary", () => {
     expect(screen.getByRole("textbox", { name: "Arquivos" })).toHaveFocus();
   });
 
+  it("o link do erro tem a altura do alvo de toque", () => {
+    render(<Form attempt={1} />);
+
+    expect(screen.getByRole("link", { name: "Escolha pelo menos um arquivo." })).toHaveClass(
+      "min-h-11",
+    );
+  });
+
   it("erro sem campo fica como texto, sem link", () => {
     render(<Form attempt={1} />);
 

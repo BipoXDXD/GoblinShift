@@ -68,6 +68,7 @@ def test_sli_de_aceitacao(telemetry: Telemetry) -> None:
     traces.acceptance(200)  # fora: ?validate_only=true não cria Run
     traces.request("GET", RUNS_ROUTE, 500)  # fora: outra operação
     traces.request("POST", RUNS_ROUTE, 202, main=False)  # fora: não é o evento amplo
+    traces.database_query()  # fora: span de consulta, sem atributo `main`
     traces.flush()
 
     assert sli(telemetry, "aceitacao", stream) == (6, 2)

@@ -26,6 +26,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
+from starlette.requests import ClientDisconnect
 
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 
@@ -82,14 +83,18 @@ async def read_command_body(request: Request) -> bytes:
     _require_json_media_type(request)
     chunks: list[bytes] = []
     size = 0
-    async for chunk in request.stream():
-        size += len(chunk)
-        if size > MAX_COMMAND_BYTES:
-            raise ApiProblem(
-                ProblemCode.BODY_TOO_LARGE,
-                f"O comando passa de {MAX_COMMAND_BYTES} bytes.",
-            )
-        chunks.append(chunk)
+    try:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_COMMAND_BYTES:
+                raise ApiProblem(
+                    ProblemCode.BODY_TOO_LARGE,
+                    f"O comando passa de {MAX_COMMAND_BYTES} bytes.",
+                )
+            chunks.append(chunk)
+    except ClientDisconnect:
+        # Ninguém lerá a resposta, mas sem isto o corte do cliente conta como erro do servidor.
+        raise ApiProblem(ProblemCode.BAD_REQUEST, "O envio foi interrompido.") from None
     return b"".join(chunks)
 
 

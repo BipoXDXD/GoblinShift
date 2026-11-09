@@ -5,6 +5,7 @@ geradas com o FFmpeg (test_recipe.py) provam que o JSON de verdade tem esta form
 """
 
 import json
+from fractions import Fraction
 from typing import Any
 
 import pytest
@@ -292,7 +293,9 @@ def test_audio_acima_do_limite_nao_importa_sem_extracao() -> None:
     "overrides",
     [
         pytest.param({"sample_rate": "0"}, id="taxa-zero"),
+        pytest.param({"sample_rate": "-1"}, id="taxa-negativa"),
         pytest.param({"channels": 0}, id="sem-canais"),
+        pytest.param({"channels": -1}, id="canais-negativos"),
         pytest.param({"sample_rate": "abc"}, id="taxa-invalida"),
     ],
 )
@@ -315,10 +318,96 @@ def test_audio_sem_taxa_ou_canais_e_formato_nao_suportado(overrides: dict[str, A
             b'{"streams": [{"codec_type": "video", "width": "x"}], "format": {}}',
             id="largura-texto",
         ),
+        pytest.param(probe_json([video(width="1920")]), id="largura-texto-em-faixa-completa"),
+        pytest.param(probe_json([video(width=True)]), id="largura-booleana"),
+        pytest.param(probe_json([video(side_data_list={})]), id="side-data-nao-lista"),
+        pytest.param(probe_json([video()], duration="inf"), id="duracao-infinita"),
+        pytest.param(probe_json([video()], duration="nan"), id="duracao-nan"),
+        pytest.param(probe_json([video(avg_frame_rate="x/1")]), id="taxa-nao-numerica"),
     ],
 )
 def test_saida_do_ffprobe_fora_do_esperado_e_formato_nao_suportado(data: bytes) -> None:
     with pytest.raises(MediaRejected) as rejected:
         parse_probe(data)
+
+    assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+def test_sem_media_declarada_a_taxa_vem_de_r_frame_rate() -> None:
+    stream = video(r_frame_rate="30/1")
+    del stream["avg_frame_rate"]
+
+    [parsed] = parse_probe(probe_json([stream])).videos
+
+    assert parsed.frame_rate == Fraction(30, 1)
+
+
+def test_sem_nenhuma_taxa_declarada_a_faixa_fica_sem_taxa() -> None:
+    stream = video()
+    del stream["avg_frame_rate"], stream["r_frame_rate"]
+
+    [parsed] = parse_probe(probe_json([stream])).videos
+
+    assert parsed.frame_rate is None
+
+
+def test_exatamente_16_faixas_sao_aceitas() -> None:
+    streams = [video(), *(audio(index=i) for i in range(1, 16))]
+
+    media = parse_probe(probe_json(streams))
+
+    assert (len(media.videos), len(media.audios)) == (1, 15)
+
+
+def test_17_faixas_sao_recusadas_pelo_teto_de_faixas() -> None:
+    streams = [video(), *(audio(index=i) for i in range(1, 17))]
+
+    with pytest.raises(MediaRejected, match="mais de 16 faixas") as rejected:
+        parse_probe(probe_json(streams))
+
+    assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+def test_faixas_de_dados_tambem_contam_para_o_teto_de_faixas() -> None:
+    data_stream = {"codec_type": "data", "codec_name": "bin_data"}
+    streams = [video(), *(data_stream for _ in range(16))]
+
+    with pytest.raises(MediaRejected, match="mais de 16 faixas"):
+        parse_probe(probe_json(streams))
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [
+        pytest.param("-1/1", id="numerador-negativo"),
+        pytest.param("1/-1", id="denominador-negativo"),
+        pytest.param("0/1", id="zero"),
+    ],
+)
+def test_taxa_que_nao_e_positiva_conta_como_nao_declarada(rate: str) -> None:
+    [parsed] = parse_probe(probe_json([video(avg_frame_rate=rate, r_frame_rate=rate)])).videos
+
+    assert parsed.frame_rate is None
+
+
+def test_menor_taxa_positiva_e_mantida() -> None:
+    [parsed] = parse_probe(probe_json([video(avg_frame_rate="1/1000")])).videos
+
+    assert parsed.frame_rate == Fraction(1, 1000)
+
+
+def test_media_negativa_cai_para_a_taxa_base() -> None:
+    data = probe_json([video(avg_frame_rate="-1/1", r_frame_rate="30/1")])
+
+    [parsed] = parse_probe(data).videos
+
+    assert parsed.frame_rate == Fraction(30, 1)
+
+
+def test_video_so_com_taxas_negativas_e_recusado_por_nao_declarar_quadros() -> None:
+    data = probe_json([video(avg_frame_rate="-1/1", r_frame_rate="-1/1")])
+
+    with pytest.raises(MediaRejected, match="não declara quadros por segundo") as rejected:
+        inspected(data)
 
     assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT

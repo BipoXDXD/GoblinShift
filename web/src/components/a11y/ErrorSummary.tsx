@@ -55,7 +55,7 @@ export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactEleme
             ) : (
               <a
                 href={`#${issue.fieldId}`}
-                className="font-semibold text-danger-fg"
+                className="inline-flex min-h-11 items-center font-semibold text-danger-fg"
                 onClick={focusField(issue.fieldId)}
               >
                 {issue.message}
