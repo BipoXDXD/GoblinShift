@@ -15,6 +15,7 @@ from goblinshift.files.errors import (
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
+    UploadObjectNotPendingError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -254,6 +255,34 @@ def test_conteudo_de_32_mib_exatos_e_aceito(
         view = receive_content(session, storage, owner, intent.id, chunks)
 
     assert view.size_bytes == MAX_FILE_BYTES
+
+
+def test_objeto_fora_de_pending_na_conclusao_e_estado_impossivel(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=3)
+
+    def sabotaged_chunks() -> Iterator[bytes]:
+        # Sabotagem: outro escritor tira o objeto de `pending` no meio da transferência, o que
+        # nenhum caminho do código faz enquanto o upload está `receiving`.
+        with unit_of_work(factory) as other:
+            other.execute(
+                update(stored_object)
+                .where(
+                    stored_object.c.id
+                    == select(upload.c.object_id).where(upload.c.id == intent.id).scalar_subquery()
+                )
+                .values(state="missing", sha256=b"\x00" * 32, size_bytes=3)
+            )
+        yield b"abc"
+
+    with factory() as session, pytest.raises(UploadObjectNotPendingError):
+        receive_content(session, storage, owner, intent.id, sabotaged_chunks())
+
+    with factory() as session:
+        state = session.execute(select(upload.c.state).where(upload.c.id == intent.id)).scalar_one()
+    assert state == UploadState.RECEIVING
 
 
 @pytest.mark.parametrize("content", [b"ab", b"abcd"])

@@ -70,11 +70,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Instalar o age
+        # Job com chave de backup: sem cache do Actions. Cada espelho do Ubuntu tem um teto por
+        # tentativa (scripts/ci-apt-instalar.sh).
         timeout-minutes: 10
-        run: |
-          scripts/ci-apt-sem-azure.sh
-          sudo apt-get update -q
-          sudo apt-get install -yq age
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
+        run: scripts/ci-apt-instalar.sh "$DEBS" age
       - name: PostgreSQL efêmero
         # `docker run` em vez de `services:`, que não aceita argumentos do servidor. Sem porta
         # publicada: acessado só por docker exec. `terse` tira DETAIL e CONTEXT (que trazem

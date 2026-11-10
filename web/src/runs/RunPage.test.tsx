@@ -1,4 +1,5 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { notifyManager, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
@@ -204,6 +205,170 @@ describe("Execução", () => {
     await screen.findByRole("link", { name: "Baixar clientes.csv" });
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+/** Respostas do GET da execução em sequência; a última se repete. */
+function inSequence(...responses: readonly (() => Response | null)[]): Handler {
+  let served = 0;
+  return () => {
+    const next = responses[Math.min(served, responses.length - 1)];
+    served += 1;
+    return next === undefined ? null : next();
+  };
+}
+
+const running = (): Response => jsonResponse(runBody({ status: "running" }));
+const unavailable = (): Response => problemResponse(503, "SERVICE_UNAVAILABLE");
+const UNAVAILABLE_TEXT = "O serviço está indisponível no momento.";
+/** Quantas vezes a tela consultou a execução. */
+function runRequests(requests: readonly Request[]): number {
+  return requests.filter(
+    (request) =>
+      request.method === "GET" && new URL(request.url).pathname === `/api/v1/runs/${RUN_ID}`,
+  ).length;
+}
+
+// Pedido que nunca responde: segura a consulta em andamento.
+const hanging = (): null => null;
+
+/** A próxima consulta do polling, sem esperar o intervalo dele. */
+async function nextPoll(queryClient: QueryClient): Promise<void> {
+  await act(() => queryClient.refetchQueries({ queryKey: ["runs", RUN_ID] }));
+}
+
+/**
+ * Conta os `role="alert"` inseridos no DOM: cada inserção é um anúncio assertivo do leitor de
+ * tela. Um alerta que fica montado e só muda de texto não conta.
+ */
+function countInsertedAlerts(): { readonly count: () => number; readonly stop: () => void } {
+  let inserted = 0;
+  const tally = (mutations: readonly MutationRecord[]): void => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node instanceof Element) {
+          inserted += node.matches('[role="alert"]') ? 1 : 0;
+          inserted += node.querySelectorAll('[role="alert"]').length;
+        }
+      }
+    }
+  };
+  const observer = new MutationObserver(tally);
+  observer.observe(document.body, { childList: true, subtree: true });
+  return {
+    count: () => {
+      tally(observer.takeRecords());
+      return inserted;
+    },
+    stop: () => {
+      observer.disconnect();
+    },
+  };
+}
+
+describe("Execução: falha do polling sem anúncio repetido", () => {
+  beforeEach(() => {
+    // O TanStack Query entrega as atualizações num setTimeout(0); entregar na hora faz cada
+    // consulta virar uma renderização, como na tela, onde as consultas têm segundos entre si.
+    notifyManager.setScheduler((callback) => {
+      callback();
+    });
+  });
+
+  afterEach(() => {
+    notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+  });
+
+  it("falha intermitente (erro, sucesso, erro) não vira alerta a cada alternância", async () => {
+    const { queryClient } = setup(inSequence(running, unavailable, running, unavailable));
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    alerts.stop();
+  });
+
+  it("falha persistente vira um alerta só, que fica enquanto ela dura", async () => {
+    const { queryClient } = setup(inSequence(running, unavailable));
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
+    // O último estado conhecido continua na tela, abaixo do aviso de que pode estar desatualizado.
+    expect(screen.getByText("Em andamento")).toBeInTheDocument();
+    alerts.stop();
+  });
+
+  it("o alerta some quando o polling volta a responder", async () => {
+    const { queryClient } = setup(inSequence(running, unavailable, unavailable, running));
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
+    await nextPoll(queryClient);
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ao voltar à execução, falhas antigas e não seguidas não viram alerta", async () => {
+    const { queryClient, router } = setup(
+      inSequence(running, unavailable, running, unavailable, hanging),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(() => router.navigate("/termos"));
+    await act(() => router.navigate(`/execucoes/${RUN_ID}`));
+
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    [401, "AUTHENTICATION_REQUIRED", "Sua sessão terminou"],
+    [410, "GONE", "Isto expirou"],
+  ])(
+    "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",
+    async (status, code, text) => {
+      // Só o intervalo do polling fica no relógio falso: avançá-lo prova que não há próxima consulta.
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const { queryClient, api } = setup(
+          inSequence(running, () => problemResponse(status, code)),
+        );
+        expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+        await nextPoll(queryClient);
+        expect(screen.getByRole("alert")).toHaveTextContent(text);
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
+
+        expect(runRequests(api.requests)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("falha transitória antes do primeiro dado vira alerta na primeira vez", async () => {
+    setup(unavailable);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
   });
 });
 
@@ -516,6 +681,25 @@ describe("pré-visualização dos resultados", () => {
     expect(box).toHaveAttribute("tabindex", "0");
     expect(within(box).getByRole("list")).toBeInTheDocument();
     expect(await axeViolations(box)).toEqual([]);
+  });
+
+  it("PDF: a legenda com nome longo quebra linha em qualquer ponto", async () => {
+    // Sem espaço, o nome só cabe a 320 px quebrando dentro da palavra (WCAG 1.4.10). O jsdom
+    // não faz layout, então o teste confere a classe.
+    const longName =
+      "relatorio_clientes_consolidado_2026_novembro_final_revisado_pela_contabilidade.pdf";
+    setupPreview({ fileName: longName, previewName: "selecao.json" }, () =>
+      bytes(
+        JSON.stringify({
+          schema_version: 1,
+          path: longName,
+          pages: [{ input_position: 0, page_number: 1 }],
+        }),
+      ),
+    );
+
+    const caption = await screen.findByText(`Páginas de ${longName}: 1 página`);
+    expect(caption).toHaveClass("wrap-anywhere");
   });
 
   it("PDF: mapa fora do formato mostra a falha", async () => {

@@ -7,12 +7,13 @@ import { SignInPrompt } from "../../account/SignInPrompt";
 import { ApiError } from "../../api/response";
 import { acceptTermsPath } from "../../app/paths";
 import { TEXT } from "../../text";
+import { Heading, type HeadingLevel } from "../a11y/Heading";
 import { ProblemAlert, type ProblemMessages } from "./ProblemAlert";
 
 interface FailureNoticeProps {
   readonly error: Error;
   /** Nível do título dos avisos de login e de termos, conforme a seção onde aparecem. */
-  readonly headingLevel?: 2 | 3;
+  readonly headingLevel?: HeadingLevel;
   readonly messages?: ProblemMessages;
 }
 
@@ -41,10 +42,13 @@ export function FailureNotice({
 }
 
 /** A conta precisa aceitar a versão nova dos termos; o link volta para esta tela depois. */
-function TermsRequiredNotice({ headingLevel }: { readonly headingLevel: 2 | 3 }): ReactElement {
+function TermsRequiredNotice({
+  headingLevel,
+}: {
+  readonly headingLevel: HeadingLevel;
+}): ReactElement {
   const titleId = useId();
   const { pathname, search } = useLocation();
-  const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <section
       aria-labelledby={titleId}
@@ -52,7 +56,7 @@ function TermsRequiredNotice({ headingLevel }: { readonly headingLevel: 2 | 3 })
     >
       <FileText aria-hidden="true" className="mt-1 size-4 flex-none" />
       <div className="flex max-w-prose flex-col gap-1">
-        <Heading id={titleId} className="font-semibold">
+        <Heading level={headingLevel} id={titleId} className="font-semibold">
           {TEXT.terms.requiredTitle}
         </Heading>
         <p>{TEXT.terms.requiredBody}</p>

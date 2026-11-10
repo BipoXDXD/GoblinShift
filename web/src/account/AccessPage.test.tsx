@@ -6,9 +6,10 @@ import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
-import { expectHeadingFocused } from "../test/focus";
+import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
+import { API_KEYS_QUERY_KEY } from "./api";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -346,6 +347,137 @@ describe("Acesso: chaves de API", () => {
     expect(await screen.findByRole("heading", { name: "Nenhuma chave de API" })).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  // O <dialog> devolveria o foco ao Revogar, que some com a chave revogada (WCAG 2.4.3).
+  it.each([
+    { caso: "revogada (204)", answer: NO_CONTENT },
+    { caso: "já sumida (404)", answer: () => problemResponse(404, "NOT_FOUND") },
+  ])("chave $caso: o foco vai para o título da seção", async ({ answer }) => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [apiKeyBody(settled ? { revoked_at: "2026-10-14T12:00:00Z" } : {})],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return answer();
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+  });
+
+  // A lista relida ainda traz o Revogar: se o <dialog> fechasse depois dela, devolveria o foco a ele
+  // por cima do título. Guarda a ordem "fecha, relê, foca".
+  it("chave revogada com a lista relida ainda ativa: o foco termina no título, não no Revogar", async () => {
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: NO_CONTENT,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    expect(await screen.findByText("Chave gsk_7Hq2 revogada.")).toBeInTheDocument();
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Falha genérica (5xx, timeout) com a mudança aplicada no servidor: o Revogar some na releitura e
+  // o foco cairia no <body> (WCAG 2.4.3).
+  it("500 com a lista já sem a chave: o foco vai para o título e a falha aparece", async () => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: settled ? [] : [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return problemResponse(500, "INTERNAL_ERROR");
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+  });
+
+  it("500 com a chave relida já revogada: o foco vai para o título, porque o Revogar sumiu", async () => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [apiKeyBody({ revoked_at: settled ? "2026-10-20T12:00:00Z" : null })],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return problemResponse(500, "INTERNAL_ERROR");
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+  });
+
+  it("500 com a chave ainda na lista: o foco volta ao Revogar", async () => {
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => problemResponse(500, "INTERNAL_ERROR"),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    expect(within(keys).getByRole("button", { name: "Revogar a chave gsk_7Hq2" })).toHaveFocus();
+  });
+
+  // WCAG 3.2: o destino do foco é decidido uma vez, na resposta. Uma releitura posterior da lista
+  // (a pessoa volta de outra aba) não pode puxar o foco para o título sem ação dela.
+  it("500 com a chave na lista: a releitura posterior não move o foco que a pessoa tirou", async () => {
+    let lastUsedAt: string | null = null;
+    const { queryClient, user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({ data: [apiKeyBody({ last_used_at: lastUsedAt })] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => problemResponse(500, "INTERNAL_ERROR"),
+    });
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    const revoke = within(keys).getByRole("button", { name: "Revogar a chave gsk_7Hq2" });
+    await waitFor(() => {
+      expect(revoke).toHaveFocus();
+    });
+
+    revoke.blur();
+    lastUsedAt = "2026-10-20T12:00:00Z";
+    await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+
+    expect(await within(keys).findByText(/Último uso em/)).toBeVisible();
+    expect(document.body).toHaveFocus();
+  });
+
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
     const held = heldResponse();
     const { api, user } = setup({
@@ -389,6 +521,38 @@ describe("Acesso: chave nova", () => {
     return screen.getByRole("form", { name: "Nova chave de API" });
   }
 
+  // "Nova chave" some quando o formulário abre, e o formulário some ao cancelar ou ao criar: sem
+  // destino explícito, o foco cairia no <body> (WCAG 2.4.3).
+  it("Nova chave leva o foco ao título do formulário", async () => {
+    const { user } = setup();
+
+    await openForm(user);
+
+    expect(screen.getByRole("heading", { name: "Nova chave de API" })).toHaveFocus();
+  });
+
+  it("Cancelar fecha o formulário e devolve o foco a Nova chave", async () => {
+    const { user } = setup();
+    const form = await openForm(user);
+
+    await user.click(within(form).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("form", { name: "Nova chave de API" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Nova chave" })).toHaveFocus();
+  });
+
+  it("Já copiei devolve o foco a Nova chave", async () => {
+    const { user } = setup({ "POST /api/v1/api-keys": () => jsonResponse(created, 201) });
+    const form = await openForm(user);
+    await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+    await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+    const reveal = await section("Chave criada: gsk_nova");
+
+    await user.click(within(reveal).getByRole("button", { name: "Já copiei" }));
+
+    expect(screen.getByRole("button", { name: "Nova chave" })).toHaveFocus();
+  });
+
   it("sem escopo e com validade fora da faixa, nada é enviado e o resumo aponta os dois", async () => {
     const { api, user } = setup({ "POST /api/v1/api-keys": () => jsonResponse(created, 201) });
     const form = await openForm(user);
@@ -400,10 +564,12 @@ describe("Acesso: chave nova", () => {
     const summary = await within(form).findByRole("alert");
     expect(summary).toHaveFocus();
     expect(
-      within(summary).getByRole("link", { name: "Escolha pelo menos um escopo." }),
+      within(summary).getByRole("link", { name: "Escopos: escolha pelo menos um escopo." }),
     ).toBeVisible();
     expect(
-      within(summary).getByRole("link", { name: "Informe um número inteiro de 1 a 90." }),
+      within(summary).getByRole("link", {
+        name: "Validade, em dias: informe um número inteiro de 1 a 90.",
+      }),
     ).toBeVisible();
     expect(sent(api.requests, "POST /api/v1/api-keys")).toEqual([]);
   });
@@ -516,6 +682,37 @@ describe("Acesso: chave nova", () => {
     );
   });
 
+  it("o resumo de erros fica um nível abaixo do título do formulário (h3 → h4)", async () => {
+    const { user } = setup();
+    const form = await openForm(user);
+
+    await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+    const summary = await within(form).findByRole("alert");
+    expect(
+      within(summary).getByRole("heading", {
+        level: 4,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeVisible();
+  });
+
+  it.each([
+    ["REAUTH_REQUIRED", 401, "Entre de novo para confirmar"],
+    ["TERMS_NOT_ACCEPTED", 403, "Aceite os termos para continuar"],
+  ] as const)(
+    "o aviso de %s fica um nível abaixo do título do formulário (h3 → h4)",
+    async (code, status, title) => {
+      const { user } = setup({ "POST /api/v1/api-keys": () => problemResponse(status, code) });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ler arquivos (files:read)"));
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+      const notice = await section(title);
+      expect(within(notice).getByRole("heading", { level: 4, name: title })).toBeVisible();
+    },
+  );
+
   it("não tem violações do axe com a lista, o formulário e a chave criada", async () => {
     const { container, user } = setup({
       "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
@@ -539,19 +736,76 @@ describe("Acesso: excluir conta", () => {
     return screen.getByRole("dialog", { name: "Excluir a conta?" });
   }
 
-  it("sem a frase digitada, a confirmação fica aria-disabled e nada é enviado", async () => {
+  it("sem a frase, a confirmação fica ativa; confirmar não envia e leva o foco ao campo com o erro", async () => {
     const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
     const dialog = await openDialog(user);
     const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
     expect(phrase).toHaveFocus();
 
+    // Padrão GOV.UK: o botão não se diz indisponível; a validação acontece ao confirmar.
     const confirm = within(dialog).getByRole("button", { name: "Excluir conta" });
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
-    await user.type(phrase, "excluir");
+    expect(confirm).not.toHaveAttribute("aria-disabled", "true");
     await user.click(confirm);
 
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(phrase).toHaveFocus();
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    expect(phrase).toHaveAccessibleDescription(
+      "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+    );
+    expect(confirm).not.toHaveAttribute("aria-disabled", "true");
     expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("o erro da frase some quando a frase passa a conferir", async () => {
+    const { user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
+    await user.type(phrase, "excluir");
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(phrase, " minha cont");
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    await user.type(phrase, "a");
+
+    expect(phrase).not.toHaveAttribute("aria-invalid");
+    expect(within(dialog).queryByText(/A frase não confere\./)).toBeNull();
+  });
+
+  it("frase errada: confirmar mostra o erro no campo, com o foco nele, e nada é enviado", async () => {
+    const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
+    await user.type(phrase, "excluir minha conta.");
+    const atFocus = recordDescriptionOnFocus(phrase);
+
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+
+    expect(phrase).toHaveFocus();
+    // O erro já está no DOM e ligado ao campo quando o foco chega, e não só depois do render.
+    expect(atFocus.descriptions).toEqual([
+      expect.stringContaining("A frase não confere.") as unknown,
+    ]);
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    expect(phrase).toHaveAccessibleDescription(
+      "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+    );
+    expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("o erro da frase some ao cancelar e reabrir o diálogo", async () => {
+    const { user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    expect(within(dialog).getByText(/A frase não confere\./)).toBeVisible();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    const reopened = await openDialog(user);
+
+    expect(within(reopened).queryByText(/A frase não confere\./)).toBeNull();
+    expect(within(reopened).getByLabelText("Digite “excluir minha conta”")).not.toHaveAttribute(
+      "aria-invalid",
+    );
   });
 
   it("com a frase, exclui (202), encerra a sessão local e mostra a exclusão pedida", async () => {
@@ -618,6 +872,11 @@ describe("Acesso: excluir conta", () => {
       expect(sent(api.requests, "DELETE /api/v1/me")).toHaveLength(1);
     });
 
+    // Só o pedido em curso bloqueia a confirmação.
+    expect(within(dialog).getByRole("button", { name: "Excluindo…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     expect(escapeIsBlocked(dialog)).toBe(true);
     forceClose(dialog);
     expect(screen.queryByRole("dialog")).toBeNull();

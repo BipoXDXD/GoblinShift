@@ -18,6 +18,8 @@ const CANCELABLE: ReadonlySet<RunStatus> = new Set(["queued", "running"]);
 interface CancelRunProps {
   readonly runId: string;
   readonly status: RunStatus;
+  /** Recebe o status que o anúncio do pedido já disse, para o polling não repeti-lo. */
+  readonly onAnnounced: (status: RunStatus) => void;
 }
 
 /**
@@ -25,7 +27,7 @@ interface CancelRunProps {
  * atualização otimista (2.2): o anúncio diz o que o servidor respondeu e o polling mostra o estado
  * novo no próximo Retry-After, sem consultar antes dele.
  */
-export function CancelRun({ runId, status }: CancelRunProps): ReactElement {
+export function CancelRun({ runId, status, onAnnounced }: CancelRunProps): ReactElement {
   const client = useApiClient();
   const [asking, setAsking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -33,6 +35,10 @@ export function CancelRun({ runId, status }: CancelRunProps): ReactElement {
     mutationFn: () => cancelRun(client, runId),
     onSuccess: (result) => {
       setMessage(outcomeMessage(result));
+      const announced = statusAnnounced(result);
+      if (announced !== null) {
+        onAnnounced(announced);
+      }
     },
     onSettled: () => {
       setAsking(false);
@@ -98,6 +104,23 @@ function outcomeMessage({
     return T.requested;
   }
   return outcome.status === "canceled" ? T.canceled : T.alreadyFinished;
+}
+
+/**
+ * Status que a mensagem do pedido já comunica: o 202 diz que a execução vai parar (`stopping`) e o
+ * 200 da fila diz que ela foi cancelada. "Já tinha terminado" não diz como, então o polling conta.
+ */
+function statusAnnounced({
+  outcome,
+  accepted,
+}: {
+  readonly outcome: CancelOutcome;
+  readonly accepted: boolean;
+}): RunStatus | null {
+  if (accepted) {
+    return "stopping";
+  }
+  return outcome.status === "canceled" ? "canceled" : null;
 }
 
 /**

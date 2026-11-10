@@ -8,7 +8,9 @@ Runner acontecem fora de transação.
 Lease vencido não prova que o executor morreu: antes de reagendar, o Runner é consultado pelo
 nome; executor vivo recebe `stop`, e só a confirmação do término libera a decisão. Sem
 confirmação, ou com o Runner fora do ar (`executor-ctl` parado), a execução fica como está
-(reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado.
+(reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado. O
+`stop` só sai se o lease, relido numa transação curta e sem trava logo antes, ainda estiver
+vencido: um worker pausado que voltou e renovou não perde o executor.
 
 O executor e a área de trabalho só são removidos depois de a decisão estar no banco. Se a remoção
 falhar, a limpeza das áreas (`sweep_work_areas`) a repete nos ciclos seguintes: o `executor-ctl`
@@ -19,12 +21,13 @@ import logging
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, and_, func, select
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
@@ -83,7 +86,7 @@ from goblinshift.runs.store import (
 )
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.coordinator import TRANSIENT_ATTEMPT_ERROR, random_retry_jitter
-from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.runner import STOP_GRACE, ExecutorStatus, Runner, RunnerError
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,16 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# Contagem do evento do ciclo: passos que levantaram exceção. O ciclo segue para os outros, e a
+# volta conta como falha (`entrypoints/maintenance.run_cycles`, causa `gs-causa-ciclos-falhando`).
+STEPS_FAILED = "steps_failed"
+# Passos não tentados na volta: os de banco depois de uma falha de conexão e os que a parada
+# pedida deixou para trás.
+STEPS_SKIPPED = "steps_skipped"
+# SQLSTATE de conexão (classe 08) e de servidor parando (admin_shutdown, crash_shutdown,
+# cannot_connect_now): o banco não vai responder ao passo seguinte desta volta.
+_CONNECTION_EXCEPTION_CLASS = "08"
+_SERVER_STOPPING_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
 
 
 @dataclass(frozen=True)
@@ -105,8 +118,91 @@ class MaintenanceConfig:
     # Fração do lote ausente acima da qual nada é marcado (files/missing.py); 1.0 desliga o
     # limitador, para o administrador depois de restaurar de propósito um backup antigo (3.8).
     missing_max_absent_ratio: float = DEFAULT_MAX_ABSENT_RATIO
-    stop_grace: timedelta = timedelta(seconds=10)
+    stop_grace: timedelta = STOP_GRACE
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
+
+
+def _never() -> bool:
+    return False
+
+
+def _always() -> bool:
+    return True
+
+
+@dataclass(frozen=True)
+class _Step:
+    name: str
+    run: Callable[[], Mapping[str, int]]
+    uses_database: bool = True
+
+
+@dataclass
+class _CycleOutcome:
+    """O que a volta acumulou: contagens dos passos que rodaram, falhas e passos pulados."""
+
+    counts: dict[str, int] = field(default_factory=dict)
+    failed: int = 0
+    connection_lost_in: str | None = None
+    skipped_after_connection: list[str] = field(default_factory=list)
+    skipped_for_stop: list[str] = field(default_factory=list)
+
+    def run(self, step: _Step) -> None:
+        try:
+            self.counts.update(step.run())
+        except Exception as error:
+            # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
+            _log_step_failure(step.name, error)
+            self.failed += 1
+            if self.connection_lost_in is None and _is_connection_error(error):
+                self.connection_lost_in = step.name
+
+    def finish(self) -> dict[str, int]:
+        """As contagens da volta, com falhas e pulos; os pulos vão ao log, uma linha por motivo."""
+        self.counts[STEPS_FAILED] = self.failed
+        self.counts[STEPS_SKIPPED] = len(self.skipped_after_connection) + len(self.skipped_for_stop)
+        if self.skipped_after_connection:
+            fields = {
+                "failed_step": self.connection_lost_in,
+                "skipped": self.skipped_after_connection,
+            }
+            logger.warning(
+                "banco inalcançável; passos de banco pulados nesta volta",
+                extra={"fields": fields},
+            )
+        if self.skipped_for_stop:
+            logger.info(
+                "parada pedida; passos restantes pulados",
+                extra={"fields": {"skipped": self.skipped_for_stop}},
+            )
+        return self.counts
+
+
+def _log_items_left(step: str, items_left: int) -> None:
+    """A parada pedida cortou o lote do passo; os itens restantes voltam no próximo processo."""
+    logger.info(
+        "parada pedida; itens restantes do passo pulados",
+        extra={"fields": {"step": step, "items_left": items_left}},
+    )
+
+
+def _is_connection_error(error: Exception) -> bool:
+    """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
+
+    Conexão que o pool invalidou, ou `OperationalError` sem SQLSTATE (o `connect` recusado ou
+    sem resposta) ou com SQLSTATE de conexão ou de servidor parando. `statement_timeout` (57014)
+    também chega como `OperationalError`, mas o banco respondeu: os outros passos seguem.
+    """
+    if isinstance(error, DBAPIError) and error.connection_invalidated:
+        return True
+    if not isinstance(error, OperationalError):
+        return False
+    sqlstate: str | None = getattr(error.orig, "sqlstate", None)
+    return (
+        sqlstate is None
+        or sqlstate.startswith(_CONNECTION_EXCEPTION_CLASS)
+        or sqlstate in _SERVER_STOPPING_SQLSTATES
+    )
 
 
 @dataclass(frozen=True)
@@ -138,35 +234,80 @@ class Maintenance:
         # passos, por `_decide`, cujo retorno já é a transição.
         self._candidates_left_on_disk = 0
 
-    def run_cycle(self) -> dict[str, int]:
-        """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
+    def run_cycle(self, should_stop: Callable[[], bool] = _never) -> dict[str, int]:
+        """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7).
+
+        Passos independentes: a exceção de um fica no log e em `steps_failed`, e o ciclo segue
+        para prazo, retenção, expurgo e medidores; as contagens do passo que falhou ficam fora do
+        evento. Falha de conexão (banco inalcançável) pula os passos de banco restantes da volta,
+        que só esperariam o `connect_timeout` de novo; `should_stop` (a parada pedida por sinal) é
+        conferido antes de cada passo. Os dois contam em `steps_skipped`. Os passos que chamam o
+        Runner item a item também conferem a parada entre os itens: o item em curso termina, e o
+        seguinte fica para o próximo processo. Esse item em curso pode, sozinho, passar da carência
+        da plataforma até o SIGKILL, que então leva o evento do ciclo: o limite é de um item, não
+        de tempo. Interrupção do processo (`KeyboardInterrupt`, `SystemExit`) não é `Exception` e
+        sobe.
+        """
         started = time.monotonic()
         self._candidates_left_on_disk = 0
-        counts = {
-            "leases_reconciled": self.reconcile_expired_leases(),
-            "queue_expired": self.expire_queue(),
-            "deadlines": self.apply_deadlines(),
-            "holds_released": self.release_orphan_holds(),
-            **self.discard_stale_candidates(),
-            "work_areas_removed": self.sweep_work_areas(),
-            **self.apply_retention(),
-            **self.sweep_temporary_parts(),
-            **self.mark_missing_objects(),
-            **self.measure(),
-        }
+        outcome = _CycleOutcome()
+        for step in self._cycle_steps(should_stop):
+            if should_stop():
+                outcome.skipped_for_stop.append(step.name)
+            elif outcome.connection_lost_in is not None and step.uses_database:
+                outcome.skipped_after_connection.append(step.name)
+            else:
+                outcome.run(step)
+        counts = outcome.finish()
         counts["candidates_left_on_disk"] = self._candidates_left_on_disk
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de manutenção", extra={"fields": fields})
         return counts
 
+    def _cycle_steps(self, should_stop: Callable[[], bool]) -> tuple[_Step, ...]:
+        """Os passos do ciclo, na ordem: reconciliação, fila, prazo, usos, retenção e medidores."""
+        return (
+            _Step(
+                "reconcile_expired_leases",
+                lambda: {
+                    "leases_reconciled": self.reconcile_expired_leases(should_stop=should_stop)
+                },
+            ),
+            _Step("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
+            _Step("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
+            _Step("release_orphan_holds", lambda: {"holds_released": self.release_orphan_holds()}),
+            _Step("discard_stale_candidates", self.discard_stale_candidates),
+            _Step(
+                "sweep_work_areas",
+                lambda: {"work_areas_removed": self.sweep_work_areas(should_stop=should_stop)},
+            ),
+            _Step("apply_retention", self.apply_retention),
+            # Só o storage: segue mesmo com o banco fora.
+            _Step("sweep_temporary_parts", self.sweep_temporary_parts, uses_database=False),
+            _Step("mark_missing_objects", self.mark_missing_objects),
+            _Step("measure", self.measure),
+        )
+
     # Lease vencido e parada ------------------------------------------------------------
 
-    def reconcile_expired_leases(self) -> int:
-        """Tentativas com lease vencido: confirma o término do executor e decide."""
+    def reconcile_expired_leases(self, *, should_stop: Callable[[], bool] = _never) -> int:
+        """Tentativas com lease vencido: confirma o término do executor e decide.
+
+        `should_stop` é conferido antes de cada tentativa, nunca no meio dela: uma tentativa
+        começada vai até a decisão e o `remove`.
+        """
         reconciled = 0
-        for expired in self._expired_attempts():
-            status = self._confirm_ended(expired.attempt_id, expired.run_id)
+        batch = self._expired_attempts()
+        for position, expired in enumerate(batch):
+            if should_stop():
+                _log_items_left("reconcile_expired_leases", len(batch) - position)
+                break
+            status = self._confirm_ended(
+                expired.attempt_id,
+                expired.run_id,
+                may_stop=partial(self._may_stop, expired),
+            )
             if status is None:
                 continue
             applied = self._decide(
@@ -179,13 +320,26 @@ class Maintenance:
         return reconciled
 
     def _confirm_ended(
-        self, attempt_id: uuid.UUID, run_id: uuid.UUID | None
+        self,
+        attempt_id: uuid.UUID,
+        run_id: uuid.UUID | None,
+        may_stop: Callable[[], bool] = _always,
     ) -> ExecutorStatus | None:
-        """Estado final do executor, parando-o se vivo; `None` se o fim não foi confirmado."""
+        """Estado final do executor, parando-o se vivo; `None` se o fim não foi confirmado.
+
+        `may_stop` é conferido entre o `status` e o `stop`, sem trava segurada durante as
+        chamadas ao Runner: falso deixa o executor vivo e a execução para o próximo ciclo.
+        """
         fields = {"attempt_id": str(attempt_id), "run_id": str(run_id) if run_id else None}
         try:
             status = self._runner.status(attempt_id)
             if status.is_running:
+                if not may_stop():
+                    logger.info(
+                        "lease não confirmado vencido na releitura; executor não é parado",
+                        extra={"fields": fields},
+                    )
+                    return None
                 status = self._runner.stop(attempt_id, self._config.stop_grace)
         except RunnerError as error:
             logger.warning(
@@ -217,15 +371,55 @@ class Maintenance:
             rows = session.execute(
                 select(run.c.id, run.c.generation, attempt.c.id.label("attempt_id"))
                 .join(attempt, attempt.c.run_id == run.c.id)
-                .where(
-                    attempt.c.ended_at.is_(None),
-                    attempt.c.lease_expires_at < func.now(),
-                    run.c.status.in_(ACTIVE_STATUSES),
-                )
+                .where(_lease_expired())
                 .order_by(attempt.c.lease_expires_at)
                 .limit(self._config.batch_size)
             ).all()
         return [_ExpiredAttempt(row.id, row.generation, row.attempt_id) for row in rows]
+
+    def _may_stop(self, expired: _ExpiredAttempt) -> bool:
+        """A releitura isolada por tentativa: erro de banco nela é "não parar neste ciclo".
+
+        O erro fica no log com tipo e SQLSTATE (a mensagem do banco traz host e valores, 3.7) e
+        o lote segue para a próxima tentativa. Erro de conexão sobe: o passo falha e o ciclo pula
+        os passos de banco restantes, que só esperariam o `connect_timeout` de novo.
+        """
+        try:
+            return self._lease_still_expired(expired)
+        except DBAPIError as error:
+            if _is_connection_error(error):
+                raise
+            fields = {
+                "attempt_id": str(expired.attempt_id),
+                "run_id": str(expired.run_id),
+                "error_type": type(error).__name__,
+                "sqlstate": getattr(error.orig, "sqlstate", None),
+            }
+            logger.warning(
+                "releitura do lease falhou; executor não é parado neste ciclo",
+                extra={"fields": fields},
+            )
+            return False
+
+    def _lease_still_expired(self, expired: _ExpiredAttempt) -> bool:
+        """Relê a tentativa antes do `stop`: ainda aberta, de Run ativa e com o lease vencido.
+
+        Leitura simples, sem `FOR UPDATE`, numa transação que termina antes da chamada ao
+        Runner. Não fecha a janela inteira (o worker pode renovar entre esta leitura e o `stop`),
+        só a encurta; quem decide depois continua sendo o fencing de `_lease_event`.
+
+        A geração não é conferida: ela só sobe no claim, que exige a Run em `queued` ou
+        `retry_wait`, e só se chega a `retry_wait` encerrando a tentativa viva; com o índice
+        `attempt_one_alive_per_run_idx` (uma viva por Run), tentativa ainda aberta implica a
+        geração lida.
+        """
+        with self._factory() as session, session.begin():
+            found = session.execute(
+                select(attempt.c.id)
+                .join(run, attempt.c.run_id == run.c.id)
+                .where(_lease_expired(), attempt.c.id == expired.attempt_id)
+            ).first()
+        return found is not None
 
     def _lease_event(
         self, loaded: LoadedRun, expired: _ExpiredAttempt, status: ExecutorStatus
@@ -309,10 +503,11 @@ class Maintenance:
 
     # Áreas de trabalho ------------------------------------------------------------------
 
-    def sweep_work_areas(self) -> int:
+    def sweep_work_areas(self, *, should_stop: Callable[[], bool] = _never) -> int:
         """Remove executor e área de tentativas encerradas (ou sem registro) que ficaram para trás.
 
         A tentativa viva (`ended_at` nulo) é do worker ou da reconciliação de lease: não é tocada.
+        `should_stop` é conferido antes de cada área, nunca no meio dela.
         """
         try:
             present = self._runner.list_work()[: self._config.batch_size]
@@ -321,22 +516,28 @@ class Maintenance:
             return 0
         if not present:
             return 0
+        live = self._live_attempts(present)
+        left_behind = [attempt_id for attempt_id in present if attempt_id not in live]
+        removed = 0
+        for position, attempt_id in enumerate(left_behind):
+            if should_stop():
+                _log_items_left("sweep_work_areas", len(left_behind) - position)
+                break
+            status = self._confirm_ended(attempt_id, run_id=None)
+            if status is not None and self._try_remove(attempt_id):
+                removed += 1
+        return removed
+
+    def _live_attempts(self, present: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Das tentativas com área no disco, as ainda abertas (`ended_at` nulo)."""
         with self._factory() as session, session.begin():
-            live = set(
+            return set(
                 session.execute(
                     select(attempt.c.id).where(
                         attempt.c.id.in_(present), attempt.c.ended_at.is_(None)
                     )
                 ).scalars()
             )
-        removed = 0
-        for attempt_id in present:
-            if attempt_id in live:
-                continue
-            status = self._confirm_ended(attempt_id, run_id=None)
-            if status is not None and self._try_remove(attempt_id):
-                removed += 1
-        return removed
 
     # Retenção --------------------------------------------------------------------------
 
@@ -576,6 +777,30 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _lease_expired() -> ColumnElement[bool]:
+    """Tentativa aberta de Run ativa com o lease vencido no relógio do banco."""
+    return and_(
+        attempt.c.ended_at.is_(None),
+        attempt.c.lease_expires_at < func.now(),
+        run.c.status.in_(ACTIVE_STATUSES),
+    )
+
+
+def _log_step_failure(step: str, error: Exception) -> None:
+    """Registra o passo que falhou com o tipo e o SQLSTATE nos campos.
+
+    A mensagem do banco traz host, porta, usuário e valores (3.7): não entra nos campos, e o
+    filtro do processo (`omit_database_error_detail`) tira o texto dela do traceback.
+    """
+    driver_error = getattr(error, "orig", error)
+    fields = {
+        "step": step,
+        "error_type": type(error).__name__,
+        "sqlstate": getattr(driver_error, "sqlstate", None),
+    }
+    logger.exception("passo da manutenção falhou", extra={"fields": fields})
 
 
 def _unreadable_fields(sweep: MissingSweep) -> dict[str, object]:

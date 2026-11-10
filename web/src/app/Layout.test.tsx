@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { SiteNotice } from "../notice/notice";
@@ -271,6 +272,22 @@ describe("Layout: aviso global", () => {
 
     expect(await axeViolations(container)).toEqual([]);
   });
+
+  it("Fechar aviso leva o foco ao título da tela, não ao corpo da página", async () => {
+    setup(() => jsonResponse(meBody()), "/historico", {
+      ...INCIDENT,
+      id: "termos-2026-11",
+      kind: "terms-change",
+    });
+    const title = await screen.findByRole("heading", { level: 1, name: "Histórico" });
+    const close = screen.getByRole("button", { name: "Fechar aviso" });
+    close.focus();
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(screen.queryByRole("region", { name: /^Aviso/ })).toBeNull();
+    expect(title).toHaveFocus();
+  });
 });
 
 describe("Layout: rodapé", () => {
@@ -288,4 +305,36 @@ describe("Layout: rodapé", () => {
       expect(link).toHaveClass("min-h-11");
     }
   });
+
+  it.each([
+    ["/termos", ["page", null, null]],
+    ["/privacidade", [null, "page", null]],
+    ["/creditos", [null, null, "page"]],
+  ])("em %s, só o link da página atual tem aria-current", async (path, expected) => {
+    setup(() => jsonResponse(meBody()), path);
+
+    const footer = await screen.findByRole("contentinfo");
+    const links = within(footer).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("aria-current"))).toEqual(expected);
+  });
+
+  it("a página atual se destaca também sem cor: perde o sublinhado, como no cabeçalho", async () => {
+    setup(() => jsonResponse(meBody()), "/termos");
+
+    const footer = await screen.findByRole("contentinfo");
+    const current = within(footer).getByRole("link", { name: "Termos de Uso" });
+    expect(current).toHaveClass("aria-[current=page]:text-fg", "aria-[current=page]:no-underline");
+  });
+
+  it.each(["/historico", "/termos/aceitar"])(
+    "em %s, nenhum link do rodapé é a página atual",
+    async (path) => {
+      setup(() => jsonResponse(meBody()), path);
+
+      const footer = await screen.findByRole("contentinfo");
+      for (const link of within(footer).getAllByRole("link")) {
+        expect(link).not.toHaveAttribute("aria-current");
+      }
+    },
+  );
 });

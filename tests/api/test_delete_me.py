@@ -18,6 +18,7 @@ from goblinshift.runs.tables import run
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, new_user
+from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import queue_run
 
 pytestmark = pytest.mark.integration
@@ -83,6 +84,27 @@ def test_delete_me_cancela_a_execucao_ativa(
     with factory() as session:
         status = session.execute(select(run.c.status).where(run.c.id == run_id)).scalar_one()
     assert status == Status.CANCELED
+
+
+def test_delete_me_com_execucao_na_fila_emite_um_termino_cancelado(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    sessions: SimulatedSessions,
+    app: FastAPI,
+) -> None:
+    finished = RecordedFinished(factory)
+    app.state.run_finished = finished.reporter
+    owner = new_user(factory)
+    run_id = queue_run(factory, app.state.storage, owner)
+    sessions.sign_in(owner)
+
+    try:
+        assert client.delete(ME).status_code == 202
+    finally:
+        finished.shutdown()
+
+    [event] = finished.events()
+    assert (event["run_id"], event["run.state"]) == (str(run_id), "canceled")
 
 
 def test_repetir_delete_me_202_mantem_o_primeiro_pedido(

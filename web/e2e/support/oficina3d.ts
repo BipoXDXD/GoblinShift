@@ -30,8 +30,7 @@ export const INTRO_LIMIT_MS = 5_500;
 export async function pretendGpu(page: Page, renderer = "E2E GPU"): Promise<void> {
   await page.addInitScript((rendererName: string) => {
     const UNMASKED_RENDERER = 0x9246;
-    // Os originais são chamados com o `this` certo pelo Reflect.apply logo abaixo.
-    // eslint-disable-next-line @typescript-eslint/unbound-method
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- o Reflect.apply abaixo chama o original com o `this` certo
     const getContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (
       this: HTMLCanvasElement,
@@ -42,7 +41,7 @@ export async function pretendGpu(page: Page, renderer = "E2E GPU"): Promise<void
       delete rest["failIfMajorPerformanceCaveat"];
       return Reflect.apply(getContext, this, [type, rest]);
     } as typeof getContext;
-    // eslint-disable-next-line @typescript-eslint/unbound-method
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- o Reflect.apply abaixo chama o original com o `this` certo
     const getParameter = WebGL2RenderingContext.prototype.getParameter;
     WebGL2RenderingContext.prototype.getParameter = function (
       this: WebGL2RenderingContext,
@@ -102,8 +101,7 @@ export async function nextFrame(page: Page): Promise<void> {
 
 export async function withoutWebGl(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    // O original é chamado com o `this` certo pelo Reflect.apply logo abaixo.
-    // eslint-disable-next-line @typescript-eslint/unbound-method
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- o Reflect.apply abaixo chama o original com o `this` certo
     const getContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (
       this: HTMLCanvasElement,

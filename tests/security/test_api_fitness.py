@@ -6,7 +6,6 @@ sem vazar SQL nem a credencial.
 """
 
 import json
-import re
 from collections.abc import Iterator
 from contextlib import nullcontext
 from datetime import UTC, datetime
@@ -29,11 +28,11 @@ from goblinshift.platform.settings import Settings
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
 from tests.security.authz_matrix import Policy, entries
+from tests.security.path_params import fill_path_params
 
 SPEC: dict[str, Any] = json.loads(render_openapi())
 # Com o sufixo, fica fora do tamanho de um token de sessão (43) e de uma chave (64): sem consulta.
 CANARY = f"CANARY-{uuid4()}-x"
-_PATH_PARAM = re.compile(r"\{[a-z_]+\}")
 _JSON = {"Content-Type": "application/json"}
 # Campos que só o servidor conhece: nenhum modelo publicado pode trazê-los (rotas `runs`, 1.6).
 _INTERNAL_FIELDS = frozenset(
@@ -92,7 +91,7 @@ def _offline_app_settings() -> Settings:
 
 
 def _concrete(path: str) -> str:
-    return _PATH_PARAM.sub(lambda _match: str(uuid4()), path)
+    return fill_path_params(path, lambda _name: str(uuid4()))
 
 
 def _json_commands() -> list[tuple[str, str]]:

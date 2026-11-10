@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError, ExecutorCtlRunner
+from goblinshift.runs.worker import executor_ctl_runner
+from goblinshift.runs.worker.executor_ctl_runner import (
+    CALL_TIMEOUT,
+    START_TIMEOUT,
+    ExecutorCtlError,
+    ExecutorCtlRunner,
+)
 from goblinshift.runs.worker.runner import ExecutorPhase
 from tests.runs.fake_executor_ctl import IMAGE, FakeContainer, FakeExecutorCtl
 
@@ -19,6 +25,10 @@ FAKE_EXECUTOR = str(Path(__file__).with_name("fake_executor.py"))
 SHORT_TIMEOUT = timedelta(seconds=0.3)
 WAIT_TIMEOUT_S = 15.0
 OTHER_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
+# Os prazos do contrato em centésimos: o teste do ctl lento não espera minutos.
+TIME_SCALE = 0.01
+# O prazo do start antes de ser derivado do pior caso do ctl.
+PREVIOUS_START_TIMEOUT = timedelta(seconds=30)
 
 
 @pytest.fixture
@@ -280,6 +290,7 @@ def test_ctl_que_nao_responde_a_tempo_vira_indisponivel(
         work_group=os.getgid(),
         call_timeout=SHORT_TIMEOUT,
         start_timeout=SHORT_TIMEOUT,
+        remove_timeout=SHORT_TIMEOUT,
     )
     attempt_id = prepared(runner)
     ctl.response_delay_s = 1.5
@@ -290,6 +301,60 @@ def test_ctl_que_nao_responde_a_tempo_vira_indisponivel(
 
     assert error.value.code == "unavailable"
     assert time.monotonic() - started < ctl.response_delay_s
+
+
+def test_start_aceita_ctl_mais_lento_que_o_prazo_antigo_dentro_do_teto(
+    ctl: FakeExecutorCtl, area: Path
+) -> None:
+    runner = ExecutorCtlRunner(
+        ctl.socket_path,
+        area,
+        work_group=os.getgid(),
+        call_timeout=CALL_TIMEOUT * TIME_SCALE,
+        start_timeout=START_TIMEOUT * TIME_SCALE,
+    )
+    attempt_id = prepared(runner)
+    # Entre os 30 s antigos e o teto novo: um `docker run` lento, ainda no pior caso do ctl.
+    ctl.response_delay_s = (
+        (PREVIOUS_START_TIMEOUT + START_TIMEOUT) / 2 * TIME_SCALE
+    ).total_seconds()
+
+    status = runner.start(attempt_id, IMAGE)
+
+    assert status.is_running
+    assert ctl.operations(attempt_id) == ["start"]
+
+
+@pytest.mark.parametrize(
+    ("operation", "timeout_s"),
+    [
+        # (3 chamadas do start + 3 de quem segura o lock) x 30 s do Docker + 10 s de margem.
+        ("start", 190.0),
+        # (2 chamadas do remove + 3 de quem segura o lock) x 30 s do Docker + 10 s de margem.
+        ("remove", 160.0),
+        ("status", 10.0),
+    ],
+)
+def test_operacao_espera_por_padrao_o_prazo_derivado_do_ctl(
+    ctl: FakeExecutorCtl,
+    area: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    timeout_s: float,
+) -> None:
+    timeouts: list[float] = []
+
+    class RecordingConnection(executor_ctl_runner._UnixConnection):
+        def __init__(self, socket_path: Path, timeout_s: float) -> None:
+            timeouts.append(timeout_s)
+            super().__init__(socket_path, timeout_s)
+
+    monkeypatch.setattr(executor_ctl_runner, "_UnixConnection", RecordingConnection)
+    runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+
+    _call(runner, operation, prepared(runner))
+
+    assert timeouts == [timeout_s]
 
 
 def test_executor_real_roda_ate_o_fim_pelo_ctl(area: Path) -> None:

@@ -1,13 +1,14 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type SubmitEvent, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
-import { PATHS } from "../app/paths";
+import { PATHS, runPath } from "../app/paths";
 import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
-import { LiveRegion } from "../components/a11y/LiveRegion";
+import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -39,6 +40,8 @@ interface HistoryPageProps {
 /**
  * Histórico (2.2): as execuções da conta, das mais novas para as mais antigas, com filtros por
  * receita, estado e período guardados na URL e "Carregar mais" pelo cursor da API (keyset).
+ * Aplicar ou limpar os filtros recria o formulário: o foco volta ao título a cada filtro novo da
+ * URL (WCAG 2.4.3), e a lista que chega é anunciada (4.1.3).
  */
 export function HistoryPage({ now }: HistoryPageProps): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,7 +52,7 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
   const nowMs = useNow(now, AVAILABILITY_TICK_MS);
   return (
     <div className="flex flex-col gap-8">
-      <FocusHeading>{T.title}</FocusHeading>
+      <FocusHeading focusKey={filtersToSearchParams(filters).toString()}>{T.title}</FocusHeading>
       <HistoryResults
         query={toRunListQuery(filters, anchorMs)}
         nowMs={nowMs}
@@ -82,6 +85,9 @@ function HistoryResults({
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const filterKey = filtersToSearchParams(filters).toString();
+  // Os filtros da abertura não são anunciados: o título com foco já diz onde a pessoa está.
+  const [announcedKey, setAnnouncedKey] = useState(filterKey);
   const queryKey = ["runs", "history", query] as const;
   const runs = useInfiniteQuery({
     queryKey,
@@ -91,10 +97,20 @@ function HistoryResults({
     getNextPageParam: (last: RunList) => last.next_cursor,
   });
 
+  const rows = useRef<HTMLDivElement>(null);
+  const announceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    const timer = announceTimer;
+    return () => {
+      clearTimeout(timer.current);
+    };
+  }, []);
+
   const loadMore = async (): Promise<void> => {
     if (runs.isFetchingNextPage) {
       return;
     }
+    clearTimeout(announceTimer.current);
     setAnnouncement(T.loadingMore);
     const result = await runs.fetchNextPage();
     if (result.isFetchNextPageError) {
@@ -107,28 +123,48 @@ function HistoryResults({
       }
       return;
     }
-    setAnnouncement(T.loadedMore(result.data?.pages.at(-1)?.data.length ?? 0));
+    const loaded = result.data?.pages.at(-1)?.data ?? [];
+    const counted = loaded.length === 0 ? T.noMore : T.loadedMore(loaded.length);
+    const message = result.hasNextPage ? counted : `${counted} ${T.endOfList}`;
+    // A página nova já está no cache; o flushSync a pinta (e esvazia a região) antes de o foco
+    // procurar a linha.
+    flushSync(() => {
+      setAnnouncement(null);
+    });
+    // Na última página o "Carregar mais" some com o foco (WCAG 2.4.3): em toda página, o foco
+    // segue para a primeira linha nova, ou para a última da lista se nada chegou. Sem achar a
+    // linha pelo `href`, ele volta ao título da tela em vez de cair no `<body>`.
+    const target = loaded.at(0) ?? result.data?.pages.flatMap((entry) => entry.data).at(-1);
+    const row =
+      target === undefined
+        ? null
+        : rows.current?.querySelector<HTMLAnchorElement>(`a[href="${runPath(target.id)}"]`);
+    (row ?? rows.current?.closest("main")?.querySelector<HTMLHeadingElement>("h1"))?.focus();
+    // A mudança de foco cancela a fala pendente em alguns leitores: o anúncio vem depois dela.
+    announceTimer.current = setTimeout(() => {
+      setAnnouncement(message);
+    }, ANNOUNCE_DELAY_MS);
   };
 
   const active = hasActiveFilters(filters);
   const items = runs.data?.pages.flatMap((entry) => entry.data) ?? [];
+  // Ajuste durante o render, não num efeito: a lista dos filtros novos chegou (do servidor ou do
+  // cache) e ainda não foi anunciada.
+  if (runs.data !== undefined && announcedKey !== filterKey) {
+    setAnnouncedKey(filterKey);
+    setAnnouncement(T.listed({ count: items.length, filtered: active, more: runs.hasNextPage }));
+  }
   // Sem nada para filtrar, os filtros só atrapalham o estado vazio.
   const showFilters = active || items.length > 0;
   return (
     <>
-      {showFilters && (
-        <FiltersForm
-          key={filtersToSearchParams(filters).toString()}
-          filters={filters}
-          onApply={onApplyFilters}
-        />
-      )}
+      {showFilters && <FiltersForm key={filterKey} filters={filters} onApply={onApplyFilters} />}
       {runs.data === undefined ? (
         <FirstPagePending error={runs.error} />
       ) : items.length === 0 ? (
         <EmptyResults filtered={active} />
       ) : (
-        <div className="flex flex-col gap-4">
+        <div ref={rows} className="flex flex-col gap-4">
           <RunRows
             runs={items}
             renderExtras={(run) => <RunHistoryExtras run={run} nowMs={nowMs} />}

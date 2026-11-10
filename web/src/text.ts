@@ -1,6 +1,14 @@
 // Textos fixos da interface, num lugar só (D12: só pt-BR; traduzir fica restrito a este arquivo).
 // Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre os goblins só no vazio, na
 // espera e no sucesso, sempre depois da informação.
+
+/** A lista do Histórico que acabou de chegar: quantas linhas, com filtro ou não, e se há mais. */
+interface ListedRuns {
+  readonly count: number;
+  readonly filtered: boolean;
+  readonly more: boolean;
+}
+
 export const TEXT = {
   field: {
     errorPrefix: "Erro: ",
@@ -15,6 +23,7 @@ export const TEXT = {
   },
   errorSummary: {
     title: "Corrija os itens abaixo antes de continuar.",
+    item: (label: string, message: string) => `${label}: ${message}`,
   },
   failure: {
     network: "Não foi possível falar com o servidor. Confira a conexão e tente de novo.",
@@ -79,7 +88,6 @@ export const TEXT = {
     footerNavLabel: "Rodapé",
   },
   pageTitles: {
-    workbench: "Bancada",
     acceptTerms: "Aceite dos termos",
   },
   notice: {
@@ -90,7 +98,10 @@ export const TEXT = {
       "terms-change": "Mudança nos termos",
     },
     regionLabel: (kind: string) => `Aviso: ${kind.toLowerCase()}`,
-    dismiss: "Fechar",
+    // Diz o que fecha: "Fechar" sozinho é ambíguo para quem navega pelos botões (WCAG 2.4.6).
+    // Só "Fechar" fica à vista, para não apertar o texto da faixa a 320 px; o complemento vai
+    // para o leitor de tela, e o nome "Fechar aviso" contém o rótulo visível (WCAG 2.5.3).
+    dismiss: { visible: "Fechar", screenReaderOnly: "aviso" },
   },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",
@@ -113,18 +124,27 @@ export const TEXT = {
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
+  // Tela que não abriu (chunk que não carregou ou erro de render): o detalhe fica no console.
+  routeFailure: {
+    title: "Não foi possível abrir esta tela",
+    pageTitle: "Erro ao abrir a tela",
+    reload: "Recarregar a página",
+    backHome: "Voltar à Oficina",
+  },
   // Texto alternativo das goblins (ADR 030): diz quem é e como é; o estado já está no texto ao lado.
   art: {
     castHeading: "O elenco",
     // Palco 3D da abertura (ADR 038): uma goblin por vez, escolhida no seletor.
     stage: {
       label: (name: string) => `${name} em 3D`,
-      hint: "Arraste para girar. Com o foco aqui, as setas giram e inclinam, e Home volta à pose inicial. No celular, use os botões para inclinar; a pinça amplia a página.",
+      hint: "Arraste ou use os botões para girar e inclinar. Com o foco aqui, as setas fazem o mesmo; Home volta à pose inicial.",
       castLabel: "Escolha a goblin",
-      tiltLabel: "Inclinar",
+      turnLabel: "Girar e inclinar",
+      turnLeft: "Girar para a esquerda",
+      turnRight: "Girar para a direita",
       tiltUp: "Inclinar para ver de cima",
       tiltDown: "Inclinar para ver de baixo",
-      spin: "Girar",
+      spin: "Giro automático",
       reset: "Pose inicial",
     },
     goblins: {
@@ -365,6 +385,25 @@ export const TEXT = {
       finalizing: "Finalizando",
       retry_wait: "Aguardando nova tentativa",
     },
+    // Frases da região viva da Execução: só quando status ou fase mudam.
+    announce: {
+      statuses: {
+        queued: "Execução na fila.",
+        running: "Execução em andamento.",
+        stopping: "Cancelando a execução.",
+        succeeded: "Execução concluída.",
+        succeeded_with_warnings: "Execução concluída com avisos.",
+        canceled: "Execução cancelada.",
+        failed: "A execução falhou.",
+      },
+      phases: {
+        inspecting: "Inspecionando as entradas.",
+        processing: "Processando os arquivos.",
+        packaging: "Empacotando os resultados.",
+        finalizing: "Finalizando.",
+        retry_wait: "Aguardando uma nova tentativa.",
+      },
+    },
     results: {
       heading: "Resultados",
       loading: "Carregando os resultados.",
@@ -465,6 +504,7 @@ export const TEXT = {
     op: (row: number) => `Condição (linha ${String(row)})`,
     value: (row: number) => `Valor (linha ${String(row)})`,
     removeRow: (row: number) => `Remover linha ${String(row)}`,
+    inRow: (list: string, field: string) => `${list}, ${field.toLocaleLowerCase(TEXT.locale)}`,
     errors: {
       columnRequired: "Informe a coluna.",
       tooManyColumns: (max: number) => `Informe no máximo ${String(max)} colunas.`,
@@ -628,6 +668,19 @@ export const TEXT = {
     loadedMore: (count: number) =>
       count === 1 ? "Mais 1 execução na lista." : `Mais ${String(count)} execuções na lista.`,
     restarted: "A lista voltou ao início, porque a página seguinte expirou.",
+    // Anunciado quando a lista chega depois de aplicar ou limpar os filtros.
+    listed: ({ count, filtered, more }: ListedRuns) => {
+      const scope = filtered ? " com esses filtros" : "";
+      if (count === 0) {
+        return filtered ? "Nenhuma execução com esses filtros." : "Nenhuma execução ainda.";
+      }
+      if (more) {
+        const latest =
+          count === 1 ? "A execução mais recente" : `As ${String(count)} execuções mais recentes`;
+        return `${latest}${scope}; há mais para carregar.`;
+      }
+      return count === 1 ? `1 execução${scope}.` : `${String(count)} execuções${scope}.`;
+    },
     empty: "Nenhuma execução ainda",
     emptyHint: "As execuções aparecem aqui depois que você roda uma receita na Bancada.",
     goToWorkshop: "Escolher uma receita na Oficina",
@@ -636,6 +689,9 @@ export const TEXT = {
     recentHeading: "Execuções recentes",
     recentEmptyHint: "Escolha uma receita acima para começar.",
     seeAll: "Ver o histórico completo",
+    // Anunciados depois do "Carregar mais", junto com quantas execuções chegaram.
+    noMore: "Não há mais execuções.",
+    endOfList: "Fim da lista.",
   },
   account: {
     signIn: {
@@ -748,6 +804,7 @@ export const TEXT = {
       dialogBody: "Não dá para desfazer. Para confirmar, digite a frase abaixo.",
       phrase: "excluir minha conta",
       phraseLabel: (phrase: string) => `Digite “${phrase}”`,
+      phraseMismatch: (phrase: string) => `A frase não confere. Digite “${phrase}” para confirmar.`,
       confirm: "Excluir conta",
       deleting: "Excluindo…",
       cancel: "Cancelar",
@@ -916,5 +973,13 @@ export const TEXT = {
   legal: {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",
+    outlineTitle: "Sumário",
+    /** Legenda de tabela sem título acima: as próprias colunas dizem do que ela trata. */
+    tableOfColumns: (columns: readonly string[]) => {
+      const named = columns.filter((column) => column.trim() !== "");
+      return named.length === 0 ? "Tabela" : `Tabela: ${named.join(", ")}`;
+    },
+    /** Segunda tabela (ou mais) com o mesmo nome: o número a distingue no leitor de tela. */
+    repeatedTable: (caption: string, position: number) => `${caption} (tabela ${String(position)})`,
   },
 } as const;

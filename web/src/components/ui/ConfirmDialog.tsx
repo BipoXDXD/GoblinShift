@@ -80,7 +80,11 @@ export function ConfirmDialog({
         <div id={bodyId} className="flex flex-col gap-4 text-fg-muted">
           {children}
         </div>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {/* No celular, a saída segura fica em cima de propósito, contra a convenção do iOS e do
+            Material (ação em cima): a ordem visual tem de ser a do Tab (WCAG 2.4.3 e 1.3.2), e o
+            foco inicial está em Cancelar, o primeiro da pilha. Não voltar a um *-reverse. Os dois
+            botões ocupam a largura toda pelo stretch do flex-col. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
           <Button type="button" variant="secondary" data-initial-focus="" onClick={onCancel}>
             {cancelLabel}
           </Button>

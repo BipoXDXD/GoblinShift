@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
 from goblinshift.runs.cancellation import cancel_run
-from goblinshift.runs.lifecycle import Status
+from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
+from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from tests.runs.fake_executor_ctl import IMAGE, FakeExecutorCtl
 from tests.runs.worker_support import (
@@ -26,6 +27,7 @@ from tests.runs.worker_support import (
     claim,
     coordinator,
     create_user,
+    expire_lease,
     open_run_uses,
     queue_run,
     run_row,
@@ -221,3 +223,52 @@ def test_tentativa_acima_do_teto_e_parada_e_falha_por_limite_de_recurso(
     assert (row["status"], row["error_code"]) == ("failed", "RESOURCE_LIMIT_EXCEEDED")
     assert attempts(factory, run_id)[0]["error_code"] == "RESOURCE_LIMIT_EXCEEDED"
     assert "stop" in ctl.operations(claimed.attempt_id)
+
+
+def test_lease_vencido_durante_o_start_fica_com_a_manutencao_e_o_worker_abandona(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    area: Path,
+    start_ctl: Callable[..., FakeExecutorCtl],
+) -> None:
+    # Com o start esperando até o teto do ctl, o lease (não renovado durante o start) pode vencer
+    # antes da resposta: a manutenção decide a tentativa, e o worker, ao voltar, não a reclama.
+    ctl = start_ctl((sys.executable, FAKE_EXECUTOR, "sleep", "30"))
+    run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
+    claimed = claim(factory, storage)
+    runner = ctl_runner(ctl, area)
+    janitor = Maintenance(
+        factory,
+        storage,
+        runner,
+        MaintenanceConfig(stop_grace=timedelta(seconds=1), jitter=lambda: MIN_RETRY_JITTER),
+    )
+    reconciled: list[int] = []
+
+    def lease_expires_meanwhile(_attempt_id: str) -> None:
+        expire_lease(factory, run_id)
+        reconciled.append(janitor.reconcile_expired_leases())
+
+    ctl.after_start_run = lease_expires_meanwhile
+
+    applied = coordinator(factory, storage, runner).run(claimed)
+
+    # record_start perdeu o fencing (LostFencing): nada foi escrito pelo worker.
+    assert applied is None
+    assert reconciled == [1]
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"]) == ("running", "retry_wait")
+    [only] = attempts(factory, run_id)
+    # O executor chegou a rodar (`status.ran`): a manutenção conta a tentativa como física.
+    assert only["executor_started_at"] is not None
+    # A manutenção parou e removeu; o `_abandon` do worker repete stop e remove, sem efeito.
+    assert ctl.operations(claimed.attempt_id) == [
+        "start",
+        "status",
+        "stop",
+        "remove",
+        "stop",
+        "remove",
+    ]
+    assert ctl.containers == {}
+    assert list(area.iterdir()) == []

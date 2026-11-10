@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeDraft, RecipeParameters } from "../types";
 import type { OUTPUT_FORMATS } from "./schema";
 import {
-  imageForgeFieldId,
+  imageForgeField,
   parseImageForge,
   type ImageForgeFormValues,
   type ImageForgeSettings,
@@ -101,6 +101,7 @@ describe("parseImageForge", () => {
     expect(issuesOf(parseImageForge(values({ max_height: "9000" }), SETTINGS))).toEqual([
       {
         fieldId: "image-forge-max_height",
+        label: "Altura máxima, em pixels",
         message: "Informe um número inteiro de 16 a 4096.",
       },
     ]);
@@ -127,7 +128,11 @@ describe("parseImageForge", () => {
     "cor de fundo %j é recusada no campo",
     (color) => {
       expect(issuesOf(parseImageForge(values({ jpeg_background: color }), SETTINGS))).toEqual([
-        { fieldId: "image-forge-jpeg_background", message: "Use o formato #RRGGBB, como #FFFFFF." },
+        {
+          fieldId: "image-forge-jpeg_background",
+          label: "Cor de fundo da transparência no JPEG",
+          message: "Use o formato #RRGGBB, como #FFFFFF.",
+        },
       ]);
     },
   );
@@ -166,19 +171,19 @@ describe("parseImageForge", () => {
   });
 });
 
-describe("imageForgeFieldId", () => {
+describe("imageForgeField", () => {
   it.each([
-    [["max_width"], "image-forge-max_width"],
-    [["jpeg_background"], "image-forge-jpeg_background"],
-    [["make_thumbnails"], "image-forge-make_thumbnails"],
-  ])("%j → %s", (path, expected) => {
-    expect(imageForgeFieldId(path)).toBe(expected);
+    [["max_width"], "image-forge-max_width", "Largura máxima, em pixels"],
+    [["jpeg_background"], "image-forge-jpeg_background", "Cor de fundo da transparência no JPEG"],
+    [["make_thumbnails"], "image-forge-make_thumbnails", "Gerar miniaturas"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(imageForgeField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]], [["toString"]]])(
     "caminho sem campo %j → null",
     (path) => {
-      expect(imageForgeFieldId(path)).toBeNull();
+      expect(imageForgeField(path)).toBeNull();
     },
   );
 });
