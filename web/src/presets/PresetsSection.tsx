@@ -24,8 +24,10 @@ const T = TEXT.presets;
 /**
  * Presets na Oficina (2.2): os da conta, cada um abrindo a Bancada pré-preenchida, e Excluir
  * terciária com confirmação em vermelho. Só com a sessão confirmada: o visitante não vê a seção
- * nem gera um 401 a cada visita. Depois de excluir, o foco vai para o título da seção: o Excluir
- * que abriu o diálogo saiu da lista (WCAG 2.4.3).
+ * nem gera um 401 a cada visita. Depois de excluir (204), o foco vai para o título da seção,
+ * porque o Excluir que abriu o diálogo saiu da lista. Na revisão vencida (412) o preset continua
+ * listado, mas o foco vai ao mesmo título, para o destino ser um só e o aviso ser lido a partir
+ * dele (WCAG 2.4.3).
  */
 export function PresetsSection(): ReactElement | null {
   const headingId = useId();
