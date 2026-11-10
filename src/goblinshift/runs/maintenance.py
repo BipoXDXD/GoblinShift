@@ -281,7 +281,7 @@ class Maintenance:
             status = self._confirm_ended(
                 expired.attempt_id,
                 expired.run_id,
-                may_stop=partial(self._lease_still_expired, expired),
+                may_stop=partial(self._may_stop, expired),
             )
             if status is None:
                 continue
@@ -311,7 +311,7 @@ class Maintenance:
             if status.is_running:
                 if not may_stop():
                     logger.info(
-                        "tentativa mudou desde a leitura do lease; executor não é parado",
+                        "lease não confirmado vencido na releitura; executor não é parado",
                         extra={"fields": fields},
                     )
                     return None
@@ -352,22 +352,47 @@ class Maintenance:
             ).all()
         return [_ExpiredAttempt(row.id, row.generation, row.attempt_id) for row in rows]
 
+    def _may_stop(self, expired: _ExpiredAttempt) -> bool:
+        """A releitura isolada por tentativa: erro de banco nela é "não parar neste ciclo".
+
+        O erro fica no log com tipo e SQLSTATE (a mensagem do banco traz host e valores, 3.7) e
+        o lote segue para a próxima tentativa. Erro de conexão sobe: o passo falha e o ciclo pula
+        os passos de banco restantes, que só esperariam o `connect_timeout` de novo.
+        """
+        try:
+            return self._lease_still_expired(expired)
+        except DBAPIError as error:
+            if _is_connection_error(error):
+                raise
+            fields = {
+                "attempt_id": str(expired.attempt_id),
+                "run_id": str(expired.run_id),
+                "error_type": type(error).__name__,
+                "sqlstate": getattr(error.orig, "sqlstate", None),
+            }
+            logger.warning(
+                "releitura do lease falhou; executor não é parado neste ciclo",
+                extra={"fields": fields},
+            )
+            return False
+
     def _lease_still_expired(self, expired: _ExpiredAttempt) -> bool:
-        """Relê a tentativa antes do `stop`: mesma geração, ainda aberta e com o lease vencido.
+        """Relê a tentativa antes do `stop`: ainda aberta, de Run ativa e com o lease vencido.
 
         Leitura simples, sem `FOR UPDATE`, numa transação que termina antes da chamada ao
         Runner. Não fecha a janela inteira (o worker pode renovar entre esta leitura e o `stop`),
         só a encurta; quem decide depois continua sendo o fencing de `_lease_event`.
+
+        A geração não é conferida: ela só sobe no claim, que exige a Run em `queued` ou
+        `retry_wait`, e só se chega a `retry_wait` encerrando a tentativa viva; com o índice
+        `attempt_one_alive_per_run_idx` (uma viva por Run), tentativa ainda aberta implica a
+        geração lida.
         """
         with self._factory() as session, session.begin():
             found = session.execute(
                 select(attempt.c.id)
                 .join(run, attempt.c.run_id == run.c.id)
-                .where(
-                    _lease_expired(),
-                    attempt.c.id == expired.attempt_id,
-                    run.c.generation == expired.generation,
-                )
+                .where(_lease_expired(), attempt.c.id == expired.attempt_id)
             ).first()
         return found is not None
 

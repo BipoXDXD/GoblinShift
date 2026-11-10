@@ -4,6 +4,7 @@ Lease vencido não prova que o executor morreu: a manutenção consulta o ctl pe
 que estiver vivo e só reagenda com o fim confirmado; o que não consegue inspecionar, não toca.
 """
 
+import logging
 import os
 import uuid
 from collections.abc import Iterator
@@ -11,14 +12,19 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import Engine, func, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
+from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
+from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.tables import attempt
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from tests.runs.fake_executor_ctl import IMAGE, FakeContainer, FakeExecutorCtl
+from tests.runs.test_maintenance_steps import connection_refused
 from tests.runs.worker_support import (
     attempts,
     claim,
@@ -69,10 +75,13 @@ def abandoned_attempt(
 
 
 def paused_worker_attempt(
-    factory: sessionmaker[Session], storage: FileStorage, runner: ExecutorCtlRunner
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    runner: ExecutorCtlRunner,
+    subject: str = "ana",
 ) -> ClaimedAttempt:
     """Como `abandoned_attempt`, devolvendo o claim: o worker pode voltar e renovar o lease."""
-    run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
+    run_id = queue_run(factory, storage, create_user(factory, subject), executor_image=IMAGE)
     claimed = claim(factory, storage)
     runner.create_work_dir(claimed.attempt_id)
     expire_lease(factory, run_id)
@@ -162,6 +171,97 @@ def test_tentativa_reconciliada_por_outra_manutencao_nao_e_parada_de_novo(
     row = run_row(factory, claimed.run_id)
     assert (row["status"], row["phase"]) == ("running", "retry_wait")
     assert attempts(factory, claimed.run_id)[0]["ended_at"] is not None
+
+
+def expire_lease_ago(factory: sessionmaker[Session], attempt_id: uuid.UUID, ago: timedelta) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(attempt)
+            .where(attempt.c.id == attempt_id)
+            .values(lease_expires_at=func.now() - ago)
+        )
+
+
+def test_releitura_que_estoura_o_statement_timeout_nao_derruba_o_lote(
+    db_settings: Settings,
+    engine: Engine,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    runner: ExecutorCtlRunner,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first = paused_worker_attempt(factory, storage, runner, "ana")
+    second = paused_worker_attempt(factory, storage, runner, "bia")
+    expire_lease_ago(factory, first.attempt_id, timedelta(minutes=2))
+    expire_lease_ago(factory, second.attempt_id, timedelta(minutes=1))
+    for claimed in (first, second):
+        ctl.containers[str(claimed.attempt_id)] = FakeContainer("running")
+    # A releitura da primeira espera uma trava exclusiva na tabela e estoura o
+    # `statement_timeout` (57014) de verdade; a trava sai no `status` da segunda.
+    blocker = engine.connect()
+    held = blocker.begin()
+
+    def lock_attempts_during_first(attempt_id: str) -> None:
+        if attempt_id == str(first.attempt_id):
+            blocker.execute(text("LOCK TABLE attempt IN ACCESS EXCLUSIVE MODE"))
+        else:
+            held.rollback()
+
+    ctl.on_status = lock_attempts_during_first
+    short = db_settings.model_copy(
+        update={"db_statement_timeout_ms": 300, "db_lock_timeout_ms": 5_000}
+    )
+    impatient_engine = make_engine(short)
+    try:
+        janitor_ = janitor(make_session_factory(impatient_engine), storage, runner)
+        with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+            reconciled = janitor_.reconcile_expired_leases()
+    finally:
+        blocker.close()
+        impatient_engine.dispose()
+
+    assert reconciled == 1
+    assert ctl.operations(first.attempt_id) == ["status"]
+    assert ctl.containers[str(first.attempt_id)].state == "running"
+    assert attempts(factory, first.run_id)[0]["ended_at"] is None
+    assert ctl.operations(second.attempt_id) == ["status", "stop", "remove"]
+    assert attempts(factory, second.run_id)[0]["ended_at"] is not None
+    [failure] = [
+        record.fields  # type: ignore[attr-defined]
+        for record in caplog.records
+        if record.getMessage().startswith("releitura do lease falhou")
+    ]
+    assert failure == {
+        "attempt_id": str(first.attempt_id),
+        "run_id": str(first.run_id),
+        "error_type": "OperationalError",
+        "sqlstate": "57014",
+    }
+
+
+def test_releitura_sem_conexao_sobe_e_pula_os_passos_de_banco(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    runner: ExecutorCtlRunner,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claimed = paused_worker_attempt(factory, storage, runner)
+    ctl.containers[str(claimed.attempt_id)] = FakeContainer("running")
+    janitor_ = janitor(factory, storage, runner)
+
+    def unreachable(_expired: object) -> bool:
+        raise connection_refused()
+
+    monkeypatch.setattr(janitor_, "_lease_still_expired", unreachable)
+
+    counts = janitor_.run_cycle()
+
+    assert ctl.operations(claimed.attempt_id) == ["status"]
+    assert counts["steps_failed"] == 1
+    assert counts["steps_skipped"] > 0
+    assert attempts(factory, claimed.run_id)[0]["ended_at"] is None
 
 
 def test_executor_ausente_reagenda_sem_gastar_tentativa(
