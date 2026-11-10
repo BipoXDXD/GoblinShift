@@ -20,8 +20,8 @@ export interface AppServices {
 
 /**
  * Cada tela é um chunk próprio (`lazy`), baixado só quando a rota abre: o JS inicial fica com o
- * React, o router e a moldura. A 404 fica no chunk de entrada porque a Bancada também a usa e
- * ela é pequena. Os textos legais ficam cada um no chunk da sua rota.
+ * React, o router e a moldura. A 404 fica no chunk de entrada porque é pequena e o `*` a usa
+ * para qualquer URL, inclusive a Bancada de uma receita que não existe. Os textos legais ficam cada um no chunk da sua rota.
  */
 export function createRoutes({ uploadServices, now, notice }: AppServices): RouteObject[] {
   return [
@@ -136,8 +136,8 @@ function withRouteFailure(screens: RouteObject[]): RouteObject[] {
 
 /**
  * Uma rota da Bancada por receita do registro, para a aba dizer qual receita está aberta (WCAG
- * 2.4.2). O caminho estático vence o `:recipeId`, que fica só para o id que não existe, com o
- * título genérico. `caseSensitive` mantém a regra do registro: `CSV-Janitor` não é receita.
+ * 2.4.2). O id que não existe cai no `*`, com o título da página não encontrada.
+ * `caseSensitive` mantém a regra do registro: `CSV-Janitor` não é receita.
  */
 function workbenchRoutes(uploadServices: UploadServices): RouteObject[] {
   return [
@@ -150,7 +150,6 @@ function workbenchRoutes(uploadServices: UploadServices): RouteObject[] {
         return { element: <WorkbenchPage recipeId={recipeId} uploadServices={uploadServices} /> };
       },
     })),
-    { path: PATHS.workbench, element: <NotFoundPage />, handle: titled(TEXT.pageTitles.workbench) },
   ];
 }
 

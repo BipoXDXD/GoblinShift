@@ -104,17 +104,17 @@ describe("título da aba da Bancada", () => {
     },
   );
 
-  it("uma receita que não existe fica com o título genérico da Bancada", async () => {
+  it("uma receita que não existe tem o título da página não encontrada", async () => {
     renderAt("/bancada/receita-que-nao-existe");
 
     await expectHeadingFocused("Página não encontrada");
-    expect(document.title).toBe("Bancada · GoblinShift");
+    expect(document.title).toBe("Página não encontrada · GoblinShift");
   });
 
   it("o id da receita na URL diferencia maiúsculas, como o registro", async () => {
     renderAt("/bancada/CSV-Janitor");
 
     await expectHeadingFocused("Página não encontrada");
-    expect(document.title).toBe("Bancada · GoblinShift");
+    expect(document.title).toBe("Página não encontrada · GoblinShift");
   });
 });

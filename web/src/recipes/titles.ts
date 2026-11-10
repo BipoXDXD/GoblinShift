@@ -14,7 +14,8 @@ export const RECIPE_TITLES: Readonly<Record<RecipeId, string>> = {
   "media-mill": TEXT.mediaMill.title,
 };
 
-/** Os ids do registro, na ordem de exibição. */
+/** Os ids do registro; a ordem de exibição é a do `RECIPE_LIST`, não esta. */
+// O filtro nunca descarta nada: só estreita `string` para `RecipeId` sem um `as`.
 export const RECIPE_IDS: readonly RecipeId[] = Object.keys(RECIPE_TITLES).filter(isRecipeId);
 
 function isRecipeId(candidate: string): candidate is RecipeId {

@@ -37,7 +37,9 @@ export function WorkbenchPage({ recipeId, uploadServices }: WorkbenchPageProps):
   const recipe = recipeOf(recipeId);
   const [search] = useSearchParams();
   const source = sourceFromSearch(search);
-  // A key recria a Bancada ao trocar de receita ou de origem, sem herdar arquivos nem parâmetros.
+  // A key recria a Bancada ao trocar de origem (preset, execução) e também de receita: cada
+  // receita tem a sua rota, mas o React Router não dá key às rotas e reaproveitaria esta página.
+  // Assim nada herda arquivos nem parâmetros.
   return (
     <CatalogGate
       key={`${recipe.id}:${source?.kind ?? ""}:${source?.id ?? ""}`}
