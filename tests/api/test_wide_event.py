@@ -396,6 +396,8 @@ def test_cancelar_run_na_fila_pela_api_emite_o_termino(traced: Traced, tmp_path:
     attributes = finished.attributes or {}
     assert attributes["run_id"] == run_id
     assert attributes["run.state"] == "canceled"
+    # Evento instantâneo e raiz do próprio trace, fora do da requisição.
+    assert finished.parent is None
     hasher = UserHasher(traced.app.state.settings.user_hash_key())
     assert attributes["user.hash"] == hasher.hash(user_id)
 

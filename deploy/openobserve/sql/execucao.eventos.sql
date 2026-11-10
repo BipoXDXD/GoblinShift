@@ -1,7 +1,7 @@
 -- SLO de execução (docs/GoblinShiftPlan.md, 3.7): um evento por Run terminada, meta 99%.
--- O evento é o span "run.finished" com main = true que o worker emite no término da Run
--- (contrato em deploy/openobserve/README.md). Ele já diz se a Run é elegível: até 10 arquivos e
--- 50 MiB de entrada, e não cancelada pela pessoa usuária.
+-- O evento é o span "run.finished" com main = true que o worker, a manutenção e a API emitem no
+-- término da Run (contrato em deploy/openobserve/README.md). Ele já diz se a Run é elegível:
+-- até 10 arquivos e 50 MiB de entrada, e não cancelada pela pessoa usuária.
 -- Bom: sem falha de infraestrutura nem de parada e em até 5 min desde o início da primeira
 -- tentativa. Rejeições de conteúdo (NO_VALID_OUTPUTS, limites da receita) não gastam orçamento.
 -- Uma Run que nunca começou não tem duração e conta como ruim; ela só termina assim por

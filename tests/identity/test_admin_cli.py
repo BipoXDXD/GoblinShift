@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid7
@@ -12,6 +13,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints import admin_cli
 from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
@@ -24,11 +26,13 @@ from goblinshift.identity import (
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
 from tests.identity.support import new_user
+from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -226,6 +230,40 @@ def test_block_bloqueia_revoga_chaves_e_cancela_a_execucao(
         run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
         assert run_status.scalar_one() == Status.CANCELED
     assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
+
+
+@pytest.fixture
+def finished(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> Iterator[RecordedFinished]:
+    """O `run.finished` que a CLI emitiria pelo tracer do processo, gravado em memória."""
+    recorded = RecordedFinished(factory)
+
+    @contextmanager
+    def reporter(*_args: object) -> Iterator[RunFinishedReporter]:
+        yield recorded.reporter
+
+    monkeypatch.setattr(admin_cli, "run_finished_reporter", reporter)
+    yield recorded
+    recorded.shutdown()
+
+
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_cancelamento_pela_cli_emite_um_termino_cancelado(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    finished: RecordedFinished,
+    command: str,
+) -> None:
+    user_id = create_user(capsys)
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, _, _ = run(capsys, command, "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    [event] = finished.events()
+    assert (event["run_id"], event["run.state"]) == (str(run_id), "canceled")
 
 
 def test_block_repetido_completa_o_que_faltou(

@@ -40,7 +40,7 @@ Todos os nomes começam com `gs-`. O que tem esse prefixo e saiu do catálogo é
 
 ### O evento de término da Run
 
-O SLO de execução lê o span `run.finished`, que o worker, a manutenção e a API emitem quando uma Run chega a estado terminal (`goblinshift.runs.finished`): publicação, falha da receita, parada confirmada, `INFRA_POISON` no claim, `QUEUE_EXPIRED` e prazo vencido pela manutenção, e cancelamento de Run ainda na fila pela API. A emissão acontece depois do commit e da liberação dos usos, uma vez por Run; se falhar, a Run não é afetada e o log registra `evento de término da execução perdido` com o `run_id`. A Run cancelada sai com `run.state = canceled` e `slo.execution.eligible = false`: a consulta a deixa fora do SLO. Contrato, conferido por `tests/runs/test_run_finished_event.py` contra a consulta:
+O SLO de execução lê o span `run.finished`, que o worker, a manutenção, a API e o `gs-admin` emitem quando uma Run chega a estado terminal (`goblinshift.runs.finished`): publicação, falha da receita, parada confirmada, `INFRA_POISON` no claim, `QUEUE_EXPIRED` e prazo vencido pela manutenção, e cancelamento de Run ainda na fila (pela pessoa usuária, por `DELETE /me` ou por `gs-admin block`/`request-deletion`). O span é raiz do próprio trace. A emissão acontece depois do commit e da liberação dos usos, uma vez por Run; se falhar, a Run não é afetada e o log registra `evento de término da execução perdido` com o `run_id`. A Run cancelada sai com `run.state = canceled` e `slo.execution.eligible = false`: a consulta a deixa fora do SLO. Contrato, conferido por `tests/runs/test_run_finished_event.py` contra a consulta:
 
 | Atributo | Valor |
 |---|---|

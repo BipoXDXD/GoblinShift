@@ -236,7 +236,7 @@ def test_execucao_ativa_adia_a_purga_ate_terminar(
     assert counts["accounts_purged"] == 0
     assert count_owned(factory, owner)["run"] == 1
 
-    result = cancel_active_run(factory, storage, owner)
+    result = cancel_active_run(factory, storage, owner, on_finished=None)
     assert result is not None
     assert result.status == Status.CANCELED
     cycles_until_purged(factory, maintenance, jobs, owner)

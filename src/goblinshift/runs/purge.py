@@ -16,11 +16,16 @@ from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.runs.cancellation import CancelResult, RunNotFoundError, cancel_run
 from goblinshift.runs.lifecycle import TERMINAL_STATUSES
+from goblinshift.runs.store import RunFinishedHook
 from goblinshift.runs.tables import attempt, run
 
 
 def cancel_active_run(
-    factory: sessionmaker[Session], storage: FileStorage, owner_id: UUID
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    owner_id: UUID,
+    *,
+    on_finished: RunFinishedHook | None,
 ) -> CancelResult | None:
     """Pede o cancelamento da execução não terminal da conta; None se não houver.
 
@@ -35,7 +40,7 @@ def cancel_active_run(
     if run_id is None:
         return None
     try:
-        return cancel_run(factory, storage, owner_id, run_id)
+        return cancel_run(factory, storage, owner_id, run_id, on_finished=on_finished)
     except RunNotFoundError:
         # Purgada entre a leitura e o cancelamento: o estado final é o mesmo.
         return None

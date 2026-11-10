@@ -47,6 +47,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
+from goblinshift.entrypoints.worker import run_finished_reporter
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
@@ -76,6 +77,7 @@ from goblinshift.identity.accounts import (
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import UserHasher
+from goblinshift.runs.cancellation import CancelResult
 from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
@@ -86,6 +88,8 @@ from goblinshift.runs.quotas import (
 )
 from goblinshift.runs.store import db_now
 
+# Nome do serviço nos eventos que a CLI emite (`OTEL_SERVICE_NAME` tem precedência).
+_SERVICE_NAME = "goblinshift-admin"
 EXIT_OK = 0
 EXIT_NOT_FOUND = 1
 EXIT_USAGE = 2
@@ -250,8 +254,7 @@ def _block(args: argparse.Namespace, context: _Context) -> int:
         return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
     # Depois do commit: a partir daqui nenhuma credencial da conta autentica, e o cancelamento
     # abre as próprias transações. Se cair aqui, rodar `block` de novo completa.
-    storage = FileStorage(context.settings.storage_root)
-    canceled = cancel_active_run(context.factory, storage, args.user)
+    canceled = _cancel_active_run(context, args.user)
     print(f"conta {args.user} bloqueada", file=sys.stderr)
     if canceled is not None:
         print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
@@ -278,12 +281,18 @@ def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
     except UnknownAccountError:
         return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
     # Depois do commit, como em `DELETE /me`; se cair aqui, repetir o comando completa.
-    storage = FileStorage(context.settings.storage_root)
-    canceled = cancel_active_run(context.factory, storage, args.user)
+    canceled = _cancel_active_run(context, args.user)
     print(f"exclusão da conta {args.user} pedida", file=sys.stderr)
     if canceled is not None:
         print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
     return EXIT_OK
+
+
+def _cancel_active_run(context: _Context, user_id: UUID) -> CancelResult | None:
+    """Cancela a execução ativa da conta; a que estava na fila emite o `run.finished` (3.7)."""
+    storage = FileStorage(context.settings.storage_root)
+    with run_finished_reporter(context.settings, context.factory, _SERVICE_NAME) as finished:
+        return cancel_active_run(context.factory, storage, user_id, on_finished=finished.report)
 
 
 def _list_users(args: argparse.Namespace, context: _Context) -> int:
