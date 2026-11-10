@@ -83,7 +83,7 @@ from goblinshift.runs.store import (
 )
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.coordinator import TRANSIENT_ATTEMPT_ERROR, random_retry_jitter
-from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.runner import STOP_GRACE, ExecutorStatus, Runner, RunnerError
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +93,6 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
-# Carência do `stop` ao executor de tentativa vencida; o worker a soma na pausa dos claims.
-STOP_GRACE = timedelta(seconds=10)
 
 
 @dataclass(frozen=True)

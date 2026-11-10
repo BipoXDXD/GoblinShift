@@ -4,8 +4,9 @@ Cenário: a falha de banco num dos pontos sem tratamento (`record_start`, renova
 empacotamento pelo `_LeaseKeeper`, desfecho em `finish`) sobe até a volta do worker com a Attempt
 viva e a área de trabalho ocupada. O `executor-ctl` recusa outro `start` com área suja
 (`work_area_dirty`): sem a pausa, a Run seguinte, de outra conta, gasta um claim por um defeito
-que não é dela. O `record_start` falha com um `55P03` de verdade (trava da Run noutra sessão);
-nos outros dois pontos a falha é injetada com o mesmo erro do driver.
+que não é dela. O `record_start` falha com um `55P03` de verdade: a Run fica travada noutra
+sessão só entre o `start` e o fim do `record_start`, para a falha não vir de um passo seguinte.
+Nos outros dois pontos a falha é injetada com o mesmo erro do driver.
 """
 
 import logging
@@ -113,20 +114,39 @@ class LockingAfterStart(ExecutorCtlRunner):
         return status
 
 
-@contextmanager
-def run_lock_holder(factory: sessionmaker[Session]) -> Iterator[Callable[[uuid.UUID], None]]:
-    """Trava a Run da tentativa numa sessão própria, aberta até sair do contexto."""
-    with ExitStack() as stack:
+class RunLock:
+    """Trava a Run de uma tentativa numa sessão própria, até `release`."""
 
-        def lock(attempt_id: uuid.UUID) -> None:
-            session = stack.enter_context(factory())
-            stack.enter_context(session.begin())
-            run_id = session.execute(
-                select(attempt.c.run_id).where(attempt.c.id == attempt_id)
-            ).scalar_one()
-            session.execute(select(run.c.id).where(run.c.id == run_id).with_for_update())
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self._factory = factory
+        self._held = ExitStack()
 
-        yield lock
+    def lock(self, attempt_id: uuid.UUID) -> None:
+        session = self._held.enter_context(self._factory())
+        self._held.enter_context(session.begin())
+        run_id = session.execute(
+            select(attempt.c.run_id).where(attempt.c.id == attempt_id)
+        ).scalar_one()
+        session.execute(select(run.c.id).where(run.c.id == run_id).with_for_update())
+
+    def release(self) -> None:
+        self._held.close()
+
+
+def fail_in_record_start(
+    worker: Coordinator, run_lock: RunLock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Solta a trava ao sair do `record_start`, falhe ele ou não: se ele absorvesse o erro, o
+    # desfecho publicaria sem falha, e a pausa não aconteceria.
+    record_start = worker.record_start
+
+    def record_start_then_release(claimed: ClaimedAttempt) -> None:
+        try:
+            record_start(claimed)
+        finally:
+            run_lock.release()
+
+    monkeypatch.setattr(worker, "record_start", record_start_then_release)
 
 
 def fail_in_lease_keeper(worker: Coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,15 +182,20 @@ def worker_failing_at(
     area: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Coordinator]:
-    with run_lock_holder(factory) as lock:
+    run_lock = RunLock(factory)
+    try:
         if point is None:
-            runner: ExecutorCtlRunner = LockingAfterStart(ctl, area, lock)
+            runner: ExecutorCtlRunner = LockingAfterStart(ctl, area, run_lock.lock)
         else:
             runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
         worker = coordinator(worker_factory, storage, runner)
-        if point is not None:
+        if point is None:
+            fail_in_record_start(worker, run_lock, monkeypatch)
+        else:
             point(worker, monkeypatch)
         yield worker
+    finally:
+        run_lock.release()
 
 
 def turn(

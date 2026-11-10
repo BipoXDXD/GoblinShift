@@ -99,7 +99,7 @@ from goblinshift.runs.worker.collection import (
     OutputLimitError,
     collect_outputs,
 )
-from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.runner import STOP_GRACE, ExecutorStatus, Runner, RunnerError
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def random_retry_jitter() -> timedelta:
 class CoordinatorConfig:
     lease: timedelta
     status_poll: timedelta = timedelta(seconds=0.2)
-    stop_grace: timedelta = timedelta(seconds=10)
+    stop_grace: timedelta = STOP_GRACE
     attempt_timeout: timedelta = DEFAULT_ATTEMPT_TIMEOUT
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 

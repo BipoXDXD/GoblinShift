@@ -19,7 +19,7 @@ from datetime import timedelta
 def orphan_cleanup_window(
     lease: timedelta, maintenance_interval: timedelta, stop_grace: timedelta
 ) -> timedelta:
-    """Tempo até a manutenção encerrar uma tentativa órfã: 60 + 30 + 10 = 100 s em produção."""
+    """Tempo até a manutenção encerrar uma tentativa órfã: lease, ciclo da manutenção e carência."""
     return lease + maintenance_interval + stop_grace
 
 

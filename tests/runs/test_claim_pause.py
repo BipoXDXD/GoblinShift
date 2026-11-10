@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import worker as worker_entrypoint
 from goblinshift.files.storage import FileStorage
+from goblinshift.platform.settings import Settings
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
@@ -55,6 +56,22 @@ def test_janela_cobre_lease_ciclo_da_manutencao_e_carencia_da_parada() -> None:
     )
 
     assert window == timedelta(seconds=100)
+
+
+def test_pausa_do_processo_usa_os_prazos_de_producao_por_padrao() -> None:
+    pause = worker_entrypoint.claim_pause_for(Settings.model_validate({"environment": "test"}))
+
+    assert pause.window == timedelta(seconds=100)
+
+
+def test_pausa_do_processo_soma_lease_ciclo_da_manutencao_e_carencia_da_parada() -> None:
+    settings = Settings.model_validate(
+        {"environment": "test", "worker_lease_s": 2, "maintenance_interval_s": 3}
+    )
+
+    pause = worker_entrypoint.claim_pause_for(settings)
+
+    assert pause.window == timedelta(seconds=15)
 
 
 def test_sem_falha_nao_ha_pausa() -> None:

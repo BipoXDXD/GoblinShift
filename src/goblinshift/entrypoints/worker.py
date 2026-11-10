@@ -12,8 +12,9 @@ falhar se esgotar as tentativas ou o prazo.
 
 Falha transitória do banco fora da supervisão (`record_start`, renovação no empacotamento,
 desfecho) deixa a tentativa órfã, com a área de trabalho ocupada até a manutenção encerrá-la. O
-worker então pausa os claims por `orphan_cleanup_window` (100 s em produção), para a Run seguinte
-não receber `work_area_dirty` e gastar claims (runs/worker/claim_pause.py).
+worker então pausa os claims por `orphan_cleanup_window` (lease, intervalo da manutenção e
+carência da parada), para a Run seguinte não receber `work_area_dirty` e gastar claims
+(runs/worker/claim_pause.py).
 
 Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
 o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
@@ -35,7 +36,6 @@ from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import UserHasher, configure_logging, make_tracer_provider
 from goblinshift.runs.finished import RunFinishedReporter
-from goblinshift.runs.maintenance import STOP_GRACE
 from goblinshift.runs.worker.claim import ClaimedAttempt, QueueListener, claim_next
 from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
 from goblinshift.runs.worker.coordinator import (
@@ -44,7 +44,7 @@ from goblinshift.runs.worker.coordinator import (
     CoordinatorConfig,
 )
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
-from goblinshift.runs.worker.runner import LocalRunner, Runner
+from goblinshift.runs.worker.runner import STOP_GRACE, LocalRunner, Runner
 
 logger = logging.getLogger("goblinshift.worker")
 
@@ -94,8 +94,7 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
         lease=lease, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
     )
     hasher = UserHasher(settings.user_hash_key())
-    maintenance_interval = timedelta(seconds=settings.maintenance_interval_s)
-    pause = ClaimPause(orphan_cleanup_window(lease, maintenance_interval, STOP_GRACE))
+    pause = claim_pause_for(settings)
     try:
         with (
             process_tracer(settings, "goblinshift-worker") as tracer,
@@ -120,6 +119,16 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     finally:
         engine.dispose()
     logger.info("worker encerrado")
+
+
+def claim_pause_for(settings: Settings) -> ClaimPause:
+    """Pausa dos claims do processo, com os prazos que worker e manutenção leem da configuração."""
+    window = orphan_cleanup_window(
+        lease=timedelta(seconds=settings.worker_lease_s),
+        maintenance_interval=timedelta(seconds=settings.maintenance_interval_s),
+        stop_grace=STOP_GRACE,
+    )
+    return ClaimPause(window)
 
 
 @contextmanager
