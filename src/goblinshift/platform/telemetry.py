@@ -13,10 +13,11 @@ import os
 import re
 import sys
 import traceback
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import psycopg
@@ -34,7 +35,7 @@ from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import Span, Status, StatusCode, get_current_span
+from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -191,6 +192,8 @@ UNKNOWN_ADDRESS = "unknown"
 # o IP do cliente; nomes antigos e novos das convenções semânticas.
 _URL_ATTRIBUTES = ("http.url", "url.full")
 _TARGET_ATTRIBUTES = ("http.target",)
+# Preenchidos com o header `Host`, que o cliente escreve como quiser.
+_SERVER_NAME_ATTRIBUTES = ("http.server_name", "server.address")
 _QUERY_ATTRIBUTES = ("url.query",)
 _CLIENT_ADDRESS_ATTRIBUTES = ("net.peer.ip", "client.address", "http.client_ip")
 _SQLALCHEMY_SCOPE = "opentelemetry.instrumentation.sqlalchemy"
@@ -281,30 +284,38 @@ def _redacted_exception_event(event: SdkEvent) -> SdkEvent:
     )
 
 
-def _start_main_event(span: Span, scope: dict[str, Any]) -> None:
-    # Convenção "main = true": o span da requisição é o evento amplo dela. O resto dele vem do
-    # middleware do evento amplo, no fim da requisição.
-    if not span.is_recording():
-        return
-    span.set_attribute("main", True)
-    _redact_request_attributes(span, scope)
+def _main_event_starter(public_origin: str) -> Callable[[Span, dict[str, Any]], None]:
+    """Hook do span da requisição; a URL dele sai de `public_origin`, nunca do header `Host`."""
+    server_name = urlsplit(public_origin).netloc
+
+    def start_main_event(span: Span, scope: dict[str, Any]) -> None:
+        # Convenção "main = true": o span da requisição é o evento amplo dela. O resto dele vem
+        # do middleware do evento amplo, no fim da requisição.
+        if not span.is_recording():
+            return
+        span.set_attribute("main", True)
+        _redact_request_attributes(span, scope, public_origin, server_name)
+
+    return start_main_event
 
 
-def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
-    """Tira a query string, o IP completo e o User-Agent que a instrumentação ASGI pôs no span.
+def _redact_request_attributes(
+    span: Span, scope: dict[str, Any], public_origin: str, server_name: str
+) -> None:
+    """Tira a query string, o IP completo e os headers que a instrumentação ASGI pôs no span.
 
-    A query carrega filtros e cursores, que são dados do usuário, e o User-Agent é texto livre do
-    cliente (3.7). Só sobrescreve os atributos que já existem, para não inventar nomes de outra
-    versão das convenções.
+    A query carrega filtros e cursores, que são dados do usuário; User-Agent e Host são texto
+    livre do cliente, e nenhum header entra no evento (3.7). Só sobrescreve os atributos que já
+    existem, para não inventar nomes de outra versão das convenções.
     """
     present = getattr(span, "attributes", None) or {}
     path = str(scope.get("path", ""))
-    url_without_query = f"{scope.get('scheme', 'http')}://{_host_of(scope)}{path}"
     client = scope.get("client")
     address = truncate_client_address(str(client[0])) if client else UNKNOWN_ADDRESS
     for names, value in (
-        (_URL_ATTRIBUTES, url_without_query),
+        (_URL_ATTRIBUTES, f"{public_origin}{path}"),
         (_TARGET_ATTRIBUTES, path),
+        (_SERVER_NAME_ATTRIBUTES, server_name),
         (_QUERY_ATTRIBUTES, ""),
         (_CLIENT_ADDRESS_ATTRIBUTES, address),
         (_USER_AGENT_ATTRIBUTES, ""),
@@ -312,14 +323,6 @@ def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
         for name in names:
             if name in present:
                 span.set_attribute(name, value)
-
-
-def _host_of(scope: dict[str, Any]) -> str:
-    for name, value in scope.get("headers", []):
-        if name == b"host":
-            return bytes(value).decode("latin-1")
-    server = scope.get("server")
-    return f"{server[0]}:{server[1]}" if server else ""
 
 
 @dataclass(frozen=True)
@@ -419,24 +422,26 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
 
 def configure_tracing(
     app: FastAPI, engine: Engine, settings: Settings, exporter: SpanExporter | None = None
-) -> None:
-    """Liga os traces da API; sem `exporter` e sem endpoint OTLP, não faz nada.
+) -> Tracer:
+    """Liga os traces da API e devolve o tracer dos eventos que ela emite fora da requisição.
 
+    Sem `exporter` e sem endpoint OTLP, não instrumenta nada e devolve um tracer que não grava.
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
     provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
-        return
+        return NoOpTracer()
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=provider,
         excluded_urls="livez,readyz",
-        server_request_hook=_start_main_event,
+        server_request_hook=_main_event_starter(settings.checked_public_origin()),
         # Um span por pedaço enviado multiplicaria o volume num download por streaming; bytes e
         # tempos do envio já estão no evento amplo.
         exclude_spans=["receive", "send"],
     )
     _instrument_database(engine, provider)
+    return provider.get_tracer(__name__)
 
 
 def _instrument_database(engine: Engine, provider: TracerProvider) -> None:

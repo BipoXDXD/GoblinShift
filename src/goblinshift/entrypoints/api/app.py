@@ -43,6 +43,7 @@ from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.schema import read_code_revisions
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher, configure_logging, configure_tracing
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.quotas import QuotaLimits
 
 API_PREFIX = "/api/v1"
@@ -133,5 +134,6 @@ def create_app(
     api.include_router(runs_artifacts.router)
     app.include_router(api)
 
-    configure_tracing(app, engine, settings, span_exporter)
+    tracer = configure_tracing(app, engine, settings, span_exporter)
+    app.state.run_finished = RunFinishedReporter(app.state.session_factory, user_hasher, tracer)
     return app
