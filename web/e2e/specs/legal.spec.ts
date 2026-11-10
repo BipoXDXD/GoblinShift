@@ -99,3 +99,19 @@ test("/termos: o item do sumário leva a seção com folga acima do título", as
   // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
   expect(await top()).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
 });
+
+// WCAG 1.4.10 (Reflow): na largura do celular, nenhum texto legal rola na horizontal. As URLs
+// longas dos .md (60 a 75 caracteres sem espaço) são o caso que vigia.
+for (const path of ["/termos", "/privacidade", "/creditos"]) {
+  test(`${path} cabe na largura do celular, sem rolagem horizontal`, async ({ page }, info) => {
+    test.skip(info.project.name !== "mobile", "a largura estreita é a do projeto mobile");
+    await page.goto(path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+    const widths = await page.evaluate(() => ({
+      content: document.documentElement.scrollWidth,
+      window: window.innerWidth,
+    }));
+    expect(widths.content).toBeLessThanOrEqual(widths.window);
+  });
+}
