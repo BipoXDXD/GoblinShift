@@ -66,7 +66,11 @@ async function clippedTexts(page: Page, roundingPx: number): Promise<string[]> {
       return style.clipPath === "inset(50%)" || (box.width <= 1 && box.height <= 1);
     };
     const clipped: string[] = [];
-    for (const element of document.querySelectorAll<HTMLElement>("body *")) {
+    for (const element of document.querySelectorAll("body *")) {
+      // SVG não tem `innerText`; o texto que ele desenha não depende do CSS de espaçamento.
+      if (!(element instanceof HTMLElement)) {
+        continue;
+      }
       const style = getComputedStyle(element);
       const hidesX = hides(style.overflowX);
       const hidesY = hides(style.overflowY);
