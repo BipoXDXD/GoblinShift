@@ -4,7 +4,6 @@ A CSP da SPA é do Nginx (fatia 7): a API manda só `default-src 'none'` nas sua
 download mantém a própria CSP com `sandbox`.
 """
 
-import re
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -22,6 +21,7 @@ from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddlewa
 from tests.api.files_support import new_account, publish
 from tests.api.test_api_docs import DOCS_CSP
 from tests.security.authz_matrix import entries
+from tests.security.path_params import fill_path_params
 
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
 HSTS = "max-age=63072000; includeSubDomains"
@@ -151,7 +151,6 @@ async def test_escopo_que_nao_e_http_passa_intacto() -> None:
 
 # --- Aplicação real ---------------------------------------------------------------------------
 
-_PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
 _DOCS = "/docs"
 
 
@@ -167,9 +166,7 @@ def _assert_common(headers: httpx.Headers, *, csp: str | None = API_CSP) -> None
     "path", [path for method, path, _ in entries() if method == "GET"], ids=str
 )
 def test_respostas_da_api_tem_cabecalhos_de_3_6(offline_client: TestClient, path: str) -> None:
-    concrete = _PATH_PARAM.sub(
-        lambda match: "google" if match["name"] == "provider" else str(uuid4()), path
-    )
+    concrete = fill_path_params(path, lambda name: "google" if name == "provider" else str(uuid4()))
 
     response = offline_client.get(concrete)
 
