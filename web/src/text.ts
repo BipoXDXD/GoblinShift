@@ -88,7 +88,6 @@ export const TEXT = {
     footerNavLabel: "Rodapé",
   },
   pageTitles: {
-    workbench: "Bancada",
     acceptTerms: "Aceite dos termos",
   },
   notice: {
@@ -138,12 +137,14 @@ export const TEXT = {
     // Palco 3D da abertura (ADR 038): uma goblin por vez, escolhida no seletor.
     stage: {
       label: (name: string) => `${name} em 3D`,
-      hint: "Arraste para girar. Com o foco aqui, as setas giram e inclinam, e Home volta à pose inicial. No celular, use os botões para inclinar; a pinça amplia a página.",
+      hint: "Arraste ou use os botões para girar e inclinar. Com o foco aqui, as setas fazem o mesmo; Home volta à pose inicial.",
       castLabel: "Escolha a goblin",
-      tiltLabel: "Inclinar",
+      turnLabel: "Girar e inclinar",
+      turnLeft: "Girar para a esquerda",
+      turnRight: "Girar para a direita",
       tiltUp: "Inclinar para ver de cima",
       tiltDown: "Inclinar para ver de baixo",
-      spin: "Girar",
+      spin: "Giro automático",
       reset: "Pose inicial",
     },
     goblins: {
@@ -383,6 +384,25 @@ export const TEXT = {
       packaging: "Empacotando os resultados",
       finalizing: "Finalizando",
       retry_wait: "Aguardando nova tentativa",
+    },
+    // Frases da região viva da Execução: só quando status ou fase mudam.
+    announce: {
+      statuses: {
+        queued: "Execução na fila.",
+        running: "Execução em andamento.",
+        stopping: "Cancelando a execução.",
+        succeeded: "Execução concluída.",
+        succeeded_with_warnings: "Execução concluída com avisos.",
+        canceled: "Execução cancelada.",
+        failed: "A execução falhou.",
+      },
+      phases: {
+        inspecting: "Inspecionando as entradas.",
+        processing: "Processando os arquivos.",
+        packaging: "Empacotando os resultados.",
+        finalizing: "Finalizando.",
+        retry_wait: "Aguardando uma nova tentativa.",
+      },
     },
     results: {
       heading: "Resultados",
@@ -953,5 +973,13 @@ export const TEXT = {
   legal: {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",
+    outlineTitle: "Sumário",
+    /** Legenda de tabela sem título acima: as próprias colunas dizem do que ela trata. */
+    tableOfColumns: (columns: readonly string[]) => {
+      const named = columns.filter((column) => column.trim() !== "");
+      return named.length === 0 ? "Tabela" : `Tabela: ${named.join(", ")}`;
+    },
+    /** Segunda tabela (ou mais) com o mesmo nome: o número a distingue no leitor de tela. */
+    repeatedTable: (caption: string, position: number) => `${caption} (tabela ${String(position)})`,
   },
 } as const;

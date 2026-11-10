@@ -90,7 +90,7 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       <h3 id={headingId} ref={heading} tabIndex={-1} className="font-semibold text-fg">
         {T.formHeading}
       </h3>
-      <ErrorSummary issues={issues} attempt={attempt} />
+      <ErrorSummary issues={issues} attempt={attempt} headingLevel={4} />
       <FieldGroup id={ids.scopes} legend={T.scopes} error={errors.scopes}>
         <div className="flex flex-col gap-1">
           {SCOPES.map((scope, index) => (
@@ -138,7 +138,7 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       {create.error !== null && (
         <FailureNotice
           error={create.error}
-          headingLevel={3}
+          headingLevel={4}
           messages={{ STATE_CONFLICT: T.tooMany }}
         />
       )}

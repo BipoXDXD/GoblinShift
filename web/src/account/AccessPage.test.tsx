@@ -682,6 +682,37 @@ describe("Acesso: chave nova", () => {
     );
   });
 
+  it("o resumo de erros fica um nível abaixo do título do formulário (h3 → h4)", async () => {
+    const { user } = setup();
+    const form = await openForm(user);
+
+    await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+    const summary = await within(form).findByRole("alert");
+    expect(
+      within(summary).getByRole("heading", {
+        level: 4,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeVisible();
+  });
+
+  it.each([
+    ["REAUTH_REQUIRED", 401, "Entre de novo para confirmar"],
+    ["TERMS_NOT_ACCEPTED", 403, "Aceite os termos para continuar"],
+  ] as const)(
+    "o aviso de %s fica um nível abaixo do título do formulário (h3 → h4)",
+    async (code, status, title) => {
+      const { user } = setup({ "POST /api/v1/api-keys": () => problemResponse(status, code) });
+      const form = await openForm(user);
+      await user.click(within(form).getByLabelText("Ler arquivos (files:read)"));
+      await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+      const notice = await section(title);
+      expect(within(notice).getByRole("heading", { level: 4, name: title })).toBeVisible();
+    },
+  );
+
   it("não tem violações do axe com a lista, o formulário e a chave criada", async () => {
     const { container, user } = setup({
       "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -139,6 +139,37 @@ describe("ConfirmDialog", () => {
     );
 
     expect(notCanceled).toBe(true);
+  });
+
+  it("no DOM, Cancelar vem antes da confirmação", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    const buttons = within(screen.getByRole("dialog")).getAllByRole("button");
+
+    expect(buttons.map((button) => button.textContent)).toEqual(["Cancelar", "Revogar chave"]);
+  });
+
+  it("nenhum contêiner dos botões inverte a ordem visual (*-reverse)", async () => {
+    // O jsdom não faz layout: a prova de comportamento é o e2e de session.spec.ts a 375 px. Aqui
+    // fica a guarda rápida contra um `*-reverse` em qualquer ancestral até o diálogo, que separa a
+    // ordem visual da do Tab.
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+    const dialog = screen.getByRole("dialog");
+
+    const classes: string[] = [];
+    for (
+      let node = screen.getByRole("button", { name: "Cancelar" }).parentElement;
+      node !== null && node !== dialog;
+      node = node.parentElement
+    ) {
+      classes.push(node.className);
+    }
+
+    expect(classes.join(" ")).not.toMatch(/reverse/);
   });
 
   it("não tem violações do axe aberto", async () => {

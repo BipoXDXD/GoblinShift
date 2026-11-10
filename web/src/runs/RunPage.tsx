@@ -61,7 +61,7 @@ export function RunPage(): ReactElement {
  * mudanças anunciadas em `aria-live` e, ao concluir, os downloads.
  */
 function RunView({ runId }: { readonly runId: string }): ReactElement {
-  const { query, announcement } = useRunPolling(runId);
+  const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
@@ -71,13 +71,13 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       </div>
       <LiveRegion message={announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
-      {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
+      {failure !== null && <ProblemAlert failure={failureOf(failure)} />}
       {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
           a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
           do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
       {run !== undefined && (
         <div className="flex flex-col gap-8 max-md:order-1">
-          <RunDetails run={run} />
+          <RunDetails run={run} onAnnounced={acknowledge} />
           {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
@@ -107,11 +107,16 @@ function BackToWorkbench({ recipeId }: { readonly recipeId: string }): ReactElem
   );
 }
 
+interface RunDetailsProps {
+  readonly run: Run;
+  readonly onAnnounced: (status: RunStatus) => void;
+}
+
 /**
  * Cartão de estado. Os rótulos que só repetiriam o óbvio ficam para o leitor de tela (`sr-only`):
  * o selo já diz o estado e o texto grande diz a fase (RUI cap. 2, "Labels are a last resort").
  */
-function RunDetails({ run }: { readonly run: Run }): ReactElement {
+function RunDetails({ run, onAnnounced }: RunDetailsProps): ReactElement {
   const recipe = findRecipe(run.recipe_id);
   const { phase, processed, total } = run.progress;
   const flavor = flavorOf(run.status);
@@ -160,7 +165,7 @@ function RunDetails({ run }: { readonly run: Run }): ReactElement {
               <span className="tabular-nums">{run.attempt}</span>
             </Detail>
           </dl>
-          <CancelRun runId={run.id} status={run.status} />
+          <CancelRun runId={run.id} status={run.status} onAnnounced={onAnnounced} />
         </div>
         {/* Depois do texto: o leitor de tela ouve o estado antes da goblin, e no celular ela fica
             embaixo, sem empurrar o estado para fora da primeira dobra. */}

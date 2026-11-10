@@ -57,3 +57,18 @@ for (const [path, title] of [
     }
   });
 }
+
+// Link de fora para uma seção (resposta a titular, e-mail de suporte): a rota é lazy e o título da
+// tela recebe o foco ao abrir, então sem tratamento a página fica no topo. O jsdom não rola nem
+// carrega o chunk de verdade; aqui o build servido mostra a seção na tela e com o foco.
+test("/privacidade#secao-8 abre na seção 8, com o foco no h2 dela", async ({ page }) => {
+  await page.goto("/privacidade#secao-8-seus-direitos-e-como-exerce-los");
+
+  const section = page.getByRole("heading", {
+    level: 2,
+    name: "8. Seus direitos e como exercê-los",
+  });
+  await expect(section).toBeFocused();
+  await expect(section).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+});

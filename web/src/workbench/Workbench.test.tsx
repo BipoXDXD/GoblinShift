@@ -177,6 +177,20 @@ describe("Bancada", () => {
     ).toBeVisible();
   });
 
+  // Cada receita tem a sua rota, mas o React Router não dá key às rotas: sem o id da receita na
+  // key, a página seria reaproveitada e levaria arquivos e rascunho para a outra receita.
+  it("ir direto para outra receita abre a Bancada vazia, com o foco no título", async () => {
+    const { user, router } = await setup();
+    await chooseFiles(user, ["vazou-a.csv", "vazou-b.csv"]);
+    await waitUntilSent(2);
+
+    await act(() => router.navigate("/bancada/downloads-detox"));
+
+    await expectHeadingFocused("Bancada: Downloads Detox");
+    expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
+    expect(screen.queryAllByText(/vazou-/)).toHaveLength(0);
+  });
+
   it("envia os arquivos escolhidos e anuncia quando ficam prontos", async () => {
     const { user } = await setup();
 

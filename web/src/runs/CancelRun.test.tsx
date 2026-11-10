@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -211,4 +212,112 @@ describe("Cancelar execução: confirmação", () => {
     });
     expect(message.closest("[tabindex]")).toHaveFocus();
   });
+});
+
+/** Textos das regiões vivas da página: os do pedido e os do polling. */
+function liveTexts(): string[] {
+  return [...document.querySelectorAll("[aria-live]")].map((region) => region.textContent);
+}
+
+function pollReturns(queryClient: QueryClient, status: string): void {
+  act(() => {
+    queryClient.setQueryData(["runs", RUN_ID], {
+      data: runBody({ status }),
+      status: 200,
+      retryAfterMs: null,
+    });
+  });
+}
+
+describe("Cancelar execução: anúncios sem repetição", () => {
+  it("na fila (200 canceled), o polling não repete o cancelamento já anunciado", async () => {
+    const { user, queryClient } = setup({
+      [`GET /api/v1/runs/${RUN_ID}`]: runWith("queued"),
+      [CANCEL_ROUTE]: () =>
+        jsonResponse({ id: RUN_ID, status: "canceled", error_code: "CANCELED" }),
+    });
+    await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: OPEN_BUTTON }));
+    await screen.findByText("Execução cancelada.");
+
+    pollReturns(queryClient, "canceled");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
+    });
+    expect(liveTexts().filter((text) => text === "Execução cancelada.")).toHaveLength(1);
+  });
+
+  it("em andamento (202), o polling não repete o pedido e anuncia o fim uma vez", async () => {
+    const { user, queryClient } = setup({
+      [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+      [CANCEL_ROUTE]: () => jsonResponse({ id: RUN_ID, status: "stopping", error_code: null }, 202),
+    });
+    await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: OPEN_BUTTON }));
+    await screen.findByText(/^Cancelamento pedido\./);
+
+    pollReturns(queryClient, "stopping");
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
+    });
+    expect(liveTexts()).not.toContain("Cancelando a execução.");
+
+    pollReturns(queryClient, "canceled");
+    await waitFor(() => {
+      expect(liveTexts()).toContain("Execução cancelada.");
+    });
+    expect(liveTexts().filter((text) => text === "Execução cancelada.")).toHaveLength(1);
+  });
+});
+
+describe("Cancelar execução: o polling anuncia o que o pedido não disse", () => {
+  it.each([
+    ["succeeded", "Execução concluída."],
+    ["failed", "A execução falhou."],
+  ])(
+    "já tinha terminado (200 %s): o polling ainda diz como terminou",
+    async (status, announcement) => {
+      const { user, queryClient } = setup({
+        [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+        [CANCEL_ROUTE]: () => jsonResponse({ id: RUN_ID, status, error_code: null }),
+      });
+      await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: OPEN_BUTTON }),
+      );
+      await screen.findByText("A execução já tinha terminado; não havia o que cancelar.");
+
+      pollReturns(queryClient, status);
+
+      await waitFor(() => {
+        expect(liveTexts()).toContain(announcement);
+      });
+    },
+  );
+
+  it.each([
+    ["409", () => problemResponse(409, "STATE_CONFLICT")],
+    ["500", () => problemResponse(500, "INTERNAL_ERROR")],
+    ["falha de rede", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ] as const)(
+    "pedido com erro (%s): o polling ainda anuncia que a execução está parando",
+    async (_case, answer) => {
+      const { user, queryClient } = setup({
+        [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+        [CANCEL_ROUTE]: answer,
+      });
+      await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: OPEN_BUTTON }),
+      );
+      expect(await screen.findByRole("alert")).toBeVisible();
+
+      pollReturns(queryClient, "stopping");
+
+      await waitFor(() => {
+        expect(liveTexts()).toContain("Cancelando a execução.");
+      });
+    },
+  );
 });
