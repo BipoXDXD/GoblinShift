@@ -16,11 +16,13 @@ from sqlalchemy.orm import Session
 from goblinshift.capacity import delete_released_reservations
 from goblinshift.files.purge import purge_owner_batch
 from goblinshift.files.retention import HistoryReferences, delete_old_file_rows
+from goblinshift.identity.login_state import purge_expired_states
 from goblinshift.identity.purge import (
     delete_ended_web_sessions,
     delete_expired_login_states,
     delete_old_audit_events,
 )
+from goblinshift.identity.rate_limit import delete_expired_windows
 from goblinshift.identity.tables import login_state
 from goblinshift.platform.sql import skip_locked_batch
 from goblinshift.runs.retention import delete_expired_idempotency_records
@@ -64,6 +66,14 @@ BATCHES: dict[str, tuple[Callable[[Session], object], str]] = {
     "identity.audit_event": (
         lambda s: delete_old_audit_events(s, NOW, LIMIT),
         "DELETE FROM audit_event",
+    ),
+    "identity.login_state.purge_expired_states": (
+        lambda s: purge_expired_states(s, NOW, limit=LIMIT),
+        "DELETE FROM login_state",
+    ),
+    "identity.request_window": (
+        lambda s: delete_expired_windows(s, NOW, LIMIT),
+        "DELETE FROM request_window",
     ),
     "runs.idempotency_record": (
         lambda s: delete_expired_idempotency_records(s, NOW, LIMIT),
