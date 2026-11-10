@@ -221,6 +221,14 @@ function inSequence(...responses: readonly (() => Response | null)[]): Handler {
 const running = (): Response => jsonResponse(runBody({ status: "running" }));
 const unavailable = (): Response => problemResponse(503, "SERVICE_UNAVAILABLE");
 const UNAVAILABLE_TEXT = "O serviço está indisponível no momento.";
+/** Quantas vezes a tela consultou a execução. */
+function runRequests(requests: readonly Request[]): number {
+  return requests.filter(
+    (request) =>
+      request.method === "GET" && new URL(request.url).pathname === `/api/v1/runs/${RUN_ID}`,
+  ).length;
+}
+
 // Pedido que nunca responde: segura a consulta em andamento.
 const hanging = (): null => null;
 
@@ -332,14 +340,30 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("falha que o polling não resolve sozinho vira alerta na primeira vez", async () => {
-    const { queryClient } = setup(inSequence(running, () => problemResponse(410, "GONE")));
-    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+  it.each([
+    [401, "AUTHENTICATION_REQUIRED", "Sua sessão terminou"],
+    [410, "GONE", "Isto expirou"],
+  ])(
+    "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",
+    async (status, code, text) => {
+      // Só o intervalo do polling fica no relógio falso: avançá-lo prova que não há próxima consulta.
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const { queryClient, api } = setup(
+          inSequence(running, () => problemResponse(status, code)),
+        );
+        expect(await screen.findByText("Em andamento")).toBeInTheDocument();
 
-    await nextPoll(queryClient);
+        await nextPoll(queryClient);
+        expect(screen.getByRole("alert")).toHaveTextContent(text);
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Isto expirou");
-  });
+        expect(runRequests(api.requests)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("falha transitória antes do primeiro dado vira alerta na primeira vez", async () => {
     setup(unavailable);
