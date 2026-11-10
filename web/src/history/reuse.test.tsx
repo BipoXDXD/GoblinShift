@@ -45,28 +45,28 @@ describe("Histórico: disponibilidade dos resultados", () => {
   );
 });
 
-describe("Histórico: reusar a configuração", () => {
+describe("Histórico: reutilizar os parâmetros", () => {
   it("leva à Bancada da receita com os parâmetros da execução, sem ser coberto pelo link da linha", async () => {
     const { container } = renderHistory({
       status: "succeeded",
       parameters: { output_delimiter: ";" },
     });
 
-    const reuse = within(await row()).getByRole("link", { name: /^Reusar configuração/ });
+    const reuse = within(await row()).getByRole("link", { name: /^Reutilizar parâmetros/ });
     expect(reuse).toHaveAttribute("href", `/bancada/csv-janitor?execucao=${RUN_ID}`);
     expect(reuse).toHaveClass("relative");
     expect(await axeViolations(container)).toEqual([]);
   });
 
-  it("sem parâmetros guardados (passados os 30 dias), não oferece reusar", async () => {
+  it("sem parâmetros guardados (passados os 30 dias), não oferece reutilizar", async () => {
     renderHistory({ status: "succeeded", parameters: null });
 
-    expect(within(await row()).queryByRole("link", { name: /^Reusar configuração/ })).toBeNull();
+    expect(within(await row()).queryByRole("link", { name: /^Reutilizar parâmetros/ })).toBeNull();
   });
 
-  it("receita que a interface não conhece não oferece reusar", async () => {
+  it("receita que a interface não conhece não oferece reutilizar", async () => {
     renderHistory({ status: "succeeded", recipe_id: "receita-futura" });
 
-    expect(within(await row()).queryByRole("link", { name: /^Reusar configuração/ })).toBeNull();
+    expect(within(await row()).queryByRole("link", { name: /^Reutilizar parâmetros/ })).toBeNull();
   });
 });

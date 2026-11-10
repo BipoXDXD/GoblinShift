@@ -187,6 +187,15 @@ describe("Acesso: uso e cotas", () => {
     expect(usage).toHaveTextContent("Por vídeo268,4 MB");
   });
 
+  it("chama os limites de por execução, como a Bancada", async () => {
+    setup();
+
+    const usage = await section("Uso e cotas");
+    expect(within(usage).getByRole("heading", { name: "Limites por execução" })).toBeVisible();
+    expect(usage).toHaveTextContent("Arquivos por execução");
+    expect(usage).not.toHaveTextContent(/por lote/i);
+  });
+
   it("uso zero, sem execução na janela: sem a hora de renovação", async () => {
     setup({
       "GET /api/v1/me": () =>

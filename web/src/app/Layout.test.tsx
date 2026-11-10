@@ -119,7 +119,7 @@ describe("Layout: termos pendentes", () => {
     await waitFor(() => {
       expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico%3Festado%3Dfailed");
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de Uso" })).toBeVisible();
   });
 
   it("conta que aceitou a versão anterior volta ao aceite quando a versão sobe", async () => {
@@ -141,7 +141,7 @@ describe("Layout: termos pendentes", () => {
     await waitFor(() => {
       expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico");
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de Uso" })).toBeVisible();
   });
 
   it.each(["/termos", "/privacidade", "/acesso", "/entrar"])(
@@ -167,7 +167,7 @@ describe("Layout: login recusado", () => {
     setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), "/?login_error=failed");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
     );
   });
 
@@ -189,7 +189,7 @@ describe("Layout: login recusado", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(
-      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
     );
     expect(within(alert).queryByText(/Código/)).toBeNull();
     expect(alert).not.toHaveTextContent(/golpe|PERIGO|<b>/);

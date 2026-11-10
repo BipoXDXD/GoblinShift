@@ -74,6 +74,7 @@ describe("Execução: detalhe por arquivo", () => {
     expect(entries[1]).toHaveTextContent("Arquivo 2");
     expect(entries[1]).toHaveTextContent("Rejeitado");
     expect(entries[1]).toHaveTextContent("A estrutura do CSV é inválida");
+    expect(entries[1]).toHaveTextContent("Salve o CSV de novo em UTF-8 e envie outra vez.");
     expect(entries[2]).toHaveTextContent("Repetido");
     expect(entries[2]).toHaveTextContent("Igual ao arquivo 1");
     expect(entries[3]).toHaveTextContent("Processado com aviso");
