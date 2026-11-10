@@ -5,6 +5,7 @@ linha no banco; com a manutenção no ar, ela para e remove a sonda no ciclo seg
 um falso que registra os comandos, porque o script inteiro só roda na VPS.
 """
 
+import os
 import signal
 import subprocess
 import sys
@@ -274,10 +275,16 @@ def test_maintenance_already_stopped_is_left_as_is() -> None:
     assert "não estava rodando" in outcomes[-1].evidence
 
 
-def _probe_run(log_config: dict[str, object]) -> run.ProbeRun:
+def _probe_run(
+    log_config: dict[str, object],
+    *,
+    runtime: str | None = "runsc",
+    sandbox_kernel: str | None = "4.4.0",
+    timed_out: bool = False,
+) -> run.ProbeRun:
     memory = profile.MEMORY_BYTES
     host_config = {
-        "Runtime": "runsc",
+        "Runtime": runtime,
         "NetworkMode": "none",
         "ReadonlyRootfs": True,
         "PidsLimit": profile.SANDBOX_TASKS_LIMIT,
@@ -297,7 +304,7 @@ def _probe_run(log_config: dict[str, object]) -> run.ProbeRun:
         "LogConfig": log_config,
     }
     report = {
-        "kernel": "4.4.0",
+        "kernel": sandbox_kernel,
         "uid": profile.EXECUTOR_UID,
         "root_write_error": "EROFS",
         "docker_sock_exists": False,
@@ -305,7 +312,7 @@ def _probe_run(log_config: dict[str, object]) -> run.ProbeRun:
     state = run.ExecutorState(
         running=False, exit_code=0, oom_killed=False, error="", host_config=host_config
     )
-    return run.ProbeRun(state, [report], "", 1.0, timed_out=False)
+    return run.ProbeRun(state, [report], "", 1.0, timed_out=timed_out)
 
 
 def _fixed_profile(probe: run.ProbeRun) -> Outcome:
@@ -334,3 +341,78 @@ def test_perfil_fixo_reprova_log_sem_o_limite_do_perfil(log_config: dict[str, ob
 
     assert not outcome.passed
     assert "LogConfig" in outcome.evidence
+
+
+# Kernel do host fixo: o critério compara o kernel visto no sandbox com o do host (`os.uname`).
+HOST_KERNEL = "6.8.0-146-generic"
+GVISOR_KERNEL = "4.4.0"
+LOG_DO_PERFIL: dict[str, object] = {
+    "Type": "local",
+    "Config": {"max-size": "1m", "max-file": "1", "compress": "false"},
+}
+
+
+@pytest.fixture
+def host_kernel(monkeypatch: pytest.MonkeyPatch) -> str:
+    real = os.uname()
+    fixed = os.uname_result((real.sysname, real.nodename, HOST_KERNEL, real.version, real.machine))
+    monkeypatch.setattr(os, "uname", lambda: fixed)
+    return HOST_KERNEL
+
+
+def _runtime_criterion(probe: run.ProbeRun) -> Outcome:
+    return next(o for o in run.check_identity(probe) if o.criterion == "container sob runsc")
+
+
+@pytest.mark.usefixtures("host_kernel")
+def test_container_sob_runsc_passa_com_runtime_runsc_e_kernel_do_gvisor() -> None:
+    outcome = _runtime_criterion(_probe_run(LOG_DO_PERFIL))
+
+    assert outcome.passed
+    assert "runtime runsc" in outcome.evidence
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    ["runc", "io.containerd.runc.v2", "", None],
+    ids=["runc", "runc-do-containerd", "vazio", "ausente"],
+)
+@pytest.mark.usefixtures("host_kernel")
+def test_container_sob_runsc_reprova_outro_runtime_mesmo_com_kernel_diferente(
+    runtime: str | None,
+) -> None:
+    # Kernel diferente do host isola a checagem do campo Runtime: só ela pode reprovar aqui.
+    outcome = _runtime_criterion(
+        _probe_run(LOG_DO_PERFIL, runtime=runtime, sandbox_kernel=GVISOR_KERNEL)
+    )
+
+    assert not outcome.passed
+    assert f"runtime {runtime}" in outcome.evidence
+
+
+def test_container_sob_runc_real_reprova_com_o_kernel_do_host(host_kernel: str) -> None:
+    outcome = _runtime_criterion(
+        _probe_run(LOG_DO_PERFIL, runtime="runc", sandbox_kernel=host_kernel)
+    )
+
+    assert not outcome.passed
+    assert f"kernel visto no sandbox {host_kernel}, no host {host_kernel}" in outcome.evidence
+
+
+@pytest.mark.parametrize(
+    "sandbox_kernel", [HOST_KERNEL, None], ids=["kernel-do-host", "sonda-sem-kernel"]
+)
+@pytest.mark.usefixtures("host_kernel")
+def test_container_sob_runsc_reprova_runsc_declarado_sem_kernel_proprio(
+    sandbox_kernel: str | None,
+) -> None:
+    outcome = _runtime_criterion(_probe_run(LOG_DO_PERFIL, sandbox_kernel=sandbox_kernel))
+
+    assert not outcome.passed
+
+
+@pytest.mark.usefixtures("host_kernel")
+def test_container_sob_runsc_reprova_sonda_que_passou_do_prazo() -> None:
+    outcome = _runtime_criterion(_probe_run(LOG_DO_PERFIL, timed_out=True))
+
+    assert not outcome.passed
