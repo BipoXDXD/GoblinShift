@@ -8,6 +8,7 @@ import hashlib
 import logging
 import secrets
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -353,7 +354,7 @@ def test_serve_roda_o_ciclo_de_contas_mesmo_se_o_de_execucoes_falhar(
     shutdown = ShutdownFlag()
     account_cycles: list[bool] = []
 
-    def failing_cycle(_self: Maintenance) -> dict[str, int]:
+    def failing_cycle(_self: Maintenance, should_stop: Callable[[], bool]) -> dict[str, int]:
         raise RuntimeError("ciclo de execuções quebrado")
 
     def account_cycle(_self: AccountJobs) -> dict[str, int]:

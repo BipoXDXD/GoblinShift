@@ -101,6 +101,32 @@ def test_ciclo_com_zero_passos_falhos_nao_conta_como_falha(
     assert span.status.status_code is StatusCode.UNSET
 
 
+def test_parada_pedida_nao_comeca_o_ciclo_seguinte(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    ran: list[str] = []
+
+    def executions() -> dict[str, int]:
+        ran.append("execuções")
+        return {"deadlines": 1}
+
+    def accounts() -> dict[str, int]:
+        ran.append("contas")
+        return {}
+
+    run_cycles(
+        provider.get_tracer("t"),
+        (("execuções", executions), ("contas", accounts)),
+        should_stop=lambda: bool(ran),
+    )
+
+    assert ran == ["execuções"]
+    [span] = exporter.get_finished_spans()
+    attributes = dict(span.attributes or {})
+    assert attributes["maintenance.deadlines"] == 1
+    assert attributes["maintenance.failed_cycles"] == 0
+
+
 @pytest.fixture
 def counting(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # `create_app` deixa outro contador no logger raiz (configure_logging), e quase toda a suíte

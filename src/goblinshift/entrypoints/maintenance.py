@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from types import FrameType
 from uuid import UUID
 
@@ -147,11 +148,13 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")
             cycles: tuple[Cycle, ...] = (
-                ("execuções", maintenance.run_cycle),
+                # A parada é conferida entre os passos: com o banco fora, cada passo pode levar o
+                # `connect_timeout`, e o SIGTERM viraria SIGKILL no prazo do Docker (10 s).
+                ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
                 ("contas", account_jobs.run_cycle),
             )
             while not shutdown.is_set():
-                run_cycles(tracer, cycles)
+                run_cycles(tracer, cycles, should_stop=shutdown.is_set)
                 shutdown.wait(settings.maintenance_interval_s)
             logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
     finally:
@@ -161,8 +164,12 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     logger.info("manutenção encerrada")
 
 
-def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
+def run_cycles(
+    tracer: Tracer, cycles: Sequence[Cycle], should_stop: Callable[[], bool] = lambda: False
+) -> None:
     """Uma volta: roda os ciclos em sequência dentro de um span `maintenance.cycle`.
+
+    Com a parada pedida (`should_stop`), o ciclo seguinte não começa; o span sai com o que rodou.
 
     Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
     com o prefixo `maintenance.`, e quantos falharam: os que levantaram e os que contaram passos
@@ -175,6 +182,8 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
     ) as span:
         failed = 0
         for name, cycle in cycles:
+            if should_stop():
+                break
             try:
                 counts = cycle()
             except Exception:
