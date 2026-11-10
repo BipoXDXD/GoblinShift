@@ -3,12 +3,17 @@
 Formas aceitas:
 - `` `arquivo.py` `Símbolo` `trecho` ``: o símbolo (função, classe, `Classe.método`, função
   aninhada ou nome atribuído no módulo) é localizado pelo `ast`, e o trecho literal precisa
-  aparecer no código-fonte dele, decoradores incluídos, exatamente uma vez;
+  aparecer no código-fonte dele, decoradores incluídos, exatamente uma vez. Trecho igual ao nome
+  do símbolo não prova nada e é recusado. Num nome atribuído (constante, tabela), o trecho é a
+  instrução inteira ou uma linha inteira dela, para que `= 2` não continue valendo com `= 200`;
 - `` `arquivo` `trecho` `` para arquivo que não é Python (Nginx, Dockerfile...): o trecho precisa
   aparecer exatamente uma vez no arquivo inteiro.
 
 A unicidade garante que o trecho aponta um único lugar, e editar código acima dele não reprova
 nada. A citação `arquivo:linha` é recusada para não voltar.
+
+Em célula de tabela, `\\|` no trecho vale `|`, como o GFM o mostra. Arquivo Python com quebra de
+linha que o `ast` não conta (form feed, U+2028...) é recusado, porque o recorte sairia torto.
 """
 
 import ast
@@ -19,6 +24,8 @@ _PATH = r"(?:src|deploy|docker|tests)/[^`\s:]+"
 _CODE_REF = re.compile(rf"`(?P<path>{_PATH})` `(?P<first>[^`]+)`(?: `(?P<second>[^`]+)`)?")
 _LINE_REF = re.compile(rf"`{_PATH}:\d+(?:-\d+)?`")
 _DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+# As únicas quebras de linha que o `ast` conta em `lineno`; `str.splitlines` aceita outras.
+_AST_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
 _Definition = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 _Named = _Definition | ast.Assign | ast.AnnAssign
@@ -31,10 +38,16 @@ def citation_problems(document: str, root: Path) -> list[str]:
         for match in _LINE_REF.finditer(document)
     ]
     for match in _CODE_REF.finditer(document):
-        reason = _problem_of(root, match["path"], match["first"], match["second"])
+        second = None if match["second"] is None else _unescape(match["second"])
+        reason = _problem_of(root, match["path"], _unescape(match["first"]), second)
         if reason is not None:
             problems.append(f"{match[0]}: {reason}")
     return problems
+
+
+def _unescape(part: str) -> str:
+    """Em célula de tabela GFM, o `|` do código é escrito `\\|`, mesmo dentro de code span."""
+    return part.replace("\\|", "|")
 
 
 def count_code_citations(document: str) -> int:
@@ -59,6 +72,8 @@ def _problem_of(root: Path, file: str, first: str, second: str | None) -> str | 
 
 
 def _python_problem(source: str, symbol: str, excerpt: str) -> str | None:
+    if len(source.splitlines()) != _ast_line_count(source):
+        return "o arquivo tem quebras de linha que o ast não conta"
     scopes: list[ast.AST] = [ast.parse(source)]
     candidates: list[_Named] = []
     for name in symbol.split("."):
@@ -70,7 +85,23 @@ def _python_problem(source: str, symbol: str, excerpt: str) -> str | None:
         return "o símbolo não existe no arquivo"
     if len(candidates) > 1:
         return f"o símbolo está definido {len(candidates)} vezes no arquivo"
-    return _uniqueness_problem(_segment(source, candidates[0]).count(excerpt), "no símbolo")
+    node = candidates[0]
+    segment = _segment(source, node)
+    if excerpt == _name(node):
+        return "o trecho é só o nome do símbolo"
+    if not isinstance(node, _Definition) and not _is_whole_statement(source, node, excerpt):
+        return "o trecho de uma constante é a instrução inteira ou uma linha inteira dela"
+    return _uniqueness_problem(segment.count(excerpt), "no símbolo")
+
+
+def _ast_line_count(source: str) -> int:
+    lines = _AST_LINE_BREAK.split(source)
+    return len(lines) - 1 if lines[-1] == "" else len(lines)
+
+
+def _is_whole_statement(source: str, node: ast.Assign | ast.AnnAssign, excerpt: str) -> bool:
+    whole_lines = {line.strip() for line in _segment(source, node).splitlines()}
+    return excerpt == ast.get_source_segment(source, node) or excerpt in whole_lines
 
 
 def _uniqueness_problem(count: int, where: str) -> str | None:

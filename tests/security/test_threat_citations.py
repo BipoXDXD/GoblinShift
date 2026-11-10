@@ -7,10 +7,31 @@ import pytest
 from tests.security.threat_citations import citation_problems, count_code_citations
 
 _MODULE = """\
+import contextlib
 import functools
 
 LIMIT = 10
+Number = int | float
 _FLAGS = ("a", "b")
+_PAIRS = (
+    ("a", 1),
+    ("b", 2),
+)
+
+try:
+    import tomllib
+except ImportError:
+    TRY_LIMIT = 1
+
+if LIMIT:
+    IF_LIMIT = 2
+
+with contextlib.suppress(ValueError):
+    WITH_LIMIT = 3
+
+
+async def fetch() -> int:
+    return LIMIT
 
 
 def guard(value: int) -> bool:
@@ -51,6 +72,17 @@ limit api;
 """
 
 
+_WHOLE_STATEMENT = "o trecho de uma constante é a instrução inteira ou uma linha inteira dela"
+
+# As sabotagens da revisão do PR #256: cada valor mudou, mas o trecho antigo continuava dentro dele.
+_SABOTAGED = """\
+RETURN_TO_PATTERN = r".*"
+MAX_TRANSFERS_PER_ACCOUNT = 200
+MAX_BODY_BYTES = 10240000
+_DIR_MODE = 0o7007
+"""
+
+
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     (tmp_path / "src").mkdir()
@@ -67,12 +99,22 @@ def root(tmp_path: Path) -> Path:
         "`src/mod.py` `Store.open` `return checked(key)`",
         "`src/mod.py` `Store.open.checked` `if name != key:`",
         "`src/mod.py` `LIMIT` `LIMIT = 10`",
-        '`src/mod.py` `_FLAGS` `"b"`',
+        '`src/mod.py` `_FLAGS` `_FLAGS = ("a", "b")`',
+        '`src/mod.py` `_PAIRS` `("b", 2),`',
+        "`src/mod.py` `TRY_LIMIT` `TRY_LIMIT = 1`",
+        "`src/mod.py` `IF_LIMIT` `IF_LIMIT = 2`",
+        "`src/mod.py` `WITH_LIMIT` `WITH_LIMIT = 3`",
+        "`src/mod.py` `fetch` `return LIMIT`",
         "`docker/edge.conf` `zone api rate=20;`",
     ],
 )
 def test_citacao_valida_nao_tem_problema(root: Path, citation: str) -> None:
     assert citation_problems(f"Mitigação: {citation}.", root) == []
+
+
+def test_barra_vertical_escapada_para_a_tabela_vale_como_barra(root: Path) -> None:
+    # Dentro de célula de tabela GFM o `|` do código é escrito `\|`, também em code span.
+    assert citation_problems("| x | `src/mod.py` `Number` `Number = int \\| float` |", root) == []
 
 
 def test_trecho_no_decorador_conta_como_parte_do_simbolo(root: Path) -> None:
@@ -90,6 +132,13 @@ def test_trecho_que_se_repete_fora_do_simbolo_vale_uma_vez_dentro_dele(root: Pat
         ("`src/falta.py` `guard` `return`", "o arquivo não existe"),
         ("`src/mod.py` `Store.fechar` `return None`", "o símbolo não existe no arquivo"),
         ("`src/mod.py` `Store.open.outra` `return`", "o símbolo não existe no arquivo"),
+        ("`src/mod.py` `checked` `return name`", "o símbolo não existe no arquivo"),
+        ("`src/mod.py` `Store.checked` `return name`", "o símbolo não existe no arquivo"),
+        ("`src/mod.py` `guard` `guard`", "o trecho é só o nome do símbolo"),
+        ("`src/mod.py` `LIMIT` `LIMIT`", "o trecho é só o nome do símbolo"),
+        ("`src/mod.py` `LIMIT` `= 10`", _WHOLE_STATEMENT),
+        ('`src/mod.py` `_FLAGS` `"b"`', _WHOLE_STATEMENT),
+        ('`src/mod.py` `_PAIRS` `("b", 2)`', _WHOLE_STATEMENT),
         ("`src/mod.py` `twin` `pass`", "o símbolo está definido 2 vezes no arquivo"),
         ("`src/mod.py` `guard` `value > LIMIT`", "o trecho não aparece no símbolo"),
         ("`src/mod.py` `guard` `return checked(key)`", "o trecho não aparece no símbolo"),
@@ -146,3 +195,42 @@ def test_contagem_considera_so_citacoes_de_codigo() -> None:
     )
 
     assert count_code_citations(document) == 2
+
+
+@pytest.mark.parametrize(
+    ("citation", "reason"),
+    [
+        ("`src/sab.py` `RETURN_TO_PATTERN` `RETURN_TO_PATTERN`", "o trecho é só o nome do símbolo"),
+        (
+            '`src/sab.py` `RETURN_TO_PATTERN` `RETURN_TO_PATTERN = re.compile(r"/(?!/)[a-z]*")`',
+            _WHOLE_STATEMENT,
+        ),
+        ("`src/sab.py` `MAX_TRANSFERS_PER_ACCOUNT` `= 2`", _WHOLE_STATEMENT),
+        (
+            "`src/sab.py` `MAX_TRANSFERS_PER_ACCOUNT` `MAX_TRANSFERS_PER_ACCOUNT = 2`",
+            _WHOLE_STATEMENT,
+        ),
+        ("`src/sab.py` `MAX_BODY_BYTES` `MAX_BODY_BYTES = 1024`", _WHOLE_STATEMENT),
+        ("`src/sab.py` `_DIR_MODE` `_DIR_MODE = 0o700`", _WHOLE_STATEMENT),
+    ],
+)
+def test_constante_sabotada_nao_casa_com_a_citacao_original(
+    tmp_path: Path, citation: str, reason: str
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "sab.py").write_text(_SABOTAGED, encoding="utf-8")
+
+    assert citation_problems(citation, tmp_path) == [f"{citation}: {reason}"]
+
+
+@pytest.mark.parametrize("separator", ["\x0c", "\x1c", "\u2028"])
+def test_arquivo_com_quebra_que_o_ast_nao_conta_e_recusado(tmp_path: Path, separator: str) -> None:
+    # `str.splitlines` quebra nesses caracteres e o `ast` não: o recorte do símbolo sairia torto.
+    (tmp_path / "src").mkdir()
+    module = f"# a{separator}b\nLIMIT = 10\n"
+    (tmp_path / "src" / "mod.py").write_text(module, encoding="utf-8")
+    citation = "`src/mod.py` `LIMIT` `LIMIT = 10`"
+
+    assert citation_problems(citation, tmp_path) == [
+        f"{citation}: o arquivo tem quebras de linha que o ast não conta"
+    ]
