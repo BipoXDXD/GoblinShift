@@ -19,9 +19,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.entrypoints.maintenance import (
     AccountJobs,
     AccountJobsConfig,
-    ShutdownFlag,
     serve,
 )
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
