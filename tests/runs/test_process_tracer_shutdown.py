@@ -362,9 +362,12 @@ def test_parada_da_manutencao_ociosa_ou_sem_banco_com_o_prazo_do_tracing_cabe_na
 
 
 @pytest.mark.parametrize("service", _deployments("worker"))
-def test_parada_do_worker_ocioso_com_o_prazo_do_tracing_cabe_na_carencia(
+def test_parada_do_worker_ocioso_ou_sem_banco_com_o_prazo_do_tracing_cabe_na_carencia(
     service: dict[str, Any],
 ) -> None:
     # A tentativa em curso pode passar da carência de propósito (docstring do worker); o prazo do
-    # tracing não pode tirar do worker ocioso a parada graciosa.
-    assert _grace_s(service) > SHUTDOWN_POLL_S + telemetry.TRACING_SHUTDOWN_TIMEOUT_S
+    # tracing não pode tirar do worker ocioso a parada graciosa. Ocioso, ele ainda busca na fila,
+    # e com o banco fora o `claim_next` e o `LISTEN` esperam a conexão desistir.
+    step_s = _idle_or_database_down_step_s()
+
+    assert _grace_s(service) > step_s + telemetry.TRACING_SHUTDOWN_TIMEOUT_S
