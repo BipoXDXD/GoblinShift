@@ -82,6 +82,10 @@ class FakeExecutorCtl:
     # Chamado com o `attempt_id` depois que o `start` criou o "container" e antes da resposta,
     # fora do lock: a janela do serviço real entre o `docker run` e o `inspect` final.
     after_start_run: Callable[[str], None] | None = None
+    # Chamado com o `attempt_id` depois de cada `status` calculado e antes da resposta, fora da
+    # trava do falso: o que o gancho fizer (no banco ou no próprio ctl, como outro processo)
+    # acontece entre a resposta que o cliente vai ler e a chamada seguinte dele.
+    on_status: Callable[[str], None] | None = None
     last_start_body: object = None
 
     def __post_init__(self) -> None:
@@ -128,11 +132,10 @@ class FakeExecutorCtl:
             return 400, _error("invalid_attempt_id")
         if (method, action) == ("POST", "/start"):
             return self._start_and_inspect(attempt_id, body)
+        if (method, action) == ("GET", None):
+            return 200, self._status_then_hook(attempt_id)
         with self._lock:
             match method, action:
-                case "GET", None:
-                    self.calls.append(("status", attempt_id))
-                    return 200, self._status(attempt_id)
                 case "POST", "/stop":
                     self.calls.append(("stop", attempt_id))
                     return self._stop(attempt_id, body)
@@ -152,6 +155,14 @@ class FakeExecutorCtl:
         self.after_start_run(attempt_id)
         with self._lock:
             return code, self._status(attempt_id)
+
+    def _status_then_hook(self, attempt_id: str) -> dict[str, object]:
+        with self._lock:
+            self.calls.append(("status", attempt_id))
+            status = self._status(attempt_id)
+        if self.on_status is not None:
+            self.on_status(attempt_id)
+        return status
 
     def _start(self, attempt_id: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
         document = _json_object(body)
