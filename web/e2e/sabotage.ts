@@ -18,6 +18,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { selectCases } from "./support/selectCases.ts";
+
 interface Case {
   readonly name: string;
   /** Argumentos do `playwright test`: arquivo da spec e, se preciso, `-g`. */
@@ -517,7 +519,12 @@ function runCase(sabotage: Case, port: number): boolean {
 
 // Um argumento filtra os casos pelo nome: `npm run e2e:sabotage -- CLS`.
 const filter = process.argv[2] ?? "";
-const selected = CASES.filter((sabotage) => sabotage.name.includes(filter));
+const selection = selectCases(CASES, filter);
+if (!selection.found) {
+  console.error(selection.message);
+  process.exit(1);
+}
+const selected = selection.cases;
 const escaped = selected.filter((sabotage, index) => !runCase(sabotage, FIRST_PORT + index));
 if (escaped.length > 0) {
   console.error(`\n${String(escaped.length)} defeito(s) passaram pela suíte.`);
