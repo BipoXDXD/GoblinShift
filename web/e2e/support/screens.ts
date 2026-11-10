@@ -17,6 +17,8 @@ export interface Screen {
 }
 
 const LATER = "2026-10-15T12:00:00Z";
+/** Qualquer script do build, com ou sem query: depois da carga, só os pedaços `lazy` pedem. */
+const SCRIPT_FILE = /\.js(\?.*)?$/;
 
 function runScreen(name: string, overrides: RunOverrides, visibleText: string): Screen {
   return {
@@ -148,6 +150,19 @@ export const SCREENS: readonly Screen[] = [
       await bancada.choose("PDF da página 2", "anexo.pdf");
       const pageMap = page.getByRole("region", { name: "Mapa de páginas previsto" });
       await expect(pageMap.getByText("anexo.pdf, página 1", { exact: true })).toBeVisible();
+    },
+  },
+  {
+    // M7: o aviso de origem é o parágrafo que diz por que a Bancada abriu com os padrões. Execução
+    // cujos parâmetros a retenção já apagou. Busca pela tag, porque o aviso pode ter papel de
+    // status ou de parágrafo.
+    name: "Bancada com os padrões e o aviso de origem",
+    open: async (page: Page, api: FakeApi): Promise<void> => {
+      const runId = api.seedRun({ status: "succeeded", parameters: null });
+      await page.goto(`/bancada/csv-janitor?execucao=${runId}`);
+      await expect(
+        page.locator("p").filter({ hasText: /^Os parâmetros desta execução não estão mais/ }),
+      ).toBeVisible();
     },
   },
   {
@@ -332,6 +347,23 @@ export const SCREENS: readonly Screen[] = [
     open: async (page: Page): Promise<void> => {
       await page.goto("/conta-excluida");
       await expect(page.getByRole("heading", { level: 1, name: "Exclusão pedida" })).toBeVisible();
+    },
+  },
+  {
+    // M10: a moldura já rodou e só o pedaço da rota seguinte não chega, como num deploy que
+    // trocou os arquivos com a aba aberta.
+    name: "Tela que não abriu",
+    open: async (page: Page): Promise<void> => {
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await page.route(SCRIPT_FILE, (route) => route.abort());
+      await page
+        .getByRole("navigation", { name: "Principal" })
+        .getByRole("link", { name: "Histórico" })
+        .click();
+      await expect(
+        page.getByRole("alert").filter({ hasText: "Algo deu errado nesta tela." }),
+      ).toBeVisible();
     },
   },
   {
