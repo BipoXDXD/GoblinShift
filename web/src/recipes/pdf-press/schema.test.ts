@@ -171,9 +171,9 @@ describe("pageMapPreview", () => {
     ]);
   });
 
-  it("split com uma página por parte usa o singular", () => {
-    expect(pageMapPreview(values({ operation: "split", pages_per_document: "1" }), [A])).toEqual([
-      { name: "a.pdf", entries: ["partes de 1 página, na ordem"] },
+  it.each(["1", "01"])("split com %j página por parte usa o singular", (size) => {
+    expect(pageMapPreview(values({ operation: "split", pages_per_document: size }), [A])).toEqual([
+      { name: "a.pdf", entries: [`partes de ${size} página, na ordem`] },
     ]);
   });
 

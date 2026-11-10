@@ -182,7 +182,7 @@ export function pageMapPreview(
         : [{ name: "merged.pdf", entries: inputs.map((input) => PREVIEW.allPages(input.name)) }];
     case "split": {
       const size = values.pages_per_document.trim();
-      const pages = PREVIEW.pages[size === "1" ? 0 : 1];
+      const pages = PREVIEW.pages[Number(size) === 1 ? 0 : 1];
       return inputs.map((input) => ({ name: input.name, entries: [PREVIEW.groups(size, pages)] }));
     }
     case "select": {
