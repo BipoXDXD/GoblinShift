@@ -221,6 +221,7 @@ function inSequence(...responses: readonly (() => Response | null)[]): Handler {
 const running = (): Response => jsonResponse(runBody({ status: "running" }));
 const unavailable = (): Response => problemResponse(503, "SERVICE_UNAVAILABLE");
 const UNAVAILABLE_TEXT = "O serviço está indisponível no momento.";
+const SIGNED_OUT_TEXT = "Sua sessão terminou. Entre de novo para continuar.";
 /** Quantas vezes a tela consultou a execução. */
 function runRequests(requests: readonly Request[]): number {
   return requests.filter(
@@ -311,6 +312,27 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     alerts.stop();
   });
 
+  it("sessão terminada é anunciada uma vez só, na região de status, sem tirar o foco", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    await expectHeadingFocused("Execução");
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(0);
+    const status = screen
+      .getAllByRole("status")
+      .filter((region) => region.textContent === SIGNED_OUT_TEXT);
+    expect(status).toHaveLength(1);
+    expect(screen.getAllByText(SIGNED_OUT_TEXT)).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    alerts.stop();
+  });
+
   it("o alerta some quando o polling volta a responder", async () => {
     const { queryClient } = setup(inSequence(running, unavailable, unavailable, running));
     expect(await screen.findByText("Em andamento")).toBeInTheDocument();
@@ -341,7 +363,7 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
   });
 
   it.each([
-    [401, "AUTHENTICATION_REQUIRED", "Sua sessão terminou"],
+    [404, "NOT_FOUND", "Não encontramos o que você pediu"],
     [410, "GONE", "Isto expirou"],
   ])(
     "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",
@@ -364,6 +386,51 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
       }
     },
   );
+
+  it("sessão que termina no polling mostra o convite para entrar de novo e para o polling", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const { queryClient, api } = setup(
+        inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+      );
+      expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+      await nextPoll(queryClient);
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+
+      const prompt = screen.getByRole("region", { name: "Entre para continuar" });
+      expect(
+        within(prompt).getByRole("heading", { level: 2, name: "Entre para continuar" }),
+      ).toBeVisible();
+      expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+        "href",
+        `/auth/login/google?return_to=%2Fexecucoes%2F${RUN_ID}`,
+      );
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(runRequests(api.requests)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("antes do primeiro dado, sessão terminada mostra o convite para entrar, sem alerta", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"));
+
+    expect(await screen.findByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("termos novos no polling levam ao aceite, como nas outras telas", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(403, "TERMS_NOT_ACCEPTED")),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+    await nextPoll(queryClient);
+
+    expect(screen.getByRole("region", { name: "Aceite os termos para continuar" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 
   it("falha transitória antes do primeiro dado vira alerta na primeira vez", async () => {
     setup(unavailable);
