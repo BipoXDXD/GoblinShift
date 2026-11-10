@@ -119,3 +119,44 @@ test("a escolha Claro vence o fallback num sistema escuro", async ({ page }) => 
   );
   expect(background).toBe(lightBackground);
 });
+
+// O painel abre por cima do conteúdo: fecha como um menu suspenso, para não cobrir o foco (2.4.11).
+const switcher = (page: Page) => page.locator("details").filter({ hasText: "Tema" });
+
+test("Esc fecha o seletor e devolve o foco ao resumo @keyboard", async ({ page }) => {
+  await page.goto("/bancada/csv-janitor");
+  const summary = page.getByText("Tema", { exact: true });
+  await summary.click();
+  await page.getByRole("radio", { name: "Sistema", exact: true }).focus();
+
+  await page.keyboard.press("Escape");
+
+  await expect(switcher(page)).not.toHaveAttribute("open");
+  await expect(switcher(page).locator("summary")).toBeFocused();
+});
+
+test("no celular, sair do seletor com Tab fecha o painel e o foco não fica coberto @keyboard", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto("/bancada/csv-janitor");
+  await page.getByText("Tema", { exact: true }).click();
+  await page.getByRole("radio", { name: "Sistema", exact: true }).focus();
+
+  // Os radios formam um grupo: um Tab sai dele.
+  await page.keyboard.press("Tab");
+
+  await expect(switcher(page)).not.toHaveAttribute("open");
+  const obscured = await page.evaluate(() => {
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement) || focused === document.body) {
+      return "sem foco";
+    }
+    const rect = focused.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hit !== null && !focused.contains(hit) && !hit.contains(focused)
+      ? `coberto por ${hit.tagName}`
+      : "à vista";
+  });
+  expect(obscured).toBe("à vista");
+});
