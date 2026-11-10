@@ -132,7 +132,7 @@ def test_espelho_bom_baixa_e_instala_do_archive_ubuntu(ambiente: dict[str, Path]
     assert apt[2].endswith("age ffmpeg")
     assert all("--no-install-recommends" in c for c in apt[1:])
     assert espelho_atual(ambiente) == "archive.ubuntu.com"
-    assert "security.ubuntu.com" in hosts_dos_espelhos(ambiente)
+    assert any(host == "security.ubuntu.com" for host in hosts_dos_espelhos(ambiente))
 
 
 def test_configura_o_apt_sem_traducoes_e_com_timeout_de_rede(ambiente: dict[str, Path]) -> None:
