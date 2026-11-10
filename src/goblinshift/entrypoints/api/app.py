@@ -3,6 +3,7 @@
 Executada com `uvicorn goblinshift.entrypoints.api.app:create_app --factory`.
 """
 
+import logging
 import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -50,6 +51,8 @@ from goblinshift.runs.quotas import QuotaLimits
 
 API_PREFIX = "/api/v1"
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(
     settings: Settings | None = None,
@@ -79,6 +82,10 @@ def create_app(
         finally:
             try:
                 engine.dispose()
+            except Exception:
+                # Registrada e não relançada: assim a falha da API que já propaga não é
+                # trocada pela do `dispose`.
+                logger.exception("liberação do banco falhou: conexões podem ter ficado abertas")
             finally:
                 # Por último: depois do encerramento, o processador descarta em silêncio todo
                 # span novo. O que rodar antes daqui na parada ainda entra no lote.

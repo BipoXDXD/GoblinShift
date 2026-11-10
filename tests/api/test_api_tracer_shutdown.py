@@ -165,23 +165,43 @@ def test_falha_da_api_em_execucao_ainda_libera_o_banco_e_encerra_o_tracing(
     assert steps == ["dispose", "shut_down"]
 
 
-def test_falha_ao_liberar_o_banco_ainda_encerra_o_tracing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
-    steps = _record_shutdown_steps(monkeypatch, app)
-
+def _break_dispose(monkeypatch: pytest.MonkeyPatch, app: FastAPI, steps: list[str]) -> None:
     def broken_dispose() -> None:
         steps.append("dispose")
         raise RuntimeError("dispose falhou")
 
     monkeypatch.setattr(app.state.engine, "dispose", broken_dispose)
 
+
+def test_falha_ao_liberar_o_banco_e_registrada_e_ainda_encerra_o_tracing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _break_dispose(monkeypatch, app, steps)
+
     async def run() -> None:
         async with app.router.lifespan_context(app):
             pass
 
-    with pytest.raises(RuntimeError, match="dispose falhou"):
-        asyncio.run(run())
+    asyncio.run(run())
 
     assert steps == ["dispose", "shut_down"]
+    # `configure_logging` escreve JSON no stderr, sem propagar para o `caplog`.
+    log = capsys.readouterr().err
+    assert "liberação do banco falhou" in log
+    assert "dispose falhou" in log
+
+
+def test_falha_da_api_e_do_dispose_propaga_a_falha_da_api_na_ordem_da_parada(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _break_dispose(monkeypatch, app, steps)
+
+    with pytest.raises(_ApiRunningError, match="API caiu"):
+        _run_lifespan_failing_with(app, _ApiRunningError("API caiu"))
+
+    assert steps == ["dispose", "shut_down"]
+    assert "liberação do banco falhou" in capsys.readouterr().err
