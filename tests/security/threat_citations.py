@@ -9,12 +9,14 @@ Formas aceitas:
   identificador com pontuação (`metadata,`). Se a instrução cabe numa linha, o trecho é a
   instrução inteira, para que `= 2` não continue valendo com `= 200`. Se ocupa várias, o trecho
   (sem a vírgula final) é exatamente um item do valor: elemento de tupla, lista ou set, par
-  `chave: valor` de dict, ou argumento posicional ou keyword de chamada, descendo por itens que
-  também são container ou chamada (`ForeignKeyConstraint` dentro de `Table`). Uma linha solta
-  não basta: outro item pode anular o citado sem tocá-lo. Por isso nenhum irmão pode repetir a
-  chave do item citado (primeiro elemento da tupla, chave do dict, nome do keyword), já que,
-  conforme quem lê, vence a primeira ocorrência ou a última; e a descida não atravessa `*`,
-  `and` nem outra expressão, que podem tirar o item do valor;
+  `chave: valor` de dict, ou argumento posicional ou keyword de chamada. A busca desce só por
+  elementos de tupla, lista ou set e por argumentos posicionais de chamada
+  (`ForeignKeyConstraint` dentro de `Table`); não entra em valor de keyword nem de dict
+  (`info={...}`), nem em `*`, `and` ou outra expressão, que tiram o item do valor efetivo. Uma
+  linha solta não basta: outro item pode anular o citado sem tocá-lo. Por isso nenhum irmão pode
+  repetir a chave do item citado (primeiro elemento da tupla, chave do dict, nome do keyword),
+  comparada sem caixa quando é texto, já que, conforme quem lê, vence a primeira ocorrência ou a
+  última; e o valor do item citado não pode ter irmão `*` ou `**`, cuja chave não se conhece;
 - `` `arquivo` `trecho` `` para arquivo que não é Python (Nginx, Dockerfile...): o trecho precisa
   aparecer exatamente uma vez no arquivo inteiro.
 
@@ -130,6 +132,8 @@ def _item_problem(source: str, value: ast.expr | None, wanted: str) -> str | Non
         for item in group:
             if item.text != wanted:
                 continue
+            if any(other.unpacks for other in group):
+                return "o valor do item citado tem `*` ou `**`, que pode repetir a chave"
             sibling_keys = [other.key for other in group]
             if item.key is not None and sibling_keys.count(item.key) > 1:
                 return "a chave do item citado se repete no mesmo valor"
@@ -142,13 +146,15 @@ class _Item:
     text: str
     key: str | None
     child: ast.expr | None
+    unpacks: bool = False
 
 
 def _item_groups(source: str, value: ast.expr | None) -> Iterator[list[_Item]]:
-    """Os itens de cada container ou chamada, descendo só por itens que também são um deles.
+    """Os itens de cada container ou chamada, um grupo por container ou chamada.
 
-    Não desce por `*`, `and`, `if` nem outras expressões: um item escondido nelas não está no
-    valor atribuído.
+    Desce só por elementos de tupla, lista ou set e por argumentos posicionais de chamada. Não
+    desce por valor de keyword nem de dict (`info={...}`), nem por `*`, `and`, `if` ou outra
+    expressão: um item escondido neles não está no valor efetivo.
     """
     items = _direct_items(source, value)
     if items:
@@ -160,27 +166,41 @@ def _item_groups(source: str, value: ast.expr | None) -> Iterator[list[_Item]]:
 def _direct_items(source: str, value: ast.expr | None) -> list[_Item]:
     match value:
         case ast.Tuple(elts=elts) | ast.List(elts=elts) | ast.Set(elts=elts):
-            return [_Item(_text(source, elt, elt), _first_element(elt), elt) for elt in elts]
+            return [_positional(source, elt, _first_element(elt)) for elt in elts]
         case ast.Dict(keys=keys, values=values):
             return [
-                _Item(_text(source, key or item, item), _unparsed(key), item)
+                _Item(_text(source, key or item, item), _key(key), None, unpacks=key is None)
                 for key, item in zip(keys, values, strict=True)
             ]
         case ast.Call(args=args, keywords=keywords):
-            positional = [_Item(_text(source, arg, arg), None, arg) for arg in args]
-            named = [_Item(_text(source, kw, kw), kw.arg, kw.value) for kw in keywords]
+            positional = [_positional(source, arg, None) for arg in args]
+            named = [
+                _Item(_text(source, kw, kw), kw.arg, None, unpacks=kw.arg is None)
+                for kw in keywords
+            ]
             return positional + named
     return []
 
 
+def _positional(source: str, node: ast.expr, key: str | None) -> _Item:
+    if isinstance(node, ast.Starred):
+        return _Item(_text(source, node, node), None, None, unpacks=True)
+    return _Item(_text(source, node, node), key, node)
+
+
 def _first_element(element: ast.expr) -> str | None:
     if isinstance(element, ast.Tuple | ast.List) and element.elts:
-        return ast.unparse(element.elts[0])
+        return _key(element.elts[0])
     return None
 
 
-def _unparsed(node: ast.expr | None) -> str | None:
-    return None if node is None else ast.unparse(node)
+def _key(node: ast.expr | None) -> str | None:
+    """Chave de texto sem caixa: cabeçalho HTTP é o mesmo em `Cache-Control` e `cache-control`."""
+    if node is None:
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return repr(node.value.casefold())
+    return ast.unparse(node)
 
 
 def _text(source: str, first: ast.expr | ast.keyword, last: ast.expr | ast.keyword) -> str:

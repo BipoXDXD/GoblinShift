@@ -87,6 +87,7 @@ _WHOLE_STATEMENT = "numa atribuição de uma linha, o trecho é a instrução in
 _ITEM = "numa atribuição de várias linhas, o trecho é um item do valor atribuído"
 _REPEATED_KEY = "a chave do item citado se repete no mesmo valor"
 _IDENTIFIER = "o trecho de uma atribuição é só um identificador"
+_UNPACKING = "o valor do item citado tem `*` ou `**`, que pode repetir a chave"
 
 # As sabotagens da revisão do PR #256: cada valor mudou, mas o trecho antigo continuava dentro dele.
 _SABOTAGED = """\
@@ -115,6 +116,49 @@ run_input = Table(
         ["owner_id", "upload_id"], ["upload.owner_id", "upload.id"], ondelete="RESTRICT"
     ),
 )
+"""
+
+
+# As sabotagens B1, B11, B2, B3 e B4b da re-revisão (rodada 3): outra caixa na chave, irmão
+# desempacotado, e o item citado levado para dentro de um valor de keyword ou de dict.
+_SABOTAGED_KEYS = """\
+_HEADERS_CASE = (
+    ("Cache-Control", "public, max-age=86400"),
+    ("cache-control", "no-store"),
+)
+_HEADERS_STAR = (
+    *(("cache-control", "public, max-age=86400"),),
+    ("cache-control", "no-store"),
+)
+DOWNLOAD = {
+    "Content-Security-Policy": "default-src 'none'; sandbox",
+    **{"Content-Security-Policy": "default-src *"},
+}
+audit = Table(
+    "audit",
+    *extra_columns,
+    Column("user_id", Uuid),
+)
+run_input = Table(
+    "run_input",
+    metadata,
+    info={
+        "fk": ForeignKeyConstraint(["owner_id", "upload_id"], ["upload.owner_id", "upload.id"]),
+    },
+)
+idempotency_record = Table(
+    "idempotency_record",
+    metadata,
+    info={"pk": (PrimaryKeyConstraint("owner_id", "operation", "idem_key"),)},
+)
+only_keyword = Table(
+    "only_keyword",
+    metadata,
+    info=ForeignKeyConstraint(["owner_id"], ["app_user.id"]),
+)
+ONLY_DICT = {
+    "pk": (PrimaryKeyConstraint("owner_id", "run_id"),),
+}
 """
 
 
@@ -299,5 +343,34 @@ def test_item_sabotado_em_atribuicao_de_varias_linhas_e_recusado(
 ) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "sab.py").write_text(_SABOTAGED_ITEMS, encoding="utf-8")
+
+    assert citation_problems(citation, tmp_path) == [f"{citation}: {reason}"]
+
+
+@pytest.mark.parametrize(
+    ("citation", "reason"),
+    [
+        ('`src/sab.py` `_HEADERS_CASE` `("cache-control", "no-store"),`', _REPEATED_KEY),
+        ('`src/sab.py` `_HEADERS_STAR` `("cache-control", "no-store"),`', _UNPACKING),
+        (
+            '`src/sab.py` `DOWNLOAD` `"Content-Security-Policy": "default-src \'none\'; sandbox",`',
+            _UNPACKING,
+        ),
+        ('`src/sab.py` `audit` `Column("user_id", Uuid),`', _UNPACKING),
+        ('`src/sab.py` `run_input` `["upload.owner_id", "upload.id"]`', _ITEM),
+        (
+            "`src/sab.py` `idempotency_record` "
+            '`PrimaryKeyConstraint("owner_id", "operation", "idem_key"),`',
+            _ITEM,
+        ),
+        ('`src/sab.py` `only_keyword` `["app_user.id"]`', _ITEM),
+        ('`src/sab.py` `ONLY_DICT` `PrimaryKeyConstraint("owner_id", "run_id"),`', _ITEM),
+    ],
+)
+def test_chave_com_outra_caixa_desempacotamento_ou_item_em_valor_nomeado_sao_recusados(
+    tmp_path: Path, citation: str, reason: str
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "sab.py").write_text(_SABOTAGED_KEYS, encoding="utf-8")
 
     assert citation_problems(citation, tmp_path) == [f"{citation}: {reason}"]

@@ -11,7 +11,8 @@ Formas de citação, todas conferidas por `tests/security/test_threat_model.py`:
 nome atribuído no módulo; o trecho literal aparece exatamente uma vez no código do símbolo,
 não pode ser só o nome do símbolo e, num nome atribuído, não é só um identificador e é a
 instrução inteira, se ela cabe numa linha, ou exatamente um item do valor atribuído, cuja chave
-não se repete no mesmo valor; em tabela, `\|` vale `|`);
+não se repete, sem caixa, no mesmo valor, que não pode ter `*` nem `**`; em tabela, `\|` vale
+`|`);
 `arquivo` `trecho` para arquivo que não é Python (o trecho aparece uma vez no arquivo inteiro);
 caminho sob `docs/`, que precisa existir.
 
