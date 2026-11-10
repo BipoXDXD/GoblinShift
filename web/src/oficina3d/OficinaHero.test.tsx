@@ -218,7 +218,7 @@ describe("OficinaHero", () => {
     const stage = screen.getByRole("application", { name: "Rúbia em 3D" });
     expect(stage).toHaveAttribute("tabindex", "0");
     expect(stage).toHaveAccessibleDescription(
-      "Arraste ou use os botões para girar e inclinar. Com o foco aqui, as setas também giram; Home volta à pose inicial.",
+      "Arraste ou use os botões para girar e inclinar. Com o foco aqui, as setas fazem o mesmo; Home volta à pose inicial.",
     );
   });
 
@@ -407,6 +407,33 @@ describe("OficinaHero", () => {
     expect(scene.handle.turn).not.toHaveBeenCalled();
     expect(scene.handle.resetPose).not.toHaveBeenCalled();
   });
+
+  it("o botão que liga o giro contínuo se chama Giro automático, desligado de início", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    expect(screen.getByRole("button", { name: "Giro automático" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it.each(["Girar para a esquerda", "Inclinar para ver de cima"])(
+    "com o giro automático ligado, %s desliga o giro e dá o passo",
+    async (label) => {
+      const scene = fakeScene();
+      await renderReady(scene);
+      const spin = screen.getByRole("button", { name: TEXT.art.stage.spin });
+      await userEvent.click(spin);
+      expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(true);
+
+      await userEvent.click(screen.getByRole("button", { name: label }));
+
+      expect(spin).toHaveAttribute("aria-pressed", "false");
+      expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(false);
+      expect(scene.handle.turn).toHaveBeenCalledOnce();
+    },
+  );
 
   it("Girar liga e desliga a auto-rotação, com aria-pressed", async () => {
     const scene = fakeScene();
