@@ -62,7 +62,7 @@ function Outline({ sections }: { readonly sections: readonly Section[] }): React
       <ul className="mt-2 flex flex-col">
         {sections.map((section) => (
           <li key={section.anchor}>
-            <a href={`#${section.anchor}`} className="inline-flex min-h-11 items-center">
+            <a href={`#${section.anchor}`} className="inline-flex items-center">
               {section.title}
             </a>
           </li>
