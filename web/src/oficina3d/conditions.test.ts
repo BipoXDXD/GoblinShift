@@ -60,6 +60,32 @@ describe("browserEnvironment.subscribeReducedMotion", () => {
   });
 });
 
+describe("browserEnvironment.savesData", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "connection");
+  });
+
+  function withConnection(connection: unknown): void {
+    Object.defineProperty(navigator, "connection", { value: connection, configurable: true });
+  }
+
+  it("lê o Save-Data da Network Information API", () => {
+    withConnection({ saveData: true });
+
+    expect(browserEnvironment.savesData()).toBe(true);
+  });
+
+  it.each<[string, unknown]>([
+    ["sem a API (Firefox, Safari, jsdom)", undefined],
+    ["com a API e sem economia", { saveData: false }],
+    ["com a API e sem o campo", {}],
+  ])("não economiza dados %s", (_case, connection) => {
+    withConnection(connection);
+
+    expect(browserEnvironment.savesData()).toBe(false);
+  });
+});
+
 describe("browserEnvironment.supportsWebGL2", () => {
   it("pede WebGL 2 sem a ressalva de desempenho e sem contexto responde não", () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);

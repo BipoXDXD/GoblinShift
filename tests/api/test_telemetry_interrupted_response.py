@@ -6,7 +6,6 @@ que o `OTLPSpanExporter` enviaria, depois do mesmo processador da produção.
 
 import io
 import logging
-import threading
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ from uvicorn.logging import DefaultFormatter
 from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.transfers import DownloadResponse, TransferTimeouts
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import (
@@ -576,7 +576,7 @@ def worker_offline(monkeypatch: pytest.MonkeyPatch, restored_root_logging: None)
     settings = _offline_settings()
     monkeypatch.setattr(worker, "Settings", lambda: settings)
     monkeypatch.setattr(worker, "build_runner", lambda _settings: MagicMock())
-    monkeypatch.setattr(worker, "shutdown_on_signals", threading.Event)
+    monkeypatch.setattr(worker, "shutdown_on_signals", ShutdownFlag)
 
 
 def _assert_failed_without_canary(
@@ -603,6 +603,13 @@ def test_worker_sem_banco_no_boot_sai_com_erro_e_sem_o_detalhe(
 
 
 class _ListenerLosingTheConnection:
+    """Listener que deixa o erro de banco escapar da espera.
+
+    O `QueueListener` real absorve a queda da conexão e reconecta
+    (tests/runs/test_queue_listener.py); este falso cobre a fronteira do processo para qualquer
+    erro de banco que ainda chegue até ela.
+    """
+
     def __init__(self, canary: str) -> None:
         self._canary = canary
 
@@ -617,7 +624,7 @@ class _ListenerLosingTheConnection:
 
 
 @pytest.mark.usefixtures("worker_offline")
-def test_worker_ocioso_que_perde_o_banco_sai_com_erro_e_sem_o_detalhe(
+def test_erro_de_banco_que_escapa_do_listener_sai_com_erro_e_sem_o_detalhe(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     canary = _new_canary()

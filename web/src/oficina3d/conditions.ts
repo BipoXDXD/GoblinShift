@@ -35,6 +35,9 @@ export const browserEnvironment: Environment3D = {
       query.removeEventListener("change", onChange);
     };
   },
+  // O lib.dom do TypeScript não declara navigator.connection (Network Information API, só no
+  // Chromium); a asserção acrescenta o campo como opcional, e o `=== true` trata a ausência dele
+  // como "não economiza dados".
   savesData: () =>
     (navigator as Navigator & { readonly connection?: NetworkInformationLike }).connection
       ?.saveData === true,

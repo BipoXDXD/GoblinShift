@@ -19,7 +19,7 @@ interface TouchPointer {
  */
 async function touchPointers(host: Locator, events: readonly TouchPointer[]): Promise<void> {
   await host.evaluate((element, pointers) => {
-    // eslint-disable-next-line @typescript-eslint/unbound-method
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- só guardado para restaurar no finally
     const capture = element.setPointerCapture;
     element.setPointerCapture = (): void => undefined;
     try {

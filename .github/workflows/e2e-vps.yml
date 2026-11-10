@@ -51,9 +51,18 @@ jobs:
       - run: npm ci
         working-directory: web
       - name: Chromium, Firefox e dependências do sistema
+        # O `--with-deps` do Playwright roda o apt sem teto; as dependências vêm do script com teto
+        # e troca de espelho (job com chave de produção: sem cache), e os navegadores depois.
+        timeout-minutes: 10
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
         run: |
-          ../scripts/ci-apt-sem-azure.sh
-          npx playwright install --with-deps chromium firefox
+          lista=$(../scripts/ci-playwright-pacotes.sh chromium firefox)
+          if [[ -n $lista ]]; then
+            mapfile -t pacotes <<<"$lista"
+            ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+          fi
+          npx playwright install chromium firefox
         working-directory: web
       - name: Conta de teste
         env:

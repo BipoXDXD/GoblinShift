@@ -170,7 +170,7 @@ class Settings(BaseSettings):
         """Lê e valida a configuração do login; chamado na subida da API."""
         production = self.environment == "production"
         return WebIdentityConfig(
-            public_origin=self._public_origin(production),
+            public_origin=self.checked_public_origin(),
             signup_open=self.signup_mode == "open",
             google=self._oauth_client(
                 production, "GOOGLE", self.google_client_id, self.google_client_secret_file
@@ -190,7 +190,9 @@ class Settings(BaseSettings):
             ),
         )
 
-    def _public_origin(self, production: bool) -> str:
+    def checked_public_origin(self) -> str:
+        """A origem pública validada: a do login e a da URL nos eventos da API (3.6, 3.7)."""
+        production = self.environment == "production"
         if self.public_origin is None:
             if production:
                 raise WebConfigError("GS_PUBLIC_ORIGIN é obrigatória em produção")

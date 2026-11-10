@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from goblinshift.files.objects import has_valid_reference, request_deletion_of_unreferenced
 from goblinshift.files.states import ObjectState
 from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
+from goblinshift.platform.sql import skip_locked_batch
 
 # Objetos que ainda têm arquivo no disco ou um escritor em andamento: a retenção cuida deles.
 _LIVE_OBJECT_STATES = (ObjectState.PENDING, ObjectState.COMMITTED, ObjectState.DELETE_REQUESTED)
@@ -77,18 +78,16 @@ def _request_deletion_batch(session: Session, owner_id: UUID, limit: int) -> boo
 
 def _mark_deleted(session: Session, table: Table, owner_id: UUID, limit: int) -> list[UUID]:
     """`deleted_at` nos registros ainda válidos da conta; devolve os objetos deles."""
-    chosen = (
+    chosen = skip_locked_batch(
         select(table.c.id)
         .where(table.c.owner_id == owner_id, table.c.deleted_at.is_(None))
-        .order_by(table.c.id)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-        .scalar_subquery()
+        .order_by(table.c.id),
+        limit,
     )
     return list(
         session.execute(
             update(table)
-            .where(table.c.id.in_(chosen))
+            .where(table.c.id.in_(select(chosen.c.id)))
             .values(deleted_at=func.now())
             .returning(table.c.object_id)
         ).scalars()

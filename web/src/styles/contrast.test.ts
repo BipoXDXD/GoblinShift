@@ -24,13 +24,15 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
   ...pairs("fg", SURFACES, TEXT),
   ...pairs("fg-muted", SURFACES, TEXT),
   ...pairs("link", SURFACES, TEXT),
-  ...pairs("secondary-fg", ["bg", "surface", "surface-raised"], TEXT),
+  ...pairs("secondary-fg", SURFACES, TEXT),
   ...pairs("on-primary", ["primary", "primary-hover"], TEXT),
   ...pairs("on-destructive", ["destructive", "destructive-hover"], TEXT),
   ...pairs("success-fg", ["success-bg", "surface"], TEXT),
-  ...pairs("warning-fg", ["warning-bg"], TEXT),
-  ...pairs("danger-fg", ["danger-bg", "bg", "surface", "surface-sunken"], TEXT),
+  ...pairs("warning-fg", ["warning-bg", "surface"], TEXT),
+  ...pairs("danger-fg", ["danger-bg", ...SURFACES], TEXT),
   ...pairs("info-fg", ["info-bg"], TEXT),
+  // Link dentro da caixa de informação (o guia da API, por exemplo).
+  ...pairs("link", ["info-bg"], TEXT),
   ...pairs("fg", ["dropzone-active"], TEXT),
   ...pairs("fg-muted", ["dropzone-active"], TEXT),
   // Faixa do herói da página inicial: título e texto de apoio ficam sobre ela.
@@ -40,7 +42,12 @@ const CONTRAST_PAIRS: readonly ContrastPair[] = [
   // Terciário: só texto grande (18 px ou mais) ou decorativo.
   ...pairs("fg-subtle", ["bg", "surface", "surface-sunken"], NON_TEXT),
   ...pairs("border-ui", [...SURFACES, "dropzone-active"], NON_TEXT),
-  ...pairs("ring", [...SURFACES, "danger-bg", "warning-bg"], NON_TEXT),
+  // O anel de foco aparece sobre todo fundo que tem controle focável dentro.
+  ...pairs(
+    "ring",
+    [...SURFACES, "danger-bg", "warning-bg", "info-bg", "success-bg", "hero-band"],
+    NON_TEXT,
+  ),
   ...pairs("progress-fill", ["progress-track"], NON_TEXT),
   // Fio inferior da faixa do aviso global, sobre o próprio fundo da faixa.
   ...pairs("warning-accent", ["warning-bg"], NON_TEXT),

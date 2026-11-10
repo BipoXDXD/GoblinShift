@@ -1,7 +1,8 @@
 """Span `run.finished` emitido onde a Run chega ao estado terminal (3.7), com PostgreSQL real.
 
-Worker (publicação e INFRA_POISON no claim) e manutenção (fila e prazo vencidos) passam pelo
-mesmo ponto depois do commit; transições que não terminam a Run não emitem nada.
+Worker (publicação e INFRA_POISON no claim), manutenção (fila e prazo vencidos) e o cancelamento
+de Run na fila passam pelo mesmo ponto depois do commit; transições que não terminam a Run não
+emitem nada.
 """
 
 import uuid
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.telemetry import UserHasher
+from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.finished import SPAN_NAME, RunFinishedReporter
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
@@ -158,6 +160,36 @@ def test_quinto_claim_emite_infra_poison_uma_vez(
     event = spans.only_event()
     assert (event["run.state"], event["error.code"]) == ("failed", "INFRA_POISON")
     assert event["run.attempts"] == 4
+
+
+def test_cancelamento_na_fila_emite_o_termino_cancelado_fora_do_slo(
+    factory: sessionmaker[Session], storage: FileStorage, spans: Spans
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+
+    cancel_run(factory, storage, owner, run_id, on_finished=spans.reporter.report)
+
+    event = spans.only_event()
+    assert event["main"] is True
+    assert event["run_id"] == str(run_id)
+    assert event["user.hash"] == HASHER.hash(owner)
+    assert (event["run.state"], event["error.code"]) == ("canceled", "CANCELED")
+    assert event["run.attempts"] == 0
+    assert "run.duration_ms" not in event
+    assert event["slo.execution.eligible"] is False
+
+
+def test_cancelar_run_ja_terminal_nao_emite_de_novo(
+    factory: sessionmaker[Session], storage: FileStorage, spans: Spans
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    cancel_run(factory, storage, owner, run_id, on_finished=spans.reporter.report)
+
+    cancel_run(factory, storage, owner, run_id, on_finished=spans.reporter.report)
+
+    assert len(spans.finished()) == 1
 
 
 def test_falha_ao_montar_o_evento_nao_interrompe_quem_concluiu_a_run(
