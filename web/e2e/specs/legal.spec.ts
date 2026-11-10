@@ -77,7 +77,9 @@ test("/privacidade#secao-8 abre na seção 8, com o foco no h2 dela", async ({ p
 // títulos com âncora deixa 16 px (o passo 4 da escala de espaçamento) entre a borda e o título.
 const ANCHOR_BREATHING_PX = 16;
 
-test("/termos: o item do sumário leva a seção com folga acima do título", async ({ page }) => {
+test("/termos: o item do sumário leva a seção com folga acima do título e o foco nele", async ({
+  page,
+}) => {
   await page.goto("/termos");
   const section = page.getByRole("heading", { level: 2, name: "6. Uso aceitável" });
 
@@ -94,6 +96,8 @@ test("/termos: o item do sumário leva a seção com folga acima do título", as
   await expect.poll(top).toBeLessThan(ANCHOR_BREATHING_PX * 2);
   // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
   expect(await top()).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
+  // WCAG 2.4.3: o Tab seguinte parte da seção escolhida, não do sumário.
+  await expect(section).toBeFocused();
 });
 
 // WCAG 1.4.10 (Reflow): na largura do celular, nenhum texto legal rola na horizontal. As URLs
