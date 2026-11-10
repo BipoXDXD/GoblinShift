@@ -176,10 +176,13 @@ function Heading({
   const Tag = HEADING_TAGS[shown];
   return (
     // tabIndex -1: o link de fora com âncora leva o foco à seção (LegalPage), fora da ordem do Tab.
+    // scroll-mt-4: sem cabeçalho fixo, o alvo da âncora pararia rente à borda de cima da janela.
     <Tag
       id={anchor}
       tabIndex={anchor === undefined ? undefined : -1}
-      className={HEADING_CLASSES[shown]}
+      className={
+        anchor === undefined ? HEADING_CLASSES[shown] : `${HEADING_CLASSES[shown]} scroll-mt-4`
+      }
     >
       {renderInlines(inlines)}
     </Tag>
