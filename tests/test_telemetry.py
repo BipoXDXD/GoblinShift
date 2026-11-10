@@ -36,6 +36,7 @@ from sqlalchemy.exc import OperationalError
 from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform import telemetry
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import (
@@ -689,6 +690,6 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(maintenance, "make_tracer_provider", stop_at_provider)
 
     with pytest.raises(ProviderRequestedError):
-        maintenance.serve(TEST_SETTINGS, Mock(), maintenance.ShutdownFlag())
+        maintenance.serve(TEST_SETTINGS, Mock(), ShutdownFlag())
 
     assert calls == [((TEST_SETTINGS, "goblinshift-maintenance"), {})]
