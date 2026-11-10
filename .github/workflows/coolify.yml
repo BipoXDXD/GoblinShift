@@ -134,7 +134,7 @@ jobs:
             jq -se 'if length == 1 and (.[0] | type == "object") then .[0] | has("manifests") else error("expected one JSON object") end' "$RUNNER_TEMP/scan-index.json" >/dev/null 2>&1 || has_manifests_rc=$?
             case "$has_manifests_rc" in
               0)
-                digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$RUNNER_TEMP/scan-index.json" 2>/dev/null) || {
+                digest=$(jq -er 'if (.manifests | type) != "array" then error("manifests is not a list") else . end | [.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$RUNNER_TEMP/scan-index.json" 2>/dev/null) || {
                   printf 'Cannot resolve the linux/amd64 digest from the index for role %s\n' "$role" >&2
                   exit 1
                 }

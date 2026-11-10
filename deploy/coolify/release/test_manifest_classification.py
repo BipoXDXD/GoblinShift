@@ -286,6 +286,7 @@ class ManifestClassificationTests(unittest.TestCase):
         unusable: dict[str, object] = {
             "manifests_string": CANARY,
             "manifests_null": None,
+            "manifests_object": {"only": amd64},
             "no_amd64": [arm64],
             "two_amd64": [amd64, amd64],
         }
