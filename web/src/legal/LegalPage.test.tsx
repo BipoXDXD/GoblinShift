@@ -78,6 +78,52 @@ describe.each([
 
     expect(await axeViolations(container)).toEqual([]);
   });
+
+  it("o sumário tem um link por h2, na ordem e com o mesmo texto", async () => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const sections = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    const outline = screen.getByRole("navigation", { name: "Sumário" });
+    const entries = within(outline)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
+    expect(entries).toEqual(sections);
+  });
+
+  it("cada link do sumário leva ao h2 da seção", async () => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const outline = screen.getByRole("navigation", { name: "Sumário" });
+    for (const link of within(outline).getAllByRole("link")) {
+      const href = link.getAttribute("href") ?? "";
+      expect(href).toMatch(/^#secao-[a-z0-9-]+$/);
+      const target = document.getElementById(href.slice(1));
+      expect(target?.tagName).toBe("H2");
+      expect(target).toHaveTextContent(link.textContent);
+    }
+  });
+});
+
+describe("e-mails de contato", () => {
+  it.each([
+    ["/privacidade", "Aviso de Privacidade do GoblinShift", "privacidade@goblinshift.dev"],
+    ["/termos", "Termos de Uso do GoblinShift", "privacidade@goblinshift.dev"],
+    ["/termos", "Termos de Uso do GoblinShift", "contato@goblinshift.dev"],
+    ["/termos", "Termos de Uso do GoblinShift", "abuso@goblinshift.dev"],
+  ])("%s: %s abre o e-mail", async (path, title, address) => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const links = within(screen.getByRole("article")).getAllByRole("link", { name: address });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", `mailto:${address}`);
+    }
+  });
 });
 
 describe("links entre os textos", () => {

@@ -916,5 +916,6 @@ export const TEXT = {
   legal: {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",
+    outlineTitle: "Sumário",
   },
 } as const;
