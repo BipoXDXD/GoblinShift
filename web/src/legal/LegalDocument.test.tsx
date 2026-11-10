@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
+import { axeViolations } from "../test/axe";
 import { LegalDocument, sectionsOf } from "./LegalDocument";
 import { parseMarkdown } from "./markdown";
 
@@ -125,5 +126,72 @@ describe("e-mails no texto", () => {
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByText("Nada de arroba aqui.")).toBeInTheDocument();
+  });
+});
+
+describe("nome das tabelas", () => {
+  it("parágrafo entre o título e a tabela não apaga o título", () => {
+    renderDocument(
+      "## 6. Fornecedores\n\nQuem recebe dados.\n\n| Fornecedor | Papel |\n| --- | --- |\n| A | B |",
+    );
+
+    expect(screen.getByRole("region", { name: "6. Fornecedores" })).toBeInTheDocument();
+  });
+
+  it("título vazio não vira nome: a tabela leva o nome das colunas", () => {
+    renderDocument("## \n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |");
+
+    expect(screen.getByRole("region", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+  });
+
+  // O " +" do HEADING come os espaços comuns; um tab depois deles chega ao título.
+  it("título só com espaços também cai nas colunas", () => {
+    renderDocument("## \t \n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |");
+
+    expect(screen.getByRole("region", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+  });
+
+  it("duas tabelas sob o mesmo título têm nomes distintos, sem violação do axe", async () => {
+    const table = "| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |";
+    const { container } = renderDocument(
+      `## 5. Prazos\n\n${table}\n\nOutro parágrafo.\n\n${table}`,
+    );
+
+    expect(screen.getAllByRole("region")).toHaveLength(2);
+    expect(screen.getByRole("region", { name: "5. Prazos" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "5. Prazos (tabela 2)" })).toBeInTheDocument();
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("tabelas repetidas sem título também têm nomes distintos", () => {
+    const table = "| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |";
+    renderDocument(`${table}\n\nParágrafo.\n\n${table}`);
+
+    expect(screen.getByRole("region", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Tabela: Dado, Prazo (tabela 2)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a tabela leva o título mais próximo acima dela, também de subseção", () => {
+    renderDocument(
+      "## 3. Dados\n\n### 3.1. Da conta\n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |",
+    );
+
+    expect(screen.getByRole("region", { name: "3.1. Da conta" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "3.1. Da conta" })).toBeInTheDocument();
+  });
+
+  it("sem título antes, a tabela leva o nome das colunas", () => {
+    renderDocument("| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |");
+
+    expect(screen.getByRole("region", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+  });
+
+  it("sem título nem colunas com nome, a tabela ainda tem nome", () => {
+    renderDocument("| | |\n| --- | --- |\n| a | b |");
+
+    expect(screen.getByRole("region", { name: "Tabela" })).toBeInTheDocument();
   });
 });

@@ -37,6 +37,7 @@ export function LegalDocument({
   readonly sections: readonly Section[];
 }): ReactElement {
   const anchors = new Map(sections.map((section) => [section.blockIndex, section.anchor]));
+  const captions = tableCaptions(blocks);
   // O sumário entra logo antes da primeira seção: Versão, Vigência e a abertura, que dizem qual
   // texto a pessoa está lendo, continuam no topo.
   const outlineAt = sections.length >= MIN_OUTLINE_SECTIONS ? sections[0]?.blockIndex : undefined;
@@ -45,7 +46,10 @@ export function LegalDocument({
       {blocks.map((block, index) => (
         <Fragment key={index}>
           {index === outlineAt && <Outline sections={sections} />}
-          {renderBlock(block, index, anchors.get(index))}
+          {renderBlock(block, index, {
+            anchor: anchors.get(index),
+            caption: captions.get(index),
+          })}
         </Fragment>
       ))}
     </div>
@@ -88,6 +92,34 @@ export function sectionsOf(blocks: readonly Block[]): Section[] {
   return sections;
 }
 
+/**
+ * A legenda de cada tabela: o título mais próximo acima dela, de qualquer nível, que já diz do que
+ * a tabela trata. Sem título antes (ou com título vazio), as colunas descrevem o conteúdo; nada de
+ * texto jurídico novo. A segunda tabela com a mesma legenda ganha um número, porque duas regiões
+ * com o mesmo nome não se distinguem no leitor de tela (axe landmark-unique).
+ */
+function tableCaptions(blocks: readonly Block[]): Map<number, string> {
+  const captions = new Map<number, string>();
+  const seen = new Map<string, number>();
+  let lastTitle: string | undefined;
+  blocks.forEach((block, index) => {
+    if (block.kind === "heading") {
+      const title = plainText(block.inlines).trim();
+      lastTitle = title === "" ? undefined : title;
+    } else if (block.kind === "table") {
+      const caption = lastTitle ?? columnsCaption(block.header);
+      const count = (seen.get(caption) ?? 0) + 1;
+      seen.set(caption, count);
+      captions.set(index, count === 1 ? caption : TEXT.legal.repeatedTable(caption, count));
+    }
+  });
+  return captions;
+}
+
+function columnsCaption(header: readonly (readonly Inline[])[]): string {
+  return TEXT.legal.tableOfColumns(header.map(plainText));
+}
+
 /** `base`, ou `base-2`, `base-3`…: o primeiro que nenhuma seção anterior usa ("Notas 2" incluso). */
 function freeAnchor(base: string, used: ReadonlySet<string>): string {
   let anchor = base;
@@ -116,10 +148,18 @@ function plainText(inlines: readonly Inline[]): string {
     .join("");
 }
 
-function renderBlock(block: Block, index: number, anchor?: string): ReactElement {
+/** O que o bloco ganha da posição no texto: a âncora do h2 e a legenda vinda do título acima. */
+interface BlockPlace {
+  readonly anchor?: string | undefined;
+  readonly caption?: string | undefined;
+}
+
+function renderBlock(block: Block, index: number, place: BlockPlace = {}): ReactElement {
   switch (block.kind) {
     case "heading":
-      return <Heading key={index} level={block.level} inlines={block.inlines} anchor={anchor} />;
+      return (
+        <Heading key={index} level={block.level} inlines={block.inlines} anchor={place.anchor} />
+      );
     case "paragraph":
       return <p key={index}>{renderInlines(block.inlines)}</p>;
     case "quote":
@@ -145,7 +185,14 @@ function renderBlock(block: Block, index: number, anchor?: string): ReactElement
       );
     }
     case "table":
-      return <Table key={index} header={block.header} rows={block.rows} />;
+      return (
+        <Table
+          key={index}
+          caption={place.caption ?? columnsCaption(block.header)}
+          header={block.header}
+          rows={block.rows}
+        />
+      );
     case "rule":
       return <hr key={index} className="border-line-soft" />;
   }
@@ -187,18 +234,30 @@ function Heading({
 }
 
 function Table({
+  caption,
   header,
   rows,
 }: {
+  readonly caption: string;
   readonly header: readonly (readonly Inline[])[];
   readonly rows: readonly (readonly (readonly Inline[])[])[];
 }): ReactElement {
+  const captionId = useId();
   return (
     // Tabela larga rola dentro da própria caixa, não a página (WCAG 1.4.10); com foco, rola pelo
-    // teclado (regra scrollable-region-focusable do axe).
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
-    <div tabIndex={0} className="overflow-x-auto rounded-lg">
+    // teclado (regra scrollable-region-focusable do axe). O foco anuncia a região pelo nome da
+    // legenda (WCAG 4.1.2), como em ResultPreview.
+    <div
+      role="region"
+      aria-labelledby={captionId}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
+      tabIndex={0}
+      className="overflow-x-auto rounded-lg"
+    >
       <table className="w-full border-collapse text-left text-sm">
+        <caption id={captionId} className="sr-only">
+          {caption}
+        </caption>
         <thead>
           <tr>
             {header.map((cell, index) => (

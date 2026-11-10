@@ -956,5 +956,12 @@ export const TEXT = {
     termsTitle: "Termos de Uso",
     privacyTitle: "Aviso de Privacidade",
     outlineTitle: "Sumário",
+    /** Legenda de tabela sem título acima: as próprias colunas dizem do que ela trata. */
+    tableOfColumns: (columns: readonly string[]) => {
+      const named = columns.filter((column) => column.trim() !== "");
+      return named.length === 0 ? "Tabela" : `Tabela: ${named.join(", ")}`;
+    },
+    /** Segunda tabela (ou mais) com o mesmo nome: o número a distingue no leitor de tela. */
+    repeatedTable: (caption: string, position: number) => `${caption} (tabela ${String(position)})`,
   },
 } as const;
