@@ -127,3 +127,27 @@ describe("e-mails no texto", () => {
     expect(screen.getByText("Nada de arroba aqui.")).toBeInTheDocument();
   });
 });
+
+describe("nome das tabelas", () => {
+  it("a tabela leva o título mais próximo acima dela, também de subseção", () => {
+    renderDocument(
+      "## 3. Dados\n\n### 3.1. Da conta\n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |",
+    );
+
+    expect(screen.getByRole("region", { name: "3.1. Da conta" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "3.1. Da conta" })).toBeInTheDocument();
+  });
+
+  it("sem título antes, a tabela leva o nome das colunas", () => {
+    renderDocument("| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |");
+
+    expect(screen.getByRole("region", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
+  });
+
+  it("sem título nem colunas com nome, a tabela ainda tem nome", () => {
+    renderDocument("| | |\n| --- | --- |\n| a | b |");
+
+    expect(screen.getByRole("region", { name: "Tabela" })).toBeInTheDocument();
+  });
+});

@@ -113,6 +113,30 @@ describe.each([
     expect(await axeViolations(container)).toEqual([]);
   });
 
+  // WCAG 4.1.2: a caixa rolável recebe foco, e o leitor de tela precisa dizer o que há nela.
+  it("cada tabela tem legenda e rola numa região com nome", async () => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const tables = screen.getAllByRole("table");
+    const regions = screen.getAllByRole("region");
+    expect(regions).toHaveLength(tables.length);
+    for (const region of regions) {
+      expect(region).toHaveAccessibleName(/\S/);
+    }
+    for (const table of tables) {
+      expect(table.querySelector("caption")?.textContent).toMatch(/\S/);
+    }
+  });
+
+  it("a tabela leva o nome do título que a precede", async () => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const region = screen.getByRole("region", { name: "Histórico de versões" });
+    expect(within(region).getByRole("table")).toHaveAccessibleName("Histórico de versões");
+  });
+
   it("o sumário tem um link por h2, na ordem e com o mesmo texto", async () => {
     setup(path);
     await expectHeadingFocused(title);
