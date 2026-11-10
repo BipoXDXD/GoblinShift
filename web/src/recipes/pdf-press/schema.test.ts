@@ -165,9 +165,15 @@ describe("pageMapPreview", () => {
     ]);
   });
 
-  it("split descreve as partes de cada PDF", () => {
+  it("split descreve as partes de cada PDF, no plural", () => {
     expect(pageMapPreview(values({ operation: "split", pages_per_document: "2" }), [A])).toEqual([
-      { name: "a.pdf", entries: ["partes de 2 página(s), na ordem"] },
+      { name: "a.pdf", entries: ["partes de 2 páginas, na ordem"] },
+    ]);
+  });
+
+  it("split com uma página por parte usa o singular", () => {
+    expect(pageMapPreview(values({ operation: "split", pages_per_document: "1" }), [A])).toEqual([
+      { name: "a.pdf", entries: ["partes de 1 página, na ordem"] },
     ]);
   });
 

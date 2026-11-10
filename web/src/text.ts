@@ -552,7 +552,9 @@ export const TEXT = {
       heading: "Mapa de páginas previsto",
       empty: "O mapa aparece quando houver PDFs enviados ou páginas escolhidas.",
       allPages: (name: string) => `${name}, todas as páginas`,
-      groups: (size: string) => `partes de ${size} página(s), na ordem`,
+      // Singular e plural, como em `nouns`.
+      pages: ["página", "páginas"],
+      groups: (size: string, pages: string) => `partes de ${size} ${pages}, na ordem`,
       page: (name: string, page: string) => `${name}, página ${page}`,
       noFile: "PDF não escolhido",
     },
