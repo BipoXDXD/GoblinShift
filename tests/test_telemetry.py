@@ -734,6 +734,6 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(maintenance, "make_tracer_provider", stop_at_provider)
 
     with pytest.raises(ProviderRequestedError):
-        maintenance.serve(TEST_SETTINGS, Mock(), threading.Event())
+        maintenance.serve(TEST_SETTINGS, Mock(), maintenance.ShutdownFlag())
 
     assert calls == [((TEST_SETTINGS, "goblinshift-maintenance"), {})]

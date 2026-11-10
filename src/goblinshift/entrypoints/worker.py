@@ -2,6 +2,8 @@
 
 Laço: tenta o claim; sem trabalho, espera um `NOTIFY goblinshift_runs` por até
 `GS_WORKER_POLL_INTERVAL_S` (2 s), a garantia contra notificação perdida. Uma tentativa por vez.
+Se a conexão do `LISTEN` cai (PostgreSQL reiniciado), o worker segue só no polling e o listener
+reconecta com backoff (runs/worker/claim.py).
 
 SIGTERM e SIGINT param o laço de forma segura: o worker deixa de reivindicar e termina a
 tentativa em andamento antes de sair. O prazo de parada do deploy (`stop_grace_period`, 30 s) é

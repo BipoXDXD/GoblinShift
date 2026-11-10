@@ -7,8 +7,11 @@ relógio do banco. O executor só é pedido depois do commit, pelo coordenador.
 """
 
 import logging
+import random
+import time
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import timedelta
 from types import TracebackType
 from typing import Self
@@ -36,6 +39,8 @@ RUNS_CHANNEL = "goblinshift_runs"
 # Execuções venenosas encerradas num mesmo pedido de claim antes de desistir até a próxima vez.
 _MAX_POISON_PER_CLAIM = 10
 _MILLISECOND = timedelta(milliseconds=1)
+# Teto do expoente do backoff: 2**32 s já passa de qualquer teto, e o float não estoura.
+_MAX_DOUBLINGS = 32
 
 
 @dataclass(frozen=True)
@@ -146,21 +151,66 @@ def _next_eligible() -> Select[uuid.UUID]:
     )
 
 
-class QueueListener:
-    """`LISTEN goblinshift_runs` numa conexão própria, em autocommit, fora do pool."""
+def equal_jitter(delay_s: float) -> float:
+    """Metade fixa e metade sorteada: espaça os workers sem encurtar a espera abaixo da metade."""
+    half = delay_s / 2
+    return half + random.uniform(0, half)  # noqa: S311 - jitter, não segredo
 
-    def __init__(self, engine: Engine, connect_timeout_s: int) -> None:
+
+@dataclass(frozen=True)
+class ReconnectBackoff:
+    """Espera entre tentativas de reconectar o listener: dobra a partir de `first` até `cap`."""
+
+    first: timedelta = timedelta(seconds=1)
+    cap: timedelta = timedelta(seconds=30)
+    # Recebe a espera calculada e devolve a que vale; o padrão nunca passa da calculada.
+    jitter: Callable[[float], float] = field(default=equal_jitter)
+
+    def delay_s(self, failures: int) -> float:
+        """Espera depois de `failures` tentativas seguidas recusadas (a partir de 1)."""
+        if failures < 1:
+            raise ValueError(f"falhas seguidas abaixo de 1: {failures}")
+        doublings = min(failures - 1, _MAX_DOUBLINGS)
+        base = min(self.cap.total_seconds(), self.first.total_seconds() * 2**doublings)
+        return self.jitter(base)
+
+
+class QueueListener:
+    """`LISTEN goblinshift_runs` numa conexão própria, em autocommit, fora do pool.
+
+    A queda dessa conexão (PostgreSQL reiniciado com o worker ocioso) não derruba o processo: a
+    espera registra o tipo e o SQLSTATE, fecha a conexão e devolve `False`, e o worker segue no
+    polling. Cada espera seguinte tenta reconectar quando a anterior foi recusada há mais que o
+    backoff; sem conexão, a espera dorme o intervalo do polling. Notificações perdidas nesse meio
+    tempo são as que o polling já cobre.
+    """
+
+    def __init__(
+        self,
+        engine: Engine,
+        connect_timeout_s: int,
+        *,
+        backoff: ReconnectBackoff = ReconnectBackoff(),  # noqa: B008 - dataclass imutável
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._conninfo = engine.url.set(drivername="postgresql").render_as_string(
             hide_password=False
         )
         self._connect_timeout_s = connect_timeout_s
+        self._backoff = backoff
+        self._clock = clock
+        self._sleep = sleep
         self._connection: psycopg.Connection[tuple[object, ...]] | None = None
+        self._entered = False
+        # Tentativas de reconexão recusadas em sequência e quando a próxima pode acontecer.
+        self._failures = 0
+        self._retry_at = float("-inf")
 
     def __enter__(self) -> Self:
-        self._connection = psycopg.connect(
-            self._conninfo, autocommit=True, connect_timeout=self._connect_timeout_s
-        )
-        self._connection.execute(f"LISTEN {RUNS_CHANNEL}")
+        # Sem banco na subida, o processo não fica pronto: o erro sobe até `main`.
+        self._connection = self._listen()
+        self._entered = True
         return self
 
     def __exit__(
@@ -169,11 +219,66 @@ class QueueListener:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
+        self._entered = False
         if self._connection is not None:
             self._connection.close()
+            self._connection = None
 
     def wait(self, timeout_s: float) -> bool:
         """Espera um NOTIFY até `timeout_s`; `False` se o tempo esgotou (consultar mesmo assim)."""
-        if self._connection is None:
+        if not self._entered:
             raise RuntimeError("QueueListener usado fora do bloco with")
-        return any(True for _ in self._connection.notifies(timeout=timeout_s, stop_after=1))
+        connection = self._connected()
+        if connection is None:
+            self._sleep(timeout_s)
+            return False
+        try:
+            return any(True for _ in connection.notifies(timeout=timeout_s, stop_after=1))
+        except psycopg.OperationalError as error:
+            self._drop(error)
+            return False
+
+    def _connected(self) -> psycopg.Connection[tuple[object, ...]] | None:
+        """A conexão, reconectando se a espera do backoff já passou; `None` se segue sem."""
+        if self._connection is not None:
+            return self._connection
+        if self._clock() < self._retry_at:
+            return None
+        try:
+            self._connection = self._listen()
+        except psycopg.OperationalError as error:
+            self._failures += 1
+            retry_in_s = self._backoff.delay_s(self._failures)
+            self._retry_at = self._clock() + retry_in_s
+            fields = {**_error_fields(error), "failures": self._failures, "retry_in_s": retry_in_s}
+            logger.warning("listener sem conexão; nova tentativa adiada", extra={"fields": fields})
+            return None
+        logger.info("listener reconectado", extra={"fields": {"failures": self._failures}})
+        self._failures = 0
+        return self._connection
+
+    def _listen(self) -> psycopg.Connection[tuple[object, ...]]:
+        connection = psycopg.connect(
+            self._conninfo, autocommit=True, connect_timeout=self._connect_timeout_s
+        )
+        try:
+            connection.execute(f"LISTEN {RUNS_CHANNEL}")
+        except BaseException:
+            connection.close()
+            raise
+        return connection
+
+    def _drop(self, error: psycopg.OperationalError) -> None:
+        """Fecha a conexão perdida; a espera seguinte já tenta reconectar."""
+        logger.warning(
+            "listener perdeu a conexão; seguindo no polling",
+            extra={"fields": _error_fields(error)},
+        )
+        if self._connection is not None:
+            self._connection.close()
+        self._connection = None
+
+
+def _error_fields(error: psycopg.Error) -> dict[str, object]:
+    # Só o tipo e o SQLSTATE: a mensagem do banco traz host, porta e usuário.
+    return {"error_type": type(error).__name__, "sqlstate": error.sqlstate}

@@ -19,12 +19,13 @@ import logging
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
 
 from sqlalchemy import ColumnElement, func, select
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
@@ -93,6 +94,16 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# Contagem do evento do ciclo: passos que levantaram exceção. O ciclo segue para os outros, e a
+# volta conta como falha (`entrypoints/maintenance.run_cycles`, causa `gs-causa-ciclos-falhando`).
+STEPS_FAILED = "steps_failed"
+# Passos não tentados na volta: os de banco depois de uma falha de conexão e os que a parada
+# pedida deixou para trás.
+STEPS_SKIPPED = "steps_skipped"
+# SQLSTATE de conexão (classe 08) e de servidor parando (admin_shutdown, crash_shutdown,
+# cannot_connect_now): o banco não vai responder ao passo seguinte desta volta.
+_CONNECTION_EXCEPTION_CLASS = "08"
+_SERVER_STOPPING_SQLSTATES = frozenset({"57P01", "57P02", "57P03"})
 
 
 @dataclass(frozen=True)
@@ -107,6 +118,77 @@ class MaintenanceConfig:
     missing_max_absent_ratio: float = DEFAULT_MAX_ABSENT_RATIO
     stop_grace: timedelta = STOP_GRACE
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
+
+
+def _never() -> bool:
+    return False
+
+
+@dataclass(frozen=True)
+class _Step:
+    name: str
+    run: Callable[[], Mapping[str, int]]
+    uses_database: bool = True
+
+
+@dataclass
+class _CycleOutcome:
+    """O que a volta acumulou: contagens dos passos que rodaram, falhas e passos pulados."""
+
+    counts: dict[str, int] = field(default_factory=dict)
+    failed: int = 0
+    connection_lost_in: str | None = None
+    skipped_after_connection: list[str] = field(default_factory=list)
+    skipped_for_stop: list[str] = field(default_factory=list)
+
+    def run(self, step: _Step) -> None:
+        try:
+            self.counts.update(step.run())
+        except Exception as error:
+            # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
+            _log_step_failure(step.name, error)
+            self.failed += 1
+            if self.connection_lost_in is None and _is_connection_error(error):
+                self.connection_lost_in = step.name
+
+    def finish(self) -> dict[str, int]:
+        """As contagens da volta, com falhas e pulos; os pulos vão ao log, uma linha por motivo."""
+        self.counts[STEPS_FAILED] = self.failed
+        self.counts[STEPS_SKIPPED] = len(self.skipped_after_connection) + len(self.skipped_for_stop)
+        if self.skipped_after_connection:
+            fields = {
+                "failed_step": self.connection_lost_in,
+                "skipped": self.skipped_after_connection,
+            }
+            logger.warning(
+                "banco inalcançável; passos de banco pulados nesta volta",
+                extra={"fields": fields},
+            )
+        if self.skipped_for_stop:
+            logger.info(
+                "parada pedida; passos restantes pulados",
+                extra={"fields": {"skipped": self.skipped_for_stop}},
+            )
+        return self.counts
+
+
+def _is_connection_error(error: Exception) -> bool:
+    """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
+
+    Conexão que o pool invalidou, ou `OperationalError` sem SQLSTATE (o `connect` recusado ou
+    sem resposta) ou com SQLSTATE de conexão ou de servidor parando. `statement_timeout` (57014)
+    também chega como `OperationalError`, mas o banco respondeu: os outros passos seguem.
+    """
+    if isinstance(error, DBAPIError) and error.connection_invalidated:
+        return True
+    if not isinstance(error, OperationalError):
+        return False
+    sqlstate: str | None = getattr(error.orig, "sqlstate", None)
+    return (
+        sqlstate is None
+        or sqlstate.startswith(_CONNECTION_EXCEPTION_CLASS)
+        or sqlstate in _SERVER_STOPPING_SQLSTATES
+    )
 
 
 @dataclass(frozen=True)
@@ -138,27 +220,51 @@ class Maintenance:
         # passos, por `_decide`, cujo retorno já é a transição.
         self._candidates_left_on_disk = 0
 
-    def run_cycle(self) -> dict[str, int]:
-        """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
+    def run_cycle(self, should_stop: Callable[[], bool] = _never) -> dict[str, int]:
+        """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7).
+
+        Passos independentes: a exceção de um fica no log e em `steps_failed`, e o ciclo segue
+        para prazo, retenção, expurgo e medidores; as contagens do passo que falhou ficam fora do
+        evento. Falha de conexão (banco inalcançável) pula os passos de banco restantes da volta,
+        que só esperariam o `connect_timeout` de novo; `should_stop` (a parada pedida por sinal) é
+        conferido antes de cada passo. Os dois contam em `steps_skipped`. Interrupção do processo
+        (`KeyboardInterrupt`, `SystemExit`) não é `Exception` e sobe.
+        """
         started = time.monotonic()
         self._candidates_left_on_disk = 0
-        counts = {
-            "leases_reconciled": self.reconcile_expired_leases(),
-            "queue_expired": self.expire_queue(),
-            "deadlines": self.apply_deadlines(),
-            "holds_released": self.release_orphan_holds(),
-            **self.discard_stale_candidates(),
-            "work_areas_removed": self.sweep_work_areas(),
-            **self.apply_retention(),
-            **self.sweep_temporary_parts(),
-            **self.mark_missing_objects(),
-            **self.measure(),
-        }
+        outcome = _CycleOutcome()
+        for step in self._cycle_steps():
+            if should_stop():
+                outcome.skipped_for_stop.append(step.name)
+            elif outcome.connection_lost_in is not None and step.uses_database:
+                outcome.skipped_after_connection.append(step.name)
+            else:
+                outcome.run(step)
+        counts = outcome.finish()
         counts["candidates_left_on_disk"] = self._candidates_left_on_disk
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de manutenção", extra={"fields": fields})
         return counts
+
+    def _cycle_steps(self) -> tuple[_Step, ...]:
+        """Os passos do ciclo, na ordem: reconciliação, fila, prazo, usos, retenção e medidores."""
+        return (
+            _Step(
+                "reconcile_expired_leases",
+                lambda: {"leases_reconciled": self.reconcile_expired_leases()},
+            ),
+            _Step("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
+            _Step("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
+            _Step("release_orphan_holds", lambda: {"holds_released": self.release_orphan_holds()}),
+            _Step("discard_stale_candidates", self.discard_stale_candidates),
+            _Step("sweep_work_areas", lambda: {"work_areas_removed": self.sweep_work_areas()}),
+            _Step("apply_retention", self.apply_retention),
+            # Só o storage: segue mesmo com o banco fora.
+            _Step("sweep_temporary_parts", self.sweep_temporary_parts, uses_database=False),
+            _Step("mark_missing_objects", self.mark_missing_objects),
+            _Step("measure", self.measure),
+        )
 
     # Lease vencido e parada ------------------------------------------------------------
 
@@ -576,6 +682,21 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _log_step_failure(step: str, error: Exception) -> None:
+    """Registra o passo que falhou com o tipo e o SQLSTATE nos campos.
+
+    A mensagem do banco traz host, porta, usuário e valores (3.7): não entra nos campos, e o
+    filtro do processo (`omit_database_error_detail`) tira o texto dela do traceback.
+    """
+    driver_error = getattr(error, "orig", error)
+    fields = {
+        "step": step,
+        "error_type": type(error).__name__,
+        "sqlstate": getattr(driver_error, "sqlstate", None),
+    }
+    logger.exception("passo da manutenção falhou", extra={"fields": fields})
 
 
 def _unreadable_fields(sweep: MissingSweep) -> dict[str, object]:
