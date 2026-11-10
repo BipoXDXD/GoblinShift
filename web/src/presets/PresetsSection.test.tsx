@@ -112,6 +112,24 @@ describe("Oficina: presets", () => {
     ).toBeVisible();
   });
 
+  // O <dialog> devolveria o foco ao Excluir, que some com o preset (WCAG 2.4.3).
+  it.each([
+    { caso: "excluído (204)", answer: () => new Response(null, { status: 204 }) },
+    { caso: "de revisão vencida (412)", answer: () => problemResponse(412, "PRECONDITION_FAILED") },
+  ])("preset $caso: o foco vai para o título da seção", async ({ answer }) => {
+    const { user } = setup({ [DELETE_ROUTE]: answer });
+
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Excluir preset" }));
+
+    await waitFor(() => {
+      expect(within(section).getByRole("heading", { level: 2, name: "Presets" })).toHaveFocus();
+    });
+  });
+
   it("cancelar a exclusão não chama a API", async () => {
     const { api, user } = setup();
 

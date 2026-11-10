@@ -346,6 +346,33 @@ describe("Acesso: chaves de API", () => {
     expect(await screen.findByRole("heading", { name: "Nenhuma chave de API" })).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  // O <dialog> devolveria o foco ao Revogar, que some com a chave revogada (WCAG 2.4.3).
+  it.each([
+    { caso: "revogada (204)", answer: NO_CONTENT },
+    { caso: "já sumida (404)", answer: () => problemResponse(404, "NOT_FOUND") },
+  ])("chave $caso: o foco vai para o título da seção", async ({ answer }) => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [apiKeyBody(settled ? { revoked_at: "2026-10-14T12:00:00Z" } : {})],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return answer();
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+  });
+
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
     const held = heldResponse();
     const { api, user } = setup({
@@ -388,6 +415,38 @@ describe("Acesso: chave nova", () => {
     await user.click(await screen.findByRole("button", { name: "Nova chave" }));
     return screen.getByRole("form", { name: "Nova chave de API" });
   }
+
+  // "Nova chave" some quando o formulário abre, e o formulário some ao cancelar ou ao criar: sem
+  // destino explícito, o foco cairia no <body> (WCAG 2.4.3).
+  it("Nova chave leva o foco ao título do formulário", async () => {
+    const { user } = setup();
+
+    await openForm(user);
+
+    expect(screen.getByRole("heading", { name: "Nova chave de API" })).toHaveFocus();
+  });
+
+  it("Cancelar fecha o formulário e devolve o foco a Nova chave", async () => {
+    const { user } = setup();
+    const form = await openForm(user);
+
+    await user.click(within(form).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("form", { name: "Nova chave de API" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Nova chave" })).toHaveFocus();
+  });
+
+  it("Já copiei devolve o foco a Nova chave", async () => {
+    const { user } = setup({ "POST /api/v1/api-keys": () => jsonResponse(created, 201) });
+    const form = await openForm(user);
+    await user.click(within(form).getByLabelText("Ver execuções (runs:read)"));
+    await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+    const reveal = await section("Chave criada: gsk_nova");
+
+    await user.click(within(reveal).getByRole("button", { name: "Já copiei" }));
+
+    expect(screen.getByRole("button", { name: "Nova chave" })).toHaveFocus();
+  });
 
   it("sem escopo e com validade fora da faixa, nada é enviado e o resumo aponta os dois", async () => {
     const { api, user } = setup({ "POST /api/v1/api-keys": () => jsonResponse(created, 201) });

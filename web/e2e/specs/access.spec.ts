@@ -69,6 +69,42 @@ test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista m
   expect(stored?.key.revoked_at).not.toBeNull();
 });
 
+// O jsdom não devolve o foco ao fechar o <dialog>; no Chromium, o diálogo devolve o foco ao
+// Revogar antes de a chave revogada tirá-lo da lista, e o título da seção tem de ganhar depois.
+test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova e ao revogar @keyboard", async ({
+  page,
+  fakeApi,
+}) => {
+  await fakeApi.signIn();
+  const acesso = new AcessoPage(page);
+  await acesso.open();
+  const keys = acesso.section("Chaves de API");
+  const newKey = keys.getByRole("button", { name: "Nova chave" });
+
+  await newKey.focus();
+  await page.keyboard.press("Enter");
+  await expect(keys.getByRole("heading", { name: "Nova chave de API" })).toBeFocused();
+  const form = page.getByRole("form", { name: "Nova chave de API" });
+  await form.getByRole("button", { name: "Cancelar" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(newKey).toBeFocused();
+
+  await acesso.createKey(["Ler arquivos (files:read)"]);
+  await page.getByRole("button", { name: "Já copiei" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(newKey).toBeFocused();
+
+  const [stored] = [...fakeApi.account.keys.values()];
+  const publicId = stored?.key.public_id ?? "";
+  await page.getByRole("button", { name: `Revogar a chave ${publicId}` }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: `Revogar a chave ${publicId}?` });
+  await dialog.getByRole("button", { name: "Revogar chave" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(`Chave ${publicId} revogada.`)).toBeAttached();
+  await expect(keys.getByRole("heading", { level: 2, name: "Chaves de API" })).toBeFocused();
+});
+
 test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reabre", async ({
   page,
   fakeApi,
