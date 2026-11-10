@@ -89,6 +89,29 @@ describe("ErrorSummary", () => {
     expect(screen.getByRole("alert")).toHaveFocus();
   });
 
+  it("o título é h2 por padrão", () => {
+    render(<ErrorSummary issues={issues} attempt={1} />);
+
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("aceita o nível h4, para formulário sob um h3", () => {
+    render(<ErrorSummary issues={issues} attempt={1} headingLevel={4} />);
+
+    expect(
+      screen.getByRole("heading", {
+        level: 4,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  });
+
   it("não tem violações do axe", async () => {
     const { container } = render(<Form attempt={1} />);
 

@@ -85,7 +85,7 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       <h3 id={headingId} className="font-semibold text-fg">
         {T.formHeading}
       </h3>
-      <ErrorSummary issues={issues} attempt={attempt} />
+      <ErrorSummary issues={issues} attempt={attempt} headingLevel={4} />
       <FieldGroup id={ids.scopes} legend={T.scopes} error={errors.scopes}>
         <div className="flex flex-col gap-1">
           {SCOPES.map((scope, index) => (
