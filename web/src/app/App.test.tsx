@@ -89,5 +89,8 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Página não encontrada" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("O endereço pode estar errado, ou a página saiu do ar."),
+    ).toBeInTheDocument();
   });
 });

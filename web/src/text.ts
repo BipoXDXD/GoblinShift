@@ -112,7 +112,11 @@ export const TEXT = {
         "Tira o áudio de vídeos curtos em WAV ou FLAC e gera miniaturas, sem editar o vídeo.",
     },
   },
-  notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
+  notFound: {
+    title: "Página não encontrada",
+    lead: "O endereço pode estar errado, ou a página saiu do ar.",
+    backHome: "Voltar à Oficina",
+  },
   // Texto alternativo das goblins (ADR 030): diz quem é e como é; o estado já está no texto ao lado.
   art: {
     castHeading: "O elenco",
