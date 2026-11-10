@@ -189,6 +189,18 @@ describe("nome das tabelas", () => {
     expect(screen.getByRole("table", { name: "Tabela: Dado, Prazo" })).toBeInTheDocument();
   });
 
+  it("tabelas iguais dentro de citação têm nomes distintos, sem violação do axe", async () => {
+    const table = "> | Dado | Prazo |\n> | --- | --- |\n> | e-mail | 1 ano |";
+    const { container } = renderDocument(
+      `## 5. Prazos\n\n${table}\n>\n> Outro parágrafo.\n>\n${table}`,
+    );
+
+    expect(screen.getAllByRole("region")).toHaveLength(2);
+    expect(screen.getByRole("region", { name: "5. Prazos" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "5. Prazos (tabela 2)" })).toBeInTheDocument();
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
   it("sem título nem colunas com nome, a tabela ainda tem nome", () => {
     renderDocument("| | |\n| --- | --- |\n| a | b |");
 

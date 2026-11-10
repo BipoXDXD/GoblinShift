@@ -46,10 +46,7 @@ export function LegalDocument({
       {blocks.map((block, index) => (
         <Fragment key={index}>
           {index === outlineAt && <Outline sections={sections} />}
-          {renderBlock(block, index, {
-            anchor: anchors.get(index),
-            caption: captions.get(index),
-          })}
+          {renderBlock(block, index, { captions, anchor: anchors.get(index) })}
         </Fragment>
       ))}
     </div>
@@ -93,26 +90,32 @@ export function sectionsOf(blocks: readonly Block[]): Section[] {
 }
 
 /**
- * A legenda de cada tabela: o título mais próximo acima dela, de qualquer nível, que já diz do que
- * a tabela trata. Sem título antes (ou com título vazio), as colunas descrevem o conteúdo; nada de
- * texto jurídico novo. A segunda tabela com a mesma legenda ganha um número, porque duas regiões
- * com o mesmo nome não se distinguem no leitor de tela (axe landmark-unique).
+ * A legenda de cada tabela, inclusive as de dentro de citação: o título mais próximo acima dela, de
+ * qualquer nível, que já diz do que a tabela trata. Sem título antes (ou com título vazio), as
+ * colunas descrevem o conteúdo; nada de texto jurídico novo. A segunda tabela com a mesma legenda
+ * ganha um número, porque duas regiões com o mesmo nome não se distinguem no leitor de tela (axe
+ * landmark-unique). A chave é o próprio bloco, porque o índice se repete dentro das citações.
  */
-function tableCaptions(blocks: readonly Block[]): Map<number, string> {
-  const captions = new Map<number, string>();
+function tableCaptions(blocks: readonly Block[]): Map<Block, string> {
+  const captions = new Map<Block, string>();
   const seen = new Map<string, number>();
   let lastTitle: string | undefined;
-  blocks.forEach((block, index) => {
+  const visit = (block: Block): void => {
     if (block.kind === "heading") {
       const title = plainText(block.inlines).trim();
       lastTitle = title === "" ? undefined : title;
+    } else if (block.kind === "quote") {
+      block.blocks.forEach(visit);
     } else if (block.kind === "table") {
       const caption = lastTitle ?? columnsCaption(block.header);
       const count = (seen.get(caption) ?? 0) + 1;
       seen.set(caption, count);
-      captions.set(index, count === 1 ? caption : TEXT.legal.repeatedTable(caption, count));
+      // Um título literal igual a um nome numerado ("X (tabela 2)") ainda colide; nenhum texto
+      // publicado tem esse título, e o axe de LegalPage.test.tsx acusa se um dia tiver.
+      captions.set(block, count === 1 ? caption : TEXT.legal.repeatedTable(caption, count));
     }
-  });
+  };
+  blocks.forEach(visit);
   return captions;
 }
 
@@ -148,13 +151,13 @@ function plainText(inlines: readonly Inline[]): string {
     .join("");
 }
 
-/** O que o bloco ganha da posição no texto: a âncora do h2 e a legenda vinda do título acima. */
+/** O que o bloco ganha do texto inteiro: as legendas das tabelas e, no h2, a âncora. */
 interface BlockPlace {
+  readonly captions: ReadonlyMap<Block, string>;
   readonly anchor?: string | undefined;
-  readonly caption?: string | undefined;
 }
 
-function renderBlock(block: Block, index: number, place: BlockPlace = {}): ReactElement {
+function renderBlock(block: Block, index: number, place: BlockPlace): ReactElement {
   switch (block.kind) {
     case "heading":
       return (
@@ -168,7 +171,9 @@ function renderBlock(block: Block, index: number, place: BlockPlace = {}): React
           key={index}
           className="flex flex-col gap-2 border-l-4 border-line-soft pl-4 text-fg-muted"
         >
-          {block.blocks.map((inner, innerIndex) => renderBlock(inner, innerIndex))}
+          {block.blocks.map((inner, innerIndex) =>
+            renderBlock(inner, innerIndex, { captions: place.captions }),
+          )}
         </blockquote>
       );
     case "list": {
@@ -188,7 +193,7 @@ function renderBlock(block: Block, index: number, place: BlockPlace = {}): React
       return (
         <Table
           key={index}
-          caption={place.caption ?? columnsCaption(block.header)}
+          caption={place.captions.get(block) ?? columnsCaption(block.header)}
           header={block.header}
           rows={block.rows}
         />
