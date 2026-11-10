@@ -288,4 +288,36 @@ describe("Layout: rodapé", () => {
       expect(link).toHaveClass("min-h-11");
     }
   });
+
+  it.each([
+    ["/termos", ["page", null, null]],
+    ["/privacidade", [null, "page", null]],
+    ["/creditos", [null, null, "page"]],
+  ])("em %s, só o link da página atual tem aria-current", async (path, expected) => {
+    setup(() => jsonResponse(meBody()), path);
+
+    const footer = await screen.findByRole("contentinfo");
+    const links = within(footer).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("aria-current"))).toEqual(expected);
+  });
+
+  it("a página atual se destaca também sem cor: perde o sublinhado, como no cabeçalho", async () => {
+    setup(() => jsonResponse(meBody()), "/termos");
+
+    const footer = await screen.findByRole("contentinfo");
+    const current = within(footer).getByRole("link", { name: "Termos de Uso" });
+    expect(current).toHaveClass("aria-[current=page]:text-fg", "aria-[current=page]:no-underline");
+  });
+
+  it.each(["/historico", "/termos/aceitar"])(
+    "em %s, nenhum link do rodapé é a página atual",
+    async (path) => {
+      setup(() => jsonResponse(meBody()), path);
+
+      const footer = await screen.findByRole("contentinfo");
+      for (const link of within(footer).getAllByRole("link")) {
+        expect(link).not.toHaveAttribute("aria-current");
+      }
+    },
+  );
 });
