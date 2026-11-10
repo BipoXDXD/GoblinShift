@@ -144,6 +144,30 @@ O worker emite um span `attempt` por tentativa (`goblinshift.runs.worker.attempt
 | Backup diário que falhou | healthchecks.io (ping do `pg-backup.sh`) |
 | Certificado TLS a menos de 14 dias | workflow tls-check + healthchecks.io (certificado TLS, 1 dia / 6 h) |
 | Teste de aceitação do ambiente falhando | healthchecks.io (ping do `deploy/acceptance/scheduled.sh`, pelo timer semanal) |
+| API saturada (503 do teto de concorrência do uvicorn) e 429 do `limit_req` do Nginx | sem alerta: só no log dos containers; roteiro manual abaixo |
+
+### Saturação da API e limite por cliente
+
+Os dois sinais não têm alerta porque não chegam ao OpenObserve. O Collector só recebe OTLP, a aplicação exporta só traces, e o log dos containers fica no driver `local` do Docker, sem exportação (`tests/openobserve/test_saturation_runbook.py` falha se isso mudar; aí o lugar destes sinais passa a ser uma causa no catálogo). O 503 do teto sai do uvicorn antes do ASGI: não abre span, não tem `request_id` e não conta em nenhum SLO. Por isso uma API saturada não queima orçamento nenhum. O único aviso automático vem do monitor de uptime, quando a sonda do `/readyz` cai num momento de saturação.
+
+- **Teto de concorrência da API.** Com 30 conexões em curso (`--limit-concurrency` do `docker/app.Dockerfile`, o dobro do pool do banco), o uvicorn responde 503 `text/plain` na hora e escreve `WARNING:  Exceeded concurrency limit.`, uma linha por pedido recusado, sem caminho nem cliente. Para contar e ver quando aconteceu:
+
+  ```bash
+  sudo docker logs --since 1h goblinshift-api-1 2>&1 | grep -c 'Exceeded concurrency limit.'
+  # o mesmo 503 no log de acesso do Nginx, com caminho e cliente truncado (/24 ou /48)
+  sudo docker logs --since 1h goblinshift-nginx-1 2>/dev/null | grep '"upstream_status":"503"' | grep -o '"time":"[^"]*","client":"[^"]*","method":"[^"]*","path":"[^"]*"' | tail -20
+  ```
+
+  O log da API é a prova da saturação. O 503 do Nginx também inclui os da própria aplicação, como o `/readyz` com o banco fora. Linhas isoladas são um pico absorvido. Linhas em vários minutos seguidos indicam pedidos que demoram a liberar a conexão. Siga nesta ordem: o banco (o `gs-slo-aceitacao-*` e a duração das consultas no stream de traces; com o pool esgotado, cada pedido espera o `pool_timeout`), downloads e envios longos, que ocupam a vaga enquanto transferem (veja o `gs-slo-download-*`), e um cliente só concentrando os pedidos (a contagem por `client` acima). Subir o teto sem subir o pool só troca o 503 rápido por espera no pool. Os dois mudam juntos, por PR, porque `tests/test_api_server_limits.py` amarra um ao outro.
+- **Limite por cliente do Nginx** (zonas `api` e `readyz`). Acima de 20 pedidos por segundo em `/api/` (rajada de 40), ou 5 por segundo no `/readyz` (rajada de 10), por cliente, o Nginx responde 429 `RATE_LIMITED` sem chegar à API:
+
+  ```bash
+  sudo docker logs --since 1h goblinshift-nginx-1 2>/dev/null | grep -c '"status":429'
+  # quem e onde: cliente truncado e caminho, do mais frequente para o menos
+  sudo docker logs --since 1h goblinshift-nginx-1 2>/dev/null | grep '"status":429' | grep -o '"client":"[^"]*","method":"[^"]*","path":"[^"]*"' | sort | uniq -c | sort -rn | head
+  ```
+
+  O `2>/dev/null` deixa de fora o log de erro do Nginx, que vai para o stderr. O 429 do `/auth/` tem limite próprio (10 por minuto) e aparece na mesma contagem. Um cliente só, num caminho só, é cliente com laço ou abuso, e o limite está cumprindo o papel. Muitos clientes ao mesmo tempo, na SPA, indicam limite apertado demais para o uso real. Ajuste as zonas em `docker/nginx/templates/default.conf.template` por PR: `tests/test_nginx_limit_consumers.py` confere que o k6 e a prova de troca sem queda ainda cabem nelas.
 
 ### Monitores externos
 
