@@ -466,7 +466,7 @@ export const TEXT = {
     op: (row: number) => `Condição (linha ${String(row)})`,
     value: (row: number) => `Valor (linha ${String(row)})`,
     removeRow: (row: number) => `Remover linha ${String(row)}`,
-    inRow: (list: string, field: string) => `${list}, ${field.toLocaleLowerCase("pt-BR")}`,
+    inRow: (list: string, field: string) => `${list}, ${field.toLocaleLowerCase(TEXT.locale)}`,
     errors: {
       columnRequired: "Informe a coluna.",
       tooManyColumns: (max: number) => `Informe no máximo ${String(max)} colunas.`,
