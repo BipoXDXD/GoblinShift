@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { FormIssue } from "../../components/a11y/ErrorSummary";
+import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
 import type { RecipeDraft, RecipeParameters } from "../types";
 
@@ -92,10 +92,9 @@ export function parseMediaMill(
   if (!result.success) {
     return {
       ok: false,
-      issues: result.error.issues.map((issue): FormIssue => ({
-        fieldId: mediaMillFieldId(issue.path.map(String)),
-        message: issue.message,
-      })),
+      issues: result.error.issues.map((issue) =>
+        formIssue(mediaMillField(issue.path.map(String)), issue.message),
+      ),
     };
   }
   return {
@@ -105,17 +104,24 @@ export function parseMediaMill(
 }
 
 const ID_PREFIX = "media-mill";
-const FIELDS: ReadonlySet<string> = new Set<keyof MediaMillFormValues>([
-  "extract_audio",
-  "audio_format",
-  "audio_stream_index",
-  "thumbnail_count",
-]);
+// Os mesmos rótulos do formulário (MediaMillFields): o resumo de erros cita o campo por eles.
+const LABELS: Readonly<Record<keyof MediaMillFormValues, string>> = {
+  extract_audio: TEXT.mediaMill.extractAudio,
+  audio_format: TEXT.mediaMill.audioFormat,
+  audio_stream_index: TEXT.mediaMill.audioStreamIndex,
+  thumbnail_count: TEXT.mediaMill.thumbnailCount,
+};
 
-/** Id do controle para um caminho de erro relativo a `parameters`; `null` fora do formulário. */
-export function mediaMillFieldId(path: readonly (string | number)[]): string | null {
+/** Controle para um caminho de erro relativo a `parameters`; `null` fora do formulário. */
+export function mediaMillField(path: readonly (string | number)[]): FormField | null {
   const [field] = path.map(String);
-  return field !== undefined && FIELDS.has(field) ? fieldId(field) : null;
+  return field !== undefined && isFormField(field)
+    ? { fieldId: fieldId(field), label: LABELS[field] }
+    : null;
+}
+
+function isFormField(field: string): field is keyof MediaMillFormValues {
+  return Object.hasOwn(LABELS, field);
 }
 
 export function fieldId(field: string): string {

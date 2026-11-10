@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeParameters } from "../types";
 import type { CASE_MODES, DELIMITERS, FILTER_OPS, FORMULA_GUARDS } from "./schema";
 import {
-  csvJanitorFieldId,
+  csvJanitorField,
   parseCsvJanitor as parseWithLimits,
   type CsvJanitorFormValues,
   type CsvJanitorLimits,
@@ -259,7 +259,7 @@ describe("parseCsvJanitor com outros limites do catálogo", () => {
   });
 });
 
-describe("csvJanitorFieldId", () => {
+describe("csvJanitorField", () => {
   it.each([
     [["input_delimiter"], "csv-janitor-input_delimiter"],
     [["trim_columns", "3"], "csv-janitor-trim_columns"],
@@ -271,10 +271,10 @@ describe("csvJanitorFieldId", () => {
     [["filters", "0", "desconhecido"], "csv-janitor-filters-0-op"],
     [["filters", "x"], "csv-janitor-filters-adicionar"],
   ])("%j → %s", (path, expected) => {
-    expect(csvJanitorFieldId(path)).toBe(expected);
+    expect(csvJanitorField(path)?.fieldId).toBe(expected);
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]]])("caminho sem campo %j → null", (path) => {
-    expect(csvJanitorFieldId(path)).toBeNull();
+    expect(csvJanitorField(path)).toBeNull();
   });
 });

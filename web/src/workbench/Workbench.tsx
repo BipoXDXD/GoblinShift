@@ -18,7 +18,12 @@ import { ApiError } from "../api/response";
 import type { RunCommand } from "../api/types";
 import { PATHS, runPath } from "../app/paths";
 import { GoblinIllustration } from "../art/GoblinIllustration";
-import { ErrorSummary, type FormIssue } from "../components/a11y/ErrorSummary";
+import {
+  ErrorSummary,
+  formIssue,
+  type FormField,
+  type FormIssue,
+} from "../components/a11y/ErrorSummary";
 import { FileDropzone } from "../components/a11y/FileDropzone";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
@@ -40,6 +45,8 @@ import { SavePreset } from "./SavePreset";
 import { UploadEntryView } from "./UploadEntryView";
 
 const FILES_FIELD_ID = "bancada-arquivos";
+// O resumo de erros cita o campo de arquivos pelo título da seção, não pelo botão de escolher.
+const FILES_FIELD: FormField = { fieldId: FILES_FIELD_ID, label: TEXT.workbench.filesHeading };
 
 type PendingRemoval =
   | { readonly kind: "one"; readonly localId: string; readonly name: string }
@@ -324,7 +331,7 @@ function commandFrom(draft: RecipeDraft<RecipeId>, inputs: RunInputs): RunComman
 
 function clientIssues(inputs: RunInputs, draft: RecipeDraft<RecipeId>): FormIssue[] {
   return [
-    ...(inputs.ok ? [] : [{ fieldId: FILES_FIELD_ID, message: inputs.message }]),
+    ...(inputs.ok ? [] : [formIssue(FILES_FIELD, inputs.message)]),
     ...(draft.ok ? [] : draft.issues),
   ];
 }
@@ -345,10 +352,9 @@ function fieldIssuesOf(failure: DisplayableFailure, recipe: RecipeModule): FormI
   if (errors.length === 0) {
     return null;
   }
-  return errors.map(({ field, code, message }) => ({
-    fieldId: fieldIdForServerPath(field, recipe),
-    message: fieldErrorText(code, message),
-  }));
+  return errors.map(({ field, code, message }) =>
+    formIssue(fieldForServerPath(field, recipe), fieldErrorText(code, message)),
+  );
 }
 
 const SERVER_FIELD_ERRORS: Readonly<Record<string, string>> = TEXT.workbench.serverFieldErrors;
@@ -369,14 +375,14 @@ function fieldErrorText(code: string, message: string): string {
   return known ?? TEXT.workbench.serverFieldErrors.fallback;
 }
 
-function fieldIdForServerPath(field: string, recipe: RecipeModule): string | null {
+function fieldForServerPath(field: string, recipe: RecipeModule): FormField | null {
   // O servidor aponta o campo a partir do corpo: `body.parameters.filters.0.value`.
   const segments = field.split(".");
   const [root, ...rest] = segments[0] === "body" ? segments.slice(1) : segments;
   if (root === "parameters") {
-    return recipe.fieldIdFor(rest);
+    return recipe.fieldFor(rest);
   }
-  return root === "input_upload_ids" ? FILES_FIELD_ID : null;
+  return root === "input_upload_ids" ? FILES_FIELD : null;
 }
 
 /**

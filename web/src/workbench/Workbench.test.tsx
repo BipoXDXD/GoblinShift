@@ -740,7 +740,7 @@ describe("Bancada", () => {
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Os arquivos somam 5 bytes; o máximo por execução é 4 bytes.",
+      "Arquivos de entrada: os arquivos somam 5 bytes; o máximo por execução é 4 bytes.",
     );
     expect(runRequests(api.requests)).toHaveLength(0);
   });

@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeDraft, RecipeParameters } from "../types";
 import type { GROUP_BY_OPTIONS, NAME_MODES } from "./schema";
 import {
-  downloadsDetoxFieldId,
+  downloadsDetoxField,
   parseDownloadsDetox,
   type DownloadsDetoxFormValues,
   type DownloadsDetoxSettings,
@@ -107,15 +107,15 @@ describe("parseDownloadsDetox", () => {
   });
 });
 
-describe("downloadsDetoxFieldId", () => {
+describe("downloadsDetoxField", () => {
   it.each([
     [["deduplicate"], "downloads-detox-deduplicate"],
     [["name_prefix"], "downloads-detox-name_prefix"],
   ])("%j → %s", (path, expected) => {
-    expect(downloadsDetoxFieldId(path)).toBe(expected);
+    expect(downloadsDetoxField(path)?.fieldId).toBe(expected);
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]]])("caminho sem campo %j → null", (path) => {
-    expect(downloadsDetoxFieldId(path)).toBeNull();
+    expect(downloadsDetoxField(path)).toBeNull();
   });
 });

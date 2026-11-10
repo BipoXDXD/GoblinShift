@@ -4,7 +4,7 @@ import type { RecipeDraft, RecipeInput, RecipeParameters } from "../types";
 import {
   pageMapPreview,
   parsePdfPress,
-  pdfPressFieldId,
+  pdfPressField,
   type OPERATIONS,
   type PageCard,
   type PdfPressFormValues,
@@ -160,7 +160,7 @@ describe("parsePdfPress", () => {
   });
 });
 
-describe("pdfPressFieldId", () => {
+describe("pdfPressField", () => {
   it.each([
     [["operation"], "pdf-press-operation"],
     [["pages_per_document"], "pdf-press-pages_per_document"],
@@ -168,13 +168,13 @@ describe("pdfPressFieldId", () => {
     [["select", "1", "upload_id"], "pdf-press-select-1-upload_id"],
     [["select", 2, "page_number"], "pdf-press-select-2-page_number"],
   ] as const)("traduz %j do servidor", (path, id) => {
-    expect(pdfPressFieldId(path)).toBe(id);
+    expect(pdfPressField(path)?.fieldId).toBe(id);
   });
 
   it.each([[["outro"]], [["select", "x", "upload_id"]], [["select", "0", "outro"]], [[]]])(
     "fora do formulário %j → null",
     (path) => {
-      expect(pdfPressFieldId(path)).toBeNull();
+      expect(pdfPressField(path)).toBeNull();
     },
   );
 });

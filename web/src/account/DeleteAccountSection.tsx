@@ -1,6 +1,8 @@
-import { useId, useState, type ReactElement } from "react";
+import { useId, useRef, useState, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 
 import { PATHS } from "../app/paths";
+import { Field } from "../components/a11y/Field";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -26,11 +28,40 @@ export function DeleteAccountSection(): ReactElement {
   const phraseId = useId();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const [phraseError, setPhraseError] = useState<string | null>(null);
+  const phraseInput = useRef<HTMLInputElement>(null);
   const remove = useEndSession(deleteAccount, PATHS.accountDeleted);
   // Fecha sempre, até com o pedido em voo (o navegador pode ter fechado o <dialog>).
   const close = (): void => {
     setOpen(false);
     setTyped("");
+    setPhraseError(null);
+  };
+  // A confirmação bloqueada ainda recebe o clique: em vez de não fazer nada, diz o que falta. O
+  // erro entra no DOM antes do foco, para o leitor de tela ler o campo já com a descrição nova.
+  const rejectPhrase = (): void => {
+    flushSync(() => {
+      setPhraseError(T.phraseMismatch(T.phrase));
+    });
+    phraseInput.current?.focus();
+  };
+  // O mesmo caminho para o clique liberado e o bloqueado: a frase errada vira erro no campo, e o
+  // pedido em curso não dispara outro.
+  const confirm = (): void => {
+    if (remove.isPending) {
+      return;
+    }
+    if (!phraseMatches(typed)) {
+      rejectPhrase();
+      return;
+    }
+    setPhraseError(null);
+    remove.mutate(undefined, {
+      onError: () => {
+        setOpen(false);
+        setTyped("");
+      },
+    });
   };
   return (
     <Card as="section" aria-labelledby={headingId}>
@@ -64,33 +95,25 @@ export function DeleteAccountSection(): ReactElement {
         confirmBlocked={!phraseMatches(typed) || remove.isPending}
         busy={remove.isPending}
         onCancel={close}
-        onConfirm={() => {
-          if (phraseMatches(typed) && !remove.isPending) {
-            remove.mutate(undefined, {
-              onError: () => {
-                setOpen(false);
-                setTyped("");
-              },
-            });
-          }
-        }}
+        onConfirm={confirm}
+        onBlockedConfirm={confirm}
       >
         <p>{T.dialogBody}</p>
-        <div className="flex flex-col gap-2">
-          <label htmlFor={phraseId} className="text-sm font-semibold text-fg">
-            {T.phraseLabel(T.phrase)}
-          </label>
-          <input
-            id={phraseId}
-            data-initial-focus=""
-            autoComplete="off"
-            spellCheck={false}
-            value={typed}
-            onChange={(event) => {
-              setTyped(event.currentTarget.value);
-            }}
-          />
-        </div>
+        <Field id={phraseId} label={T.phraseLabel(T.phrase)} error={phraseError}>
+          {(control) => (
+            <input
+              {...control}
+              ref={phraseInput}
+              data-initial-focus=""
+              autoComplete="off"
+              spellCheck={false}
+              value={typed}
+              onChange={(event) => {
+                setTyped(event.currentTarget.value);
+              }}
+            />
+          )}
+        </Field>
       </ConfirmDialog>
     </Card>
   );

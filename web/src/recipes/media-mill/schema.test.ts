@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeDraft, RecipeParameters } from "../types";
 import type { AUDIO_FORMATS, THUMBNAIL_COUNTS } from "./schema";
 import {
-  mediaMillFieldId,
+  mediaMillField,
   parseMediaMill,
   type MediaMillFormValues,
   type MediaMillSettings,
@@ -122,13 +122,13 @@ describe("parseMediaMill", () => {
   });
 });
 
-describe("mediaMillFieldId", () => {
+describe("mediaMillField", () => {
   it.each([
     [["audio_stream_index"], "media-mill-audio_stream_index"],
     [["thumbnail_count"], "media-mill-thumbnail_count"],
     [[], null],
     [["inventado"], null],
   ])("%j → %s", (path, id) => {
-    expect(mediaMillFieldId(path)).toBe(id);
+    expect(mediaMillField(path)?.fieldId ?? null).toBe(id);
   });
 });

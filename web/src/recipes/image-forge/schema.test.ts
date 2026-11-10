@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeDraft, RecipeParameters } from "../types";
 import type { OUTPUT_FORMATS } from "./schema";
 import {
-  imageForgeFieldId,
+  imageForgeField,
   parseImageForge,
   type ImageForgeFormValues,
   type ImageForgeSettings,
@@ -171,19 +171,19 @@ describe("parseImageForge", () => {
   });
 });
 
-describe("imageForgeFieldId", () => {
+describe("imageForgeField", () => {
   it.each([
     [["max_width"], "image-forge-max_width"],
     [["jpeg_background"], "image-forge-jpeg_background"],
     [["make_thumbnails"], "image-forge-make_thumbnails"],
   ])("%j → %s", (path, expected) => {
-    expect(imageForgeFieldId(path)).toBe(expected);
+    expect(imageForgeField(path)?.fieldId).toBe(expected);
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]], [["toString"]]])(
     "caminho sem campo %j → null",
     (path) => {
-      expect(imageForgeFieldId(path)).toBeNull();
+      expect(imageForgeField(path)).toBeNull();
     },
   );
 });

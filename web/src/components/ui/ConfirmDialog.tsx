@@ -19,6 +19,8 @@ interface ConfirmDialogProps {
   readonly onCancel: () => void;
   /** A confirmação fica `aria-disabled` (digitação pendente, pedido em curso). */
   readonly confirmBlocked?: boolean;
+  /** Clique na confirmação bloqueada, para explicar o que falta. */
+  readonly onBlockedConfirm?: () => void;
   /** Pedido em curso: o Esc não fecha, para a resposta aparecer no diálogo. */
   readonly busy?: boolean;
   /** Vermelho só aqui, onde a ação destrutiva é a primária (RUI cap. 2). */
@@ -39,6 +41,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   confirmBlocked = false,
+  onBlockedConfirm,
   busy = false,
   destructive = true,
 }: ConfirmDialogProps): ReactElement {
@@ -89,6 +92,7 @@ export function ConfirmDialog({
             variant={destructive ? "destructive" : "primary"}
             aria-disabled={confirmBlocked}
             onClick={onConfirm}
+            {...(onBlockedConfirm === undefined ? {} : { onBlockedClick: onBlockedConfirm })}
           >
             {confirmLabel}
           </Button>
