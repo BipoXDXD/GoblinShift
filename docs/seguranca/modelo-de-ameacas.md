@@ -143,6 +143,20 @@ E elevation of privilege.
 | R | Pedido de exclusão sem rastro; auditoria identifica o titular após a purga | `src/goblinshift/entrypoints/api/me_delete.py` `delete_me` `AuditEventType.ACCOUNT_DELETION_REQUESTED`; `user_id` sem FK: `src/goblinshift/identity/tables.py` `audit_event` `Column("user_id", Uuid),` | `tests/api/test_delete_me.py::test_delete_me_marca_a_exclusao_revoga_tudo_e_limpa_o_navegador`, `tests/identity/test_purge.py::test_auditoria_sobrevive_a_purga_sem_identificar` |
 | D | Run ativa segura a purga | `src/goblinshift/entrypoints/api/me_delete.py` `delete_me` `cancel_active_run(factory, storage, principal.owner_id, on_finished=finished.report)` | `tests/api/test_delete_me.py::test_delete_me_cancela_a_execucao_ativa`, `tests/files/test_owner_purge.py::test_download_aberto_segura_a_purga_ate_terminar` |
 
+## Limites conhecidos das citações
+
+A citação prova que um trecho de código existe onde se diz. Ela não prova o que fica fora do
+trecho, e nestes casos a garantia vem só dos testes de comportamento da mesma linha:
+
+- **Fila da conta.** O índice parcial de `run` filtra por `_ACTIVE`, constante definida fora do
+  símbolo `run`, em `src/goblinshift/runs/tables.py`. Encolher a lista de estados de `_ACTIVE`
+  não reprova a citação do índice.
+- **`user_id` sem FK em `audit_event`.** A citação de `Column("user_id", Uuid),` prova que a coluna
+  é declarada sem FK, mas não que nenhuma FK para `user_id` exista em outro lugar da tabela ou de
+  uma migration. Uma citação não prova ausência.
+- **Limite de `/api` no Nginx.** A citação aponta o início de cada `location`, não o
+  `limit_req zone=api` dentro dela, como diz a linha da ameaça.
+
 ## Fora do escopo deste documento
 
 A borda e a infraestrutura não são modeladas aqui: Cloudflare, TLS e HSTS no Nginx, gateway e
