@@ -168,6 +168,26 @@ describe("Bancada: Salvar preset", () => {
     expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
   });
 
+  it("Cancelar devolve o foco a Salvar preset", async () => {
+    const { user } = setup();
+    const dialog = await openSaveDialog(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Salvar preset" })).toHaveFocus();
+  });
+
+  it("fechado pelo navegador (Esc), devolve o foco a Salvar preset", async () => {
+    const { user } = setup();
+    const dialog = await openSaveDialog(user);
+
+    forceClose(dialog);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Salvar preset" })).toHaveFocus();
+  });
+
   it("fechado pelo navegador com o pedido em voo, reabre e mostra o 409 que chegou depois", async () => {
     let answer: (response: Response) => void = () => undefined;
     const { user } = setup("/bancada/csv-janitor", {

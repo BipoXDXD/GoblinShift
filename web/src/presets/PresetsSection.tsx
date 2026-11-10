@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useId, useRef, useState, type ReactElement } from "react";
-import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
 import { useMe } from "../account/useMe";
@@ -39,9 +38,7 @@ export function PresetsSection(): ReactElement | null {
     enabled: signedIn,
   });
   const heading = useRef<HTMLHeadingElement>(null);
-  const removal = useRemoval(() => {
-    heading.current?.focus();
-  });
+  const removal = useRemoval();
   if (!signedIn) {
     return null;
   }
@@ -65,6 +62,7 @@ export function PresetsSection(): ReactElement | null {
         cancelLabel={T.cancel}
         confirmBlocked={removal.pending}
         busy={removal.pending}
+        returnFocusTo={removal.toHeading ? heading : undefined}
         onCancel={removal.cancel}
         onConfirm={removal.confirm}
       >
@@ -150,6 +148,8 @@ interface Removal {
   readonly pending: boolean;
   readonly failure: Error | null;
   readonly message: string | null;
+  /** O foco vai ao título da seção quando o diálogo fecha, porque o Excluir sumiu. */
+  readonly toHeading: boolean;
   readonly ask: (preset: Preset) => void;
   readonly cancel: () => void;
   readonly confirm: () => void;
@@ -158,15 +158,17 @@ interface Removal {
 /**
  * Excluir com confirmação e `If-Match`. Revisão vencida (412: o preset mudou em outro lugar) vira
  * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta.
- * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 412 e na falha genérica
- * (5xx, timeout) que o servidor aplicou mesmo assim, com o preset fora da lista. A decisão é tomada
- * uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2).
+ * O diálogo fica aberto até a lista ser relida e fecha já com o destino do foco: o título no
+ * sucesso, no 412 e na falha genérica (5xx, timeout) que o servidor aplicou mesmo assim, com o
+ * preset fora da lista; senão, o próprio Excluir. A decisão é tomada uma vez, pela lista relida, e
+ * uma releitura posterior não move o foco (WCAG 3.2).
  */
-function useRemoval(onListUpdated: () => void): Removal {
+function useRemoval(): Removal {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<Preset | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [toHeading, setToHeading] = useState(false);
   const mutation = useMutation({
     mutationFn: (preset: Preset) => deletePreset(client, preset),
     onSuccess: (_result, preset) => {
@@ -178,16 +180,11 @@ function useRemoval(onListUpdated: () => void): Removal {
       }
     },
     onSettled: async (_result, error, preset) => {
-      // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
-      flushSync(() => {
-        setTarget(null);
-      });
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
       // Pelo dado, não pelo foco: o Excluir só sai do DOM no próximo commit.
       const relisted = queryClient.getQueryData<readonly Preset[]>(PRESETS_QUERY_KEY);
-      if (error === null || isStale(error) || !isListed(relisted, preset)) {
-        onListUpdated();
-      }
+      setToHeading(error === null || isStale(error) || !isListed(relisted, preset));
+      setTarget(null);
     },
   });
   const failure = mutation.error !== null && !isStale(mutation.error) ? mutation.error : null;
@@ -196,12 +193,14 @@ function useRemoval(onListUpdated: () => void): Removal {
     pending: mutation.isPending,
     failure,
     message,
+    toHeading,
     // Reaberto com o pedido em voo (o navegador fechou o <dialog>), a resposta ainda tem de chegar.
     ask: (preset) => {
       if (!mutation.isPending) {
         mutation.reset();
         setMessage(null);
       }
+      setToHeading(false);
       setTarget(preset);
     },
     // Fecha sempre: o <dialog> pode já ter fechado, e o estado não pode divergir dele.

@@ -1,9 +1,10 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { axeViolations } from "../../test/axe";
+import { forceClose } from "../../test/dialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 function Harness({
@@ -47,6 +48,56 @@ function Harness({
             <input data-initial-focus="" />
           </label>
         )}
+      </ConfirmDialog>
+    </>
+  );
+}
+
+/**
+ * Quem chama fecha e escolhe o destino do foco no mesmo render, sem esperar o commit (sem
+ * `flushSync`): o diálogo é o único a mover o foco no fechamento.
+ */
+function DestinationHarness(): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [toHeading, setToHeading] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  return (
+    <>
+      <h2 ref={heading} tabIndex={-1}>
+        Chaves
+      </h2>
+      <button
+        type="button"
+        onClick={() => {
+          setToHeading(false);
+          setOpen(true);
+        }}
+      >
+        Abrir
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setToHeading(true);
+        }}
+      >
+        Resposta chegou
+      </button>
+      <ConfirmDialog
+        open={open}
+        title="Revogar a chave?"
+        confirmLabel="Revogar chave"
+        cancelLabel="Cancelar"
+        returnFocusTo={toHeading ? heading : undefined}
+        onConfirm={() => {
+          setToHeading(true);
+          setOpen(false);
+        }}
+        onCancel={() => {
+          setOpen(false);
+        }}
+      >
+        <p>Não dá para desfazer.</p>
       </ConfirmDialog>
     </>
   );
@@ -128,7 +179,7 @@ describe("ConfirmDialog", () => {
     expect(notCanceled).toBe(false);
   });
 
-  it("só com a confirmação bloqueada (digitação pendente), o Esc segue o navegador", async () => {
+  it("com a confirmação bloqueada mas sem pedido em curso, o Esc segue o navegador", async () => {
     const user = userEvent.setup();
     render(<Harness confirmBlocked />);
     await user.click(screen.getByRole("button", { name: "Abrir" }));
@@ -139,6 +190,90 @@ describe("ConfirmDialog", () => {
     );
 
     expect(notCanceled).toBe(true);
+  });
+
+  it("Cancelar devolve o foco a quem abriu", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.getByRole("button", { name: "Abrir" })).toHaveFocus();
+  });
+
+  it("fechado pelo navegador (Esc), devolve o foco a quem abriu", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    forceClose(screen.getByRole("dialog"));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Abrir" })).toHaveFocus();
+  });
+
+  it("fechado com destino, o foco termina no destino e não em quem abriu", async () => {
+    const user = userEvent.setup();
+    render(<DestinationHarness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Chaves" })).toHaveFocus();
+  });
+
+  it("fechado pelo navegador antes da resposta, o destino que chega depois recebe o foco", async () => {
+    const user = userEvent.setup();
+    render(<DestinationHarness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+    forceClose(screen.getByRole("dialog"));
+    expect(screen.getByRole("button", { name: "Abrir" })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resposta chegou" }));
+
+    expect(screen.getByRole("heading", { name: "Chaves" })).toHaveFocus();
+  });
+
+  it("um destino passado antes da primeira abertura não rouba o foco na montagem", () => {
+    function Closed(): ReactElement {
+      const heading = useRef<HTMLHeadingElement>(null);
+      return (
+        <>
+          <h2 ref={heading} tabIndex={-1}>
+            Chaves
+          </h2>
+          <ConfirmDialog
+            open={false}
+            title="Revogar a chave?"
+            confirmLabel="Revogar chave"
+            cancelLabel="Cancelar"
+            returnFocusTo={heading}
+            onConfirm={vi.fn()}
+            onCancel={vi.fn()}
+          >
+            <p>Não dá para desfazer.</p>
+          </ConfirmDialog>
+        </>
+      );
+    }
+
+    render(<Closed />);
+
+    expect(document.body).toHaveFocus();
+  });
+
+  it("sem destino novo, um render posterior não move o foco", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    screen.getByRole("button", { name: "Abrir" }).blur();
+
+    rerender(<Harness busy />);
+
+    expect(document.body).toHaveFocus();
   });
 
   it("no DOM, Cancelar vem antes da confirmação", async () => {

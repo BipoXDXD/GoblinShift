@@ -46,10 +46,7 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
   const [created, setCreated] = useState<CreatedApiKey | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const newKey = useRef<HTMLButtonElement>(null);
-  const focusHeading = (): void => {
-    heading.current?.focus();
-  };
-  const revoke = useRevoke(focusHeading, now);
+  const revoke = useRevoke(now);
   const openForm = (): void => {
     setCreated(null);
     setFormOpen(true);
@@ -115,6 +112,7 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
         cancelLabel={T.cancel}
         confirmBlocked={revoke.pending}
         busy={revoke.pending}
+        returnFocusTo={revoke.toHeading ? heading : undefined}
         onCancel={revoke.cancel}
         onConfirm={revoke.confirm}
       >
@@ -251,6 +249,8 @@ interface Revoke {
   readonly pending: boolean;
   readonly failure: Error | null;
   readonly message: string | null;
+  /** O foco vai ao título da seção quando o diálogo fecha, porque o Revogar sumiu. */
+  readonly toHeading: boolean;
   readonly ask: (key: ApiKey) => void;
   readonly cancel: () => void;
   readonly confirm: () => void;
@@ -258,15 +258,17 @@ interface Revoke {
 
 /**
  * Revogar com confirmação. A chave que já não existe (404) só some da lista, com um aviso.
- * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 404 e na falha genérica
- * (5xx, timeout) que o servidor aplicou mesmo assim, com o Revogar fora da lista. A decisão é
- * tomada uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2).
+ * O diálogo fica aberto até a lista ser relida e fecha já com o destino do foco: o título no
+ * sucesso, no 404 e na falha genérica (5xx, timeout) que o servidor aplicou mesmo assim, com o
+ * Revogar fora da lista; senão, o próprio Revogar. A decisão é tomada uma vez, pela lista relida, e
+ * uma releitura posterior não move o foco (WCAG 3.2).
  */
-function useRevoke(onListUpdated: () => void, now: () => number): Revoke {
+function useRevoke(now: () => number): Revoke {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<ApiKey | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [toHeading, setToHeading] = useState(false);
   const mutation = useMutation({
     mutationFn: (key: ApiKey) => revokeApiKey(client, key.id),
     onSuccess: (_result, key) => {
@@ -278,16 +280,11 @@ function useRevoke(onListUpdated: () => void, now: () => number): Revoke {
       }
     },
     onSettled: async (_result, error, key) => {
-      // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
-      flushSync(() => {
-        setTarget(null);
-      });
       await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
       // Pelo dado, não pelo foco: o Revogar só sai do DOM no próximo commit.
       const relisted = queryClient.getQueryData<readonly ApiKey[]>(API_KEYS_QUERY_KEY);
-      if (error === null || isNotFound(error) || !isRevocable(relisted, key, now())) {
-        onListUpdated();
-      }
+      setToHeading(error === null || isNotFound(error) || !isRevocable(relisted, key, now()));
+      setTarget(null);
     },
   });
   const failure = mutation.error !== null && !isNotFound(mutation.error) ? mutation.error : null;
@@ -296,12 +293,14 @@ function useRevoke(onListUpdated: () => void, now: () => number): Revoke {
     pending: mutation.isPending,
     failure,
     message,
+    toHeading,
     // Reaberto com o pedido em voo (o navegador fechou o <dialog>), a resposta ainda tem de chegar.
     ask: (key) => {
       if (!mutation.isPending) {
         mutation.reset();
         setMessage(null);
       }
+      setToHeading(false);
       setTarget(key);
     },
     // Fecha sempre: o <dialog> pode já ter fechado, e o estado não pode divergir dele.
