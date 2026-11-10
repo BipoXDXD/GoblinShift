@@ -72,3 +72,26 @@ test("/privacidade#secao-8 abre na seção 8, com o foco no h2 dela", async ({ p
   await expect(section).toBeInViewport();
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 });
+
+// Sem cabeçalho fixo, o navegador põe o alvo da âncora rente à borda de cima; o scroll-mt dos
+// títulos com âncora deixa 16 px (o passo 4 da escala de espaçamento) entre a borda e o título.
+const ANCHOR_BREATHING_PX = 16;
+
+test("/termos: o item do sumário leva a seção com folga acima do título", async ({ page }) => {
+  await page.goto("/termos");
+  const section = page.getByRole("heading", { level: 2, name: "6. Uso aceitável" });
+
+  await page
+    .getByRole("navigation", { name: "Sumário" })
+    .getByRole("link", { name: "6. Uso aceitável" })
+    .click();
+
+  await expect(section).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  const top = (): Promise<number> =>
+    section.evaluate((heading) => heading.getBoundingClientRect().top);
+  // 1 px de tolerância para o arredondamento subpixel do Firefox e do celular.
+  await expect.poll(top).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
+  // Teto: a rolagem parou no título, não deixou a seção solta no meio da tela.
+  expect(await top()).toBeLessThan(ANCHOR_BREATHING_PX * 2);
+});
