@@ -643,7 +643,9 @@ export const TEXT = {
         return filtered ? "Nenhuma execução com esses filtros." : "Nenhuma execução ainda.";
       }
       if (more) {
-        return `As ${String(count)} execuções mais recentes${scope}; há mais para carregar.`;
+        const latest =
+          count === 1 ? "A execução mais recente" : `As ${String(count)} execuções mais recentes`;
+        return `${latest}${scope}; há mais para carregar.`;
       }
       return count === 1 ? `1 execução${scope}.` : `${String(count)} execuções${scope}.`;
     },

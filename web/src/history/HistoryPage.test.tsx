@@ -181,6 +181,14 @@ describe("Histórico", () => {
       await announced("As 2 execuções mais recentes com esses filtros; há mais para carregar.");
     });
 
+    it("com uma só execução e mais páginas, o anúncio fica no singular", async () => {
+      const { user } = setup(() => page([runBody({ id: RUN_A })], "pagina-2"));
+
+      await applyFailedFilter(user);
+
+      await announced("A execução mais recente com esses filtros; há mais para carregar.");
+    });
+
     it("limpar leva o foco ao título", async () => {
       const { user } = setup(() => page([runBody()]), "/historico?estado=failed");
 
