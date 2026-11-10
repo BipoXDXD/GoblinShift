@@ -34,6 +34,11 @@ from tests.openobserve.conftest import (
 pytestmark = pytest.mark.openobserve
 
 FIRING_TIMEOUT_S = 240.0
+# Dois heartbeats depois de um instante qualquer custam até duas voltas do agendador (a primeira
+# pode ter acabado de passar), e cada volta leva uns 110-120 s com a carga do cenário: 240 s
+# ficavam no limite e falhavam de vez em quando. O prazo cobre duas voltas com 50% de folga.
+SCHEDULER_ROUND_S = 120.0
+TWO_ROUNDS_TIMEOUT_S = 2 * SCHEDULER_ROUND_S * 1.5
 RECENT_S = 3 * 60
 BURNING = "queima-"
 NORMAL = "normal-"
@@ -69,9 +74,9 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     normal_catalog = [
         a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
     ]
-    # O agendador avalia uma quantidade limitada de alertas por vez: com 49 alertas, cada um volta
-    # a cada 110 s, não a cada minuto, e a espera abaixo fica no limite. O cenário "queima" não tem
-    # span da manutenção, e só o "normal" precisa das causas lidas dele.
+    # O agendador avalia uma quantidade limitada de alertas por vez: cada alerta volta a cada
+    # SCHEDULER_ROUND_S, não a cada minuto. O cenário "queima" não tem span da manutenção, e só o
+    # "normal" precisa das causas lidas dele; menos alertas encurtam a volta.
     idle_causes = {
         f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
     }
@@ -110,7 +115,7 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     wait_until(
         lambda: True if len(receiver.at(f"{NORMAL}heartbeat", after)) >= 2 else None,
         "duas avaliações do cenário normal",
-        FIRING_TIMEOUT_S,
+        TWO_ROUNDS_TIMEOUT_S,
     )
     for prefix in (BURNING, NORMAL, SILENT):
         provision(telemetry.api, alerts=[], destinations={}, prefix=prefix)
