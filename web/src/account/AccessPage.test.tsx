@@ -392,6 +392,42 @@ describe("Acesso: chaves de API", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // Falha genérica (5xx, timeout) com a mudança aplicada no servidor: o Revogar some na releitura e
+  // o foco cairia no <body> (WCAG 2.4.3).
+  it("500 com a lista já sem a chave: o foco vai para o título e a falha aparece", async () => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: settled ? [] : [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return problemResponse(500, "INTERNAL_ERROR");
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+  });
+
+  it("500 com a chave ainda na lista: o foco volta ao Revogar", async () => {
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => problemResponse(500, "INTERNAL_ERROR"),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    expect(within(keys).getByRole("button", { name: "Revogar a chave gsk_7Hq2" })).toHaveFocus();
+  });
+
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
     const held = heldResponse();
     const { api, user } = setup({

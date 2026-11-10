@@ -130,6 +130,45 @@ describe("Oficina: presets", () => {
     });
   });
 
+  // Falha genérica (5xx, timeout) com a exclusão aplicada no servidor: o Excluir some na releitura
+  // e o foco cairia no <body> (WCAG 2.4.3).
+  it("500 com a lista já sem o preset: o foco vai para o título e a falha aparece", async () => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/presets": () => jsonResponse({ data: settled ? [] : [presetBody()] }),
+      [DELETE_ROUTE]: () => {
+        settled = true;
+        return problemResponse(500, "INTERNAL_ERROR");
+      },
+    });
+
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Excluir preset" }));
+
+    expect(await within(section).findByRole("alert")).toBeVisible();
+    await waitFor(() => {
+      expect(within(section).getByRole("heading", { level: 2, name: "Presets" })).toHaveFocus();
+    });
+  });
+
+  it("500 com o preset ainda na lista: o foco volta ao Excluir", async () => {
+    const { user } = setup({ [DELETE_ROUTE]: () => problemResponse(500, "INTERNAL_ERROR") });
+
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Excluir preset" }));
+
+    expect(await within(section).findByRole("alert")).toBeVisible();
+    expect(
+      within(section).getByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    ).toHaveFocus();
+  });
+
   it("cancelar a exclusão não chama a API", async () => {
     const { api, user } = setup();
 
