@@ -155,6 +155,44 @@ describe("ThemeSwitcher", () => {
       expect(details().open).toBe(true);
     });
 
+    it("tocar fora, numa área que não recebe foco, fecha sem levar o foco a lugar nenhum", async () => {
+      installFakeMatchMedia(false);
+      render(
+        <>
+          <ThemeSwitcher />
+          <p>Conteúdo da página</p>
+        </>,
+      );
+      await openSwitcher();
+
+      // Sem destino de foco não há focusout com relatedTarget, como no toque do WebKit.
+      await userEvent.click(screen.getByText("Conteúdo da página"));
+
+      expect(details().open).toBe(false);
+      expect(document.body).toHaveFocus();
+    });
+
+    it("tocar fora num botão fecha, e o foco fica com o botão tocado", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.click(screen.getByRole("button", { name: "Depois" }));
+
+      expect(details().open).toBe(false);
+      expect(screen.getByRole("button", { name: "Depois" })).toHaveFocus();
+    });
+
+    it("tocar dentro do painel, fora das opções, mantém aberto", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.click(screen.getByRole("group", { name: "Tema da interface" }));
+
+      expect(details().open).toBe(true);
+    });
+
     it("clicar numa opção escolhe e não fecha antes do clique chegar", async () => {
       installFakeMatchMedia(false);
       renderBetweenButtons();

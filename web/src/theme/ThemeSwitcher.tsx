@@ -10,8 +10,8 @@ const T = TEXT.theme;
 /**
  * Escolha do tema no cabeçalho: três radios com label visível dentro de um `<details>`, sem foco
  * preso. O resumo mostra a escolha atual. O painel abre por cima do conteúdo, então fecha como um
- * menu suspenso: com Esc (o foco volta ao resumo) e quando o foco sai dele, para nunca cobrir o
- * elemento focado (WCAG 2.4.11).
+ * menu suspenso: com Esc (o foco volta ao resumo), quando o foco sai dele e com um toque ou clique
+ * fora, para nunca cobrir o elemento focado (WCAG 2.4.11).
  */
 export function ThemeSwitcher(): ReactElement {
   const { preference, choose } = useTheme();
@@ -23,11 +23,21 @@ export function ThemeSwitcher(): ReactElement {
     if (element === null) {
       return undefined;
     }
+    // Toque ou clique fora: no WebKit, tocar num botão ou link não dá foco, então o focusout
+    // sozinho não fecharia. Não move o foco: quem tocou decide para onde ele vai.
+    const closeOnPointerOutside = (event: Event): void => {
+      if (element.open && event.target instanceof Node && !element.contains(event.target)) {
+        element.open = false;
+      }
+    };
+    const page = element.ownerDocument;
     element.addEventListener("keydown", closeOnEscape);
     element.addEventListener("focusout", closeWhenFocusLeaves);
+    page.addEventListener("pointerdown", closeOnPointerOutside);
     return () => {
       element.removeEventListener("keydown", closeOnEscape);
       element.removeEventListener("focusout", closeWhenFocusLeaves);
+      page.removeEventListener("pointerdown", closeOnPointerOutside);
     };
   }, []);
   return (
