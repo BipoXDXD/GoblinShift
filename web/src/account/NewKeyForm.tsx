@@ -133,7 +133,7 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       {create.error !== null && (
         <FailureNotice
           error={create.error}
-          headingLevel={3}
+          headingLevel={4}
           messages={{ STATE_CONFLICT: T.tooMany }}
         />
       )}
