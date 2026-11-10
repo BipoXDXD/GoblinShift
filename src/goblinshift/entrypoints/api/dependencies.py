@@ -265,7 +265,7 @@ def _require_current_terms(session: Session, principal: Principal, current_versi
     if account.needs_terms_acceptance(current_version):
         raise ApiProblem(
             ProblemCode.TERMS_NOT_ACCEPTED,
-            f"Aceite a versão {current_version} dos termos de uso e do aviso de privacidade "
+            f"Aceite a versão {current_version} dos Termos de Uso e do Aviso de Privacidade "
             "(POST /api/v1/me/terms:accept) para continuar.",
         )
 

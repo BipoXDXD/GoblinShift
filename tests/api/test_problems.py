@@ -18,6 +18,10 @@ def test_todo_codigo_do_catalogo_tem_status_e_titulo() -> None:
     assert set(PROBLEMS) == set(ProblemCode)
 
 
+def test_titulo_do_aceite_pendente_escreve_termos_de_uso_como_nome_de_documento() -> None:
+    assert PROBLEMS[ProblemCode.TERMS_NOT_ACCEPTED].title == "Termos de Uso não aceitos"
+
+
 def test_status_do_problema_vem_do_catalogo_pelo_codigo() -> None:
     assert ApiProblem(ProblemCode.BODY_TOO_LARGE, "x").status == 413
     assert ApiProblem(ProblemCode.QUEUE_FULL, "x").status == 503
