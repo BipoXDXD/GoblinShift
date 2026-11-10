@@ -31,7 +31,7 @@ export function BrandLink(): ReactElement {
   return (
     <Link
       to={PATHS.home}
-      className="inline-flex min-h-11 items-center gap-2 font-display text-xl font-semibold text-fg no-underline"
+      className="inline-flex min-h-11 min-w-[480px] items-center gap-2 font-display text-xl font-semibold text-fg no-underline"
     >
       <picture className="flex-none">
         <source type="image/avif" srcSet={AVIF_SRCSET} />
