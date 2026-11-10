@@ -3,9 +3,11 @@
 Sem banco: as leituras e a decisão são trocadas na instância, e o Runner é falso. Os dois passos
 que chamam o Runner item a item (`reconcile_expired_leases` e `sweep_work_areas`) podem esperar
 minutos por tentativa no `executor-ctl`; com o SIGTERM do deploy no meio do lote, a manutenção
-termina o item em curso, não começa o seguinte e fecha a volta com o evento do ciclo, dentro da
-carência da plataforma. A mesma regra contra o Postgres e o `executor-ctl` falso está em
-tests/runs/test_maintenance_executor_ctl.py.
+termina o item em curso, não começa o seguinte e fecha a volta com o evento do ciclo. A parada só
+é conferida entre itens: o item em curso termina inteiro e, sozinho, pode passar da carência da
+plataforma (`stop` e `remove` somam até minutos); nesse caso o SIGKILL ainda leva o evento. Isso
+depende do `stop_grace_period` do compose, fora daqui. A mesma regra contra o Postgres e o
+`executor-ctl` falso está em tests/runs/test_maintenance_executor_ctl.py.
 """
 
 import logging

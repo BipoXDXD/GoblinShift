@@ -243,8 +243,10 @@ class Maintenance:
         que só esperariam o `connect_timeout` de novo; `should_stop` (a parada pedida por sinal) é
         conferido antes de cada passo. Os dois contam em `steps_skipped`. Os passos que chamam o
         Runner item a item também conferem a parada entre os itens: o item em curso termina, e o
-        seguinte fica para o próximo processo. Interrupção do processo (`KeyboardInterrupt`,
-        `SystemExit`) não é `Exception` e sobe.
+        seguinte fica para o próximo processo. Esse item em curso pode, sozinho, passar da carência
+        da plataforma até o SIGKILL, que então leva o evento do ciclo: o limite é de um item, não
+        de tempo. Interrupção do processo (`KeyboardInterrupt`, `SystemExit`) não é `Exception` e
+        sobe.
         """
         started = time.monotonic()
         self._candidates_left_on_disk = 0
