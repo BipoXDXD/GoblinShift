@@ -206,6 +206,17 @@ def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
     assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
 
 
+@pytest.mark.parametrize("log", ["executor não iniciou", "área de trabalho falhou"])
+def test_aviso_do_executor_que_nao_inicia_cita_o_log_de_cada_causa(log: str) -> None:
+    # Start recusado e área de trabalho não criada levam ao mesmo alerta: a notificação diz qual
+    # log procurar, com os nomes do runbook.
+    alert = next(
+        a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
+    )
+
+    assert f"log {log}" in alert.description
+
+
 def test_executor_que_nao_inicia_avisa_no_destino_urgente_lendo_o_span_da_tentativa() -> None:
     alert = next(
         a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
