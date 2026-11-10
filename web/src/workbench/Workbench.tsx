@@ -290,7 +290,7 @@ const SECTION_LABEL = "text-sm font-semibold text-fg-muted";
 /** Volta à Oficina e o título da Bancada; também usado enquanto o catálogo carrega. */
 export function WorkbenchHeader({ title }: { readonly title: string }): ReactElement {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-[480px] flex-col gap-2">
       <Link
         to={PATHS.home}
         className="inline-flex min-h-11 items-center gap-1 self-start text-sm font-semibold"
