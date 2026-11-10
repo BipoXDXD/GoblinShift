@@ -82,7 +82,7 @@ export function ConfirmDialog({
         </div>
         {/* Ordem do DOM em toda largura (WCAG 2.4.3 e 1.3.2): no celular, Cancelar em cima e a
             confirmação embaixo, ambos na largura toda; um *-reverse separaria a ordem do Tab. */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <Button type="button" variant="secondary" data-initial-focus="" onClick={onCancel}>
             {cancelLabel}
           </Button>
