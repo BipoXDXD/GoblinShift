@@ -12,7 +12,11 @@ import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration"
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
-import { FailureNotice, guidanceAnnouncement } from "../components/feedback/FailureNotice";
+import {
+  FailureNotice,
+  guidanceAnnouncement,
+  isGuidance,
+} from "../components/feedback/FailureNotice";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { buttonClassName } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -65,14 +69,15 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
   // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
-  const guidance = failure === null ? null : guidanceAnnouncement(failure);
+  const showsGuidance = failure !== null && isGuidance(failure);
+  const guidanceText = failure === null ? null : guidanceAnnouncement(failure);
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <div className="flex flex-col gap-2">
         {run !== undefined && <BackToWorkbench recipeId={run.recipe_id} />}
         <FocusHeading>{T.title}</FocusHeading>
       </div>
-      <LiveRegion message={guidance ?? announcement} visuallyHidden />
+      <LiveRegion message={guidanceText ?? announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {failure !== null && <FailureNotice error={failure} />}
       {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
@@ -86,9 +91,9 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
               // Com o convite na tela, o Cancelar só abriria um segundo convite: sem sessão, a
               // ação some e os dados já carregados ficam. Os resultados só aparecem no estado
               // terminal, em que o polling já parou e não há 401 dele.
-              guidance === null ? (
+              showsGuidance ? null : (
                 <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
-              ) : null
+              )
             }
           />
           {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}

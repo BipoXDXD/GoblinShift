@@ -47,6 +47,11 @@ const GUIDANCE_CODES = [
 ] as const;
 type GuidanceCode = (typeof GUIDANCE_CODES)[number];
 
+/** Se o FailureNotice mostra um caminho (entrar, entrar de novo, aceitar) em vez do alerta. */
+export function isGuidance(error: Error): boolean {
+  return guidanceCode(error) !== null;
+}
+
 /**
  * Texto a anunciar quando o FailureNotice mostra um caminho (entrar, entrar de novo, aceitar), ou
  * `null` quando mostra o ProblemAlert. O caminho é informativo, sem `role="alert"`: numa tela que o
