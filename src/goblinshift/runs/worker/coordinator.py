@@ -153,7 +153,14 @@ class CoordinatorConfig:
 
 
 class PreparationError(Exception):
-    """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura."""
+    """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura.
+
+    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta.
+    """
+
+    def __init__(self, message: str, *, alert: str | None = None) -> None:
+        super().__init__(message)
+        self.alert = alert
 
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
@@ -260,7 +267,10 @@ class Coordinator:
         try:
             self.prepare(claimed)
         except PreparationError as error:
-            logger.warning("área de trabalho falhou", extra={"fields": _ids(claimed, error)})
+            fields = _ids(claimed, error)
+            if error.alert is not None:
+                fields["alert"] = error.alert
+            logger.warning("área de trabalho falhou", extra={"fields": fields})
             return self.fail_transiently(claimed)
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
@@ -286,12 +296,21 @@ class Coordinator:
         except HeldContentMissingError as error:
             raise PreparationError(str(error)) from error
         try:
-            self._fill_work_area(claimed, contents)
+            work_dir = self._runner.create_work_dir(claimed.attempt_id)
+        except OSError as error:
+            # A área do host que não aceita a tentativa (montagem perdida, sem escrita) perde a Run
+            # como o start recusado, e nenhuma outra causa avisa: conta no mesmo alerta.
+            raise PreparationError(
+                f"área de trabalho: {error}", alert="executor_start_failed"
+            ) from error
+        try:
+            self._fill_work_area(work_dir, claimed, contents)
         except OSError as error:
             raise PreparationError(f"área de trabalho: {error}") from error
 
-    def _fill_work_area(self, claimed: ClaimedAttempt, contents: list[HeldContent]) -> None:
-        work_dir = self._runner.create_work_dir(claimed.attempt_id)
+    def _fill_work_area(
+        self, work_dir: Path, claimed: ClaimedAttempt, contents: list[HeldContent]
+    ) -> None:
         inputs_dir = work_dir / "inputs"
         entries = [
             self._copy_input(content, position, inputs_dir)

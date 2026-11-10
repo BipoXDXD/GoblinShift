@@ -356,6 +356,28 @@ def test_preparacao_que_falha_nao_conta_como_start_recusado(
     assert_ended_without_refused_start(exporter, "running")
 
 
+@pytest.mark.usefixtures("counting_alert_events")
+def test_leitura_da_entrada_que_falha_no_disco_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O `OSError` cru vem do storage, não da área de trabalho: não é o executor que não inicia.
+    queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+
+    def refuse_open(key: str) -> None:
+        raise PermissionError(errno.EACCES, "sem permissão", key)
+
+    monkeypatch.setattr(storage, "open", refuse_open)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert_ended_without_refused_start(exporter, "running")
+
+
 class _WorkAreaRefused(LocalRunner):
     """Área sem escrita (montagem perdida, por exemplo): o executor nem chega ao `start`."""
 
