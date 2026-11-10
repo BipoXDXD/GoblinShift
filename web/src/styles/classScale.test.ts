@@ -138,7 +138,7 @@ const Z_LAYER = /^var\((--z-[a-z]+)\)$/;
 const VIEWPORT_HEIGHT = /\dvh\b/;
 /** Valores que apagam o anel de foco, por propriedade. */
 const HIDDEN_OUTLINE = new Map([
-  ["outline", new Set(["none", "0"])],
+  ["outline", new Set(["none", "0", "0px"])],
   ["outline-style", new Set(["none", "hidden"])],
   ["outline-width", new Set(["0", "0px"])],
 ]);
@@ -404,6 +404,8 @@ describe("cssViolations", () => {
     ["a:focus { outline-width: 0; }", "outline: none"],
     ["a:focus { outline: 0 none; }", "outline: none"],
     ["a:focus { outline: none 0; }", "outline: none"],
+    ["a:focus { outline: 0px; }", "outline: none"],
+    ["a:focus { outline: 0px solid; }", "outline: none"],
     ["a { color: navy; }", "cor crua em color (use o papel semântico): navy"],
     ["a { background-color: teal; }", "cor crua em background-color (use o papel semântico): teal"],
     ["a { border: 2px solid crimson; }", "cor crua em border (use o papel semântico): crimson"],
