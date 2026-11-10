@@ -78,4 +78,130 @@ describe("ThemeSwitcher", () => {
     expect(screen.getByText("Escuro", { selector: "summary *" })).toBeInTheDocument();
     expect(await axeViolations(container)).toEqual([]);
   });
+
+  describe("fecha como um menu suspenso (WCAG 2.4.11)", () => {
+    function details(): HTMLDetailsElement {
+      const summary = screen.getByText("Tema").closest("summary");
+      const element = summary?.parentElement;
+      if (!(element instanceof HTMLDetailsElement)) {
+        throw new Error("o seletor de tema não está num <details>");
+      }
+      return element;
+    }
+
+    function renderBetweenButtons(): void {
+      render(
+        <>
+          <button type="button">Antes</button>
+          <ThemeSwitcher />
+          <button type="button">Depois</button>
+        </>,
+      );
+    }
+
+    it("Esc fecha e devolve o foco ao botão que abriu", async () => {
+      installFakeMatchMedia(false);
+      render(<ThemeSwitcher />);
+      await openSwitcher();
+      screen.getByRole("radio", { name: "Sistema" }).focus();
+
+      await userEvent.keyboard("{Escape}");
+
+      expect(details().open).toBe(false);
+      expect(screen.getByText("Tema").closest("summary")).toHaveFocus();
+    });
+
+    it("Esc com o seletor fechado não move o foco", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      screen.getByRole("button", { name: "Antes" }).focus();
+
+      await userEvent.keyboard("{Escape}");
+
+      expect(screen.getByRole("button", { name: "Antes" })).toHaveFocus();
+    });
+
+    it("Tab para fora do seletor fecha", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+      screen.getByRole("radio", { name: "Sistema" }).focus();
+
+      await userEvent.tab();
+
+      expect(screen.getByRole("button", { name: "Depois" })).toHaveFocus();
+      expect(details().open).toBe(false);
+    });
+
+    it("Shift+Tab do resumo para trás também fecha", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.tab({ shift: true });
+
+      expect(screen.getByRole("button", { name: "Antes" })).toHaveFocus();
+      expect(details().open).toBe(false);
+    });
+
+    it("andar do resumo para as opções mantém aberto", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.tab();
+
+      expect(screen.getByRole("radio", { name: "Sistema" })).toHaveFocus();
+      expect(details().open).toBe(true);
+    });
+
+    it("tocar fora, numa área que não recebe foco, fecha sem levar o foco a lugar nenhum", async () => {
+      installFakeMatchMedia(false);
+      render(
+        <>
+          <ThemeSwitcher />
+          <p>Conteúdo da página</p>
+        </>,
+      );
+      await openSwitcher();
+
+      // Sem destino de foco não há focusout com relatedTarget, como no toque do WebKit.
+      await userEvent.click(screen.getByText("Conteúdo da página"));
+
+      expect(details().open).toBe(false);
+      expect(document.body).toHaveFocus();
+    });
+
+    it("tocar fora num botão fecha, e o foco fica com o botão tocado", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.click(screen.getByRole("button", { name: "Depois" }));
+
+      expect(details().open).toBe(false);
+      expect(screen.getByRole("button", { name: "Depois" })).toHaveFocus();
+    });
+
+    it("tocar dentro do painel, fora das opções, mantém aberto", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.click(screen.getByRole("group", { name: "Tema da interface" }));
+
+      expect(details().open).toBe(true);
+    });
+
+    it("clicar numa opção escolhe e não fecha antes do clique chegar", async () => {
+      installFakeMatchMedia(false);
+      renderBetweenButtons();
+      await openSwitcher();
+
+      await userEvent.click(screen.getByText("Escuro", { selector: "label" }));
+
+      expect(screen.getByRole("radio", { name: "Escuro" })).toBeChecked();
+      expect(details().open).toBe(true);
+    });
+  });
 });

@@ -258,7 +258,8 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
             key={artifact.artifact_id}
             href={artifactDownloadPath(artifact.artifact_id)}
             download={artifact.file_name}
-            className={buttonClassName({ variant: "primary", size: "lg" })}
+            // Nome sem espaço quebra em qualquer ponto em vez de empurrar a página (WCAG 1.4.10).
+            className={`${buttonClassName({ variant: "primary", size: "lg" })} wrap-anywhere`}
           >
             <Download aria-hidden="true" className="size-6" />
             {T.results.download(artifact.file_name)}
@@ -288,7 +289,7 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
                         <a
                           href={artifactDownloadPath(artifact.artifact_id)}
                           download={artifact.file_name}
-                          className="inline-flex min-h-11 items-center font-mono text-sm"
+                          className="inline-flex min-h-11 items-center font-mono text-sm wrap-anywhere"
                         >
                           {T.results.download(artifact.file_name)}
                         </a>
@@ -347,7 +348,7 @@ interface UnavailableFileProps {
 function UnavailableFile({ reference, reason }: UnavailableFileProps): ReactElement {
   return (
     <>
-      <span className="font-mono text-sm text-fg-muted">{reference.file_name}</span>{" "}
+      <span className="font-mono text-sm wrap-anywhere text-fg-muted">{reference.file_name}</span>{" "}
       <span className="text-sm text-fg-muted">
         ({T.results.roles[reference.role]}): {reason}.
       </span>
