@@ -7,6 +7,10 @@ viva e a área de trabalho ocupada. O `executor-ctl` recusa outro `start` com á
 que não é dela. O `record_start` falha com um `55P03` de verdade: a Run fica travada noutra
 sessão só entre o `start` e o fim do `record_start`, para a falha não vir de um passo seguinte.
 Nos outros dois pontos a falha é injetada com o mesmo erro do driver.
+
+A pausa vive na memória do processo. Depois de um reinício, quem segura o claim é o portão da área
+de trabalho (`WorkAreaGate`), que lê a área que o `executor-ctl` confere. Os testes da pausa
+desligam o portão (área vista como vazia) para que só ela decida a volta.
 """
 
 import logging
@@ -17,6 +21,7 @@ from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import cast
 
 import psycopg
 import pytest
@@ -38,7 +43,8 @@ from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.claim_pause import ClaimPause
 from goblinshift.runs.worker.coordinator import Coordinator
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
-from goblinshift.runs.worker.runner import ExecutorStatus
+from goblinshift.runs.worker.runner import ExecutorStatus, Runner
+from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 from tests.runs.fake_executor_ctl import IMAGE, FakeExecutorCtl
 from tests.runs.worker_support import (
     LEASE,
@@ -198,11 +204,25 @@ def worker_failing_at(
         run_lock.release()
 
 
+class UnseenArea:
+    """Área sempre vista como vazia: desliga o portão para isolar a pausa."""
+
+    def list_work(self) -> list[uuid.UUID]:
+        return []
+
+
+GATE_OFF = WorkAreaGate(cast(Runner, UnseenArea()))
+
+
 def turn(
-    factory: sessionmaker[Session], storage: FileStorage, worker: Coordinator, pause: ClaimPause
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    worker: Coordinator,
+    pause: ClaimPause,
+    gate: WorkAreaGate = GATE_OFF,
 ) -> bool:
     finished = RunFinishedReporter(factory, UserHasher(b"k" * 32), NoOpTracer())
-    return _work_once(factory, storage, LEASE, worker, finished, pause)
+    return _work_once(factory, storage, LEASE, worker, finished, pause, gate)
 
 
 def queue_two_runs(
@@ -277,3 +297,32 @@ def test_sem_a_pausa_a_run_seguinte_gasta_claim_com_area_suja(
     )
     [refusal] = [r for r in caplog.records if r.getMessage() == START_REFUSED]
     assert "work_area_dirty" in str(refusal.__dict__["fields"]["error"])
+
+
+@pytest.mark.parametrize("point", POINTS)
+def test_worker_reiniciado_dentro_da_janela_nao_gasta_claim_com_a_tentativa_orfa(
+    point: Inject | None,
+    factory: sessionmaker[Session],
+    worker_factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    area: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deploy ou SIGKILL depois da falha: o processo novo nasce sem pausa, e a área o segura."""
+    first, second = queue_two_runs(factory, storage)
+    before_restart = ClaimPause(WINDOW, clock=FakeClock())
+    restarted = ClaimPause(WINDOW, clock=FakeClock())
+    gate = WorkAreaGate(ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid()))
+
+    with worker_failing_at(point, factory, worker_factory, storage, ctl, area, monkeypatch) as w:
+        turn(factory, storage, w, before_restart)
+        second_turn = turn(factory, storage, w, restarted, gate)
+
+    assert second_turn is False
+    assert restarted.active is False
+    [orphan] = attempts(factory, first)
+    assert orphan["ended_at"] is None
+    waiting = run_row(factory, second)
+    assert (waiting["status"], waiting["claim_count"]) == ("queued", 0)
+    assert attempts(factory, second) == []
