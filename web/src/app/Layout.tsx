@@ -145,15 +145,17 @@ function AccountLink(): ReactElement {
  */
 function useDocumentTitle(): void {
   const matches = useMatches();
+  const { key } = useLocation();
   const title = matches
     .map((match) => pageTitleOf(match.handle))
     .filter((candidate): candidate is string => candidate !== null)
     .at(-1);
   // Efeito de layout, que roda antes de todos os passivos: a tela de falha (RouteFailure) troca
-  // o título num efeito passivo e precisa vencer o título da rota que não abriu.
+  // o título num efeito passivo e precisa vencer o título da rota que não abriu. Regrava a cada
+  // navegação: voltar à mesma rota depois de uma falha tira o título de erro.
   useLayoutEffect(() => {
     document.title = documentTitle(title);
-  }, [title]);
+  }, [title, key]);
 }
 
 /** A tela da rota, ou o aceite dos termos se a conta ainda não aceitou a versão vigente. */

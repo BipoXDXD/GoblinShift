@@ -7,6 +7,7 @@ import { ProblemAlert } from "../components/feedback/ProblemAlert";
 import { Button } from "../components/ui/Button";
 import { TEXT } from "../text";
 import { documentTitle } from "./pageTitle";
+import { reloadPage } from "./reloadPage";
 import { PATHS } from "./paths";
 
 const T = TEXT.routeFailure;
@@ -21,7 +22,7 @@ export function RouteFailure(): ReactElement {
     console.error("Falha ao abrir a tela:", error);
   }, [error]);
   // Efeito passivo: roda depois do título da rota (efeito de layout da moldura) e o substitui, para a
-  // aba não dizer que a tela abriu (WCAG 2.4.2).
+  // aba não dizer que a tela abriu (WCAG 2.4.2). Uma navegação nova remonta esta tela.
   useEffect(() => {
     document.title = documentTitle(T.pageTitle);
   }, []);
@@ -30,13 +31,7 @@ export function RouteFailure(): ReactElement {
       <FocusHeading>{T.title}</FocusHeading>
       <ProblemAlert failure={{ kind: "internal" }} />
       <div className="flex flex-wrap items-center gap-4">
-        <Button
-          type="button"
-          variant="primary"
-          onClick={() => {
-            window.location.reload();
-          }}
-        >
+        <Button type="button" variant="primary" onClick={reloadPage}>
           {T.reload}
         </Button>
         <Link to={PATHS.home} className="inline-flex min-h-11 items-center gap-1 font-semibold">
