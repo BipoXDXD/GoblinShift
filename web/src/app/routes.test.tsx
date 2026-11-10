@@ -19,7 +19,7 @@ function renderAt(path: string) {
 // As telas carregam por rota (lazy): o título só existe depois que o chunk da tela chega.
 describe("rotas carregadas sob demanda", () => {
   it.each([
-    ["/", "Arquivos em lote, limpos pelos goblins da oficina."],
+    ["/", "Arquivos em lote, limpos pelas goblins da oficina."],
     ["/bancada/csv-janitor", "Bancada: CSV Janitor"],
     ["/rota-que-nao-existe", "Página não encontrada"],
   ])("%s abre a tela e põe o foco no título", async (path, title) => {

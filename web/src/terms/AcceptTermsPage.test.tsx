@@ -36,7 +36,7 @@ describe("Aceite dos termos", () => {
   it("carregando o /me", async () => {
     setup({ "GET /api/v1/me": () => null });
 
-    await expectHeadingFocused("Termos de uso");
+    await expectHeadingFocused("Termos de Uso");
     expect(screen.getByText("Carregando os termos.")).toBeVisible();
   });
 

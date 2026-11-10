@@ -1,5 +1,5 @@
 // Textos fixos da interface, num lugar só (D12: só pt-BR; traduzir fica restrito a este arquivo).
-// Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre os goblins só no vazio, na
+// Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre as goblins só no vazio, na
 // espera e no sucesso, sempre depois da informação.
 export const TEXT = {
   field: {
@@ -34,7 +34,7 @@ export const TEXT = {
       FORBIDDEN: "Você não tem permissão para esta ação.",
       CSRF_FAILED:
         "A verificação de segurança da sessão falhou. Recarregue a página e tente de novo.",
-      TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos termos de uso.",
+      TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos Termos de Uso.",
       NOT_FOUND: "Não encontramos o que você pediu. Ele pode ter sido removido.",
       METHOD_NOT_ALLOWED: "Esta ação não é aceita aqui.",
       REQUEST_TIMEOUT: "O envio demorou demais e foi interrompido. Tente de novo.",
@@ -93,7 +93,7 @@ export const TEXT = {
     dismiss: "Fechar",
   },
   home: {
-    title: "Arquivos em lote, limpos pelos goblins da oficina.",
+    title: "Arquivos em lote, limpos pelas goblins da oficina.",
     lead: "Escolha uma receita para começar.",
     recipesHeading: "Receitas",
     openWorkbench: "Abrir a Bancada",
@@ -160,7 +160,7 @@ export const TEXT = {
     orderLabel: "Ordem de processamento",
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:
-      "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e os goblins começam.",
+      "Os arquivos aparecem aqui, na ordem em que serão processados. Depois, use Executar para começar.",
     limitsHint: (maxInputs: number, maxTotal: string | null, maxFile: string | null) =>
       [
         maxTotal === null
@@ -346,8 +346,8 @@ export const TEXT = {
     },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
     flavor: {
-      queued: "Os goblins pegam este lote assim que uma bancada vagar.",
-      succeeded: "Pronto! Os goblins terminaram o lote.",
+      queued: "As goblins pegam este lote assim que uma bancada vagar.",
+      succeeded: "Pronto! As goblins terminaram o lote.",
     },
     statuses: {
       queued: "Na fila",
@@ -878,7 +878,7 @@ export const TEXT = {
       "Toda resposta de erro é `application/problem+json`, com um `code` estável e o `request_id`. Decida pelo `code`, nunca pelo texto, e cite o `request_id` ao pedir ajuda.",
   },
   terms: {
-    acceptTitle: "Termos de uso",
+    acceptTitle: "Termos de Uso",
     acceptLead: (version: string) =>
       `Para continuar, leia e aceite a versão ${version} dos Termos de Uso e do Aviso de Privacidade. Ao aceitar, você declara ter 18 anos ou mais.`,
     readTerms: "Ler os Termos de Uso",
@@ -892,7 +892,7 @@ export const TEXT = {
     signOut: "Não aceito, sair",
     loading: "Carregando os termos.",
     requiredTitle: "Aceite os termos para continuar",
-    requiredBody: "Os termos de uso mudaram. Leia e aceite a versão nova para continuar.",
+    requiredBody: "Os Termos de Uso mudaram. Leia e aceite a versão nova para continuar.",
     goToAccept: "Ler e aceitar os termos",
   },
   credits: {

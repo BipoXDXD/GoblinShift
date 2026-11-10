@@ -14,7 +14,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Arquivos em lote, limpos pelos goblins da oficina.",
+        name: "Arquivos em lote, limpos pelas goblins da oficina.",
       }),
     ).toBeInTheDocument();
   });

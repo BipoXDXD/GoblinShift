@@ -118,7 +118,7 @@ describe("Layout: termos pendentes", () => {
     await waitFor(() => {
       expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico%3Festado%3Dfailed");
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de Uso" })).toBeVisible();
   });
 
   it("conta que aceitou a versão anterior volta ao aceite quando a versão sobe", async () => {
@@ -140,7 +140,7 @@ describe("Layout: termos pendentes", () => {
     await waitFor(() => {
       expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico");
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de Uso" })).toBeVisible();
   });
 
   it.each(["/termos", "/privacidade", "/acesso", "/entrar"])(

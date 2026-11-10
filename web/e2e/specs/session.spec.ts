@@ -23,7 +23,7 @@ test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada", 
   await entrar.signInWith("google");
 
   await expect(page).toHaveURL(/\/termos\/aceitar\?volta=%2Fbancada%2Fcsv-janitor$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Termos de uso" })).toBeFocused();
+  await expect(page.getByRole("heading", { level: 1, name: "Termos de Uso" })).toBeFocused();
   await page.getByRole("button", { name: "Aceitar e continuar" }).click();
 
   await expect(page).toHaveURL(/\/bancada\/csv-janitor$/);
