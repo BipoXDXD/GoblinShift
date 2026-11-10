@@ -36,6 +36,7 @@ from goblinshift.entrypoints.api.cookies import (
     LOGIN_COOKIE_PATH,
 )
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
+from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.entrypoints.api.wide_event import WideEventMiddleware, count_queries
@@ -72,12 +73,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(running: FastAPI) -> AsyncGenerator[None]:
-        yield
+        async with saturation_reporting(running.state.tracing.tracer):
+            yield
         try:
             engine.dispose()
         finally:
             # Por último: depois do encerramento, o processador descarta em silêncio todo span
-            # novo. O que rodar antes daqui na parada ainda entra no lote.
+            # novo. O que rodar antes daqui na parada ainda entra no lote, inclusive a janela
+            # final de saturação, relatada ao sair do `async with` acima.
             running.state.tracing.shut_down()
 
     app = FastAPI(

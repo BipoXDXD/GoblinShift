@@ -294,7 +294,12 @@ class SpanWriter:
     def span(
         self, name: str, age_s: float, attributes: dict[str, AttributeValue], duration_ms: float
     ) -> None:
-        start_ns = time.time_ns() - int(age_s * 1e9)
+        self.span_at(name, time.time_ns() - int(age_s * 1e9), attributes, duration_ms)
+
+    def span_at(
+        self, name: str, start_ns: int, attributes: dict[str, AttributeValue], duration_ms: float
+    ) -> None:
+        """Span que começa num instante exato (ns desde a época), sem deriva do relógio do teste."""
         span = self.tracer.start_span(
             name, kind=SpanKind.SERVER, start_time=start_ns, attributes=attributes
         )
