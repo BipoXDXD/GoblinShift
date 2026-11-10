@@ -636,6 +636,9 @@ export const TEXT = {
     recentHeading: "Execuções recentes",
     recentEmptyHint: "Escolha uma receita acima para começar.",
     seeAll: "Ver o histórico completo",
+    // Anunciados depois do "Carregar mais", junto com quantas execuções chegaram.
+    noMore: "Nenhuma execução a mais.",
+    endOfList: "Fim da lista.",
   },
   account: {
     signIn: {

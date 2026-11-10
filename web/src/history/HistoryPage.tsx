@@ -1,10 +1,11 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type SubmitEvent, type ReactElement } from "react";
+import { useId, useRef, useState, type SubmitEvent, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
-import { PATHS } from "../app/paths";
+import { PATHS, runPath } from "../app/paths";
 import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
@@ -82,6 +83,7 @@ function HistoryResults({
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const rows = useRef<HTMLDivElement>(null);
   const queryKey = ["runs", "history", query] as const;
   const runs = useInfiniteQuery({
     queryKey,
@@ -107,7 +109,18 @@ function HistoryResults({
       }
       return;
     }
-    setAnnouncement(T.loadedMore(result.data?.pages.at(-1)?.data.length ?? 0));
+    const loaded = result.data?.pages.at(-1)?.data ?? [];
+    const message = loaded.length === 0 ? T.noMore : T.loadedMore(loaded.length);
+    // A página nova já está no cache; o flushSync a pinta antes de o foco procurar a linha.
+    flushSync(() => {
+      setAnnouncement(result.hasNextPage ? message : `${message} ${T.endOfList}`);
+    });
+    // Na última página o "Carregar mais" some com o foco (WCAG 2.4.3): em toda página, o foco
+    // segue para a primeira linha nova, ou para a última da lista se nada chegou.
+    const target = loaded.at(0) ?? result.data?.pages.flatMap((entry) => entry.data).at(-1);
+    if (target !== undefined) {
+      rows.current?.querySelector<HTMLAnchorElement>(`a[href="${runPath(target.id)}"]`)?.focus();
+    }
   };
 
   const active = hasActiveFilters(filters);
@@ -128,7 +141,7 @@ function HistoryResults({
       ) : items.length === 0 ? (
         <EmptyResults filtered={active} />
       ) : (
-        <div className="flex flex-col gap-4">
+        <div ref={rows} className="flex flex-col gap-4">
           <RunRows
             runs={items}
             renderExtras={(run) => <RunHistoryExtras run={run} nowMs={nowMs} />}

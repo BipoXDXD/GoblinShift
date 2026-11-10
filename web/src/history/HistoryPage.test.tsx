@@ -10,6 +10,7 @@ import { renderRoutes } from "../test/renderRoutes";
 
 const RUN_A = "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a";
 const RUN_B = "1c8d4e2f-0000-4000-8000-0000000000bb";
+const RUN_C = "2d9e5f30-0000-4000-8000-0000000000cc";
 
 type Handler = (request: Request) => Response | null;
 
@@ -187,6 +188,59 @@ describe("Histórico", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(/indisponível/);
       expect(screen.getAllByRole("listitem")).toHaveLength(1);
       expect(screen.getByRole("button", { name: "Carregar mais" })).toBeVisible();
+    });
+
+    it("na última página, o foco vai para a primeira linha nova e o fim da lista é anunciado", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([
+              runBody({ id: RUN_B, recipe_id: "image-forge" }),
+              runBody({ id: RUN_C, recipe_id: "downloads-detox" }),
+            ])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Mais 2 execuções na lista. Fim da lista.",
+      );
+    });
+
+    it("numa página do meio, o foco vai para a primeira linha nova, sem anunciar o fim", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([runBody({ id: RUN_B, recipe_id: "image-forge" })], "pagina-3")
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(/^Mais 1 execução na lista\.$/);
+      expect(screen.getByRole("button", { name: "Carregar mais" })).toBeVisible();
+    });
+
+    it("última página vazia leva o foco à última linha da lista", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /^CSV Janitor, criada em / })).toHaveFocus();
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Nenhuma execução a mais. Fim da lista.",
+      );
     });
   });
 
