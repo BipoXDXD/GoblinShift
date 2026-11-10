@@ -1,9 +1,10 @@
 """O modelo de ameaças (docs/seguranca/modelo-de-ameacas.md) só cita evidência que existe.
 
-Três formas de citação, todas conferidas aqui:
+Formas de citação, todas conferidas aqui:
 - `arquivo.py::símbolo` (teste, função, classe ou `Classe.método`), resolvido pelo `ast`;
-- `arquivo:linha` seguido do trecho literal `` `texto` ``, que precisa estar naquela linha: um
-  deslocamento de linhas ou uma troca de código reprova em vez de deixar a citação mentindo;
+- `` `arquivo.py` `símbolo` `trecho` `` e `` `arquivo` `trecho` `` (fora do Python), com o trecho
+  exatamente uma vez no símbolo ou no arquivo (`tests/security/threat_citations.py`): editar
+  código acima não reprova, trocar o código citado sim; a forma `arquivo:linha` é recusada;
 - `docs/...`, que precisa existir.
 """
 
@@ -11,10 +12,11 @@ import ast
 import re
 from pathlib import Path
 
+from tests.security.threat_citations import citation_problems, count_code_citations
+
 ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT = ROOT / "docs" / "seguranca" / "modelo-de-ameacas.md"
 _SYMBOL_REF = re.compile(r"`((?:src|tests|deploy)/[\w/.-]+\.py)::([\w.]+)`")
-_LINE_REF = re.compile(r"`((?:src|deploy|docker)/[\w/.-]+):(\d+)`(?: `([^`]+)`)?")
 _DOC_REF = re.compile(r"`(docs/[\w/.-]+)`")
 
 
@@ -37,11 +39,11 @@ def _symbols(path: Path) -> set[str]:
     return names
 
 
-def test_documento_cita_simbolos_e_linhas() -> None:
+def test_documento_cita_simbolos_e_trechos() -> None:
     text = _text()
 
     assert len(_SYMBOL_REF.findall(text)) >= 100
-    assert len(_LINE_REF.findall(text)) >= 40
+    assert count_code_citations(text) >= 90
 
 
 def test_todo_simbolo_citado_existe() -> None:
@@ -54,16 +56,8 @@ def test_todo_simbolo_citado_existe() -> None:
     assert missing == []
 
 
-def test_toda_linha_citada_traz_o_trecho_que_esta_nela() -> None:
-    invalid = []
-    for file, line, excerpt in _LINE_REF.findall(_text()):
-        path = ROOT / file
-        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-        number = int(line)
-        if not excerpt or not 1 <= number <= len(lines) or excerpt not in lines[number - 1]:
-            invalid.append(f"{file}:{line} `{excerpt}`")
-
-    assert invalid == []
+def test_todo_trecho_citado_aparece_uma_vez_no_simbolo_ou_arquivo() -> None:
+    assert citation_problems(_text(), ROOT) == []
 
 
 def test_todo_documento_citado_existe() -> None:

@@ -36,6 +36,7 @@ from goblinshift.entrypoints.api.cookies import (
     LOGIN_COOKIE_PATH,
 )
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
+from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.entrypoints.api.wide_event import WideEventMiddleware, count_queries
@@ -71,9 +72,16 @@ def create_app(
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        yield
-        engine.dispose()
+    async def lifespan(running: FastAPI) -> AsyncGenerator[None]:
+        async with saturation_reporting(running.state.tracing.tracer):
+            yield
+        try:
+            engine.dispose()
+        finally:
+            # Por último: depois do encerramento, o processador descarta em silêncio todo span
+            # novo. O que rodar antes daqui na parada ainda entra no lote, inclusive a janela
+            # final de saturação, relatada ao sair do `async with` acima.
+            running.state.tracing.shut_down()
 
     app = FastAPI(
         title="GoblinShift",
@@ -142,6 +150,8 @@ def create_app(
     api.include_router(runs_artifacts.router)
     app.include_router(api)
 
-    tracer = configure_tracing(app, engine, settings, span_exporter)
-    app.state.run_finished = RunFinishedReporter(app.state.session_factory, user_hasher, tracer)
+    app.state.tracing = configure_tracing(app, engine, settings, span_exporter)
+    app.state.run_finished = RunFinishedReporter(
+        app.state.session_factory, user_hasher, app.state.tracing.tracer
+    )
     return app

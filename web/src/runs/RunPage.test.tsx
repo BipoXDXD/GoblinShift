@@ -518,6 +518,25 @@ describe("pré-visualização dos resultados", () => {
     expect(await axeViolations(box)).toEqual([]);
   });
 
+  it("PDF: a legenda com nome longo quebra linha em qualquer ponto", async () => {
+    // Sem espaço, o nome só cabe a 320 px quebrando dentro da palavra (WCAG 1.4.10). O jsdom
+    // não faz layout, então o teste confere a classe.
+    const longName =
+      "relatorio_clientes_consolidado_2026_novembro_final_revisado_pela_contabilidade.pdf";
+    setupPreview({ fileName: longName, previewName: "selecao.json" }, () =>
+      bytes(
+        JSON.stringify({
+          schema_version: 1,
+          path: longName,
+          pages: [{ input_position: 0, page_number: 1 }],
+        }),
+      ),
+    );
+
+    const caption = await screen.findByText(`Páginas de ${longName}: 1 página`);
+    expect(caption).toHaveClass("wrap-anywhere");
+  });
+
   it("PDF: mapa fora do formato mostra a falha", async () => {
     setupPreview({ fileName: "selecao.pdf", previewName: "selecao.json" }, () =>
       bytes(JSON.stringify({ pages: "todas" })),

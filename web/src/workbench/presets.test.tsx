@@ -1,13 +1,16 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
+import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
+import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -32,6 +35,11 @@ function sent(requests: readonly Request[], route: string): Request[] {
   return screenRequests(requests).filter(
     (request) => `${request.method} ${new URL(request.url).pathname}` === route,
   );
+}
+
+/** As regiões `role="status"` cujo texto é exatamente este. */
+function statusWith(text: string): HTMLElement[] {
+  return screen.getAllByRole("status").filter((region) => region.textContent === text);
 }
 
 async function openSaveDialog(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
@@ -75,6 +83,22 @@ describe("Bancada: Salvar preset", () => {
     expect(within(dialog).getByText(/Dê um nome ao preset\./)).toBeVisible();
     expect(within(dialog).getByLabelText("Nome do preset")).toHaveAttribute("aria-invalid", "true");
     expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
+  });
+
+  it("nome vazio leva o foco ao campo, que anuncia o erro pela descrição", async () => {
+    const { user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    const name = within(dialog).getByLabelText("Nome do preset");
+    const atFocus = recordDescriptionOnFocus(name);
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    expect(name).toHaveFocus();
+    // O erro já está no DOM e ligado ao campo quando o foco chega, e não só depois do render.
+    expect(atFocus.descriptions).toEqual([
+      expect.stringContaining("Dê um nome ao preset.") as unknown,
+    ]);
+    expect(name).toHaveAccessibleDescription(/Erro: Dê um nome ao preset\./);
   });
 
   it("nome com mais de 100 caracteres é recusado antes da API", async () => {
@@ -189,11 +213,65 @@ describe("Bancada aberta com um preset", () => {
   it("pré-preenche os parâmetros e diz de qual preset vieram", async () => {
     setup(`/bancada/csv-janitor?preset=${PRESET_ID}`);
 
-    const notice = await screen.findByText("Parâmetros do preset Clientes do mês.");
-    expect(notice).toBeVisible();
-    expect(notice).toHaveAttribute("role", "status");
+    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(";");
     expect(screen.getByLabelText("Colunas sem espaços nas pontas")).toHaveValue("nome");
+  });
+
+  it("anuncia a origem numa região viva que já existia antes de o preset chegar", async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: async () => {
+        await held;
+        return jsonResponse(presetBody());
+      },
+    });
+    await screen.findByText("Carregando o preset.");
+    const regionsBefore = screen.getAllByRole("status");
+
+    release();
+
+    // O leitor de tela só anuncia a mudança numa região que já conhecia: o texto entra num nó
+    // que existia (vazio) desde o "Carregando", e não num nó novo que já nasce com ele.
+    await waitFor(() => {
+      expect(statusWith("Parâmetros do preset Clientes do mês.")).toHaveLength(1);
+    });
+    expect(regionsBefore).toContain(statusWith("Parâmetros do preset Clientes do mês.")[0]);
+  });
+
+  it("o aviso de origem entra na região vazia só depois do atraso do anúncio", async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: async () => {
+        await held;
+        return jsonResponse(presetBody());
+      },
+    });
+    await screen.findByText("Carregando o preset.");
+    installAnnounceClock();
+    const notice = "Parâmetros do preset Clientes do mês.";
+
+    release();
+    await untilFakeClock(() => {
+      expect(screen.getByText(notice, { selector: "p" })).toBeVisible();
+    });
+
+    // Alguns leitores perdem o texto que chega logo depois de a região montar.
+    expect(statusWith(notice)).toHaveLength(0);
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_DELAY_MS - 1);
+    });
+    expect(statusWith(notice)).toHaveLength(0);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(statusWith(notice)).toHaveLength(1);
   });
 
   it("preset de outra receita abre com os parâmetros padrão e avisa", async () => {

@@ -1,5 +1,12 @@
 import type { ReactElement } from "react";
 
+/**
+ * Espera entre a região vazia e o texto. Alguns leitores (VoiceOver no Safari, NVDA no Firefox) perdem
+ * o texto que chega logo depois de a região montar, e uma mudança de foco cancela a fala pendente:
+ * quem anuncia junto de um desses eventos põe o texto depois desta espera.
+ */
+export const ANNOUNCE_DELAY_MS = 150;
+
 interface LiveRegionProps {
   /** Texto a anunciar; `null` deixa a região vazia, mas presente. */
   readonly message: string | null;

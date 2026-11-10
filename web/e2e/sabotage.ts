@@ -133,6 +133,89 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "tema: Esc não chega ao seletor (o painel fica aberto)",
+    spec: ["theme.spec.ts", "-g", "Esc fecha o seletor"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+          }
+        }, true);`,
+      );
+    },
+  },
+  {
+    name: "tema: o seletor não percebe o foco saindo (painel cobre o foco no celular)",
+    spec: ["theme.spec.ts", "-g", "sair do seletor com Tab"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `document.addEventListener("focusout", (event) => {
+          if (event.target instanceof Element && event.target.closest("details") !== null) {
+            event.stopPropagation();
+          }
+        }, true);`,
+      );
+    },
+  },
+  {
+    name: "reflow: nome longo da Bancada volta a ser cortado (truncate)",
+    spec: ["reflow.spec.ts", "-g", "Bancada"],
+    plant: (dist) => {
+      // O que o `truncate` fazia antes da correção, agora sobre a classe que o substituiu.
+      addStylesheet(
+        dist,
+        ".wrap-anywhere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+      );
+    },
+  },
+  {
+    name: "reflow: nome longo da Execução sem quebra dentro da palavra",
+    spec: ["reflow.spec.ts", "-g", "Execução"],
+    plant: (dist) => {
+      addStylesheet(dist, ".wrap-anywhere { overflow-wrap: normal; }");
+    },
+  },
+  {
+    name: "aviso: o botão volta a se chamar só Fechar",
+    spec: ["notice.spec.ts", "-g", "Fechar aviso esconde"],
+    dist: NOTICE_DIST,
+    env: { E2E_NOTICE: "1" },
+    plant: (dist) => {
+      // Sem o complemento para leitor de tela, o nome perde o que o botão fecha.
+      addStylesheet(dist, 'section[aria-label^="Aviso"] button .sr-only { display: none; }');
+    },
+  },
+  {
+    name: "aviso: fechar deixa o foco cair no <body>",
+    spec: ["notice.spec.ts", "-g", "Fechar aviso esconde"],
+    dist: NOTICE_DIST,
+    env: { E2E_NOTICE: "1" },
+    plant: (dist) => {
+      // Desliga só o foco no título que vem do clique em Fechar, como se o Layout não o pedisse;
+      // o foco da troca de rota (FocusHeading) continua.
+      addScript(
+        dist,
+        `let dismissing = false;
+        document.addEventListener("click", (event) => {
+          if (event.target instanceof Element && event.target.closest('section[aria-label^="Aviso"] button') !== null) {
+            dismissing = true;
+            setTimeout(() => { dismissing = false; }, 0);
+          }
+        }, true);
+        const focus = HTMLElement.prototype.focus;
+        HTMLElement.prototype.focus = function (options) {
+          if (dismissing && this.tagName === "H1") {
+            return;
+          }
+          focus.call(this, options);
+        };`,
+      );
+    },
+  },
+  {
     name: "CLS: aviso inserido no topo 200 ms depois do conteúdo",
     spec: ["layout-shift.spec.ts"],
     plant: (dist) => {
@@ -246,6 +329,51 @@ const CASES: readonly Case[] = [
         `const push = history.pushState.bind(history);
         history.pushState = (state, title, url) =>
           push(state, title, typeof url === "string" ? url.split("?")[0] : url);`,
+      );
+    },
+  },
+  {
+    name: "histórico: o foco do Carregar mais não chega à linha nova",
+    spec: ["history.spec.ts", "-g", "na última página"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `document.addEventListener("focusin", (event) => {
+          if (event.target instanceof HTMLAnchorElement && event.target.closest("li")) {
+            event.target.blur();
+          }
+        });`,
+      );
+    },
+  },
+  {
+    name: "Bancada: o parágrafo do aviso de origem vira região viva que nasce com o texto",
+    spec: ["reuse.spec.ts", "-g", "região viva que já existia"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `new MutationObserver(() => {
+          for (const paragraph of document.querySelectorAll("p")) {
+            if (paragraph.textContent?.startsWith("Parâmetros da execução de")) {
+              paragraph.setAttribute("role", "status");
+            }
+          }
+        }).observe(document.documentElement, { childList: true, subtree: true });`,
+      );
+    },
+  },
+  {
+    name: "tela que não abriu: o foco não chega ao título do erro",
+    spec: ["route-failure.spec.ts"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `document.addEventListener("focusin", (event) => {
+          if (event.target instanceof HTMLHeadingElement &&
+              event.target.textContent === "Não foi possível abrir esta tela") {
+            event.target.blur();
+          }
+        });`,
       );
     },
   },

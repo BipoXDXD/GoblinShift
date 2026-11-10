@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeParameters } from "../types";
 import type { CASE_MODES, DELIMITERS, FILTER_OPS, FORMULA_GUARDS } from "./schema";
 import {
-  csvJanitorFieldId,
+  csvJanitorField,
   parseCsvJanitor as parseWithLimits,
   type CsvJanitorFormValues,
   type CsvJanitorLimits,
@@ -168,7 +168,66 @@ describe("parseCsvJanitor", () => {
     );
 
     expect(issues).toEqual([
-      { fieldId: "csv-janitor-case_rules-1-column", message: "Informe a coluna." },
+      {
+        fieldId: "csv-janitor-case_rules-1-column",
+        label: "Regras de caixa, coluna (linha 2)",
+        message: "Informe a coluna.",
+      },
+    ]);
+  });
+
+  it("duas linhas de filtro sem coluna citam a linha de cada uma", () => {
+    const issues = issuesOf(
+      parseCsvJanitor(
+        values({
+          filters: [
+            { key: "a", column: "", op: "eq", value: "x" },
+            { key: "b", column: "", op: "eq", value: "y" },
+          ],
+        }),
+      ),
+    );
+
+    expect(issues).toEqual([
+      {
+        fieldId: "csv-janitor-filters-0-column",
+        label: "Filtros, coluna (linha 1)",
+        message: "Informe a coluna.",
+      },
+      {
+        fieldId: "csv-janitor-filters-1-column",
+        label: "Filtros, coluna (linha 2)",
+        message: "Informe a coluna.",
+      },
+    ]);
+  });
+
+  it("filtros demais apontam o botão de adicionar, com o nome do grupo", () => {
+    const filters = Array.from({ length: MAX_FILTERS + 1 }, (_, index) => ({
+      key: String(index),
+      column: "c",
+      op: "ne" as const,
+      value: "x",
+    }));
+
+    expect(issuesOf(parseCsvJanitor(values({ filters })))).toEqual([
+      {
+        fieldId: "csv-janitor-filters-adicionar",
+        label: "Filtros",
+        message: "Use no máximo 5 linhas.",
+      },
+    ]);
+  });
+
+  it("lista de colunas longa demais cita o campo", () => {
+    expect(
+      issuesOf(parseCsvJanitor(values({ output_columns: lines(MAX_LIST_COLUMNS + 1) }))),
+    ).toEqual([
+      {
+        fieldId: "csv-janitor-output_columns",
+        label: "Colunas finais, na ordem",
+        message: "Informe no máximo 100 colunas.",
+      },
     ]);
   });
 
@@ -200,22 +259,26 @@ describe("parseCsvJanitor com outros limites do catálogo", () => {
   });
 });
 
-describe("csvJanitorFieldId", () => {
+describe("csvJanitorField", () => {
   it.each([
-    [["input_delimiter"], "csv-janitor-input_delimiter"],
-    [["trim_columns", "3"], "csv-janitor-trim_columns"],
-    [["output_columns"], "csv-janitor-output_columns"],
-    [["case_rules"], "csv-janitor-case_rules-adicionar"],
-    [["case_rules", "2", "mode"], "csv-janitor-case_rules-2-mode"],
-    [["filters", 0, "value"], "csv-janitor-filters-0-value"],
-    [["filters", "0"], "csv-janitor-filters-0-op"],
-    [["filters", "0", "desconhecido"], "csv-janitor-filters-0-op"],
-    [["filters", "x"], "csv-janitor-filters-adicionar"],
-  ])("%j → %s", (path, expected) => {
-    expect(csvJanitorFieldId(path)).toBe(expected);
+    [["input_delimiter"], "csv-janitor-input_delimiter", "Delimitador dos arquivos de entrada"],
+    [["trim_columns", "3"], "csv-janitor-trim_columns", "Colunas sem espaços nas pontas"],
+    [["output_columns"], "csv-janitor-output_columns", "Colunas finais, na ordem"],
+    [["case_rules"], "csv-janitor-case_rules-adicionar", "Regras de caixa"],
+    [
+      ["case_rules", "2", "mode"],
+      "csv-janitor-case_rules-2-mode",
+      "Regras de caixa, modo (linha 3)",
+    ],
+    [["filters", 0, "value"], "csv-janitor-filters-0-value", "Filtros, valor (linha 1)"],
+    [["filters", "0"], "csv-janitor-filters-0-op", "Filtros, condição (linha 1)"],
+    [["filters", "0", "desconhecido"], "csv-janitor-filters-0-op", "Filtros, condição (linha 1)"],
+    [["filters", "x"], "csv-janitor-filters-adicionar", "Filtros"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(csvJanitorField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]]])("caminho sem campo %j → null", (path) => {
-    expect(csvJanitorFieldId(path)).toBeNull();
+    expect(csvJanitorField(path)).toBeNull();
   });
 });

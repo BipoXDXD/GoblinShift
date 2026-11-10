@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { SiteNotice } from "../notice/notice";
@@ -270,6 +271,22 @@ describe("Layout: aviso global", () => {
     await screen.findByRole("heading", { level: 1, name: "Histórico" });
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it("Fechar aviso leva o foco ao título da tela, não ao corpo da página", async () => {
+    setup(() => jsonResponse(meBody()), "/historico", {
+      ...INCIDENT,
+      id: "termos-2026-11",
+      kind: "terms-change",
+    });
+    const title = await screen.findByRole("heading", { level: 1, name: "Histórico" });
+    const close = screen.getByRole("button", { name: "Fechar aviso" });
+    close.focus();
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(screen.queryByRole("region", { name: /^Aviso/ })).toBeNull();
+    expect(title).toHaveFocus();
   });
 });
 

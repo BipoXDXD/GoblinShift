@@ -1,5 +1,5 @@
 import { CircleAlert } from "lucide-react";
-import { useEffect, type ReactElement } from "react";
+import { useLayoutEffect, type ReactElement } from "react";
 import {
   Link,
   Navigate,
@@ -17,7 +17,7 @@ import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { BrandLink } from "./BrandLink";
-import { pageTitleOf } from "./pageTitle";
+import { documentTitle, pageTitleOf } from "./pageTitle";
 import { acceptTermsPath, PATHS, signInPath } from "./paths";
 
 const T = TEXT.layout;
@@ -92,7 +92,12 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         </div>
       </header>
       {/* Vem do bundle, não da rede: sai na primeira pintura, sem empurrar o conteúdo (CLS). */}
-      <SiteNoticeBanner notice={notice} now={now} storage={browserStorage} />
+      <SiteNoticeBanner
+        notice={notice}
+        now={now}
+        storage={browserStorage}
+        onDismissed={focusScreenTitle}
+      />
       {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
           tela carrega e cresce. */}
       <main
@@ -116,6 +121,14 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
       </footer>
     </div>
   );
+}
+
+/**
+ * Foco no título da tela (o `h1` do FocusHeading, focável por script): é o começo do conteúdo,
+ * logo depois de onde a faixa fechada estava.
+ */
+function focusScreenTitle(): void {
+  document.getElementById(MAIN_ID)?.querySelector<HTMLElement>("h1")?.focus();
 }
 
 /**
@@ -145,13 +158,17 @@ function AccountLink(): ReactElement {
  */
 function useDocumentTitle(): void {
   const matches = useMatches();
+  const { key } = useLocation();
   const title = matches
     .map((match) => pageTitleOf(match.handle))
     .filter((candidate): candidate is string => candidate !== null)
     .at(-1);
-  useEffect(() => {
-    document.title = title === undefined ? T.brand : `${title} · ${T.brand}`;
-  }, [title]);
+  // Efeito de layout, que roda antes de todos os passivos: a tela de falha (RouteFailure) troca
+  // o título num efeito passivo e precisa vencer o título da rota que não abriu. Regrava a cada
+  // navegação: voltar à mesma rota depois de uma falha tira o título de erro.
+  useLayoutEffect(() => {
+    document.title = documentTitle(title);
+  }, [title, key]);
 }
 
 /** A tela da rota, ou o aceite dos termos se a conta ainda não aceitou a versão vigente. */

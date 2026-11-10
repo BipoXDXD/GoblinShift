@@ -74,16 +74,17 @@ def invalidated_connection() -> Exception:
     )
 
 
-def _returning(name: str) -> Callable[[], object]:
+# Os passos falsos aceitam e ignoram os argumentos nomeados dos reais (`should_stop`).
+def _returning(name: str) -> Callable[..., object]:
     counts = STEPS[name]
     if name in INT_STEPS:
         [value] = counts.values()
-        return lambda: value
-    return lambda: dict(counts)
+        return lambda **_: value
+    return lambda **_: dict(counts)
 
 
-def _raising(error: BaseException) -> Callable[[], object]:
-    def fail() -> object:
+def _raising(error: BaseException) -> Callable[..., object]:
+    def fail(**_: object) -> object:
         raise error
 
     return fail
@@ -233,7 +234,7 @@ def _counting_calls(
     for name in STEPS:
         step = _returning(name)
 
-        def record(name: str = name, step: Callable[[], object] = step) -> object:
+        def record(name: str = name, step: Callable[..., object] = step, **_: object) -> object:
             calls.append(name)
             return step()
 
@@ -262,7 +263,7 @@ def test_falha_de_conexao_pula_os_passos_de_banco_restantes(
     calls: list[str] = []
     _counting_calls(maintenance, monkeypatch, calls)
 
-    def unreachable() -> int:
+    def unreachable(**_: object) -> int:
         calls.append("reconcile_expired_leases")
         raise lost()
 

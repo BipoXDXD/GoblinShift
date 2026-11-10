@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { FormIssue } from "../../components/a11y/ErrorSummary";
+import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
 import type { RecipeDraft, RecipeParameters } from "../types";
 
@@ -80,10 +80,9 @@ export function parseDownloadsDetox(
   if (!result.success) {
     return {
       ok: false,
-      issues: result.error.issues.map((issue): FormIssue => ({
-        fieldId: downloadsDetoxFieldId(issue.path.map(String)),
-        message: issue.message,
-      })),
+      issues: result.error.issues.map((issue) =>
+        formIssue(downloadsDetoxField(issue.path.map(String)), issue.message),
+      ),
     };
   }
   return {
@@ -93,17 +92,24 @@ export function parseDownloadsDetox(
 }
 
 const ID_PREFIX = "downloads-detox";
-const FIELDS: ReadonlySet<string> = new Set<keyof DownloadsDetoxFormValues>([
-  "deduplicate",
-  "group_by",
-  "name_mode",
-  "name_prefix",
-]);
+// Os mesmos rótulos do formulário (DownloadsDetoxFields): o resumo de erros cita o campo por eles.
+const LABELS: Readonly<Record<keyof DownloadsDetoxFormValues, string>> = {
+  deduplicate: TEXT.downloadsDetox.deduplicate,
+  group_by: TEXT.downloadsDetox.groupBy,
+  name_mode: TEXT.downloadsDetox.nameMode,
+  name_prefix: TEXT.downloadsDetox.namePrefix,
+};
 
-/** Id do controle para um caminho de erro relativo a `parameters`; `null` fora do formulário. */
-export function downloadsDetoxFieldId(path: readonly (string | number)[]): string | null {
+/** Controle para um caminho de erro relativo a `parameters`; `null` fora do formulário. */
+export function downloadsDetoxField(path: readonly (string | number)[]): FormField | null {
   const [field] = path.map(String);
-  return field !== undefined && FIELDS.has(field) ? fieldId(field) : null;
+  return field !== undefined && isFormField(field)
+    ? { fieldId: fieldId(field), label: LABELS[field] }
+    : null;
+}
+
+function isFormField(field: string): field is keyof DownloadsDetoxFormValues {
+  return Object.hasOwn(LABELS, field);
 }
 
 export function fieldId(field: string): string {

@@ -25,7 +25,9 @@ Falha transitória do banco fora da supervisão (`record_start`, renovação no 
 desfecho) deixa a tentativa órfã, com a área de trabalho ocupada até a manutenção encerrá-la. O
 worker então pausa os claims por `orphan_cleanup_window` (lease, intervalo da manutenção e
 carência da parada), para a Run seguinte não receber `work_area_dirty` e gastar claims
-(runs/worker/claim_pause.py).
+(runs/worker/claim_pause.py). A pausa vive na memória e se perde no reinício; por isso, antes de
+cada claim, o worker também confere o estado da área de trabalho e não reivindica enquanto ela
+guarda alguma tentativa (runs/worker/work_area_gate.py).
 
 Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
 o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
@@ -45,7 +47,12 @@ from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import UserHasher, configure_logging, make_tracer_provider
+from goblinshift.platform.telemetry import (
+    UserHasher,
+    configure_logging,
+    make_tracer_provider,
+    shut_down_tracer_provider,
+)
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.claim import ClaimedAttempt, QueueListener, claim_next
 from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
@@ -56,6 +63,7 @@ from goblinshift.runs.worker.coordinator import (
 )
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from goblinshift.runs.worker.runner import STOP_GRACE, LocalRunner, Runner
+from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 
 logger = logging.getLogger("goblinshift.worker")
 
@@ -109,30 +117,31 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     )
     hasher = UserHasher(settings.user_hash_key())
     pause = claim_pause_for(settings)
-    try:
-        with (
-            process_tracer(settings, "goblinshift-worker") as tracer,
-            QueueListener(engine, settings.db_connect_timeout_s) as listener,
-        ):
-            # Um provider por processo: o span `attempt` e o `run.finished` saem pelo mesmo lote.
-            finished = RunFinishedReporter(factory, hasher, tracer)
-            coordinator = Coordinator(
-                factory,
-                storage,
-                runner,
-                config,
-                on_finished=finished.report,
-                tracer=tracer,
-                user_hasher=hasher,
-            )
-            logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
-            while not shutdown.is_set():
-                if not _work_once(factory, storage, lease, coordinator, finished, pause):
-                    logger.debug("fila vazia; aguardando NOTIFY")
-                    wait_for_work(listener.wait, shutdown, settings.worker_poll_interval_s)
-            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
-    finally:
-        engine.dispose()
+    gate = WorkAreaGate(runner)
+    # O tracing fecha por último, depois do pool: o encerramento descarta span emitido depois dele.
+    with process_tracer(settings, "goblinshift-worker") as tracer:
+        try:
+            with QueueListener(engine, settings.db_connect_timeout_s) as listener:
+                # Um provider por processo: o span `attempt` e o `run.finished` saem pelo mesmo
+                # lote.
+                finished = RunFinishedReporter(factory, hasher, tracer)
+                coordinator = Coordinator(
+                    factory,
+                    storage,
+                    runner,
+                    config,
+                    on_finished=finished.report,
+                    tracer=tracer,
+                    user_hasher=hasher,
+                )
+                logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
+                while not shutdown.is_set():
+                    if not _work_once(factory, storage, lease, coordinator, finished, pause, gate):
+                        logger.debug("fila vazia; aguardando NOTIFY")
+                        wait_for_work(listener.wait, shutdown, settings.worker_poll_interval_s)
+                logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
+        finally:
+            engine.dispose()
     logger.info("worker encerrado")
 
 
@@ -173,7 +182,7 @@ def claim_pause_for(settings: Settings) -> ClaimPause:
 
 @contextmanager
 def process_tracer(settings: Settings, default_service: str) -> Iterator[Tracer]:
-    """Tracer dos eventos amplos do processo (3.7); ao sair, exporta o lote pendente.
+    """Tracer dos eventos amplos do processo (3.7); ao sair, exporta o lote pendente com prazo.
 
     Sem endpoint OTLP (desenvolvimento e testes), um tracer que não grava.
     """
@@ -181,8 +190,7 @@ def process_tracer(settings: Settings, default_service: str) -> Iterator[Tracer]
     try:
         yield provider.get_tracer(__name__) if provider is not None else NoOpTracer()
     finally:
-        if provider is not None:
-            provider.shutdown()
+        shut_down_tracer_provider(provider)
 
 
 @contextmanager
@@ -202,14 +210,18 @@ def _work_once(
     coordinator: Coordinator,
     finished: RunFinishedReporter,
     pause: ClaimPause,
+    gate: WorkAreaGate,
 ) -> bool:
     """Uma volta do laço; `True` se havia trabalho (vale tentar de novo sem esperar).
 
-    Durante a pausa depois de uma tentativa órfã, a volta não reivindica e conta como fila vazia.
+    Durante a pausa depois de uma tentativa órfã, ou com a área de trabalho ainda ocupada (por
+    exemplo, depois de um reinício), a volta não reivindica e conta como fila vazia.
     """
     if pause.active:
         return False
     try:
+        if not gate.allows_claim():
+            return False
         claimed = claim_next(factory, storage, lease, on_finished=finished.report)
         if claimed is None:
             return False

@@ -3,10 +3,30 @@ import { useEffect, useId, useRef, type MouseEvent, type ReactElement } from "re
 
 import { TEXT } from "../../text";
 
-/** Um erro do formulário; `fieldId` aponta o controle a corrigir, ou `null` se não há um. */
-export interface FormIssue {
-  readonly fieldId: string | null;
+/** Controle de um formulário: o id e o texto do rótulo que a pessoa vê nele. */
+export interface FormField {
+  readonly fieldId: string;
+  readonly label: string;
+}
+
+interface FieldIssue extends FormField {
   readonly message: string;
+}
+
+interface LooseIssue {
+  readonly fieldId: null;
+  readonly message: string;
+}
+
+/**
+ * Um erro do formulário. Com campo, o resumo leva até ele e cita o rótulo: a mesma regra em dois
+ * campos (largura e altura) não pode virar dois links iguais (WCAG 2.4.4). Sem campo, é só texto.
+ */
+export type FormIssue = FieldIssue | LooseIssue;
+
+/** O erro no campo, ou solto quando o caminho não aponta um controle do formulário. */
+export function formIssue(field: FormField | null, message: string): FormIssue {
+  return field === null ? { fieldId: null, message } : { ...field, message };
 }
 
 interface ErrorSummaryProps {
@@ -58,7 +78,7 @@ export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactEleme
                 className="inline-flex min-h-11 items-center font-semibold text-danger-fg"
                 onClick={focusField(issue.fieldId)}
               >
-                {issue.message}
+                {TEXT.errorSummary.item(issue.label, startLowercase(issue.message))}
               </a>
             )}
           </li>
@@ -66,6 +86,16 @@ export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactEleme
       </ul>
     </div>
   );
+}
+
+const STARTS_WITH_ACRONYM = /^\p{Lu}{2}/u;
+
+// A mensagem vira continuação da frase depois do rótulo; sigla no começo ("PDF") fica como está.
+function startLowercase(message: string): string {
+  if (STARTS_WITH_ACRONYM.test(message)) {
+    return message;
+  }
+  return message.charAt(0).toLocaleLowerCase(TEXT.locale) + message.slice(1);
 }
 
 // O link de âncora só rola a página; o foco precisa ir ao controle para a pessoa corrigir dali.

@@ -217,7 +217,11 @@ describe("Bancada", () => {
 
     const summary = screen.getByRole("alert");
     expect(summary).toHaveFocus();
-    await user.click(within(summary).getByRole("link", { name: "Escolha pelo menos um arquivo." }));
+    await user.click(
+      within(summary).getByRole("link", {
+        name: "Arquivos de entrada: escolha pelo menos um arquivo.",
+      }),
+    );
     expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
     expect(runRequests(api.requests)).toHaveLength(0);
   });
@@ -231,7 +235,9 @@ describe("Bancada", () => {
 
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Espere o envio dos arquivos terminar.");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Arquivos de entrada: espere o envio dos arquivos terminar.",
+    );
   });
 
   it("cria a execução na ordem escolhida e abre a tela dela", async () => {
@@ -303,7 +309,11 @@ describe("Bancada", () => {
     await waitFor(() => {
       expect(summary).toHaveFocus();
     });
-    expect(within(summary).getByRole("link", { name: "a coluna 'x' não existe" })).toBeVisible();
+    expect(
+      within(summary).getByRole("link", {
+        name: "Colunas finais, na ordem: a coluna 'x' não existe",
+      }),
+    ).toBeVisible();
     expect(summary).toHaveTextContent("versão recusada");
     expect(
       screen.getByRole("textbox", { name: "Colunas finais, na ordem" }),
@@ -334,8 +344,10 @@ describe("Bancada", () => {
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
     const summary = await screen.findByRole("alert");
-    expect(summary).toHaveTextContent("Escolha uma das opções.");
-    expect(summary).toHaveTextContent("repete colunas: ['x']");
+    expect(summary).toHaveTextContent(
+      "Células que parecem fórmulas de planilha: escolha uma das opções.",
+    );
+    expect(summary).toHaveTextContent("Colunas finais, na ordem: repete colunas: ['x']");
     expect(summary).not.toHaveTextContent("Input should");
     expect(summary).not.toHaveTextContent("Value error");
   });
@@ -608,7 +620,9 @@ describe("Bancada", () => {
 
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Use no máximo 5 arquivos.");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Arquivos de entrada: use no máximo 5 arquivos.",
+    );
     expect(runRequests(api.requests)).toHaveLength(0);
   });
 
@@ -680,10 +694,32 @@ describe("Bancada", () => {
 
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
-    await screen.findByRole("link", { name: "O valor passa do máximo permitido." });
+    await screen.findByRole("link", {
+      name: "Largura máxima, em pixels: o valor passa do máximo permitido.",
+    });
     expect(
       screen.getByRole("textbox", { name: "Largura máxima, em pixels" }),
     ).toHaveAccessibleDescription(/Erro: O valor passa do máximo permitido\./);
+  });
+
+  it("Image Forge: largura e altura com o mesmo erro viram links com o nome de cada campo", async () => {
+    const { user } = await setup({ recipe: "image-forge" });
+    await user.clear(screen.getByRole("textbox", { name: "Largura máxima, em pixels" }));
+    await user.clear(screen.getByRole("textbox", { name: "Altura máxima, em pixels" }));
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    const summary = await screen.findByRole("alert");
+    expect(
+      within(summary).getByRole("link", {
+        name: "Largura máxima, em pixels: informe um número inteiro de 16 a 4096.",
+      }),
+    ).toHaveAttribute("href", "#image-forge-max_width");
+    expect(
+      within(summary).getByRole("link", {
+        name: "Altura máxima, em pixels: informe um número inteiro de 16 a 4096.",
+      }),
+    ).toHaveAttribute("href", "#image-forge-max_height");
   });
 
   it("Downloads Detox: aceita qualquer tipo e respeita o teto de bytes do catálogo", async () => {
@@ -704,7 +740,7 @@ describe("Bancada", () => {
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Os arquivos somam 5 bytes; o máximo por execução é 4 bytes.",
+      "Arquivos de entrada: os arquivos somam 5 bytes; o máximo por execução é 4 bytes.",
     );
     expect(runRequests(api.requests)).toHaveLength(0);
   });
@@ -792,10 +828,9 @@ describe("Bancada", () => {
 
     await user.click(screen.getByRole("button", { name: "Executar" }));
 
-    expect(await screen.findByRole("link", { name: /Peça ao menos uma saída/ })).toHaveAttribute(
-      "href",
-      "#media-mill-extract_audio",
-    );
+    expect(
+      await screen.findByRole("link", { name: /^Extrair o áudio: peça ao menos uma saída/ }),
+    ).toHaveAttribute("href", "#media-mill-extract_audio");
     expect(runRequests(api.requests)).toHaveLength(0);
   });
 });
