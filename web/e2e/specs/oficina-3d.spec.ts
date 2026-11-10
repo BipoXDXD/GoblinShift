@@ -1,7 +1,7 @@
 // Palco 3D da abertura (ADR 027, 030 e 038): a imagem estática da goblin escolhida chega com a
 // página e fica no lugar sem WebGL acelerado, com movimento reduzido ou se a cena falhar; com GPU,
 // a cena chega depois do `load`, sem CDN, sem violar a CSP e com a entrada parando em até 5 s.
-// Trocar de goblin no seletor baixa só o GLB dela; mouse, setas e o botão Girar mexem a vista.
+// Trocar de goblin no seletor baixa só o GLB dela; mouse, setas e os botões mexem a vista.
 import AxeBuilder from "@axe-core/playwright";
 
 import { E2E } from "../support/env";
@@ -34,7 +34,7 @@ test("com movimento reduzido fica a imagem e nada do 3D é pedido", async ({ pag
 
   await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "imagem");
   await expect(heroImage(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Girar" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Girar", exact: true })).toHaveCount(0);
 
   await castButton(page, "Nyx").click();
   await expect(castButton(page, "Nyx")).toHaveAttribute("aria-pressed", "true");
@@ -335,7 +335,7 @@ test.describe("com GPU", () => {
     await page.goto("/");
     await waitSceneStill(page);
     await holdFrames(page);
-    const spin = page.getByRole("button", { name: "Girar" });
+    const spin = page.getByRole("button", { name: "Girar", exact: true });
     const host = sceneHost(page);
     const before = await host.getAttribute("data-giro");
 
@@ -364,7 +364,7 @@ test.describe("com GPU", () => {
     await waitSceneStill(page);
 
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await expect(page.getByRole("button", { name: "Girar" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Girar", exact: true })).toHaveCount(0);
     await castButton(page, "Nyx").click();
 
     await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "pronto", {
@@ -375,6 +375,46 @@ test.describe("com GPU", () => {
     // Com a entrada, a goblin chegaria girando a partir de 52°; sem ela, já na pose de repouso.
     await expect(host).toHaveAttribute("data-movimento", "parado");
     await expect(host).toHaveAttribute("data-giro", "-20");
+  });
+
+  test("botões giram sem arrasto, também com movimento reduzido ligado depois da carga", async ({
+    page,
+    isMobile,
+  }) => {
+    await page.goto("/");
+    await waitSceneStill(page);
+    const host = sceneHost(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(page.getByRole("button", { name: "Girar", exact: true })).toHaveCount(0);
+    const group = page.getByRole("group", { name: "Girar e inclinar" });
+    const left = group.getByRole("button", { name: "Girar para a esquerda" });
+    const right = group.getByRole("button", { name: "Girar para a direita" });
+    await page.getByRole("button", { name: "Pose inicial" }).click();
+    await expect(host).toHaveAttribute("data-giro", "-20");
+    for (const button of [left, right]) {
+      const box = await button.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+
+    // Passos de 15°: -20 + 15 = -5; dois para a esquerda, -5 - 30 = -35. Nada de inclinação.
+    if (isMobile) await right.tap();
+    else await right.click();
+    await expect(host).toHaveAttribute("data-giro", "-5");
+    for (let step = 0; step < 2; step += 1) {
+      if (isMobile) await left.tap();
+      else await left.click();
+    }
+    await expect(host).toHaveAttribute("data-giro", "-35");
+    await expect(host).toHaveAttribute("data-inclinacao", "0");
+    await expect(host).toHaveAttribute("data-movimento", "parado");
+
+    await left.focus();
+    await page.keyboard.press("Enter");
+    await expect(host).toHaveAttribute("data-giro", "-50");
+    await expect(left).toBeFocused();
+    await expect(left).toHaveCSS("outline-style", "solid");
+    await expect(left).toHaveCSS("outline-width", "3px");
   });
 
   test("trocar de goblin e voltar devolve a GPU ao mesmo número de geometrias e texturas", async ({

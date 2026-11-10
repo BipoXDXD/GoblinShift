@@ -15,6 +15,9 @@ const READY: Environment3D = {
   supportsWebGL2: () => true,
 };
 
+/** Um passo de botão ou seta gira 15°, valor calculado à mão a partir da regra de 24 passos. */
+const DEGREE = Math.PI / 180;
+
 const REDUCED_MOTION: Environment3D = { ...READY, prefersReducedMotion: () => true };
 
 /** Ambiente pronto em que a pessoa liga o movimento reduzido no meio do caminho. */
@@ -214,7 +217,22 @@ describe("OficinaHero", () => {
 
     const stage = screen.getByRole("application", { name: "Rúbia em 3D" });
     expect(stage).toHaveAttribute("tabindex", "0");
-    expect(stage).toHaveAccessibleDescription(TEXT.art.stage.hint);
+    expect(stage).toHaveAccessibleDescription(
+      "Arraste ou use os botões para girar e inclinar. Com o foco aqui, as setas também giram; Home volta à pose inicial.",
+    );
+  });
+
+  it("pronta, o grupo Girar e inclinar tem os quatro botões, na ordem esquerda, direita, cima, baixo", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    const group = screen.getByRole("group", { name: "Girar e inclinar" });
+    expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Girar para a esquerda",
+      "Girar para a direita",
+      "Inclinar para ver de cima",
+      "Inclinar para ver de baixo",
+    ]);
   });
 
   it("trocar de goblin carrega só o modelo dela, com a imagem dela enquanto carrega", async () => {
@@ -257,7 +275,7 @@ describe("OficinaHero", () => {
     expect(screen.getByRole("img", { name: /^Jade, goblin/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: TEXT.art.stage.spin })).toBeNull();
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
-    expect(screen.queryByRole("group", { name: TEXT.art.stage.tiltLabel })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Girar e inclinar" })).toBeNull();
     expect(scene.host()).not.toHaveClass("cursor-grab");
     expect(scene.host()).not.toHaveClass("touch-pan-y");
 
@@ -283,7 +301,7 @@ describe("OficinaHero", () => {
 
     expect(scene.host()).not.toHaveClass("cursor-grab");
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
-    expect(screen.queryByRole("group", { name: TEXT.art.stage.tiltLabel })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Girar e inclinar" })).toBeNull();
   });
 
   it("se o chunk da cena falhar, fica a imagem estática", async () => {
@@ -311,7 +329,7 @@ describe("OficinaHero", () => {
 
     expect(heroState(container)).toBe("falhou");
     expect(screen.queryByRole("button", { name: TEXT.art.stage.reset })).toBeNull();
-    expect(screen.queryByRole("group", { name: TEXT.art.stage.tiltLabel })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Girar e inclinar" })).toBeNull();
   });
 
   it("se o contexto WebGL se perder girando, libera a cena na hora, e só uma vez", async () => {
@@ -342,6 +360,8 @@ describe("OficinaHero", () => {
   );
 
   it.each([
+    ["Girar para a esquerda", "ArrowLeft"],
+    ["Girar para a direita", "ArrowRight"],
     [TEXT.art.stage.tiltUp, "ArrowUp"],
     [TEXT.art.stage.tiltDown, "ArrowDown"],
   ])("%s reutiliza a pose com clique, Enter e Espaço", async (label, key) => {
@@ -414,6 +434,22 @@ describe("OficinaHero", () => {
     expect(scene.handle.setReducedMotion).toHaveBeenLastCalledWith(true);
     expect(screen.queryByRole("button", { name: TEXT.art.stage.spin })).toBeNull();
     expect(screen.getByRole("button", { name: TEXT.art.stage.reset })).toBeInTheDocument();
+  });
+
+  it("com movimento reduzido ligado depois da carga, os botões de girar ficam e giram em passos", async () => {
+    const scene = fakeScene();
+    const motion = reducibleMotion();
+    await renderReady(scene, motion.environment);
+
+    act(() => {
+      motion.reduce();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Girar para a esquerda" }));
+    await userEvent.click(screen.getByRole("button", { name: "Girar para a direita" }));
+
+    expect(scene.handle.turn).toHaveBeenNthCalledWith(1, { yaw: -15 * DEGREE, pitch: 0 });
+    expect(scene.handle.turn).toHaveBeenNthCalledWith(2, { yaw: 15 * DEGREE, pitch: 0 });
+    expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(false);
   });
 
   it("sem movimento reduzido, a cena sabe que pode tocar a entrada", async () => {
