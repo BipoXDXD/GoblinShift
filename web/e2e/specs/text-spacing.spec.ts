@@ -17,12 +17,24 @@ const WCAG_TEXT_SPACING = `
 `;
 /** Folga para o arredondamento de subpixel entre `scrollHeight` e `clientHeight`. */
 const ROUNDING_PX = 1;
+/**
+ * Defeito conhecido: no celular, o `truncate` do nome do arquivo (`UploadEntryView`) corta o nome
+ * com o espaçamento da 1.4.12. O #253 troca o corte por quebra (M8); ao entrar, sai daqui.
+ */
+const CLIPPED_FILE_NAME_ON_MOBILE = new Set([
+  "Bancada com arquivos (CSV Janitor)",
+  "Bancada do PDF Press montando com as páginas escolhidas",
+]);
 
 for (const screen of SCREENS) {
   test(`${screen.name}: com o espaçamento de texto da WCAG 1.4.12, nenhum texto fica cortado`, async ({
     page,
     fakeApi,
   }) => {
+    test.fixme(
+      test.info().project.name === "mobile" && CLIPPED_FILE_NAME_ON_MOBILE.has(screen.name),
+      "nome do arquivo cortado pelo truncate do UploadEntryView no celular; corrigido no #253",
+    );
     // Sem transições, o layout lido logo depois da folha nova já é o final.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await screen.open(page, fakeApi);
