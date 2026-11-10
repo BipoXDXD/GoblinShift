@@ -732,7 +732,8 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
         calls.append((args, kwargs))
         raise ProviderRequestedError
 
-    monkeypatch.setattr(maintenance, "make_tracer_provider", stop_at_provider)
+    # A manutenção cria o provider pelo `process_tracer` do worker.
+    monkeypatch.setattr(worker, "make_tracer_provider", stop_at_provider)
 
     with pytest.raises(ProviderRequestedError):
         maintenance.serve(TEST_SETTINGS, Mock(), ShutdownFlag())
