@@ -33,9 +33,10 @@ describe("findRecipe", () => {
   });
 
   it("traduz o caminho do servidor para o campo da receita", () => {
-    expect(findRecipe("csv-janitor")?.fieldIdFor(["filters", "0", "value"])).toBe(
-      "csv-janitor-filters-0-value",
-    );
+    expect(findRecipe("csv-janitor")?.fieldFor(["filters", "0", "value"])).toEqual({
+      fieldId: "csv-janitor-filters-0-value",
+      label: "Filtros, valor (linha 1)",
+    });
   });
 });
 

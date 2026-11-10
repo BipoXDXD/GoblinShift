@@ -6,7 +6,7 @@ import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
-import { expectHeadingFocused } from "../test/focus";
+import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 import { API_KEYS_QUERY_KEY } from "./api";
@@ -564,10 +564,12 @@ describe("Acesso: chave nova", () => {
     const summary = await within(form).findByRole("alert");
     expect(summary).toHaveFocus();
     expect(
-      within(summary).getByRole("link", { name: "Escolha pelo menos um escopo." }),
+      within(summary).getByRole("link", { name: "Escopos: escolha pelo menos um escopo." }),
     ).toBeVisible();
     expect(
-      within(summary).getByRole("link", { name: "Informe um número inteiro de 1 a 90." }),
+      within(summary).getByRole("link", {
+        name: "Validade, em dias: informe um número inteiro de 1 a 90.",
+      }),
     ).toBeVisible();
     expect(sent(api.requests, "POST /api/v1/api-keys")).toEqual([]);
   });
@@ -703,19 +705,76 @@ describe("Acesso: excluir conta", () => {
     return screen.getByRole("dialog", { name: "Excluir a conta?" });
   }
 
-  it("sem a frase digitada, a confirmação fica aria-disabled e nada é enviado", async () => {
+  it("sem a frase, a confirmação fica ativa; confirmar não envia e leva o foco ao campo com o erro", async () => {
     const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
     const dialog = await openDialog(user);
     const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
     expect(phrase).toHaveFocus();
 
+    // Padrão GOV.UK: o botão não se diz indisponível; a validação acontece ao confirmar.
     const confirm = within(dialog).getByRole("button", { name: "Excluir conta" });
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
-    await user.type(phrase, "excluir");
+    expect(confirm).not.toHaveAttribute("aria-disabled", "true");
     await user.click(confirm);
 
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(phrase).toHaveFocus();
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    expect(phrase).toHaveAccessibleDescription(
+      "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+    );
+    expect(confirm).not.toHaveAttribute("aria-disabled", "true");
     expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("o erro da frase some quando a frase passa a conferir", async () => {
+    const { user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
+    await user.type(phrase, "excluir");
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(phrase, " minha cont");
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    await user.type(phrase, "a");
+
+    expect(phrase).not.toHaveAttribute("aria-invalid");
+    expect(within(dialog).queryByText(/A frase não confere\./)).toBeNull();
+  });
+
+  it("frase errada: confirmar mostra o erro no campo, com o foco nele, e nada é enviado", async () => {
+    const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
+    await user.type(phrase, "excluir minha conta.");
+    const atFocus = recordDescriptionOnFocus(phrase);
+
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+
+    expect(phrase).toHaveFocus();
+    // O erro já está no DOM e ligado ao campo quando o foco chega, e não só depois do render.
+    expect(atFocus.descriptions).toEqual([
+      expect.stringContaining("A frase não confere.") as unknown,
+    ]);
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    expect(phrase).toHaveAccessibleDescription(
+      "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+    );
+    expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("o erro da frase some ao cancelar e reabrir o diálogo", async () => {
+    const { user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    expect(within(dialog).getByText(/A frase não confere\./)).toBeVisible();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    const reopened = await openDialog(user);
+
+    expect(within(reopened).queryByText(/A frase não confere\./)).toBeNull();
+    expect(within(reopened).getByLabelText("Digite “excluir minha conta”")).not.toHaveAttribute(
+      "aria-invalid",
+    );
   });
 
   it("com a frase, exclui (202), encerra a sessão local e mostra a exclusão pedida", async () => {
@@ -782,6 +841,11 @@ describe("Acesso: excluir conta", () => {
       expect(sent(api.requests, "DELETE /api/v1/me")).toHaveLength(1);
     });
 
+    // Só o pedido em curso bloqueia a confirmação.
+    expect(within(dialog).getByRole("button", { name: "Excluindo…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     expect(escapeIsBlocked(dialog)).toBe(true);
     forceClose(dialog);
     expect(screen.queryByRole("dialog")).toBeNull();

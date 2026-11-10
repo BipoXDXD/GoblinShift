@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeDraft, RecipeParameters } from "../types";
 import type { AUDIO_FORMATS, THUMBNAIL_COUNTS } from "./schema";
 import {
-  mediaMillFieldId,
+  mediaMillField,
   parseMediaMill,
   type MediaMillFormValues,
   type MediaMillSettings,
@@ -80,6 +80,7 @@ describe("parseMediaMill", () => {
     expect(issues).toEqual([
       {
         fieldId: "media-mill-audio_stream_index",
+        label: "Faixa de áudio",
         message: "Deixe vazio ou informe um número inteiro de 0 a 15.",
       },
     ]);
@@ -107,6 +108,7 @@ describe("parseMediaMill", () => {
     expect(issues).toEqual([
       {
         fieldId: "media-mill-extract_audio",
+        label: "Extrair o áudio",
         message: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
       },
     ]);
@@ -120,13 +122,15 @@ describe("parseMediaMill", () => {
   });
 });
 
-describe("mediaMillFieldId", () => {
+describe("mediaMillField", () => {
   it.each([
-    [["audio_stream_index"], "media-mill-audio_stream_index"],
-    [["thumbnail_count"], "media-mill-thumbnail_count"],
-    [[], null],
-    [["inventado"], null],
-  ])("%j → %s", (path, id) => {
-    expect(mediaMillFieldId(path)).toBe(id);
+    [["audio_stream_index"], "media-mill-audio_stream_index", "Faixa de áudio"],
+    [["thumbnail_count"], "media-mill-thumbnail_count", "Miniaturas"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(mediaMillField(path)).toEqual({ fieldId, label });
+  });
+
+  it.each([[[]], [["inventado"]]])("caminho sem campo %j → null", (path) => {
+    expect(mediaMillField(path)).toBeNull();
   });
 });

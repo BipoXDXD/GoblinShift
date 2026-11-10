@@ -1,22 +1,23 @@
 import type { ReactElement } from "react";
 
 import type { CatalogVersion } from "../catalog/api";
+import type { FormField } from "../components/a11y/ErrorSummary";
 import { inputLimitsOf, type InputLimits } from "../catalog/inputLimits";
 import { TEXT } from "../text";
 import { CsvJanitorFields } from "./csv-janitor/CsvJanitorFields";
-import { csvJanitorFieldId, parseCsvJanitor } from "./csv-janitor/schema";
+import { csvJanitorField, parseCsvJanitor } from "./csv-janitor/schema";
 import { csvJanitorSettings } from "./csv-janitor/settings";
 import { DownloadsDetoxFields } from "./downloads-detox/DownloadsDetoxFields";
-import { downloadsDetoxFieldId, parseDownloadsDetox } from "./downloads-detox/schema";
+import { downloadsDetoxField, parseDownloadsDetox } from "./downloads-detox/schema";
 import { downloadsDetoxSettings } from "./downloads-detox/settings";
 import { ImageForgeFields } from "./image-forge/ImageForgeFields";
 import { PdfPressFields } from "./pdf-press/PdfPressFields";
-import { parsePdfPress, pdfPressFieldId } from "./pdf-press/schema";
+import { parsePdfPress, pdfPressField } from "./pdf-press/schema";
 import { pdfPressSettings } from "./pdf-press/settings";
-import { imageForgeFieldId, parseImageForge } from "./image-forge/schema";
+import { imageForgeField, parseImageForge } from "./image-forge/schema";
 import { imageForgeSettings } from "./image-forge/settings";
 import { MediaMillFields } from "./media-mill/MediaMillFields";
-import { mediaMillFieldId, parseMediaMill } from "./media-mill/schema";
+import { mediaMillField, parseMediaMill } from "./media-mill/schema";
 import { mediaMillSettings } from "./media-mill/settings";
 import type {
   RecipeCommandFor,
@@ -44,8 +45,8 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly numberedInputs?: true;
   /** `null` quando o catálogo não traz a versão num formato que o formulário conheça. */
   readonly formFor: (version: CatalogVersion) => RecipeForm | null;
-  /** Id do controle para um caminho relativo a `parameters`; `null` se não for um campo. */
-  readonly fieldIdFor: (path: readonly string[]) => string | null;
+  /** Controle (id e rótulo) de um caminho relativo a `parameters`; `null` se não for um campo. */
+  readonly fieldFor: (path: readonly string[]) => FormField | null;
   /**
    * Parâmetros que citam uploads da execução (o `select` do PDF Press): só valem com aqueles
    * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
@@ -93,7 +94,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseCsvJanitor(settings.defaults, settings.limits),
       Fields: CsvJanitorFields,
     }),
-    fieldIdFor: csvJanitorFieldId,
+    fieldFor: csvJanitorField,
   },
   "image-forge": {
     id: "image-forge",
@@ -106,7 +107,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseImageForge(settings.defaults, settings),
       Fields: ImageForgeFields,
     }),
-    fieldIdFor: imageForgeFieldId,
+    fieldFor: imageForgeField,
   },
   "downloads-detox": {
     id: "downloads-detox",
@@ -119,7 +120,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseDownloadsDetox(settings.defaults, settings),
       Fields: DownloadsDetoxFields,
     }),
-    fieldIdFor: downloadsDetoxFieldId,
+    fieldFor: downloadsDetoxField,
   },
   "pdf-press": {
     id: "pdf-press",
@@ -133,7 +134,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parsePdfPress(settings.defaults, settings, []),
       Fields: PdfPressFields,
     }),
-    fieldIdFor: pdfPressFieldId,
+    fieldFor: pdfPressField,
     uploadBoundParameters: ["select"],
   },
   "media-mill": {
@@ -147,7 +148,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseMediaMill(settings.defaults, settings),
       Fields: MediaMillFields,
     }),
-    fieldIdFor: mediaMillFieldId,
+    fieldFor: mediaMillField,
   },
 };
 

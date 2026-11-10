@@ -77,8 +77,8 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
   const issues: FormIssue[] = [
     ...(errors.scopes === null
       ? []
-      : [{ fieldId: firstScopeId(ids.scopes), message: errors.scopes }]),
-    ...(errors.days === null ? [] : [{ fieldId: ids.days, message: errors.days }]),
+      : [{ fieldId: firstScopeId(ids.scopes), label: T.scopes, message: errors.scopes }]),
+    ...(errors.days === null ? [] : [{ fieldId: ids.days, label: T.days, message: errors.days }]),
   ];
   return (
     <form

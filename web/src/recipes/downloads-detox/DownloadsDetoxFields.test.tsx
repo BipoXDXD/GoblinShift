@@ -102,6 +102,7 @@ describe("DownloadsDetoxFields", () => {
       issues: [
         {
           fieldId: "downloads-detox-name_prefix",
+          label: "Prefixo da numeração",
           message: "O prefixo não pode começar com ponto.",
         },
       ],

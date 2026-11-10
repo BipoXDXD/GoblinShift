@@ -8,6 +8,7 @@ import { catalogHandler } from "../test/catalog";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
+import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
@@ -75,6 +76,22 @@ describe("Bancada: Salvar preset", () => {
     expect(within(dialog).getByText(/Dê um nome ao preset\./)).toBeVisible();
     expect(within(dialog).getByLabelText("Nome do preset")).toHaveAttribute("aria-invalid", "true");
     expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
+  });
+
+  it("nome vazio leva o foco ao campo, que anuncia o erro pela descrição", async () => {
+    const { user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    const name = within(dialog).getByLabelText("Nome do preset");
+    const atFocus = recordDescriptionOnFocus(name);
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    expect(name).toHaveFocus();
+    // O erro já está no DOM e ligado ao campo quando o foco chega, e não só depois do render.
+    expect(atFocus.descriptions).toEqual([
+      expect.stringContaining("Dê um nome ao preset.") as unknown,
+    ]);
+    expect(name).toHaveAccessibleDescription(/Erro: Dê um nome ao preset\./);
   });
 
   it("nome com mais de 100 caracteres é recusado antes da API", async () => {

@@ -23,6 +23,7 @@ export const TEXT = {
   },
   errorSummary: {
     title: "Corrija os itens abaixo antes de continuar.",
+    item: (label: string, message: string) => `${label}: ${message}`,
   },
   failure: {
     network: "Não foi possível falar com o servidor. Confira a conexão e tente de novo.",
@@ -473,6 +474,7 @@ export const TEXT = {
     op: (row: number) => `Condição (linha ${String(row)})`,
     value: (row: number) => `Valor (linha ${String(row)})`,
     removeRow: (row: number) => `Remover linha ${String(row)}`,
+    inRow: (list: string, field: string) => `${list}, ${field.toLocaleLowerCase(TEXT.locale)}`,
     errors: {
       columnRequired: "Informe a coluna.",
       tooManyColumns: (max: number) => `Informe no máximo ${String(max)} colunas.`,
@@ -769,6 +771,7 @@ export const TEXT = {
       dialogBody: "Não dá para desfazer. Para confirmar, digite a frase abaixo.",
       phrase: "excluir minha conta",
       phraseLabel: (phrase: string) => `Digite “${phrase}”`,
+      phraseMismatch: (phrase: string) => `A frase não confere. Digite “${phrase}” para confirmar.`,
       confirm: "Excluir conta",
       deleting: "Excluindo…",
       cancel: "Cancelar",
