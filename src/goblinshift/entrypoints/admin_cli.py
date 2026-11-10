@@ -33,13 +33,19 @@ e novos dos itens citados. `usage` imprime, separados por tab, o consumo das úl
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
-segredo obrigatório, com uma linha em stderr que nomeia a variável.
+segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
+`gs-admin: interrompido`. Qualquer outra falha sai com 4
+e uma linha em stderr só com o tipo do erro e, se vier do PostgreSQL, o SQLSTATE: sem stack trace
+nem mensagem, que pode trazer SQL, host ou valores do usuário (3.7). O que já foi gravado antes
+da falha fica gravado; `block` e `request-deletion` completam o que faltou se repetidos.
 """
 
 import argparse
+import logging
 import re
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -75,7 +81,12 @@ from goblinshift.identity.accounts import (
 )
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import MissingSecretError, Settings
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import (
+    UserHasher,
+    database_sqlstate,
+    is_database_error,
+    omit_database_error_detail,
+)
 from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
@@ -90,6 +101,8 @@ EXIT_OK = 0
 EXIT_NOT_FOUND = 1
 EXIT_USAGE = 2
 EXIT_MISSING_SECRET = 3
+EXIT_FAILURE = 4
+EXIT_INTERRUPTED = 130
 # HMAC-SHA256 em hexadecimal, como o `UserHasher` escreve nos eventos.
 _USER_HASH = re.compile(r"[0-9a-f]{64}")
 _FROM_STDIN = "-"
@@ -111,10 +124,44 @@ type Command = Callable[[argparse.Namespace, _Context], int]
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _argument_parser().parse_args(argv)
+    with _stderr_logging():
+        try:
+            return _run_command(args)
+        except MissingSecretError as error:
+            return _fail(EXIT_MISSING_SECRET, str(error))
+        except KeyboardInterrupt:
+            # A cadeia pode trazer um erro de banco ainda propagando, com SQL e parâmetros.
+            return _fail(EXIT_INTERRUPTED, "interrompido")
+        except Exception as error:
+            return _fail(EXIT_FAILURE, _describe_failure(error))
+
+
+@contextmanager
+def _stderr_logging() -> Iterator[None]:
+    """Logs de aviso para cima (o pool do SQLAlchemy, por exemplo) em uma linha no stderr.
+
+    Sem handler, o `logging.lastResort` escreveria o traceback e a mensagem crua do psycopg, com
+    o repr da conexão. O filtro da telemetria tira o repr; o formatador, a exceção. Não usa o
+    JSON de `configure_logging`, que leva os frames e misturaria JSON às linhas do stderr.
+    """
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(_OneLineFormatter())
+    handler.addFilter(omit_database_error_detail)
+    root = logging.getLogger()
+    root.addHandler(handler)
     try:
-        return _run_command(args)
-    except MissingSecretError as error:
-        return _fail(EXIT_MISSING_SECRET, str(error))
+        yield
+    finally:
+        root.removeHandler(handler)
+
+
+class _OneLineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        line = f"gs-admin: {record.levelname.lower()} em {record.name}: {record.getMessage()}"
+        exception = record.exc_info[1] if record.exc_info else None
+        if exception is None:
+            return line
+        return f"{line} ({_type_and_sqlstate(exception)})"
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -386,6 +433,19 @@ def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime
     record_audit_event(
         session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
     )
+
+
+def _describe_failure(error: Exception) -> str:
+    if not is_database_error(error):
+        return f"falha inesperada ({type(error).__qualname__}); detalhes omitidos"
+    return f"falha no banco de dados ({_type_and_sqlstate(error)})"
+
+
+def _type_and_sqlstate(error: BaseException) -> str:
+    """Só o tipo e o SQLSTATE: a mensagem pode trazer SQL, host ou valores do usuário."""
+    kind = type(error).__qualname__
+    sqlstate = database_sqlstate(error)
+    return kind if sqlstate is None else f"{kind}, SQLSTATE {sqlstate}"
 
 
 def _fail(exit_code: int, message: str) -> int:
