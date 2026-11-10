@@ -5,7 +5,7 @@ import type { FailedDeletion } from "../upload/useUploadBatch";
 import { DeletionFailures } from "./DeletionFailures";
 
 // Sem espaço: só cabe a 320 px se quebrar dentro da palavra (WCAG 1.4.10). O jsdom não faz
-// layout, então o teste confere a classe; a quebra medida fica no reflow.spec.ts.
+// layout, então o teste confere a classe.
 const LONG_NAME =
   "relatorio_clientes_consolidado_2026_novembro_final_revisado_pela_contabilidade_v3.csv";
 
