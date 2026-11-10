@@ -127,11 +127,14 @@ function HistoryResults({
       setAnnouncement(null);
     });
     // Na última página o "Carregar mais" some com o foco (WCAG 2.4.3): em toda página, o foco
-    // segue para a primeira linha nova, ou para a última da lista se nada chegou.
+    // segue para a primeira linha nova, ou para a última da lista se nada chegou. Sem achar a
+    // linha pelo `href`, ele volta ao título da tela em vez de cair no `<body>`.
     const target = loaded.at(0) ?? result.data?.pages.flatMap((entry) => entry.data).at(-1);
-    if (target !== undefined) {
-      rows.current?.querySelector<HTMLAnchorElement>(`a[href="${runPath(target.id)}"]`)?.focus();
-    }
+    const row =
+      target === undefined
+        ? null
+        : rows.current?.querySelector<HTMLAnchorElement>(`a[href="${runPath(target.id)}"]`);
+    (row ?? rows.current?.closest("main")?.querySelector<HTMLHeadingElement>("h1"))?.focus();
     // A mudança de foco cancela a fala pendente em alguns leitores: o anúncio vem depois dela.
     announceTimer.current = setTimeout(() => {
       setAnnouncement(message);
