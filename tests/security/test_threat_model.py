@@ -1,20 +1,24 @@
 """O modelo de ameaças (docs/seguranca/modelo-de-ameacas.md) só cita evidência que existe.
 
 Formas de citação, todas conferidas aqui:
-- `arquivo.py::símbolo` (teste, função, classe ou `Classe.método`), resolvido pelo `ast`;
+- `arquivo.py::símbolo` (teste, função, classe, `Classe.método`, função aninhada ou nome
+  atribuído), resolvido por `resolve_symbol`, a mesma regra da forma com trecho: definido uma vez;
 - `` `arquivo.py` `símbolo` `trecho` `` e `` `arquivo` `trecho` `` (fora do Python), com o trecho
   exatamente uma vez no símbolo ou no arquivo (`tests/security/threat_citations.py`): editar
   código acima não reprova, trocar o código citado sim; a forma `arquivo:linha` é recusada;
 - `docs/...`, que precisa existir.
 """
 
-import ast
 import re
 from pathlib import Path
 
 import pytest
 
-from tests.security.threat_citations import citation_problems, count_code_citations
+from tests.security.threat_citations import (
+    citation_problems,
+    count_code_citations,
+    resolve_symbol,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT = ROOT / "docs" / "seguranca" / "modelo-de-ameacas.md"
@@ -26,21 +30,6 @@ def _text() -> str:
     return DOCUMENT.read_text(encoding="utf-8")
 
 
-def _symbols(path: Path) -> set[str]:
-    """Nomes definidos no módulo, com `Classe.método` para os métodos."""
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            names.add(node.name)
-        if isinstance(node, ast.ClassDef):
-            names.update(
-                f"{node.name}.{item.name}"
-                for item in node.body
-                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
-            )
-    return names
-
-
 def test_documento_cita_simbolos_e_trechos() -> None:
     text = _text()
 
@@ -49,11 +38,12 @@ def test_documento_cita_simbolos_e_trechos() -> None:
 
 
 def _missing_symbols(document: str, root: Path) -> list[str]:
-    """As citações `arquivo.py::símbolo` cujo arquivo ou símbolo não existe."""
+    """As citações `arquivo.py::símbolo` cujo arquivo não existe ou cujo símbolo não é único."""
     return [
         f"{file}::{name}"
         for file, name in _SYMBOL_REF.findall(document)
-        if not (root / file).is_file() or name not in _symbols(root / file)
+        if not (root / file).is_file()
+        or isinstance(resolve_symbol((root / file).read_text(encoding="utf-8"), name), str)
     ]
 
 
@@ -107,3 +97,16 @@ def test_simbolo_citado_por_dois_pontos_e_encontrado(module_root: Path, symbol: 
 @pytest.mark.parametrize("citation", ["src/mod.py::Store.close", "src/falta.py::guard"])
 def test_simbolo_ou_arquivo_inexistente_e_listado(module_root: Path, citation: str) -> None:
     assert _missing_symbols(f"`{citation}`", module_root) == [citation]
+
+
+# As duas formas de citação resolvem o símbolo pela mesma regra (`resolve_symbol`).
+@pytest.mark.parametrize("symbol", ["guard.inner", "LIMIT"])
+def test_funcao_aninhada_e_nome_atribuido_sao_encontrados(module_root: Path, symbol: str) -> None:
+    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == []
+
+
+@pytest.mark.parametrize("symbol", ["inner", "twin"])
+def test_simbolo_aninhado_sem_escopo_ou_definido_duas_vezes_e_listado(
+    module_root: Path, symbol: str
+) -> None:
+    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == [f"src/mod.py::{symbol}"]

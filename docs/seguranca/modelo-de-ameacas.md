@@ -6,7 +6,7 @@ mitigação no código; **lacuna aceita** marca risco assumido por decisão regi
 ameaça que o desenho elimina.
 
 Formas de citação, todas conferidas por `tests/security/test_threat_model.py`:
-`arquivo.py::símbolo` (teste, função, classe ou `Classe.método`, resolvido pelo `ast`);
+`arquivo.py::símbolo` (símbolo resolvido pela mesma regra da forma seguinte, definido uma vez só);
 `arquivo.py` `símbolo` `trecho` (símbolo como `função`, `Classe.método`, função aninhada ou
 nome atribuído no módulo; o trecho literal aparece exatamente uma vez no código do símbolo,
 não pode ser só o nome do símbolo e, num nome atribuído, não é só um identificador e é a
