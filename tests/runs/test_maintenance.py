@@ -2,6 +2,8 @@
 
 import errno
 import logging
+import os
+import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -564,3 +566,77 @@ def test_falha_da_varredura_nao_leva_as_outras_etapas(
     assert {"objects_purged", "capacity_pools_corrected", "runs_deleted"} <= counts.keys()
     assert "storage_global_max_bytes" in counts
     assert any(r.exc_info for r in caplog.records)
+
+
+def plant_temporary(storage: FileStorage, name: str, age: timedelta, content: bytes) -> Path:
+    directory = storage.root / ".tmp"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_bytes(content)
+    modified_at = time.time() - age.total_seconds()
+    os.utime(path, (modified_at, modified_at))
+    return path
+
+
+def test_temporario_abandonado_sai_no_ciclo_e_o_diretorio_e_medido(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    abandoned = plant_temporary(
+        storage, f"{'a' * 32}.part", timedelta(hours=1, minutes=1), b"abandonado"
+    )
+    recent = plant_temporary(storage, f"{'b' * 32}.part", timedelta(minutes=59), b"recente")
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert not abandoned.exists()
+    assert recent.exists()
+    assert counts["tmp_parts_removed"] == 1
+    assert counts["tmp_parts"] == 1
+    assert counts["tmp_parts_bytes"] == len(b"recente")
+    assert counts["tmp_parts_sweep_failed"] == 0
+
+
+def test_falha_ao_varrer_temporarios_nao_impede_o_resto_do_ciclo(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    storage.root.mkdir(parents=True)
+    # `.tmp` como arquivo: `scandir` levanta `NotADirectoryError` de verdade.
+    (storage.root / ".tmp").write_bytes(b"")
+
+    with caplog.at_level(logging.ERROR, logger="goblinshift.runs.maintenance"):
+        counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert counts["tmp_parts_sweep_failed"] == 1
+    assert counts["tmp_parts_removed"] == 0
+    assert "storage_global_max_bytes" in counts
+    assert "limpeza de temporários falhou" in caplog.messages
+
+
+def test_falha_ao_apagar_um_temporario_marca_o_ciclo_e_limpa_os_demais(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old = timedelta(hours=2)
+    for name in (f"{'a' * 32}.part", f"{'b' * 32}.part"):
+        plant_temporary(storage, name, old, b"ab")
+    original = Path.unlink
+    denied = iter([PermissionError(errno.EACCES, "recusado")])
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        for failure in denied:
+            raise failure
+        original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert counts["tmp_parts_removed"] == 1
+    assert counts["tmp_parts"] == 1
+    assert counts["tmp_parts_bytes"] == len(b"ab")
+    assert counts["tmp_parts_sweep_failed"] == 1

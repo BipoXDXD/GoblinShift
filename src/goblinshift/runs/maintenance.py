@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
 from goblinshift.files.candidates import attempts_with_loose_candidates, discard_candidates
-from goblinshift.files.limits import EXPIRY_BATCH_SIZE
+from goblinshift.files.limits import EXPIRY_BATCH_SIZE, STALE_TEMPORARY_TTL
 from goblinshift.files.missing import (
     DEFAULT_MAX_ABSENT_RATIO,
     MissingSweep,
@@ -150,6 +150,7 @@ class Maintenance:
             **self.discard_stale_candidates(),
             "work_areas_removed": self.sweep_work_areas(),
             **self.apply_retention(),
+            **self.sweep_temporary_parts(),
             **self.mark_missing_objects(),
             **self.measure(),
         }
@@ -368,6 +369,34 @@ class Maintenance:
         counts["capacity_objects_adopted"] = reconciled.objects_adopted
         counts["purge_limit_reached"] = int(report.limit_reached)
         return {**counts, **self.apply_history_retention()}
+
+    def sweep_temporary_parts(self) -> dict[str, int]:
+        """Apaga os temporários que uma queda deixou no storage e mede o que ficou no diretório.
+
+        Eles ficam fora do livro-razão e do `file_backlog`. Isolada do resto do ciclo, como a
+        varredura de ausentes: uma falha de disco, no diretório ou em um arquivo, fica no log e
+        em `tmp_parts_sweep_failed`.
+        """
+        # O `mtime` vem do relógio desta máquina, e não do banco: é com ele que se compara.
+        modified_before = time.time() - STALE_TEMPORARY_TTL.total_seconds()
+        try:
+            sweep = self._storage.sweep_stale_temporaries(
+                modified_before, self._config.retention_batch_size
+            )
+        except OSError:
+            logger.exception("limpeza de temporários falhou")
+            return {
+                "tmp_parts_removed": 0,
+                "tmp_parts": 0,
+                "tmp_parts_bytes": 0,
+                "tmp_parts_sweep_failed": 1,
+            }
+        return {
+            "tmp_parts_removed": sweep.removed,
+            "tmp_parts": sweep.remaining,
+            "tmp_parts_bytes": sweep.remaining_bytes,
+            "tmp_parts_sweep_failed": int(sweep.failed > 0),
+        }
 
     def mark_missing_objects(self) -> dict[str, int]:
         """Um lote da varredura de objetos sem arquivo no disco (1.7, 3.8: `missing`).
