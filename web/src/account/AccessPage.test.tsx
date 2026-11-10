@@ -9,6 +9,7 @@ import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/
 import { expectHeadingFocused } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
+import { API_KEYS_QUERY_KEY } from "./api";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -414,6 +415,29 @@ describe("Acesso: chaves de API", () => {
     });
   });
 
+  it("500 com a chave relida já revogada: o foco vai para o título, porque o Revogar sumiu", async () => {
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [apiKeyBody({ revoked_at: settled ? "2026-10-20T12:00:00Z" : null })],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return problemResponse(500, "INTERNAL_ERROR");
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+  });
+
   it("500 com a chave ainda na lista: o foco volta ao Revogar", async () => {
     const { user } = setup({
       "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
@@ -426,6 +450,32 @@ describe("Acesso: chaves de API", () => {
     const keys = await section("Chaves de API");
     expect(await within(keys).findByRole("alert")).toBeVisible();
     expect(within(keys).getByRole("button", { name: "Revogar a chave gsk_7Hq2" })).toHaveFocus();
+  });
+
+  // WCAG 3.2: o destino do foco é decidido uma vez, na resposta. Uma releitura posterior da lista
+  // (a pessoa volta de outra aba) não pode puxar o foco para o título sem ação dela.
+  it("500 com a chave na lista: a releitura posterior não move o foco que a pessoa tirou", async () => {
+    let lastUsedAt: string | null = null;
+    const { queryClient, user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({ data: [apiKeyBody({ last_used_at: lastUsedAt })] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => problemResponse(500, "INTERNAL_ERROR"),
+    });
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+    const keys = await section("Chaves de API");
+    expect(await within(keys).findByRole("alert")).toBeVisible();
+    const revoke = within(keys).getByRole("button", { name: "Revogar a chave gsk_7Hq2" });
+    await waitFor(() => {
+      expect(revoke).toHaveFocus();
+    });
+
+    revoke.blur();
+    lastUsedAt = "2026-10-20T12:00:00Z";
+    await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+
+    expect(await within(keys).findByText(/Último uso em/)).toBeVisible();
+    expect(document.body).toHaveFocus();
   });
 
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {

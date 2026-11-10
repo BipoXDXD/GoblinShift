@@ -8,6 +8,7 @@ import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
+import { PRESETS_QUERY_KEY } from "./api";
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -167,6 +168,38 @@ describe("Oficina: presets", () => {
     expect(
       within(section).getByRole("button", { name: "Excluir o preset Clientes do mês" }),
     ).toHaveFocus();
+  });
+
+  // WCAG 3.2: o destino do foco é decidido uma vez, na resposta. Uma releitura posterior da lista
+  // (a pessoa volta de outra aba) não pode puxar o foco para o título sem ação dela.
+  it("500 com o preset na lista: a releitura posterior não move o foco que a pessoa tirou", async () => {
+    let updatedAt = "2026-10-01T12:00:00Z";
+    const { queryClient, user } = setup({
+      "GET /api/v1/presets": () => jsonResponse({ data: [presetBody({ updated_at: updatedAt })] }),
+      [DELETE_ROUTE]: () => problemResponse(500, "INTERNAL_ERROR"),
+    });
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Excluir preset" }));
+    expect(await within(section).findByRole("alert")).toBeVisible();
+    const remove = within(section).getByRole("button", {
+      name: "Excluir o preset Clientes do mês",
+    });
+    await waitFor(() => {
+      expect(remove).toHaveFocus();
+    });
+    const before = within(section).getByText(/Atualizado em/).textContent;
+
+    remove.blur();
+    updatedAt = "2026-10-20T15:30:00Z";
+    await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
+
+    await waitFor(() => {
+      expect(within(section).getByText(/Atualizado em/).textContent).not.toBe(before);
+    });
+    expect(document.body).toHaveFocus();
   });
 
   it("cancelar a exclusão não chama a API", async () => {
