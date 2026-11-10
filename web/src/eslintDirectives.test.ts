@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 /*
- * Toda diretiva que desliga uma regra do ESLint diz o porquê depois de ` -- ` (sintaxe do próprio
- * ESLint). O ESLint não tem regra nativa para exigir a descrição e o plugin que a tem
+ * Toda diretiva que desliga ou reconfigura uma regra do ESLint (`eslint-disable*` e a configuração
+ * inline em comentário de bloco, `eslint regra: off`) diz o porquê depois de ` -- ` (sintaxe do
+ * próprio ESLint). O ESLint não tem regra nativa para exigir a descrição e o plugin que a tem
  * (eslint-comments) seria uma dependência a mais só para isso; esta leitura cobre o mesmo.
  */
 
-const DISABLE_DIRECTIVE = /eslint-disable(?:-next-line|-line)?\b[^\n]*/g;
+const DISABLE_DIRECTIVE =
+  /(?:eslint-disable(?:-next-line|-line)?\b|\/\*\s*eslint\s+[\w@/-]+\s*:)[^\n]*/g;
 const DESCRIPTION = /\s--\s+\S/;
 
-/** Diretivas `eslint-disable` sem descrição, como aparecem no arquivo. */
+/** Diretivas sem descrição, como aparecem no arquivo. */
 function undescribedDirectives(source: string): string[] {
   return [...source.matchAll(DISABLE_DIRECTIVE)]
     .map(([directive]) => directive.trim())
@@ -22,6 +24,8 @@ describe("undescribedDirectives", () => {
     "// eslint-disable-line no-console",
     "/* eslint-disable eqeqeq */",
     "// eslint-disable-next-line no-console --",
+    "/* eslint no-console: off */",
+    "/* eslint @typescript-eslint/no-explicit-any: 0 */",
   ])("recusa %s", (source) => {
     expect(undescribedDirectives(source)).toHaveLength(1);
   });
@@ -30,6 +34,8 @@ describe("undescribedDirectives", () => {
     "// eslint-disable-next-line @typescript-eslint/unbound-method -- chamado com Reflect.apply",
     "/* eslint-disable eqeqeq -- compara com null de propósito */",
     "// eslint-enable eqeqeq",
+    "/* eslint no-console: off -- o script de CLI escreve no terminal */",
+    "/* eslint-env node */",
     "const x = 1;",
   ])("aceita %s", (source) => {
     expect(undescribedDirectives(source)).toEqual([]);
