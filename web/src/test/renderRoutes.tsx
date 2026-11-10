@@ -34,3 +34,10 @@ export function currentUrl(router: ReturnType<typeof createMemoryRouter>): strin
   const { pathname, search } = router.state.location;
   return `${pathname}${search}`;
 }
+
+/** Endereço atual com o fragmento, para conferir que um redirecionamento o mantém. */
+export function currentHref(router: ReturnType<typeof createMemoryRouter>): string {
+  // type-coverage:ignore-next-line -- o Location do React Router declara `state: any`
+  const { pathname, search, hash } = router.state.location;
+  return `${pathname}${search}${hash}`;
+}

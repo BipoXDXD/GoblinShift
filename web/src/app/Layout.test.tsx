@@ -1,12 +1,13 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { ME_QUERY_KEY } from "../account/api";
 import type { SiteNotice } from "../notice/notice";
 import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, TEST_CSRF_TOKEN } from "../test/fakeApi";
-import { currentUrl, renderRoutes } from "../test/renderRoutes";
+import { currentHref, currentUrl, renderRoutes } from "../test/renderRoutes";
 
 type MeHandler = () => Response | null;
 
@@ -153,6 +154,23 @@ describe("Layout: termos pendentes", () => {
     },
   );
 
+  it.each(["/termos/", "/privacidade/", "/creditos/"])(
+    "%s, com a barra final, também fica aberta para ler",
+    async (path) => {
+      const { router, queryClient } = setup(
+        () => jsonResponse(meBody({ terms: TERMS_PENDING })),
+        path,
+      );
+
+      // A tela pinta antes do /me: só com a resposta o aceite pendente poderia redirecionar.
+      await waitFor(() => {
+        expect(queryClient.getQueryState(ME_QUERY_KEY)?.status).toBe("success");
+      });
+      expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+      expect(currentUrl(router)).toBe(path.slice(0, -1));
+    },
+  );
+
   it("com os termos aceitos, a tela abre normalmente", async () => {
     const { router } = setup(() => jsonResponse(meBody()), "/historico");
 
@@ -287,5 +305,22 @@ describe("Layout: rodapé", () => {
     for (const link of links) {
       expect(link).toHaveClass("min-h-11");
     }
+  });
+});
+
+describe("Layout: barra final no endereço", () => {
+  it("vai para o endereço sem a barra, mantendo a query e o fragmento", async () => {
+    const { router } = setup(() => jsonResponse(meBody()), "/historico/?estado=failed#topo");
+
+    await waitFor(() => {
+      expect(currentHref(router)).toBe("/historico?estado=failed#topo");
+    });
+  });
+
+  it.each(["//evil.com/", "/\\evil.com/"])("%s fica no site, sem redirecionar", async (path) => {
+    const { router } = setup(() => jsonResponse(meBody()), path);
+
+    expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+    expect(currentHref(router)).toBe(path);
   });
 });
