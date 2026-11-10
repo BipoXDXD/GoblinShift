@@ -5,7 +5,7 @@ import { useApiClient } from "../api/ApiClientContext";
 import type { ApiResponse } from "../api/response";
 import { announcementFor, type RunProgressSnapshot } from "./announce";
 import { getRun, type RunDetail, type RunStatus } from "./api";
-import { nextPollDelayMs, type PollSnapshot } from "./polling";
+import { isPersistentFailure, nextPollDelayMs, type PollSnapshot } from "./polling";
 
 interface RunPolling {
   /** Estado da consulta do TanStack Query; `data` é a execução já validada. */
@@ -19,6 +19,11 @@ interface RunPolling {
    * do POST ao cache do polling, e o CancelRun decidiu não fazer atualização otimista.
    */
   readonly acknowledge: (status: RunStatus) => void;
+  /**
+   * Falha a mostrar em alerta, ou `null`. Sem execução na tela, qualquer falha. Com ela, só a
+   * persistente (polling.ts): a oscilação da rede some na próxima consulta e não vira anúncio.
+   */
+  readonly failure: Error | null;
 }
 
 interface RunPollingOptions {
@@ -66,7 +71,30 @@ export function useRunPolling(runId: string, options: RunPollingOptions = {}): R
     },
   });
 
-  return { query, ...useAnnouncement(query.data) };
+  const failureStreak = useFailureStreak(query);
+  const failure =
+    query.error !== null &&
+    (query.data === undefined || isPersistentFailure(query.error, failureStreak))
+      ? query.error
+      : null;
+  return { query, failure, ...useAnnouncement(query.data) };
+}
+
+/**
+ * Falhas seguidas, para a renderização; o `consecutiveFailures` do polling é ref, lido só fora
+ * dela. Cada falha nova aumenta `errorUpdateCount`; o sucesso zera o `error` e a contagem.
+ */
+function useFailureStreak(query: UseQueryResult<RunDetail>): number {
+  const [tracked, setTracked] = useState({ errors: 0, streak: 0 });
+  const errors = query.errorUpdateCount;
+  const recovered = query.error === null;
+  if (errors !== tracked.errors || (recovered && tracked.streak !== 0)) {
+    // Ajuste de estado durante a renderização, como em useAnnouncement.
+    const streak = recovered ? 0 : tracked.streak + errors - tracked.errors;
+    setTracked({ errors, streak });
+    return streak;
+  }
+  return tracked.streak;
 }
 
 function pollSnapshot(query: RunQuery, consecutiveFailures: number): PollSnapshot | null {
