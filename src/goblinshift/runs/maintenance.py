@@ -8,7 +8,9 @@ Runner acontecem fora de transação.
 Lease vencido não prova que o executor morreu: antes de reagendar, o Runner é consultado pelo
 nome; executor vivo recebe `stop`, e só a confirmação do término libera a decisão. Sem
 confirmação, ou com o Runner fora do ar (`executor-ctl` parado), a execução fica como está
-(reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado.
+(reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado. O
+`stop` só sai se o lease, relido numa transação curta e sem trava logo antes, ainda estiver
+vencido: um worker pausado que voltou e renovou não perde o executor.
 
 O executor e a área de trabalho só são removidos depois de a decisão estar no banco. Se a remoção
 falhar, a limpeza das áreas (`sweep_work_areas`) a repete nos ciclos seguintes: o `executor-ctl`
@@ -24,7 +26,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
 
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -122,6 +124,10 @@ class MaintenanceConfig:
 
 def _never() -> bool:
     return False
+
+
+def _always() -> bool:
+    return True
 
 
 @dataclass(frozen=True)
@@ -272,7 +278,11 @@ class Maintenance:
         """Tentativas com lease vencido: confirma o término do executor e decide."""
         reconciled = 0
         for expired in self._expired_attempts():
-            status = self._confirm_ended(expired.attempt_id, expired.run_id)
+            status = self._confirm_ended(
+                expired.attempt_id,
+                expired.run_id,
+                may_stop=partial(self._lease_still_expired, expired),
+            )
             if status is None:
                 continue
             applied = self._decide(
@@ -285,13 +295,26 @@ class Maintenance:
         return reconciled
 
     def _confirm_ended(
-        self, attempt_id: uuid.UUID, run_id: uuid.UUID | None
+        self,
+        attempt_id: uuid.UUID,
+        run_id: uuid.UUID | None,
+        may_stop: Callable[[], bool] = _always,
     ) -> ExecutorStatus | None:
-        """Estado final do executor, parando-o se vivo; `None` se o fim não foi confirmado."""
+        """Estado final do executor, parando-o se vivo; `None` se o fim não foi confirmado.
+
+        `may_stop` é conferido entre o `status` e o `stop`, sem trava segurada durante as
+        chamadas ao Runner: falso deixa o executor vivo e a execução para o próximo ciclo.
+        """
         fields = {"attempt_id": str(attempt_id), "run_id": str(run_id) if run_id else None}
         try:
             status = self._runner.status(attempt_id)
             if status.is_running:
+                if not may_stop():
+                    logger.info(
+                        "tentativa mudou desde a leitura do lease; executor não é parado",
+                        extra={"fields": fields},
+                    )
+                    return None
                 status = self._runner.stop(attempt_id, self._config.stop_grace)
         except RunnerError as error:
             logger.warning(
@@ -323,15 +346,30 @@ class Maintenance:
             rows = session.execute(
                 select(run.c.id, run.c.generation, attempt.c.id.label("attempt_id"))
                 .join(attempt, attempt.c.run_id == run.c.id)
-                .where(
-                    attempt.c.ended_at.is_(None),
-                    attempt.c.lease_expires_at < func.now(),
-                    run.c.status.in_(ACTIVE_STATUSES),
-                )
+                .where(_lease_expired())
                 .order_by(attempt.c.lease_expires_at)
                 .limit(self._config.batch_size)
             ).all()
         return [_ExpiredAttempt(row.id, row.generation, row.attempt_id) for row in rows]
+
+    def _lease_still_expired(self, expired: _ExpiredAttempt) -> bool:
+        """Relê a tentativa antes do `stop`: mesma geração, ainda aberta e com o lease vencido.
+
+        Leitura simples, sem `FOR UPDATE`, numa transação que termina antes da chamada ao
+        Runner. Não fecha a janela inteira (o worker pode renovar entre esta leitura e o `stop`),
+        só a encurta; quem decide depois continua sendo o fencing de `_lease_event`.
+        """
+        with self._factory() as session, session.begin():
+            found = session.execute(
+                select(attempt.c.id)
+                .join(run, attempt.c.run_id == run.c.id)
+                .where(
+                    _lease_expired(),
+                    attempt.c.id == expired.attempt_id,
+                    run.c.generation == expired.generation,
+                )
+            ).first()
+        return found is not None
 
     def _lease_event(
         self, loaded: LoadedRun, expired: _ExpiredAttempt, status: ExecutorStatus
@@ -682,6 +720,15 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _lease_expired() -> ColumnElement[bool]:
+    """Tentativa aberta de Run ativa com o lease vencido no relógio do banco."""
+    return and_(
+        attempt.c.ended_at.is_(None),
+        attempt.c.lease_expires_at < func.now(),
+        run.c.status.in_(ACTIVE_STATUSES),
+    )
 
 
 def _log_step_failure(step: str, error: Exception) -> None:

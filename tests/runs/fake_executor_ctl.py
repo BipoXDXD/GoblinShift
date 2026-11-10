@@ -78,6 +78,10 @@ class FakeExecutorCtl:
     oom_on_exit: bool = False
     # Chamado com o `attempt_id` no início de cada `stop`, antes de parar.
     on_stop: Callable[[str], None] | None = None
+    # Chamado com o `attempt_id` depois de cada `status` calculado e antes da resposta, fora da
+    # trava do falso: o que o gancho fizer (no banco ou no próprio ctl, como outro processo)
+    # acontece entre a resposta que o cliente vai ler e a chamada seguinte dele.
+    on_status: Callable[[str], None] | None = None
     last_start_body: object = None
 
     def __post_init__(self) -> None:
@@ -122,14 +126,13 @@ class FakeExecutorCtl:
             return 400, _error("invalid_attempt_id")
         if attempt_id != raw_id:
             return 400, _error("invalid_attempt_id")
+        if (method, action) == ("GET", None):
+            return 200, self._status_then_hook(attempt_id)
         with self._lock:
             match method, action:
                 case "POST", "/start":
                     self.calls.append(("start", attempt_id))
                     return self._start(attempt_id, body)
-                case "GET", None:
-                    self.calls.append(("status", attempt_id))
-                    return 200, self._status(attempt_id)
                 case "POST", "/stop":
                     self.calls.append(("stop", attempt_id))
                     return self._stop(attempt_id, body)
@@ -138,6 +141,14 @@ class FakeExecutorCtl:
                     return self._remove(attempt_id)
                 case _:
                     return 405, _error("method_not_allowed")
+
+    def _status_then_hook(self, attempt_id: str) -> dict[str, object]:
+        with self._lock:
+            self.calls.append(("status", attempt_id))
+            status = self._status(attempt_id)
+        if self.on_status is not None:
+            self.on_status(attempt_id)
+        return status
 
     def _start(self, attempt_id: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
         document = _json_object(body)

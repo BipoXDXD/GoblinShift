@@ -14,13 +14,15 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
-from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
+from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from tests.runs.fake_executor_ctl import IMAGE, FakeContainer, FakeExecutorCtl
 from tests.runs.worker_support import (
     attempts,
     claim,
+    coordinator,
     create_user,
     expire_lease,
     open_run_uses,
@@ -62,11 +64,19 @@ def abandoned_attempt(
     factory: sessionmaker[Session], storage: FileStorage, runner: ExecutorCtlRunner
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Run com tentativa reivindicada, área criada e lease vencido (o worker sumiu)."""
+    claimed = paused_worker_attempt(factory, storage, runner)
+    return claimed.run_id, claimed.attempt_id
+
+
+def paused_worker_attempt(
+    factory: sessionmaker[Session], storage: FileStorage, runner: ExecutorCtlRunner
+) -> ClaimedAttempt:
+    """Como `abandoned_attempt`, devolvendo o claim: o worker pode voltar e renovar o lease."""
     run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
     claimed = claim(factory, storage)
     runner.create_work_dir(claimed.attempt_id)
     expire_lease(factory, run_id)
-    return run_id, claimed.attempt_id
+    return claimed
 
 
 def test_executor_vivo_e_parado_antes_de_reagendar(
@@ -91,6 +101,67 @@ def test_executor_vivo_e_parado_antes_de_reagendar(
     assert (row["status"], row["phase"]) == ("running", "retry_wait")
     assert attempts(factory, run_id)[0]["ended_at"] is not None
     assert not runner.work_dir(attempt_id).exists()
+
+
+def test_lease_renovado_durante_a_consulta_nao_para_o_executor(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    runner: ExecutorCtlRunner,
+) -> None:
+    claimed = paused_worker_attempt(factory, storage, runner)
+    ctl.containers[str(claimed.attempt_id)] = FakeContainer("running")
+    worker = coordinator(factory, storage, runner)
+    renewed: list[Status] = []
+
+    def worker_wakes_up(_attempt_id: str) -> None:
+        # O worker pausado volta entre a leitura do lease vencido e a decisão de parar, com a
+        # renovação de verdade (`lock_fenced` + UPDATE), enquanto a manutenção espera o ctl.
+        if not renewed:
+            renewed.append(worker.renew_lease(claimed))
+
+    ctl.on_status = worker_wakes_up
+
+    counts = janitor(factory, storage, runner).run_cycle()
+
+    assert renewed == [Status.RUNNING]
+    assert counts["leases_reconciled"] == 0
+    assert ctl.operations(claimed.attempt_id) == ["status"]
+    assert ctl.containers[str(claimed.attempt_id)].state == "running"
+    [only] = attempts(factory, claimed.run_id)
+    assert only["ended_at"] is None
+    row = run_row(factory, claimed.run_id)
+    assert (row["status"], row["generation"]) == ("running", claimed.generation)
+    assert runner.work_dir(claimed.attempt_id).exists()
+
+
+def test_tentativa_reconciliada_por_outra_manutencao_nao_e_parada_de_novo(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    runner: ExecutorCtlRunner,
+) -> None:
+    claimed = paused_worker_attempt(factory, storage, runner)
+    ctl.containers[str(claimed.attempt_id)] = FakeContainer("running")
+    other = janitor(factory, storage, runner)
+    other_counts: list[dict[str, int]] = []
+
+    def other_janitor_decides(_attempt_id: str) -> None:
+        # Outra réplica da manutenção para e decide a mesma tentativa depois de esta ler o
+        # executor vivo; o gancho sai antes, para a outra não se chamar de novo.
+        ctl.on_status = None
+        other_counts.append(other.run_cycle())
+
+    ctl.on_status = other_janitor_decides
+
+    counts = janitor(factory, storage, runner).run_cycle()
+
+    assert [other["leases_reconciled"] for other in other_counts] == [1]
+    assert counts["leases_reconciled"] == 0
+    assert ctl.operations(claimed.attempt_id) == ["status", "status", "stop", "remove"]
+    row = run_row(factory, claimed.run_id)
+    assert (row["status"], row["phase"]) == ("running", "retry_wait")
+    assert attempts(factory, claimed.run_id)[0]["ended_at"] is not None
 
 
 def test_executor_ausente_reagenda_sem_gastar_tentativa(
