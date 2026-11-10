@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import ColumnElement, Select, delete, exists, func, null, or_, select, update
 from sqlalchemy.orm import Session
 
-from goblinshift.files.objects import release
+from goblinshift.files.objects import release_many
 from goblinshift.files.retention import HistoryReferences, has_unsettled_candidate
 from goblinshift.files.states import HolderKind
 from goblinshift.files.tables import artifact
@@ -132,9 +132,8 @@ def delete_old_runs(session: Session, now: datetime, limit: int) -> int:
             .with_for_update(skip_locked=True)
         ).scalars()
     )
-    for run_id in chosen:
-        # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
-        release(session, HolderKind.RUN, run_id)
+    # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
+    release_many(session, HolderKind.RUN, chosen)
     if chosen:
         session.execute(delete(run).where(run.c.id.in_(chosen)))
     return len(chosen)

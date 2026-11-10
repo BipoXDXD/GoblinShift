@@ -2,10 +2,12 @@
 
 import hashlib
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import (
@@ -23,7 +25,7 @@ from goblinshift.files.errors import (
     InputNotAvailableError,
     ObjectNotAvailableError,
 )
-from goblinshift.files.objects import hold, release
+from goblinshift.files.objects import hold, release, release_many
 from goblinshift.files.retention import expire_unused_uploads
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind
 from goblinshift.files.storage import FileStorage
@@ -133,6 +135,85 @@ def test_release_repetido_e_sucesso(factory: sessionmaker[Session], storage: Fil
             release(session, HolderKind.RUN, run_id)
 
     assert open_uses(factory) == 0
+
+
+def held_run_inputs(
+    factory: sessionmaker[Session], storage: FileStorage, owner: uuid.UUID, runs: int
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Uma entrada pronta presa por execução; devolve (run_id, upload_id) de cada uma."""
+    pairs = []
+    for _ in range(runs):
+        view = ready_upload(factory, storage, owner)
+        run_id = uuid.uuid4()
+        with unit_of_work(factory) as session:
+            [ready] = lock_ready_uploads(session, owner, [view.id])
+            hold(session, [ready.object_id], HolderKind.RUN, run_id)
+        pairs.append((run_id, view.id))
+    return pairs
+
+
+@contextmanager
+def captured_sql(session: Session) -> Iterator[list[str]]:
+    """SQL enviado ao banco pela sessão enquanto o bloco roda."""
+    statements: list[str] = []
+
+    def record(_conn: object, _cursor: object, sql: str, *_rest: object) -> None:
+        statements.append(sql)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+
+def test_release_many_encerra_os_usos_de_todos_os_detentores_pedidos(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    (first, first_upload), (second, second_upload), (kept, kept_upload) = held_run_inputs(
+        factory, storage, owner, 3
+    )
+
+    with unit_of_work(factory) as session:
+        release_many(session, HolderKind.RUN, [first, second])
+
+    assert open_uses(factory) == 1
+    with factory() as session:
+        still_open = session.execute(
+            select(object_use.c.holder_id).where(object_use.c.ended_at.is_(None))
+        ).scalar_one()
+    assert still_open == kept
+    for released in (first_upload, second_upload):
+        assert timedelta(hours=47, minutes=59) < upload_expiry(factory, released)
+    assert upload_expiry(factory, kept_upload) <= timedelta(hours=24)
+
+
+def test_release_many_usa_um_update_so_para_varios_detentores(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    run_ids = [run_id for run_id, _ in held_run_inputs(factory, storage, owner, 3)]
+
+    with unit_of_work(factory) as session, captured_sql(session) as statements:
+        release_many(session, HolderKind.RUN, run_ids)
+
+    assert len([sql for sql in statements if sql.startswith("UPDATE object_use")]) == 1
+    assert open_uses(factory) == 0
+
+
+def test_release_many_sem_detentores_nao_toca_o_banco(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    held_run_inputs(factory, storage, owner, 1)
+
+    with unit_of_work(factory) as session, captured_sql(session) as statements:
+        release_many(session, HolderKind.RUN, [])
+
+    assert statements == []
+    assert open_uses(factory) == 1
 
 
 def upload_expiry(factory: sessionmaker[Session], upload_id: uuid.UUID) -> timedelta:

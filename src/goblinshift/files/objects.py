@@ -61,12 +61,22 @@ def release(session: Session, holder_kind: HolderKind, holder_id: uuid.UUID) -> 
     terminar a execução, na mesma transação que a torna terminal. Um upload excluído fica de
     fora: a data dele já decidiu entre `deleted` e `expired`.
     """
+    release_many(session, holder_kind, [holder_id])
+
+
+def release_many(
+    session: Session, holder_kind: HolderKind, holder_ids: Collection[uuid.UUID]
+) -> None:
+    """`release` de vários detentores do mesmo tipo com um `UPDATE` só; lista vazia é no-op."""
+    ids = sorted(set(holder_ids))
+    if not ids:
+        return
     ended = (
         session.execute(
             update(object_use)
             .where(
                 object_use.c.holder_kind == holder_kind,
-                object_use.c.holder_id == holder_id,
+                object_use.c.holder_id.in_(ids),
                 object_use.c.ended_at.is_(None),
             )
             .values(ended_at=func.now())
