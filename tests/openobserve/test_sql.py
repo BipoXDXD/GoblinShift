@@ -26,6 +26,8 @@ pytestmark = pytest.mark.openobserve
 
 HOUR_S = 3600
 MINUTE_S = 60
+NS_PER_US = 1_000
+NS_PER_S = 1_000_000_000
 RECENT_S = 5 * MINUTE_S  # nas duas janelas
 OLD_S = 40 * MINUTE_S  # só na janela de 1 h
 
@@ -510,13 +512,16 @@ def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
 
 # A API exporta um span `api.saturation` 1 s depois de cada virada de minuto com recusa, e um na
 # parada; o alerta agrupa pelo minuto absoluto. Cada span é (minutos atrás, segundo no minuto),
-# contados a partir do minuto corrente, para o teste não depender da fase do relógio.
-# Extremos: dois minutos absolutos, cada um com um span 5 ms depois da virada e outro 10 ms antes
-# da seguinte. Os quatro ocupam quase 120 s, e qualquer grade de 60 s fora de fase com a do relógio
-# os divide em três fatias: um agrupamento relativo a `now()` só não dispara se a consulta rodar a
-# menos de 15 ms de uma virada (cerca de 1 em 4000 execuções).
-EDGE_OF_MINUTE_S = (0.005, 59.99)
-EDGE_SPANS = tuple((minutes_ago, second) for minutes_ago in (2, 1) for second in EDGE_OF_MINUTE_S)
+# contados a partir do minuto corrente, e começa nesse instante exato, em microssegundos inteiros,
+# sem duração: o teste não depende da fase do relógio.
+# Extremos: dois minutos absolutos, com spans exatamente na virada do primeiro, 10 ms antes da
+# virada seguinte, 5 ms depois dela e 10 ms antes da última. O agrupamento absoluto vê 2 minutos.
+# Uma volta ao agrupamento relativo a `now()` vê 3 fatias em qualquer fase: o `to_unixtime` do
+# DataFusion devolve segundos inteiros, então a fase de `now` é um inteiro de 0 a 59; na fase 0, o
+# span da virada fica a exatamente 120 s e cai numa fatia própria, e nas fases de 1 a 59 o de 5 ms
+# depois da virada já mudou de fatia. Se `now` fosse contínuo, só escaparia uma consulta nos 10 ms
+# antes de uma virada.
+EDGE_SPANS = ((2, 0.0), (2, 59.99), (1, 0.005), (1, 59.99))
 
 
 @pytest.mark.parametrize(
@@ -543,14 +548,13 @@ def test_api_saturada_em_tres_minutos_dispara(
 ) -> None:
     stream = unique_stream("saturada")
     attribute = "api.saturation.rejected"
-    now_s = time.time()
-    minute_start = now_s - now_s % MINUTE_S
+    now_ns = time.time_ns()
+    minute_start_ns = now_ns - now_ns % (MINUTE_S * NS_PER_S)
     traces = telemetry.traces(stream)
 
     def at(minutes_ago: int, second: float, attributes: dict[str, AttributeValue]) -> None:
-        moment = minute_start - minutes_ago * MINUTE_S + second
-        # Idade medida na hora de escrever: o span cai no segundo pedido, sem a deriva do teste.
-        traces.span("api.saturation", time.time() - moment, attributes, 0.1)
+        offset_us = round(second * US_PER_S) - minutes_ago * MINUTE_S * US_PER_S
+        traces.span_at("api.saturation", minute_start_ns + offset_us * NS_PER_US, attributes, 0)
 
     for minutes_ago, second in spans:
         at(minutes_ago, second, {"main": True, attribute: 5})
