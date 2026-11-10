@@ -270,3 +270,54 @@ describe("Cancelar execução: anúncios sem repetição", () => {
     expect(liveTexts().filter((text) => text === "Execução cancelada.")).toHaveLength(1);
   });
 });
+
+describe("Cancelar execução: o polling anuncia o que o pedido não disse", () => {
+  it.each([
+    ["succeeded", "Execução concluída."],
+    ["failed", "A execução falhou."],
+  ])(
+    "já tinha terminado (200 %s): o polling ainda diz como terminou",
+    async (status, announcement) => {
+      const { user, queryClient } = setup({
+        [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+        [CANCEL_ROUTE]: () => jsonResponse({ id: RUN_ID, status, error_code: null }),
+      });
+      await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: OPEN_BUTTON }),
+      );
+      await screen.findByText("A execução já tinha terminado; não havia o que cancelar.");
+
+      pollReturns(queryClient, status);
+
+      await waitFor(() => {
+        expect(liveTexts()).toContain(announcement);
+      });
+    },
+  );
+
+  it.each([
+    ["409", () => problemResponse(409, "STATE_CONFLICT")],
+    ["500", () => problemResponse(500, "INTERNAL_ERROR")],
+    ["falha de rede", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ] as const)(
+    "pedido com erro (%s): o polling ainda anuncia que a execução está parando",
+    async (_case, answer) => {
+      const { user, queryClient } = setup({
+        [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+        [CANCEL_ROUTE]: answer,
+      });
+      await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: OPEN_BUTTON }),
+      );
+      expect(await screen.findByRole("alert")).toBeVisible();
+
+      pollReturns(queryClient, "stopping");
+
+      await waitFor(() => {
+        expect(liveTexts()).toContain("Cancelando a execução.");
+      });
+    },
+  );
+});
