@@ -1,7 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { NavigationType } from "react-router";
 import { describe, expect, it } from "vitest";
 
+import { ME_QUERY_KEY } from "../account/api";
 import type { SiteNotice } from "../notice/notice";
 import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
@@ -19,19 +21,23 @@ function setup(
   notice: SiteNotice | null = null,
   csrfToken: string | null = TEST_CSRF_TOKEN,
 ) {
-  const api = fakeApi(
-    {
-      "GET /api/v1/me": me,
-      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
-    },
-    { csrfToken },
-  );
+  const api = layoutApi(me, csrfToken);
   const view = renderRoutes({
     routes: appRoutes(api.client, { notice }),
     path,
     client: api.client,
   });
   return { ...view, api };
+}
+
+function layoutApi(me: MeHandler, csrfToken: string | null = TEST_CSRF_TOKEN) {
+  return fakeApi(
+    {
+      "GET /api/v1/me": me,
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+    },
+    { csrfToken },
+  );
 }
 
 /** O cabeçalho só aparece depois do chunk da primeira tela (rotas lazy). */
@@ -151,6 +157,23 @@ describe("Layout: termos pendentes", () => {
 
       expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
       expect(currentUrl(router)).toBe(path);
+    },
+  );
+
+  it.each(["/termos/", "/privacidade/", "/creditos/"])(
+    "%s, com a barra final, também fica aberta para ler",
+    async (path) => {
+      const { router, queryClient } = setup(
+        () => jsonResponse(meBody({ terms: TERMS_PENDING })),
+        path,
+      );
+
+      // A tela pinta antes do /me: só com a resposta o aceite pendente poderia redirecionar.
+      await waitFor(() => {
+        expect(queryClient.getQueryState(ME_QUERY_KEY)?.status).toBe("success");
+      });
+      expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+      expect(currentUrl(router)).toBe(path.slice(0, -1));
     },
   );
 
@@ -337,4 +360,51 @@ describe("Layout: rodapé", () => {
       }
     },
   );
+});
+
+describe("Layout: barra final no endereço", () => {
+  it("vai para o endereço sem a barra, mantendo a query e o fragmento", async () => {
+    const { router } = setup(() => jsonResponse(meBody()), "/historico/?estado=failed#topo");
+
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/historico?estado=failed#topo");
+    });
+  });
+
+  it("troca a entrada do histórico: o Voltar leva à tela anterior, sem prender na barra", async () => {
+    const api = layoutApi(() => jsonResponse(meBody()));
+    const { router } = renderRoutes({
+      routes: appRoutes(api.client, { notice: null }),
+      visited: ["/historico"],
+      path: "/termos/",
+      client: api.client,
+    });
+
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/termos");
+    });
+    expect(router.state.historyAction).toBe(NavigationType.Replace);
+
+    await act(() => router.navigate(-1));
+    expect(currentUrl(router)).toBe("/historico");
+  });
+
+  // O navegador entrega a forma codificada como está: vira um caminho deste site, não outro host.
+  it.each(["/%2F%2Fevil.com/", "/%5Cevil.com/"])(
+    "%s vira o caminho local literal, sem a barra",
+    async (path) => {
+      const { router } = setup(() => jsonResponse(meBody()), path);
+
+      await waitFor(() => {
+        expect(currentUrl(router)).toBe(path.slice(0, -1));
+      });
+    },
+  );
+
+  it.each(["//evil.com/", "/\\evil.com/"])("%s fica no site, sem redirecionar", async (path) => {
+    const { router } = setup(() => jsonResponse(meBody()), path);
+
+    expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+    expect(currentUrl(router)).toBe(path);
+  });
 });
