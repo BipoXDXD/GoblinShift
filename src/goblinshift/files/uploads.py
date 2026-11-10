@@ -23,6 +23,7 @@ from goblinshift.files.errors import (
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
+    UploadObjectNotPendingError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -356,13 +357,16 @@ def _complete(
     ).scalar_one_or_none()
     if object_id is None:
         return False
-    session.execute(
+    committed = session.execute(
         update(stored_object)
         .where(stored_object.c.id == object_id, stored_object.c.state == ObjectState.PENDING)
         .values(
             state=ObjectState.COMMITTED, sha256=sha256, size_bytes=size, committed_at=func.now()
         )
-    )
+        .returning(stored_object.c.id)
+    ).scalar_one_or_none()
+    if committed is None:
+        raise UploadObjectNotPendingError(object_id)
     _move_reservation_to_object(session, upload_id, object_id, size)
     return True
 

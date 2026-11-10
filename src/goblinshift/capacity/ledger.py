@@ -59,6 +59,10 @@ class StorageBelowReservedError(ValueError):
     """O teto pedido para a conta é menor do que ela já reservou."""
 
 
+class LedgerDivergenceError(RuntimeError):
+    """O livro-razão diverge do contrato: estado impossível, que nenhum caminho do código produz."""
+
+
 class ReservationNotFoundError(LookupError):
     """O detentor de origem de uma transferência não tem reserva viva."""
 
@@ -371,10 +375,21 @@ def _take(session: Session, pool: ColumnElement[bool], amount: int) -> bool:
 
 
 def _give_back(session: Session, pool: ColumnElement[bool], amount: int) -> None:
-    """Devolve ao pool; ficar negativo viola o CHECK, sinal de livro-razão divergente."""
-    session.execute(
-        update(capacity_pool).where(pool).values(reserved=capacity_pool.c.reserved - amount)
-    )
+    """Devolve ao pool; ficar negativo viola o CHECK, sinal de livro-razão divergente.
+
+    O pool existe enquanto houver reserva viva nele (`purge_owner` só o apaga sem nenhuma), então
+    não achá-lo é a mesma divergência, e a reserva não pode sair sem devolver a quantidade.
+    """
+    returned = session.execute(
+        update(capacity_pool)
+        .where(pool)
+        .values(reserved=capacity_pool.c.reserved - amount)
+        .returning(capacity_pool.c.id)
+    ).scalar_one_or_none()
+    if returned is None:
+        dialect = session.get_bind().dialect
+        literal = pool.compile(dialect=dialect, compile_kwargs={"literal_binds": True})
+        raise LedgerDivergenceError(f"pool ausente ao devolver {amount}: {literal}")
 
 
 def account_pool(owner_id: uuid.UUID, resource: Resource) -> ColumnElement[bool]:
