@@ -361,8 +361,9 @@ export const SCREENS: readonly Screen[] = [
         .getByRole("navigation", { name: "Principal" })
         .getByRole("link", { name: "Histórico" })
         .click();
+      // Só o pedido de recarregar: a primeira frase do alerta muda no #271.
       await expect(
-        page.getByRole("alert").filter({ hasText: "Algo deu errado nesta tela." }),
+        page.getByRole("alert").filter({ hasText: "Recarregue a página e tente de novo." }),
       ).toBeVisible();
     },
   },
