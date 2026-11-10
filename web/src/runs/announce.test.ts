@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { TEXT } from "../text";
+import type { RunPhase, RunStatus } from "./api";
 import { announcementFor, type RunProgressSnapshot } from "./announce";
 
 function snapshot(
@@ -46,4 +48,22 @@ describe("announcementFor", () => {
   ] as const)("anuncia o fim em %s", (status, message) => {
     expect(announcementFor(snapshot("running", "finalizing"), snapshot(status))).toBe(message);
   });
+
+  it.each(Object.entries(TEXT.run.announce.statuses))(
+    "o texto do status %s vem do TEXT",
+    (status, message) => {
+      expect(announcementFor(snapshot("queued"), snapshot(status as RunStatus))).toBe(
+        status === "queued" ? null : message,
+      );
+    },
+  );
+
+  it.each(Object.entries(TEXT.run.announce.phases))(
+    "o texto da fase %s vem do TEXT",
+    (phase, message) => {
+      expect(
+        announcementFor(snapshot("running", null), snapshot("running", phase as RunPhase)),
+      ).toBe(message);
+    },
+  );
 });

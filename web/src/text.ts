@@ -365,6 +365,25 @@ export const TEXT = {
       finalizing: "Finalizando",
       retry_wait: "Aguardando nova tentativa",
     },
+    // Frases da região viva da Execução: só quando status ou fase mudam.
+    announce: {
+      statuses: {
+        queued: "Execução na fila.",
+        running: "Execução em andamento.",
+        stopping: "Cancelando a execução.",
+        succeeded: "Execução concluída.",
+        succeeded_with_warnings: "Execução concluída com avisos.",
+        canceled: "Execução cancelada.",
+        failed: "A execução falhou.",
+      },
+      phases: {
+        inspecting: "Inspecionando as entradas.",
+        processing: "Processando os arquivos.",
+        packaging: "Empacotando os resultados.",
+        finalizing: "Finalizando.",
+        retry_wait: "Aguardando uma nova tentativa.",
+      },
+    },
     results: {
       heading: "Resultados",
       loading: "Carregando os resultados.",

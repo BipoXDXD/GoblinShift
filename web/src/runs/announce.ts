@@ -1,23 +1,8 @@
+import { TEXT } from "../text";
 import type { RunPhase, RunStatus } from "./api";
 
-// Textos neutros até a decisão de voz e idioma (D11, D12); ficam juntos para trocar num lugar só.
-const STATUS_MESSAGES: Record<RunStatus, string> = {
-  queued: "Execução na fila.",
-  running: "Execução em andamento.",
-  stopping: "Cancelando a execução.",
-  succeeded: "Execução concluída.",
-  succeeded_with_warnings: "Execução concluída com avisos.",
-  canceled: "Execução cancelada.",
-  failed: "A execução falhou.",
-};
-
-const PHASE_MESSAGES: Record<RunPhase, string> = {
-  inspecting: "Inspecionando as entradas.",
-  processing: "Processando os arquivos.",
-  packaging: "Empacotando os resultados.",
-  finalizing: "Finalizando.",
-  retry_wait: "Aguardando uma nova tentativa.",
-};
+const STATUS_MESSAGES: Record<RunStatus, string> = TEXT.run.announce.statuses;
+const PHASE_MESSAGES: Record<RunPhase, string> = TEXT.run.announce.phases;
 
 export interface RunProgressSnapshot {
   readonly status: RunStatus;
