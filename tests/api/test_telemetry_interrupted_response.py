@@ -603,6 +603,13 @@ def test_worker_sem_banco_no_boot_sai_com_erro_e_sem_o_detalhe(
 
 
 class _ListenerLosingTheConnection:
+    """Listener que deixa o erro de banco escapar da espera.
+
+    O `QueueListener` real absorve a queda da conexão e reconecta
+    (tests/runs/test_queue_listener.py); este falso cobre a fronteira do processo para qualquer
+    erro de banco que ainda chegue até ela.
+    """
+
     def __init__(self, canary: str) -> None:
         self._canary = canary
 
@@ -617,7 +624,7 @@ class _ListenerLosingTheConnection:
 
 
 @pytest.mark.usefixtures("worker_offline")
-def test_worker_ocioso_que_perde_o_banco_sai_com_erro_e_sem_o_detalhe(
+def test_erro_de_banco_que_escapa_do_listener_sai_com_erro_e_sem_o_detalhe(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     canary = _new_canary()
