@@ -83,7 +83,7 @@ from goblinshift.runs.store import (
 )
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.coordinator import TRANSIENT_ATTEMPT_ERROR, random_retry_jitter
-from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.runner import STOP_GRACE, ExecutorStatus, Runner, RunnerError
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class MaintenanceConfig:
     # Fração do lote ausente acima da qual nada é marcado (files/missing.py); 1.0 desliga o
     # limitador, para o administrador depois de restaurar de propósito um backup antigo (3.8).
     missing_max_absent_ratio: float = DEFAULT_MAX_ABSENT_RATIO
-    stop_grace: timedelta = timedelta(seconds=10)
+    stop_grace: timedelta = STOP_GRACE
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
 

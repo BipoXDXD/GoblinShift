@@ -10,6 +10,12 @@ plataforma mata o processo (SIGKILL) e quem recupera é o lease vencido: a manut
 o executor pelo nome, confirma o término e reagenda. O trabalho recomeça do zero, e a Run pode
 falhar se esgotar as tentativas ou o prazo.
 
+Falha transitória do banco fora da supervisão (`record_start`, renovação no empacotamento,
+desfecho) deixa a tentativa órfã, com a área de trabalho ocupada até a manutenção encerrá-la. O
+worker então pausa os claims por `orphan_cleanup_window` (lease, intervalo da manutenção e
+carência da parada), para a Run seguinte não receber `work_area_dirty` e gastar claims
+(runs/worker/claim_pause.py).
+
 Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
 o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
 """
@@ -30,10 +36,15 @@ from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import UserHasher, configure_logging, make_tracer_provider
 from goblinshift.runs.finished import RunFinishedReporter
-from goblinshift.runs.worker.claim import QueueListener, claim_next
-from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
+from goblinshift.runs.worker.claim import ClaimedAttempt, QueueListener, claim_next
+from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
+from goblinshift.runs.worker.coordinator import (
+    TRANSIENT_DATABASE_ERRORS,
+    Coordinator,
+    CoordinatorConfig,
+)
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
-from goblinshift.runs.worker.runner import LocalRunner, Runner
+from goblinshift.runs.worker.runner import STOP_GRACE, LocalRunner, Runner
 
 logger = logging.getLogger("goblinshift.worker")
 
@@ -83,6 +94,7 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
         lease=lease, attempt_timeout=timedelta(seconds=settings.attempt_timeout_s)
     )
     hasher = UserHasher(settings.user_hash_key())
+    pause = claim_pause_for(settings)
     try:
         with (
             process_tracer(settings, "goblinshift-worker") as tracer,
@@ -101,12 +113,22 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             )
             logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
             while not shutdown.is_set():
-                if not _work_once(factory, storage, lease, coordinator, finished):
+                if not _work_once(factory, storage, lease, coordinator, finished, pause):
                     logger.debug("fila vazia; aguardando NOTIFY")
                     listener.wait(settings.worker_poll_interval_s)
     finally:
         engine.dispose()
     logger.info("worker encerrado")
+
+
+def claim_pause_for(settings: Settings) -> ClaimPause:
+    """Pausa dos claims do processo, com os prazos que worker e manutenção leem da configuração."""
+    window = orphan_cleanup_window(
+        lease=timedelta(seconds=settings.worker_lease_s),
+        maintenance_interval=timedelta(seconds=settings.maintenance_interval_s),
+        stop_grace=STOP_GRACE,
+    )
+    return ClaimPause(window)
 
 
 @contextmanager
@@ -139,19 +161,44 @@ def _work_once(
     lease: timedelta,
     coordinator: Coordinator,
     finished: RunFinishedReporter,
+    pause: ClaimPause,
 ) -> bool:
-    """Uma volta do laço; `True` se havia trabalho (vale tentar de novo sem esperar)."""
+    """Uma volta do laço; `True` se havia trabalho (vale tentar de novo sem esperar).
+
+    Durante a pausa depois de uma tentativa órfã, a volta não reivindica e conta como fila vazia.
+    """
+    if pause.active:
+        return False
     try:
         claimed = claim_next(factory, storage, lease, on_finished=finished.report)
         if claimed is None:
             return False
-        coordinator.run(claimed)
+        _run_attempt(coordinator, claimed, pause)
     except Exception:
         # Fronteira do processo: uma falha (banco fora, disco) não derruba o worker. A tentativa
         # em curso fica com o lease, que vence, e a manutenção assume.
         logger.exception("volta do worker falhou")
         return False
     return True
+
+
+def _run_attempt(coordinator: Coordinator, claimed: ClaimedAttempt, pause: ClaimPause) -> None:
+    """Leva a tentativa até o fim; falha de banco que a deixa órfã pausa os claims e sobe."""
+    try:
+        coordinator.run(claimed)
+    except TRANSIENT_DATABASE_ERRORS as error:
+        pause.begin()
+        # Só o tipo e o SQLSTATE: a mensagem do banco traz host, porta e usuário.
+        sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+        fields = {
+            "run_id": str(claimed.run_id),
+            "attempt_id": str(claimed.attempt_id),
+            "error_type": type(error).__name__,
+            "sqlstate": sqlstate,
+            "pause_s": pause.window.total_seconds(),
+        }
+        logger.warning("claims pausados depois de falha de banco", extra={"fields": fields})
+        raise
 
 
 def shutdown_on_signals() -> threading.Event:

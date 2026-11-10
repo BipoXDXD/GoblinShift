@@ -99,7 +99,7 @@ from goblinshift.runs.worker.collection import (
     OutputLimitError,
     collect_outputs,
 )
-from goblinshift.runs.worker.runner import ExecutorStatus, Runner, RunnerError
+from goblinshift.runs.worker.runner import STOP_GRACE, ExecutorStatus, Runner, RunnerError
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
 # (28P01), disco cheio (53100), E/S (58030), limite do servidor (54000). A lista os inclui de
 # propósito: desistir abandonaria um executor vivo, e repetir só custa um aviso, porque o teto da
 # tentativa e o fencing encerram a espera. Erro de SQL ou de constraint é defeito, e sobe.
-_TRANSIENT_DATABASE_ERRORS = (OperationalError, PoolTimeoutError)
+TRANSIENT_DATABASE_ERRORS = (OperationalError, PoolTimeoutError)
 
 
 def random_retry_jitter() -> timedelta:
@@ -138,7 +138,7 @@ def random_retry_jitter() -> timedelta:
 class CoordinatorConfig:
     lease: timedelta
     status_poll: timedelta = timedelta(seconds=0.2)
-    stop_grace: timedelta = timedelta(seconds=10)
+    stop_grace: timedelta = STOP_GRACE
     attempt_timeout: timedelta = DEFAULT_ATTEMPT_TIMEOUT
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
@@ -395,7 +395,7 @@ class Coordinator:
         """Renova o lease; `None` se o banco falhou de forma transitória (a espera continua)."""
         try:
             return self.renew_lease(claimed)
-        except _TRANSIENT_DATABASE_ERRORS as error:
+        except TRANSIENT_DATABASE_ERRORS as error:
             # Só o tipo e o SQLSTATE: a mensagem do banco traz host, porta e usuário.
             sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
             fields = {**_ids(claimed), "error_type": type(error).__name__, "sqlstate": sqlstate}
