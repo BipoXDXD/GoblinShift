@@ -339,12 +339,24 @@ def _deployments(name: str) -> list[Any]:
     ]
 
 
+def _idle_or_database_down_step_s() -> float:
+    """Teto do passo em curso quando o SIGTERM chega, com o processo ocioso ou o banco fora.
+
+    Ocioso, o processo dorme em fatias de `SHUTDOWN_POLL_S`; com o banco fora, a conexão desiste
+    em `db_connect_timeout_s`. O banco lento fica de fora: um statement pode levar o
+    `statement_timeout`, que passa da carência (comentário dos ciclos em `maintenance.serve`).
+    """
+    connect_timeout_s: float = Settings.model_fields["db_connect_timeout_s"].default
+    return max(SHUTDOWN_POLL_S, connect_timeout_s)
+
+
 @pytest.mark.parametrize("service", _deployments("maintenance"))
-def test_parada_da_manutencao_com_o_prazo_do_tracing_cabe_na_carencia(
+def test_parada_da_manutencao_ociosa_ou_sem_banco_com_o_prazo_do_tracing_cabe_na_carencia(
     service: dict[str, Any],
 ) -> None:
-    # A volta em curso para entre os passos; com o banco fora, o passo leva o `connect_timeout`.
-    step_s = Settings.model_fields["db_connect_timeout_s"].default
+    # A volta em curso para entre os passos. Com o banco lento, o SIGKILL pode chegar antes: risco
+    # aceito, que perde spans, não dados.
+    step_s = _idle_or_database_down_step_s()
 
     assert _grace_s(service) > step_s + telemetry.TRACING_SHUTDOWN_TIMEOUT_S
 

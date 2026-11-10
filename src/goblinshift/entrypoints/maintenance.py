@@ -93,10 +93,13 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")
             cycles: tuple[Cycle, ...] = (
-                # A parada é conferida entre os passos: com o banco fora, cada passo pode levar
-                # o `connect_timeout`. Esse passo, mais o prazo do tracing, cabe na carência do
-                # Docker (tests/runs/test_process_tracer_shutdown.py); a volta inteira não
-                # caberia.
+                # A parada é conferida entre os passos, e a volta inteira não caberia na carência
+                # do Docker. Ociosa ou com o banco fora (o passo desiste no `connect_timeout`), a
+                # parada mais o prazo do tracing cabe (tests/runs/test_process_tracer_shutdown.py).
+                # Com o banco lento, não: um statement pode levar o `statement_timeout` da
+                # manutenção, e o SIGKILL pode chegar antes do fim dele. Risco aceito: perde os
+                # spans pendentes, não dados, porque o statement roda numa transação aberta, que
+                # o PostgreSQL reverte quando a conexão cai, e o passo se repete no ciclo seguinte.
                 ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
                 ("contas", account_jobs.run_cycle),
             )
