@@ -163,6 +163,28 @@ def test_ctl_fora_do_ar_no_start_e_falha_transitoria(
     assert attempts(factory, run_id)[0]["error_code"] == "EXECUTOR_UNAVAILABLE"
 
 
+def test_area_ocupada_no_start_e_falha_transitoria_sem_tentativa_fisica(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    area: Path,
+    start_ctl: Callable[..., FakeExecutorCtl],
+) -> None:
+    ctl = start_ctl(area_busy=True)
+    run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
+    claimed = claim(factory, storage)
+
+    coordinator(factory, storage, ctl_runner(ctl, area)).run(claimed)
+
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"], row["claim_count"]) == ("running", "retry_wait", 1)
+    [only] = attempts(factory, run_id)
+    assert (only["error_code"], only["executor_started_at"]) == ("EXECUTOR_UNAVAILABLE", None)
+    assert ctl.containers == {}
+    # Um só start; a limpeza confere o estado e tenta o remove, que também recebe `busy` e
+    # fica para a manutenção.
+    assert ctl.operations(claimed.attempt_id) == ["start", "status", "remove"]
+
+
 def test_executor_morto_por_memoria_falha_sem_retentativa(
     factory: sessionmaker[Session],
     storage: FileStorage,

@@ -20,8 +20,9 @@ from .witness import PassiveObserver
 # Teto da carência de stop (3.6, "Parada": SIGTERM, até 10 s, depois SIGKILL).
 MAX_STOP_GRACE_S = 10
 # Quanto start e remove esperam pelo lock da área antes de responder `busy`. Quem o segura
-# normalmente sai em 1 a 2 s; esperar mais seria fazer fila atrás de um Docker travado, com o
-# cliente já desistindo (10 s no remove). Abaixo desse prazo, a recusa chega antes do abandono.
+# normalmente sai em 1 a 3 s: o start faz inspect, `run --pull=never` (imagem já no daemon) e
+# inspect; o remove faz inspect, rm e o rmtree da área, que só passa disso com saídas grandes.
+# Esperar além de 5 s seria fazer fila atrás de um Docker travado ou de um rmtree anormal.
 AREA_LOCK_WAIT_S = 5.0
 
 _log = logging.getLogger(__name__)
