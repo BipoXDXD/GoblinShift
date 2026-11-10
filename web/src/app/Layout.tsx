@@ -69,7 +69,8 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
     <div className="flex min-h-svh flex-col">
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip)"
+        // A altura de 44 px só com foco: oculto, o sr-only mantém a caixa de 1 px.
+        className="sr-only items-center rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip) focus:inline-flex focus:min-h-11"
       >
         {T.skipToContent}
       </a>

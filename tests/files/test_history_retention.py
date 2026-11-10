@@ -228,6 +228,27 @@ def test_usos_encerrados_ha_90_dias_saem_e_o_aberto_fica(
     assert holders == {recent, live}
 
 
+def test_usos_encerrados_saem_no_teto_do_lote(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    view = ready_upload(factory, storage, create_user(factory, "ana"))
+    holders = [uuid.uuid7() for _ in range(3)]
+    with unit_of_work(factory) as session:
+        object_id = session.execute(
+            select(upload.c.object_id).where(upload.c.id == view.id)
+        ).scalar_one()
+        for holder in holders:
+            hold(session, [object_id], HolderKind.DOWNLOAD, holder)
+            release(session, HolderKind.DOWNLOAD, holder)
+        session.execute(update(object_use).values(ended_at=now - FILE_ROWS_AFTER))
+
+    with unit_of_work(factory) as session:
+        delete_old_file_rows(session, now, 2, HISTORY_REFERENCES)
+
+    assert rows(factory, object_use) == 1
+
+
 def test_linhas_respeitam_o_lote(factory: sessionmaker[Session], storage: FileStorage) -> None:
     now = now_of(factory)
     for days in (91, 92, 93):

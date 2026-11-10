@@ -14,6 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from opentelemetry.context import Context
 from opentelemetry.trace import Tracer
 from opentelemetry.util.types import AttributeValue
 from sqlalchemy import select
@@ -95,7 +96,11 @@ class RunFinishedReporter:
     def report(self, run_id: uuid.UUID) -> None:
         try:
             finished = run_transaction(self._factory, lambda session: _load(session, run_id))
-            span = self._tracer.start_span(SPAN_NAME, attributes=finished.attributes(self._hasher))
+            # Raiz do próprio trace (`Context()` vazio), como o span `attempt`: o evento não pende
+            # do pedido de API, da tentativa nem do ciclo de manutenção que concluiu a Run.
+            span = self._tracer.start_span(
+                SPAN_NAME, context=Context(), attributes=finished.attributes(self._hasher)
+            )
             span.end()
         except Exception:
             # A Run já está terminal, com os usos liberados; perder o evento custa só telemetria,

@@ -8,22 +8,23 @@ janelas do limite de requisições, ADR 028). Cada volta é um span `maintenance
 registrada e o seguinte tenta de novo. Os lotes usam
 `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
-SIGTERM e SIGINT terminam o ciclo em andamento e saem.
+SIGTERM e SIGINT terminam o ciclo em andamento e saem. O handler só marca uma flag
+(`ShutdownFlag`, entrypoints/shutdown.py), sem trava nem log, e a espera entre as voltas dorme em
+fatias curtas para vê-la.
 """
 
 import logging
-import signal
-import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from types import FrameType
+from functools import partial
 from uuid import UUID
 
 from opentelemetry.trace import NoOpTracer, Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.shutdown import ShutdownFlag, shutdown_on_signals
 from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
@@ -33,7 +34,7 @@ from goblinshift.platform.db import make_engine, make_session_factory, unit_of_w
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
 from goblinshift.runs import purge as runs_purge
-from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.runner import Runner
 
 logger = logging.getLogger("goblinshift.maintenance")
@@ -59,16 +60,8 @@ def main() -> int:
     except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("manutenção não sobe: %s", error)
         return EXIT_CONFIGURATION
-    shutdown = threading.Event()
-
-    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        logger.info("parada pedida", extra={"fields": {"signal": signum}})
-        shutdown.set()
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-    signal.signal(signal.SIGINT, request_shutdown)
     try:
-        serve(settings, runner, shutdown)
+        serve(settings, runner, shutdown_on_signals())
     except Exception:
         # Ver `worker.main`: a mensagem crua do banco não pode ir para o stderr.
         logger.exception("manutenção encerrada por erro")
@@ -76,7 +69,7 @@ def main() -> int:
     return EXIT_OK
 
 
-def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None:
+def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     batch_settings = settings.model_copy(
         update={"db_statement_timeout_ms": settings.maintenance_statement_timeout_ms}
     )
@@ -96,12 +89,15 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")
             cycles: tuple[Cycle, ...] = (
-                ("execuções", maintenance.run_cycle),
+                # A parada é conferida entre os passos: com o banco fora, cada passo pode levar o
+                # `connect_timeout`, e o SIGTERM viraria SIGKILL no prazo do Docker (10 s).
+                ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
                 ("contas", account_jobs.run_cycle),
             )
             while not shutdown.is_set():
-                run_cycles(tracer, cycles)
+                run_cycles(tracer, cycles, should_stop=shutdown.is_set)
                 shutdown.wait(settings.maintenance_interval_s)
+            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
     finally:
         engine.dispose()
         if provider is not None:
@@ -109,12 +105,17 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
     logger.info("manutenção encerrada")
 
 
-def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
+def run_cycles(
+    tracer: Tracer, cycles: Sequence[Cycle], should_stop: Callable[[], bool] = lambda: False
+) -> None:
     """Uma volta: roda os ciclos em sequência dentro de um span `maintenance.cycle`.
 
+    Com a parada pedida (`should_stop`), o ciclo seguinte não começa; o span sai com o que rodou.
+
     Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
-    com o prefixo `maintenance.`, e quantos falharam; a mensagem da exceção fica só no log, porque
-    pode trazer valores do banco (3.7).
+    com o prefixo `maintenance.`, e quantos falharam: os que levantaram e os que contaram passos
+    falhos (`steps_failed`); a mensagem da exceção fica só no log, porque pode trazer valores do
+    banco (3.7).
     """
     started = time.monotonic()
     with tracer.start_as_current_span(
@@ -122,6 +123,8 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
     ) as span:
         failed = 0
         for name, cycle in cycles:
+            if should_stop():
+                break
             try:
                 counts = cycle()
             except Exception:
@@ -131,6 +134,10 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
                 continue
             for key, value in counts.items():
                 span.set_attribute(f"{_ATTRIBUTE_PREFIX}{key}", value)
+            if counts.get(STEPS_FAILED, 0) > 0:
+                # Passo que falhou dentro do ciclo: as contagens dos outros seguem no span, e a
+                # volta entra no mesmo alerta de quem levanta.
+                failed += 1
         span.set_attribute("main", True)
         span.set_attribute(f"{_ATTRIBUTE_PREFIX}failed_cycles", failed)
         span.set_attribute("duration_ms", round((time.monotonic() - started) * 1000))

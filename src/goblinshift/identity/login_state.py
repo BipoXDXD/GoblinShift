@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity.tables import login_state
+from goblinshift.platform.sql import skip_locked_batch
 
 # O mesmo prazo do cookie de login (LOGIN_COOKIE_MAX_AGE_S).
 LOGIN_STATE_TTL = timedelta(minutes=10)
@@ -58,14 +59,13 @@ def delete_state(session: Session, key: str) -> None:
 
 def purge_expired_states(session: Session, now: datetime, *, limit: int) -> int:
     """Apaga até `limit` estados vencidos (logins abandonados); devolve quantos apagou."""
-    expired = (
+    expired = skip_locked_batch(
         select(login_state.c.key)
         .where(login_state.c.expires_at <= now)
-        .order_by(login_state.c.expires_at)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
+        .order_by(login_state.c.expires_at),
+        limit,
     )
-    statement = delete(login_state).where(login_state.c.key.in_(expired))
+    statement = delete(login_state).where(login_state.c.key.in_(select(expired.c.key)))
     return len(session.execute(statement.returning(login_state.c.key)).all())
 
 

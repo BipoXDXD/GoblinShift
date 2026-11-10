@@ -177,6 +177,24 @@ def test_lote_pequeno_avanca_ate_terminar(
     assert rows_of(factory, owner) == EMPTY
 
 
+def test_lote_marca_no_maximo_o_teto_de_uploads(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "ana")
+    for _ in range(3):
+        ready_upload(factory, storage, owner)
+
+    purge_batch(factory, owner, limit=2)
+
+    with factory() as session:
+        marked = session.execute(
+            select(func.count())
+            .select_from(upload)
+            .where(upload.c.owner_id == owner, upload.c.deleted_at.is_not(None))
+        ).scalar_one()
+    assert marked == 2
+
+
 def test_purga_interrompida_e_retomada_termina(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
