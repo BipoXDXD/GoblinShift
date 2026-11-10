@@ -124,11 +124,13 @@ describe("parseMediaMill", () => {
 
 describe("mediaMillField", () => {
   it.each([
-    [["audio_stream_index"], "media-mill-audio_stream_index"],
-    [["thumbnail_count"], "media-mill-thumbnail_count"],
-    [[], null],
-    [["inventado"], null],
-  ])("%j → %s", (path, id) => {
-    expect(mediaMillField(path)?.fieldId ?? null).toBe(id);
+    [["audio_stream_index"], "media-mill-audio_stream_index", "Faixa de áudio"],
+    [["thumbnail_count"], "media-mill-thumbnail_count", "Miniaturas"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(mediaMillField(path)).toEqual({ fieldId, label });
+  });
+
+  it.each([[[]], [["inventado"]]])("caminho sem campo %j → null", (path) => {
+    expect(mediaMillField(path)).toBeNull();
   });
 });

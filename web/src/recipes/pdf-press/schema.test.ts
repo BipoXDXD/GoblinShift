@@ -162,13 +162,13 @@ describe("parsePdfPress", () => {
 
 describe("pdfPressField", () => {
   it.each([
-    [["operation"], "pdf-press-operation"],
-    [["pages_per_document"], "pdf-press-pages_per_document"],
-    [["select"], "pdf-press-select-adicionar"],
-    [["select", "1", "upload_id"], "pdf-press-select-1-upload_id"],
-    [["select", 2, "page_number"], "pdf-press-select-2-page_number"],
-  ] as const)("traduz %j do servidor", (path, id) => {
-    expect(pdfPressField(path)?.fieldId).toBe(id);
+    [["operation"], "pdf-press-operation", "O que fazer com os PDFs"],
+    [["pages_per_document"], "pdf-press-pages_per_document", "Páginas por parte"],
+    [["select"], "pdf-press-select-adicionar", "Páginas escolhidas"],
+    [["select", "1", "upload_id"], "pdf-press-select-1-upload_id", "PDF da página 2"],
+    [["select", 2, "page_number"], "pdf-press-select-2-page_number", "Número da página 3 no PDF"],
+  ] as const)("traduz %j do servidor", (path, fieldId, label) => {
+    expect(pdfPressField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[["outro"]], [["select", "x", "upload_id"]], [["select", "0", "outro"]], [[]]])(

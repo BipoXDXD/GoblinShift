@@ -173,11 +173,11 @@ describe("parseImageForge", () => {
 
 describe("imageForgeField", () => {
   it.each([
-    [["max_width"], "image-forge-max_width"],
-    [["jpeg_background"], "image-forge-jpeg_background"],
-    [["make_thumbnails"], "image-forge-make_thumbnails"],
-  ])("%j → %s", (path, expected) => {
-    expect(imageForgeField(path)?.fieldId).toBe(expected);
+    [["max_width"], "image-forge-max_width", "Largura máxima, em pixels"],
+    [["jpeg_background"], "image-forge-jpeg_background", "Cor de fundo da transparência no JPEG"],
+    [["make_thumbnails"], "image-forge-make_thumbnails", "Gerar miniaturas"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(imageForgeField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]], [["toString"]]])(

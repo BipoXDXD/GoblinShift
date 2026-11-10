@@ -109,10 +109,10 @@ describe("parseDownloadsDetox", () => {
 
 describe("downloadsDetoxField", () => {
   it.each([
-    [["deduplicate"], "downloads-detox-deduplicate"],
-    [["name_prefix"], "downloads-detox-name_prefix"],
-  ])("%j → %s", (path, expected) => {
-    expect(downloadsDetoxField(path)?.fieldId).toBe(expected);
+    [["deduplicate"], "downloads-detox-deduplicate", "Remover arquivos repetidos"],
+    [["name_prefix"], "downloads-detox-name_prefix", "Prefixo da numeração"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(downloadsDetoxField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]]])("caminho sem campo %j → null", (path) => {

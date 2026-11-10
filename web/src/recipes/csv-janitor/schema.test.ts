@@ -261,17 +261,21 @@ describe("parseCsvJanitor com outros limites do catálogo", () => {
 
 describe("csvJanitorField", () => {
   it.each([
-    [["input_delimiter"], "csv-janitor-input_delimiter"],
-    [["trim_columns", "3"], "csv-janitor-trim_columns"],
-    [["output_columns"], "csv-janitor-output_columns"],
-    [["case_rules"], "csv-janitor-case_rules-adicionar"],
-    [["case_rules", "2", "mode"], "csv-janitor-case_rules-2-mode"],
-    [["filters", 0, "value"], "csv-janitor-filters-0-value"],
-    [["filters", "0"], "csv-janitor-filters-0-op"],
-    [["filters", "0", "desconhecido"], "csv-janitor-filters-0-op"],
-    [["filters", "x"], "csv-janitor-filters-adicionar"],
-  ])("%j → %s", (path, expected) => {
-    expect(csvJanitorField(path)?.fieldId).toBe(expected);
+    [["input_delimiter"], "csv-janitor-input_delimiter", "Delimitador dos arquivos de entrada"],
+    [["trim_columns", "3"], "csv-janitor-trim_columns", "Colunas sem espaços nas pontas"],
+    [["output_columns"], "csv-janitor-output_columns", "Colunas finais, na ordem"],
+    [["case_rules"], "csv-janitor-case_rules-adicionar", "Regras de caixa"],
+    [
+      ["case_rules", "2", "mode"],
+      "csv-janitor-case_rules-2-mode",
+      "Regras de caixa, modo (linha 3)",
+    ],
+    [["filters", 0, "value"], "csv-janitor-filters-0-value", "Filtros, valor (linha 1)"],
+    [["filters", "0"], "csv-janitor-filters-0-op", "Filtros, condição (linha 1)"],
+    [["filters", "0", "desconhecido"], "csv-janitor-filters-0-op", "Filtros, condição (linha 1)"],
+    [["filters", "x"], "csv-janitor-filters-adicionar", "Filtros"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(csvJanitorField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]]])("caminho sem campo %j → null", (path) => {
