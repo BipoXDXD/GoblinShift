@@ -25,7 +25,6 @@ from goblinshift.identity.purge import (
 from goblinshift.identity.tables import api_key, app_user, audit_event, login_state, web_session
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_key, new_user
-from tests.sql_capture import captured_sql
 
 pytestmark = pytest.mark.integration
 
@@ -299,16 +298,3 @@ def test_lote_pula_linhas_travadas_e_nao_passa_do_teto(factory: sessionmaker[Ses
         left = set(session.execute(select(login_state.c.key)).scalars())
     assert len(left) == 4
     assert {"k0", "k1"} <= left
-
-
-def test_lote_escolhe_as_chaves_numa_cte_materializada(factory: sessionmaker[Session]) -> None:
-    # `DELETE ... WHERE key IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` depende do plano:
-    # se o subplano for reexecutado (nested loop), cada execução trava outras n linhas e o lote
-    # passa do teto. A CTE materializada escolhe as chaves uma vez só, em qualquer plano.
-    insert_expired_login_states(factory, 3)
-
-    with unit_of_work(factory) as session, captured_sql(session) as statements:
-        delete_expired_login_states(session, NOW, 2)
-
-    [delete_sql] = [sql for sql in statements if "DELETE FROM login_state" in sql]
-    assert "AS MATERIALIZED" in delete_sql

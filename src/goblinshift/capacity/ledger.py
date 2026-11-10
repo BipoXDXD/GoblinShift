@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from goblinshift.capacity.tables import capacity_pool, resource_reservation
+from goblinshift.platform.sql import skip_locked_batch
 
 GIB = 1024**3
 # Tetos de 1.7; gravados no pool quando ele nasce (o global pela migração 0006).
@@ -275,17 +276,15 @@ def delete_released_reservations(session: Session, now: datetime, limit: int) ->
 
     O pool não muda: ele soma só as vivas, e a reconciliação recalcula a partir delas.
     """
-    chosen = (
+    chosen = skip_locked_batch(
         select(resource_reservation.c.id)
         .where(resource_reservation.c.released_at <= now - RELEASED_RETENTION)
-        .order_by(resource_reservation.c.released_at)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-        .scalar_subquery()
+        .order_by(resource_reservation.c.released_at),
+        limit,
     )
     removed = session.execute(
         delete(resource_reservation)
-        .where(resource_reservation.c.id.in_(chosen))
+        .where(resource_reservation.c.id.in_(select(chosen.c.id)))
         .returning(resource_reservation.c.id)
     ).all()
     return len(removed)
