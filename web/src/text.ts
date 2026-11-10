@@ -88,7 +88,6 @@ export const TEXT = {
     footerNavLabel: "Rodapé",
   },
   pageTitles: {
-    workbench: "Bancada",
     acceptTerms: "Aceite dos termos",
   },
   notice: {

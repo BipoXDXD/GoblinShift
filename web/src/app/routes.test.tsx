@@ -2,6 +2,8 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { RECIPE_LIST } from "../recipes/registry";
+import type { RecipeId } from "../recipes/types";
 import { appRoutes } from "../test/appRoutes";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi } from "../test/fakeApi";
@@ -41,7 +43,6 @@ describe("rotas carregadas sob demanda", () => {
 describe("título da aba e indexação", () => {
   it.each([
     ["/", "GoblinShift"],
-    ["/bancada/csv-janitor", "Bancada · GoblinShift"],
     ["/historico", "Histórico · GoblinShift"],
     ["/entrar", "Entrar · GoblinShift"],
     ["/acesso", "Acesso · GoblinShift"],
@@ -78,5 +79,42 @@ describe("título da aba e indexação", () => {
       expect(document.title).toBe("Créditos · GoblinShift");
     });
     expect(document.head.querySelector('meta[name="robots"]')).toBeNull();
+  });
+});
+
+// Com várias Bancadas abertas, cada aba diz qual receita está nela (WCAG 2.4.2). O registro manda
+// nos casos: uma receita nova sem linha aqui não compila.
+const WORKBENCH_TAB_TITLES: Readonly<Record<RecipeId, string>> = {
+  "csv-janitor": "Bancada: CSV Janitor · GoblinShift",
+  "image-forge": "Bancada: Image Forge · GoblinShift",
+  "downloads-detox": "Bancada: Downloads Detox · GoblinShift",
+  "pdf-press": "Bancada: PDF Press · GoblinShift",
+  "media-mill": "Bancada: Media Mill · GoblinShift",
+};
+
+describe("título da aba da Bancada", () => {
+  it.each(RECIPE_LIST.map((recipe) => [recipe.id, WORKBENCH_TAB_TITLES[recipe.id]]))(
+    "a Bancada da %s tem o título %s",
+    async (recipeId, title) => {
+      renderAt(`/bancada/${recipeId}`);
+
+      await waitFor(() => {
+        expect(document.title).toBe(title);
+      });
+    },
+  );
+
+  it("uma receita que não existe tem o título da página não encontrada", async () => {
+    renderAt("/bancada/receita-que-nao-existe");
+
+    await expectHeadingFocused("Página não encontrada");
+    expect(document.title).toBe("Página não encontrada · GoblinShift");
+  });
+
+  it("o id da receita na URL diferencia maiúsculas, como o registro", async () => {
+    renderAt("/bancada/CSV-Janitor");
+
+    await expectHeadingFocused("Página não encontrada");
+    expect(document.title).toBe("Página não encontrada · GoblinShift");
   });
 });

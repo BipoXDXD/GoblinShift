@@ -3,7 +3,6 @@ import type { ReactElement } from "react";
 import type { CatalogVersion } from "../catalog/api";
 import type { FormField } from "../components/a11y/ErrorSummary";
 import { inputLimitsOf, type InputLimits } from "../catalog/inputLimits";
-import { TEXT } from "../text";
 import { CsvJanitorFields } from "./csv-janitor/CsvJanitorFields";
 import { csvJanitorField, parseCsvJanitor } from "./csv-janitor/schema";
 import { csvJanitorSettings } from "./csv-janitor/settings";
@@ -19,6 +18,7 @@ import { imageForgeSettings } from "./image-forge/settings";
 import { MediaMillFields } from "./media-mill/MediaMillFields";
 import { mediaMillField, parseMediaMill } from "./media-mill/schema";
 import { mediaMillSettings } from "./media-mill/settings";
+import { RECIPE_TITLES } from "./titles";
 import type {
   RecipeCommandFor,
   RecipeDraft,
@@ -87,7 +87,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "csv-janitor": {
     id: "csv-janitor",
     version: 1,
-    title: TEXT.csvJanitor.title,
+    title: RECIPE_TITLES["csv-janitor"],
     accept: ".csv,text/csv",
     formFor: catalogForm({
       settingsOf: csvJanitorSettings,
@@ -99,7 +99,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "image-forge": {
     id: "image-forge",
     version: 1,
-    title: TEXT.imageForge.title,
+    title: RECIPE_TITLES["image-forge"],
     // MPO (fotos de celular) costuma vir com extensão .jpg; .mpo cobre o resto (1.2).
     accept: ".jpg,.jpeg,.png,.mpo,image/jpeg,image/png",
     formFor: catalogForm({
@@ -112,7 +112,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "downloads-detox": {
     id: "downloads-detox",
     version: 1,
-    title: TEXT.downloadsDetox.title,
+    title: RECIPE_TITLES["downloads-detox"],
     // Aceita tipos variados e classifica pelo conteúdo (1.4); recusa o que não reconhece.
     accept: null,
     formFor: catalogForm({
@@ -125,7 +125,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "pdf-press": {
     id: "pdf-press",
     version: 1,
-    title: TEXT.pdfPress.title,
+    title: RECIPE_TITLES["pdf-press"],
     // A assinatura %PDF- é conferida no executor; aqui é só o filtro da janela de arquivos.
     accept: ".pdf,application/pdf",
     numberedInputs: true,
@@ -140,7 +140,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "media-mill": {
     id: "media-mill",
     version: 1,
-    title: TEXT.mediaMill.title,
+    title: RECIPE_TITLES["media-mill"],
     // Só os contêineres da allowlist (1.5); o conteúdo é conferido pelo ffprobe no executor.
     accept: ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm",
     formFor: catalogForm({
@@ -177,4 +177,9 @@ const BY_ID: ReadonlyMap<string, RecipeModule> = new Map(
 
 export function findRecipe(id: string): RecipeModule | null {
   return BY_ID.get(id) ?? null;
+}
+
+/** A receita de um id já conferido (a rota da Bancada de cada receita). */
+export function recipeOf(id: RecipeId): RecipeModule {
+  return RECIPES[id];
 }

@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
-import { NotFoundPage } from "../app/NotFoundPage";
 import {
   CATALOG_QUERY_KEY,
   findCatalogVersion,
@@ -13,11 +12,12 @@ import {
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import {
-  findRecipe,
+  recipeOf,
   withoutUploadBoundParameters,
   type RecipeForm,
   type RecipeModule,
 } from "../recipes/registry";
+import type { RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
 import type { UploadServices } from "../upload/useUploadBatch";
 import {
@@ -29,18 +29,18 @@ import {
 import { Workbench, WorkbenchHeader } from "./Workbench";
 
 interface WorkbenchPageProps {
+  readonly recipeId: RecipeId;
   readonly uploadServices: UploadServices;
 }
 
-/** Rota da Bancada: a receita vem da URL e só segue se existir no registro. */
-export function WorkbenchPage({ uploadServices }: WorkbenchPageProps): ReactElement {
-  const recipe = findRecipe(useParams()["recipeId"] ?? "");
+/** Rota da Bancada de uma receita do registro (routes.tsx tem uma por receita). */
+export function WorkbenchPage({ recipeId, uploadServices }: WorkbenchPageProps): ReactElement {
+  const recipe = recipeOf(recipeId);
   const [search] = useSearchParams();
   const source = sourceFromSearch(search);
-  if (recipe === null) {
-    return <NotFoundPage />;
-  }
-  // A key recria a Bancada ao trocar de receita ou de origem, sem herdar arquivos nem parâmetros.
+  // A key recria a Bancada ao trocar de origem (preset, execução) e também de receita: cada
+  // receita tem a sua rota, mas o React Router não dá key às rotas e reaproveitaria esta página.
+  // Assim nada herda arquivos nem parâmetros.
   return (
     <CatalogGate
       key={`${recipe.id}:${source?.kind ?? ""}:${source?.id ?? ""}`}
