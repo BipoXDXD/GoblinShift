@@ -107,7 +107,7 @@ describe("Bancada", () => {
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Os arquivos aparecem aqui, na ordem em que serão processados. Depois, use Executar para começar.",
+        "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e use Executar para começar.",
       ),
     ).toBeInTheDocument();
     // Rotação estável pela receita: a CSV Janitor cai sempre na Jade.

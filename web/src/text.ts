@@ -164,7 +164,7 @@ export const TEXT = {
     orderLabel: "Ordem de processamento",
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:
-      "Os arquivos aparecem aqui, na ordem em que serão processados. Depois, use Executar para começar.",
+      "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e use Executar para começar.",
     limitsHint: (maxInputs: number, maxTotal: string | null, maxFile: string | null) =>
       [
         maxTotal === null
