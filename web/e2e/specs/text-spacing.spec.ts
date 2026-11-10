@@ -1,8 +1,15 @@
 // Espaçamento de texto (WCAG 1.4.12, AA): com o espaçamento que a pessoa pode impor por folha de
 // estilo própria, nenhum texto fica cortado. Aplica os valores do critério em cada tela da matriz e
 // procura contêiner que esconde o excesso (`overflow` hidden ou clip) com texto passando da borda.
+//
+// Limites aceitos (revisão do #260):
+// - só corte: texto que vaza com `overflow` visible por cima do vizinho não é acusado;
+// - corte por `clip-path` ou `contain: paint` sem `overflow` hidden, e o valor de `<input>` e
+//   `<textarea>` (sem `innerText`), passam; `overflow: auto` fica de fora porque ainda rola;
+// - não roda no build com aviso global (`NOTICE_SPECS`), então a faixa do aviso não é medida.
 import type { Page } from "@playwright/test";
 
+import { CSV_FILES, PDF_FILES } from "../fixtures/files";
 import { SCREENS } from "../support/screens";
 import { expect, test } from "../support/test";
 
@@ -18,37 +25,56 @@ const WCAG_TEXT_SPACING = `
 /** Folga para o arredondamento de subpixel entre `scrollHeight` e `clientHeight`. */
 const ROUNDING_PX = 1;
 /**
- * Defeito conhecido: no celular, o `truncate` do nome do arquivo (`UploadEntryView`) corta o nome
- * com o espaçamento da 1.4.12. O #253 troca o corte por quebra (M8); ao entrar, sai daqui.
+ * Defeito conhecido: no celular, o `truncate` do nome do arquivo (`UploadEntryView`) corta estes
+ * nomes com o espaçamento da 1.4.12. Só esses elementos ficam de fora, e o teste exige que eles
+ * ainda estejam cortados: quando o #253 trocar o corte por quebra (M8), fica vermelho e esta
+ * exceção tem de sair.
  */
-const CLIPPED_FILE_NAME_ON_MOBILE = new Set([
-  "Bancada com arquivos (CSV Janitor)",
-  "Bancada do PDF Press montando com as páginas escolhidas",
+const CLIPPED_FILE_NAMES_ON_MOBILE: ReadonlyMap<string, readonly string[]> = new Map([
+  ["Bancada com arquivos (CSV Janitor)", CSV_FILES.map((file) => file.name)],
+  ["Bancada do PDF Press montando com as páginas escolhidas", PDF_FILES.map((file) => file.name)],
 ]);
+
+interface Clip {
+  readonly description: string;
+  readonly text: string;
+  /** `span` com `truncate`: a forma do nome do arquivo no `UploadEntryView`. */
+  readonly truncatedSpan: boolean;
+}
 
 for (const screen of SCREENS) {
   test(`${screen.name}: com o espaçamento de texto da WCAG 1.4.12, nenhum texto fica cortado`, async ({
     page,
     fakeApi,
   }) => {
-    test.fixme(
-      test.info().project.name === "mobile" && CLIPPED_FILE_NAME_ON_MOBILE.has(screen.name),
-      "nome do arquivo cortado pelo truncate do UploadEntryView no celular; corrigido no #253",
-    );
     // Sem transições, o layout lido logo depois da folha nova já é o final.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await screen.open(page, fakeApi);
 
     // Sem isso, uma folha que deixou de valer passaria em silêncio.
     expect(await applyTextSpacing(page), "word-spacing aplicado ao body").not.toBe("0px");
-    expect(await clippedTexts(page, ROUNDING_PX)).toEqual([]);
+    const clips = await clippedTexts(page, ROUNDING_PX);
+    const known =
+      test.info().project.name === "mobile"
+        ? (CLIPPED_FILE_NAMES_ON_MOBILE.get(screen.name) ?? [])
+        : [];
+    const isKnown = (clip: Clip): boolean => clip.truncatedSpan && known.includes(clip.text);
+    expect(clips.filter((clip) => !isKnown(clip)).map((clip) => clip.description)).toEqual([]);
+    expect(
+      clips
+        .filter(isKnown)
+        .map((clip) => clip.text)
+        .sort(),
+      "a exceção do nome cortado ainda casa; se o #253 corrigiu o truncate, apague-a",
+    ).toEqual([...known].sort());
   });
 }
 
 /**
  * Aplica a folha por CSSOM (`adoptedStyleSheets`): a CSP de produção barra `<style>` injetado, e a
  * folha construída entra depois das do documento, como a do usuário. Devolve o `word-spacing`
- * calculado do body, prova de que a folha vale.
+ * calculado do body, prova de que a folha vale. Só cobre o `document`: shadow DOM e iframe teriam de
+ * adotar a folha cada um (o app não tem nenhum dos dois).
  */
 async function applyTextSpacing(page: Page): Promise<string> {
   return page.evaluate(async (css) => {
@@ -68,7 +94,7 @@ async function applyTextSpacing(page: Page): Promise<string> {
 }
 
 /** Contêineres visíveis, com texto, que escondem o que passa da borda num eixo e transbordam nele. */
-async function clippedTexts(page: Page, roundingPx: number): Promise<string[]> {
+async function clippedTexts(page: Page, roundingPx: number): Promise<Clip[]> {
   return page.evaluate((tolerance) => {
     const hides = (overflow: string): boolean => overflow === "hidden" || overflow === "clip";
     // O `sr-only` corta de propósito: o texto é só para o leitor de tela.
@@ -77,7 +103,7 @@ async function clippedTexts(page: Page, roundingPx: number): Promise<string[]> {
       const box = element.getBoundingClientRect();
       return style.clipPath === "inset(50%)" || (box.width <= 1 && box.height <= 1);
     };
-    const clipped: string[] = [];
+    const clipped: Clip[] = [];
     for (const element of document.querySelectorAll("body *")) {
       // SVG não tem `innerText`; o texto que ele desenha não depende do CSS de espaçamento.
       if (!(element instanceof HTMLElement)) {
@@ -98,7 +124,11 @@ async function clippedTexts(page: Page, roundingPx: number): Promise<string[]> {
       if (overX || overY) {
         const name = `${element.tagName.toLowerCase()}.${element.getAttribute("class") ?? ""}`;
         const size = `${String(element.scrollWidth)}×${String(element.scrollHeight)} em ${String(element.clientWidth)}×${String(element.clientHeight)}`;
-        clipped.push(`${name} (${size}): ${text.slice(0, 60)}`);
+        clipped.push({
+          description: `${name} (${size}): ${text.slice(0, 60)}`,
+          text,
+          truncatedSpan: element.tagName === "SPAN" && element.classList.contains("truncate"),
+        });
       }
     }
     return clipped;
