@@ -490,14 +490,7 @@ class Maintenance:
             return 0
         if not present:
             return 0
-        with self._factory() as session, session.begin():
-            live = set(
-                session.execute(
-                    select(attempt.c.id).where(
-                        attempt.c.id.in_(present), attempt.c.ended_at.is_(None)
-                    )
-                ).scalars()
-            )
+        live = self._live_attempts(present)
         removed = 0
         for attempt_id in present:
             if attempt_id in live:
@@ -506,6 +499,17 @@ class Maintenance:
             if status is not None and self._try_remove(attempt_id):
                 removed += 1
         return removed
+
+    def _live_attempts(self, present: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Das tentativas com área no disco, as ainda abertas (`ended_at` nulo)."""
+        with self._factory() as session, session.begin():
+            return set(
+                session.execute(
+                    select(attempt.c.id).where(
+                        attempt.c.id.in_(present), attempt.c.ended_at.is_(None)
+                    )
+                ).scalars()
+            )
 
     # Retenção --------------------------------------------------------------------------
 
