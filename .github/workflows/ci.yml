@@ -21,6 +21,9 @@ jobs:
   checks:
     name: Verificações
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      APT_PACOTES: age ffmpeg
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,14 +36,30 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
+      - name: Chave do cache do apt (pacotes pedidos e pacotes já instalados na imagem)
+        id: apt-chave
+        run: echo "valor=apt-$({ echo "$APT_PACOTES"; dpkg-query -W; } | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: apt-cache
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-chave.outputs.valor }}
       - name: Instalar o age (backup) e o FFmpeg completo (vídeos sintéticos do Media Mill)
         # O FFmpeg do runner só gera e confere fixtures; a receita, na imagem do executor, usa o
         # build mínimo do ADR 036.
+        # Com o cache, os .deb vêm do Actions e o apt não usa a rede; sem ele, cada espelho do
+        # Ubuntu tem um teto por tentativa (scripts/ci-apt-instalar.sh).
         timeout-minutes: 10
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
         run: |
-          scripts/ci-apt-sem-azure.sh
-          sudo apt-get update -q
-          sudo apt-get install -yq age ffmpeg
+          read -ra pacotes <<<"$APT_PACOTES"
+          scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-chave.outputs.valor }}
       - name: Ruff (lint)
         run: uv run ruff check .
       - name: Ruff (formatação)
@@ -59,6 +78,7 @@ jobs:
   openobserve:
     name: SLOs e alertas (OpenObserve)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -112,6 +132,7 @@ jobs:
   web:
     name: Interface web
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -229,6 +250,7 @@ jobs:
   secrets:
     name: Segredos (gitleaks)
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -245,7 +267,9 @@ jobs:
     name: Executor sob gVisor
     needs: [checks]
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
+      APT_PACOTES: ffmpeg
       # Mesma versão da VPS (docs/adr/004-container-gvisor-por-tentativa.md). O repositório do
       # gVisor publica cada release como uma suíte própria, então a versão fica fixada aqui.
       GVISOR_SUITE: "20261005"
@@ -263,14 +287,17 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - name: Instalar o runsc (repositório oficial do gVisor, a mesma origem de deploy/gvisor.sh)
+        # Leva cerca de 20 s. O `update` lê só a fonte do gVisor: os espelhos do Ubuntu, que já
+        # prenderam este passo por 50 min, ficam de fora, e as listas da imagem seguem valendo.
+        timeout-minutes: 5
         run: |
           keyring=/usr/share/keyrings/gvisor-archive-keyring.gpg
-          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
+          curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
           echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
             | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
-          scripts/ci-apt-sem-azure.sh
-          sudo apt-get update -q
-          sudo apt-get install -yq "runsc=${GVISOR_VERSION}"
+          apt_rede=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+          sudo apt-get update -q "${apt_rede[@]}" -o Dir::Etc::sourcelist=sources.list.d/gvisor.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+          sudo apt-get install -yq "${apt_rede[@]}" "runsc=${GVISOR_VERSION}"
           runsc --version | head -n 1
       - name: Registrar o runtime runsc no Docker do runner
         # O runner é efêmero e só roda este job, então reiniciar o Docker aqui não derruba nada.
@@ -282,12 +309,28 @@ jobs:
           fi
           sudo systemctl restart docker
           docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+      - name: Chave do cache do apt (pacotes pedidos e pacotes já instalados na imagem)
+        id: apt-chave
+        run: echo "valor=apt-$({ echo "$APT_PACOTES"; dpkg-query -W; } | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: apt-cache
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-chave.outputs.valor }}
       - name: FFmpeg completo (gera os vídeos sintéticos dos testes do Media Mill na imagem)
+        # Com o cache, os .deb vêm do Actions e o apt não usa a rede; sem ele, cada espelho do
+        # Ubuntu tem um teto por tentativa (scripts/ci-apt-instalar.sh).
         timeout-minutes: 10
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
         run: |
-          scripts/ci-apt-sem-azure.sh
-          sudo apt-get update -q
-          sudo apt-get install -yq ffmpeg
+          read -ra pacotes <<<"$APT_PACOTES"
+          scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-chave.outputs.valor }}
       - name: Testes do executor-ctl e da imagem do executor sob runsc
         env:
           GS_TEST_RUNTIME: runsc
@@ -301,6 +344,7 @@ jobs:
     needs: [checks, contract, secrets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
@@ -347,6 +391,7 @@ jobs:
     needs: [checks, secrets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -394,6 +439,7 @@ jobs:
     needs: [checks, web, e2e, secrets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
