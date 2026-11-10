@@ -180,6 +180,36 @@ def test_respostas_da_api_tem_cabecalhos_de_3_6(offline_client: TestClient, path
         _assert_common(response.headers)
 
 
+_EVIL_ORIGIN = "https://evil.example"
+_CORS_PATHS = ["/livez", "/api/v1/me", "/api/v1/runs", "/auth/logout"]
+
+
+def _cors_headers(response: httpx.Response) -> list[str]:
+    return [name for name in response.headers if name.lower().startswith("access-control-")]
+
+
+# A SPA e a API têm a mesma origem: nenhum outro site pode ler respostas nem mandar preflight.
+@pytest.mark.parametrize("path", _CORS_PATHS)
+def test_preflight_de_outra_origem_nao_recebe_cors(offline_client: TestClient, path: str) -> None:
+    response = offline_client.options(
+        path,
+        headers={
+            "Origin": _EVIL_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization, content-type, x-csrf-token",
+        },
+    )
+
+    assert _cors_headers(response) == [], response.headers
+
+
+@pytest.mark.parametrize("path", _CORS_PATHS)
+def test_get_de_outra_origem_nao_recebe_cors(offline_client: TestClient, path: str) -> None:
+    response = offline_client.get(path, headers={"Origin": _EVIL_ORIGIN})
+
+    assert _cors_headers(response) == [], response.headers
+
+
 def test_erro_interno_tambem_recebe_os_cabecalhos(offline_client: TestClient) -> None:
     response = offline_client.get("/api/v1/_test/boom")
 
