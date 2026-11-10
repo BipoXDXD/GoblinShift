@@ -41,6 +41,10 @@ LOG_LEVELS_WITH_WARNING = {"trace", "debug", "info", "warning"}
 # Como cada campo sai no log de acesso do Nginx (JSON do formato `privacy`) para os valores que
 # o roteiro conta: 429 do `limit_req` e 503 que veio da API.
 NGINX_REJECTED = '"status":429'
+# O 429 do próprio Nginx não passa pelo upstream, e o formato JSON escreve a variável vazia como
+# "" (conferido no nginx 1.30.6 da imagem). O 429 da API (QUOTA_EXCEEDED, RATE_LIMITED das
+# transferências) chega com "upstream_status":"429" e fica fora da contagem do `limit_req`.
+NGINX_NO_UPSTREAM = '"upstream_status":""'
 NGINX_UPSTREAM_UNAVAILABLE = '"upstream_status":"503"'
 
 
@@ -108,6 +112,17 @@ def test_roteiro_conta_os_campos_do_log_de_acesso_do_nginx(needle: str) -> None:
     assert any("goblinshift-nginx-1" in command and needle in command for command in commands)
 
 
+def test_roteiro_conta_so_o_429_do_limit_req_e_nao_o_da_api() -> None:
+    commands = [
+        command
+        for command in _shell_commands(_saturation_section())
+        if "goblinshift-nginx-1" in command and NGINX_REJECTED in command
+    ]
+
+    assert commands
+    assert all(NGINX_NO_UPSTREAM in command for command in commands), commands
+
+
 def test_log_de_acesso_do_nginx_escreve_os_campos_como_o_roteiro_procura() -> None:
     log_format = ACCESS_LOG_FORMAT.read_text(encoding="utf-8")
 
@@ -115,16 +130,45 @@ def test_log_de_acesso_do_nginx_escreve_os_campos_como_o_roteiro_procura() -> No
     assert '"upstream_status":"$upstream_status"' in log_format
 
 
-def test_logs_dos_containers_nao_chegam_ao_openobserve() -> None:
-    # Premissa do roteiro manual do 429: se um receptor de arquivo (filelog) ou outro entrar no
-    # Collector, o 429 também passa a ter uma causa no catálogo, e a seção do README muda.
-    pipelines = yaml.safe_load(COLLECTOR_CONFIG.read_text(encoding="utf-8"))["service"]["pipelines"]
+def _log_receivers(collector: dict[str, Any]) -> dict[str, list[str]]:
+    """Receptores de cada pipeline de logs do Collector: `logs` e qualquer `logs/<nome>`."""
+    pipelines: dict[str, Any] = collector["service"]["pipelines"]
+    return {
+        name: list(pipeline.get("receivers", []))
+        for name, pipeline in pipelines.items()
+        if name == "logs" or name.startswith("logs/")
+    }
 
-    assert pipelines["logs"]["receivers"] == ["otlp"]
+
+def test_pipeline_de_logs_com_nome_tambem_e_conferido() -> None:
+    # Um `logs/containers` com `filelog` levaria o log dos containers ao OpenObserve sem tocar no
+    # pipeline `logs`; a conferência abaixo precisa enxergá-lo.
+    collector = {
+        "service": {
+            "pipelines": {
+                "logs": {"receivers": ["otlp"]},
+                "logs/containers": {"receivers": ["filelog"]},
+                "traces": {"receivers": ["otlp"]},
+            }
+        }
+    }
+
+    assert _log_receivers(collector) == {"logs": ["otlp"], "logs/containers": ["filelog"]}
+
+
+def test_logs_dos_containers_nao_chegam_ao_openobserve() -> None:
+    # Premissa do roteiro manual do 429: se um receptor de arquivo (filelog) ou outro entrar em
+    # algum pipeline de logs do Collector, o 429 também passa a ter uma causa no catálogo, e a
+    # seção do README muda.
+    collector = yaml.safe_load(COLLECTOR_CONFIG.read_text(encoding="utf-8"))
+
+    receivers = _log_receivers(collector)
+    assert receivers
+    assert all(names == ["otlp"] for names in receivers.values()), receivers
     exporting = [
         path
         for path in APPLICATION_SOURCE.rglob("*.py")
         if OTLP_LOG_EXPORT.search(path.read_text(encoding="utf-8"))
     ]
     assert exporting == []
-    assert {alert.stream_type for alert in alerts("default", "gs-")} == {"traces", "metrics"}
+    assert "logs" not in {alert.stream_type for alert in alerts("default", "gs-")}
