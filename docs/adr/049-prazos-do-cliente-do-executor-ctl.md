@@ -44,7 +44,7 @@ O cliente vive na imagem do worker e não pode importar `deploy/executor_ctl`, q
 
 O `CALL_TIMEOUT` de 10 s continua para `status` e `stop`, que não tomam o lock. O plano registra os dois prazos e a regra cliente > teto do servidor (`docs/GoblinShiftPlan.md:731`).
 
-**Lock com prazo e `runsc` obrigatório (alternativa A), proposto.** Decidido no ruling da triagem (`frente-4-triagem.md:48`), implementado no PR #235, que só pode ser mesclado junto da reinstalação:
+**Lock com prazo e `runsc` obrigatório (alternativa A), proposto.** Decidido depois do PR #232, que mostrou que nenhum teste exigia `runsc` em produção; a regra escolhida, o arquivo do host nunca aceitar `runc`, é a mais simples de auditar. Implementado no PR #235, que só pode ser mesclado junto da reinstalação:
 
 - `start` e `remove` tomam o lock por `acquire(timeout=5 s)`; estourado, o serviço responde `503` com `{"error": "busy"}`. Os 5 s ficam acima da duração normal de quem segura o lock (1 a 3 s).
 - `load_config` aceita só `runtime: "runsc"`. `runc` só existe em `Config` montada nos testes.
@@ -64,5 +64,5 @@ O `CALL_TIMEOUT` de 10 s continua para `status` e `stop`, que não tomam o lock.
 
 - `tests/executor_ctl/test_client_deadlines.py` roda o `ExecutorService` real com um Docker que só conta as chamadas: o espelho do prazo é igual a `COMMAND_TIMEOUT_S`; o `start` faz `["inspect", "run", "inspect"]` e o `remove` `["inspect", "rm"]`; quem segura o lock cabe no espelho; o teto medido no serviço (180 s no `start`, 150 s no `remove`) é menor que o prazo do cliente.
 - `tests/runs/test_executor_ctl_runner.py`: o runner padrão usa 190 s no `start`, 160 s no `remove` e 10 s no `status`; um `executor-ctl` lento, com prazos escalados, é aceito no ponto médio entre o prazo antigo e o novo.
-- Sabotagens registradas no relatório da frente 4e (`START_MARGIN = 0`, `REMOVE_MARGIN = 0`, `CTL_LOCK_HOLDER_DOCKER_CALLS = 2`, `remove()` com `CALL_TIMEOUT`), todas reprovadas.
+- Sabotagens feitas no PR #230 (`START_MARGIN = 0`, `REMOVE_MARGIN = 0`, `CTL_LOCK_HOLDER_DOCKER_CALLS = 2`, `remove()` com `CALL_TIMEOUT`), todas reprovadas.
 - Com o #235: `tests/executor_ctl/test_service.py` (lock liberado depois de exceção dentro do bloco), `tests/executor_ctl/test_area_busy.py` (`503 busy` no `start` e no `remove`, recebido pelo worker como falha transitória), `tests/executor_ctl/test_config.py` (configuração com `runc` recusada) e `test_area_ocupada_no_start_e_falha_transitoria_sem_tentativa_fisica` no coordenador. A aceitação na VPS (`sudo python3 -B -m acceptance.run`) roda na janela de reinstalação.
