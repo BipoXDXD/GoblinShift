@@ -23,7 +23,6 @@ export function NotFoundPage(): ReactElement {
           {TEXT.notFound.backHome}
         </Link>
       </p>
-      <Link to={PATHS.home}></Link>
     </div>
   );
 }
