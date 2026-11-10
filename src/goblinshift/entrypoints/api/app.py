@@ -3,8 +3,10 @@
 Executada com `uvicorn goblinshift.entrypoints.api.app:create_app --factory`.
 """
 
-from collections.abc import AsyncGenerator
+import time
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from functools import partial
 from importlib.metadata import version
 
 from fastapi import APIRouter, FastAPI
@@ -49,9 +51,13 @@ API_PREFIX = "/api/v1"
 
 
 def create_app(
-    settings: Settings | None = None, *, span_exporter: SpanExporter | None = None
+    settings: Settings | None = None,
+    *,
+    span_exporter: SpanExporter | None = None,
+    readiness_clock: Callable[[], float] = time.monotonic,
 ) -> FastAPI:
-    """`span_exporter` substitui o exportador OTLP nos testes do evento amplo."""
+    """`span_exporter` substitui o exportador OTLP nos testes do evento amplo, e
+    `readiness_clock`, o relógio da validade do resultado do `/readyz`."""
     settings = settings or Settings()
     # Lidos já na subida: em produção, sem os segredos ou sem o executor-ctl e a imagem do
     # executor, a API não sobe (em vez de falhar no primeiro pedido).
@@ -88,8 +94,10 @@ def create_app(
     app.state.web_identity = web_identity
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
-    app.state.code_heads = code_heads
-    app.state.known_revisions = known_revisions
+    app.state.readiness = health.ReadinessCache(
+        partial(health.database_is_ready, engine, code_heads, known_revisions),
+        clock=readiness_clock,
+    )
     app.state.storage = FileStorage(settings.storage_root)
     app.state.transfer_timeouts = TransferTimeouts()
     app.state.terms_version = CURRENT_TERMS_VERSION

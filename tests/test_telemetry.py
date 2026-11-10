@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -226,8 +227,10 @@ def traced_app(tmp_path: Path) -> Iterator[TracedApp]:
     app = FastAPI()
     app.include_router(health.router)
     app.state.engine = engine
-    app.state.code_heads = frozenset({REVISION})
-    app.state.known_revisions = frozenset({REVISION})
+    app.state.readiness = health.ReadinessCache(
+        lambda: health.database_is_ready(engine, frozenset({REVISION}), frozenset({REVISION})),
+        clock=time.monotonic,
+    )
 
     @app.get(QUERY_ROUTE)
     def query(request: Request) -> dict[str, int]:
