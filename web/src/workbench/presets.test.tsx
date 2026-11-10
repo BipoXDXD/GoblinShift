@@ -77,6 +77,17 @@ describe("Bancada: Salvar preset", () => {
     expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
   });
 
+  it("nome vazio leva o foco ao campo, que anuncia o erro pela descrição", async () => {
+    const { user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    const name = within(dialog).getByLabelText("Nome do preset");
+    expect(name).toHaveFocus();
+    expect(name).toHaveAccessibleDescription(/Erro: Dê um nome ao preset\./);
+  });
+
   it("nome com mais de 100 caracteres é recusado antes da API", async () => {
     const { api, user } = setup();
 

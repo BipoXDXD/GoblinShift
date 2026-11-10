@@ -101,6 +101,7 @@ describe("parseImageForge", () => {
     expect(issuesOf(parseImageForge(values({ max_height: "9000" }), SETTINGS))).toEqual([
       {
         fieldId: "image-forge-max_height",
+        label: "Altura máxima, em pixels",
         message: "Informe um número inteiro de 16 a 4096.",
       },
     ]);
@@ -127,7 +128,11 @@ describe("parseImageForge", () => {
     "cor de fundo %j é recusada no campo",
     (color) => {
       expect(issuesOf(parseImageForge(values({ jpeg_background: color }), SETTINGS))).toEqual([
-        { fieldId: "image-forge-jpeg_background", message: "Use o formato #RRGGBB, como #FFFFFF." },
+        {
+          fieldId: "image-forge-jpeg_background",
+          label: "Cor de fundo da transparência no JPEG",
+          message: "Use o formato #RRGGBB, como #FFFFFF.",
+        },
       ]);
     },
   );

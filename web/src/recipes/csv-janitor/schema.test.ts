@@ -168,7 +168,66 @@ describe("parseCsvJanitor", () => {
     );
 
     expect(issues).toEqual([
-      { fieldId: "csv-janitor-case_rules-1-column", message: "Informe a coluna." },
+      {
+        fieldId: "csv-janitor-case_rules-1-column",
+        label: "Regras de caixa, coluna (linha 2)",
+        message: "Informe a coluna.",
+      },
+    ]);
+  });
+
+  it("duas linhas de filtro sem coluna citam a linha de cada uma", () => {
+    const issues = issuesOf(
+      parseCsvJanitor(
+        values({
+          filters: [
+            { key: "a", column: "", op: "eq", value: "x" },
+            { key: "b", column: "", op: "eq", value: "y" },
+          ],
+        }),
+      ),
+    );
+
+    expect(issues).toEqual([
+      {
+        fieldId: "csv-janitor-filters-0-column",
+        label: "Filtros, coluna (linha 1)",
+        message: "Informe a coluna.",
+      },
+      {
+        fieldId: "csv-janitor-filters-1-column",
+        label: "Filtros, coluna (linha 2)",
+        message: "Informe a coluna.",
+      },
+    ]);
+  });
+
+  it("filtros demais apontam o botão de adicionar, com o nome do grupo", () => {
+    const filters = Array.from({ length: MAX_FILTERS + 1 }, (_, index) => ({
+      key: String(index),
+      column: "c",
+      op: "ne" as const,
+      value: "x",
+    }));
+
+    expect(issuesOf(parseCsvJanitor(values({ filters })))).toEqual([
+      {
+        fieldId: "csv-janitor-filters-adicionar",
+        label: "Filtros",
+        message: "Use no máximo 5 linhas.",
+      },
+    ]);
+  });
+
+  it("lista de colunas longa demais cita o campo", () => {
+    expect(
+      issuesOf(parseCsvJanitor(values({ output_columns: lines(MAX_LIST_COLUMNS + 1) }))),
+    ).toEqual([
+      {
+        fieldId: "csv-janitor-output_columns",
+        label: "Colunas finais, na ordem",
+        message: "Informe no máximo 100 colunas.",
+      },
     ]);
   });
 

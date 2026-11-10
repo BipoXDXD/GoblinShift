@@ -71,7 +71,11 @@ describe("parsePdfPress", () => {
     );
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-pages_per_document", message: "Informe um número inteiro de 1 a 200." },
+      {
+        fieldId: "pdf-press-pages_per_document",
+        label: "Páginas por parte",
+        message: "Informe um número inteiro de 1 a 200.",
+      },
     ]);
   });
 
@@ -94,7 +98,11 @@ describe("parsePdfPress", () => {
     const draft = parsePdfPress(values({ operation: "select" }), SETTINGS, [A]);
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-select-adicionar", message: "Adicione ao menos uma página." },
+      {
+        fieldId: "pdf-press-select-adicionar",
+        label: "Páginas escolhidas",
+        message: "Adicione ao menos uma página.",
+      },
     ]);
   });
 
@@ -104,7 +112,11 @@ describe("parsePdfPress", () => {
     const draft = parsePdfPress(values({ operation: "select", cards }), SETTINGS, [A]);
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-select-adicionar", message: "Escolha no máximo 3 páginas." },
+      {
+        fieldId: "pdf-press-select-adicionar",
+        label: "Páginas escolhidas",
+        message: "Escolha no máximo 3 páginas.",
+      },
     ]);
   });
 
@@ -114,8 +126,16 @@ describe("parsePdfPress", () => {
     const draft = parsePdfPress(values({ operation: "select", cards }), SETTINGS, [B]);
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-select-0-upload_id", message: "Escolha um dos PDFs enviados." },
-      { fieldId: "pdf-press-select-1-upload_id", message: "Escolha um dos PDFs enviados." },
+      {
+        fieldId: "pdf-press-select-0-upload_id",
+        label: "PDF da página 1",
+        message: "Escolha um dos PDFs enviados.",
+      },
+      {
+        fieldId: "pdf-press-select-1-upload_id",
+        label: "PDF da página 2",
+        message: "Escolha um dos PDFs enviados.",
+      },
     ]);
   });
 
@@ -127,6 +147,7 @@ describe("parsePdfPress", () => {
     expect(issuesOf(draft)).toEqual([
       {
         fieldId: "pdf-press-select-0-page_number",
+        label: "Número da página 1 no PDF",
         message: "Informe um número inteiro de 1 a 200.",
       },
     ]);

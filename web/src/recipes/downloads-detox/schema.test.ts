@@ -95,7 +95,7 @@ describe("parseDownloadsDetox", () => {
     ],
   ])("prefixo %s é recusado no campo", (_, prefix, message) => {
     expect(issuesOf(parseDownloadsDetox(indexed(prefix), SETTINGS))).toEqual([
-      { fieldId: "downloads-detox-name_prefix", message },
+      { fieldId: "downloads-detox-name_prefix", label: "Prefixo da numeração", message },
     ]);
   });
 

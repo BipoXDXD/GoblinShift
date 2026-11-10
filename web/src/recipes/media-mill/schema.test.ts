@@ -80,6 +80,7 @@ describe("parseMediaMill", () => {
     expect(issues).toEqual([
       {
         fieldId: "media-mill-audio_stream_index",
+        label: "Faixa de áudio",
         message: "Deixe vazio ou informe um número inteiro de 0 a 15.",
       },
     ]);
@@ -107,6 +108,7 @@ describe("parseMediaMill", () => {
     expect(issues).toEqual([
       {
         fieldId: "media-mill-extract_audio",
+        label: "Extrair o áudio",
         message: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
       },
     ]);

@@ -10,7 +10,7 @@ const MIN_TARGET_PX = 44;
 const EXTRACT_AUDIO = "Extrair o áudio";
 const AUDIO_TRACK = "Faixa de áudio";
 const THUMBNAIL_OPTION = "Nenhuma";
-const NO_FILES_ERROR = "Escolha pelo menos um arquivo.";
+const NO_FILES_ERROR = "Arquivos de entrada: escolha pelo menos um arquivo.";
 const OUTPUT = { name: "clientes.csv", body: Buffer.from("nome\nAna\n") };
 
 async function lookOf(field: Locator): Promise<Record<"background" | "border" | "shadow", string>> {

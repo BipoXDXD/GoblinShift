@@ -170,7 +170,11 @@ describe("PdfPressFields", () => {
     expect(lastDraft()).toEqual({
       ok: false,
       issues: [
-        { fieldId: "pdf-press-select-0-upload_id", message: "Escolha um dos PDFs enviados." },
+        {
+          fieldId: "pdf-press-select-0-upload_id",
+          label: "PDF da página 1",
+          message: "Escolha um dos PDFs enviados.",
+        },
       ],
     });
     expect(screen.getByRole("combobox", { name: "PDF da página 1" })).toHaveDisplayValue(

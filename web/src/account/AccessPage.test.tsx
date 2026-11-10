@@ -400,10 +400,12 @@ describe("Acesso: chave nova", () => {
     const summary = await within(form).findByRole("alert");
     expect(summary).toHaveFocus();
     expect(
-      within(summary).getByRole("link", { name: "Escolha pelo menos um escopo." }),
+      within(summary).getByRole("link", { name: "Escopos: escolha pelo menos um escopo." }),
     ).toBeVisible();
     expect(
-      within(summary).getByRole("link", { name: "Informe um número inteiro de 1 a 90." }),
+      within(summary).getByRole("link", {
+        name: "Validade, em dias: informe um número inteiro de 1 a 90.",
+      }),
     ).toBeVisible();
     expect(sent(api.requests, "POST /api/v1/api-keys")).toEqual([]);
   });
@@ -552,6 +554,37 @@ describe("Acesso: excluir conta", () => {
 
     expect(confirm).toHaveAttribute("aria-disabled", "true");
     expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("frase errada: confirmar mostra o erro no campo, com o foco nele, e nada é enviado", async () => {
+    const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
+    await user.type(phrase, "excluir minha conta.");
+
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+
+    expect(phrase).toHaveFocus();
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    expect(phrase).toHaveAccessibleDescription(
+      "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+    );
+    expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("o erro da frase some ao cancelar e reabrir o diálogo", async () => {
+    const { user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    expect(within(dialog).getByText(/A frase não confere\./)).toBeVisible();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    const reopened = await openDialog(user);
+
+    expect(within(reopened).queryByText(/A frase não confere\./)).toBeNull();
+    expect(within(reopened).getByLabelText("Digite “excluir minha conta”")).not.toHaveAttribute(
+      "aria-invalid",
+    );
   });
 
   it("com a frase, exclui (202), encerra a sessão local e mostra a exclusão pedida", async () => {
