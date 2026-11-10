@@ -12,6 +12,8 @@ test.use({ auth: "none" });
 const NARROW_PHONE = { width: 375, height: 740 };
 /** Alvo de toque da regra de interface 11 (WCAG 2.5.5). */
 const TOUCH_TARGET_PX = 44;
+/** Arredondamento subpixel das caixas. */
+const WIDTH_TOLERANCE_PX = 1;
 
 test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada", async ({
   page,
@@ -113,13 +115,21 @@ test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões
   await expect(confirm).toBeFocused();
 
   const [first, second] = await Promise.all([cancel.boundingBox(), confirm.boundingBox()]);
-  expect(first, "Cancelar sem caixa").not.toBeNull();
-  expect(second, "confirmação sem caixa").not.toBeNull();
-  expect(first?.y ?? 0, "o primeiro do Tab tem de vir acima do segundo").toBeLessThan(
-    second?.y ?? 0,
-  );
+  if (first === null || second === null) {
+    throw new Error("botões do diálogo sem caixa");
+  }
+  expect(first.y, "o primeiro do Tab tem de vir acima do segundo").toBeLessThan(second.y);
+  // Largura útil do diálogo: a caixa de conteúdo, sem o padding.
+  const contentWidth = await dialog.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  });
   for (const box of [first, second]) {
-    expect(box?.height ?? 0, "alvo de toque de 44 px").toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+    expect(box.height, "alvo de toque de 44 px").toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+    expect(
+      Math.abs(box.width - contentWidth),
+      `botão na largura útil do diálogo (${String(contentWidth)} px)`,
+    ).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
   }
 });
 
