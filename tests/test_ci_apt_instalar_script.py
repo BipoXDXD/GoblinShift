@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -97,6 +98,12 @@ def chamadas(ambiente: dict[str, Path]) -> list[str]:
     return log.read_text().splitlines() if log.exists() else []
 
 
+def hosts_dos_espelhos(ambiente: dict[str, Path]) -> list[str]:
+    """Host de cada URI do apt-mirrors.txt, na ordem do arquivo."""
+    linhas = (ambiente["etc"] / "apt-mirrors.txt").read_text().splitlines()
+    return [urlsplit(linha.split("\t")[0]).hostname or "" for linha in linhas]
+
+
 def espelho_atual(ambiente: dict[str, Path]) -> str:
     first = (ambiente["etc"] / "apt-mirrors.txt").read_text().splitlines()[0]
     match = re.search(r"//([^/]+)/ubuntu", first)
@@ -125,7 +132,7 @@ def test_espelho_bom_baixa_e_instala_do_archive_ubuntu(ambiente: dict[str, Path]
     assert apt[2].endswith("age ffmpeg")
     assert all("--no-install-recommends" in c for c in apt[1:])
     assert espelho_atual(ambiente) == "archive.ubuntu.com"
-    assert "security.ubuntu.com" in (ambiente["etc"] / "apt-mirrors.txt").read_text()
+    assert "security.ubuntu.com" in hosts_dos_espelhos(ambiente)
 
 
 def test_configura_o_apt_sem_traducoes_e_com_timeout_de_rede(ambiente: dict[str, Path]) -> None:
@@ -150,7 +157,10 @@ def test_espelho_lento_passa_para_o_proximo(ambiente: dict[str, Path]) -> None:
 
     assert result.returncode == 0, result.stderr
     assert espelho_atual(ambiente) == "mirrors.edge.kernel.org"
-    assert "archive.ubuntu.com" in result.stdout
+    assert (
+        f"::warning::apt: archive.ubuntu.com não entregou os pacotes em {TENTATIVA_S} s; "
+        "tentando o próximo espelho"
+    ) in result.stdout.splitlines()
     assert "::warning::" in result.stdout
     assert chamadas(ambiente)[-1].startswith("apt-get")
     assert "--no-download" in chamadas(ambiente)[-1]
