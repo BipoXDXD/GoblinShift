@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CircleCheck, Clock } from "lucide-react";
-import { useId, useRef, useState, type ReactElement, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { PATHS } from "../app/paths";
+import { focusIsLost } from "../components/a11y/focusLost";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -50,6 +51,13 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
     heading.current?.focus();
   };
   const revoke = useRevoke(focusHeading);
+  // Falha genérica que o servidor aplicou mesmo assim (5xx, timeout): o Revogar sai na releitura e
+  // leva o foco junto. Depois do commit da lista, o foco perdido vai para o título.
+  useEffect(() => {
+    if (revoke.failure !== null && focusIsLost()) {
+      heading.current?.focus();
+    }
+  }, [keys.data, revoke.failure]);
   const openForm = (): void => {
     setCreated(null);
     setFormOpen(true);

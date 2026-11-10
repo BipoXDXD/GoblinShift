@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { useId, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
@@ -8,6 +8,7 @@ import { useMe } from "../account/useMe";
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { workbenchPresetPath } from "../app/paths";
+import { focusIsLost } from "../components/a11y/focusLost";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -40,6 +41,13 @@ export function PresetsSection(): ReactElement | null {
   const removal = useRemoval(() => {
     heading.current?.focus();
   });
+  // Falha genérica que o servidor aplicou mesmo assim (5xx, timeout): o Excluir sai na releitura e
+  // leva o foco junto. Depois do commit da lista, o foco perdido vai para o título.
+  useEffect(() => {
+    if (removal.failure !== null && focusIsLost()) {
+      heading.current?.focus();
+    }
+  }, [presets.data, removal.failure]);
   if (!signedIn) {
     return null;
   }
