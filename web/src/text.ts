@@ -125,6 +125,13 @@ export const TEXT = {
     },
   },
   notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
+  // Tela que não abriu (chunk que não carregou ou erro de render): o detalhe fica no console.
+  routeFailure: {
+    title: "Não foi possível abrir esta tela",
+    pageTitle: "Erro ao abrir a tela",
+    reload: "Recarregar a página",
+    backHome: "Voltar à Oficina",
+  },
   // Texto alternativo das goblins (ADR 030): diz quem é e como é; o estado já está no texto ao lado.
   art: {
     castHeading: "O elenco",
@@ -662,6 +669,9 @@ export const TEXT = {
     recentHeading: "Execuções recentes",
     recentEmptyHint: "Escolha uma receita acima para começar.",
     seeAll: "Ver o histórico completo",
+    // Anunciados depois do "Carregar mais", junto com quantas execuções chegaram.
+    noMore: "Não há mais execuções.",
+    endOfList: "Fim da lista.",
   },
   account: {
     signIn: {

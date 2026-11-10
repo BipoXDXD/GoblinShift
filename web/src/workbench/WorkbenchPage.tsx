@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -10,6 +10,7 @@ import {
   getCatalog,
   type CatalogVersion,
 } from "../catalog/api";
+import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import {
   findRecipe,
@@ -73,36 +74,40 @@ function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): Reac
   const sourcePending = source !== null && loaded.isPending;
   if (catalog.data === undefined || sourcePending) {
     return (
-      <div className="flex flex-col gap-8">
-        <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
-        {catalog.data === undefined ? (
-          <CatalogPending error={catalog.error} />
-        ) : (
-          <p className="text-fg-muted">
-            {source?.kind === "run" ? TEXT.history.loadingRun : TEXT.presets.loadingPreset}
-          </p>
-        )}
-      </div>
+      <SourceAnnouncer source={source} message={null}>
+        <div className="flex flex-col gap-8">
+          <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
+          {catalog.data === undefined ? (
+            <CatalogPending error={catalog.error} />
+          ) : (
+            <p className="text-fg-muted">
+              {source?.kind === "run" ? TEXT.history.loadingRun : TEXT.presets.loadingPreset}
+            </p>
+          )}
+        </div>
+      </SourceAnnouncer>
     );
   }
   const version = findCatalogVersion(catalog.data, recipe.id, recipe.version);
   const form = version === null ? null : recipe.formFor(version);
   if (form === null) {
     return (
-      <div className="flex flex-col gap-8">
-        <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
-        <p
-          role="alert"
-          className="rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 font-semibold text-danger-fg"
-        >
-          {TEXT.workbench.recipeUnavailable}
-        </p>
-      </div>
+      <SourceAnnouncer source={source} message={null}>
+        <div className="flex flex-col gap-8">
+          <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
+          <p
+            role="alert"
+            className="rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 font-semibold text-danger-fg"
+          >
+            {TEXT.workbench.recipeUnavailable}
+          </p>
+        </div>
+      </SourceAnnouncer>
     );
   }
   const prefilled =
     source === null || version === null
-      ? { form, notice: null }
+      ? { form, notice: null, announcement: null }
       : prefilledForm({
           recipe,
           version,
@@ -111,12 +116,45 @@ function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): Reac
           error: loaded.error,
         });
   return (
-    <Workbench
-      recipe={recipe}
-      form={prefilled.form}
-      notice={prefilled.notice}
-      uploadServices={uploadServices}
-    />
+    <SourceAnnouncer source={source} message={prefilled.announcement}>
+      <Workbench
+        recipe={recipe}
+        form={prefilled.form}
+        notice={prefilled.notice}
+        uploadServices={uploadServices}
+      />
+    </SourceAnnouncer>
+  );
+}
+
+interface SourceAnnouncerProps {
+  readonly source: SourceRef | null;
+  /** O aviso de origem a anunciar; `null` enquanto ele não existe. */
+  readonly message: string | null;
+  readonly children: ReactNode;
+}
+
+/**
+ * Anuncia o aviso de origem (WCAG 4.1.3). O leitor de tela só lê a mudança numa região viva que já
+ * conhecia, e o parágrafo do aviso nasce junto com a Bancada: a região fica aqui, no mesmo lugar em
+ * todas as etapas, montada vazia desde o "Carregando". O texto entra `ANNOUNCE_DELAY_MS` depois de
+ * mudar, para que também a Bancada que abre direto do cache tenha a região vazia antes do aviso.
+ */
+function SourceAnnouncer({ source, message, children }: SourceAnnouncerProps): ReactElement {
+  const [announced, setAnnounced] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAnnounced(message);
+    }, ANNOUNCE_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [message]);
+  return (
+    <>
+      {children}
+      {source !== null && <LiveRegion message={announced} visuallyHidden />}
+    </>
   );
 }
 
@@ -137,16 +175,22 @@ interface PrefillSources {
 function prefilledForm({ recipe, version, fallback, source, error }: PrefillSources): {
   readonly form: RecipeForm;
   readonly notice: ReactNode;
+  /** O texto do aviso de origem, para a região viva; a falha já sai num `alert`. */
+  readonly announcement: string | null;
 } {
   if (source === null) {
-    return { form: fallback, notice: error === null ? null : <FailureNotice error={error} /> };
+    return {
+      form: fallback,
+      notice: error === null ? null : <FailureNotice error={error} />,
+      announcement: null,
+    };
   }
   const sameRecipe = source.recipeId === recipe.id && source.recipeVersion === recipe.version;
   if (!sameRecipe) {
-    return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
+    return withNotice(fallback, source.wrongRecipeNotice);
   }
   if (source.stored.kind === "gone") {
-    return { form: fallback, notice: <SourceNotice>{source.stored.notice}</SourceNotice> };
+    return withNotice(fallback, source.stored.notice);
   }
   const reusable = withoutUploadBoundParameters(recipe, source.stored.parameters);
   const form = recipe.formFor({
@@ -154,28 +198,29 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
     defaults: { ...version.defaults, ...reusable.parameters },
   });
   if (form === null) {
-    return { form: fallback, notice: <SourceNotice>{source.wrongRecipeNotice}</SourceNotice> };
+    return withNotice(fallback, source.wrongRecipeNotice);
   }
-  return {
+  return withNotice(
     form,
-    notice: (
-      <SourceNotice>
-        {source.loadedNotice}
-        {reusable.dropped && ` ${TEXT.workbench.uploadBoundDropped}`}
-      </SourceNotice>
-    ),
-  };
+    reusable.dropped
+      ? `${source.loadedNotice} ${TEXT.workbench.uploadBoundDropped}`
+      : source.loadedNotice,
+  );
+}
+
+function withNotice(
+  form: RecipeForm,
+  text: string,
+): { readonly form: RecipeForm; readonly notice: ReactNode; readonly announcement: string } {
+  return { form, notice: <SourceNotice>{text}</SourceNotice>, announcement: text };
 }
 
 /**
- * Status (WCAG 4.1.3): o aviso chega depois do carregamento da origem, no lugar do "carregando".
+ * O aviso visível de onde vieram os parâmetros, no lugar do "carregando". Não é região viva: quem
+ * o anuncia é o SourceAnnouncer, que já existia antes de ele aparecer.
  */
 function SourceNotice({ children }: { readonly children: ReactNode }): ReactElement {
-  return (
-    <p role="status" className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">
-      {children}
-    </p>
-  );
+  return <p className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">{children}</p>;
 }
 
 /** Enquanto não há catálogo: carregando, sem login (aviso, não erro) ou a falha em texto. */

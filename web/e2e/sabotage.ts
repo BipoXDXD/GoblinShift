@@ -333,6 +333,51 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "histórico: o foco do Carregar mais não chega à linha nova",
+    spec: ["history.spec.ts", "-g", "na última página"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `document.addEventListener("focusin", (event) => {
+          if (event.target instanceof HTMLAnchorElement && event.target.closest("li")) {
+            event.target.blur();
+          }
+        });`,
+      );
+    },
+  },
+  {
+    name: "Bancada: o parágrafo do aviso de origem vira região viva que nasce com o texto",
+    spec: ["reuse.spec.ts", "-g", "região viva que já existia"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `new MutationObserver(() => {
+          for (const paragraph of document.querySelectorAll("p")) {
+            if (paragraph.textContent?.startsWith("Parâmetros da execução de")) {
+              paragraph.setAttribute("role", "status");
+            }
+          }
+        }).observe(document.documentElement, { childList: true, subtree: true });`,
+      );
+    },
+  },
+  {
+    name: "tela que não abriu: o foco não chega ao título do erro",
+    spec: ["route-failure.spec.ts"],
+    plant: (dist) => {
+      addScript(
+        dist,
+        `document.addEventListener("focusin", (event) => {
+          if (event.target instanceof HTMLHeadingElement &&
+              event.target.textContent === "Não foi possível abrir esta tela") {
+            event.target.blur();
+          }
+        });`,
+      );
+    },
+  },
+  {
     name: "chave de API: canário embutido no bundle",
     spec: ["api-key.spec.ts", "-g", "não aparece"],
     env: { GS_E2E_API_KEY: PLANTED_KEY },

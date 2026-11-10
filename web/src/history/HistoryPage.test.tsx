@@ -1,7 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
+import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody } from "../test/fakeApi";
@@ -10,6 +12,7 @@ import { renderRoutes } from "../test/renderRoutes";
 
 const RUN_A = "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a";
 const RUN_B = "1c8d4e2f-0000-4000-8000-0000000000bb";
+const RUN_C = "2d9e5f30-0000-4000-8000-0000000000cc";
 
 type Handler = (request: Request) => Response | null;
 
@@ -228,7 +231,9 @@ describe("Histórico", () => {
         "/api/v1/runs?limit=25&status=queued",
         "/api/v1/runs?limit=25&status=queued&cursor=pagina-2",
       ]);
-      expect(screen.getByRole("status")).toHaveTextContent("Mais 1 execução na lista.");
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent("Mais 1 execução na lista.");
+      });
       expect(screen.queryByRole("button", { name: "Carregar mais" })).toBeNull();
     });
 
@@ -267,6 +272,155 @@ describe("Histórico", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(/indisponível/);
       expect(screen.getAllByRole("listitem")).toHaveLength(1);
       expect(screen.getByRole("button", { name: "Carregar mais" })).toBeVisible();
+    });
+
+    it("na última página, o foco vai para a primeira linha nova e o fim da lista é anunciado", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([
+              runBody({ id: RUN_B, recipe_id: "image-forge" }),
+              runBody({ id: RUN_C, recipe_id: "downloads-detox" }),
+            ])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Mais 2 execuções na lista. Fim da lista.",
+        );
+      });
+    });
+
+    it("numa página do meio, o foco vai para a primeira linha nova, sem anunciar o fim", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([runBody({ id: RUN_B, recipe_id: "image-forge" })], "pagina-3")
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(/^Mais 1 execução na lista\.$/);
+      });
+      expect(screen.getByRole("button", { name: "Carregar mais" })).toBeVisible();
+    });
+
+    it("anuncia só depois de o foco chegar à linha, com a região vazia no meio", async () => {
+      setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([runBody({ id: RUN_B, recipe_id: "image-forge" })])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+      const loadMore = await screen.findByRole("button", { name: "Carregar mais" });
+      installAnnounceClock();
+
+      fireEvent.click(loadMore);
+      await untilFakeClock(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+
+      // O foco interrompe a fala pendente em alguns leitores: o fim da lista vem depois dele.
+      expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+      act(() => {
+        vi.advanceTimersByTime(ANNOUNCE_DELAY_MS - 1);
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Mais 1 execução na lista. Fim da lista.",
+      );
+    });
+
+    it("dois Carregar mais dentro do atraso anunciam só a última carga", async () => {
+      setup((request) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        if (cursor === "pagina-2") {
+          return page([runBody({ id: RUN_B, recipe_id: "image-forge" })], "pagina-3");
+        }
+        if (cursor === "pagina-3") {
+          return page([runBody({ id: RUN_C, recipe_id: "downloads-detox" })]);
+        }
+        return page([runBody({ id: RUN_A })], "pagina-2");
+      });
+      const loadMore = await screen.findByRole("button", { name: "Carregar mais" });
+      installAnnounceClock();
+
+      fireEvent.click(loadMore);
+      await untilFakeClock(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+      act(() => {
+        vi.advanceTimersByTime(ANNOUNCE_DELAY_MS / 2);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Carregar mais" }));
+      await untilFakeClock(() => {
+        expect(screen.getByRole("link", { name: /^Downloads Detox, criada em / })).toHaveFocus();
+      });
+
+      // O prazo da primeira carga vence aqui: a contagem velha não pode entrar na região.
+      act(() => {
+        vi.advanceTimersByTime(ANNOUNCE_DELAY_MS / 2);
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+      act(() => {
+        vi.advanceTimersByTime(ANNOUNCE_DELAY_MS / 2);
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /^Mais 1 execução na lista\. Fim da lista\.$/,
+      );
+    });
+
+    it("sair da tela antes do atraso descarta o anúncio pendente", async () => {
+      const { queryClient, unmount } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([runBody({ id: RUN_B, recipe_id: "image-forge" })])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+      const loadMore = await screen.findByRole("button", { name: "Carregar mais" });
+      installAnnounceClock();
+      fireEvent.click(loadMore);
+      await untilFakeClock(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+
+      unmount();
+      // Sem as consultas, o único relógio que poderia sobrar é o do anúncio.
+      queryClient.clear();
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => {
+        vi.advanceTimersByTime(ANNOUNCE_DELAY_MS);
+      }).not.toThrow();
+    });
+
+    it("última página vazia leva o foco à última linha da lista", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /^CSV Janitor, criada em / })).toHaveFocus();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Não há mais execuções. Fim da lista.",
+        );
+      });
     });
   });
 
