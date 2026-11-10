@@ -263,24 +263,30 @@ export function OficinaHero({
             </Button>
           </div>
           {/* Alternativa de ponteiro único ao arrasto (WCAG 2.5.7): cada toque dá o passo de uma
-              seta, sem animação, então vale também com movimento reduzido. */}
+              seta, sem animação, então vale também com movimento reduzido. Abaixo do `sm`, os
+              quatro ficam em grade 2×2 (girar em cima, inclinar embaixo), sem um botão sozinho. */}
           <div
             role="group"
             aria-label={T.turnLabel}
-            className="flex flex-wrap items-center justify-center gap-1 text-sm text-fg-muted"
+            className="flex flex-col items-center gap-1 text-sm text-fg-muted"
           >
             <span aria-hidden="true">{T.turnLabel}</span>
-            {STEP_BUTTONS.map(({ key, label, Icon }) => (
-              <StepButton
-                key={key}
-                label={label}
-                Icon={Icon}
-                onStep={() => {
-                  const turn = keyTurn(key);
-                  if (turn !== null) handle.turn(turn);
-                }}
-              />
-            ))}
+            <div className="grid grid-cols-2 gap-1 sm:flex">
+              {STEP_BUTTONS.map(({ key, label, Icon }) => (
+                <StepButton
+                  key={key}
+                  label={label}
+                  Icon={Icon}
+                  onStep={() => {
+                    // Quem assume o controle manual tem precedência sobre o giro automático,
+                    // como no Pose inicial; senão o passo some na rotação contínua.
+                    setSpinning(false);
+                    const turn = keyTurn(key);
+                    if (turn !== null) handle.turn(turn);
+                  }}
+                />
+              ))}
+            </div>
           </div>
           <p id={hintId} className="text-center text-sm text-fg-muted">
             {T.hint}
