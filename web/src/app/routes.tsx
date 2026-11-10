@@ -1,12 +1,13 @@
 import type { RouteObject } from "react-router";
 
 import type { SiteNotice } from "../notice/notice";
+import { RECIPE_IDS, RECIPE_TITLES } from "../recipes/titles";
 import type { UploadServices } from "../upload/useUploadBatch";
 import { TEXT } from "../text";
 import { Layout } from "./Layout";
 import { NotFoundPage } from "./NotFoundPage";
 import type { PageTitleHandle } from "./pageTitle";
-import { PATHS } from "./paths";
+import { PATHS, workbenchPath } from "./paths";
 import { RootFailure, RouteFailure } from "./RouteFailure";
 
 export interface AppServices {
@@ -38,14 +39,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
             return { Component: HomePage };
           },
         },
-        {
-          path: PATHS.workbench,
-          handle: titled(TEXT.pageTitles.workbench),
-          lazy: async () => {
-            const { WorkbenchPage } = await import("../workbench/WorkbenchPage");
-            return { element: <WorkbenchPage uploadServices={uploadServices} /> };
-          },
-        },
+        ...workbenchRoutes(uploadServices),
         {
           path: PATHS.history,
           handle: titled(TEXT.history.title),
@@ -138,6 +132,26 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
  */
 function withRouteFailure(screens: RouteObject[]): RouteObject[] {
   return [{ errorElement: <RouteFailure />, children: screens }];
+}
+
+/**
+ * Uma rota da Bancada por receita do registro, para a aba dizer qual receita está aberta (WCAG
+ * 2.4.2). O caminho estático vence o `:recipeId`, que fica só para o id que não existe, com o
+ * título genérico. `caseSensitive` mantém a regra do registro: `CSV-Janitor` não é receita.
+ */
+function workbenchRoutes(uploadServices: UploadServices): RouteObject[] {
+  return [
+    ...RECIPE_IDS.map((recipeId) => ({
+      path: workbenchPath(recipeId),
+      caseSensitive: true,
+      handle: titled(TEXT.workbench.title(RECIPE_TITLES[recipeId])),
+      lazy: async () => {
+        const { WorkbenchPage } = await import("../workbench/WorkbenchPage");
+        return { element: <WorkbenchPage recipeId={recipeId} uploadServices={uploadServices} /> };
+      },
+    })),
+    { path: PATHS.workbench, element: <NotFoundPage />, handle: titled(TEXT.pageTitles.workbench) },
+  ];
 }
 
 /** Título da aba da rota (Layout); a Oficina fica só com o nome do site. */
