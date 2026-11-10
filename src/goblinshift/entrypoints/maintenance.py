@@ -8,12 +8,12 @@ janelas do limite de requisições, ADR 028). Cada volta é um span `maintenance
 registrada e o seguinte tenta de novo. Os lotes usam
 `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
-SIGTERM e SIGINT terminam o ciclo em andamento e saem.
+SIGTERM e SIGINT terminam o ciclo em andamento e saem. O handler só marca uma flag
+(`ShutdownFlag`), sem trava nem log, e a espera entre as voltas dorme em fatias curtas para vê-la.
 """
 
 import logging
 import signal
-import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -47,6 +47,8 @@ type Cycle = tuple[str, Callable[[], Mapping[str, int]]]
 
 CYCLE_SPAN = "maintenance.cycle"
 _ATTRIBUTE_PREFIX = "maintenance."
+# Fatia da espera entre as voltas: o maior atraso entre o sinal e a saída quando ocioso.
+SHUTDOWN_POLL_S = 0.5
 
 
 def main() -> int:
@@ -59,16 +61,8 @@ def main() -> int:
     except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("manutenção não sobe: %s", error)
         return EXIT_CONFIGURATION
-    shutdown = threading.Event()
-
-    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        logger.info("parada pedida", extra={"fields": {"signal": signum}})
-        shutdown.set()
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-    signal.signal(signal.SIGINT, request_shutdown)
     try:
-        serve(settings, runner, shutdown)
+        serve(settings, runner, shutdown_on_signals())
     except Exception:
         # Ver `worker.main`: a mensagem crua do banco não pode ir para o stderr.
         logger.exception("manutenção encerrada por erro")
@@ -76,7 +70,64 @@ def main() -> int:
     return EXIT_OK
 
 
-def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None:
+class ShutdownFlag:
+    """Pedido de parada que um handler de sinal pode marcar com segurança.
+
+    O CPython roda o handler na thread principal entre dois bytecodes, inclusive enquanto ela
+    segura a trava interna de um `threading.Event` dentro de `Event.wait`: ali, `Event.set()`
+    espera pela própria trava para sempre. `request` é uma atribuição, sem trava, e `wait` dorme
+    em fatias de `slice_s`, conferindo a flag entre elas.
+    """
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        slice_s: float = SHUTDOWN_POLL_S,
+    ) -> None:
+        self._clock = clock
+        self._sleep = sleep
+        self._slice_s = slice_s
+        self._signal: int | None = None
+        self._requested = False
+
+    @property
+    def signum(self) -> int | None:
+        """O sinal que pediu a parada; `None` sem sinal."""
+        return self._signal
+
+    def is_set(self) -> bool:
+        return self._requested
+
+    def request(self, signum: int | None = None) -> None:
+        self._signal = signum
+        self._requested = True
+
+    def wait(self, timeout_s: float) -> bool:
+        """Dorme até `timeout_s` ou até a parada ser pedida; devolve se ela foi pedida."""
+        deadline = self._clock() + timeout_s
+        while not self._requested:
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                break
+            self._sleep(min(remaining, self._slice_s))
+        return self._requested
+
+
+def shutdown_on_signals() -> ShutdownFlag:
+    """Flag de parada marcada por SIGTERM e SIGINT; quem a vê é o laço, que registra o pedido."""
+    shutdown = ShutdownFlag()
+
+    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
+        shutdown.request(signum)
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
+    return shutdown
+
+
+def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     batch_settings = settings.model_copy(
         update={"db_statement_timeout_ms": settings.maintenance_statement_timeout_ms}
     )
@@ -102,6 +153,7 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             while not shutdown.is_set():
                 run_cycles(tracer, cycles)
                 shutdown.wait(settings.maintenance_interval_s)
+            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
     finally:
         engine.dispose()
         if provider is not None:

@@ -7,7 +7,6 @@ A manutenção roda os dois ciclos, o de execuções e arquivos (`Maintenance`) 
 import hashlib
 import logging
 import secrets
-import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,7 +15,12 @@ import pytest
 from sqlalchemy import Table, func, insert, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.maintenance import AccountJobs, AccountJobsConfig, serve
+from goblinshift.entrypoints.maintenance import (
+    AccountJobs,
+    AccountJobsConfig,
+    ShutdownFlag,
+    serve,
+)
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
@@ -346,7 +350,7 @@ def test_exclusao_atrasada_gera_alerta(
 def test_serve_roda_o_ciclo_de_contas_mesmo_se_o_de_execucoes_falhar(
     db_settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    shutdown = threading.Event()
+    shutdown = ShutdownFlag()
     account_cycles: list[bool] = []
 
     def failing_cycle(_self: Maintenance) -> dict[str, int]:
@@ -354,7 +358,7 @@ def test_serve_roda_o_ciclo_de_contas_mesmo_se_o_de_execucoes_falhar(
 
     def account_cycle(_self: AccountJobs) -> dict[str, int]:
         account_cycles.append(True)
-        shutdown.set()
+        shutdown.request()
         return {}
 
     monkeypatch.setattr(Maintenance, "run_cycle", failing_cycle)
