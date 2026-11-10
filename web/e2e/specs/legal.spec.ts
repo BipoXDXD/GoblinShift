@@ -90,8 +90,8 @@ test("/termos: o item do sumário leva a seção com folga acima do título", as
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   const top = (): Promise<number> =>
     section.evaluate((heading) => heading.getBoundingClientRect().top);
-  // 1 px de tolerância para o arredondamento subpixel do Firefox e do celular.
-  await expect.poll(top).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
-  // Teto: a rolagem parou no título, não deixou a seção solta no meio da tela.
-  expect(await top()).toBeLessThan(ANCHOR_BREATHING_PX * 2);
+  // Primeiro o teto: no celular o salto chega depois do clique, e o título ainda está embaixo.
+  await expect.poll(top).toBeLessThan(ANCHOR_BREATHING_PX * 2);
+  // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
+  expect(await top()).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
 });
