@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useId, useRef, useState, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
 import { useMe } from "../account/useMe";
@@ -173,7 +174,10 @@ function useRemoval(onListUpdated: () => void): Removal {
       }
     },
     onSettled: async (_result, error) => {
-      setTarget(null);
+      // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
+      flushSync(() => {
+        setTarget(null);
+      });
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
       if (error === null || isStale(error)) {
         onListUpdated();

@@ -276,7 +276,10 @@ function useRevoke(onListUpdated: () => void): Revoke {
       }
     },
     onSettled: async (_result, error) => {
-      setTarget(null);
+      // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
+      flushSync(() => {
+        setTarget(null);
+      });
       await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
       if (error === null || isNotFound(error)) {
         onListUpdated();
