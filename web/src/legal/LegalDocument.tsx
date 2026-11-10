@@ -1,7 +1,9 @@
-import { Fragment, type ReactElement, type ReactNode } from "react";
+import { Fragment, useId, type ReactElement, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import { PATHS } from "../app/paths";
+import { Card } from "../components/ui/Card";
+import { TEXT } from "../text";
 import type { Block, Inline } from "./markdown";
 
 // Links entre os textos de docs/legal/ viram as rotas da interface; outro link relativo aponta
@@ -11,17 +13,113 @@ const DOCUMENT_ROUTES: Readonly<Record<string, string>> = {
   "aviso-de-privacidade.md": PATHS.privacy,
 };
 
-/** Os blocos de um texto legal, com a tipografia de leitura (45 a 75 caracteres por linha). */
-export function LegalDocument({ blocks }: { readonly blocks: readonly Block[] }): ReactElement {
+// Com uma ou duas seções o texto cabe de relance, e o sumário seria só ruído antes dele.
+const MIN_OUTLINE_SECTIONS = 3;
+// Prefixo das âncoras: o título "Conteúdo" não pode colidir com o id do <main> nem com outro id.
+const ANCHOR_PREFIX = "secao-";
+
+export interface Section {
+  readonly blockIndex: number;
+  readonly anchor: string;
+  readonly title: string;
+}
+
+/**
+ * Os blocos de um texto legal, com a tipografia de leitura (45 a 75 caracteres por linha). Cada
+ * seção (h2) ganha uma âncora tirada do próprio título, e o texto longo abre com um sumário delas.
+ */
+export function LegalDocument({
+  blocks,
+  sections,
+}: {
+  readonly blocks: readonly Block[];
+  /** As seções de `blocks`, de `sectionsOf`: a tela também as usa para achar a âncora da URL. */
+  readonly sections: readonly Section[];
+}): ReactElement {
+  const anchors = new Map(sections.map((section) => [section.blockIndex, section.anchor]));
+  // O sumário entra logo antes da primeira seção: Versão, Vigência e a abertura, que dizem qual
+  // texto a pessoa está lendo, continuam no topo.
+  const outlineAt = sections.length >= MIN_OUTLINE_SECTIONS ? sections[0]?.blockIndex : undefined;
   return (
-    <div className="flex max-w-prose flex-col gap-4 leading-relaxed">{blocks.map(renderBlock)}</div>
+    <div className="flex max-w-prose flex-col gap-4 leading-relaxed">
+      {blocks.map((block, index) => (
+        <Fragment key={index}>
+          {index === outlineAt && <Outline sections={sections} />}
+          {renderBlock(block, index, anchors.get(index))}
+        </Fragment>
+      ))}
+    </div>
   );
 }
 
-function renderBlock(block: Block, index: number): ReactElement {
+function Outline({ sections }: { readonly sections: readonly Section[] }): ReactElement {
+  const titleId = useId();
+  return (
+    <Card as="nav" aria-labelledby={titleId}>
+      <p id={titleId} className="font-display text-lg font-semibold text-fg">
+        {TEXT.legal.outlineTitle}
+      </p>
+      <ul className="mt-2 flex flex-col">
+        {sections.map((section) => (
+          <li key={section.anchor}>
+            <a href={`#${section.anchor}`} className="inline-flex min-h-11 items-center">
+              {section.title}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** As seções do texto: os títulos que a tela mostra como h2, com âncoras únicas e estáveis. */
+export function sectionsOf(blocks: readonly Block[]): Section[] {
+  const used = new Set<string>();
+  const sections: Section[] = [];
+  blocks.forEach((block, blockIndex) => {
+    if (block.kind !== "heading" || shownLevel(block.level) !== 2) {
+      return;
+    }
+    const title = plainText(block.inlines);
+    const anchor = freeAnchor(`${ANCHOR_PREFIX}${slugOf(title)}`, used);
+    used.add(anchor);
+    sections.push({ blockIndex, anchor, title });
+  });
+  return sections;
+}
+
+/** `base`, ou `base-2`, `base-3`…: o primeiro que nenhuma seção anterior usa ("Notas 2" incluso). */
+function freeAnchor(base: string, used: ReadonlySet<string>): string {
+  let anchor = base;
+  for (let suffix = 2; used.has(anchor); suffix += 1) {
+    anchor = `${base}-${String(suffix)}`;
+  }
+  return anchor;
+}
+
+/** "2. O que **não** coletamos" → "2-o-que-nao-coletamos": sem acento, minúsculas, hífens. */
+function slugOf(title: string): string {
+  const slug = title
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return slug === "" ? "sem-titulo" : slug;
+}
+
+function plainText(inlines: readonly Inline[]): string {
+  return inlines
+    .map((inline) =>
+      inline.kind === "text" || inline.kind === "code" ? inline.text : plainText(inline.children),
+    )
+    .join("");
+}
+
+function renderBlock(block: Block, index: number, anchor?: string): ReactElement {
   switch (block.kind) {
     case "heading":
-      return <Heading key={index} level={block.level} inlines={block.inlines} />;
+      return <Heading key={index} level={block.level} inlines={block.inlines} anchor={anchor} />;
     case "paragraph":
       return <p key={index}>{renderInlines(block.inlines)}</p>;
     case "quote":
@@ -30,7 +128,7 @@ function renderBlock(block: Block, index: number): ReactElement {
           key={index}
           className="flex flex-col gap-2 border-l-4 border-line-soft pl-4 text-fg-muted"
         >
-          {block.blocks.map(renderBlock)}
+          {block.blocks.map((inner, innerIndex) => renderBlock(inner, innerIndex))}
         </blockquote>
       );
     case "list": {
@@ -61,16 +159,31 @@ const HEADING_CLASSES = {
   4: "font-semibold text-fg",
 } as const;
 
+function shownLevel(level: 1 | 2 | 3 | 4): 2 | 3 | 4 {
+  return level === 1 ? 2 : level;
+}
+
 function Heading({
   level,
   inlines,
+  anchor,
 }: {
   readonly level: 1 | 2 | 3 | 4;
   readonly inlines: readonly Inline[];
+  readonly anchor: string | undefined;
 }): ReactElement {
-  const shown = level === 1 ? 2 : level;
+  const shown = shownLevel(level);
   const Tag = HEADING_TAGS[shown];
-  return <Tag className={HEADING_CLASSES[shown]}>{renderInlines(inlines)}</Tag>;
+  return (
+    // tabIndex -1: o link de fora com âncora leva o foco à seção (LegalPage), fora da ordem do Tab.
+    <Tag
+      id={anchor}
+      tabIndex={anchor === undefined ? undefined : -1}
+      className={HEADING_CLASSES[shown]}
+    >
+      {renderInlines(inlines)}
+    </Tag>
+  );
 }
 
 function Table({
@@ -115,21 +228,62 @@ function Table({
   );
 }
 
-function renderInlines(inlines: readonly Inline[]): ReactNode {
-  return inlines.map((inline, index) => <Fragment key={index}>{renderInline(inline)}</Fragment>);
+/** Como um trecho de texto puro aparece: com e-mails clicáveis, ou literal dentro de um link. */
+type TextRenderer = (text: string) => ReactNode;
+
+function renderInlines(
+  inlines: readonly Inline[],
+  renderText: TextRenderer = linkEmails,
+): ReactNode {
+  return inlines.map((inline, index) => (
+    <Fragment key={index}>{renderInline(inline, renderText)}</Fragment>
+  ));
 }
 
-function renderInline(inline: Inline): ReactNode {
+function renderInline(inline: Inline, renderText: TextRenderer): ReactNode {
   switch (inline.kind) {
     case "text":
-      return inline.text;
+      return renderText(inline.text);
     case "strong":
-      return <strong className="font-semibold text-fg">{renderInlines(inline.children)}</strong>;
+      return (
+        <strong className="font-semibold text-fg">
+          {renderInlines(inline.children, renderText)}
+        </strong>
+      );
     case "code":
       return <code className="rounded-lg bg-surface-sunken px-1 text-sm">{inline.text}</code>;
     case "link":
-      return renderLink(inline.href, renderInlines(inline.children));
+      // Link dentro de link não existe em HTML: o texto de um link fica literal.
+      return renderLink(inline.href, renderInlines(inline.children, literal));
   }
+}
+
+function literal(text: string): ReactNode {
+  return text;
+}
+
+// Endereço completo (nome@domínio.tld). "contato@," sem domínio fica texto, e o ponto final da
+// frase não entra no link porque o domínio termina numa letra, número ou hífen.
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+
+/** Os e-mails do texto viram `mailto:`: no celular, o canal de direitos abre o app de e-mail. */
+function linkEmails(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(EMAIL)) {
+    parts.push(text.slice(last, match.index));
+    parts.push(
+      <a key={match.index} href={`mailto:${match[0]}`}>
+        {match[0]}
+      </a>,
+    );
+    last = match.index + match[0].length;
+  }
+  if (last === 0) {
+    return text;
+  }
+  parts.push(text.slice(last));
+  return parts;
 }
 
 function renderLink(href: string, children: ReactNode): ReactNode {

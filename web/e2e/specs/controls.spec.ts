@@ -99,3 +99,17 @@ test("Execução: o link de download tem a altura do alvo de toque", async ({ pa
   await expect(link).toBeVisible();
   expect(await heightOf(link)).toBeGreaterThanOrEqual(MIN_TARGET_PX);
 });
+
+test("Aviso de Privacidade: os links do sumário têm a altura do alvo de toque", async ({
+  page,
+}) => {
+  await page.goto("/privacidade");
+
+  const links = page.getByRole("navigation", { name: "Sumário" }).getByRole("link");
+  await expect(links.first()).toBeVisible();
+  const heights = await Promise.all((await links.all()).map((link) => heightOf(link)));
+  expect(heights.length).toBeGreaterThan(5);
+  for (const height of heights) {
+    expect(height).toBeGreaterThanOrEqual(MIN_TARGET_PX);
+  }
+});
