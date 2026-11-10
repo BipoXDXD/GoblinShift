@@ -1,4 +1,12 @@
-import { ChevronDown, ChevronUp, RotateCcw, RotateCw } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  RotateCcw,
+  RotateCw,
+  type LucideIcon,
+} from "lucide-react";
 import {
   useEffect,
   useId,
@@ -64,6 +72,17 @@ const THUMBNAIL_HEIGHT_PX = 240;
 /** Teto da espera por um momento ocioso; passado isso, a carga começa de qualquer jeito. */
 const IDLE_TIMEOUT_MS = 2_000;
 const RESET_KEY = "Home";
+/** Os botões de passo, na ordem da leitura: girar antes de inclinar, cada um com a sua seta. */
+const STEP_BUTTONS: readonly {
+  readonly key: string;
+  readonly label: string;
+  readonly Icon: LucideIcon;
+}[] = [
+  { key: "ArrowLeft", label: T.turnLeft, Icon: ChevronLeft },
+  { key: "ArrowRight", label: T.turnRight, Icon: ChevronRight },
+  { key: "ArrowUp", label: T.tiltUp, Icon: ChevronUp },
+  { key: "ArrowDown", label: T.tiltDown, Icon: ChevronDown },
+];
 
 /**
  * Palco 3D da abertura (ADR 027, 030 e 038): uma goblin por vez, escolhida numa fileira de cinco
@@ -243,36 +262,25 @@ export function OficinaHero({
               {T.reset}
             </Button>
           </div>
+          {/* Alternativa de ponteiro único ao arrasto (WCAG 2.5.7): cada toque dá o passo de uma
+              seta, sem animação, então vale também com movimento reduzido. */}
           <div
             role="group"
-            aria-label={T.tiltLabel}
-            className="flex items-center gap-1 text-sm text-fg-muted"
+            aria-label={T.turnLabel}
+            className="flex flex-wrap items-center justify-center gap-1 text-sm text-fg-muted"
           >
-            <span aria-hidden="true">{T.tiltLabel}</span>
-            <button
-              type="button"
-              aria-label={T.tiltUp}
-              title={T.tiltUp}
-              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
-              onClick={() => {
-                const turn = keyTurn("ArrowUp");
-                if (turn !== null) handle.turn(turn);
-              }}
-            >
-              <ChevronUp aria-hidden="true" className="size-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={T.tiltDown}
-              title={T.tiltDown}
-              className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
-              onClick={() => {
-                const turn = keyTurn("ArrowDown");
-                if (turn !== null) handle.turn(turn);
-              }}
-            >
-              <ChevronDown aria-hidden="true" className="size-4" />
-            </button>
+            <span aria-hidden="true">{T.turnLabel}</span>
+            {STEP_BUTTONS.map(({ key, label, Icon }) => (
+              <StepButton
+                key={key}
+                label={label}
+                Icon={Icon}
+                onStep={() => {
+                  const turn = keyTurn(key);
+                  if (turn !== null) handle.turn(turn);
+                }}
+              />
+            ))}
           </div>
           <p id={hintId} className="text-center text-sm text-fg-muted">
             {T.hint}
@@ -292,6 +300,27 @@ export function OficinaHero({
         ))}
       </div>
     </div>
+  );
+}
+
+interface StepButtonProps {
+  readonly label: string;
+  readonly Icon: LucideIcon;
+  readonly onStep: () => void;
+}
+
+/** Botão de ícone que gira ou inclina um passo; o alvo tem 44 px e o foco usa o anel global. */
+function StepButton({ label, Icon, onStep }: StepButtonProps): ReactElement {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
+      onClick={onStep}
+    >
+      <Icon aria-hidden="true" className="size-4" />
+    </button>
   );
 }
 

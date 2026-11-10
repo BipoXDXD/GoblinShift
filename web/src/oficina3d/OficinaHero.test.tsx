@@ -227,7 +227,11 @@ describe("OficinaHero", () => {
     await renderReady(scene);
 
     const group = screen.getByRole("group", { name: "Girar e inclinar" });
-    expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual([
       "Girar para a esquerda",
       "Girar para a direita",
       "Inclinar para ver de cima",
