@@ -41,11 +41,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
 USER app
 EXPOSE 8000
 # Sem access log: o evento amplo `main` já registra cada requisição, sem IP completo (plano, 3.7).
-# Acima de 30 conexões ao mesmo tempo, o dobro do pool do banco (10 + 5), o uvicorn responde 503
-# na hora em vez de acumular pedidos à espera de conexão. Na parada, 8 s para terminar os pedidos
-# em curso: o serviço `api` não declara `stop_grace_period`, então o Compose (e o Coolify, que
-# publica com `docker compose up -d`) manda SIGKILL 10 s depois do SIGTERM, e o lifespan ainda
-# precisa fechar o pool. tests/test_api_server_limits.py confere as duas contas.
+# Teto de 30, o dobro do pool do banco (10 + 5): o uvicorn compara com `>=` contando a conexão
+# atual, então atende até 29 conexões ao mesmo tempo e responde 503 `text/plain`, sem Retry-After,
+# a partir da 30ª, em vez de acumular pedidos à espera de conexão. Na parada, 8 s para terminar os
+# pedidos em curso, mais 2 s para o lifespan fechar o pool: cabe em qualquer carência de 10 s ou
+# mais, que é o padrão do Docker e do Compose (o serviço `api` não declara `stop_grace_period`).
+# tests/test_api_server_limits.py confere as duas contas.
 CMD ["uvicorn", "goblinshift.entrypoints.api.app:create_app", "--factory", \
      "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header", \
      "--no-access-log", "--limit-concurrency", "30", "--timeout-graceful-shutdown", "8"]

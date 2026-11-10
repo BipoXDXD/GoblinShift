@@ -24,8 +24,8 @@ COOLIFY_APP = ROOT / "deploy" / "coolify" / "app.json"
 # Cada conexão do pool pode ter um pedido usando-a e outro esperando o `pool_timeout`; além disso,
 # o uvicorn recusa, e o cliente tenta de novo com o 503.
 CONCURRENCY_PER_POOL_CONNECTION = 2
-# Prazo do Compose entre o SIGTERM e o SIGKILL quando o serviço não declara `stop_grace_period`.
-# O Coolify publica com `docker compose up -d`, que respeita esse prazo.
+# Prazo do Docker e do Compose entre o SIGTERM e o SIGKILL quando o serviço não declara
+# `stop_grace_period`. A parada graciosa precisa caber nele, a menor carência considerada.
 COMPOSE_DEFAULT_STOP_GRACE_SECONDS = 10
 # Depois do prazo dos pedidos, o lifespan ainda fecha o pool do banco e exporta a telemetria.
 LIFESPAN_SHUTDOWN_MARGIN_SECONDS = 2
