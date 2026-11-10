@@ -34,7 +34,7 @@ export const TEXT = {
     // Contato geral dos Termos de Uso (item 1), o mesmo canal que o runbook de abuso responde.
     support: {
       address: "contato@goblinshift.dev",
-      link: "Escrever para o suporte",
+      link: "Escrever para o suporte por e-mail",
       subject: (id: string) => `Suporte GoblinShift: pedido ${id}`,
       body: (id: string) => `Código do pedido: ${id}`,
     },
@@ -48,8 +48,8 @@ export const TEXT = {
       REAUTH_REQUIRED: "Por segurança, entre de novo para continuar.",
       INSUFFICIENT_SCOPE:
         "A chave usada não tem permissão para esta ação. Crie uma chave com o escopo necessário no Acesso.",
-      FORBIDDEN:
-        "Você não tem permissão para esta ação. Se acha que é um engano, escreva para o suporte.",
+      // Sem "suporte": o envio de arquivos e a lista de exclusões mostram esta frase sem o link.
+      FORBIDDEN: "Você não tem permissão para esta ação. Confira se entrou com a conta certa.",
       CSRF_FAILED:
         "A verificação de segurança da sessão falhou. Recarregue a página e tente de novo.",
       TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos Termos de Uso.",

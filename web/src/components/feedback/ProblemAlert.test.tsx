@@ -51,7 +51,7 @@ describe("describeFailure", () => {
     [
       "FORBIDDEN",
       403,
-      "Você não tem permissão para esta ação. Se acha que é um engano, escreva para o suporte.",
+      "Você não tem permissão para esta ação. Confira se entrou com a conta certa.",
     ],
     [
       "NOT_FOUND",
@@ -73,6 +73,19 @@ describe("describeFailure", () => {
     });
 
     expect(description.message).toBe(expected);
+  });
+
+  // O envio de arquivos e a lista de exclusões mostram só a frase, sem o código nem o link: uma frase
+  // que mandasse escrever ao suporte apontaria para um canal que essas telas não oferecem.
+  it.each(PROBLEM_CODES)("a frase de %s não depende do link do suporte", (code) => {
+    const description = describeFailure({
+      kind: "problem",
+      status: 400,
+      problem: problem(code, 400),
+      retryAfterMs: null,
+    });
+
+    expect(description.message).not.toMatch(/suporte/i);
   });
 
   it("erro de campo sem texto próprio diz onde conferir o formato", () => {
@@ -193,7 +206,7 @@ describe("ProblemAlert", () => {
       />,
     );
 
-    const link = screen.getByRole("link", { name: "Escrever para o suporte" });
+    const link = screen.getByRole("link", { name: "Escrever para o suporte por e-mail" });
     expect(link).toHaveAttribute(
       "href",
       "mailto:contato@goblinshift.dev" +
