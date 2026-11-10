@@ -43,14 +43,19 @@ def _retained_bytes(logging: dict[str, Any]) -> int:
     return int(size[1]) * SIZE_UNITS[size[2]] * int(options["max-file"])
 
 
-def test_uvicorn_roda_sem_log_de_acesso() -> None:
-    # O evento amplo `main` já registra cada requisição, sem IP completo (plano, 3.7).
+def uvicorn_cmd() -> list[str]:
+    """O CMD (forma exec) da imagem da aplicação, que o serviço `api` usa sem `command`."""
     cmd_line = next(
         line for line in DOCKERFILE.read_text().split("\nCMD ")[1:] if "uvicorn" in line
     )
-    cmd = json.loads(cmd_line.replace("\\\n", ""))
+    cmd: list[str] = json.loads(cmd_line.replace("\\\n", ""))
     assert cmd[0] == "uvicorn"
-    assert "--no-access-log" in cmd
+    return cmd
+
+
+def test_uvicorn_roda_sem_log_de_acesso() -> None:
+    # O evento amplo `main` já registra cada requisição, sem IP completo (plano, 3.7).
+    assert "--no-access-log" in uvicorn_cmd()
 
 
 @pytest.mark.parametrize("name", sorted(_production_services()))

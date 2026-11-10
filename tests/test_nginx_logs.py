@@ -133,8 +133,12 @@ class NginxLogs:
             f"for i in $(seq {count}); do curl -sS -i {header_args} {url};"
             f" printf '{RESPONSE_SEPARATOR}'; done"
         )
-        dump = _docker("exec", client, "sh", "-c", loop)
+        dump = self.shell(client, loop)
         return [Response.parse(raw) for raw in dump.split(RESPONSE_SEPARATOR)[:count]]
+
+    def shell(self, client: str, command: str) -> str:
+        """Roda `command` no shell de `client` e devolve a saída padrão."""
+        return _docker("exec", client, "sh", "-c", command)
 
     def logs(self) -> tuple[str, str]:
         result = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell

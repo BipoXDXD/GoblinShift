@@ -26,18 +26,34 @@ map $forwarded_proto $hsts {
     default "";
 }
 
-# /auth/* (3.8): cada início de login grava uma linha em `login_state` sem autenticação. 10 por
-# minuto por cliente real, com rajada de 10 para o vai e volta do login. O cliente é o endereço em
-# IPv4 e o /64 em IPv6, porque um só cliente costuma ter o /64 inteiro (ADR 041). A regex lê os bytes
-# do endereço, não o texto, então nenhuma grafia de IPv6 muda a chave: 8 bytes são o /64, e um IPv4
-# mapeado em IPv6 conta como o próprio IPv4, senão todos eles cairiam no mesmo /64.
-map $binary_remote_addr $auth_limit_key {
+# Limites por cliente real (3.8). O cliente é o endereço em IPv4 e o /64 em IPv6, porque um só
+# cliente costuma ter o /64 inteiro (ADR 041). A regex lê os bytes do endereço, não o texto, então
+# nenhuma grafia de IPv6 muda a chave: 8 bytes são o /64, e um IPv4 mapeado em IPv6 conta como o
+# próprio IPv4, senão todos eles cairiam no mesmo /64.
+map $binary_remote_addr $client_limit_key {
     "~(?s)^\x00{10}\xff\xff(?<mapped_v4>.{4})$" $mapped_v4;
     "~(?s)^(?<v6_net>.{8}).{8}$"                $v6_net;
     default                                     $binary_remote_addr;
 }
-limit_req_zone $auth_limit_key zone=auth:10m rate=10r/m;
+# /auth/*: cada início de login grava uma linha em `login_state` sem autenticação. 10 por minuto,
+# com rajada de 10 (`limit_req` na location) para o vai e volta do login.
+limit_req_zone $client_limit_key zone=auth:10m rate=10r/m;
+# /api/ (shed load antes da autenticação): sem conta, a API não tem por quem limitar, e pedidos
+# anônimos de um cliente ocupariam o pool do banco de todos. 20 por segundo, com rajada de 40, é
+# folga larga sobre o uso legítimo: a conta tem teto de 120 leituras por minuto na própria API, e a
+# SPA abre uma página com poucos pedidos em paralelo. O ritmo do k6 (deploy/load) e da prova de
+# troca sem queda, que saem de um IP só, é conferido contra estes números
+# (tests/test_nginx_limit_consumers.py).
+limit_req_zone $client_limit_key zone=api:10m rate=20r/s;
+# /readyz: cada sonda consulta o banco. 5 por segundo, com rajada de 10; o monitor de uptime
+# consulta a cada 2 min e o healthcheck do Nginx a cada 10 s.
+limit_req_zone $client_limit_key zone=readyz:1m rate=5r/s;
 limit_req_status 429;
+# Cada recusa iria para o log de erro com o IP completo (`client:`) e a query string (`request:`),
+# desfazendo o log de acesso, que trunca um e descarta a outra (access-log.conf). Em `info`, abaixo
+# do `notice` do `error_log` da imagem, nada é escrito; o 429 continua no log de acesso, com o IP
+# truncado. tests/test_nginx_edge_limits.py prova com canários.
+limit_req_log_level info;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
 # na partida. No rollout da pilha local (deploy/rollout-api.sh), que a publicação pelo Coolify não
@@ -136,6 +152,8 @@ server {
     # Backend. A CSP da SPA não se aplica: a API define a sua (downloads com sandbox) e a /docs
     # tem a própria, com o Swagger UI servido pela API, da mesma origem (api_docs.py).
     location /api/ {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location = /docs {
@@ -152,6 +170,8 @@ server {
         include /etc/nginx/snippets/proxy-api.conf;
     }
     location = /readyz {
+        limit_req zone=readyz burst=10 nodelay;
+        error_page 429 = @rate_limited;
         include /etc/nginx/snippets/proxy-api.conf;
     }
 
@@ -167,9 +187,20 @@ server {
         add_header Strict-Transport-Security $hsts always;
         return 429 '{"type":"https://goblinshift.dev/problems/rate-limited","title":"Muitas requisições","status":429,"detail":"Muitas tentativas de autenticação; tente de novo em alguns segundos.","code":"RATE_LIMITED","request_id":"$request_id"}';
     }
+    # 429 de /api/ e /readyz. Retry-After de 1 s, o menor que o cabeçalho expressa: a cota repõe um
+    # pedido a cada 50 ms em /api/ e a cada 200 ms em /readyz.
+    location @rate_limited {
+        default_type application/problem+json;
+        add_header Retry-After 1 always;
+        add_header Strict-Transport-Security $hsts always;
+        return 429 '{"type":"https://goblinshift.dev/problems/rate-limited","title":"Muitas requisições","status":429,"detail":"Muitas requisições deste cliente; tente de novo em instantes.","code":"RATE_LIMITED","request_id":"$request_id"}';
+    }
 
-    # Envio de conteúdo (fatia 3): teto por arquivo e sem bufferizar em disco.
+    # Envio de conteúdo (fatia 3): teto por arquivo e sem bufferizar em disco. Location por regex,
+    # que o Nginx escolhe antes do prefixo /api/: o limite de /api/ precisa ser repetido aqui.
     location ~ ^/api/v1/uploads/[^/]+/content$ {
+        limit_req zone=api burst=40 nodelay;
+        error_page 429 = @rate_limited;
         client_max_body_size 256m;
         proxy_request_buffering off;
         include /etc/nginx/snippets/proxy-api.conf;
