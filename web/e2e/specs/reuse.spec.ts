@@ -66,8 +66,9 @@ test("o aviso de origem entra numa região viva que já existia antes de a execu
       .locator('[role="status"][data-e2e-antes]')
       .filter({ hasText: /^Parâmetros da execução de / }),
   ).toHaveCount(1);
-  // O parágrafo visível não é região viva: nasceria já com o texto e não seria lido.
+  // O parágrafo visível não é região viva: nasceria já com o texto e não seria lido. Busca pela
+  // tag, não pelo papel: com role="status" ele deixaria de ser "paragraph" e sumiria da busca.
   await expect(
-    page.getByRole("paragraph").filter({ hasText: /^Parâmetros da execução de / }),
+    page.locator("p").filter({ hasText: /^Parâmetros da execução de / }),
   ).not.toHaveAttribute("role", "status");
 });
