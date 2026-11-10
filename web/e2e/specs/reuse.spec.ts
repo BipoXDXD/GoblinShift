@@ -33,7 +33,10 @@ test("Histórico → Reusar configuração → Bancada com os parâmetros da exe
 
   await row.getByRole("link", { name: /^Reusar configuração/ }).click();
 
-  await expect(page.getByText(/^Parâmetros da execução de /)).toBeVisible();
+  // O aviso existe duas vezes: o parágrafo visível e a região viva sr-only. Confere o visível.
+  await expect(
+    page.getByRole("paragraph").filter({ hasText: /^Parâmetros da execução de / }),
+  ).toBeVisible();
   await expect(page.getByLabel("Delimitador dos arquivos de saída")).toHaveValue(";");
   await expect(page.getByLabel("Colunas sem espaços nas pontas", { exact: true })).toHaveValue(
     "email",
@@ -65,6 +68,6 @@ test("o aviso de origem entra numa região viva que já existia antes de a execu
   ).toHaveCount(1);
   // O parágrafo visível não é região viva: nasceria já com o texto e não seria lido.
   await expect(
-    page.locator("p").filter({ hasText: /^Parâmetros da execução de / }),
+    page.getByRole("paragraph").filter({ hasText: /^Parâmetros da execução de / }),
   ).not.toHaveAttribute("role", "status");
 });
