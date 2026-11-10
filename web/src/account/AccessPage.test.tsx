@@ -682,6 +682,21 @@ describe("Acesso: chave nova", () => {
     );
   });
 
+  it("o resumo de erros fica um nível abaixo do título do formulário (h3 → h4)", async () => {
+    const { user } = setup();
+    const form = await openForm(user);
+
+    await user.click(within(form).getByRole("button", { name: "Criar chave" }));
+
+    const summary = await within(form).findByRole("alert");
+    expect(
+      within(summary).getByRole("heading", {
+        level: 4,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeVisible();
+  });
+
   it("não tem violações do axe com a lista, o formulário e a chave criada", async () => {
     const { container, user } = setup({
       "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),

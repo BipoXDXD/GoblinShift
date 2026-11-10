@@ -33,13 +33,19 @@ interface ErrorSummaryProps {
   readonly issues: readonly FormIssue[];
   /** Número da tentativa de envio; cada tentativa nova com erro devolve o foco ao resumo. */
   readonly attempt: number;
+  /** Um nível abaixo do título do formulário: 4 quando o formulário está sob um `h3`. */
+  readonly headingLevel?: 2 | 4;
 }
 
 /**
  * Resumo dos erros no topo do formulário, que recebe o foco depois de um envio recusado e leva a
  * cada campo por link. Evita que o foco salte para um campo no meio da página sem contexto.
  */
-export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactElement | null {
+export function ErrorSummary({
+  issues,
+  attempt,
+  headingLevel = 2,
+}: ErrorSummaryProps): ReactElement | null {
   const container = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const focusedAttempt = useRef<number | null>(null);
@@ -54,6 +60,7 @@ export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactEleme
   if (!hasIssues) {
     return null;
   }
+  const Heading = headingLevel === 2 ? "h2" : "h4";
   return (
     <div
       ref={container}
@@ -62,10 +69,10 @@ export function ErrorSummary({ issues, attempt }: ErrorSummaryProps): ReactEleme
       tabIndex={-1}
       className="flex flex-col gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg md:p-6"
     >
-      <h2 id={titleId} className="flex items-center gap-2 text-base font-semibold">
+      <Heading id={titleId} className="flex items-center gap-2 text-base font-semibold">
         <CircleAlert aria-hidden="true" className="size-6 flex-none" />
         {TEXT.errorSummary.title}
-      </h2>
+      </Heading>
       <ul className="flex list-disc flex-col gap-1 pl-12">
         {issues.map((issue, index) => (
           // Mensagens podem se repetir (duas linhas com o mesmo erro); a posição desempata.
