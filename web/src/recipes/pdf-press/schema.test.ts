@@ -171,10 +171,25 @@ describe("pageMapPreview", () => {
     ]);
   });
 
-  it.each(["1", "01"])("split com %j página por parte usa o singular", (size) => {
-    expect(pageMapPreview(values({ operation: "split", pages_per_document: size }), [A])).toEqual([
-      { name: "a.pdf", entries: [`partes de ${size} página, na ordem`] },
+  it.each(["1", "01"])(
+    "split com %j página por parte usa o singular, sem zero à esquerda",
+    (size) => {
+      expect(pageMapPreview(values({ operation: "split", pages_per_document: size }), [A])).toEqual(
+        [{ name: "a.pdf", entries: ["partes de 1 página, na ordem"] }],
+      );
+    },
+  );
+
+  it("split mostra o tamanho sem zeros à esquerda também no plural", () => {
+    expect(pageMapPreview(values({ operation: "split", pages_per_document: "007" }), [A])).toEqual([
+      { name: "a.pdf", entries: ["partes de 7 páginas, na ordem"] },
     ]);
+  });
+
+  it("split com tamanho que não é número mostra o que foi digitado", () => {
+    expect(pageMapPreview(values({ operation: "split", pages_per_document: "dois" }), [A])).toEqual(
+      [{ name: "a.pdf", entries: ["partes de dois páginas, na ordem"] }],
+    );
   });
 
   it("select lista os cartões, inclusive o sem PDF", () => {
