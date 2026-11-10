@@ -92,7 +92,12 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         </div>
       </header>
       {/* Vem do bundle, não da rede: sai na primeira pintura, sem empurrar o conteúdo (CLS). */}
-      <SiteNoticeBanner notice={notice} now={now} storage={browserStorage} />
+      <SiteNoticeBanner
+        notice={notice}
+        now={now}
+        storage={browserStorage}
+        onDismissed={focusScreenTitle}
+      />
       {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
           tela carrega e cresce. */}
       <main
@@ -116,6 +121,14 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
       </footer>
     </div>
   );
+}
+
+/**
+ * Foco no título da tela (o `h1` do FocusHeading, focável por script): é o começo do conteúdo,
+ * logo depois de onde a faixa fechada estava.
+ */
+function focusScreenTitle(): void {
+  document.getElementById(MAIN_ID)?.querySelector<HTMLElement>("h1")?.focus();
 }
 
 /**

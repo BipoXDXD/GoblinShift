@@ -90,7 +90,8 @@ export const TEXT = {
       "terms-change": "Mudança nos termos",
     },
     regionLabel: (kind: string) => `Aviso: ${kind.toLowerCase()}`,
-    dismiss: "Fechar",
+    // Diz o que fecha: "Fechar" sozinho é ambíguo para quem navega pelos botões (WCAG 2.4.6).
+    dismiss: "Fechar aviso",
   },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",
