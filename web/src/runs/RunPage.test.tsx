@@ -6,6 +6,7 @@ import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
+  type FakeApi,
   jsonResponse,
   problemResponse,
   runBody,
@@ -230,6 +231,43 @@ function runRequests(requests: readonly Request[]): number {
   ).length;
 }
 
+const FORBIDDEN_TEXT = "Você não tem permissão para esta ação.";
+const NOT_FOUND_TEXT = "Não encontramos o que você pediu.";
+const TIMEOUT_TEXT = "O servidor demorou demais para responder.";
+/** Prazo do cliente da API (client.ts), que o relógio falso atravessa no teste do timeout. */
+const CLIENT_TIMEOUT_MS = 30_000;
+
+type PollFailure = (queryClient: QueryClient, api: FakeApi) => Promise<void>;
+
+/** As próximas `polls` consultas da execução respondem com a falha. */
+function pollFailing(failure: () => Response, polls = 1): PollFailure {
+  return async (queryClient, api) => {
+    for (let poll = 0; poll < polls; poll += 1) {
+      api.fetchMock.mockImplementationOnce(() => Promise.resolve(failure()));
+      await nextPoll(queryClient);
+    }
+  };
+}
+
+/** A próxima consulta não responde até o prazo do cliente, que a aborta como timeout. */
+const pollTimingOut: PollFailure = async (queryClient, api) => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    api.fetchMock.mockImplementationOnce(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Prazo do cliente", "AbortError"));
+          });
+        }),
+    );
+    void queryClient.refetchQueries({ queryKey: ["runs", RUN_ID] });
+    await act(() => vi.advanceTimersByTimeAsync(CLIENT_TIMEOUT_MS));
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
 // Pedido que nunca responde: segura a consulta em andamento.
 const hanging = (): null => null;
 
@@ -278,6 +316,21 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
 
   afterEach(() => {
     notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+  });
+
+  it.each([
+    ["403 comum", pollFailing(() => problemResponse(403, "FORBIDDEN")), FORBIDDEN_TEXT],
+    ["404", pollFailing(() => problemResponse(404, "NOT_FOUND")), NOT_FOUND_TEXT],
+    ["5xx persistente", pollFailing(unavailable, 2), UNAVAILABLE_TEXT],
+    ["timeout", pollTimingOut, TIMEOUT_TEXT],
+  ])("falha que vira alerta (%s) mantém o Cancelar na tela", async (_name, fail, text) => {
+    const { queryClient, api } = setup(running);
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+
+    await fail(queryClient, api);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(text);
+    expect(screen.getByRole("button", { name: "Cancelar execução" })).toBeVisible();
   });
 
   it("falha intermitente (erro, sucesso, erro) não vira alerta a cada alternância", async () => {
