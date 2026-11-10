@@ -107,7 +107,12 @@ export function DeleteAccountSection(): ReactElement {
               spellCheck={false}
               value={typed}
               onChange={(event) => {
-                setTyped(event.currentTarget.value);
+                const value = event.currentTarget.value;
+                setTyped(value);
+                // A frase corrigida tira o erro na hora; ainda errada, o erro fica até confirmar.
+                if (phraseMatches(value)) {
+                  setPhraseError(null);
+                }
               }}
             />
           )}

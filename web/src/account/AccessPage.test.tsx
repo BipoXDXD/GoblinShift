@@ -561,6 +561,22 @@ describe("Acesso: excluir conta", () => {
     expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
   });
 
+  it("o erro da frase some quando a frase passa a conferir", async () => {
+    const { user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
+    const dialog = await openDialog(user);
+    const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
+    await user.type(phrase, "excluir");
+    await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(phrase, " minha cont");
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    await user.type(phrase, "a");
+
+    expect(phrase).not.toHaveAttribute("aria-invalid");
+    expect(within(dialog).queryByText(/A frase não confere\./)).toBeNull();
+  });
+
   it("frase errada: confirmar mostra o erro no campo, com o foco nele, e nada é enviado", async () => {
     const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
     const dialog = await openDialog(user);
