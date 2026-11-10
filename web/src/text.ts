@@ -644,7 +644,7 @@ export const TEXT = {
     recentEmptyHint: "Escolha uma receita acima para começar.",
     seeAll: "Ver o histórico completo",
     // Anunciados depois do "Carregar mais", junto com quantas execuções chegaram.
-    noMore: "Nenhuma execução a mais.",
+    noMore: "Não há mais execuções.",
     endOfList: "Fim da lista.",
   },
   account: {

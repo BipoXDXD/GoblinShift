@@ -10,7 +10,7 @@ import {
   getCatalog,
   type CatalogVersion,
 } from "../catalog/api";
-import { LiveRegion } from "../components/a11y/LiveRegion";
+import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import {
   findRecipe,
@@ -137,17 +137,17 @@ interface SourceAnnouncerProps {
 /**
  * Anuncia o aviso de origem (WCAG 4.1.3). O leitor de tela só lê a mudança numa região viva que já
  * conhecia, e o parágrafo do aviso nasce junto com a Bancada: a região fica aqui, no mesmo lugar em
- * todas as etapas, montada vazia desde o "Carregando". O texto entra um quadro depois de mudar,
- * para que também a Bancada que abre direto do cache tenha a região vazia antes do aviso.
+ * todas as etapas, montada vazia desde o "Carregando". O texto entra `ANNOUNCE_DELAY_MS` depois de
+ * mudar, para que também a Bancada que abre direto do cache tenha a região vazia antes do aviso.
  */
 function SourceAnnouncer({ source, message, children }: SourceAnnouncerProps): ReactElement {
   const [announced, setAnnounced] = useState<string | null>(null);
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
+    const timer = setTimeout(() => {
       setAnnounced(message);
-    });
+    }, ANNOUNCE_DELAY_MS);
     return () => {
-      cancelAnimationFrame(frame);
+      clearTimeout(timer);
     };
   }, [message]);
   return (

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useRef, useState, type SubmitEvent, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router";
 
@@ -8,7 +8,7 @@ import { ApiError } from "../api/response";
 import { PATHS, runPath } from "../app/paths";
 import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
-import { LiveRegion } from "../components/a11y/LiveRegion";
+import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -93,11 +93,19 @@ function HistoryResults({
   });
 
   const rows = useRef<HTMLDivElement>(null);
+  const announceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    const timer = announceTimer;
+    return () => {
+      clearTimeout(timer.current);
+    };
+  }, []);
 
   const loadMore = async (): Promise<void> => {
     if (runs.isFetchingNextPage) {
       return;
     }
+    clearTimeout(announceTimer.current);
     setAnnouncement(T.loadingMore);
     const result = await runs.fetchNextPage();
     if (result.isFetchNextPageError) {
@@ -111,10 +119,12 @@ function HistoryResults({
       return;
     }
     const loaded = result.data?.pages.at(-1)?.data ?? [];
-    const message = loaded.length === 0 ? T.noMore : T.loadedMore(loaded.length);
-    // A página nova já está no cache; o flushSync a pinta antes de o foco procurar a linha.
+    const counted = loaded.length === 0 ? T.noMore : T.loadedMore(loaded.length);
+    const message = result.hasNextPage ? counted : `${counted} ${T.endOfList}`;
+    // A página nova já está no cache; o flushSync a pinta (e esvazia a região) antes de o foco
+    // procurar a linha.
     flushSync(() => {
-      setAnnouncement(result.hasNextPage ? message : `${message} ${T.endOfList}`);
+      setAnnouncement(null);
     });
     // Na última página o "Carregar mais" some com o foco (WCAG 2.4.3): em toda página, o foco
     // segue para a primeira linha nova, ou para a última da lista se nada chegou.
@@ -122,6 +132,10 @@ function HistoryResults({
     if (target !== undefined) {
       rows.current?.querySelector<HTMLAnchorElement>(`a[href="${runPath(target.id)}"]`)?.focus();
     }
+    // A mudança de foco cancela a fala pendente em alguns leitores: o anúncio vem depois dela.
+    announceTimer.current = setTimeout(() => {
+      setAnnouncement(message);
+    }, ANNOUNCE_DELAY_MS);
   };
 
   const active = hasActiveFilters(filters);

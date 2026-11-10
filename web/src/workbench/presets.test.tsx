@@ -1,7 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
+import { untilFakeClock, useAnnounceClock } from "../test/announceClock";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler } from "../test/catalog";
@@ -221,6 +223,38 @@ describe("Bancada aberta com um preset", () => {
       expect(statusWith("Parâmetros do preset Clientes do mês.")).toHaveLength(1);
     });
     expect(regionsBefore).toContain(statusWith("Parâmetros do preset Clientes do mês.")[0]);
+  });
+
+  it("o aviso de origem entra na região vazia só depois do atraso do anúncio", async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: async () => {
+        await held;
+        return jsonResponse(presetBody());
+      },
+    });
+    await screen.findByText("Carregando o preset.");
+    useAnnounceClock();
+    const notice = "Parâmetros do preset Clientes do mês.";
+
+    release();
+    await untilFakeClock(() => {
+      expect(screen.getByText(notice, { selector: "p" })).toBeVisible();
+    });
+
+    // Alguns leitores perdem o texto que chega logo depois de a região montar.
+    expect(statusWith(notice)).toHaveLength(0);
+    act(() => {
+      vi.advanceTimersByTime(ANNOUNCE_DELAY_MS - 1);
+    });
+    expect(statusWith(notice)).toHaveLength(0);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(statusWith(notice)).toHaveLength(1);
   });
 
   it("preset de outra receita abre com os parâmetros padrão e avisa", async () => {

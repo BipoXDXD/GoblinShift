@@ -1,7 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
+import { untilFakeClock, useAnnounceClock } from "../test/announceClock";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody } from "../test/fakeApi";
@@ -149,7 +151,9 @@ describe("Histórico", () => {
         "/api/v1/runs?limit=25&status=queued",
         "/api/v1/runs?limit=25&status=queued&cursor=pagina-2",
       ]);
-      expect(screen.getByRole("status")).toHaveTextContent("Mais 1 execução na lista.");
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent("Mais 1 execução na lista.");
+      });
       expect(screen.queryByRole("button", { name: "Carregar mais" })).toBeNull();
     });
 
@@ -205,9 +209,11 @@ describe("Histórico", () => {
       await waitFor(() => {
         expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
       });
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "Mais 2 execuções na lista. Fim da lista.",
-      );
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Mais 2 execuções na lista. Fim da lista.",
+        );
+      });
     });
 
     it("numa página do meio, o foco vai para a primeira linha nova, sem anunciar o fim", async () => {
@@ -222,8 +228,38 @@ describe("Histórico", () => {
       await waitFor(() => {
         expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
       });
-      expect(screen.getByRole("status")).toHaveTextContent(/^Mais 1 execução na lista\.$/);
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(/^Mais 1 execução na lista\.$/);
+      });
       expect(screen.getByRole("button", { name: "Carregar mais" })).toBeVisible();
+    });
+
+    it("anuncia só depois de o foco chegar à linha, com a região vazia no meio", async () => {
+      setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? page([runBody({ id: RUN_B, recipe_id: "image-forge" })])
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+      const loadMore = await screen.findByRole("button", { name: "Carregar mais" });
+      useAnnounceClock();
+
+      fireEvent.click(loadMore);
+      await untilFakeClock(() => {
+        expect(screen.getByRole("link", { name: /^Image Forge, criada em / })).toHaveFocus();
+      });
+
+      // O foco interrompe a fala pendente em alguns leitores: o fim da lista vem depois dele.
+      expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+      act(() => {
+        vi.advanceTimersByTime(ANNOUNCE_DELAY_MS - 1);
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(/^$/);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Mais 1 execução na lista. Fim da lista.",
+      );
     });
 
     it("última página vazia leva o foco à última linha da lista", async () => {
@@ -238,9 +274,11 @@ describe("Histórico", () => {
       await waitFor(() => {
         expect(screen.getByRole("link", { name: /^CSV Janitor, criada em / })).toHaveFocus();
       });
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "Nenhuma execução a mais. Fim da lista.",
-      );
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Não há mais execuções. Fim da lista.",
+        );
+      });
     });
   });
 
