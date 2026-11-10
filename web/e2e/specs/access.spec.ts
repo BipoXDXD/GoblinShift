@@ -69,6 +69,47 @@ test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista m
   expect(stored?.key.revoked_at).not.toBeNull();
 });
 
+// O dublê do jsdom devolve o foco como o navegador, mas a ordem real só o Chromium garante: o
+// diálogo devolve o foco ao Revogar antes de a lista tirá-lo, e o título ganha depois.
+test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova e ao revogar @keyboard", async ({
+  page,
+  fakeApi,
+}) => {
+  await fakeApi.signIn();
+  const acesso = new AcessoPage(page);
+  await acesso.open();
+  const keys = acesso.section("Chaves de API");
+  const newKey = keys.getByRole("button", { name: "Nova chave" });
+
+  await newKey.focus();
+  await page.keyboard.press("Enter");
+  const formHeading = keys.getByRole("heading", { name: "Nova chave de API" });
+  await expect(formHeading).toBeFocused();
+  // Título focado por programa não é controle: sem anel, como o h1 das telas (base.css).
+  await expect(formHeading).toHaveCSS("outline-style", "none");
+  const form = page.getByRole("form", { name: "Nova chave de API" });
+  await form.getByRole("button", { name: "Cancelar" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(newKey).toBeFocused();
+
+  await acesso.createKey(["Ler arquivos (files:read)"]);
+  await page.getByRole("button", { name: "Já copiei" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(newKey).toBeFocused();
+
+  const [stored] = [...fakeApi.account.keys.values()];
+  const publicId = stored?.key.public_id ?? "";
+  await page.getByRole("button", { name: `Revogar a chave ${publicId}` }).focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: `Revogar a chave ${publicId}?` });
+  await dialog.getByRole("button", { name: "Revogar chave" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(`Chave ${publicId} revogada.`)).toBeAttached();
+  const sectionHeading = keys.getByRole("heading", { level: 2, name: "Chaves de API" });
+  await expect(sectionHeading).toBeFocused();
+  await expect(sectionHeading).toHaveCSS("outline-style", "none");
+});
+
 test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reabre", async ({
   page,
   fakeApi,

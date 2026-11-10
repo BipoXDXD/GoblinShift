@@ -468,8 +468,8 @@ const CSS_EXCEPTIONS = new Map([
     "clique de mouse não desenha anel; o teclado continua com o :focus-visible",
   ],
   [
-    'base.css › @layer base › h1[tabindex="-1"]:focus { outline: none }',
-    "o título recebe foco por programa a cada rota (FocusHeading) e não é controle",
+    'base.css › @layer base › :is(h1, h2, h3)[tabindex="-1"]:focus { outline: none }',
+    "títulos recebem foco por programa (rota, seção depois de revogar ou excluir, formulário) e não são controles",
   ],
   [
     "base.css › @layer components › .card-link:focus-visible { outline: none }",

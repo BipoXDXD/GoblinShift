@@ -129,6 +129,86 @@ describe("Histórico", () => {
     expect(screen.getByLabelText("Estado")).toHaveValue("failed");
   });
 
+  // Aplicar ou limpar recria o formulário com o foco dentro (WCAG 2.4.3), e a lista nova chega
+  // sem aviso (4.1.3): o foco volta ao título e a região de status diz o que veio.
+  describe("depois de aplicar ou limpar os filtros", () => {
+    async function applyFailedFilter(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+      await screen.findByRole("list", { name: "Execuções" });
+      await user.click(screen.getByText("Filtros"));
+      await user.selectOptions(screen.getByLabelText("Estado"), "Falhou");
+      await user.click(screen.getByRole("button", { name: "Aplicar filtros" }));
+    }
+
+    async function announced(message: string): Promise<void> {
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent(message);
+      });
+    }
+
+    it("aplicar leva o foco ao título", async () => {
+      const { user } = setup(() => page([runBody()]));
+
+      await applyFailedFilter(user);
+
+      await expectHeadingFocused("Histórico");
+    });
+
+    it("aplicar anuncia quantas execuções vieram com os filtros", async () => {
+      const { user } = setup(() => page([runBody({ status: "failed" })]));
+
+      await applyFailedFilter(user);
+
+      await announced("1 execução com esses filtros.");
+    });
+
+    it("aplicar sem resultado anuncia que nada veio", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.has("status") ? page([]) : page([runBody()]),
+      );
+
+      await applyFailedFilter(user);
+
+      await announced("Nenhuma execução com esses filtros.");
+    });
+
+    it("com mais páginas, o anúncio diz que há mais para carregar", async () => {
+      const { user } = setup(() =>
+        page([runBody({ id: RUN_A }), runBody({ id: RUN_B })], "pagina-2"),
+      );
+
+      await applyFailedFilter(user);
+
+      await announced("As 2 execuções mais recentes com esses filtros; há mais para carregar.");
+    });
+
+    it("com uma só execução e mais páginas, o anúncio fica no singular", async () => {
+      const { user } = setup(() => page([runBody({ id: RUN_A })], "pagina-2"));
+
+      await applyFailedFilter(user);
+
+      await announced("A execução mais recente com esses filtros; há mais para carregar.");
+    });
+
+    it("limpar leva o foco ao título", async () => {
+      const { user } = setup(() => page([runBody()]), "/historico?estado=failed");
+
+      await user.click(await screen.findByRole("link", { name: "Limpar filtros" }));
+
+      await expectHeadingFocused("Histórico");
+    });
+
+    it("limpar anuncia quantas execuções a lista tem", async () => {
+      const { user } = setup(
+        () => page([runBody({ id: RUN_A }), runBody({ id: RUN_B })]),
+        "/historico?estado=failed",
+      );
+
+      await user.click(await screen.findByRole("link", { name: "Limpar filtros" }));
+
+      await announced("2 execuções.");
+    });
+  });
+
   describe("Carregar mais (cursor)", () => {
     it("segue o cursor com os mesmos filtros e acrescenta as linhas", async () => {
       const { api, user } = setup(

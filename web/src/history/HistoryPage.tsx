@@ -39,6 +39,8 @@ interface HistoryPageProps {
 /**
  * Histórico (2.2): as execuções da conta, das mais novas para as mais antigas, com filtros por
  * receita, estado e período guardados na URL e "Carregar mais" pelo cursor da API (keyset).
+ * Aplicar ou limpar os filtros recria o formulário: o foco volta ao título a cada filtro novo da
+ * URL (WCAG 2.4.3), e a lista que chega é anunciada (4.1.3).
  */
 export function HistoryPage({ now }: HistoryPageProps): ReactElement {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,7 +51,7 @@ export function HistoryPage({ now }: HistoryPageProps): ReactElement {
   const nowMs = useNow(now, AVAILABILITY_TICK_MS);
   return (
     <div className="flex flex-col gap-8">
-      <FocusHeading>{T.title}</FocusHeading>
+      <FocusHeading focusKey={filtersToSearchParams(filters).toString()}>{T.title}</FocusHeading>
       <HistoryResults
         query={toRunListQuery(filters, anchorMs)}
         nowMs={nowMs}
@@ -82,6 +84,9 @@ function HistoryResults({
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const filterKey = filtersToSearchParams(filters).toString();
+  // Os filtros da abertura não são anunciados: o título com foco já diz onde a pessoa está.
+  const [announcedKey, setAnnouncedKey] = useState(filterKey);
   const queryKey = ["runs", "history", query] as const;
   const runs = useInfiniteQuery({
     queryKey,
@@ -112,17 +117,17 @@ function HistoryResults({
 
   const active = hasActiveFilters(filters);
   const items = runs.data?.pages.flatMap((entry) => entry.data) ?? [];
+  // Ajuste durante o render, não num efeito: a lista dos filtros novos chegou (do servidor ou do
+  // cache) e ainda não foi anunciada.
+  if (runs.data !== undefined && announcedKey !== filterKey) {
+    setAnnouncedKey(filterKey);
+    setAnnouncement(T.listed({ count: items.length, filtered: active, more: runs.hasNextPage }));
+  }
   // Sem nada para filtrar, os filtros só atrapalham o estado vazio.
   const showFilters = active || items.length > 0;
   return (
     <>
-      {showFilters && (
-        <FiltersForm
-          key={filtersToSearchParams(filters).toString()}
-          filters={filters}
-          onApply={onApplyFilters}
-        />
-      )}
+      {showFilters && <FiltersForm key={filterKey} filters={filters} onApply={onApplyFilters} />}
       {runs.data === undefined ? (
         <FirstPagePending error={runs.error} />
       ) : items.length === 0 ? (
