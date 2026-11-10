@@ -100,6 +100,19 @@ def _delete_batch(
     condition: ColumnElement[bool],
     limit: int,
 ) -> int:
-    chosen = select(key).where(condition).limit(limit).with_for_update(skip_locked=True)
-    deleted = session.execute(delete(table).where(key.in_(chosen.scalar_subquery())).returning(key))
+    """Apaga até `limit` linhas que atendem `condition`, pulando as travadas por outra transação.
+
+    As chaves são escolhidas numa CTE materializada, avaliada uma vez: um `IN (subconsulta com
+    LIMIT ... SKIP LOCKED)` reexecutado pelo plano travaria outras linhas a cada execução e
+    passaria do teto do lote.
+    """
+    chosen = (
+        select(key)
+        .where(condition)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+        .cte("chosen")
+        .prefix_with("MATERIALIZED")
+    )
+    deleted = session.execute(delete(table).where(key.in_(select(chosen.c[0]))).returning(key))
     return len(deleted.all())

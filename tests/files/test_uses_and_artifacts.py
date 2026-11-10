@@ -2,12 +2,10 @@
 
 import hashlib
 import uuid
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import event, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import (
@@ -33,6 +31,7 @@ from goblinshift.files.tables import artifact, object_use, upload
 from goblinshift.files.uploads import get_upload, lock_ready_uploads, request_deletion
 from goblinshift.platform.db import unit_of_work
 from tests.files.support import create_intent, create_user, ready_upload
+from tests.sql_capture import captured_sql
 
 pytestmark = pytest.mark.integration
 
@@ -150,22 +149,6 @@ def held_run_inputs(
             hold(session, [ready.object_id], HolderKind.RUN, run_id)
         pairs.append((run_id, view.id))
     return pairs
-
-
-@contextmanager
-def captured_sql(session: Session) -> Iterator[list[str]]:
-    """SQL enviado ao banco pela sessão enquanto o bloco roda."""
-    statements: list[str] = []
-
-    def record(_conn: object, _cursor: object, sql: str, *_rest: object) -> None:
-        statements.append(sql)
-
-    engine = session.get_bind()
-    event.listen(engine, "before_cursor_execute", record)
-    try:
-        yield statements
-    finally:
-        event.remove(engine, "before_cursor_execute", record)
 
 
 def test_release_many_encerra_os_usos_de_todos_os_detentores_pedidos(
