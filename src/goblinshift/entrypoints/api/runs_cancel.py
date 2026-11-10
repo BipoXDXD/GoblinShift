@@ -20,6 +20,7 @@ from goblinshift.entrypoints.api.dependencies import Storage, require_scope
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.identity import Principal, Scope
 from goblinshift.runs.cancellation import RunNotFoundError, cancel_run
+from goblinshift.runs.finished import RunFinishedReporter
 
 router = APIRouter(tags=["runs"])
 
@@ -46,8 +47,12 @@ def cancel(
     # O cancelamento abre as próprias transações curtas (decisão e liberação de usos), com
     # retentativa em deadlock; por isso recebe a fábrica de Sessions, não a Session da rota.
     factory: sessionmaker[Session] = request.app.state.session_factory
+    # A Run na fila termina aqui, e quem termina a Run emite o `run.finished` (3.7).
+    finished: RunFinishedReporter = request.app.state.run_finished
     try:
-        result = cancel_run(factory, storage, principal.owner_id, run_id)
+        result = cancel_run(
+            factory, storage, principal.owner_id, run_id, on_finished=finished.report
+        )
     except RunNotFoundError:
         raise ApiProblem(ProblemCode.NOT_FOUND, "Execução não encontrada.") from None
     response.status_code = STATUS_TERMINAL if result.is_terminal else STATUS_STOPPING

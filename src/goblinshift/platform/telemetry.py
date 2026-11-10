@@ -35,7 +35,7 @@ from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import Span, Status, StatusCode, get_current_span
+from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -384,14 +384,15 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
 
 def configure_tracing(
     app: FastAPI, engine: Engine, settings: Settings, exporter: SpanExporter | None = None
-) -> None:
-    """Liga os traces da API; sem `exporter` e sem endpoint OTLP, não faz nada.
+) -> Tracer:
+    """Liga os traces da API e devolve o tracer dos eventos que ela emite fora da requisição.
 
+    Sem `exporter` e sem endpoint OTLP, não instrumenta nada e devolve um tracer que não grava.
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
     provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
-        return
+        return NoOpTracer()
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=provider,
@@ -402,6 +403,7 @@ def configure_tracing(
         exclude_spans=["receive", "send"],
     )
     _instrument_database(engine, provider)
+    return provider.get_tracer(__name__)
 
 
 def _instrument_database(engine: Engine, provider: TracerProvider) -> None:

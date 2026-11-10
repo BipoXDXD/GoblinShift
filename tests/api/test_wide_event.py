@@ -371,6 +371,35 @@ def test_aceitacao_traz_run_receita_e_replay(traced: Traced, tmp_path: Path) -> 
     assert traced.main_event()["idempotency.replayed"] is True
 
 
+def test_cancelar_run_na_fila_pela_api_emite_o_termino(traced: Traced, tmp_path: Path) -> None:
+    user_id, auth = new_account(traced.factory)
+    storage = FileStorage(tmp_path / "storage")
+    inputs = ready_inputs(traced.factory, storage, user_id)
+    payload = {
+        "recipe_id": "csv-janitor",
+        "recipe_version": 1,
+        "input_upload_ids": [str(i) for i in inputs],
+        "parameters": {},
+    }
+    accepted = traced.client.post(
+        RUNS, json=payload, headers={**auth, "Idempotency-Key": str(uuid.uuid4())}
+    )
+    assert accepted.status_code == 202, accepted.text
+    run_id = accepted.json()["id"]
+    traced.clear()
+
+    response = traced.client.post(f"{RUNS}/{run_id}/cancel", headers=auth)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "canceled"
+    (finished,) = [span for span in traced.spans() if span.name == "run.finished"]
+    attributes = finished.attributes or {}
+    assert attributes["run_id"] == run_id
+    assert attributes["run.state"] == "canceled"
+    hasher = UserHasher(traced.app.state.settings.user_hash_key())
+    assert attributes["user.hash"] == hasher.hash(user_id)
+
+
 # Limite de requisições (1.7; ADR 028)
 
 
