@@ -115,7 +115,9 @@ export function SiteNoticeBanner({
             className={`inline-flex min-h-11 flex-none cursor-pointer items-center gap-2 rounded-lg px-2 font-semibold underline underline-offset-4 hover:decoration-2 ${look.text}`}
           >
             <X aria-hidden="true" className="size-4" />
-            {T.dismiss}
+            {T.dismiss.visible}
+            {/* O espaço fica fora do span: quem calcula o nome junta os pedaços já aparados. */}{" "}
+            <span className="sr-only">{T.dismiss.screenReaderOnly}</span>
           </button>
         ) : null}
       </div>

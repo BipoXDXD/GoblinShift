@@ -116,6 +116,22 @@ describe("SiteNoticeBanner: Fechar", () => {
     expect(window.localStorage.getItem("gs-notice-dismissed")).toBe("aviso-terms-change");
   });
 
+  it("o rótulo visível é só Fechar; o nome completo vem do texto para leitor de tela", () => {
+    banner(notice("terms-change"));
+
+    // A 320 px o rótulo longo apertava a coluna do texto da faixa; o nome continua
+    // "Fechar aviso" e contém o rótulo visível (WCAG 2.5.3).
+    const button = screen.getByRole("button", { name: "Fechar aviso" });
+    const hidden = Array.from(button.querySelectorAll(".sr-only"));
+    expect(hidden.map((node) => node.textContent)).toEqual(["aviso"]);
+    const visible = Array.from(button.childNodes)
+      .filter((node) => !hidden.includes(node as Element))
+      .map((node) => node.textContent)
+      .join("")
+      .trim();
+    expect(visible).toBe("Fechar");
+  });
+
   it("depois de fechar, avisa quem leva o foco adiante, uma vez", async () => {
     let calls = 0;
     banner(notice("terms-change"), {
