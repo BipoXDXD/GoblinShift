@@ -91,11 +91,12 @@ Quanto aos dados de terceiros que você enviar, veja o item 6 dos Termos de Uso.
 - **Registros (logs) dos serviços:** mensagens técnicas da aplicação e dos componentes do
   servidor. O registro de acesso do servidor web guarda, por requisição, a hora, o IP
   **truncado** como na auditoria, o método, o caminho **sem a query string**, o código de
-  resposta, o tamanho e os tempos da resposta; não guarda Referer, User-Agent nem outros
-  cabeçalhos. A aplicação não mantém registro de acesso próprio, e o proxy de borda não grava
-  registro de acesso. Quando o servidor web não consegue falar com a aplicação, o registro de
-  erro dele inclui a linha da requisição, com a query string, mas o endereço anotado ali é o do
-  proxy de borda, e não o seu.
+  resposta do servidor web e o da aplicação, o tamanho e os tempos da resposta; não guarda
+  Referer, User-Agent nem outros cabeçalhos. A aplicação não mantém registro de acesso próprio,
+  e o proxy de borda não grava registro de acesso. Nas requisições, o registro de erro do
+  servidor web só anota falhas graves do próprio servidor, como falta de espaço em disco, de
+  memória ou de arquivos abertos. Nesses casos raros, a linha pode trazer o seu **IP completo** e
+  a linha da requisição, com a query string.
 - **Visitantes sem conta:** quem só abre o site ou tenta entrar também gera eventos de telemetria
   e registros de acesso, sempre com o IP truncado. Um evento de segurança de login recusado pode
   ficar sem conta associada.
