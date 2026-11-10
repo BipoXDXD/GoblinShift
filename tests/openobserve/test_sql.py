@@ -511,6 +511,14 @@ def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
 # A API exporta um span `api.saturation` 1 s depois de cada virada de minuto com recusa, e um na
 # parada; o alerta agrupa pelo minuto absoluto. Cada span é (minutos atrás, segundo no minuto),
 # contados a partir do minuto corrente, para o teste não depender da fase do relógio.
+# Extremos: dois minutos absolutos, cada um com um span 5 ms depois da virada e outro 10 ms antes
+# da seguinte. Os quatro ocupam quase 120 s, e qualquer grade de 60 s fora de fase com a do relógio
+# os divide em três fatias: um agrupamento relativo a `now()` só não dispara se a consulta rodar a
+# menos de 15 ms de uma virada (cerca de 1 em 4000 execuções).
+EDGE_OF_MINUTE_S = (0.005, 59.99)
+EDGE_SPANS = tuple((minutes_ago, second) for minutes_ago in (2, 1) for second in EDGE_OF_MINUTE_S)
+
+
 @pytest.mark.parametrize(
     ("spans", "fires"),
     [
@@ -518,9 +526,17 @@ def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
         (((2, 1), (1, 1)), False),  # dois minutos: pico absorvido
         (((2, 1), (2, 1.3), (1, 1)), False),  # duas réplicas na mesma virada
         (((2, 1), (2, 40), (1, 1)), False),  # parada aos 40 s, no minuto do último relato
+        (EDGE_SPANS, False),  # dois minutos absolutos, três fatias de qualquer grade relativa
         (((12, 1), (2, 1), (1, 1)), False),  # o terceiro minuto saiu dos 10 min
     ],
-    ids=["tres-minutos", "dois-minutos", "duas-replicas", "relato-da-parada", "fora-da-janela"],
+    ids=[
+        "tres-minutos",
+        "dois-minutos",
+        "duas-replicas",
+        "relato-da-parada",
+        "extremos-do-minuto",
+        "fora-da-janela",
+    ],
 )
 def test_api_saturada_em_tres_minutos_dispara(
     telemetry: Telemetry, spans: tuple[tuple[int, float], ...], fires: bool
@@ -533,7 +549,8 @@ def test_api_saturada_em_tres_minutos_dispara(
 
     def at(minutes_ago: int, second: float, attributes: dict[str, AttributeValue]) -> None:
         moment = minute_start - minutes_ago * MINUTE_S + second
-        traces.span("api.saturation", now_s - moment, attributes, 0.1)
+        # Idade medida na hora de escrever: o span cai no segundo pedido, sem a deriva do teste.
+        traces.span("api.saturation", time.time() - moment, attributes, 0.1)
 
     for minutes_ago, second in spans:
         at(minutes_ago, second, {"main": True, attribute: 5})
