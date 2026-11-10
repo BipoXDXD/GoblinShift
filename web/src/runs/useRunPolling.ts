@@ -14,7 +14,9 @@ interface RunPolling {
   readonly announcement: string | null;
   /**
    * Avisa que outra região da página já anunciou este status (a resposta do cancelamento); a
-   * próxima mudança para ele não é repetida.
+   * próxima mudança para ele não é repetida. Corrida aceita: se o polling ler o status novo antes
+   * de a resposta do pedido chegar, as duas regiões anunciam. Fechá-la exigiria levar a resposta
+   * do POST ao cache do polling, e o CancelRun decidiu não fazer atualização otimista.
    */
   readonly acknowledge: (status: RunStatus) => void;
 }
@@ -102,6 +104,8 @@ function useAnnouncement(run: RunDetail | undefined): {
       snapshot: next,
       announcement:
         announcementFor(tracked.snapshot, next, tracked.acknowledged) ?? tracked.announcement,
+      // Vale só para uma transição: o status já foi silenciado uma vez e não se repete na
+      // Execução, então a marca não serve para mais nada.
       acknowledged: next.status === tracked.acknowledged ? null : tracked.acknowledged,
     });
   }
