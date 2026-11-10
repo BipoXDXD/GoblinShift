@@ -34,6 +34,11 @@ function sent(requests: readonly Request[], route: string): Request[] {
   );
 }
 
+/** As regiões `role="status"` cujo texto é exatamente este. */
+function statusWith(text: string): HTMLElement[] {
+  return screen.getAllByRole("status").filter((region) => region.textContent === text);
+}
+
 async function openSaveDialog(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
   await user.click(await screen.findByRole("button", { name: "Salvar preset" }));
   return screen.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
@@ -189,11 +194,33 @@ describe("Bancada aberta com um preset", () => {
   it("pré-preenche os parâmetros e diz de qual preset vieram", async () => {
     setup(`/bancada/csv-janitor?preset=${PRESET_ID}`);
 
-    const notice = await screen.findByText("Parâmetros do preset Clientes do mês.");
-    expect(notice).toBeVisible();
-    expect(notice).toHaveAttribute("role", "status");
+    expect(await screen.findByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
     expect(screen.getByLabelText("Delimitador dos arquivos de saída")).toHaveValue(";");
     expect(screen.getByLabelText("Colunas sem espaços nas pontas")).toHaveValue("nome");
+  });
+
+  it("anuncia a origem numa região viva que já existia antes de o preset chegar", async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    setup(`/bancada/csv-janitor?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: async () => {
+        await held;
+        return jsonResponse(presetBody());
+      },
+    });
+    await screen.findByText("Carregando o preset.");
+    const regionsBefore = screen.getAllByRole("status");
+
+    release();
+
+    // O leitor de tela só anuncia a mudança numa região que já conhecia: o texto entra num nó
+    // que existia (vazio) desde o "Carregando", e não num nó novo que já nasce com ele.
+    await waitFor(() => {
+      expect(statusWith("Parâmetros do preset Clientes do mês.")).toHaveLength(1);
+    });
+    expect(regionsBefore).toContain(statusWith("Parâmetros do preset Clientes do mês.")[0]);
   });
 
   it("preset de outra receita abre com os parâmetros padrão e avisa", async () => {
