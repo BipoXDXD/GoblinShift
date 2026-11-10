@@ -195,6 +195,7 @@ export function OficinaHero({
     const turn = keyTurn(event.key);
     if (turn !== null) {
       event.preventDefault();
+      setSpinning(false);
       handle.turn(turn);
     }
   };
@@ -264,7 +265,8 @@ export function OficinaHero({
           </div>
           {/* Alternativa de ponteiro único ao arrasto (WCAG 2.5.7): cada toque dá o passo de uma
               seta, sem animação, então vale também com movimento reduzido. Abaixo do `sm`, os
-              quatro ficam em grade 2×2 (girar em cima, inclinar embaixo), sem um botão sozinho. */}
+              quatro ficam em grade 2×2 por agrupamento, não por falta de espaço: girar em cima,
+              inclinar embaixo. */}
           <div
             role="group"
             aria-label={T.turnLabel}

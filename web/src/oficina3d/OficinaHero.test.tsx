@@ -435,7 +435,25 @@ describe("OficinaHero", () => {
     },
   );
 
-  it("Girar liga e desliga a auto-rotação, com aria-pressed", async () => {
+  it.each(["ArrowLeft", "ArrowUp"])(
+    "com o giro automático ligado, a seta %s desliga o giro e dá o passo",
+    async (key) => {
+      const scene = fakeScene();
+      await renderReady(scene);
+      const spin = screen.getByRole("button", { name: TEXT.art.stage.spin });
+      await userEvent.click(spin);
+      expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(true);
+
+      screen.getByRole("application").focus();
+      await userEvent.keyboard(`{${key}}`);
+
+      expect(spin).toHaveAttribute("aria-pressed", "false");
+      expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(false);
+      expect(scene.handle.turn).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("Giro automático liga e desliga a auto-rotação, com aria-pressed", async () => {
     const scene = fakeScene();
     await renderReady(scene);
     const spin = screen.getByRole("button", { name: TEXT.art.stage.spin });
@@ -450,7 +468,7 @@ describe("OficinaHero", () => {
     expect(scene.handle.setSpinning).toHaveBeenLastCalledWith(false);
   });
 
-  it("girando e então reduz o movimento: o giro para, o Girar some e a cena fica sem entrada", async () => {
+  it("girando e então reduz o movimento: o giro para, o Giro automático some e a cena fica sem entrada", async () => {
     const scene = fakeScene();
     const motion = reducibleMotion();
     await renderReady(scene, motion.environment);
