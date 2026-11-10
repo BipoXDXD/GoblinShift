@@ -21,7 +21,8 @@ export interface AppServices {
 /**
  * Cada tela é um chunk próprio (`lazy`), baixado só quando a rota abre: o JS inicial fica com o
  * React, o router e a moldura. A 404 fica no chunk de entrada porque é pequena e o `*` a usa
- * para qualquer URL, inclusive a Bancada de uma receita que não existe. Os textos legais ficam cada um no chunk da sua rota.
+ * para qualquer URL, inclusive a Bancada de uma receita que não existe. Os textos legais ficam
+ * cada um no chunk da sua rota.
  */
 export function createRoutes({ uploadServices, now, notice }: AppServices): RouteObject[] {
   return [
