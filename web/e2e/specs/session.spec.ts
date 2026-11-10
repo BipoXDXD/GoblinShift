@@ -8,6 +8,13 @@ import { expect, test } from "../support/test";
 
 test.use({ auth: "none" });
 
+/** O celular do achado B2 da auditoria de design. */
+const NARROW_PHONE = { width: 375, height: 740 };
+/** Alvo de toque da regra de interface 11 (WCAG 2.5.5). */
+const TOUCH_TARGET_PX = 44;
+/** Arredondamento subpixel das caixas. */
+const WIDTH_TOLERANCE_PX = 1;
+
 test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada", async ({
   page,
   fakeApi,
@@ -88,6 +95,42 @@ test("Sair encerra a sessão: os cookies somem e a próxima tela pede para entra
   expect(await context.cookies()).toEqual([]);
   await page.goto("/historico");
   await expect(page.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+});
+
+test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões @keyboard", async ({
+  page,
+  fakeApi,
+}) => {
+  // WCAG 2.4.3 e 1.3.2: o projeto mobile pula o Tab (@keyboard), então a largura vem daqui.
+  await page.setViewportSize(NARROW_PHONE);
+  await fakeApi.signIn();
+  const acesso = new AcessoPage(page);
+  await acesso.open();
+
+  const dialog = await acesso.askSignOutAll();
+  const cancel = dialog.getByRole("button", { name: "Cancelar" });
+  const confirm = dialog.getByRole("button", { name: "Sair de todos e revogar as chaves" });
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(confirm).toBeFocused();
+
+  const [first, second] = await Promise.all([cancel.boundingBox(), confirm.boundingBox()]);
+  if (first === null || second === null) {
+    throw new Error("botões do diálogo sem caixa");
+  }
+  expect(first.y, "o primeiro do Tab tem de vir acima do segundo").toBeLessThan(second.y);
+  // Largura útil do diálogo: a caixa de conteúdo, sem o padding.
+  const contentWidth = await dialog.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  });
+  for (const box of [first, second]) {
+    expect(box.height, "alvo de toque de 44 px").toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+    expect(
+      Math.abs(box.width - contentWidth),
+      `botão na largura útil do diálogo (${String(contentWidth)} px)`,
+    ).toBeLessThanOrEqual(WIDTH_TOLERANCE_PX);
+  }
 });
 
 test("Sair de todos: Esc cancela e devolve o foco; confirmar revoga as chaves @keyboard", async ({

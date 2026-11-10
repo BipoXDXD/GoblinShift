@@ -102,6 +102,13 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "ordem do Tab: botões do diálogo invertidos no celular",
+    spec: ["session.spec.ts", "-g", "375 px"],
+    plant: (dist) => {
+      addStylesheet(dist, "dialog div:has(> button + button) { flex-direction: column-reverse; }");
+    },
+  },
+  {
     name: "movimento reduzido: regra do base.css apagada",
     spec: ["motion.spec.ts", "-g", "movimento reduzido"],
     plant: (dist) => {
