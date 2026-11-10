@@ -160,7 +160,7 @@ interface Removal {
  * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta.
  * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 412 e na falha genérica
  * (5xx, timeout) que o servidor aplicou mesmo assim, com o preset fora da lista. A decisão é tomada
- * uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2.1).
+ * uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2).
  */
 function useRemoval(onListUpdated: () => void): Removal {
   const client = useApiClient();

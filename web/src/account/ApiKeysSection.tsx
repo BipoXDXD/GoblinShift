@@ -260,7 +260,7 @@ interface Revoke {
  * Revogar com confirmação. A chave que já não existe (404) só some da lista, com um aviso.
  * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 404 e na falha genérica
  * (5xx, timeout) que o servidor aplicou mesmo assim, com o Revogar fora da lista. A decisão é
- * tomada uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2.1).
+ * tomada uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2).
  */
 function useRevoke(onListUpdated: () => void, now: () => number): Revoke {
   const client = useApiClient();
