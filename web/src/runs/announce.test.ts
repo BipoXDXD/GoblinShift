@@ -66,4 +66,14 @@ describe("announcementFor", () => {
       ).toBe(message);
     },
   );
+
+  it("não repete o status que o pedido de cancelamento já anunciou", () => {
+    expect(announcementFor(snapshot("queued"), snapshot("canceled"), "canceled")).toBeNull();
+  });
+
+  it("anuncia normalmente um status diferente do que o pedido já anunciou", () => {
+    expect(announcementFor(snapshot("stopping"), snapshot("canceled"), "stopping")).toBe(
+      "Execução cancelada.",
+    );
+  });
 });

@@ -1,10 +1,10 @@
 import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
 import type { ApiResponse } from "../api/response";
 import { announcementFor, type RunProgressSnapshot } from "./announce";
-import { getRun, type RunDetail } from "./api";
+import { getRun, type RunDetail, type RunStatus } from "./api";
 import { nextPollDelayMs, type PollSnapshot } from "./polling";
 
 interface RunPolling {
@@ -12,6 +12,11 @@ interface RunPolling {
   readonly query: UseQueryResult<RunDetail>;
   /** Texto da região `aria-live="polite"`; muda só quando status ou fase mudam. */
   readonly announcement: string | null;
+  /**
+   * Avisa que outra região da página já anunciou este status (a resposta do cancelamento); a
+   * próxima mudança para ele não é repetida.
+   */
+  readonly acknowledge: (status: RunStatus) => void;
 }
 
 interface RunPollingOptions {
@@ -59,7 +64,7 @@ export function useRunPolling(runId: string, options: RunPollingOptions = {}): R
     },
   });
 
-  return { query, announcement: useAnnouncement(query.data) };
+  return { query, ...useAnnouncement(query.data) };
 }
 
 function pollSnapshot(query: RunQuery, consecutiveFailures: number): PollSnapshot | null {
@@ -81,20 +86,29 @@ function lastUpdatedAt(query: RunQuery): number {
   return Math.max(query.state.dataUpdatedAt, query.state.errorUpdatedAt);
 }
 
-function useAnnouncement(run: RunDetail | undefined): string | null {
+function useAnnouncement(run: RunDetail | undefined): {
+  readonly announcement: string | null;
+  readonly acknowledge: (status: RunStatus) => void;
+} {
   const [tracked, setTracked] = useState<{
     snapshot: RunProgressSnapshot | null;
     announcement: string | null;
-  }>({ snapshot: null, announcement: null });
+    acknowledged: RunStatus | null;
+  }>({ snapshot: null, announcement: null, acknowledged: null });
   if (run !== undefined && changed(tracked.snapshot, run)) {
     const next = { status: run.status, phase: run.progress.phase };
     // Ajuste de estado durante a renderização: o padrão do React para estado derivado de dados.
     setTracked({
       snapshot: next,
-      announcement: announcementFor(tracked.snapshot, next) ?? tracked.announcement,
+      announcement:
+        announcementFor(tracked.snapshot, next, tracked.acknowledged) ?? tracked.announcement,
+      acknowledged: next.status === tracked.acknowledged ? null : tracked.acknowledged,
     });
   }
-  return tracked.announcement;
+  const acknowledge = useCallback((status: RunStatus) => {
+    setTracked((current) => ({ ...current, acknowledged: status }));
+  }, []);
+  return { announcement: tracked.announcement, acknowledge };
 }
 
 function changed(previous: RunProgressSnapshot | null, run: RunDetail): boolean {
