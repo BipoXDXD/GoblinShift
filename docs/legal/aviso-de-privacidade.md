@@ -91,12 +91,13 @@ Quanto aos dados de terceiros que você enviar, veja o item 6 dos Termos de Uso.
 - **Registros (logs) dos serviços:** mensagens técnicas da aplicação e dos componentes do
   servidor. O registro de acesso do servidor web guarda, por requisição, a hora, o IP
   **truncado** como na auditoria, o método, o caminho **sem a query string**, o código de
-  resposta do servidor web e o da aplicação, o tamanho e os tempos da resposta; não guarda
-  Referer, User-Agent nem outros cabeçalhos. A aplicação não mantém registro de acesso próprio,
-  e o proxy de borda não grava registro de acesso. Nas requisições, o registro de erro do
-  servidor web só anota falhas graves do próprio servidor, como falta de espaço em disco, de
-  memória ou de arquivos abertos. Nesses casos raros, a linha pode trazer o seu **IP completo** e
-  a linha da requisição, com a query string.
+  resposta (do servidor web e, quando houver, o da aplicação), o tamanho e os tempos da resposta;
+  esse registro de acesso não guarda Referer, User-Agent nem outros cabeçalhos. A aplicação não
+  mantém registro de acesso próprio, e o proxy de borda não grava registro de acesso. Sobre as
+  requisições, o registro de erro do servidor web só anota falhas graves do próprio servidor,
+  como falta de espaço em disco, de memória ou de arquivos abertos. Nesses casos raros, a linha
+  pode trazer o seu **IP completo**, o endereço pedido (com a query string) e a página de onde o
+  pedido saiu (Referer).
 - **Visitantes sem conta:** quem só abre o site ou tenta entrar também gera eventos de telemetria
   e registros de acesso, sempre com o IP truncado. Um evento de segurança de login recusado pode
   ficar sem conta associada.
@@ -314,4 +315,4 @@ texto e em [https://github.com/BipoXDXD/GoblinShift/commits/main/docs/legal](htt
 | `v2-rascunho` | 2026-10-15 | Identificação do controlador; domínio e canal de privacidade; dados enviados por e-mail (item 3.6) e o prazo de 12 meses; eventos de segurança guardados por 90 dias depois da exclusão da conta; Backblaze nos Estados Unidos; aviso de incidente no site; antecedência de 15 dias para mudanças e este histórico |
 | `v3-rascunho` | 2026-10-15 | Provedor dos endereços de e-mail identificado: ImprovMX (encaminhamento) e Google/Gmail (caixa de entrada), nos itens 2, 3.6, 6 e 7 |
 | `v4-rascunho` | 2026-10-21 | Redação editorial e referência ao registro de licenças atualizadas; novo aceite conjunto, sem alterar aceites anteriores |
-| `v5` | 2026-11-05 | Primeira versão vigente, sem marcações pendentes: Cloudflare incluída como fornecedora; Zoho no lugar de ImprovMX e Gmail; dispensa de encarregado; bases legais completas; papel de cada fornecedor; mecanismo da transferência internacional; conta bloqueada; restauração de backup; verificação de identidade e prazo de 15 dias; serviço só para maiores de 18 anos; identificação do controlador |
+| `v5` | 2026-11-05 | Primeira versão vigente, sem marcações pendentes: Cloudflare incluída como fornecedora; Zoho no lugar de ImprovMX e Gmail; dispensa de encarregado; bases legais completas; papel de cada fornecedor; mecanismo da transferência internacional; conta bloqueada; restauração de backup; verificação de identidade e prazo de 15 dias; serviço só para maiores de 18 anos; identificação do controlador. Revisado em 2026-11-10: descrição do registro de erro do servidor web corrigida (item 3.4), sem mudar a versão nem pedir novo aceite |

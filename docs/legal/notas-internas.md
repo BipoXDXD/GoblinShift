@@ -278,8 +278,8 @@ o especificado para a abertura pública. Os caminhos citados estão na `main`, c
 | HTTPS, banco sem porta exposta, segredos em hash | Plano 3.8 (Proxy de borda, Rede) e 3.6 |
 | Nome "Conta Google" para contas Google; nome do GitHub (`login`) regravado a cada login; nome sem edição | `src/goblinshift/identity/providers.py` (`GOOGLE_SCOPE`, `GOOGLE_DISPLAY_NAME`); `src/goblinshift/identity/users.py` (`ON CONFLICT ... set_ display_name`); `src/goblinshift/entrypoints/api/me.py` (só `GET /me`, sem rota de edição) |
 | Cookie `__Secure-gs_login`: chave assinada, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/auth`, 10 minutos; estado do login expira em 10 minutos | `src/goblinshift/entrypoints/api/cookies.py`; `src/goblinshift/entrypoints/api/app.py` (`SessionMiddleware` do Starlette, que sempre marca `httponly`); `src/goblinshift/identity/login_state.py` (`LOGIN_STATE_TTL`) |
-| Log de acesso do Nginx: IP truncado /24 e /48, só o caminho, sem Referer nem User-Agent; Uvicorn sem log de acesso | `docker/nginx/templates/access-log.conf.template` (`log_format privacy`); `docker/nginx/templates/default.conf.template:25`; `docker/app.Dockerfile:34` (`--no-access-log`); `tests/test_nginx_logs.py`; PR #12 |
-| Log de erro do Nginx só com falhas graves (`crit`), que ainda gravam o IP completo e a linha da requisição com a query | `docker/nginx/templates/default.conf.template:53-65` (`error_log ... crit`; disco cheio no `proxy_temp`, EMFILE, malloc); `client:` é o cliente real por `default.conf.template:5-11` (`set_real_ip_from`, `real_ip_header`); `tests/test_nginx_logs.py`, `tests/test_nginx_edge_limits.py`; PR #239 |
+| Log de acesso do Nginx: IP truncado /24 e /48, só o caminho, sem Referer nem User-Agent; Uvicorn sem log de acesso | `docker/nginx/templates/access-log.conf.template` (`log_format privacy`); `docker/nginx/templates/default.conf.template:86`; `docker/app.Dockerfile:52` (`--no-access-log`); `tests/test_nginx_logs.py`; PR #12 |
+| Log de erro do Nginx só com falhas graves (`crit`), que ainda gravam o IP completo, o endereço pedido com a query e o Referer | `docker/nginx/templates/default.conf.template:53-65` (`error_log ... crit`; disco cheio no `proxy_temp`, EMFILE, malloc); `client:` é o cliente real por `default.conf.template:5-11` (`set_real_ip_from`, `real_ip_header`); campos da linha (`client:`, `server:`, `request:`, `upstream:`, `host:`, `referrer:`) em `ngx_http_log_error` e `ngx_http_log_error_handler`, `src/http/ngx_http_request.c` do Nginx `release-1.30.6` (a imagem de `docker/web.Dockerfile:15`); `tests/test_nginx_logs.py`, `tests/test_nginx_edge_limits.py`; PR #239 |
 | Log de acesso com o status e os tempos da aplicação | `docker/nginx/templates/access-log.conf.template:24-28` (`upstream_status`, `upstream_response_time`, `upstream_connect_time`) |
 | Proxy de borda sem log de acesso | `deploy/edge/Caddyfile` e `deploy/edge/conf.d/goblinshift.caddy` (sem diretiva `log`); `docker/gateway/Caddyfile` e `docker/gateway/sites/goblinshift.dev.caddy` (sem diretiva `log`) |
 | Logs: 5 × 10 MiB por serviço, cerca de 14 dias no volume previsto, somem ao recriar o container | `compose.yaml:11-15` (`x-logging`); plano 1.7 (Retenção e "Logs dos containers"); `tests/test_container_logs.py` |
@@ -296,7 +296,8 @@ Todas as três encontradas no primeiro rascunho estão resolvidas na `main` (con
    que o log de **erro** do Nginx trazia, quando a aplicação não respondia, a linha da requisição
    com o IP do proxy de borda. Com o `real_ip`, o `client:` é o IP completo do usuário. Com o
    PR #239, o log de erro das requisições fica em `crit` e só falhas graves do servidor gravam
-   linha, ainda com `client:` e `request:` completos; o item 3.4 diz isso.
+   linha, ainda com `client:`, `request:`, `upstream:`, `host:` e `referrer:` completos; o
+   item 3.4 diz isso.
 2. **Retenção dos logs: resolvida pelo PR #12.** A rotação passou para cada serviço do Compose
    (driver `local`, 5 arquivos de 10 MiB), e o `deploy/provision.sh` não escreve mais o
    `/etc/docker/daemon.json`, que é global na VPS compartilhada. O plano 1.7 trocou "14 dias" por
