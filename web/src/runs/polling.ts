@@ -5,6 +5,8 @@ import type { RunStatus } from "./api";
 const DEFAULT_POLL_MS = 2_000;
 const MAX_BACKOFF_MS = 30_000;
 const JITTER_FRACTION = 0.1;
+/** Falhas transitórias seguidas a partir das quais deixam de ser oscilação e viram aviso. */
+const PERSISTENT_FAILURE_STREAK = 2;
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set([
   "succeeded",
@@ -36,7 +38,7 @@ export function nextPollDelayMs(snapshot: PollSnapshot, random: () => number): n
       : Math.max(snapshot.retryAfterMs ?? 0, DEFAULT_POLL_MS);
   }
   const { error, consecutiveFailures } = snapshot;
-  if (!(error instanceof ApiError) || isPermanent(error)) {
+  if (!isRetryable(error)) {
     return false;
   }
   const backoffMs = Math.min(DEFAULT_POLL_MS * 2 ** (consecutiveFailures - 1), MAX_BACKOFF_MS);
@@ -44,6 +46,25 @@ export function nextPollDelayMs(snapshot: PollSnapshot, random: () => number): n
   const { failure } = error;
   const retryAfterMs = "retryAfterMs" in failure ? failure.retryAfterMs : null;
   return Math.max(jitteredMs, retryAfterMs ?? 0);
+}
+
+/**
+ * Se a falha do polling merece aviso. A falha rápida e isolada entre sucessos é oscilação da rede: a
+ * próxima consulta, segundos depois, a corrige. Um alerta a cada uma delas repetiria o anúncio
+ * assertivo a cada oscilação (WCAG 4.1.3). O aviso vem quando repetir não resolve, quando a falha se
+ * repete ou no timeout, que já deixou a tela sem notícia durante o prazo inteiro do pedido.
+ */
+export function isPersistentFailure(error: unknown, consecutiveFailures: number): boolean {
+  return (
+    !isRetryable(error) ||
+    error.failure.kind === "timeout" ||
+    consecutiveFailures >= PERSISTENT_FAILURE_STREAK
+  );
+}
+
+/** Falha da API que outra consulta pode resolver; defeito da interface e recusa permanente, não. */
+function isRetryable(error: unknown): error is ApiError {
+  return error instanceof ApiError && !isPermanent(error);
 }
 
 function isPermanent({ failure }: ApiError): boolean {

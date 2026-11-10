@@ -61,7 +61,7 @@ export function RunPage(): ReactElement {
  * mudanças anunciadas em `aria-live` e, ao concluir, os downloads.
  */
 function RunView({ runId }: { readonly runId: string }): ReactElement {
-  const { query, announcement, acknowledge } = useRunPolling(runId);
+  const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
@@ -71,7 +71,7 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       </div>
       <LiveRegion message={announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
-      {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
+      {failure !== null && <ProblemAlert failure={failureOf(failure)} />}
       {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
           a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
           do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
