@@ -40,10 +40,11 @@
     outline: none;
   }
 
-  /* O título da tela recebe foco por programa a cada troca de rota (FocusHeading), só para o
-     leitor de tela e o Tab partirem dali; não é controle, então não desenha anel (o resumo de
-     erros, que também recebe foco, continua com o anel). */
-  h1[tabindex="-1"]:focus {
+  /* Títulos recebem foco por programa só para o leitor de tela e o Tab partirem dali: o h1 a cada
+     troca de rota (FocusHeading), o h2 da seção depois de revogar ou excluir e o h3 do formulário
+     que abriu. Não são controles, então não desenham anel (o resumo de erros, que também recebe
+     foco, continua com o anel). */
+  :is(h1, h2, h3)[tabindex="-1"]:focus {
     outline: none;
   }
 

@@ -83,7 +83,10 @@ test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova 
 
   await newKey.focus();
   await page.keyboard.press("Enter");
-  await expect(keys.getByRole("heading", { name: "Nova chave de API" })).toBeFocused();
+  const formHeading = keys.getByRole("heading", { name: "Nova chave de API" });
+  await expect(formHeading).toBeFocused();
+  // Título focado por programa não é controle: sem anel, como o h1 das telas (base.css).
+  await expect(formHeading).toHaveCSS("outline-style", "none");
   const form = page.getByRole("form", { name: "Nova chave de API" });
   await form.getByRole("button", { name: "Cancelar" }).focus();
   await page.keyboard.press("Enter");
@@ -102,7 +105,9 @@ test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova 
   await dialog.getByRole("button", { name: "Revogar chave" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByText(`Chave ${publicId} revogada.`)).toBeAttached();
-  await expect(keys.getByRole("heading", { level: 2, name: "Chaves de API" })).toBeFocused();
+  const sectionHeading = keys.getByRole("heading", { level: 2, name: "Chaves de API" });
+  await expect(sectionHeading).toBeFocused();
+  await expect(sectionHeading).toHaveCSS("outline-style", "none");
 });
 
 test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reabre", async ({
