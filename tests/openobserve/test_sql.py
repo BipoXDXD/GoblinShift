@@ -505,6 +505,39 @@ def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
     assert bool(cause_rows(telemetry, "causa-executor-nao-iniciou", stream)) is fires
 
 
+# A API exporta um span `api.saturation` por minuto com recusa no teto do uvicorn. Idade em
+# segundos, para ficar longe da borda da fatia de 1 min durante a consulta.
+@pytest.mark.parametrize(
+    ("ages_s", "fires"),
+    [
+        ((70, 130, 190), True),  # três minutos com recusa
+        ((70, 130), False),  # dois minutos: pico absorvido
+        ((65, 75, 130), False),  # duas réplicas no mesmo minuto contam uma fatia só
+        ((70, 130, 730), False),  # a terceira saiu dos 10 min
+    ],
+)
+def test_api_saturada_em_tres_minutos_dispara(
+    telemetry: Telemetry, ages_s: tuple[int, ...], fires: bool
+) -> None:
+    stream = unique_stream("saturada")
+    attribute = "api.saturation.rejected"
+    traces = telemetry.traces(stream)
+    for age in ages_s:
+        traces.span("api.saturation", age, {"main": True, attribute: 5}, 0.1)
+    # Sem recusa ou fora do evento amplo, nunca conta.
+    for age in (250, 310, 370):
+        traces.span("api.saturation", age, {"main": True, attribute: 0}, 0.1)
+        traces.span("api.saturation", age, {"main": False, attribute: 5}, 0.1)
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    rows = cause_rows(telemetry, "causa-api-saturada", stream)
+
+    assert bool(rows) is fires
+    if fires:
+        assert int(str(rows[0]["rejected"])) == 15
+
+
 # --- Ausência: a telemetria que deveria chegar e não chegou -------------------------------------
 
 

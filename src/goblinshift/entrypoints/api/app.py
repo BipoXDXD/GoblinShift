@@ -36,6 +36,7 @@ from goblinshift.entrypoints.api.cookies import (
     LOGIN_COOKIE_PATH,
 )
 from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
+from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from goblinshift.entrypoints.api.wide_event import WideEventMiddleware, count_queries
@@ -71,8 +72,9 @@ def create_app(
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        yield
+    async def lifespan(running: FastAPI) -> AsyncGenerator[None]:
+        async with saturation_reporting(running.state.tracer):
+            yield
         engine.dispose()
 
     app = FastAPI(
@@ -144,4 +146,5 @@ def create_app(
 
     tracer = configure_tracing(app, engine, settings, span_exporter)
     app.state.run_finished = RunFinishedReporter(app.state.session_factory, user_hasher, tracer)
+    app.state.tracer = tracer
     return app

@@ -1,9 +1,12 @@
-"""Saturação da API e limite por cliente: sem alerta, com roteiro manual (README do OpenObserve).
+"""Saturação da API com alerta, e limite por cliente com roteiro manual (README do OpenObserve).
 
-Os dois sinais existem só no log dos containers, que não chega ao OpenObserve: o 503 do teto de
-concorrência do uvicorn sai antes do ASGI, sem span, e o 429 do `limit_req` é do Nginx. O roteiro
-conta as linhas no `docker logs`. Estes testes amarram o texto que ele procura ao que os programas
-escrevem de fato, e a premissa de que o log não chega: se ela cair, o lugar do sinal é um alerta.
+O 503 do teto de concorrência do uvicorn sai antes do ASGI, sem span: a API conta a linha que o
+uvicorn escreve e exporta a contagem por janela num span `api.saturation`, que o alerta
+`gs-causa-api-saturada` lê. O 429 do `limit_req` é do Nginx, cujo log não chega ao OpenObserve, e
+fica no roteiro manual, que conta as linhas no `docker logs`. Estes testes amarram a mensagem que o
+contador procura ao que o uvicorn escreve de fato, o alerta ao span que a API exporta, o roteiro ao
+que os programas escrevem e a premissa de que o log dos containers não chega: se ela cair, o lugar
+do 429 também é um alerta.
 """
 
 import inspect
@@ -15,7 +18,13 @@ import pytest
 import yaml
 from uvicorn.protocols.http import h11_impl, httptools_impl
 
-from openobserve.catalog import alerts
+from goblinshift.entrypoints.api.saturation import (
+    REJECTED_ATTRIBUTE,
+    SATURATION_SPAN,
+    UVICORN_CONCURRENCY_MESSAGE,
+)
+from openobserve.catalog import DestinationKey, alerts
+from tests.test_container_logs import uvicorn_cmd
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "deploy" / "openobserve" / "README.md"
@@ -25,7 +34,9 @@ APPLICATION_SOURCE = ROOT / "src" / "goblinshift"
 # O que exportaria o log da aplicação por OTLP: o exportador e a ponte do `logging` do SDK.
 OTLP_LOG_EXPORT = re.compile(r"_log_exporter|LoggingHandler|LoggerProvider")
 SATURATION_SECTION = "### Saturação da API e limite por cliente"
-UVICORN_SATURATION_MESSAGE = "Exceeded concurrency limit."
+SATURATION_ALERT = "gs-causa-api-saturada"
+# Níveis do uvicorn em que o aviso do teto ainda chega aos handlers do `uvicorn.error`.
+LOG_LEVELS_WITH_WARNING = {"trace", "debug", "info", "warning"}
 # Como cada campo sai no log de acesso do Nginx (JSON do formato `privacy`) para os valores que
 # o roteiro conta: 429 do `limit_req` e 503 que veio da API.
 NGINX_REJECTED = '"status":429'
@@ -44,17 +55,36 @@ def _shell_commands(section: str) -> list[str]:
 
 
 @pytest.mark.parametrize("module", [h11_impl, httptools_impl], ids=["h11", "httptools"])
-def test_uvicorn_avisa_o_teto_com_a_mensagem_do_roteiro(module: Any) -> None:
-    # A mensagem não é API pública do uvicorn: uma atualização que a mude cala o roteiro.
-    assert f'"{UVICORN_SATURATION_MESSAGE}"' in inspect.getsource(module)
+def test_uvicorn_avisa_o_teto_com_a_mensagem_que_o_contador_procura(module: Any) -> None:
+    # A mensagem não é API pública do uvicorn: uma atualização que a mude cala o alerta.
+    assert f'"{UVICORN_CONCURRENCY_MESSAGE}"' in inspect.getsource(module)
 
 
-def test_roteiro_conta_a_mensagem_do_teto_no_log_da_api() -> None:
-    commands = _shell_commands(_saturation_section())
+def test_api_roda_num_nivel_de_log_que_entrega_o_aviso_do_teto() -> None:
+    # Com `--log-level error` ou acima, o `uvicorn.error` descarta o WARNING antes do contador.
+    cmd = uvicorn_cmd()
 
+    level = cmd[cmd.index("--log-level") + 1] if "--log-level" in cmd else "info"
+    assert level in LOG_LEVELS_WITH_WARNING
+
+
+def test_saturacao_tem_alerta_urgente_lendo_o_span_da_api() -> None:
+    by_name = {alert.name: alert for alert in alerts("default", "gs-")}
+
+    alert = by_name[SATURATION_ALERT]
+    assert alert.stream_type == "traces"
+    assert alert.destination is DestinationKey.URGENT
+    assert f"operation_name = '{SATURATION_SPAN}'" in alert.sql
+    assert REJECTED_ATTRIBUTE.replace(".", "_") in alert.sql
+
+
+def test_roteiro_aponta_o_alerta_e_ainda_conta_a_mensagem_no_log_da_api() -> None:
+    section = _saturation_section()
+
+    assert f"`{SATURATION_ALERT}`" in section
     assert any(
-        "goblinshift-api-1" in command and UVICORN_SATURATION_MESSAGE in command
-        for command in commands
+        "goblinshift-api-1" in command and UVICORN_CONCURRENCY_MESSAGE in command
+        for command in _shell_commands(section)
     )
 
 
@@ -73,8 +103,8 @@ def test_log_de_acesso_do_nginx_escreve_os_campos_como_o_roteiro_procura() -> No
 
 
 def test_logs_dos_containers_nao_chegam_ao_openobserve() -> None:
-    # Se um receptor de arquivo (filelog) ou outro entrar no Collector, o roteiro manual deixa de
-    # ser o lugar destes sinais: crie as causas no catálogo e reescreva a seção do README.
+    # Premissa do roteiro manual do 429: se um receptor de arquivo (filelog) ou outro entrar no
+    # Collector, o 429 também passa a ter uma causa no catálogo, e a seção do README muda.
     pipelines = yaml.safe_load(COLLECTOR_CONFIG.read_text(encoding="utf-8"))["service"]["pipelines"]
 
     assert pipelines["logs"]["receivers"] == ["otlp"]

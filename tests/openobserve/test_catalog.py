@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from goblinshift.entrypoints.api.saturation import REJECTED_ATTRIBUTE, SATURATION_SPAN
 from openobserve.catalog import (
     BURN_LEVELS,
     CAUSE_COLUMNS,
@@ -108,6 +109,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-executor-nao-iniciou",
         "gs-causa-manutencao-sem-ciclo",
         "gs-causa-sem-traces",
+        "gs-causa-api-saturada",
         "gs-heartbeat",
     }
 
@@ -235,7 +237,7 @@ def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
 def test_contadores_lidos_pelas_causas_sao_declarados() -> None:
     # Coluna fora de CAUSE_COLUMNS não existe no stream quando o provisionamento valida a consulta.
     for alert in alerts(stream="s", prefix=PREFIX):
-        for column in re.findall(r"\b(?:maintenance|alert)_\w+", alert.sql):
+        for column in re.findall(r"\b(?:maintenance|alert|api)_\w+", alert.sql):
             assert column in CAUSE_COLUMNS, f"{alert.name}: {column}"
 
 
@@ -308,3 +310,21 @@ def test_ausencia_le_o_stream_de_traces_e_dispara_sem_nenhuma_linha(name: str) -
     assert "HAVING count(*) = 0" in alert.sql
     # A semente do provisionamento (`main = false`) não pode contar como telemetria viva.
     assert "main = 'true'" in alert.sql
+
+
+def test_api_saturada_le_o_span_da_janela_e_avisa_no_destino_urgente() -> None:
+    alert = next(a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-api-saturada")
+
+    assert alert.destination is DestinationKey.URGENT
+    assert (alert.stream_type, alert.stream_name) == ("traces", "s")
+    assert "operation_name = 'api.saturation'" in alert.sql
+    assert "api_saturation_rejected" in CAUSE_COLUMNS
+    assert (alert.period_minutes, alert.frequency_minutes, alert.silence_minutes) == (10, 5, 60)
+
+
+def test_api_saturada_le_o_atributo_e_o_span_que_a_api_exporta() -> None:
+    # O nome no OpenObserve troca "." por "_": uma mudança só de um lado cala o alerta.
+    alert = next(a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-api-saturada")
+
+    assert f"operation_name = '{SATURATION_SPAN}'" in alert.sql
+    assert REJECTED_ATTRIBUTE.replace(".", "_") in alert.sql
