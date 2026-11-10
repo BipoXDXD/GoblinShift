@@ -1,5 +1,8 @@
 // Seleção dos casos do sabotage.ts pelo filtro da linha de comando. Um filtro que não seleciona
 // nada é erro: com zero casos o script dizia que "os 0 defeitos" foram pegos e saía verde.
+//
+// A seleção diferencia caixa, como sempre fez: o filtro é um trecho exato do nome. A sugestão não
+// diferencia, para que `cls` aponte o caso `CLS:` em vez de rodar outro por engano.
 
 /** Palavras mais curtas ("do", "no") casam com quase todo nome e não ajudam a sugerir. */
 const MIN_WORD_LENGTH = 3;
@@ -17,7 +20,7 @@ export function selectCases<T extends { readonly name: string }>(
     return { found: true, cases: selected };
   }
   const similar = cases.filter((sabotage) => sharesWord(sabotage.name, filter));
-  const heading = similar.length > 0 ? "Os mais parecidos" : "Os casos disponíveis";
+  const heading = similar.length > 0 ? "Casos com uma palavra em comum" : "Os casos disponíveis";
   const names = (similar.length > 0 ? similar : cases).map((sabotage) => `  ${sabotage.name}`);
   return {
     found: false,

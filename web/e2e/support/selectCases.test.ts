@@ -21,13 +21,46 @@ describe("selectCases", () => {
     expect(selectCases(CASES, "CLS")).toEqual({ found: true, cases: [CASES[2]] });
   });
 
-  it("filtro sem caso falha e sugere os nomes que dividem uma palavra com ele", () => {
-    expect(selectCases(CASES, "Contraste do tema")).toEqual({
+  it("filtro que bate em vários nomes seleciona todos, na ordem da lista", () => {
+    expect(selectCases(CASES, "contraste")).toEqual({ found: true, cases: [CASES[0], CASES[1]] });
+  });
+
+  it("a seleção diferencia caixa, mas a sugestão não: cls aponta o caso CLS", () => {
+    expect(selectCases(CASES, "cls")).toEqual({
       found: false,
       message:
-        'Nenhum caso de sabotagem contém "Contraste do tema". Os mais parecidos:\n' +
+        'Nenhum caso de sabotagem contém "cls". Casos com uma palavra em comum:\n' +
+        "  CLS: aviso empurra o título no celular",
+    });
+  });
+
+  it("basta uma palavra do filtro em comum para sugerir o nome", () => {
+    expect(selectCases(CASES, "contraste azul")).toEqual({
+      found: false,
+      message:
+        'Nenhum caso de sabotagem contém "contraste azul". Casos com uma palavra em comum:\n' +
         "  contraste: texto secundário no tema claro\n" +
         "  contraste: texto secundário no tema escuro",
+    });
+  });
+
+  it("palavra de 3 letras conta para a sugestão", () => {
+    expect(selectCases(CASES, "CLS!")).toEqual({
+      found: false,
+      message:
+        'Nenhum caso de sabotagem contém "CLS!". Casos com uma palavra em comum:\n' +
+        "  CLS: aviso empurra o título no celular",
+    });
+  });
+
+  it("palavra de 2 letras não conta para a sugestão", () => {
+    expect(selectCases(CASES, "no xyz")).toEqual({
+      found: false,
+      message:
+        'Nenhum caso de sabotagem contém "no xyz". Os casos disponíveis:\n' +
+        "  contraste: texto secundário no tema claro\n" +
+        "  contraste: texto secundário no tema escuro\n" +
+        "  CLS: aviso empurra o título no celular",
     });
   });
 
