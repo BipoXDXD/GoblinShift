@@ -1,3 +1,4 @@
+import { parse } from "culori";
 import { describe, expect, it } from "vitest";
 
 /*
@@ -125,11 +126,13 @@ const SPACING_PROPERTY =
 const LITERAL_LENGTH = /(?<![\w.])-?\d*\.?\d+(?:px|rem|em|ch|ex|vw|vh)\b/;
 const SPACING_FUNCTION = /--spacing\(([^)]*)\)/g;
 const RAW_CSS_COLOR = /var\(--color-[a-z]+-\d+\)|\boklch\(|#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/i;
-/** Propriedades que recebem cor, onde um nome de cor (`white`, `black`…) é tom cru. */
+/** Propriedades que recebem cor, onde um nome de cor (`white`, `navy`…) é tom cru. */
 const COLOR_PROPERTY =
   /(?:^|-)color$|^background$|^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?$|^outline$|^(?:fill|stroke)$|shadow$|^text-decoration$/;
-const NAMED_COLOR =
-  /(?<![\w-])(?:white|black|red|green|blue|gray|grey|yellow|orange|purple|pink|brown|silver|gold)(?![\w-])/i;
+/** Palavra solta do valor: fora ficam `--token`, unidade colada ao número e trecho de palavra. */
+const CSS_WORD = /(?<![\w-])[a-z][a-z-]*(?![\w-])/gi;
+/** Nomes que o culori lê como cor, mas que não são tom cru: não pintam com cor própria. */
+const NOT_RAW_COLOR = new Set(["transparent", "currentcolor"]);
 const ELEVATION = /^var\(--elevation-([a-z]+)\)$/;
 const Z_LAYER = /^var\((--z-[a-z]+)\)$/;
 const VIEWPORT_HEIGHT = /\dvh\b/;
@@ -264,9 +267,7 @@ function statementViolations({ scope, text }: CssStatement): string[] {
       : []),
     ...(property === "z-index" && !isZLayer(value) ? [`z-index fora das camadas: ${value}`] : []),
     ...(VIEWPORT_HEIGHT.test(value) ? [`altura de janela em vh: ${value} (use svh)`] : []),
-    ...(HIDDEN_OUTLINE.get(property)?.has(value) === true
-      ? ["outline: none: o foco visível não pode sumir"]
-      : []),
+    ...(hidesOutline(property, value) ? ["outline: none: o foco visível não pode sumir"] : []),
     ...SYSTEM_VALUES.filter(([name, allowed]) => name.test(property) && !allowed.test(value)).map(
       ([, , rule]) => `${rule}: ${property}: ${value}`,
     ),
@@ -296,10 +297,24 @@ function spacingViolations(property: string, value: string): string[] {
 }
 
 function colorViolations(property: string, value: string): string[] {
-  const isNamedColor = COLOR_PROPERTY.test(property) && NAMED_COLOR.test(value);
-  return RAW_CSS_COLOR.test(value) || isNamedColor
-    ? [`cor crua em ${property} (use o papel semântico)`]
-    : [];
+  const named = COLOR_PROPERTY.test(property) ? namedColors(value) : [];
+  if (named.length > 0) {
+    return [`cor crua em ${property} (use o papel semântico): ${named.join(", ")}`];
+  }
+  return RAW_CSS_COLOR.test(value) ? [`cor crua em ${property} (use o papel semântico)`] : [];
+}
+
+/** Qualquer nome de cor CSS (os 148 que o culori conhece), não uma lista escrita à mão. */
+function namedColors(value: string): string[] {
+  return [...value.matchAll(CSS_WORD)]
+    .map(([word]) => word)
+    .filter((word) => !NOT_RAW_COLOR.has(word.toLowerCase()) && parse(word) !== undefined);
+}
+
+/** O anel some se qualquer parte do valor o apaga (`outline: 0 none`, `none 0`). */
+function hidesOutline(property: string, value: string): boolean {
+  const hidden = HIDDEN_OUTLINE.get(property);
+  return hidden !== undefined && value.split(" ").some((part) => hidden.has(part));
 }
 
 function isElevation(value: string): boolean {
@@ -387,6 +402,12 @@ describe("cssViolations", () => {
     ["a:focus { outline: none !important; }", "outline: none"],
     ["a:focus { outline-style: none; }", "outline: none"],
     ["a:focus { outline-width: 0; }", "outline: none"],
+    ["a:focus { outline: 0 none; }", "outline: none"],
+    ["a:focus { outline: none 0; }", "outline: none"],
+    ["a { color: navy; }", "cor crua em color (use o papel semântico): navy"],
+    ["a { background-color: teal; }", "cor crua em background-color (use o papel semântico): teal"],
+    ["a { border: 2px solid crimson; }", "cor crua em border (use o papel semântico): crimson"],
+    ["a { outline: 3px solid rebeccapurple; }", "cor crua em outline (use o papel semântico)"],
     ["padding: 13px;", "declaração fora de regra: padding: 13px"],
     ["a { @include x; }", "at-rule fora da régua: @include x"],
     ["@plugin x;", "at-rule fora da régua: @plugin x"],
@@ -410,6 +431,8 @@ describe("cssViolations", () => {
     "a { border-radius: var(--radius-lg); font: inherit; font-weight: 600; font-size: var(--text-sm); }",
     "a { border-radius: var(--radius-full) 0; line-height: var(--text-sm--line-height); }",
     'a { content: "{;}"; background-image: url("a;b.png"); white-space: nowrap; }',
+    "a { color: currentcolor; background-color: transparent; border: 2px solid var(--border-ui); }",
+    "a { border-color: currentColor; outline: 3px dashed var(--ring); text-decoration: underline; }",
     "a { animation-duration: 0.01ms !important; inset-inline: 0; margin-block: --spacing(4); }",
     '@import "tailwindcss"; @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));',
   ])("aceita %s", (source) => {
