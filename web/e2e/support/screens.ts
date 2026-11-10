@@ -3,7 +3,7 @@
 // falsa, porque a API real não para num estado sob encomenda.
 import type { Page } from "@playwright/test";
 
-import { CSV_FILES } from "../fixtures/files";
+import { CSV_FILES, PDF_FILES } from "../fixtures/files";
 import { AcessoPage } from "../pages/AcessoPage";
 import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
@@ -132,6 +132,22 @@ export const SCREENS: readonly Screen[] = [
     name: "Bancada (Downloads Detox)",
     open: async (page: Page): Promise<void> => {
       await new BancadaPage(page).open("downloads-detox");
+    },
+  },
+  {
+    // A tela de formulário mais complexa: cartões numa lista reordenável aninhada no formulário,
+    // cada um com seus campos, e o mapa de páginas previsto ao lado.
+    name: "Bancada do PDF Press montando com as páginas escolhidas",
+    open: async (page: Page): Promise<void> => {
+      const bancada = new BancadaPage(page);
+      await bancada.open("pdf-press");
+      await bancada.addFiles(PDF_FILES);
+      await bancada.choose("O que fazer com os PDFs", "Montar um PDF com as páginas escolhidas");
+      await bancada.press("Adicionar página");
+      await bancada.press("Adicionar página");
+      await bancada.choose("PDF da página 2", "anexo.pdf");
+      const pageMap = page.getByRole("region", { name: "Mapa de páginas previsto" });
+      await expect(pageMap.getByText("anexo.pdf, página 1", { exact: true })).toBeVisible();
     },
   },
   {

@@ -116,6 +116,22 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "espaçamento de texto: título num contêiner de altura fixa que corta o excesso",
+    spec: ["text-spacing.spec.ts", "-g", "Oficina: com o espaçamento"],
+    plant: (dist) => {
+      addStylesheet(dist, "main h1 { height: 1em; overflow: hidden; }");
+    },
+  },
+  {
+    // A guarda da folha: sem o `word-spacing` da 1.4.12 no body, a spec tem de cair antes de medir.
+    // `html body` vence o `*` da folha adotada por especificidade, ambos `!important`.
+    name: "espaçamento de texto: a folha da 1.4.12 não muda o word-spacing do body",
+    spec: ["text-spacing.spec.ts", "-g", "Oficina: com o espaçamento"],
+    plant: (dist) => {
+      addStylesheet(dist, "html body { word-spacing: 0px !important; }");
+    },
+  },
+  {
     name: "tema: theme-init.js vazio (pisca no primeiro quadro)",
     spec: ["theme.spec.ts", "-g", "primeiro quadro"],
     plant: (dist) => {
