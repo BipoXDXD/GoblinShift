@@ -27,7 +27,7 @@ test("a execução criada na Bancada abre pela Oficina e pelo Histórico", async
 
   const historico = new HistoricoPage(page);
   await historico.open();
-  // O link do título leva à execução; o outro da linha é o "Reusar configuração".
+  // O link do título leva à execução; o outro da linha é o "Reutilizar parâmetros".
   await historico
     .rows()
     .first()

@@ -593,7 +593,7 @@ export const TEXT = {
     },
   },
   history: {
-    reuse: "Reusar configuração",
+    reuse: "Reutilizar parâmetros",
     reuseOf: (recipe: string, date: string) => `da execução de ${recipe} em ${date}`,
     availability: {
       until: (date: string) => `Resultados até ${date}`,
@@ -683,11 +683,11 @@ export const TEXT = {
       atLimit: "No limite",
       resetsAt: (when: string) => `A cota diária começa a liberar em ${when}.`,
       activeRun: "Execução em andamento",
-      limitsHeading: "Limites por lote",
+      limitsHeading: "Limites por execução",
       fileBytes: "Por arquivo",
       videoFileBytes: "Por vídeo",
-      batchFiles: "Arquivos por lote",
-      batchBytes: "Por lote",
+      batchFiles: "Arquivos por execução",
+      batchBytes: "Por execução",
       concurrentUploads: "Envios simultâneos",
     },
     keys: {

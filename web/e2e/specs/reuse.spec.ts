@@ -1,9 +1,9 @@
-// Reusar a configuração pelo Histórico: a linha diz se os resultados ainda valem e leva à Bancada
+// Reutilizar os parâmetros pelo Histórico: a linha diz se os resultados ainda valem e leva à Bancada
 // com os parâmetros daquela execução.
 import { HistoricoPage } from "../pages/HistoricoPage";
 import { expect, test } from "../support/test";
 
-test("Histórico → Reusar configuração → Bancada com os parâmetros da execução", async ({
+test("Histórico → Reutilizar parâmetros → Bancada com os parâmetros da execução", async ({
   page,
   fakeApi,
 }) => {
@@ -28,7 +28,7 @@ test("Histórico → Reusar configuração → Bancada com os parâmetros da exe
   const row = historico.rows().first();
   await expect(row.getByText(/^Resultados até /)).toBeVisible();
 
-  await row.getByRole("link", { name: /^Reusar configuração/ }).click();
+  await row.getByRole("link", { name: /^Reutilizar parâmetros/ }).click();
 
   await expect(page.getByText(/^Parâmetros da execução de /)).toBeVisible();
   await expect(page.getByLabel("Delimitador dos arquivos de saída")).toHaveValue(";");

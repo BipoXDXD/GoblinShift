@@ -35,7 +35,7 @@ function setup(run: () => Response, path = `/bancada/csv-janitor?execucao=${RUN_
   return api;
 }
 
-describe("Bancada aberta pela execução (reusar configuração)", () => {
+describe("Bancada aberta pela execução (reutilizar parâmetros)", () => {
   it("pré-preenche com os parâmetros da execução e diz de qual", async () => {
     setup(() => jsonResponse(runBody({ status: "succeeded", parameters: PARAMETERS })));
 
