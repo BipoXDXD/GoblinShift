@@ -12,6 +12,7 @@ import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration"
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
+import { FailureNotice, guidanceAnnouncement } from "../components/feedback/FailureNotice";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { buttonClassName } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -63,15 +64,17 @@ export function RunPage(): ReactElement {
 function RunView({ runId }: { readonly runId: string }): ReactElement {
   const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
+  // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
+  const guidance = failure === null ? null : guidanceAnnouncement(failure);
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <div className="flex flex-col gap-2">
         {run !== undefined && <BackToWorkbench recipeId={run.recipe_id} />}
         <FocusHeading>{T.title}</FocusHeading>
       </div>
-      <LiveRegion message={announcement} visuallyHidden />
+      <LiveRegion message={guidance ?? announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
-      {failure !== null && <ProblemAlert failure={failureOf(failure)} />}
+      {failure !== null && <FailureNotice error={failure} />}
       {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
           a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
           do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}

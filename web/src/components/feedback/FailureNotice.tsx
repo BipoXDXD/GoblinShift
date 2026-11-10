@@ -29,15 +29,38 @@ export function FailureNotice({
   if (!(error instanceof ApiError)) {
     return <ProblemAlert failure={{ kind: "internal" }} />;
   }
-  const failure = error.failure;
-  const code = failure.kind === "problem" ? failure.problem.code : null;
+  const code = guidanceCode(error);
   if (code === "AUTHENTICATION_REQUIRED" || code === "REAUTH_REQUIRED") {
     return <SignInPrompt reauth={code === "REAUTH_REQUIRED"} headingLevel={headingLevel} />;
   }
   if (code === "TERMS_NOT_ACCEPTED") {
     return <TermsRequiredNotice headingLevel={headingLevel} />;
   }
-  return <ProblemAlert failure={failure} {...(messages === undefined ? {} : { messages })} />;
+  return <ProblemAlert failure={error.failure} {...(messages === undefined ? {} : { messages })} />;
+}
+
+type GuidanceCode = "AUTHENTICATION_REQUIRED" | "REAUTH_REQUIRED" | "TERMS_NOT_ACCEPTED";
+
+/**
+ * Texto a anunciar quando o FailureNotice mostra um caminho (entrar, entrar de novo, aceitar), ou
+ * `null` quando mostra o ProblemAlert. O caminho é informativo, sem `role="alert"`: numa tela que o
+ * troca sozinha, como o polling da Execução, quem a usa anuncia este texto na própria região viva.
+ */
+export function guidanceAnnouncement(error: Error): string | null {
+  const code = guidanceCode(error);
+  return code === null ? null : TEXT.failure.problems[code];
+}
+
+function guidanceCode(error: Error): GuidanceCode | null {
+  if (!(error instanceof ApiError) || error.failure.kind !== "problem") {
+    return null;
+  }
+  const { code } = error.failure.problem;
+  return code === "AUTHENTICATION_REQUIRED" ||
+    code === "REAUTH_REQUIRED" ||
+    code === "TERMS_NOT_ACCEPTED"
+    ? code
+    : null;
 }
 
 /** A conta precisa aceitar a versão nova dos termos; o link volta para esta tela depois. */
