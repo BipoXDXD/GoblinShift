@@ -8,14 +8,17 @@ o coordenador recebe `LostFencing`, registra e para sem escrever mais nada.
 Passos:
 1. `prepare`: o Runner cria a área vazia; as entradas do storage são copiadas para `inputs/`,
    conferindo SHA-256 e tamanho, `job.json` recebe os parâmetros fixados na aceitação e
-   `context.json`, a imagem do executor fixada na Run (para o manifesto, ADR 021).
+   `context.json`, a imagem do executor fixada na Run (para o manifesto, ADR 021). Erro de E/S
+   aqui (disco cheio, storage ilegível) é infraestrutura: falha transitória na hora.
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
    `processing`.
 3. `supervise`: renova o lease a cada terço do prazo, grava o progresso, aplica o prazo vencido
    e, se a Run foi para `stopping` (cancelamento ou prazo) ou a tentativa passou do teto de
    duração, pede `stop` ao Runner. Runner fora do ar não interrompe a espera: o lease segue
-   renovado e a consulta se repete (3.5: execuções aguardam dentro dos prazos).
+   renovado e a consulta se repete (3.5: execuções aguardam dentro dos prazos). Falha transitória
+   do banco na renovação também não: a renovação é repetida logo, e o fencing decide, quando o
+   banco voltar, se a tentativa ainda é desta instância.
 4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3, ou memória
    estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
    `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
@@ -45,6 +48,8 @@ from opentelemetry.context import Context
 from opentelemetry.trace import NoOpTracer, Tracer
 from opentelemetry.util.types import AttributeValue
 from sqlalchemy import insert, select, update
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import publish_artifact
@@ -115,6 +120,12 @@ WORKER_FILE_MODE = 0o640
 DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
+# Erros que não encerram a supervisão. Conexão caída, `lock_timeout`, `statement_timeout` e pool
+# esgotado passam sozinhos. `OperationalError` também traz os que pedem ação de fora: senha recusada
+# (28P01), disco cheio (53100), E/S (58030), limite do servidor (54000). A lista os inclui de
+# propósito: desistir abandonaria um executor vivo, e repetir só custa um aviso, porque o teto da
+# tentativa e o fencing encerram a espera. Erro de SQL ou de constraint é defeito, e sobe.
+_TRANSIENT_DATABASE_ERRORS = (OperationalError, PoolTimeoutError)
 
 
 def random_retry_jitter() -> timedelta:
@@ -134,6 +145,11 @@ class CoordinatorConfig:
     @property
     def renew_every(self) -> timedelta:
         return self.lease / 3
+
+    @property
+    def renew_retry_every(self) -> timedelta:
+        """Espera depois de uma renovação que falhou: cabem várias tentativas antes de vencer."""
+        return self.renew_every / 10
 
 
 class PreparationError(Exception):
@@ -269,6 +285,12 @@ class Coordinator:
                 contents = held_input_contents(session, claimed.owner_id, claimed.input_upload_ids)
         except HeldContentMissingError as error:
             raise PreparationError(str(error)) from error
+        try:
+            self._fill_work_area(claimed, contents)
+        except OSError as error:
+            raise PreparationError(f"área de trabalho: {error}") from error
+
+    def _fill_work_area(self, claimed: ClaimedAttempt, contents: list[HeldContent]) -> None:
         work_dir = self._runner.create_work_dir(claimed.attempt_id)
         inputs_dir = work_dir / "inputs"
         entries = [
@@ -345,14 +367,20 @@ class Coordinator:
     def supervise(self, claimed: ClaimedAttempt) -> ExecutorStatus:
         """Espera o executor terminar, renovando o lease; pede `stop` se a Run vai parar."""
         started = time.monotonic()
-        last_renew = float("-inf")
+        next_renewal = float("-inf")
         while True:
             status = self._observe(claimed)
             if status is not None and not status.is_running:
                 return status
-            if time.monotonic() - last_renew >= self._config.renew_every.total_seconds():
-                last_renew = time.monotonic()
-                if self.renew_lease(claimed) is Status.STOPPING:
+            now = time.monotonic()
+            if now >= next_renewal:
+                renewed = self._try_renew(claimed)
+                renewal_failed = renewed is None
+                wait = (
+                    self._config.renew_retry_every if renewal_failed else self._config.renew_every
+                )
+                next_renewal = now + wait.total_seconds()
+                if renewed is Status.STOPPING:
                     stopped = self._try_stop(claimed)
                     # Sem confirmação de término não há desfecho: o lease segue renovado.
                     if stopped is not None and not stopped.is_running:
@@ -362,6 +390,17 @@ class Coordinator:
                 if stopped is not None and not stopped.is_running:
                     return replace(stopped, timed_out=True)
             time.sleep(self._config.status_poll.total_seconds())
+
+    def _try_renew(self, claimed: ClaimedAttempt) -> Status | None:
+        """Renova o lease; `None` se o banco falhou de forma transitória (a espera continua)."""
+        try:
+            return self.renew_lease(claimed)
+        except _TRANSIENT_DATABASE_ERRORS as error:
+            # Só o tipo e o SQLSTATE: a mensagem do banco traz host, porta e usuário.
+            sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+            fields = {**_ids(claimed), "error_type": type(error).__name__, "sqlstate": sqlstate}
+            logger.warning("lease não renovado", extra={"fields": fields})
+            return None
 
     def _observe(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
         """Estado do executor; `None` se o Runner não respondeu (a espera continua)."""

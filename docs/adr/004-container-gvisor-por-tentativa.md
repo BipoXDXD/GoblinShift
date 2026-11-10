@@ -51,3 +51,7 @@ O gVisor monta um `tmpfs` próprio em `/tmp`, mesmo com a raiz read-only; o que 
 - O teste de aceitação do ambiente ([3.8](../GoblinShiftPlan.md#s3-8)) passa na VPS: sem rede, `ENOSPC` aos 6 GiB, morte por falta de memória acima de 2 GiB, fork bomb contido em 64 processos, container sob `runsc` e o worker sem acesso a `/var/run/docker.sock`. É o critério da fatia 1 (protótipo) e continua valendo na fatia 4 e a cada mudança no host.
 - Nenhum arquivo Compose (`compose.yaml`, `compose.prod.yaml`, `compose.override.yaml`) monta `/var/run/docker.sock` (vale desde já).
 - Na fatia 4, o `executor-ctl` de produção roda como serviço systemd do host, expõe só as quatro operações e o serviço recusa iniciar com o `Runner` local.
+
+## Atualização de 2026-11-09
+
+O `executor-ctl` ganhou uma quinta operação, só de leitura: `GET /v1/image?ref=...` responde se uma imagem da allowlist está no daemon, para a manutenção notar a falta dela sem tráfego de usuário. A allowlist é conferida antes de chamar o Docker, e o perfil de `docker run` não muda. A decisão acima segue valendo: o `executor-ctl` continua sendo o único com acesso ao Docker.

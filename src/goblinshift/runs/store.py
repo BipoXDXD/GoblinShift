@@ -16,8 +16,9 @@ import uuid
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
-from sqlalchemy import and_, exists, func, insert, select, update
+from sqlalchemy import Row, and_, exists, func, insert, select, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -143,14 +144,9 @@ def load_run(
     """Lê e trava a Run (`FOR UPDATE`, ou `SKIP LOCKED` na manutenção) como `RunState`.
 
     `physical_attempts` e `executor_started` saem das Attempts, e `has_published_outputs` dos
-    `RunOutput`: são dados derivados, nunca colunas que poderiam divergir.
+    `RunOutput`: são dados derivados, nunca colunas que poderiam divergir. Eles são lidos num
+    segundo comando, depois da trava (`_read_attempt_facts`).
     """
-    live = attempt.alias("live")
-    physical = (
-        select(func.count())
-        .where(attempt.c.run_id == run.c.id, attempt.c.executor_started_at.is_not(None))
-        .scalar_subquery()
-    )
     conditions = [run.c.id == run_id]
     if owner_id is not None:
         conditions.append(run.c.owner_id == owner_id)
@@ -168,26 +164,23 @@ def load_run(
             run.c.cancel_requested_at,
             run.c.stop_reason,
             run.c.error_code,
-            physical.label("physical_attempts"),
-            exists().where(run_output.c.run_id == run.c.id).label("published"),
-            live.c.id.label("live_id"),
-            live.c.generation.label("live_generation"),
-            live.c.number.label("live_number"),
-            live.c.lease_expires_at.label("live_lease"),
-            live.c.executor_started_at.label("live_started"),
             func.now().label("now"),
         )
-        .outerjoin(live, and_(live.c.run_id == run.c.id, live.c.ended_at.is_(None)))
         .where(*conditions)
-        .with_for_update(of=run, skip_locked=skip_locked)
+        .with_for_update(skip_locked=skip_locked)
     ).one_or_none()
     if row is None:
         return None
+    derived = _read_attempt_facts(session, run_id)
     live_attempt = (
         LiveAttempt(
-            row.live_id, row.live_generation, row.live_number, row.live_lease, row.live_started
+            derived.live_id,
+            derived.live_generation,
+            derived.live_number,
+            derived.live_lease,
+            derived.live_started,
         )
-        if row.live_id is not None
+        if derived.live_id is not None
         else None
     )
     state = RunState(
@@ -195,7 +188,7 @@ def load_run(
         phase=Phase(row.phase) if row.phase is not None else None,
         generation=row.generation,
         claim_count=row.claim_count,
-        physical_attempts=row.physical_attempts,
+        physical_attempts=derived.physical_attempts,
         executor_started=live_attempt is not None and live_attempt.executor_started_at is not None,
         eligible_at=row.eligible_at,
         queue_expires_at=row.queue_expires_at,
@@ -203,9 +196,39 @@ def load_run(
         cancel_requested=row.cancel_requested_at is not None,
         stop_reason=ErrorCode(row.stop_reason) if row.stop_reason is not None else None,
         error_code=ErrorCode(row.error_code) if row.error_code is not None else None,
-        has_published_outputs=row.published,
+        has_published_outputs=derived.published,
     )
     return LoadedRun(row.id, row.owner_id, state, live_attempt, row.now)
+
+
+def _read_attempt_facts(session: Session, run_id: uuid.UUID) -> Row[Any]:
+    """Attempt viva, tentativas físicas e saídas da Run já travada, num comando próprio.
+
+    Em READ COMMITTED, o comando que espera uma trava recebe a versão nova da linha travada, mas
+    as demais tabelas continuam no snapshot de quando ele começou: no mesmo comando do
+    `FOR UPDATE`, a Attempt encerrada por quem segurava a trava voltaria viva. Um comando novo
+    tem snapshot novo, e a trava impede que esses dados mudem daqui até o commit.
+    """
+    live = attempt.alias("live")
+    physical = (
+        select(func.count())
+        .where(attempt.c.run_id == run.c.id, attempt.c.executor_started_at.is_not(None))
+        .scalar_subquery()
+    )
+    return session.execute(
+        select(
+            physical.label("physical_attempts"),
+            exists().where(run_output.c.run_id == run.c.id).label("published"),
+            live.c.id.label("live_id"),
+            live.c.generation.label("live_generation"),
+            live.c.number.label("live_number"),
+            live.c.lease_expires_at.label("live_lease"),
+            live.c.executor_started_at.label("live_started"),
+        )
+        .select_from(run)
+        .outerjoin(live, and_(live.c.run_id == run.c.id, live.c.ended_at.is_(None)))
+        .where(run.c.id == run_id)
+    ).one()
 
 
 def lock_fenced(session: Session, fence: Fence, statuses: Collection[Status]) -> LoadedRun:

@@ -147,6 +147,45 @@ def test_remove_com_daemon_inacessivel_nao_vira_sucesso(tmp_path: Path) -> None:
         docker.remove("gs-exec-x")
 
 
+def test_imagem_que_o_inspect_acha_esta_presente(tmp_path: Path) -> None:
+    assert fake_docker(tmp_path, "", 0).image_present("repo@sha256:" + "a" * 64) is True
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "Error response from daemon: No such image: repo@sha256:aaa\n",
+        "Error: No such image: repo@sha256:aaa\n",
+    ],
+)
+def test_imagem_que_o_daemon_nao_tem_esta_ausente(tmp_path: Path, stderr: str) -> None:
+    assert fake_docker(tmp_path, stderr, 1).image_present("repo@sha256:" + "a" * 64) is False
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        DAEMON_UNREACHABLE,
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\n",
+        # Os marcadores de container não significam imagem ausente.
+        "Error: No such object: repo@sha256:aaa\n",
+        "Error response from daemon: toomanyrequests\n",
+        "",
+    ],
+    ids=["socket-ausente", "daemon-fora", "objeto", "outro-erro", "sem-mensagem"],
+)
+def test_erro_que_nao_nomeia_a_imagem_nunca_vira_ausente(tmp_path: Path, stderr: str) -> None:
+    docker = fake_docker(tmp_path, stderr, 1)
+
+    with pytest.raises(DockerUnavailableError):
+        docker.image_present("repo@sha256:" + "a" * 64)
+
+
+def test_sonda_com_binario_ausente_vira_docker_indisponivel(tmp_path: Path) -> None:
+    with pytest.raises(DockerUnavailableError):
+        DockerCli(binary=str(tmp_path / "nao-existe")).image_present("repo@sha256:" + "a" * 64)
+
+
 def test_remove_de_container_rodando_e_recusado(tmp_path: Path) -> None:
     docker = fake_docker(
         tmp_path,

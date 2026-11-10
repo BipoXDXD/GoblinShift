@@ -6,6 +6,10 @@
 | status   | GET /v1/attempts/{id}                           | 200 Status       |
 | stop     | POST /v1/attempts/{id}/stop {"grace_s": 0..10}  | 200 Status       |
 | remove   | DELETE /v1/attempts/{id}                        | 204              |
+| image    | GET /v1/image?ref=<imagem>@sha256:<hex>         | 200 {"present"}  |
+
+`image` é só leitura: imagem fora da allowlist é recusada antes do Docker, e a ausência no daemon
+é resposta (`present: false`), não erro.
 
 Erros: `{"error": "<código>", "detail": "..."}`. Uma requisição por conexão, corpo JSON pequeno
 com Content-Length obrigatório e prazo de leitura curto: o cliente é o worker, mas um cliente
@@ -43,6 +47,9 @@ SOCKET_MODE = 0o660
 _BIND_UMASK = 0o177
 
 _ROUTE = re.compile(r"/v1/attempts/(?P<attempt>[^/?#]+)(?P<action>/start|/stop)?")
+# A referência vai crua: seu alfabeto vale numa query, e %XX ou outro parâmetro não casam com ela.
+_IMAGE_ROUTE = re.compile(r"/v1/image\?ref=(?P<ref>.*)")
+_INVALID_IMAGE = "image precisa ser uma referência <nome>@sha256:<64 hex>"
 _ERRORS: tuple[tuple[type[Exception], HTTPStatus, str], ...] = (
     (ImageNotAllowedError, HTTPStatus.FORBIDDEN, "image_not_allowed"),
     (WorkAreaDirtyError, HTTPStatus.CONFLICT, "work_area_dirty"),
@@ -128,8 +135,14 @@ def parse_start_body(raw: bytes) -> str:
     body = _parse_object(raw, required_keys={"image"})
     image = body["image"]
     if not isinstance(image, str) or not IMAGE_REFERENCE.fullmatch(image):
-        raise _invalid("image precisa ser uma referência <nome>@sha256:<64 hex>")
+        raise _invalid(_INVALID_IMAGE)
     return image
+
+
+def parse_image_ref(ref: str) -> str:
+    if not IMAGE_REFERENCE.fullmatch(ref):
+        raise _invalid(_INVALID_IMAGE)
+    return ref
 
 
 def parse_stop_body(raw: bytes) -> int:
@@ -170,6 +183,12 @@ def _reject_constant(name: str) -> object:
 
 def _invalid(detail: str) -> RequestError:
     return RequestError(HTTPStatus.BAD_REQUEST, "invalid_request", detail)
+
+
+def _method_not_allowed() -> RequestError:
+    return RequestError(
+        HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "método não aceito aqui"
+    )
 
 
 class ControlHandler(BaseHTTPRequestHandler):
@@ -225,14 +244,15 @@ class ControlHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str, fields: dict[str, object]) -> tuple[HTTPStatus, Payload]:
         try:
+            image_route = _IMAGE_ROUTE.fullmatch(self.path)
+            if image_route is not None:
+                return self._image(method, image_route["ref"], fields)
             route = _ROUTE.fullmatch(self.path)
             if route is None:
                 raise RequestError(HTTPStatus.NOT_FOUND, "not_found", "rota desconhecida")
             operation = _OPERATIONS.get((method, route["action"]))
             if operation is None:
-                raise RequestError(
-                    HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "método não aceito aqui"
-                )
+                raise _method_not_allowed()
             name, run = operation
             fields["operation"] = name
             attempt_id = parse_attempt_id(route["attempt"])
@@ -244,6 +264,16 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise
         except Exception as error:
             return _error_payload(error)
+
+    def _image(
+        self, method: str, ref: str, fields: dict[str, object]
+    ) -> tuple[HTTPStatus, Payload]:
+        if method != "GET":
+            raise _method_not_allowed()
+        fields["operation"] = "image"
+        image = parse_image_ref(ref)
+        fields["image"] = image
+        return HTTPStatus.OK, {"present": self.server.service.image_present(image)}
 
     def _start(
         self, attempt_id: uuid.UUID, fields: dict[str, object]
