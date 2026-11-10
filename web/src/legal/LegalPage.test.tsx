@@ -156,7 +156,9 @@ describe("link de fora com âncora", () => {
   it("o h1 não recebe o foco no caminho: o leitor de tela anuncia só a seção", async () => {
     const focused: string[] = [];
     const record = (event: FocusEvent) => {
-      focused.push((event.target as Element).tagName);
+      if (event.target instanceof Element) {
+        focused.push(event.target.tagName);
+      }
     };
     document.addEventListener("focusin", record);
     try {
@@ -205,11 +207,9 @@ describe("posição do sumário", () => {
 
       const outline = screen.getByRole("navigation", { name: "Sumário" });
       const validity = screen.getByText("Vigência:");
-      const [firstSection] = screen.getAllByRole("heading", { level: 2 });
+      const firstSection = screen.getAllByRole("heading", { level: 2 }).at(0) ?? outline;
       expect(validity.compareDocumentPosition(outline)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-      expect(outline.compareDocumentPosition(firstSection as Node)).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
+      expect(outline.compareDocumentPosition(firstSection)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     },
   );
 });
