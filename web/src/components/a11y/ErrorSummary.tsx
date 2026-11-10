@@ -2,6 +2,7 @@ import { CircleAlert } from "lucide-react";
 import { useEffect, useId, useRef, type MouseEvent, type ReactElement } from "react";
 
 import { TEXT } from "../../text";
+import { Heading, type HeadingLevel } from "./Heading";
 
 /** Controle de um formulário: o id e o texto do rótulo que a pessoa vê nele. */
 export interface FormField {
@@ -34,7 +35,7 @@ interface ErrorSummaryProps {
   /** Número da tentativa de envio; cada tentativa nova com erro devolve o foco ao resumo. */
   readonly attempt: number;
   /** Um nível abaixo do título do formulário: 4 quando o formulário está sob um `h3`. */
-  readonly headingLevel?: 2 | 4;
+  readonly headingLevel?: HeadingLevel;
 }
 
 /**
@@ -60,7 +61,6 @@ export function ErrorSummary({
   if (!hasIssues) {
     return null;
   }
-  const Heading = headingLevel === 2 ? "h2" : "h4";
   return (
     <div
       ref={container}
@@ -69,7 +69,11 @@ export function ErrorSummary({
       tabIndex={-1}
       className="flex flex-col gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg md:p-6"
     >
-      <Heading id={titleId} className="flex items-center gap-2 text-base font-semibold">
+      <Heading
+        level={headingLevel}
+        id={titleId}
+        className="flex items-center gap-2 text-base font-semibold"
+      >
         <CircleAlert aria-hidden="true" className="size-6 flex-none" />
         {TEXT.errorSummary.title}
       </Heading>
