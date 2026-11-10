@@ -120,6 +120,9 @@ WORKER_FILE_MODE = 0o640
 DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
+# Evento `alert=` do executor que não chega a iniciar: start recusado ou área de trabalho não
+# criada. `gs-causa-executor-nao-iniciou` o lê no span `attempt`.
+EXECUTOR_START_FAILED = "executor_start_failed"
 # Erros que não encerram a supervisão. Conexão caída, `lock_timeout`, `statement_timeout` e pool
 # esgotado passam sozinhos. `OperationalError` também traz os que pedem ação de fora: senha recusada
 # (28P01), disco cheio (53100), E/S (58030), limite do servidor (54000). A lista os inclui de
@@ -281,7 +284,7 @@ class Coordinator:
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
             logger.warning(
                 "executor não iniciou",
-                extra={"fields": {**_ids(claimed, error), "alert": "executor_start_failed"}},
+                extra={"fields": {**_ids(claimed, error), "alert": EXECUTOR_START_FAILED}},
             )
             return self.fail_transiently(claimed)
         self.record_start(claimed)
@@ -301,11 +304,14 @@ class Coordinator:
             # A área do host que não aceita a tentativa (montagem perdida, sem escrita) perde a Run
             # como o start recusado, e nenhuma outra causa avisa: conta no mesmo alerta.
             raise PreparationError(
-                f"área de trabalho: {error}", alert="executor_start_failed"
+                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED
             ) from error
         try:
             self._fill_work_area(work_dir, claimed, contents)
         except OSError as error:
+            # Sem alerta: aqui a `OSError` mistura a leitura do storage com a escrita na área.
+            # Lacuna conhecida: disco cheio ou E/S na escrita depois do `create_work_dir` perde a
+            # Run em `INFRA_POISON` sem nenhum alerta (runbook em deploy/openobserve/README.md).
             raise PreparationError(f"área de trabalho: {error}") from error
 
     def _fill_work_area(

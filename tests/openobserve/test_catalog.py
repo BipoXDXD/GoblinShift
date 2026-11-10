@@ -242,9 +242,17 @@ def test_contadores_lidos_pelas_causas_sao_declarados() -> None:
 def modules_emitting_log_events() -> dict[str, set[str]]:
     modules: dict[str, set[str]] = {}
     for path in SRC.rglob("*.py"):
-        for event in re.findall(r'"alert": "(\w+)"', path.read_text(encoding="utf-8")):
+        for event in _log_events(path.read_text(encoding="utf-8")):
             modules.setdefault(event, set()).add(path.relative_to(SRC).as_posix())
     return modules
+
+
+def _log_events(source: str) -> set[str]:
+    # O evento vem como literal ou como constante do próprio módulo (`"alert": NOME`).
+    constants = dict(re.findall(r'^([A-Z_]+) = "(\w+)"$', source, flags=re.MULTILINE))
+    events = set(re.findall(r'"alert": "(\w+)"', source))
+    events |= {constants[name] for name in re.findall(r'"alert": ([A-Z_]+)\b', source)}
+    return events
 
 
 def test_todo_evento_de_alerta_do_log_tem_um_alerta_no_catalogo() -> None:
