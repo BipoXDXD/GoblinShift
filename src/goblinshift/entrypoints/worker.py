@@ -6,7 +6,9 @@ Se a conexão do `LISTEN` cai (PostgreSQL reiniciado), o worker segue só no pol
 reconecta com backoff (runs/worker/claim.py).
 
 SIGTERM e SIGINT param o laço de forma segura: o worker deixa de reivindicar e termina a
-tentativa em andamento antes de sair. O prazo de parada do deploy (`stop_grace_period`, 30 s) é
+tentativa em andamento antes de sair. O handler só marca uma flag (`ShutdownFlag`,
+entrypoints/shutdown.py), sem trava nem log; a espera por NOTIFY dorme em fatias curtas para vê-la,
+e o laço registra a parada ao sair. O prazo de parada do deploy (`stop_grace_period`, 30 s) é
 menor que o teto de uma tentativa (10 min), então uma tentativa longa não termina a tempo: a
 plataforma mata o processo (SIGKILL) e quem recupera é o lease vencido: a manutenção encontra
 o executor pelo nome, confirma o término e reagenda. O trabalho recomeça do zero, e a Run pode
@@ -23,16 +25,15 @@ o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
 """
 
 import logging
-import signal
-import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
-from types import FrameType
 
 from opentelemetry.trace import NoOpTracer, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag, shutdown_on_signals
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
@@ -87,7 +88,7 @@ def build_runner(settings: Settings) -> Runner:
     )
 
 
-def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None:
+def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     engine = make_engine(settings)
     factory = make_session_factory(engine)
     storage = FileStorage(settings.storage_root)
@@ -117,10 +118,31 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             while not shutdown.is_set():
                 if not _work_once(factory, storage, lease, coordinator, finished, pause):
                     logger.debug("fila vazia; aguardando NOTIFY")
-                    listener.wait(settings.worker_poll_interval_s)
+                    wait_for_work(listener.wait, shutdown, settings.worker_poll_interval_s)
+            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
     finally:
         engine.dispose()
     logger.info("worker encerrado")
+
+
+def wait_for_work(
+    wait: Callable[[float], bool],
+    shutdown: ShutdownFlag,
+    timeout_s: float,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Espera um NOTIFY por até `timeout_s`, em fatias de `SHUTDOWN_POLL_S` que conferem a parada.
+
+    `wait` é a espera do `QueueListener`: `True` quando chegou um NOTIFY.
+    """
+    deadline = clock() + timeout_s
+    while not shutdown.is_set():
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return
+        if wait(min(remaining, SHUTDOWN_POLL_S)):
+            return
 
 
 def claim_pause_for(settings: Settings) -> ClaimPause:
@@ -201,21 +223,6 @@ def _run_attempt(coordinator: Coordinator, claimed: ClaimedAttempt, pause: Claim
         }
         logger.warning("claims pausados depois de falha de banco", extra={"fields": fields})
         raise
-
-
-def shutdown_on_signals() -> threading.Event:
-    shutdown = threading.Event()
-
-    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        logger.info(
-            "parada pedida; a tentativa em curso termina antes",
-            extra={"fields": {"signal": signum}},
-        )
-        shutdown.set()
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-    signal.signal(signal.SIGINT, request_shutdown)
-    return shutdown
 
 
 if __name__ == "__main__":

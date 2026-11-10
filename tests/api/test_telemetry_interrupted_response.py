@@ -6,7 +6,6 @@ que o `OTLPSpanExporter` enviaria, depois do mesmo processador da produção.
 
 import io
 import logging
-import threading
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ from uvicorn.logging import DefaultFormatter
 from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.transfers import DownloadResponse, TransferTimeouts
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import (
@@ -576,7 +576,7 @@ def worker_offline(monkeypatch: pytest.MonkeyPatch, restored_root_logging: None)
     settings = _offline_settings()
     monkeypatch.setattr(worker, "Settings", lambda: settings)
     monkeypatch.setattr(worker, "build_runner", lambda _settings: MagicMock())
-    monkeypatch.setattr(worker, "shutdown_on_signals", threading.Event)
+    monkeypatch.setattr(worker, "shutdown_on_signals", ShutdownFlag)
 
 
 def _assert_failed_without_canary(

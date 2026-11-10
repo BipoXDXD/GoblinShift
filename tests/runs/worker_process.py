@@ -20,7 +20,8 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from goblinshift.entrypoints.worker import serve, shutdown_on_signals
+from goblinshift.entrypoints.shutdown import shutdown_on_signals
+from goblinshift.entrypoints.worker import serve
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import configure_logging
 from goblinshift.runs.worker.runner import ExecutorStatus, LocalRunner, Runner
