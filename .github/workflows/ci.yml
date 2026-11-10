@@ -176,13 +176,13 @@ jobs:
 
   e2e:
     name: Interface no navegador (Playwright)
-    # Em paralelo com web. As duas suítes levaram quase 9 min nos runners, e o
-    # limite de 12 min já estourou em runner lento, cancelando o CI. O limite
-    # inclui preparo, capturas e finalização, sem reduzir testes.
+    # Em paralelo com web. O job inteiro levou até 11,1 min nos runs verdes recentes, e o
+    # limite de 12 min já estourou em runner lento, cancelando o CI. O limite é o dobro disso e
+    # cobre também o pior caso do apt das dependências (3 tentativas de 90 s), sem reduzir testes.
     # A API é falsa e o build usa os cabeçalhos de produção do Nginx
     # (web/e2e/server/serve-dist.ts).
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: web
@@ -204,9 +204,20 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
       - name: Chromium headless e dependências do sistema
+        # O `--with-deps` do Playwright roda o apt sem teto; as que faltam vêm do script com teto e
+        # troca de espelho (sem cache: a lista muda com o Playwright), e o navegador depois. Com
+        # 90 s por tentativa, o pior caso do apt fica em 4,5 min; o saudável levou de 15 s a 50 s.
+        timeout-minutes: 6
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
+          CI_APT_TENTATIVA_S: "90"
         run: |
-          ../scripts/ci-apt-sem-azure.sh
-          npx playwright install --with-deps --only-shell chromium
+          lista=$(../scripts/ci-playwright-pacotes.sh chromium)
+          if [[ -n $lista ]]; then
+            mapfile -t pacotes <<<"$lista"
+            ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+          fi
+          npx playwright install --only-shell chromium
       - name: Build
         run: npm run build
       - name: Conferir partição exata das specs por ID e projeto

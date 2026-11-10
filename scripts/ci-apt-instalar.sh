@@ -4,7 +4,10 @@
 # Uso: ci-apt-instalar.sh <diretório-dos-debs> <pacote>...
 #
 # 1. Se o diretório já tem .deb (restaurado do cache do Actions), instala só deles, sem rede.
-# 2. Senão, baixa de um espelho por vez, com teto por tentativa: em 2026-11-06 o espelho do Azure
+#    Instalados por caminho, eles não passam pela assinatura do InRelease: são confiados como o
+#    próprio cache do Actions (escopo por ref; PR de fork não escreve no escopo da main; jobs com
+#    segredo não usam cache).
+# 2. Senão, baixa de um espelho por vez, com teto por tentativa: em 2026-11-05 o espelho do Azure
 #    e em 2026-11-10 o archive.ubuntu.com entregaram cerca de 40 KB/s, e um único `apt-get update`
 #    levou quase 6 minutos. Lentidão não é erro para o apt, então só o teto faz trocar de espelho.
 #    Os .deb já baixados ficam no diretório e valem para a tentativa seguinte.
@@ -25,8 +28,8 @@ etc=${CI_APT_ETC:-/etc/apt}
 # Um download saudável (update e pacotes) levou de 20 s a 66 s nos runs recentes. Três tentativas
 # de 150 s somam 7,5 min e cabem no teto de 10 min do passo, com folga para a instalação local.
 tentativa_s=${CI_APT_TENTATIVA_S:-150}
-# Espelhos oficiais do Ubuntu, todos com o mesmo caminho /ubuntu. A assinatura do InRelease é
-# conferida pelo apt, então trocar de espelho não muda o que é instalado.
+# Espelhos oficiais do Ubuntu, todos com o mesmo caminho /ubuntu. No download o apt confere a
+# assinatura do InRelease, então trocar de espelho não muda o que é instalado.
 espelhos=(archive.ubuntu.com mirrors.edge.kernel.org azure.archive.ubuntu.com)
 hosts_do_ubuntu='(?:azure\.archive\.ubuntu\.com|archive\.ubuntu\.com|mirrors\.edge\.kernel\.org)'
 opcoes=(-q -y --no-install-recommends -o "Dir::Cache::archives=$debs")
