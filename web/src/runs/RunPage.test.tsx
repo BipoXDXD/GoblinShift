@@ -363,6 +363,7 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
   });
 
   it.each([
+    [403, "FORBIDDEN", "Você não tem permissão para esta ação."],
     [404, "NOT_FOUND", "Não encontramos o que você pediu"],
     [410, "GONE", "Isto expirou"],
   ])(
@@ -387,30 +388,45 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     },
   );
 
-  it("sessão que termina no polling mostra o convite para entrar de novo e para o polling", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    try {
-      const { queryClient, api } = setup(
-        inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
-      );
-      expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+  it.each([
+    ["AUTHENTICATION_REQUIRED", "Entre para continuar", ""],
+    ["REAUTH_REQUIRED", "Entre de novo para confirmar", "&reauth=1"],
+  ])(
+    "401 %s no polling mostra o convite para entrar de novo e para o polling",
+    async (code, title, reauthParam) => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const { queryClient, api } = setup(inSequence(running, () => problemResponse(401, code)));
+        expect(await screen.findByText("Em andamento")).toBeInTheDocument();
 
-      await nextPoll(queryClient);
-      await act(() => vi.advanceTimersByTimeAsync(60_000));
+        await nextPoll(queryClient);
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
 
-      const prompt = screen.getByRole("region", { name: "Entre para continuar" });
-      expect(
-        within(prompt).getByRole("heading", { level: 2, name: "Entre para continuar" }),
-      ).toBeVisible();
-      expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
-        "href",
-        `/auth/login/google?return_to=%2Fexecucoes%2F${RUN_ID}`,
-      );
-      expect(screen.queryByRole("alert")).toBeNull();
-      expect(runRequests(api.requests)).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+        const prompt = screen.getByRole("region", { name: title });
+        expect(within(prompt).getByRole("heading", { level: 2, name: title })).toBeVisible();
+        expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+          "href",
+          `/auth/login/google?return_to=%2Fexecucoes%2F${RUN_ID}${reauthParam}`,
+        );
+        expect(screen.queryByRole("alert")).toBeNull();
+        expect(runRequests(api.requests)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("com o convite na tela, o Cancelar some e os dados já carregados ficam", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+
+    await nextPoll(queryClient);
+
+    expect(screen.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Cancelar execução" })).toBeNull();
+    expect(screen.getByText("Em andamento")).toBeInTheDocument();
   });
 
   it("antes do primeiro dado, sessão terminada mostra o convite para entrar, sem alerta", async () => {
@@ -430,6 +446,14 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
 
     expect(screen.getByRole("region", { name: "Aceite os termos para continuar" })).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen
+        .getAllByRole("status")
+        .some(
+          (region) =>
+            region.textContent === "Para continuar, aceite a versão atual dos termos de uso.",
+        ),
+    ).toBe(true);
   });
 
   it("falha transitória antes do primeiro dado vira alerta na primeira vez", async () => {
