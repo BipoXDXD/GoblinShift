@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { useId, useRef, useState, type ReactElement } from "react";
 import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
@@ -8,7 +8,6 @@ import { useMe } from "../account/useMe";
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { workbenchPresetPath } from "../app/paths";
-import { focusIsLost } from "../components/a11y/focusLost";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -43,13 +42,6 @@ export function PresetsSection(): ReactElement | null {
   const removal = useRemoval(() => {
     heading.current?.focus();
   });
-  // Falha genérica que o servidor aplicou mesmo assim (5xx, timeout): o Excluir sai na releitura e
-  // leva o foco junto. Depois do commit da lista, o foco perdido vai para o título.
-  useEffect(() => {
-    if (removal.failure !== null && focusIsLost()) {
-      heading.current?.focus();
-    }
-  }, [presets.data, removal.failure]);
   if (!signedIn) {
     return null;
   }
@@ -165,8 +157,10 @@ interface Removal {
 
 /**
  * Excluir com confirmação e `If-Match`. Revisão vencida (412: o preset mudou em outro lugar) vira
- * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta. Nos
- * dois casos `onListUpdated` recebe a vez depois de a lista ser relida.
+ * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta.
+ * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 412 e na falha genérica
+ * (5xx, timeout) que o servidor aplicou mesmo assim, com o preset fora da lista. A decisão é tomada
+ * uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2.1).
  */
 function useRemoval(onListUpdated: () => void): Removal {
   const client = useApiClient();
@@ -183,13 +177,15 @@ function useRemoval(onListUpdated: () => void): Removal {
         setMessage(T.changedElsewhere);
       }
     },
-    onSettled: async (_result, error) => {
+    onSettled: async (_result, error, preset) => {
       // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
       flushSync(() => {
         setTarget(null);
       });
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
-      if (error === null || isStale(error)) {
+      // Pelo dado, não pelo foco: o Excluir só sai do DOM no próximo commit.
+      const relisted = queryClient.getQueryData<readonly Preset[]>(PRESETS_QUERY_KEY);
+      if (error === null || isStale(error) || !isListed(relisted, preset)) {
         onListUpdated();
       }
     },
@@ -218,6 +214,10 @@ function useRemoval(onListUpdated: () => void): Removal {
       }
     },
   };
+}
+
+function isListed(presets: readonly Preset[] | undefined, preset: Preset): boolean {
+  return presets?.some((candidate) => candidate.id === preset.id) ?? false;
 }
 
 function isStale(error: Error): boolean {

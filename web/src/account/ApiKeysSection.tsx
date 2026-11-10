@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CircleCheck, Clock } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactElement, type Ref } from "react";
+import { useId, useRef, useState, type ReactElement, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
 import { PATHS } from "../app/paths";
-import { focusIsLost } from "../components/a11y/focusLost";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -50,14 +49,7 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
   const focusHeading = (): void => {
     heading.current?.focus();
   };
-  const revoke = useRevoke(focusHeading);
-  // Falha genérica que o servidor aplicou mesmo assim (5xx, timeout): o Revogar sai na releitura e
-  // leva o foco junto. Depois do commit da lista, o foco perdido vai para o título.
-  useEffect(() => {
-    if (revoke.failure !== null && focusIsLost()) {
-      heading.current?.focus();
-    }
-  }, [keys.data, revoke.failure]);
+  const revoke = useRevoke(focusHeading, now);
   const openForm = (): void => {
     setCreated(null);
     setFormOpen(true);
@@ -265,10 +257,12 @@ interface Revoke {
 }
 
 /**
- * Revogar com confirmação. A chave que já não existe (404) só some da lista, com um aviso. Nos
- * dois casos `onListUpdated` recebe a vez depois de a lista ser relida, sem o Revogar.
+ * Revogar com confirmação. A chave que já não existe (404) só some da lista, com um aviso.
+ * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 404 e na falha genérica
+ * (5xx, timeout) que o servidor aplicou mesmo assim, com o Revogar fora da lista. A decisão é
+ * tomada uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2.1).
  */
-function useRevoke(onListUpdated: () => void): Revoke {
+function useRevoke(onListUpdated: () => void, now: () => number): Revoke {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<ApiKey | null>(null);
@@ -283,13 +277,15 @@ function useRevoke(onListUpdated: () => void): Revoke {
         setMessage(T.notFound);
       }
     },
-    onSettled: async (_result, error) => {
+    onSettled: async (_result, error, key) => {
       // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
       flushSync(() => {
         setTarget(null);
       });
       await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
-      if (error === null || isNotFound(error)) {
+      // Pelo dado, não pelo foco: o Revogar só sai do DOM no próximo commit.
+      const relisted = queryClient.getQueryData<readonly ApiKey[]>(API_KEYS_QUERY_KEY);
+      if (error === null || isNotFound(error) || !isRevocable(relisted, key, now())) {
         onListUpdated();
       }
     },
@@ -318,6 +314,12 @@ function useRevoke(onListUpdated: () => void): Revoke {
       }
     },
   };
+}
+
+/** O Revogar desta chave continua na lista: ela está lá e ainda ativa. */
+function isRevocable(keys: readonly ApiKey[] | undefined, key: ApiKey, nowMs: number): boolean {
+  const listed = keys?.find((candidate) => candidate.id === key.id);
+  return listed !== undefined && keyStatus(listed, nowMs) === "active";
 }
 
 function isNotFound(error: Error): boolean {
