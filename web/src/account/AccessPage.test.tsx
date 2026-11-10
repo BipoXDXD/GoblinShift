@@ -373,6 +373,25 @@ describe("Acesso: chaves de API", () => {
     });
   });
 
+  // A lista relida ainda traz o Revogar: se o <dialog> fechasse depois dela, devolveria o foco a ele
+  // por cima do título. Guarda a ordem "fecha, relê, foca".
+  it("chave revogada com a lista relida ainda ativa: o foco termina no título, não no Revogar", async () => {
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: NO_CONTENT,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+
+    expect(await screen.findByText("Chave gsk_7Hq2 revogada.")).toBeInTheDocument();
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
     const held = heldResponse();
     const { api, user } = setup({
