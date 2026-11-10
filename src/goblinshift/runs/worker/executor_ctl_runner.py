@@ -5,7 +5,10 @@ por tentativa com perfil fixo. O worker fala com ele por HTTP/1.1 num socket Uni
 (`/run/goblinshift/executor-ctl.sock`, grupo `gs-exec`), só com a biblioteca padrão, e nunca
 escolhe montagens nem opções: só manda o `attempt_id` e a imagem fixada na Run.
 
-Uma conexão por chamada, com timeout de 10 s (30 s no `start`, que cria o container). Qualquer
+Uma conexão por chamada, com timeout de 10 s. `start` e `remove`, que tomam o lock da área no
+serviço, esperam mais que o pior caso dele (`START_TIMEOUT`, `REMOVE_TIMEOUT`): desistir antes
+deixaria o container nascer sem ninguém esperando, e a área ocupada recusaria o claim seguinte
+(`work_area_dirty`). Qualquer
 falha de transporte (socket ausente, recusa, timeout, resposta ilegível ou fora do contrato) vira
 `ExecutorCtlError` com código `unavailable` ou `invalid_response`; recusas do serviço trazem o
 código do corpo (`image_not_allowed`, `work_area_dirty`, `still_running`…). Para quem chama, tudo
@@ -35,9 +38,30 @@ from goblinshift.runs.worker.runner import (
     parse_attempt_id,
 )
 
-# 3.2: 10 s nas chamadas ao `executor-ctl` e 30 s no `start`.
+# 3.2: 10 s nas chamadas ao `executor-ctl`.
 CALL_TIMEOUT = timedelta(seconds=10)
-START_TIMEOUT = timedelta(seconds=30)
+# Pior caso das operações que tomam o lock da área no serviço (deploy/executor_ctl), espelhado
+# porque o worker não leva aquele pacote; tests/executor_ctl/test_client_deadlines.py confere o
+# espelho contra o serviço. Cada chamada ao CLI do Docker tem prazo próprio; o start faz três
+# (inspect, run, inspect), o remove duas (inspect, rm), e antes cada um pode esperar o lock atrás
+# de uma operação inteira que o toma (outro start, no máximo). Desistir antes do serviço deixa a
+# operação seguindo lá: no start, o container nasce sem ninguém esperando; no remove, a thread
+# continua na fila do lock, e a repetição da manutenção empilha outras atrás dela.
+CTL_DOCKER_CALL_TIMEOUT = timedelta(seconds=30)
+CTL_START_DOCKER_CALLS = 3
+CTL_REMOVE_DOCKER_CALLS = 2
+CTL_LOCK_HOLDER_DOCKER_CALLS = 3
+# O que o serviço faz fora do Docker: allowlist, posse da área e o próprio HTTP.
+START_MARGIN = timedelta(seconds=10)
+# O `rmtree` da área (até o filesystem de 6 GiB, ADR 005) e o próprio HTTP.
+REMOVE_MARGIN = timedelta(seconds=10)
+START_TIMEOUT = (
+    CTL_DOCKER_CALL_TIMEOUT * (CTL_START_DOCKER_CALLS + CTL_LOCK_HOLDER_DOCKER_CALLS) + START_MARGIN
+)
+REMOVE_TIMEOUT = (
+    CTL_DOCKER_CALL_TIMEOUT * (CTL_REMOVE_DOCKER_CALLS + CTL_LOCK_HOLDER_DOCKER_CALLS)
+    + REMOVE_MARGIN
+)
 # Respostas do contrato são objetos pequenos; acima disso, o serviço está fora do contrato.
 MAX_RESPONSE_BYTES = 64 * 1024
 UNAVAILABLE = "unavailable"
@@ -70,12 +94,14 @@ class ExecutorCtlRunner:
         work_group: int,
         call_timeout: timedelta = CALL_TIMEOUT,
         start_timeout: timedelta = START_TIMEOUT,
+        remove_timeout: timedelta = REMOVE_TIMEOUT,
     ) -> None:
         self._socket_path = socket_path
         self._root = work_root
         self._group = work_group
         self._call_timeout = call_timeout
         self._start_timeout = start_timeout
+        self._remove_timeout = remove_timeout
 
     def work_dir(self, attempt_id: uuid.UUID) -> Path:
         return self._root / str(attempt_id)
@@ -111,7 +137,7 @@ class ExecutorCtlRunner:
         )
 
     def remove(self, attempt_id: uuid.UUID) -> None:
-        self._request("DELETE", _path(attempt_id), None, self._call_timeout)
+        self._request("DELETE", _path(attempt_id), None, self._remove_timeout)
 
     def _status_call(
         self, method: str, path: str, body: dict[str, object] | None, timeout: timedelta
