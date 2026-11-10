@@ -108,10 +108,11 @@ for (const path of ["/termos", "/privacidade", "/creditos"]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-    const widths = await page.evaluate(() => ({
-      content: document.documentElement.scrollWidth,
-      window: window.innerWidth,
-    }));
-    expect(widths.content).toBeLessThanOrEqual(widths.window);
+    // A régua é a largura do aparelho, não o innerWidth: com isMobile, o Chromium alarga o layout
+    // viewport até o conteúdo que estoura, e o innerWidth cresce junto com o scrollWidth.
+    const device = page.viewportSize();
+    expect(device).not.toBeNull();
+    const content = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(content).toBeLessThanOrEqual(device?.width ?? 0);
   });
 }
