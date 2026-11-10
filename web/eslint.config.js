@@ -80,7 +80,7 @@ export default tseslint.config(
             "tree",
             "treegrid",
           ],
-          controlComponents: ["Button", "Link", "AddRowButton"],
+          controlComponents: ["Button", "Link", "NavLink", "AddRowButton"],
           depth: 3,
         },
       ],
