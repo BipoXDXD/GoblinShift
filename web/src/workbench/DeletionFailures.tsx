@@ -35,11 +35,13 @@ export function DeletionFailures({
     >
       <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
       <div className="flex max-w-prose flex-col gap-2">
-        <p className="font-semibold">{title}</p>
+        <p className="font-semibold wrap-anywhere">{title}</p>
         {!one && (
           <ul className="flex flex-col gap-1 font-mono text-sm">
             {failures.map((failed) => (
-              <li key={failed.uploadId}>{failed.name}</li>
+              <li key={failed.uploadId} className="wrap-anywhere">
+                {failed.name}
+              </li>
             ))}
           </ul>
         )}
