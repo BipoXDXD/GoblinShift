@@ -3,6 +3,7 @@
 // o index.html da SPA.
 import type { Locator, Page } from "@playwright/test";
 
+import { expectFitsDeviceWidth } from "../support/reflow";
 import { expect, test, THEMES, useTheme } from "../support/test";
 
 /** Celular estreito: o lockup inteiro tem de caber aqui, ou o nome iria para sr-only (o nome acessível é o próprio texto). */
@@ -49,9 +50,7 @@ for (const theme of THEMES) {
     ).toBeLessThanOrEqual(MAX_CENTER_OFFSET_PX);
     expect(nameBox.x).toBeGreaterThan(emblemBox.x + emblemBox.width);
     expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(NARROW.width);
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    ).toBe(true);
+    await expectFitsDeviceWidth(page);
   });
 }
 
