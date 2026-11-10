@@ -93,6 +93,8 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# Carência do `stop` ao executor de tentativa vencida; o worker a soma na pausa dos claims.
+STOP_GRACE = timedelta(seconds=10)
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ class MaintenanceConfig:
     # Fração do lote ausente acima da qual nada é marcado (files/missing.py); 1.0 desliga o
     # limitador, para o administrador depois de restaurar de propósito um backup antigo (3.8).
     missing_max_absent_ratio: float = DEFAULT_MAX_ABSENT_RATIO
-    stop_grace: timedelta = timedelta(seconds=10)
+    stop_grace: timedelta = STOP_GRACE
     jitter: Callable[[], timedelta] = field(default=random_retry_jitter)
 
 
