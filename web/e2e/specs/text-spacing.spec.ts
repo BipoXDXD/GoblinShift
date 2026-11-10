@@ -9,7 +9,6 @@
 // - não roda no build com aviso global (`NOTICE_SPECS`), então a faixa do aviso não é medida.
 import type { Page } from "@playwright/test";
 
-import { CSV_FILES, PDF_FILES } from "../fixtures/files";
 import { SCREENS } from "../support/screens";
 import { expect, test } from "../support/test";
 
@@ -24,22 +23,8 @@ const WCAG_TEXT_SPACING = `
 `;
 /** Folga para o arredondamento de subpixel entre `scrollHeight` e `clientHeight`. */
 const ROUNDING_PX = 1;
-/**
- * Defeito conhecido: no celular, o `truncate` do nome do arquivo (`UploadEntryView`) corta estes
- * nomes com o espaçamento da 1.4.12. Só esses elementos ficam de fora, e o teste exige que eles
- * ainda estejam cortados: quando o #253 trocar o corte por quebra (M8), fica vermelho e esta
- * exceção tem de sair.
- */
-const CLIPPED_FILE_NAMES_ON_MOBILE: ReadonlyMap<string, readonly string[]> = new Map([
-  ["Bancada com arquivos (CSV Janitor)", CSV_FILES.map((file) => file.name)],
-  ["Bancada do PDF Press montando com as páginas escolhidas", PDF_FILES.map((file) => file.name)],
-]);
-
 interface Clip {
   readonly description: string;
-  readonly text: string;
-  /** `span` com `truncate`: a forma do nome do arquivo no `UploadEntryView`. */
-  readonly truncatedSpan: boolean;
 }
 
 for (const screen of SCREENS) {
@@ -54,19 +39,7 @@ for (const screen of SCREENS) {
     // Sem isso, uma folha que deixou de valer passaria em silêncio.
     expect(await applyTextSpacing(page), "word-spacing aplicado ao body").not.toBe("0px");
     const clips = await clippedTexts(page, ROUNDING_PX);
-    const known =
-      test.info().project.name === "mobile"
-        ? (CLIPPED_FILE_NAMES_ON_MOBILE.get(screen.name) ?? [])
-        : [];
-    const isKnown = (clip: Clip): boolean => clip.truncatedSpan && known.includes(clip.text);
-    expect(clips.filter((clip) => !isKnown(clip)).map((clip) => clip.description)).toEqual([]);
-    expect(
-      clips
-        .filter(isKnown)
-        .map((clip) => clip.text)
-        .sort(),
-      "a exceção do nome cortado ainda casa; se o #253 corrigiu o truncate, apague-a",
-    ).toEqual([...known].sort());
+    expect(clips.map((clip) => clip.description)).toEqual([]);
   });
 }
 
@@ -126,8 +99,6 @@ async function clippedTexts(page: Page, roundingPx: number): Promise<Clip[]> {
         const size = `${String(element.scrollWidth)}×${String(element.scrollHeight)} em ${String(element.clientWidth)}×${String(element.clientHeight)}`;
         clipped.push({
           description: `${name} (${size}): ${text.slice(0, 60)}`,
-          text,
-          truncatedSpan: element.tagName === "SPAN" && element.classList.contains("truncate"),
         });
       }
     }
