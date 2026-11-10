@@ -27,6 +27,9 @@ describe("paths", () => {
     ["/termos/", "/termos"],
     ["/termos//", "/termos"],
     ["/termos/aceitar/", "/termos/aceitar"],
+    // Codificadas, as barras e a contrabarra são texto do caminho local, não outro host.
+    ["/%2F%2Fevil.com/", "/%2F%2Fevil.com"],
+    ["/%5Cevil.com/", "/%5Cevil.com"],
   ])("tira a barra final de %s", (pathname, expected) => {
     expect(withoutTrailingSlash(pathname)).toBe(expected);
   });

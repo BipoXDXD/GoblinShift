@@ -9,15 +9,25 @@ interface RenderRoutesOptions {
   readonly routes: RouteObject[];
   readonly path: string;
   readonly client: ApiClient;
+  /** Entradas antes de `path` no histórico, para testar o Voltar. */
+  readonly visited?: readonly string[];
 }
 
 /** Renderiza as rotas num router em memória, com o cliente da API e um QueryClient novos. */
-export function renderRoutes({ routes, path, client }: RenderRoutesOptions): RenderResult & {
+export function renderRoutes({
+  routes,
+  path,
+  client,
+  visited = [],
+}: RenderRoutesOptions): RenderResult & {
   readonly router: ReturnType<typeof createMemoryRouter>;
   readonly queryClient: QueryClient;
 } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
+  const router = createMemoryRouter(routes, {
+    initialEntries: [...visited, path],
+    initialIndex: visited.length,
+  });
   const view = render(
     <ApiClientProvider client={client}>
       <QueryClientProvider client={queryClient}>
@@ -28,15 +38,8 @@ export function renderRoutes({ routes, path, client }: RenderRoutesOptions): Ren
   return { ...view, router, queryClient };
 }
 
-/** Caminho e query atuais do router de memória, como a barra de endereço mostraria. */
+/** Caminho, query e fragmento atuais do router de memória, como a barra de endereço mostraria. */
 export function currentUrl(router: ReturnType<typeof createMemoryRouter>): string {
-  // type-coverage:ignore-next-line -- o Location do React Router declara `state: any`
-  const { pathname, search } = router.state.location;
-  return `${pathname}${search}`;
-}
-
-/** Endereço atual com o fragmento, para conferir que um redirecionamento o mantém. */
-export function currentHref(router: ReturnType<typeof createMemoryRouter>): string {
   // type-coverage:ignore-next-line -- o Location do React Router declara `state: any`
   const { pathname, search, hash } = router.state.location;
   return `${pathname}${search}${hash}`;
