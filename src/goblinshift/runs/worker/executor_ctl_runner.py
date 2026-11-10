@@ -5,7 +5,9 @@ por tentativa com perfil fixo. O worker fala com ele por HTTP/1.1 num socket Uni
 (`/run/goblinshift/executor-ctl.sock`, grupo `gs-exec`), só com a biblioteca padrão, e nunca
 escolhe montagens nem opções: só manda o `attempt_id` e a imagem fixada na Run.
 
-Uma conexão por chamada, com timeout de 10 s (30 s no `start`, que cria o container). Qualquer
+Uma conexão por chamada, com timeout de 10 s. O `start`, que cria o container, espera mais que o
+pior caso do serviço (`START_TIMEOUT`): desistir antes deixaria o container nascer sem ninguém
+esperando, e a área ocupada recusaria o claim seguinte (`work_area_dirty`). Qualquer
 falha de transporte (socket ausente, recusa, timeout, resposta ilegível ou fora do contrato) vira
 `ExecutorCtlError` com código `unavailable` ou `invalid_response`; recusas do serviço trazem o
 código do corpo (`image_not_allowed`, `work_area_dirty`, `still_running`…). Para quem chama, tudo
@@ -35,9 +37,20 @@ from goblinshift.runs.worker.runner import (
     parse_attempt_id,
 )
 
-# 3.2: 10 s nas chamadas ao `executor-ctl` e 30 s no `start`.
+# 3.2: 10 s nas chamadas ao `executor-ctl`.
 CALL_TIMEOUT = timedelta(seconds=10)
-START_TIMEOUT = timedelta(seconds=30)
+# Pior caso do `start` no serviço (deploy/executor_ctl), espelhado porque o worker não leva aquele
+# pacote; tests/executor_ctl/test_start_deadline.py confere o espelho contra o serviço. Cada
+# chamada ao CLI do Docker tem prazo próprio; o start faz três (inspect, run, inspect) e, antes,
+# pode esperar o lock da área atrás de uma operação inteira que o toma (outro start, no máximo).
+CTL_DOCKER_CALL_TIMEOUT = timedelta(seconds=30)
+CTL_START_DOCKER_CALLS = 3
+CTL_LOCK_HOLDER_DOCKER_CALLS = 3
+# O que o serviço faz fora do Docker: allowlist, posse da área e o próprio HTTP.
+START_MARGIN = timedelta(seconds=10)
+START_TIMEOUT = (
+    CTL_DOCKER_CALL_TIMEOUT * (CTL_START_DOCKER_CALLS + CTL_LOCK_HOLDER_DOCKER_CALLS) + START_MARGIN
+)
 # Respostas do contrato são objetos pequenos; acima disso, o serviço está fora do contrato.
 MAX_RESPONSE_BYTES = 64 * 1024
 UNAVAILABLE = "unavailable"
