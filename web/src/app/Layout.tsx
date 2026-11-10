@@ -1,5 +1,5 @@
 import { CircleAlert } from "lucide-react";
-import { useEffect, type ReactElement } from "react";
+import { useLayoutEffect, type ReactElement } from "react";
 import {
   Link,
   Navigate,
@@ -17,7 +17,7 @@ import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { BrandLink } from "./BrandLink";
-import { pageTitleOf } from "./pageTitle";
+import { documentTitle, pageTitleOf } from "./pageTitle";
 import { acceptTermsPath, PATHS, signInPath } from "./paths";
 
 const T = TEXT.layout;
@@ -149,8 +149,10 @@ function useDocumentTitle(): void {
     .map((match) => pageTitleOf(match.handle))
     .filter((candidate): candidate is string => candidate !== null)
     .at(-1);
-  useEffect(() => {
-    document.title = title === undefined ? T.brand : `${title} · ${T.brand}`;
+  // Efeito de layout, que roda antes de todos os passivos: a tela de falha (RouteFailure) troca
+  // o título num efeito passivo e precisa vencer o título da rota que não abriu.
+  useLayoutEffect(() => {
+    document.title = documentTitle(title);
   }, [title]);
 }
 
