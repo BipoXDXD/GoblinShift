@@ -182,6 +182,13 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "textos legais: título da seção rente ao topo depois do sumário",
+    spec: ["legal.spec.ts", "-g", "folga acima do título"],
+    plant: (dist) => {
+      addStylesheet(dist, '[id^="secao-"] { scroll-margin-top: 0 !important; }');
+    },
+  },
+  {
     name: "jornadas: botões de reordenar sumiram (só sobra o arrasto)",
     spec: ["journeys.spec.ts"],
     plant: (dist) => {
