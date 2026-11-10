@@ -69,8 +69,8 @@ test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista m
   expect(stored?.key.revoked_at).not.toBeNull();
 });
 
-// O jsdom não devolve o foco ao fechar o <dialog>; no Chromium, o diálogo devolve o foco ao
-// Revogar antes de a chave revogada tirá-lo da lista, e o título da seção tem de ganhar depois.
+// O dublê do jsdom devolve o foco como o navegador, mas a ordem real só o Chromium garante: o
+// diálogo devolve o foco ao Revogar antes de a lista tirá-lo, e o título ganha depois.
 test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova e ao revogar @keyboard", async ({
   page,
   fakeApi,
