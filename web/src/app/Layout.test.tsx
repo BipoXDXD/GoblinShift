@@ -331,14 +331,18 @@ describe("Layout: rodapé", () => {
 
   it.each([
     ["/termos", ["page", null, null]],
+    ["/termos/", ["page", null, null]],
     ["/privacidade", [null, "page", null]],
     ["/creditos", [null, null, "page"]],
   ])("em %s, só o link da página atual tem aria-current", async (path, expected) => {
     setup(() => jsonResponse(meBody()), path);
 
     const footer = await screen.findByRole("contentinfo");
-    const links = within(footer).getAllByRole("link");
-    expect(links.map((link) => link.getAttribute("aria-current"))).toEqual(expected);
+    // Com barra final, o rodapé aparece antes do redirect para o endereço sem barra.
+    await waitFor(() => {
+      const links = within(footer).getAllByRole("link");
+      expect(links.map((link) => link.getAttribute("aria-current"))).toEqual(expected);
+    });
   });
 
   it("a página atual se destaca também sem cor: perde o sublinhado, como no cabeçalho", async () => {
