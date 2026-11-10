@@ -71,7 +71,8 @@ def test_confere_a_borda_e_roda_as_jornadas_nos_dois_navegadores() -> None:
     commands = run_commands()
 
     assert 'scripts/check-spa-edge.sh "$BASE_URL"' in commands
-    assert "playwright install --with-deps chromium firefox" in commands
+    assert "npx playwright install chromium firefox" in commands
+    assert "ci-playwright-pacotes.sh chromium firefox" in commands
     journeys = next(
         step for step in vps_job()["steps"] if step.get("name") == "Jornadas de leitura"
     )

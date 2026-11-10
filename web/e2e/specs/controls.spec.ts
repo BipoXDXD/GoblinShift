@@ -84,9 +84,10 @@ test("Moldura: o pular para o conteúdo, com foco, tem a altura do alvo de toque
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-  await page.keyboard.press("Tab");
-
+  // A troca de rota põe o foco no h1 (FocusHeading), então o primeiro Tab não chega ao link;
+  // a ordem do Tab já é provada em focus.spec.ts. Aqui basta o estado :focus do link.
   const link = page.getByRole("link", { name: "Pular para o conteúdo", exact: true });
+  await link.focus();
   await expect(link).toBeFocused();
   expect(await heightOf(link)).toBeGreaterThanOrEqual(MIN_TARGET_PX);
 });
