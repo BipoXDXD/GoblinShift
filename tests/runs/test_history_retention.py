@@ -485,6 +485,22 @@ def test_registro_de_idempotencia_vencido_sai_e_o_vigente_fica(
     assert count(factory, "idempotency") == 1
 
 
+def test_idempotencia_vencida_respeita_o_lote(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    now = now_of(factory)
+    for _ in range(3):
+        finished_run(factory, storage, now - timedelta(days=2))
+
+    with unit_of_work(factory) as session:
+        first = delete_expired_idempotency_records(session, now, 2)
+    with unit_of_work(factory) as session:
+        second = delete_expired_idempotency_records(session, now, 2)
+
+    assert (first, second) == (2, 1)
+    assert count(factory, "idempotency") == 0
+
+
 # --- Tamanho do acúmulo -----------------------------------------------------------------------
 
 
