@@ -80,7 +80,8 @@ def test_configuracao_de_producao_com_runc_e_recusada(tmp_path: Path) -> None:
     # require_mount fica no padrão (True): é a configuração do host, não a dos testes.
     path = write_config(tmp_path, {**VALID, "runtime": "runc"})
 
-    with pytest.raises(ConfigError):
+    # O motivo precisa citar o runtime: outro ConfigError (chave, caminho) não fecha a lacuna.
+    with pytest.raises(ConfigError, match="runtime"):
         load_config(path)
 
 

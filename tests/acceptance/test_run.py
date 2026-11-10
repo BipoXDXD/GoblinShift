@@ -5,6 +5,7 @@ linha no banco; com a manutenção no ar, ela para e remove a sonda no ciclo seg
 um falso que registra os comandos, porque o script inteiro só roda na VPS.
 """
 
+import json
 import os
 import signal
 import subprocess
@@ -387,10 +388,16 @@ def test_container_sob_runsc_reprova_outro_runtime_mesmo_com_kernel_diferente(
     )
 
     assert not outcome.passed
-    assert f"runtime {runtime}" in outcome.evidence
+    # Prefixo inteiro, com o separador: no caso vazio, "runtime " sozinho casaria com qualquer
+    # evidência.
+    assert outcome.evidence.startswith(
+        f"runtime {runtime}; kernel visto no sandbox {GVISOR_KERNEL}, no host {HOST_KERNEL}"
+    )
 
 
-def test_container_sob_runc_real_reprova_com_o_kernel_do_host(host_kernel: str) -> None:
+def test_runc_real_reprova_e_a_evidencia_mostra_o_kernel_do_host_no_sandbox(
+    host_kernel: str,
+) -> None:
     outcome = _runtime_criterion(
         _probe_run(LOG_DO_PERFIL, runtime="runc", sandbox_kernel=host_kernel)
     )
@@ -416,3 +423,68 @@ def test_container_sob_runsc_reprova_sonda_que_passou_do_prazo() -> None:
     outcome = _runtime_criterion(_probe_run(LOG_DO_PERFIL, timed_out=True))
 
     assert not outcome.passed
+
+
+def _docker_inspect_json(runtime: str) -> str:
+    """Saída de `docker inspect --type=container` (Docker 29, gVisor), reduzida aos campos lidos
+    e a alguns vizinhos. `Runtime` só existe em `HostConfig`; não há campo homônimo no topo."""
+    return json.dumps(
+        [
+            {
+                "Id": "4f1c" + "0" * 60,
+                "Created": "2026-10-13T12:00:00.000000000Z",
+                "Path": "python",
+                "Args": ["/opt/gs/probe.py", "identity"],
+                "State": {
+                    "Status": "exited",
+                    "Running": False,
+                    "Paused": False,
+                    "Restarting": False,
+                    "OOMKilled": False,
+                    "Dead": False,
+                    "Pid": 0,
+                    "ExitCode": 0,
+                    "Error": "",
+                    "StartedAt": "2026-10-13T12:00:01.000000000Z",
+                    "FinishedAt": "2026-10-13T12:00:02.000000000Z",
+                },
+                "Name": "/gs-exec-00000000-0000-0000-0000-000000000000",
+                "Driver": "overlay2",
+                "HostConfig": {
+                    "Runtime": runtime,
+                    "NetworkMode": "none",
+                    "ReadonlyRootfs": True,
+                    "PidsLimit": profile.SANDBOX_TASKS_LIMIT,
+                    "Memory": profile.MEMORY_BYTES,
+                    "MemorySwap": profile.MEMORY_BYTES,
+                    "NanoCpus": profile.CPUS * 1_000_000_000,
+                    "CapDrop": ["ALL"],
+                    "SecurityOpt": ["no-new-privileges"],
+                    "LogConfig": LOG_DO_PERFIL,
+                },
+                "Config": {"Hostname": "4f1c", "User": str(profile.EXECUTOR_UID)},
+            }
+        ]
+    )
+
+
+@pytest.mark.parametrize("runtime", ["runsc", "runc"])
+def test_inspect_le_o_runtime_do_hostconfig_do_docker_inspect(
+    monkeypatch: pytest.MonkeyPatch, runtime: str
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=_docker_inspect_json(runtime))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    state = run._inspect("gs-exec-x")
+
+    assert commands == [["docker", "inspect", "--type=container", "gs-exec-x"]]
+    [info] = json.loads(_docker_inspect_json(runtime))
+    assert state == run.ExecutorState(
+        running=False, exit_code=0, oom_killed=False, error="", host_config=info["HostConfig"]
+    )
+    assert state.host_config["Runtime"] == runtime
