@@ -125,7 +125,7 @@ describe("SiteNoticeBanner: Fechar", () => {
     const hidden = Array.from(button.querySelectorAll(".sr-only"));
     expect(hidden.map((node) => node.textContent)).toEqual(["aviso"]);
     const visible = Array.from(button.childNodes)
-      .filter((node) => !hidden.includes(node as Element))
+      .filter((node) => !(node instanceof Element && node.classList.contains("sr-only")))
       .map((node) => node.textContent)
       .join("")
       .trim();
