@@ -10,6 +10,7 @@ Sem banco: o Runner e o claim são falsos. O cenário com Postgres e o `executor
 """
 
 import logging
+import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -426,9 +427,8 @@ def test_durante_a_pausa_a_area_nao_e_consultada(queue: FakeQueue) -> None:
 # Ligação no processo --------------------------------------------------------------------
 
 
-def test_serve_confere_a_area_do_runner_do_processo(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def serve_gate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, area: FakeArea) -> WorkAreaGate:
+    """O portão que o `serve` real monta, capturado na primeira volta (sem banco)."""
     shutdown = ShutdownFlag()
     gates: list[WorkAreaGate] = []
     listener = Mock()
@@ -443,10 +443,32 @@ def test_serve_confere_a_area_do_runner_do_processo(
 
     monkeypatch.setattr(worker_entrypoint, "_work_once", capture_gate)
     settings = Settings(environment="test", db_port=1, storage_root=tmp_path / "storage")
-    area = FakeArea(ORPHAN)
 
     worker_entrypoint.serve(settings, cast(Runner, area), shutdown)
 
     [gate] = gates
+    return gate
+
+
+def test_serve_confere_a_area_do_runner_do_processo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    area = FakeArea(ORPHAN)
+    gate = serve_gate(monkeypatch, tmp_path, area)
+
     assert gate.allows_claim() is False
     assert area.reads == 1
+
+
+def test_portao_do_serve_mede_o_teto_no_relogio_monotonico(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Relógio de parede pula (NTP, ajuste manual) e encurtaria ou esticaria o teto.
+    clock = FakeClock()
+    monkeypatch.setattr(time, "monotonic", clock)
+    gate = serve_gate(monkeypatch, tmp_path, FakeArea(ORPHAN))
+    gate.allows_claim()
+
+    clock.now += HOLD_LIMIT.total_seconds()
+
+    assert gate.allows_claim() is True

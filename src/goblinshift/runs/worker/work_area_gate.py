@@ -12,9 +12,15 @@ reinício. O portão confere o próprio estado: antes de cada claim, o worker li
 com a área ilegível, a volta não reivindica.
 
 A espera tem teto (`HOLD_LIMIT`), contado no relógio monotônico desde que o worker viu a área
-presa pela primeira vez e zerado quando ela esvazia. Passado o teto, o portão libera o claim: o
-`start` é recusado como antes, e o alerta `executor_start_failed`, que já existe, avisa alguém. Sem
-isso, uma área presa de vez pararia a fila sem sinal nenhum (os logs não são exportados).
+presa pela primeira vez e zerado quando ela esvazia. Passado o teto, o portão libera o claim e a
+tentativa segue como antes deste portão. Com a área ocupada, ou ilegível mas gravável, o `start` é
+recusado e o alerta `executor_start_failed`, que já existe, avisa alguém. Sem o teto, uma área
+presa de vez pararia a fila sem sinal nenhum (os logs não são exportados).
+
+Limitação conhecida: com a área ilegível e também sem escrita (montagem perdida, por exemplo), o
+claim liberado falha na preparação da área (`create_work_dir`), antes do `start`. A tentativa é
+encerrada como falha transitória com o log `área de trabalho falhou`, sem `alert`, então o
+`executor_start_failed` não dispara. A base, sem o portão, já se comportava assim.
 
 `list_work` só reconhece nomes de tentativa (UUID canônico). Outra entrada na área ainda passa
 pelo portão e é recusada no `start`, como antes.
@@ -52,9 +58,10 @@ class WorkAreaGate:
     primeira vez), teto atingido e a retomada quando a área esvazia.
     """
 
-    def __init__(self, runner: Runner, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, runner: Runner, clock: Callable[[], float] | None = None) -> None:
         self._runner = runner
-        self._clock = clock
+        # Monotônico: o relógio de parede pula (NTP, ajuste) e encurtaria ou esticaria o teto.
+        self._clock = clock if clock is not None else time.monotonic
         self._limit_s = HOLD_LIMIT.total_seconds()
         self._state = _AreaState.CLEAR
         self._held_since: float | None = None
