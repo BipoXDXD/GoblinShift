@@ -41,7 +41,9 @@ export function LegalDocument({
   // texto a pessoa está lendo, continuam no topo.
   const outlineAt = sections.length >= MIN_OUTLINE_SECTIONS ? sections[0]?.blockIndex : undefined;
   return (
-    <div className="flex max-w-prose flex-col gap-4 leading-relaxed">
+    // wrap-anywhere: URL e e-mail longos sem espaço quebram na coluna, sem rolagem horizontal no
+    // celular (WCAG 1.4.10). A tabela volta ao wrap-normal: ela rola dentro da própria caixa.
+    <div className="flex max-w-prose flex-col gap-4 leading-relaxed wrap-anywhere">
       {blocks.map((block, index) => (
         <Fragment key={index}>
           {index === outlineAt && <Outline sections={sections} />}
@@ -200,7 +202,7 @@ function Table({
     // Tabela larga rola dentro da própria caixa, não a página (WCAG 1.4.10); com foco, rola pelo
     // teclado (regra scrollable-region-focusable do axe).
     // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
-    <div tabIndex={0} className="overflow-x-auto rounded-lg">
+    <div tabIndex={0} className="overflow-x-auto rounded-lg wrap-normal">
       <table className="w-full border-collapse text-left text-sm">
         <thead>
           <tr>
