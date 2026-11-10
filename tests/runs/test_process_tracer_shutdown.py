@@ -280,6 +280,36 @@ def test_parada_da_manutencao_encerra_o_tracing_depois_dos_outros_passos(
     assert SHUTDOWN_SPAN in exporters.span_names()
 
 
+class _DisposeFailedError(RuntimeError):
+    pass
+
+
+def test_falha_ao_descartar_o_pool_da_manutencao_nao_pula_o_encerramento_do_tracing(
+    exporters: Exporters, otlp: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Sem o encerramento com prazo, sobraria o `atexit` do SDK, que espera o Collector sem prazo.
+    shutdown = ShutdownFlag()
+    _one_round(otlp, shutdown)
+
+    def make_engine_failing_dispose(settings: Settings) -> Engine:
+        engine = make_engine(settings)
+        dispose = engine.dispose
+
+        def dispose_and_fail() -> None:
+            dispose()
+            raise _DisposeFailedError
+
+        otlp.setattr(engine, "dispose", dispose_and_fail)
+        return engine
+
+    otlp.setattr(maintenance, "make_engine", make_engine_failing_dispose)
+
+    with pytest.raises(_DisposeFailedError):
+        maintenance.serve(_settings(tmp_path), Mock(), shutdown)
+
+    assert exporters.span_names() == [CYCLE_SPAN]
+
+
 # Carência da plataforma ------------------------------------------------------------------------
 
 
