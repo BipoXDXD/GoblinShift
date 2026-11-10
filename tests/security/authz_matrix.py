@@ -5,10 +5,26 @@ explícita. `test_authz_matrix.py` enumera as rotas registradas no app e exige i
 entradas: rota nova sem entrada reprova a suíte, e entrada sem rota também.
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum, auto
 
 from goblinshift.identity import Scope
+
+PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
+
+# Parâmetros de caminho que não são ids: um valor da allowlist da própria rota. Todo outro
+# parâmetro identifica um recurso com dono e precisa ser o `resource_param` da regra.
+NAMED_PATH_VALUES = {
+    "provider": "google",
+    "name": "swagger-init.js",
+    "recipe_id": "csv-janitor",
+    "version": "1",
+}
+
+
+def path_params(path: str) -> list[str]:
+    return [match["name"] for match in PATH_PARAM.finditer(path)]
 
 
 class Policy(Enum):
