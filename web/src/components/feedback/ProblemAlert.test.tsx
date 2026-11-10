@@ -29,6 +29,12 @@ describe("describeFailure", () => {
     expect(description.message).not.toContain("Title from server");
   });
 
+  it("erro da própria interface diz de onde veio e pede para recarregar", () => {
+    expect(describeFailure({ kind: "internal" }).message).toBe(
+      "Houve um erro na interface. Recarregue a página e tente de novo.",
+    );
+  });
+
   it("acrescenta a espera do Retry-After, arredondada para cima", () => {
     const description = describeFailure({
       kind: "problem",

@@ -6,6 +6,7 @@ import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
+  type FakeApi,
   jsonResponse,
   problemResponse,
   runBody,
@@ -221,6 +222,7 @@ function inSequence(...responses: readonly (() => Response | null)[]): Handler {
 const running = (): Response => jsonResponse(runBody({ status: "running" }));
 const unavailable = (): Response => problemResponse(503, "SERVICE_UNAVAILABLE");
 const UNAVAILABLE_TEXT = "O serviço está indisponível no momento.";
+const SIGNED_OUT_TEXT = "Sua sessão terminou. Entre de novo para continuar.";
 /** Quantas vezes a tela consultou a execução. */
 function runRequests(requests: readonly Request[]): number {
   return requests.filter(
@@ -228,6 +230,43 @@ function runRequests(requests: readonly Request[]): number {
       request.method === "GET" && new URL(request.url).pathname === `/api/v1/runs/${RUN_ID}`,
   ).length;
 }
+
+const FORBIDDEN_TEXT = "Você não tem permissão para esta ação.";
+const NOT_FOUND_TEXT = "Não encontramos o que você pediu.";
+const TIMEOUT_TEXT = "O servidor demorou demais para responder.";
+/** Prazo do cliente da API (client.ts), que o relógio falso atravessa no teste do timeout. */
+const CLIENT_TIMEOUT_MS = 30_000;
+
+type PollFailure = (queryClient: QueryClient, api: FakeApi) => Promise<void>;
+
+/** As próximas `polls` consultas da execução respondem com a falha. */
+function pollFailing(failure: () => Response, polls = 1): PollFailure {
+  return async (queryClient, api) => {
+    for (let poll = 0; poll < polls; poll += 1) {
+      api.fetchMock.mockImplementationOnce(() => Promise.resolve(failure()));
+      await nextPoll(queryClient);
+    }
+  };
+}
+
+/** A próxima consulta não responde até o prazo do cliente, que a aborta como timeout. */
+const pollTimingOut: PollFailure = async (queryClient, api) => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    api.fetchMock.mockImplementationOnce(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Prazo do cliente", "AbortError"));
+          });
+        }),
+    );
+    void queryClient.refetchQueries({ queryKey: ["runs", RUN_ID] });
+    await act(() => vi.advanceTimersByTimeAsync(CLIENT_TIMEOUT_MS));
+  } finally {
+    vi.useRealTimers();
+  }
+};
 
 // Pedido que nunca responde: segura a consulta em andamento.
 const hanging = (): null => null;
@@ -279,6 +318,21 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     notifyManager.setScheduler((callback) => setTimeout(callback, 0));
   });
 
+  it.each([
+    ["403 comum", pollFailing(() => problemResponse(403, "FORBIDDEN")), FORBIDDEN_TEXT],
+    ["404", pollFailing(() => problemResponse(404, "NOT_FOUND")), NOT_FOUND_TEXT],
+    ["5xx persistente", pollFailing(unavailable, 2), UNAVAILABLE_TEXT],
+    ["timeout", pollTimingOut, TIMEOUT_TEXT],
+  ])("falha que vira alerta (%s) mantém o Cancelar na tela", async (_name, fail, text) => {
+    const { queryClient, api } = setup(running);
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+
+    await fail(queryClient, api);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(text);
+    expect(screen.getByRole("button", { name: "Cancelar execução" })).toBeVisible();
+  });
+
   it("falha intermitente (erro, sucesso, erro) não vira alerta a cada alternância", async () => {
     const { queryClient } = setup(inSequence(running, unavailable, running, unavailable));
     expect(await screen.findByText("Em andamento")).toBeInTheDocument();
@@ -308,6 +362,27 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
     // O último estado conhecido continua na tela, abaixo do aviso de que pode estar desatualizado.
     expect(screen.getByText("Em andamento")).toBeInTheDocument();
+    alerts.stop();
+  });
+
+  it("sessão terminada é anunciada uma vez só, na região de status, sem tirar o foco", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    await expectHeadingFocused("Execução");
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(0);
+    const status = screen
+      .getAllByRole("status")
+      .filter((region) => region.textContent === SIGNED_OUT_TEXT);
+    expect(status).toHaveLength(1);
+    expect(screen.getAllByText(SIGNED_OUT_TEXT)).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
     alerts.stop();
   });
 
@@ -341,7 +416,8 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
   });
 
   it.each([
-    [401, "AUTHENTICATION_REQUIRED", "Sua sessão terminou"],
+    [403, "FORBIDDEN", "Você não tem permissão para esta ação."],
+    [404, "NOT_FOUND", "Não encontramos o que você pediu"],
     [410, "GONE", "Isto expirou"],
   ])(
     "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",
@@ -364,6 +440,73 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
       }
     },
   );
+
+  it.each([
+    ["AUTHENTICATION_REQUIRED", "Entre para continuar", ""],
+    ["REAUTH_REQUIRED", "Entre de novo para confirmar", "&reauth=1"],
+  ])(
+    "401 %s no polling mostra o convite para entrar de novo e para o polling",
+    async (code, title, reauthParam) => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const { queryClient, api } = setup(inSequence(running, () => problemResponse(401, code)));
+        expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+        await nextPoll(queryClient);
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
+
+        const prompt = screen.getByRole("region", { name: title });
+        expect(within(prompt).getByRole("heading", { level: 2, name: title })).toBeVisible();
+        expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+          "href",
+          `/auth/login/google?return_to=%2Fexecucoes%2F${RUN_ID}${reauthParam}`,
+        );
+        expect(screen.queryByRole("alert")).toBeNull();
+        expect(runRequests(api.requests)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("com o convite na tela, o Cancelar some e os dados já carregados ficam", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+
+    await nextPoll(queryClient);
+
+    expect(screen.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Cancelar execução" })).toBeNull();
+    expect(screen.getByText("Em andamento")).toBeInTheDocument();
+  });
+
+  it("antes do primeiro dado, sessão terminada mostra o convite para entrar, sem alerta", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"));
+
+    expect(await screen.findByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("termos novos no polling levam ao aceite, como nas outras telas", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(403, "TERMS_NOT_ACCEPTED")),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+    await nextPoll(queryClient);
+
+    expect(screen.getByRole("region", { name: "Aceite os termos para continuar" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getAllByRole("status").some(
+        // Sem distinguir maiúsculas: "termos de uso" vira "Termos de Uso" no #271.
+        (region) =>
+          /^Para continuar, aceite a versão atual dos termos de uso\.$/i.test(region.textContent),
+      ),
+    ).toBe(true);
+  });
 
   it("falha transitória antes do primeiro dado vira alerta na primeira vez", async () => {
     setup(unavailable);

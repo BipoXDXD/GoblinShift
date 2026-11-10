@@ -105,6 +105,11 @@ describe("Bancada", () => {
 
     await expectHeadingFocused("Bancada: CSV Janitor");
     expect(screen.getByRole("heading", { name: "A bancada está vazia" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e use Executar para começar.",
+      ),
+    ).toBeInTheDocument();
     // Rotação estável pela receita: a CSV Janitor cai sempre na Jade.
     expect(screen.getByRole("img", { name: /^Jade, / })).toBeInTheDocument();
     expect(screen.getByLabelText("Escolher arquivos")).toHaveAttribute("accept", ".csv,text/csv");

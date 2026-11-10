@@ -10,7 +10,7 @@ import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { BrandLink } from "./BrandLink";
 import { documentTitle, pageTitleOf } from "./pageTitle";
-import { acceptTermsPath, PATHS, signInPath } from "./paths";
+import { acceptTermsPath, PATHS, signInPath, withoutTrailingSlash } from "./paths";
 
 const T = TEXT.layout;
 /** Alvo do "Pular para o conteúdo"; o `<main>` é o mesmo em todas as telas. */
@@ -97,7 +97,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         className="mx-auto min-h-svh w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12"
       >
         <LoginFailedAlert />
-        <TermsGate />
+        <CanonicalPath />
       </main>
       {/* Links públicos para textos legais e créditos. */}
       <footer className="border-t border-line-soft">
@@ -162,6 +162,19 @@ function useDocumentTitle(): void {
   useLayoutEffect(() => {
     document.title = documentTitle(title);
   }, [title, key]);
+}
+
+/**
+ * Um endereço por tela: `/termos/` vai para `/termos`, com a mesma query e o mesmo fragmento. Assim
+ * o aceite dos termos e os links da tela atual comparam o caminho sem conhecer a barra final.
+ */
+function CanonicalPath(): ReactElement {
+  const { pathname, search, hash } = useLocation();
+  const canonical = withoutTrailingSlash(pathname);
+  if (canonical !== null) {
+    return <Navigate replace to={{ pathname: canonical, search, hash }} />;
+  }
+  return <TermsGate />;
 }
 
 /** A tela da rota, ou o aceite dos termos se a conta ainda não aceitou a versão vigente. */

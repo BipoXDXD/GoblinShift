@@ -1,4 +1,4 @@
-// Reusar a configuração pelo Histórico: a linha diz se os resultados ainda valem e leva à Bancada
+// Reutilizar os parâmetros pelo Histórico: a linha diz se os resultados ainda valem e leva à Bancada
 // com os parâmetros daquela execução.
 import { HistoricoPage } from "../pages/HistoricoPage";
 import { holdRequest } from "../support/held";
@@ -15,7 +15,7 @@ const PARAMETERS = {
   formula_guard: "tab_prefix",
 };
 
-test("Histórico → Reusar configuração → Bancada com os parâmetros da execução", async ({
+test("Histórico → Reutilizar parâmetros → Bancada com os parâmetros da execução", async ({
   page,
   fakeApi,
 }) => {
@@ -31,7 +31,7 @@ test("Histórico → Reusar configuração → Bancada com os parâmetros da exe
   const row = historico.rows().first();
   await expect(row.getByText(/^Resultados até /)).toBeVisible();
 
-  await row.getByRole("link", { name: /^Reusar configuração/ }).click();
+  await row.getByRole("link", { name: /^Reutilizar parâmetros/ }).click();
 
   // O aviso existe duas vezes: o parágrafo visível e a região viva sr-only. Confere o visível.
   await expect(
