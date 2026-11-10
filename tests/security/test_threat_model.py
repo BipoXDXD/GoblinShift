@@ -40,18 +40,28 @@ def test_documento_cita_simbolos_e_trechos() -> None:
 
 
 def _missing_symbols(document: str, root: Path) -> list[str]:
-    """As citações `arquivo.py::símbolo` cujo arquivo não existe ou cujo símbolo não é uma definição
-    única (função ou classe)."""
-    return [
-        f"{file}::{name}"
+    """As citações `arquivo.py::símbolo` cujo símbolo não é uma definição única (função ou classe),
+    no formato "<citação>: <motivo>"."""
+    problems = [
+        (f"{file}::{name}", _symbol_problem(root / file, name))
         for file, name in _SYMBOL_REF.findall(document)
-        if not (root / file).is_file() or not _is_single_definition(root / file, name)
     ]
+    return [f"{citation}: {reason}" for citation, reason in problems if reason is not None]
 
 
-def _is_single_definition(path: Path, symbol: str) -> bool:
+def _symbol_problem(path: Path, symbol: str) -> str | None:
     """Nome atribuído não vale aqui: só a forma com trecho confere o valor dele."""
-    return isinstance(resolve_symbol(path.read_text(encoding="utf-8"), symbol), Definition)
+    if not path.is_file():
+        return "o arquivo não existe"
+    node = resolve_symbol(path.read_text(encoding="utf-8"), symbol)
+    if isinstance(node, str):
+        return node
+    if not isinstance(node, Definition):
+        return (
+            "existe, mas é nome atribuído, não definição; "
+            "use a forma com trecho (`arquivo.py` `símbolo` `trecho`)"
+        )
+    return None
 
 
 def test_todo_simbolo_citado_existe() -> None:
@@ -107,9 +117,17 @@ def test_simbolo_citado_por_dois_pontos_e_encontrado(module_root: Path, symbol: 
     assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == []
 
 
-@pytest.mark.parametrize("citation", ["src/mod.py::Store.close", "src/falta.py::guard"])
-def test_simbolo_ou_arquivo_inexistente_e_listado(module_root: Path, citation: str) -> None:
-    assert _missing_symbols(f"`{citation}`", module_root) == [citation]
+@pytest.mark.parametrize(
+    ("citation", "reason"),
+    [
+        ("src/mod.py::Store.close", "o símbolo não existe no arquivo"),
+        ("src/falta.py::guard", "o arquivo não existe"),
+    ],
+)
+def test_simbolo_ou_arquivo_inexistente_e_listado_com_motivo(
+    module_root: Path, citation: str, reason: str
+) -> None:
+    assert _missing_symbols(f"`{citation}`", module_root) == [f"{citation}: {reason}"]
 
 
 # As duas formas de citação resolvem o símbolo pela mesma regra (`resolve_symbol`).
@@ -117,14 +135,26 @@ def test_funcao_aninhada_e_encontrada(module_root: Path) -> None:
     assert _missing_symbols("`src/mod.py::guard.inner`", module_root) == []
 
 
-# Nome atribuído só prova que existe: o valor é conferido pela forma com trecho.
+# Nome atribuído só prova que existe: o valor é conferido pela forma com trecho. O motivo diz que
+# ele existe, para quem esbarra não achar que o símbolo sumiu.
 @pytest.mark.parametrize("symbol", ["MAX_UPLOAD_BYTES", "MAX", "test_upload.response"])
-def test_nome_atribuido_e_listado(module_root: Path, symbol: str) -> None:
-    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == [f"src/mod.py::{symbol}"]
+def test_nome_atribuido_e_listado_com_motivo_proprio(module_root: Path, symbol: str) -> None:
+    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == [
+        f"src/mod.py::{symbol}: existe, mas é nome atribuído, não definição; "
+        "use a forma com trecho (`arquivo.py` `símbolo` `trecho`)"
+    ]
 
 
-@pytest.mark.parametrize("symbol", ["inner", "twin"])
-def test_simbolo_aninhado_sem_escopo_ou_definido_duas_vezes_e_listado(
-    module_root: Path, symbol: str
+@pytest.mark.parametrize(
+    ("symbol", "reason"),
+    [
+        ("inner", "o símbolo não existe no arquivo"),
+        ("twin", "o símbolo está definido 2 vezes no arquivo"),
+    ],
+)
+def test_simbolo_aninhado_sem_escopo_ou_definido_duas_vezes_e_listado_com_motivo(
+    module_root: Path, symbol: str, reason: str
 ) -> None:
-    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == [f"src/mod.py::{symbol}"]
+    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == [
+        f"src/mod.py::{symbol}: {reason}"
+    ]
