@@ -162,6 +162,9 @@ trecho, e nestes casos a garantia vem só dos testes de comportamento da mesma l
   pelo `filterwarnings = ["error"]` do pytest, impede que isso chegue verde ao CI.
 - **Limite de `/api` no Nginx.** A citação aponta o início de cada `location`, não o
   `limit_req zone=api` dentro dela, como diz a linha da ameaça.
+- **Símbolo definido mais de uma vez.** Property com setter, função com `@overload` e definição
+  nos dois ramos de `if TYPE_CHECKING` são recusados de propósito, nas duas formas: a citação não
+  diz qual definição vale. Cite a classe que contém o símbolo, com um trecho.
 - **Forma literal, não valor efetivo.** O verificador lê a forma literal do valor atribuído, e não
   o valor que ele produz. Quatro grafias passam por ele e enfraquecem citações de hoje:
   - chave calculada, seja por nome (uma constante com `"Content-Security-Policy"` usada como chave
