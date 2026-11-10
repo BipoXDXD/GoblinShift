@@ -49,6 +49,11 @@ limit_req_zone $client_limit_key zone=api:10m rate=20r/s;
 # consulta a cada 2 min e o healthcheck do Nginx a cada 10 s.
 limit_req_zone $client_limit_key zone=readyz:1m rate=5r/s;
 limit_req_status 429;
+# Cada recusa iria para o log de erro com o IP completo (`client:`) e a query string (`request:`),
+# desfazendo o log de acesso, que trunca um e descarta a outra (access-log.conf). Em `info`, abaixo
+# do `notice` do `error_log` da imagem, nada é escrito; o 429 continua no log de acesso, com o IP
+# truncado. tests/test_nginx_edge_limits.py prova com canários.
+limit_req_log_level info;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
 # na partida. No rollout da pilha local (deploy/rollout-api.sh), que a publicação pelo Coolify não

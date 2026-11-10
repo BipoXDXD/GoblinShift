@@ -9,6 +9,7 @@ seguidos deixaria a cota se repor entre eles.
 
 import json
 import shlex
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -60,7 +61,7 @@ def _burst_command(path: str, count: int, client_ip: str) -> str:
         [
             "curl", "-sS", "-Z", "--parallel-immediate", "--parallel-max", str(count),
             "-H", f"X-Forwarded-For: {client_ip}", "-o", "resp-#1", "-w", rf"{write_out}\n",
-            f"http://nginx{path}?n=[1-{count}]",
+            f"http://nginx{path}{'&' if '?' in path else '?'}n=[1-{count}]",
         ]
     )  # fmt: skip
     # Corpo de cada resposta na mesma linha, depois do status: 204 não tem corpo.
@@ -181,3 +182,35 @@ def test_limite_do_readyz_nao_gasta_a_cota_da_api(stack: NginxLogs) -> None:
     hits = _burst(stack, "/api/v1/me", API_ALLOWED_AT_ONCE, client)
 
     assert [hit.status for hit in hits] == [HTTP_NO_CONTENT] * API_ALLOWED_AT_ONCE
+
+
+# --- Recusa sem IP nem query no log de erro ----------------------------------------------------
+
+# O `limit_req` registra cada recusa no log de erro com `client:` (IP completo) e `request:` (com a
+# query string). O log de acesso trunca o IP e descarta a query (tests/test_nginx_logs.py); o de
+# erro não pode desfazer isso.
+REFUSAL_CANARY_QUERY = f"CANARY-{uuid.uuid4()}"
+REFUSAL_CANARY_IPS = {
+    "/api/v1/me": "203.0.113.97",
+    "/readyz": "203.0.113.98",
+    "/auth/login/google": "203.0.113.99",
+}
+
+
+@pytest.fixture(scope="module")
+def refused_logs(stack: NginxLogs) -> tuple[str, str]:
+    for path, client_ip in REFUSAL_CANARY_IPS.items():
+        hits = _burst(stack, f"{path}?token={REFUSAL_CANARY_QUERY}", 60, client_ip)
+        # Sem recusa a prova não diz nada: o caminho do log de recusa precisa ter rodado.
+        assert _count(hits, HTTP_TOO_MANY_REQUESTS) > 0, path
+    return stack.logs()
+
+
+@pytest.mark.parametrize("canary", [REFUSAL_CANARY_QUERY, *REFUSAL_CANARY_IPS.values()])
+def test_recusa_do_limite_nao_registra_ip_nem_query(
+    refused_logs: tuple[str, str], canary: str
+) -> None:
+    stdout, stderr = refused_logs
+
+    assert canary not in stdout
+    assert canary not in stderr
