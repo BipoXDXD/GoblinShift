@@ -929,13 +929,13 @@ Chaves são enviadas em `Authorization: Bearer`, nunca na URL. API key não é I
 
 | Operação | Requisição | Resposta |
 |---|---|---|
-| start | `POST /v1/attempts/{id}/start` `{"image": "<ref>@sha256:<hex>"}` | `200` Status; idempotente pelo nome. `403 image_not_allowed`, `409 work_area_dirty` / `work_dir_missing`, `503 docker_unavailable` |
+| start | `POST /v1/attempts/{id}/start` `{"image": "<ref>@sha256:<hex>"}` | `200` Status; idempotente pelo nome. `403 image_not_allowed`, `409 work_area_dirty` / `work_dir_missing`, `503 docker_unavailable`, `503 busy` |
 | status | `GET /v1/attempts/{id}` | `200` Status |
 | stop | `POST /v1/attempts/{id}/stop` `{"grace_s": 0..10}` | `200` Status após SIGTERM, carência e SIGKILL; ausente ou terminado é sucesso |
-| remove | `DELETE /v1/attempts/{id}` | `204`; apaga container e `<area>/<id>`; repetir é sucesso; `409 still_running` com o container vivo |
+| remove | `DELETE /v1/attempts/{id}` | `204`; apaga container e `<area>/<id>`; repetir é sucesso; `409 still_running` com o container vivo, `503 busy` |
 | image | `GET /v1/image?ref=<ref>@sha256:<hex>` | `200 {"present": bool}`, só leitura e sem corpo; ausente no daemon é `present: false`. `400 invalid_request`, `403 image_not_allowed` (antes do Docker), `503 docker_unavailable` |
 
-Status: `{"state": "absent"|"created"|"running"|"exited", "exit_code", "oom_killed", "started_at", "finished_at"}`. Implementação em `deploy/executor_ctl/` (só biblioteca padrão, Python do host), instalada por `deploy/executor-ctl/install.sh` como `goblinshift-executor-ctl.service`.
+Status: `{"state": "absent"|"created"|"running"|"exited", "exit_code", "oom_killed", "started_at", "finished_at"}`. `start` e `remove` disputam o lock da área (a cota de uma tentativa) e esperam por ele no máximo 5 s; depois respondem `503 busy` sem tocar no Docker nem na área, e o worker trata a recusa como falha transitória. Assim uma operação travada no Docker não empilha threads atrás dela. A configuração instalada só aceita `"runtime": "runsc"`; `runc` existe apenas na `Config` montada pelos testes. Implementação em `deploy/executor_ctl/` (só biblioteca padrão, Python do host), instalada por `deploy/executor-ctl/install.sh` como `goblinshift-executor-ctl.service`.
 
 A coleta ocorre após encerrar os escritores. Aceitar apenas arquivos regulares na árvore autorizada; rejeitar symlinks, hardlinks, dispositivos e caminhos externos. Limitar bytes e quantidade durante a leitura. Validar conteúdo derivado em contexto isolado quando necessário; relatório do executor também recebe validação de schema: o `code` de cada rejeição só passa se for do catálogo de 1.6, e o `summary` só com as chaves conhecidas e os valores que os próprios itens dão. Manifesto e ZIP, publicados para o dono, são conferidos contra os arquivos coletados: o manifesto lista exatamente as saídas, com tamanho e SHA-256 calculados pelo worker; o ZIP tem exatamente as saídas, o manifesto e o relatório, na ordem, cada entrada arquivo regular, não cifrado, com a compressão do empacotador e o mesmo conteúdo, sem nada descomprimido além do tamanho esperado. FFmpeg/ffprobe não recebem URLs, shell ou flags livres.
 

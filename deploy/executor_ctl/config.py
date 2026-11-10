@@ -11,8 +11,9 @@ from .images import ImageNotAllowedError, _read_root_file
 DEFAULT_CONFIG_PATH = Path("/etc/goblinshift/executor-ctl.json")
 IMAGES_FILE = "/var/lib/coolify-release/goblinshift/executor-images.json"
 
-# runc só serve para desenvolvimento e para a CI sem gVisor; em produção é runsc (ADR 004).
-ALLOWED_RUNTIMES = frozenset({"runsc", "runc"})
+# O arquivo do host só escolhe gVisor (ADR 004). runc, do Mac e da CI sem gVisor, só existe
+# na Config montada no código dos testes: nenhum arquivo instalado consegue pedi-lo.
+PRODUCTION_RUNTIME = "runsc"
 # Caminhos entram em `--mount=type=bind,src=...`: vírgula ou `=` mudariam as opções da montagem.
 _SAFE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
 _GROUP_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
@@ -100,9 +101,9 @@ def _group(value: object) -> str:
 
 
 def _runtime(value: object) -> str:
-    if not isinstance(value, str) or value not in ALLOWED_RUNTIMES:
-        raise ConfigError(f"runtime precisa ser um de {sorted(ALLOWED_RUNTIMES)}")
-    return str(value)
+    if value != PRODUCTION_RUNTIME:
+        raise ConfigError(f"runtime precisa ser {PRODUCTION_RUNTIME!r}")
+    return PRODUCTION_RUNTIME
 
 
 def _flag(value: object) -> bool:
