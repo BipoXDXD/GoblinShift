@@ -149,11 +149,14 @@ describe.each([
     setup(path);
     await expectHeadingFocused(title);
 
-    expect(screen.getAllByRole("table")).toHaveLength(tableNames.length);
-    for (const name of tableNames) {
-      const region = screen.getByRole("region", { name });
-      expect(within(region).getByRole("table")).toHaveAccessibleName(name);
-    }
+    // Por índice, não por busca de nome: uma troca de legendas entre duas tabelas fica vermelha.
+    const tables = screen.getAllByRole("table");
+    const regions = tables.map((table) => table.closest("[role=region]"));
+    expect(tables).toHaveLength(tableNames.length);
+    tableNames.forEach((name, index) => {
+      expect(tables[index]).toHaveAccessibleName(name);
+      expect(regions[index]).toHaveAccessibleName(name);
+    });
   });
 
   it("o sumário tem um link por h2, na ordem e com o mesmo texto", async () => {
