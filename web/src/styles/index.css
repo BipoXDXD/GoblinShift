@@ -2,3 +2,6 @@
 @import "./tokens.css";
 @import "./fonts.css";
 @import "./base.css";
+
+/* SABOTAGEM TEMPORÁRIA (#260): título de altura fixa que corta o excesso. */
+main h1 { height: 1em; overflow: hidden; }
