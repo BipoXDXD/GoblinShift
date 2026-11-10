@@ -1,6 +1,14 @@
 // Textos fixos da interface, num lugar só (D12: só pt-BR; traduzir fica restrito a este arquivo).
 // Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre os goblins só no vazio, na
 // espera e no sucesso, sempre depois da informação.
+
+/** A lista do Histórico que acabou de chegar: quantas linhas, com filtro ou não, e se há mais. */
+interface ListedRuns {
+  readonly count: number;
+  readonly filtered: boolean;
+  readonly more: boolean;
+}
+
 export const TEXT = {
   field: {
     errorPrefix: "Erro: ",
@@ -628,6 +636,17 @@ export const TEXT = {
     loadedMore: (count: number) =>
       count === 1 ? "Mais 1 execução na lista." : `Mais ${String(count)} execuções na lista.`,
     restarted: "A lista voltou ao início, porque a página seguinte expirou.",
+    // Anunciado quando a lista chega depois de aplicar ou limpar os filtros.
+    listed: ({ count, filtered, more }: ListedRuns) => {
+      const scope = filtered ? " com esses filtros" : "";
+      if (count === 0) {
+        return filtered ? "Nenhuma execução com esses filtros." : "Nenhuma execução ainda.";
+      }
+      if (more) {
+        return `As ${String(count)} execuções mais recentes${scope}; há mais para carregar.`;
+      }
+      return count === 1 ? `1 execução${scope}.` : `${String(count)} execuções${scope}.`;
+    },
     empty: "Nenhuma execução ainda",
     emptyHint: "As execuções aparecem aqui depois que você roda uma receita na Bancada.",
     goToWorkshop: "Escolher uma receita na Oficina",

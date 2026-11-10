@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { useId, useState, type ReactElement } from "react";
+import { useId, useRef, useState, type ReactElement } from "react";
 import { Link } from "react-router";
 
 import { useMe } from "../account/useMe";
@@ -22,7 +22,8 @@ const T = TEXT.presets;
 /**
  * Presets na Oficina (2.2): os da conta, cada um abrindo a Bancada pré-preenchida, e Excluir
  * terciária com confirmação em vermelho. Só com a sessão confirmada: o visitante não vê a seção
- * nem gera um 401 a cada visita.
+ * nem gera um 401 a cada visita. Depois de excluir, o foco vai para o título da seção: o Excluir
+ * que abriu o diálogo saiu da lista (WCAG 2.4.3).
  */
 export function PresetsSection(): ReactElement | null {
   const headingId = useId();
@@ -34,13 +35,21 @@ export function PresetsSection(): ReactElement | null {
     queryFn: ({ signal }) => listPresets(client, signal),
     enabled: signedIn,
   });
-  const removal = useRemoval();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const removal = useRemoval(() => {
+    heading.current?.focus();
+  });
   if (!signedIn) {
     return null;
   }
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <h2 id={headingId} className="text-sm font-semibold text-fg-muted">
+      <h2
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="text-sm font-semibold text-fg-muted"
+      >
         {T.heading}
       </h2>
       <PresetsBody presets={presets.data ?? null} error={presets.error} onRemove={removal.ask} />
@@ -145,9 +154,10 @@ interface Removal {
 
 /**
  * Excluir com confirmação e `If-Match`. Revisão vencida (412: o preset mudou em outro lugar) vira
- * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta.
+ * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta. Nos
+ * dois casos `onListUpdated` recebe a vez depois de a lista ser relida.
  */
-function useRemoval(): Removal {
+function useRemoval(onListUpdated: () => void): Removal {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<Preset | null>(null);
@@ -162,9 +172,12 @@ function useRemoval(): Removal {
         setMessage(T.changedElsewhere);
       }
     },
-    onSettled: async () => {
+    onSettled: async (_result, error) => {
       setTarget(null);
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
+      if (error === null || isStale(error)) {
+        onListUpdated();
+      }
     },
   });
   const failure = mutation.error !== null && !isStale(mutation.error) ? mutation.error : null;
