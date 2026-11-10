@@ -421,8 +421,9 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
     return SdkEvent(event.name, attributes, event.timestamp)
 
 
-# O Docker manda SIGKILL 10 s depois do SIGTERM, e o uvicorn gasta até 8 deles esperando as conexões
-# (`--timeout-graceful-shutdown`, docker/app.Dockerfile). O lifespan fica com os 2 s restantes.
+# Cabe na margem que sobra ao lifespan entre o fim do `--timeout-graceful-shutdown` do uvicorn
+# (docker/app.Dockerfile) e o SIGKILL da plataforma. A margem está em
+# tests/test_api_server_limits.py, e tests/api/test_api_tracer_shutdown.py confere a parada nela.
 TRACING_SHUTDOWN_TIMEOUT_S = 1.5
 
 

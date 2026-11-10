@@ -76,7 +76,8 @@ def create_app(
         try:
             engine.dispose()
         finally:
-            # Por último: os spans da parada, inclusive os do banco, ainda entram no lote.
+            # Por último: depois do encerramento, o processador descarta em silêncio todo span
+            # novo. O que rodar antes daqui na parada ainda entra no lote.
             running.state.tracing.shut_down()
 
     app = FastAPI(

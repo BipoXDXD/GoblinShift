@@ -18,13 +18,14 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.platform import telemetry
 from goblinshift.platform.settings import Settings
+from tests.test_api_server_limits import LIFESPAN_SHUTDOWN_MARGIN_SECONDS
 
 # Bem acima da duração do teste: o lote só sai pelo encerramento, nunca pelo relógio do SDK.
 BATCH_DELAY_MS = "600000"
 TRACED_PATH = "/openapi.json"
-# O prazo de parada do tracing (1,5 s) mais folga para o resto do lifespan num runner lento. Fica
-# abaixo dos 2 s que o Docker deixa à API depois do `--timeout-graceful-shutdown 8` do uvicorn.
-SHUTDOWN_CEILING_S = 2.0
+SHUTDOWN_SPAN = "passo anterior da parada"
+# Curto para o teste do prazo estourado não esperar o prazo real.
+SHORT_SHUTDOWN_TIMEOUT_S = 0.05
 
 
 class _StuckExporter(SpanExporter):
@@ -87,7 +88,43 @@ def test_parada_da_api_nao_espera_o_collector_alem_do_prazo(otlp: pytest.MonkeyP
     finally:
         exporter.gate.set()
 
-    assert elapsed < SHUTDOWN_CEILING_S
+    assert elapsed < LIFESPAN_SHUTDOWN_MARGIN_SECONDS
+
+
+def test_prazo_estourado_no_encerramento_do_tracing_fica_no_log(
+    otlp: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    otlp.setattr(telemetry, "TRACING_SHUTDOWN_TIMEOUT_S", SHORT_SHUTDOWN_TIMEOUT_S)
+    exporter = _StuckExporter()
+    client = _api_with(otlp, exporter)
+    try:
+        with client:
+            client.get(TRACED_PATH)
+    finally:
+        exporter.gate.set()
+
+    assert "encerramento do tracing passou do prazo" in capsys.readouterr().err
+
+
+def test_parada_da_api_encerra_o_tracing_depois_dos_outros_passos(
+    otlp: pytest.MonkeyPatch,
+) -> None:
+    exporter = InMemorySpanExporter()
+    client = _api_with(otlp, exporter)
+    app_state = client.app.state  # type: ignore[attr-defined]
+    dispose = app_state.engine.dispose
+
+    def dispose_emitting_span() -> None:
+        # Representa qualquer passo da parada que ainda emite span antes do encerramento.
+        with app_state.tracing.tracer.start_as_current_span(SHUTDOWN_SPAN):
+            dispose()
+
+    otlp.setattr(app_state.engine, "dispose", dispose_emitting_span)
+
+    with client:
+        pass
+
+    assert SHUTDOWN_SPAN in _span_names(exporter)
 
 
 def test_falha_ao_encerrar_o_tracing_nao_derruba_a_parada(
