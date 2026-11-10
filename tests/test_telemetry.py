@@ -734,8 +734,12 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
 
     # A manutenção cria o provider pelo `process_tracer` do worker.
     monkeypatch.setattr(worker, "make_tracer_provider", stop_at_provider)
+    # Parada já pedida: se o provider vier por outro caminho, o `serve` sai na hora e o teste
+    # falha, em vez de ficar no laço da manutenção.
+    shutdown = ShutdownFlag()
+    shutdown.request()
 
     with pytest.raises(ProviderRequestedError):
-        maintenance.serve(TEST_SETTINGS, Mock(), ShutdownFlag())
+        maintenance.serve(TEST_SETTINGS, Mock(), shutdown)
 
     assert calls == [((TEST_SETTINGS, "goblinshift-maintenance"), {})]
