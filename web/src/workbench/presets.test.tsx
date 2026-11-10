@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
-import { untilFakeClock, useAnnounceClock } from "../test/announceClock";
+import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler } from "../test/catalog";
@@ -237,7 +237,7 @@ describe("Bancada aberta com um preset", () => {
       },
     });
     await screen.findByText("Carregando o preset.");
-    useAnnounceClock();
+    installAnnounceClock();
     const notice = "Parâmetros do preset Clientes do mês.";
 
     release();

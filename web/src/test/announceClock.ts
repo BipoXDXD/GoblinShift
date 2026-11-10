@@ -1,4 +1,4 @@
-import { notifyManager } from "@tanstack/react-query";
+import { defaultScheduler, notifyManager } from "@tanstack/react-query";
 import { act } from "@testing-library/react";
 import { onTestFinished, vi } from "vitest";
 
@@ -13,13 +13,11 @@ const realSetTimeout = globalThis.setTimeout;
  * parado, então daí em diante use `fireEvent` e `untilFakeClock`. O TanStack Query entrega as
  * notificações num `setTimeout(0)`: aqui elas saem numa microtask.
  */
-export function useAnnounceClock(): void {
+export function installAnnounceClock(): void {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   notifyManager.setScheduler(queueMicrotask);
   onTestFinished(() => {
-    notifyManager.setScheduler((callback) => {
-      setTimeout(callback, 0);
-    });
+    notifyManager.setScheduler(defaultScheduler);
     vi.useRealTimers();
   });
 }
