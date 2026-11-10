@@ -14,7 +14,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import admin_cli
-from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
+from goblinshift.entrypoints.admin_cli import (
+    EXIT_MISSING_SECRET,
+    EXIT_NOT_FOUND,
+    EXIT_OK,
+    EXIT_USAGE,
+    main,
+)
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
@@ -264,6 +270,39 @@ def test_cancelamento_pela_cli_emite_um_termino_cancelado(
     assert exit_code == EXIT_OK
     [event] = finished.events()
     assert (event["run_id"], event["run.state"]) == (str(run_id), "canceled")
+
+
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_sem_segredo_do_user_hash_em_producao_falha_antes_de_gravar(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    db_settings: Settings,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    user_id = create_user(capsys)
+    run_id = queue_run(factory, storage, UUID(user_id))
+    # Produção exige a senha do banco em arquivo; só o segredo do `user.hash` fica faltando.
+    password_file = tmp_path / "db_password"
+    password_file.write_text(db_settings.db_password.get_secret_value())
+    monkeypatch.setenv("GS_DB_PASSWORD_FILE", str(password_file))
+    monkeypatch.setenv("GS_ENVIRONMENT", "production")
+    monkeypatch.delenv("GS_USER_HASH_SECRET", raising=False)
+
+    exit_code, _, err = run(capsys, command, "--user", user_id)
+
+    assert exit_code == EXIT_MISSING_SECRET
+    assert "GS_USER_HASH_SECRET" in err
+    assert status_of(factory, user_id) == "active"
+    assert deletion_requested_at(factory, user_id) is None
+    assert audited(factory, user_id) == []
+    with factory() as session:
+        status = session.execute(
+            select(run_table.c.status).where(run_table.c.id == run_id)
+        ).scalar_one()
+    assert status == Status.QUEUED
 
 
 def test_block_repetido_completa_o_que_faltou(

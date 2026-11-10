@@ -40,6 +40,7 @@ import argparse
 import re
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -78,6 +79,7 @@ from goblinshift.platform.db import make_engine, make_session_factory, unit_of_w
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.cancellation import CancelResult
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
@@ -245,16 +247,17 @@ def _revoke_key(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _block(args: argparse.Namespace, context: _Context) -> int:
-    now = datetime.now(UTC)
-    with unit_of_work(context.factory) as session:
-        found = block_account(session, args.user, now)
-        if found:
-            _audit(session, AuditEventType.ACCOUNT_BLOCKED, args.user, now)
-    if not found:
-        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-    # Depois do commit: a partir daqui nenhuma credencial da conta autentica, e o cancelamento
-    # abre as próprias transações. Se cair aqui, rodar `block` de novo completa.
-    canceled = _cancel_active_run(context, args.user)
+    with _run_finished_reporter(context) as finished:
+        now = datetime.now(UTC)
+        with unit_of_work(context.factory) as session:
+            found = block_account(session, args.user, now)
+            if found:
+                _audit(session, AuditEventType.ACCOUNT_BLOCKED, args.user, now)
+        if not found:
+            return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+        # Depois do commit: a partir daqui nenhuma credencial da conta autentica, e o
+        # cancelamento abre as próprias transações. Se cair aqui, rodar `block` de novo completa.
+        canceled = _cancel_active_run(context, args.user, finished)
     print(f"conta {args.user} bloqueada", file=sys.stderr)
     if canceled is not None:
         print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
@@ -273,26 +276,37 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
-    now = datetime.now(UTC)
-    try:
-        with unit_of_work(context.factory) as session:
-            request_account_deletion(session, args.user, now)
-            _audit(session, AuditEventType.ACCOUNT_DELETION_REQUESTED, args.user, now)
-    except UnknownAccountError:
-        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-    # Depois do commit, como em `DELETE /me`; se cair aqui, repetir o comando completa.
-    canceled = _cancel_active_run(context, args.user)
+    with _run_finished_reporter(context) as finished:
+        now = datetime.now(UTC)
+        try:
+            with unit_of_work(context.factory) as session:
+                request_account_deletion(session, args.user, now)
+                _audit(session, AuditEventType.ACCOUNT_DELETION_REQUESTED, args.user, now)
+        except UnknownAccountError:
+            return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+        # Depois do commit, como em `DELETE /me`; se cair aqui, repetir o comando completa.
+        canceled = _cancel_active_run(context, args.user, finished)
     print(f"exclusão da conta {args.user} pedida", file=sys.stderr)
     if canceled is not None:
         print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
     return EXIT_OK
 
 
-def _cancel_active_run(context: _Context, user_id: UUID) -> CancelResult | None:
+def _run_finished_reporter(context: _Context) -> AbstractContextManager[RunFinishedReporter]:
+    """Emissor do `run.finished` dos comandos que cancelam a execução ativa.
+
+    Aberto antes da primeira escrita: ele lê o segredo do `user.hash`, e sem ele o comando falha
+    sem ter bloqueado nem pedido exclusão com a execução ainda na fila.
+    """
+    return run_finished_reporter(context.settings, context.factory, _SERVICE_NAME)
+
+
+def _cancel_active_run(
+    context: _Context, user_id: UUID, finished: RunFinishedReporter
+) -> CancelResult | None:
     """Cancela a execução ativa da conta; a que estava na fila emite o `run.finished` (3.7)."""
     storage = FileStorage(context.settings.storage_root)
-    with run_finished_reporter(context.settings, context.factory, _SERVICE_NAME) as finished:
-        return cancel_active_run(context.factory, storage, user_id, on_finished=finished.report)
+    return cancel_active_run(context.factory, storage, user_id, on_finished=finished.report)
 
 
 def _list_users(args: argparse.Namespace, context: _Context) -> int:
