@@ -180,7 +180,9 @@ function Heading({
     <Tag
       id={anchor}
       tabIndex={anchor === undefined ? undefined : -1}
-      className={anchor === undefined ? HEADING_CLASSES[shown] : HEADING_CLASSES[shown]}
+      className={
+        anchor === undefined ? HEADING_CLASSES[shown] : `${HEADING_CLASSES[shown]} scroll-mt-4`
+      }
     >
       {renderInlines(inlines)}
     </Tag>
