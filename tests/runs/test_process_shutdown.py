@@ -103,12 +103,32 @@ def test_sinal_marca_a_parada(signum: signal.Signals) -> None:
 
 
 @pytest.mark.usefixtures("restored_handlers")
-def test_handler_nao_escreve_no_log(caplog: pytest.LogCaptureFixture) -> None:
+def test_handler_nao_escreve_no_log(
+    caplog: pytest.LogCaptureFixture, capfd: pytest.CaptureFixture[str]
+) -> None:
     # Escrever no stream dentro do handler pode reentrar numa escrita interrompida do próprio
     # processo (`RuntimeError: reentrant call`); o laço registra a parada quando a vê.
     shutdown_on_signals()
+    capfd.readouterr()
 
     with caplog.at_level(logging.DEBUG):
         signal.raise_signal(signal.SIGTERM)
 
     assert caplog.records == []
+    assert capfd.readouterr() == ("", "")
+
+
+@pytest.mark.usefixtures("restored_handlers")
+def test_aviso_que_nao_consegue_escrever_nao_derruba_o_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Uma exceção no handler subiria no ponto interrompido do laço; a parada vale mesmo assim.
+    def closed_stderr(_fd: int, _data: bytes) -> int:
+        raise OSError("stderr fechado")
+
+    monkeypatch.setattr("goblinshift.entrypoints.shutdown.os.write", closed_stderr)
+    shutdown = shutdown_on_signals(notice=b"aviso\n")
+
+    signal.raise_signal(signal.SIGTERM)
+
+    assert shutdown.is_set()

@@ -7,8 +7,15 @@ reconecta com backoff (runs/worker/claim.py).
 
 SIGTERM e SIGINT param o laço de forma segura: o worker deixa de reivindicar e termina a
 tentativa em andamento antes de sair. O handler só marca uma flag (`ShutdownFlag`,
-entrypoints/shutdown.py), sem trava nem log; a espera por NOTIFY dorme em fatias curtas para vê-la,
-e o laço registra a parada ao sair. O prazo de parada do deploy (`stop_grace_period`, 30 s) é
+entrypoints/shutdown.py), sem trava nem logging, e a espera por NOTIFY dorme em fatias curtas para
+vê-la. A parada deixa duas linhas:
+
+- `gs-worker: sinal de parada recebido`, texto fixo no stderr, escrito pelo próprio handler com
+  `os.write` assim que o sinal chega, mesmo no meio de uma tentativa;
+- `parada pedida` (log estruturado, campo `signal`), quando o laço sai, depois da tentativa em
+  curso; se o SIGKILL chega antes, só a primeira aparece.
+
+O prazo de parada do deploy (`stop_grace_period`, 30 s) é
 menor que o teto de uma tentativa (10 min), então uma tentativa longa não termina a tempo: a
 plataforma mata o processo (SIGKILL) e quem recupera é o lease vencido: a manutenção encontra
 o executor pelo nome, confirma o término e reagenda. O trabalho recomeça do zero, e a Run pode
@@ -33,7 +40,8 @@ from datetime import timedelta
 from opentelemetry.trace import NoOpTracer, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag, shutdown_on_signals
+import goblinshift.entrypoints.shutdown as process_shutdown
+from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
@@ -54,6 +62,9 @@ logger = logging.getLogger("goblinshift.worker")
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_CONFIGURATION = 2
+
+# Linha fixa do handler de sinal, sem dado nenhum (ver o docstring do módulo).
+STOP_NOTICE = b"gs-worker: sinal de parada recebido\n"
 
 
 def main() -> int:
@@ -123,6 +134,11 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     finally:
         engine.dispose()
     logger.info("worker encerrado")
+
+
+def shutdown_on_signals() -> ShutdownFlag:
+    """Flag de parada do worker: SIGTERM e SIGINT a marcam e escrevem `STOP_NOTICE` no stderr."""
+    return process_shutdown.shutdown_on_signals(notice=STOP_NOTICE)
 
 
 def wait_for_work(

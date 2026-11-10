@@ -9,10 +9,14 @@ registra o pedido ao sair. O CPython roda o handler na thread principal entre do
   escrita levanta `RuntimeError: reentrant call` no ponto interrompido.
 """
 
+import contextlib
+import os
 import signal
 import time
 from collections.abc import Callable
 from types import FrameType
+
+STDERR_FD = 2
 
 # Fatia da espera: o maior atraso entre o sinal e a saída quando o processo está ocioso.
 SHUTDOWN_POLL_S = 0.5
@@ -61,12 +65,22 @@ class ShutdownFlag:
         return self._requested
 
 
-def shutdown_on_signals() -> ShutdownFlag:
-    """Flag de parada marcada por SIGTERM e SIGINT; quem a vê é o laço, que registra o pedido."""
+def shutdown_on_signals(notice: bytes = b"") -> ShutdownFlag:
+    """Flag de parada marcada por SIGTERM e SIGINT; quem a vê é o laço, que registra o pedido.
+
+    `notice`, se houver, é uma linha fixa que o handler escreve direto no fd 2 com `os.write`: uma
+    chamada de sistema, sem o logging nem o buffer do stream que o sinal pode ter interrompido.
+    Serve para o pedido aparecer na hora, quando o laço só o registra bem depois.
+    """
     shutdown = ShutdownFlag()
 
     def request_shutdown(signum: int, _frame: FrameType | None) -> None:
         shutdown.request(signum)
+        if notice:
+            # stderr fechado ou cheio: o aviso é cortesia, e uma exceção aqui subiria no ponto
+            # interrompido do laço. A parada já está marcada e o laço a registra ao sair.
+            with contextlib.suppress(OSError):
+                os.write(STDERR_FD, notice)
 
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
