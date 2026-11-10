@@ -94,19 +94,30 @@ export function sectionsOf(blocks: readonly Block[]): Section[] {
 
 /**
  * A legenda de cada tabela: o título mais próximo acima dela, de qualquer nível, que já diz do que
- * a tabela trata. Sem título antes, as colunas descrevem o conteúdo; nada de texto jurídico novo.
+ * a tabela trata. Sem título antes (ou com título vazio), as colunas descrevem o conteúdo; nada de
+ * texto jurídico novo. A segunda tabela com a mesma legenda ganha um número, porque duas regiões
+ * com o mesmo nome não se distinguem no leitor de tela (axe landmark-unique).
  */
 function tableCaptions(blocks: readonly Block[]): Map<number, string> {
   const captions = new Map<number, string>();
+  const seen = new Map<string, number>();
   let lastTitle: string | undefined;
   blocks.forEach((block, index) => {
     if (block.kind === "heading") {
-      lastTitle = plainText(block.inlines);
-    } else if (block.kind === "table" && lastTitle !== undefined) {
-      captions.set(index, lastTitle);
+      const title = plainText(block.inlines).trim();
+      lastTitle = title === "" ? undefined : title;
+    } else if (block.kind === "table") {
+      const caption = lastTitle ?? columnsCaption(block.header);
+      const count = (seen.get(caption) ?? 0) + 1;
+      seen.set(caption, count);
+      captions.set(index, count === 1 ? caption : TEXT.legal.repeatedTable(caption, count));
     }
   });
   return captions;
+}
+
+function columnsCaption(header: readonly (readonly Inline[])[]): string {
+  return TEXT.legal.tableOfColumns(header.map(plainText));
 }
 
 /** `base`, ou `base-2`, `base-3`…: o primeiro que nenhuma seção anterior usa ("Notas 2" incluso). */
@@ -177,7 +188,7 @@ function renderBlock(block: Block, index: number, place: BlockPlace = {}): React
       return (
         <Table
           key={index}
-          caption={place.caption ?? TEXT.legal.tableOfColumns(block.header.map(plainText))}
+          caption={place.caption ?? columnsCaption(block.header)}
           header={block.header}
           rows={block.rows}
         />

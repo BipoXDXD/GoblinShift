@@ -922,5 +922,7 @@ export const TEXT = {
       const named = columns.filter((column) => column.trim() !== "");
       return named.length === 0 ? "Tabela" : `Tabela: ${named.join(", ")}`;
     },
+    /** Segunda tabela (ou mais) com o mesmo nome: o número a distingue no leitor de tela. */
+    repeatedTable: (caption: string, position: number) => `${caption} (tabela ${String(position)})`,
   },
 } as const;

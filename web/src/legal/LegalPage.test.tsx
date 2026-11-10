@@ -64,10 +64,23 @@ function setup(path: string) {
   return renderRoutes({ routes: appRoutes(api.client), path, client: api.client });
 }
 
+// Nome de cada tabela, na ordem: o título acima dela, mesmo com parágrafos no meio. Mudar um título
+// com tabela muda o que o leitor de tela anuncia, então a lista acompanha o texto.
+const TERMS_TABLES = ["Histórico de versões"];
+const PRIVACY_TABLES = [
+  "3.1. Dados da conta",
+  "4. Para que usamos e com que base legal",
+  "5. Por quanto tempo guardamos",
+  "6. Com quem compartilhamos",
+  "8. Seus direitos e como exercê-los",
+  "9. Cookies",
+  "Histórico de versões",
+];
+
 describe.each([
-  ["/termos", "Termos de Uso do GoblinShift", terms],
-  ["/privacidade", "Aviso de Privacidade do GoblinShift", privacy],
-])("%s", (path, title, source) => {
+  ["/termos", "Termos de Uso do GoblinShift", terms, TERMS_TABLES],
+  ["/privacidade", "Aviso de Privacidade do GoblinShift", privacy, PRIVACY_TABLES],
+])("%s", (path, title, source, tableNames) => {
   it("o título do arquivo é o h1 da tela, sem aviso de rascunho", async () => {
     setup(path);
 
@@ -119,7 +132,10 @@ describe.each([
     await expectHeadingFocused(title);
 
     const tables = screen.getAllByRole("table");
-    const regions = screen.getAllByRole("region");
+    // Só as regiões das tabelas: outra região da tela não tem a ver com o B1.
+    const regions = screen
+      .getAllByRole("region")
+      .filter((region) => within(region).queryByRole("table") !== null);
     expect(regions).toHaveLength(tables.length);
     for (const region of regions) {
       expect(region).toHaveAccessibleName(/\S/);
@@ -129,12 +145,15 @@ describe.each([
     }
   });
 
-  it("a tabela leva o nome do título que a precede", async () => {
+  it("cada tabela leva o nome do título que a precede", async () => {
     setup(path);
     await expectHeadingFocused(title);
 
-    const region = screen.getByRole("region", { name: "Histórico de versões" });
-    expect(within(region).getByRole("table")).toHaveAccessibleName("Histórico de versões");
+    expect(screen.getAllByRole("table")).toHaveLength(tableNames.length);
+    for (const name of tableNames) {
+      const region = screen.getByRole("region", { name });
+      expect(within(region).getByRole("table")).toHaveAccessibleName(name);
+    }
   });
 
   it("o sumário tem um link por h2, na ordem e com o mesmo texto", async () => {
