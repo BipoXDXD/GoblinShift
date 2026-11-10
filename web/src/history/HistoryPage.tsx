@@ -83,7 +83,6 @@ function HistoryResults({
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [announcement, setAnnouncement] = useState<string | null>(null);
-  const rows = useRef<HTMLDivElement>(null);
   const queryKey = ["runs", "history", query] as const;
   const runs = useInfiniteQuery({
     queryKey,
@@ -92,6 +91,8 @@ function HistoryResults({
     initialPageParam: FIRST_PAGE,
     getNextPageParam: (last: RunList) => last.next_cursor,
   });
+
+  const rows = useRef<HTMLDivElement>(null);
 
   const loadMore = async (): Promise<void> => {
     if (runs.isFetchingNextPage) {
