@@ -127,9 +127,7 @@ function HistoryResults({
   const showFilters = active || items.length > 0;
   return (
     <>
-      {showFilters && (
-        <FiltersForm key={filterKey} filters={filters} onApply={onApplyFilters} />
-      )}
+      {showFilters && <FiltersForm key={filterKey} filters={filters} onApply={onApplyFilters} />}
       {runs.data === undefined ? (
         <FirstPagePending error={runs.error} />
       ) : items.length === 0 ? (
