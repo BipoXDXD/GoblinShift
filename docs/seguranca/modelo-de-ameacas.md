@@ -96,7 +96,7 @@ E elevation of privilege.
 | | Ameaça | Mitigação | Teste |
 |---|---|---|---|
 | E | Chave sem `runs:write` cria Run | `src/goblinshift/entrypoints/api/runs.py` `create_run` `require_scope(Scope.RUNS_WRITE)` | `tests/api/test_runs.py::test_criar_exige_o_escopo_runs_write` |
-| I/E | Run cita upload de outra conta | Lock filtrado por dono: `src/goblinshift/files/uploads.py` `lock_ready_uploads` `upload.c.owner_id == owner_id`; FK composta das colunas `src/goblinshift/runs/tables.py` `run_input` `["owner_id", "upload_id"]` para `src/goblinshift/runs/tables.py` `run_input` `["upload.owner_id", "upload.id"]` | `tests/api/test_runs.py::test_upload_indisponivel_responde_o_mesmo_422_para_todos_os_motivos` |
+| I/E | Run cita upload de outra conta | Lock filtrado por dono: `src/goblinshift/files/uploads.py` `lock_ready_uploads` `upload.c.owner_id == owner_id`; FK composta das colunas `src/goblinshift/runs/tables.py` `run_input` `["owner_id", "upload_id"]` para `src/goblinshift/runs/tables.py` `run_input` `["upload.owner_id", "upload.id"]`, que impede apagar o upload citado (`src/goblinshift/runs/tables.py` `run_input` `ondelete="RESTRICT"`) | `tests/api/test_runs.py::test_upload_indisponivel_responde_o_mesmo_422_para_todos_os_motivos` |
 | I | Leitura, listagem ou cancelamento de Run alheia | `src/goblinshift/runs/queries.py` `get_run` `run.c.owner_id == owner_id`, `src/goblinshift/runs/queries.py` `list_runs` `run.c.owner_id == owner_id` | `tests/api/test_runs.py::test_outra_conta_recebe_404_igual_ao_de_inexistente`, `tests/api/test_runs.py::test_listagem_de_outra_conta_nao_mostra_execucoes_alheias`, `tests/api/test_runs_cancel.py::test_execucao_alheia_ou_inexistente_responde_404_igual` |
 | T | Cursor de paginação adulterado ou de outra conta | `src/goblinshift/runs/cursor.py` `decode_cursor` `hmac.compare_digest(_b64decode(signature), _sign(body, secret))` | `tests/api/test_runs.py::test_cursor_adulterado_responde_400`, `tests/runs/test_cursor_owner.py::test_http_responde_400_ao_cursor_de_outra_conta` |
 | T | Repetição cria Run duplicada; chave reaproveitada com outro corpo ou por outra conta | `src/goblinshift/runs/tables.py` `idempotency_record` `PrimaryKeyConstraint("owner_id", "operation", "idem_key"),`, `src/goblinshift/runs/acceptance.py` `accept_run` `_lock_idempotency_key(session, owner_id, key)` | `tests/runs/test_acceptance.py::test_duas_requisicoes_simultaneas_com_a_mesma_chave_criam_uma_execucao`, `tests/runs/test_acceptance.py::test_chave_de_outra_conta_nao_interfere`, `tests/api/test_runs.py::test_replay_devolve_o_mesmo_location_sem_criar_nada`, `tests/api/test_runs.py::test_mesma_chave_com_outro_comando_responde_422` |
@@ -155,6 +155,10 @@ trecho, e nestes casos a garantia vem só dos testes de comportamento da mesma l
 - **`user_id` sem FK em `audit_event`.** A citação de `Column("user_id", Uuid),` prova que a coluna
   é declarada sem FK, mas não que nenhuma FK para `user_id` exista em outro lugar da tabela ou de
   uma migration. Uma citação não prova ausência.
+- **Restrição repetida numa `Table`.** Argumento posicional de chamada não tem chave, então uma
+  segunda `PrimaryKeyConstraint` depois da citada, que no SQLAlchemy substitui a primeira, não
+  reprova a citação de `idempotency_record`. Só o `SAWarning` dessa troca, transformado em erro
+  pelo `filterwarnings = ["error"]` do pytest, impede que isso chegue verde ao CI.
 - **Limite de `/api` no Nginx.** A citação aponta o início de cada `location`, não o
   `limit_req zone=api` dentro dela, como diz a linha da ameaça.
 
