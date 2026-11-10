@@ -42,7 +42,9 @@ export function LegalDocument({
   // texto a pessoa está lendo, continuam no topo.
   const outlineAt = sections.length >= MIN_OUTLINE_SECTIONS ? sections[0]?.blockIndex : undefined;
   return (
-    <div className="flex max-w-prose flex-col gap-4 leading-relaxed">
+    // wrap-anywhere: URL e e-mail longos sem espaço quebram na coluna, sem rolagem horizontal no
+    // celular (WCAG 1.4.10). A tabela volta ao wrap-normal: ela rola dentro da própria caixa.
+    <div className="flex max-w-prose flex-col gap-4 leading-relaxed wrap-anywhere">
       {blocks.map((block, index) => (
         <Fragment key={index}>
           {index === outlineAt && <Outline sections={sections} />}
@@ -231,10 +233,13 @@ function Heading({
   const Tag = HEADING_TAGS[shown];
   return (
     // tabIndex -1: o link de fora com âncora leva o foco à seção (LegalPage), fora da ordem do Tab.
+    // scroll-mt-4: sem cabeçalho fixo, o alvo da âncora pararia rente à borda de cima da janela.
     <Tag
       id={anchor}
       tabIndex={anchor === undefined ? undefined : -1}
-      className={HEADING_CLASSES[shown]}
+      className={
+        anchor === undefined ? HEADING_CLASSES[shown] : `${HEADING_CLASSES[shown]} scroll-mt-4`
+      }
     >
       {renderInlines(inlines)}
     </Tag>
@@ -260,7 +265,7 @@ function Table({
       aria-labelledby={captionId}
       // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- caixa rolável precisa de foco para o teclado
       tabIndex={0}
-      className="overflow-x-auto rounded-lg"
+      className="overflow-x-auto rounded-lg wrap-normal"
     >
       <table className="w-full border-collapse text-left text-sm">
         <caption id={captionId} className="sr-only">

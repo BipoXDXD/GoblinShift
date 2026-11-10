@@ -287,6 +287,22 @@ const CASES: readonly Case[] = [
       replace: "style-src 'self' 'unsafe-inline'",
     },
   },
+  ...(["desktop", "mobile"] as const).map((project): Case => ({
+    name: `textos legais: título da seção rente ao topo depois do sumário (${project})`,
+    spec: ["legal.spec.ts", "-g", "folga acima do título"],
+    project,
+    plant: (dist) => {
+      addStylesheet(dist, '[id^="secao-"] { scroll-margin-top: 0 !important; }');
+    },
+  })),
+  {
+    name: "textos legais: URL longa estoura a largura do celular",
+    spec: ["legal.spec.ts", "-g", "/termos cabe na largura"],
+    project: "mobile",
+    plant: (dist) => {
+      addStylesheet(dist, ".wrap-anywhere { overflow-wrap: normal !important; }");
+    },
+  },
   {
     name: "jornadas: botões de reordenar sumiram (só sobra o arrasto)",
     spec: ["journeys.spec.ts"],
