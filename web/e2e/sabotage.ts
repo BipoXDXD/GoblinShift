@@ -47,6 +47,13 @@ const PLANTED_KEY = "CANARY-sabotagem-fixa";
 
 const CASES: readonly Case[] = [
   {
+    name: "diálogo: botões invertidos no celular, a ordem visual separada da do Tab",
+    spec: ["session.spec.ts", "-g", "375 px"],
+    plant: (dist) => {
+      addStylesheet(dist, "dialog div:has(> button + button) { flex-direction: column-reverse; }");
+    },
+  },
+  {
     name: "contraste: texto secundário quase invisível no tema claro",
     spec: ["contrast.spec.ts", "-g", "tema light"],
     plant: (dist) => {

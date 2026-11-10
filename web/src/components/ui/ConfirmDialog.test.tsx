@@ -141,6 +141,18 @@ describe("ConfirmDialog", () => {
     expect(notCanceled).toBe(true);
   });
 
+  it("os botões não invertem a ordem do DOM em nenhuma largura", async () => {
+    // O jsdom não faz layout: a prova de comportamento é o e2e de session.spec.ts a 375 px. Aqui
+    // fica a guarda rápida contra a volta de um `*-reverse`, que separa a ordem visual do Tab.
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    const actions = screen.getByRole("button", { name: "Cancelar" }).parentElement;
+
+    expect(actions?.className).not.toMatch(/reverse/);
+  });
+
   it("não tem violações do axe aberto", async () => {
     const user = userEvent.setup();
     const { container } = render(<Harness withField />);
