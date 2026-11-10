@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import privacy from "../../../docs/legal/aviso-de-privacidade.md?raw";
@@ -22,6 +22,40 @@ const INTERNAL_MARKERS = [
   /Esta seção sai do texto final/i,
   /Trechos entre/i,
   /Notas marcadas como/i,
+];
+
+// Âncoras publicadas (#secao-...): mudar uma delas é decisão consciente, registrada no Histórico de
+// versões do texto, porque quebra links já enviados para fora.
+const TERMS_ANCHORS = [
+  "secao-1-quem-oferece-o-servico",
+  "secao-2-aceite-destes-termos",
+  "secao-3-o-que-o-servico-faz",
+  "secao-4-conta-e-acesso",
+  "secao-5-limites-cotas-e-disponibilidade",
+  "secao-6-uso-aceitavel",
+  "secao-7-abuso-sexual-infantil-e-outros-conteudos-ilegais",
+  "secao-8-suspensao-e-encerramento",
+  "secao-9-conteudo-e-propriedade",
+  "secao-10-ausencia-de-garantias-e-limitacao-de-responsabilidade",
+  "secao-11-privacidade",
+  "secao-12-mudancas-nestes-termos",
+  "secao-13-lei-aplicavel-e-foro",
+  "secao-historico-de-versoes",
+];
+const PRIVACY_ANCHORS = [
+  "secao-1-controlador-e-contato",
+  "secao-2-resumo",
+  "secao-3-que-dados-tratamos",
+  "secao-4-para-que-usamos-e-com-que-base-legal",
+  "secao-5-por-quanto-tempo-guardamos",
+  "secao-6-com-quem-compartilhamos",
+  "secao-7-transferencia-internacional",
+  "secao-8-seus-direitos-e-como-exerce-los",
+  "secao-9-cookies",
+  "secao-10-seguranca",
+  "secao-11-criancas-e-adolescentes",
+  "secao-12-mudancas-neste-aviso",
+  "secao-historico-de-versoes",
 ];
 
 function setup(path: string) {
@@ -106,6 +140,78 @@ describe.each([
       expect(target).toHaveTextContent(link.textContent);
     }
   });
+});
+
+describe("link de fora com âncora", () => {
+  it("abre com o foco no h2 da seção, não no h1", async () => {
+    setup("/privacidade#secao-8-seus-direitos-e-como-exerce-los");
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { level: 2, name: "8. Seus direitos e como exercê-los" }),
+      ).toHaveFocus();
+    });
+  });
+
+  it("o h1 não recebe o foco no caminho: o leitor de tela anuncia só a seção", async () => {
+    const focused: string[] = [];
+    const record = (event: FocusEvent) => {
+      focused.push((event.target as Element).tagName);
+    };
+    document.addEventListener("focusin", record);
+    try {
+      setup("/privacidade#secao-8-seus-direitos-e-como-exerce-los");
+      await waitFor(() => {
+        expect(focused).toContain("H2");
+      });
+    } finally {
+      document.removeEventListener("focusin", record);
+    }
+
+    expect(focused).not.toContain("H1");
+  });
+
+  it("âncora que não existe mais cai no h1", async () => {
+    setup("/termos#secao-que-nao-existe");
+
+    await expectHeadingFocused("Termos de Uso do GoblinShift");
+  });
+});
+
+describe("âncoras travadas", () => {
+  // Link para uma seção sai da página (resposta a titular, e-mail de suporte). Mudar um título ou
+  // renumerar as seções quebra esses links em silêncio: este teste obriga a decisão consciente.
+  it.each([
+    ["/termos", "Termos de Uso do GoblinShift", TERMS_ANCHORS],
+    ["/privacidade", "Aviso de Privacidade do GoblinShift", PRIVACY_ANCHORS],
+  ])("%s mantém as âncoras publicadas", async (path, title, anchors) => {
+    setup(path);
+    await expectHeadingFocused(title);
+
+    const shown = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.id);
+    expect(shown).toEqual(anchors);
+  });
+});
+
+describe("posição do sumário", () => {
+  it.each([
+    ["/termos", "Termos de Uso do GoblinShift"],
+    ["/privacidade", "Aviso de Privacidade do GoblinShift"],
+  ])(
+    "%s: o sumário vem depois de Versão e Vigência e antes do primeiro h2",
+    async (path, title) => {
+      setup(path);
+      await expectHeadingFocused(title);
+
+      const outline = screen.getByRole("navigation", { name: "Sumário" });
+      const validity = screen.getByText("Vigência:");
+      const [firstSection] = screen.getAllByRole("heading", { level: 2 });
+      expect(validity.compareDocumentPosition(outline)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(outline.compareDocumentPosition(firstSection as Node)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    },
+  );
 });
 
 describe("e-mails de contato", () => {

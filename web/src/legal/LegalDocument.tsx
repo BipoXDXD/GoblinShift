@@ -1,4 +1,4 @@
-import { Fragment, useId, useMemo, type ReactElement, type ReactNode } from "react";
+import { Fragment, useId, type ReactElement, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import { PATHS } from "../app/paths";
@@ -18,7 +18,7 @@ const MIN_OUTLINE_SECTIONS = 3;
 // Prefixo das âncoras: o título "Conteúdo" não pode colidir com o id do <main> nem com outro id.
 const ANCHOR_PREFIX = "secao-";
 
-interface Section {
+export interface Section {
   readonly blockIndex: number;
   readonly anchor: string;
   readonly title: string;
@@ -28,13 +28,26 @@ interface Section {
  * Os blocos de um texto legal, com a tipografia de leitura (45 a 75 caracteres por linha). Cada
  * seção (h2) ganha uma âncora tirada do próprio título, e o texto longo abre com um sumário delas.
  */
-export function LegalDocument({ blocks }: { readonly blocks: readonly Block[] }): ReactElement {
-  const sections = useMemo(() => sectionsOf(blocks), [blocks]);
+export function LegalDocument({
+  blocks,
+  sections,
+}: {
+  readonly blocks: readonly Block[];
+  /** As seções de `blocks`, de `sectionsOf`: a tela também as usa para achar a âncora da URL. */
+  readonly sections: readonly Section[];
+}): ReactElement {
   const anchors = new Map(sections.map((section) => [section.blockIndex, section.anchor]));
+  // O sumário entra logo antes da primeira seção: Versão, Vigência e a abertura, que dizem qual
+  // texto a pessoa está lendo, continuam no topo.
+  const outlineAt = sections.length >= MIN_OUTLINE_SECTIONS ? sections[0]?.blockIndex : undefined;
   return (
     <div className="flex max-w-prose flex-col gap-4 leading-relaxed">
-      {sections.length >= MIN_OUTLINE_SECTIONS && <Outline sections={sections} />}
-      {blocks.map((block, index) => renderBlock(block, index, anchors.get(index)))}
+      {blocks.map((block, index) => (
+        <Fragment key={index}>
+          {index === outlineAt && <Outline sections={sections} />}
+          {renderBlock(block, index, anchors.get(index))}
+        </Fragment>
+      ))}
     </div>
   );
 }
@@ -60,20 +73,28 @@ function Outline({ sections }: { readonly sections: readonly Section[] }): React
 }
 
 /** As seções do texto: os títulos que a tela mostra como h2, com âncoras únicas e estáveis. */
-function sectionsOf(blocks: readonly Block[]): Section[] {
-  const used = new Map<string, number>();
+export function sectionsOf(blocks: readonly Block[]): Section[] {
+  const used = new Set<string>();
   const sections: Section[] = [];
   blocks.forEach((block, blockIndex) => {
     if (block.kind !== "heading" || shownLevel(block.level) !== 2) {
       return;
     }
     const title = plainText(block.inlines);
-    const base = `${ANCHOR_PREFIX}${slugOf(title)}`;
-    const seen = (used.get(base) ?? 0) + 1;
-    used.set(base, seen);
-    sections.push({ blockIndex, anchor: seen === 1 ? base : `${base}-${String(seen)}`, title });
+    const anchor = freeAnchor(`${ANCHOR_PREFIX}${slugOf(title)}`, used);
+    used.add(anchor);
+    sections.push({ blockIndex, anchor, title });
   });
   return sections;
+}
+
+/** `base`, ou `base-2`, `base-3`…: o primeiro que nenhuma seção anterior usa ("Notas 2" incluso). */
+function freeAnchor(base: string, used: ReadonlySet<string>): string {
+  let anchor = base;
+  for (let suffix = 2; used.has(anchor); suffix += 1) {
+    anchor = `${base}-${String(suffix)}`;
+  }
+  return anchor;
 }
 
 /** "2. O que **não** coletamos" → "2-o-que-nao-coletamos": sem acento, minúsculas, hífens. */
@@ -154,7 +175,12 @@ function Heading({
   const shown = shownLevel(level);
   const Tag = HEADING_TAGS[shown];
   return (
-    <Tag id={anchor} className={HEADING_CLASSES[shown]}>
+    // tabIndex -1: o link de fora com âncora leva o foco à seção (LegalPage), fora da ordem do Tab.
+    <Tag
+      id={anchor}
+      tabIndex={anchor === undefined ? undefined : -1}
+      className={HEADING_CLASSES[shown]}
+    >
       {renderInlines(inlines)}
     </Tag>
   );

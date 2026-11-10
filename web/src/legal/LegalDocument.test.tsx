@@ -2,13 +2,14 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
-import { LegalDocument } from "./LegalDocument";
+import { LegalDocument, sectionsOf } from "./LegalDocument";
 import { parseMarkdown } from "./markdown";
 
 function renderDocument(source: string) {
+  const blocks = parseMarkdown(source);
   return render(
     <MemoryRouter>
-      <LegalDocument blocks={parseMarkdown(source)} />
+      <LegalDocument blocks={blocks} sections={sectionsOf(blocks)} />
     </MemoryRouter>,
   );
 }
@@ -58,6 +59,27 @@ describe("sumário", () => {
     ]);
     expect(document.getElementById("secao-notas-3")?.tagName).toBe("H2");
   });
+
+  it("sufixo de repetido não colide com outro título: ids e links únicos", () => {
+    renderDocument("## Notas\n\n## Notas\n\n## Notas 2");
+
+    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+    expect(hrefs).toHaveLength(3);
+    expect(new Set(hrefs).size).toBe(3);
+    const ids = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.id);
+    expect(new Set(ids).size).toBe(3);
+    expect(hrefs).toEqual(ids.map((id) => `#${id}`));
+  });
+
+  it("o sumário vem depois do preâmbulo, logo antes do primeiro h2", () => {
+    renderDocument("- **Versão:** v1\n\nAbertura.\n\n## 1. Uma\n\n## 2. Duas\n\n## 3. Três");
+
+    const outline = screen.getByRole("navigation", { name: "Sumário" });
+    const opening = screen.getByText("Abertura.");
+    const [first] = screen.getAllByRole("heading", { level: 2 });
+    expect(opening.compareDocumentPosition(outline)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(outline.nextElementSibling).toBe(first);
+  });
 });
 
 describe("e-mails no texto", () => {
@@ -83,6 +105,19 @@ describe("e-mails no texto", () => {
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", "https://goblinshift.dev/contato");
+  });
+
+  it.each([
+    ["parâmetro ?cc=", "Escreva para x@y.com?cc=a@b.com&body=oi agora."],
+    ["parâmetros ?=&", "Escreva para x@y.com?=&z=1 agora."],
+    ["esquema javascript:", "Clique em javascript:alert(1)@x.com agora."],
+  ])("%s não entra no href", (_case, source) => {
+    renderDocument(source);
+
+    for (const link of screen.queryAllByRole("link")) {
+      expect(link.getAttribute("href")).toMatch(/^mailto:[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/);
+    }
+    expect(screen.queryByRole("link", { name: /javascript|\?|&|=/ })).not.toBeInTheDocument();
   });
 
   it("texto sem e-mail fica igual", () => {

@@ -42,8 +42,10 @@
 
   /* O título da tela recebe foco por programa a cada troca de rota (FocusHeading), só para o
      leitor de tela e o Tab partirem dali; não é controle, então não desenha anel (o resumo de
-     erros, que também recebe foco, continua com o anel). */
-  h1[tabindex="-1"]:focus {
+     erros, que também recebe foco, continua com o anel). O h2 de uma seção recebe o foco do mesmo
+     jeito quando a tela abre por um link com âncora (LegalPage). */
+  h1[tabindex="-1"]:focus,
+  h2[tabindex="-1"]:focus {
     outline: none;
   }
 
