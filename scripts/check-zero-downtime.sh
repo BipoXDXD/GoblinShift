@@ -10,6 +10,9 @@ set -euo pipefail
 
 ROUNDS="${1:-2}"
 URL="http://127.0.0.1:${GS_HTTP_PORT:-80}/readyz"
+# O Nginx limita /readyz a 5 por segundo por cliente (default.conf.template); sem pausa, o laço
+# receberia 429 e a prova falharia por causa do limite, não da troca.
+INTERVAL_SECONDS=0.25
 codes="$(mktemp)"
 trap 'rm -f "$codes"' EXIT
 
@@ -17,7 +20,10 @@ curl -fsS --max-time 2 "$URL" >/dev/null || { echo "a pilha local não responde 
 
 # Sem --fail: o código HTTP (000 se a conexão falhar) é justamente o que se conta, e uma falha
 # de conexão não pode encerrar o laço (set -e).
-(while true; do curl -s -o /dev/null -w '%{http_code}\n' --max-time 2 "$URL" >>"$codes" || true; done) &
+(while true; do
+  curl -s -o /dev/null -w '%{http_code}\n' --max-time 2 "$URL" >>"$codes" || true
+  sleep "$INTERVAL_SECONDS"
+done) &
 load=$!
 for _ in $(seq 1 "$ROUNDS"); do
   deploy/rollout-api.sh docker compose

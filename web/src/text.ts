@@ -90,7 +90,10 @@ export const TEXT = {
       "terms-change": "Mudança nos termos",
     },
     regionLabel: (kind: string) => `Aviso: ${kind.toLowerCase()}`,
-    dismiss: "Fechar",
+    // Diz o que fecha: "Fechar" sozinho é ambíguo para quem navega pelos botões (WCAG 2.4.6).
+    // Só "Fechar" fica à vista, para não apertar o texto da faixa a 320 px; o complemento vai
+    // para o leitor de tela, e o nome "Fechar aviso" contém o rótulo visível (WCAG 2.5.3).
+    dismiss: { visible: "Fechar", screenReaderOnly: "aviso" },
   },
   home: {
     title: "Arquivos em lote, limpos pelos goblins da oficina.",

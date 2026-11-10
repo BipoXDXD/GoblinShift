@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,7 @@ from sqlalchemy.exc import OperationalError
 from goblinshift.entrypoints import maintenance, worker
 from goblinshift.entrypoints.api import health
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform import telemetry
 from goblinshift.platform.settings import MissingSecretError, Settings
 from goblinshift.platform.telemetry import (
@@ -226,8 +228,10 @@ def traced_app(tmp_path: Path) -> Iterator[TracedApp]:
     app = FastAPI()
     app.include_router(health.router)
     app.state.engine = engine
-    app.state.code_heads = frozenset({REVISION})
-    app.state.known_revisions = frozenset({REVISION})
+    app.state.readiness = health.ReadinessCache(
+        lambda: health.database_is_ready(engine, frozenset({REVISION}), frozenset({REVISION})),
+        clock=time.monotonic,
+    )
 
     @app.get(QUERY_ROUTE)
     def query(request: Request) -> dict[str, int]:
@@ -291,6 +295,48 @@ def test_span_de_banco_e_filho_da_requisicao_e_nao_conta_como_evento(
         assert span.parent is not None
         assert span.parent.span_id == main.context.span_id
         assert "main" not in (span.attributes or {})
+
+
+def test_header_host_do_cliente_nao_vai_ao_evento_da_requisicao(traced_app: TracedApp) -> None:
+    with TestClient(traced_app.app) as client:
+        assert client.get(QUERY_ROUTE, headers={"Host": "canario.invalid"}).status_code == 200
+
+    spans = traced_app.exporter.get_finished_spans()
+    (main,) = [s for s in spans if (s.attributes or {}).get("main") is True]
+    attributes = main.attributes or {}
+    # A URL do evento sai da origem pública configurada (3.6), como o `redirect_uri` do login.
+    assert attributes["url.full" if "url.full" in attributes else "http.url"] == (
+        f"http://localhost{QUERY_ROUTE}"
+    )
+    for span in spans:
+        assert "canario" not in span.to_json(), span.name
+
+
+def test_origem_publica_configurada_e_a_da_url_do_evento(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'origem.db'}")
+    app = FastAPI()
+
+    @app.get("/x")
+    def route() -> dict[str, bool]:
+        return {"ok": True}
+
+    exporter = InMemorySpanExporter()
+    settings = Settings.model_validate(
+        {"environment": "test", "public_origin": "https://goblinshift.example"}
+    )
+    configure_tracing(app, engine, settings, exporter)
+    try:
+        with TestClient(app) as client:
+            assert client.get("/x?q=1", headers={"Host": "canario.invalid"}).status_code == 200
+    finally:
+        SQLAlchemyInstrumentor().uninstrument()
+        engine.dispose()
+
+    (main,) = exporter.get_finished_spans()
+    attributes = main.attributes or {}
+    assert attributes["url.full" if "url.full" in attributes else "http.url"] == (
+        "https://goblinshift.example/x"
+    )
 
 
 def test_sonda_readyz_nao_gera_span_de_banco(traced_app: TracedApp) -> None:
@@ -689,6 +735,6 @@ def test_manutencao_nao_escolhe_a_fila_da_api(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(maintenance, "make_tracer_provider", stop_at_provider)
 
     with pytest.raises(ProviderRequestedError):
-        maintenance.serve(TEST_SETTINGS, Mock(), threading.Event())
+        maintenance.serve(TEST_SETTINGS, Mock(), ShutdownFlag())
 
     assert calls == [((TEST_SETTINGS, "goblinshift-maintenance"), {})]

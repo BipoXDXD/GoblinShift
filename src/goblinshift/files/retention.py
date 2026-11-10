@@ -40,6 +40,7 @@ from goblinshift.files.objects import (
 from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
+from goblinshift.platform.sql import skip_locked_batch
 
 logger = logging.getLogger(__name__)
 
@@ -380,14 +381,10 @@ def _open_use_of(object_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
 
 
 def _delete_old_ended_uses(session: Session, cutoff: datetime, limit: int) -> None:
-    chosen = (
-        select(object_use.c.id)
-        .where(object_use.c.ended_at <= cutoff)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-        .scalar_subquery()
+    chosen = skip_locked_batch(
+        select(object_use.c.id).where(object_use.c.ended_at <= cutoff), limit
     )
-    session.execute(delete(object_use).where(object_use.c.id.in_(chosen)))
+    session.execute(delete(object_use).where(object_use.c.id.in_(select(chosen.c.id))))
 
 
 def _published_as_artifact() -> ColumnElement[bool]:

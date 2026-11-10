@@ -69,7 +69,8 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
     <div className="flex min-h-svh flex-col">
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip)"
+        // A altura de 44 px só com foco: oculto, o sr-only mantém a caixa de 1 px.
+        className="sr-only items-center rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip) focus:inline-flex focus:min-h-11"
       >
         {T.skipToContent}
       </a>
@@ -91,7 +92,12 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         </div>
       </header>
       {/* Vem do bundle, não da rede: sai na primeira pintura, sem empurrar o conteúdo (CLS). */}
-      <SiteNoticeBanner notice={notice} now={now} storage={browserStorage} />
+      <SiteNoticeBanner
+        notice={notice}
+        now={now}
+        storage={browserStorage}
+        onDismissed={focusScreenTitle}
+      />
       {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
           tela carrega e cresce. */}
       <main
@@ -115,6 +121,14 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
       </footer>
     </div>
   );
+}
+
+/**
+ * Foco no título da tela (o `h1` do FocusHeading, focável por script): é o começo do conteúdo,
+ * logo depois de onde a faixa fechada estava.
+ */
+function focusScreenTitle(): void {
+  document.getElementById(MAIN_ID)?.querySelector<HTMLElement>("h1")?.focus();
 }
 
 /**

@@ -5,10 +5,38 @@ explícita. `test_authz_matrix.py` enumera as rotas registradas no app e exige i
 entradas: rota nova sem entrada reprova a suíte, e entrada sem rota também.
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum, auto
+from uuid import uuid4
 
 from goblinshift.identity import Scope
+
+# Casa também `{run_id:uuid}`, `{file_path:path}`, `{runId}` e `{upload_id2}`; `path_params` falha
+# fechado se sobrar `{` sem casar, para nenhuma rota escapar da fitness por causa do formato.
+PATH_PARAM = re.compile(r"\{(?P<name>[^}:]+)(?::[^}]*)?\}")
+
+
+def path_params(path: str) -> list[str]:
+    names = [match["name"] for match in PATH_PARAM.finditer(path)]
+    if path.count("{") != len(names):
+        raise ValueError(f"parâmetro de caminho fora do formato em {path}")
+    return names
+
+
+def id_params(path: str) -> list[str]:
+    """Parâmetros do caminho que identificam um recurso (os que não têm valor nomeado na rota)."""
+    named = NAMED_PATH_VALUES.get(path, {})
+    return [name for name in path_params(path) if name not in named]
+
+
+def fill_path(path: str, resource_id: str | None = None) -> str:
+    """Caminho concreto: valor nomeado da rota, senão `resource_id`, senão um UUID novo."""
+    named = NAMED_PATH_VALUES.get(path, {})
+    path_params(path)
+    return PATH_PARAM.sub(
+        lambda match: named.get(match["name"]) or resource_id or str(uuid4()), path
+    )
 
 
 class Policy(Enum):
@@ -49,6 +77,18 @@ def _scope(scope: Scope, resource_param: str | None = None) -> Rule:
 
 
 API = "/api/v1"
+
+# Parâmetros de caminho que não são ids, por rota: um valor da allowlist da própria rota. Todo
+# outro parâmetro identifica um recurso com dono e precisa ser o `resource_param` da regra.
+NAMED_PATH_VALUES: dict[str, dict[str, str]] = {
+    "/docs/assets/{name}": {"name": "swagger-init.js"},
+    "/auth/login/{provider}": {"provider": "google"},
+    "/auth/callback/{provider}": {"provider": "google"},
+    f"{API}/catalog/{{recipe_id}}/versions/{{version}}": {
+        "recipe_id": "csv-janitor",
+        "version": "1",
+    },
+}
 
 MATRIX: dict[tuple[str, str], Rule] = {
     # Infraestrutura e documentação (Swagger UI servido da própria origem: test_api_docs.py).

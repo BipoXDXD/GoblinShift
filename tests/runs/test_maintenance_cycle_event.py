@@ -14,6 +14,7 @@ from opentelemetry.trace import StatusCode
 
 from goblinshift.entrypoints.maintenance import CYCLE_SPAN, run_cycles
 from goblinshift.platform.telemetry import AlertEventCounter
+from goblinshift.runs.maintenance import STEPS_FAILED
 
 logger = logging.getLogger("tests.maintenance_cycle_event")
 
@@ -68,6 +69,62 @@ def test_ciclo_que_falha_nao_impede_o_outro_e_marca_o_span(
     # A mensagem da exceção pode trazer valores do banco: o evento leva só o nome do ciclo.
     assert "banco fora" not in str(span.status.description)
     assert not span.events
+
+
+def test_ciclo_com_passo_falho_conta_como_falha_e_mantem_as_contagens(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    run_cycles(
+        provider.get_tracer("t"),
+        (
+            ("execuções", lambda: {"deadlines": 2, STEPS_FAILED: 1}),
+            ("contas", lambda: {"accounts_purged": 1}),
+        ),
+    )
+
+    [span] = exporter.get_finished_spans()
+    attributes = dict(span.attributes or {})
+    # O mesmo caminho do ciclo que levanta: a causa `gs-causa-ciclos-falhando` lê isto.
+    assert attributes["maintenance.failed_cycles"] == 1
+    assert attributes["maintenance.steps_failed"] == 1
+    assert attributes["maintenance.deadlines"] == 2
+    assert span.status.status_code is StatusCode.ERROR
+
+
+def test_ciclo_com_zero_passos_falhos_nao_conta_como_falha(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    run_cycles(provider.get_tracer("t"), (("execuções", lambda: {STEPS_FAILED: 0}),))
+
+    [span] = exporter.get_finished_spans()
+    assert dict(span.attributes or {})["maintenance.failed_cycles"] == 0
+    assert span.status.status_code is StatusCode.UNSET
+
+
+def test_parada_pedida_nao_comeca_o_ciclo_seguinte(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    ran: list[str] = []
+
+    def executions() -> dict[str, int]:
+        ran.append("execuções")
+        return {"deadlines": 1}
+
+    def accounts() -> dict[str, int]:
+        ran.append("contas")
+        return {}
+
+    run_cycles(
+        provider.get_tracer("t"),
+        (("execuções", executions), ("contas", accounts)),
+        should_stop=lambda: bool(ran),
+    )
+
+    assert ran == ["execuções"]
+    [span] = exporter.get_finished_spans()
+    attributes = dict(span.attributes or {})
+    assert attributes["maintenance.deadlines"] == 1
+    assert attributes["maintenance.failed_cycles"] == 0
 
 
 @pytest.fixture

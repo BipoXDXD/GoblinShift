@@ -78,6 +78,20 @@ test("Bancada: o link do resumo de erros tem a altura do alvo de toque", async (
   expect(await heightOf(link)).toBeGreaterThanOrEqual(MIN_TARGET_PX);
 });
 
+test("Moldura: o pular para o conteúdo, com foco, tem a altura do alvo de toque @keyboard", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+  // A troca de rota põe o foco no h1 (FocusHeading), então o primeiro Tab não chega ao link;
+  // a ordem do Tab já é provada em focus.spec.ts. Aqui basta o estado :focus do link.
+  const link = page.getByRole("link", { name: "Pular para o conteúdo", exact: true });
+  await link.focus();
+  await expect(link).toBeFocused();
+  expect(await heightOf(link)).toBeGreaterThanOrEqual(MIN_TARGET_PX);
+});
+
 test("Execução: o link de download tem a altura do alvo de toque", async ({ page, fakeApi }) => {
   await new ExecucaoPage(page).open(fakeApi.seedRun({ status: "succeeded" }, [OUTPUT]));
 

@@ -31,6 +31,20 @@ describe("App", () => {
     );
   });
 
+  // A altura medida de fato fica no e2e (controls.spec.ts); aqui, o aviso rápido de que a classe
+  // do alvo de toque e a centralização vertical não sumiram.
+  it("o atalho para o conteúdo tem o alvo de toque de 44 px", () => {
+    window.history.pushState({}, "", "/rota-que-nao-existe");
+
+    render(<App />);
+
+    expect(screen.getByRole("link", { name: "Pular para o conteúdo" })).toHaveClass(
+      "focus:min-h-11",
+      "focus:inline-flex",
+      "items-center",
+    );
+  });
+
   it("a rota inicial leva à Bancada de cada receita", async () => {
     window.history.pushState({}, "", "/");
 
