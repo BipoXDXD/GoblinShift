@@ -186,9 +186,9 @@ def test_limite_do_readyz_nao_gasta_a_cota_da_api(stack: NginxLogs) -> None:
 
 # --- Recusa sem IP nem query no log de erro ----------------------------------------------------
 
-# O `limit_req` registra cada recusa no log de erro com `client:` (IP completo) e `request:` (com a
-# query string). O log de acesso trunca o IP e descarta a query (tests/test_nginx_logs.py); o de
-# erro não pode desfazer isso.
+# O `limit_req` registra cada recusa no log de erro, em nível `error`, com `client:` (IP completo) e
+# `request:` (com a query string). O log de acesso trunca o IP e descarta a query
+# (tests/test_nginx_logs.py); o de erro, em `crit`, não pode desfazer isso.
 REFUSAL_CANARY_QUERY = f"CANARY-{uuid.uuid4()}"
 REFUSAL_CANARY_IPS = {
     "/api/v1/me": "203.0.113.97",
