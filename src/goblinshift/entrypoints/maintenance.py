@@ -25,15 +25,21 @@ from opentelemetry.trace import NoOpTracer, Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.shutdown import ShutdownFlag, shutdown_on_signals
-from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
+from goblinshift.entrypoints.worker import build_runner
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
+from goblinshift.platform.telemetry import (
+    UserHasher,
+    configure_logging,
+    make_tracer_provider,
+    shut_down_tracer_provider,
+)
 from goblinshift.runs import purge as runs_purge
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.runner import Runner
 
@@ -78,30 +84,33 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     provider = make_tracer_provider(settings, "goblinshift-maintenance")
     tracer: Tracer = provider.get_tracer(__name__) if provider is not None else NoOpTracer()
     try:
-        with run_finished_reporter(settings, factory, "goblinshift-maintenance") as finished:
-            maintenance = Maintenance(
-                factory,
-                FileStorage(settings.storage_root),
-                runner,
-                MaintenanceConfig(missing_max_absent_ratio=settings.missing_sweep_max_absent_ratio),
-                on_finished=finished.report,
-            )
-            account_jobs = AccountJobs(factory)
-            logger.info("manutenção pronta")
-            cycles: tuple[Cycle, ...] = (
-                # A parada é conferida entre os passos: com o banco fora, cada passo pode levar o
-                # `connect_timeout`, e o SIGTERM viraria SIGKILL no prazo do Docker (10 s).
-                ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
-                ("contas", account_jobs.run_cycle),
-            )
-            while not shutdown.is_set():
-                run_cycles(tracer, cycles, should_stop=shutdown.is_set)
-                shutdown.wait(settings.maintenance_interval_s)
-            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
+        # Um provider por processo: o `maintenance.cycle` e o `run.finished` saem pelo mesmo lote,
+        # e a parada espera um prazo de encerramento só.
+        finished = RunFinishedReporter(factory, UserHasher(settings.user_hash_key()), tracer)
+        maintenance = Maintenance(
+            factory,
+            FileStorage(settings.storage_root),
+            runner,
+            MaintenanceConfig(missing_max_absent_ratio=settings.missing_sweep_max_absent_ratio),
+            on_finished=finished.report,
+        )
+        account_jobs = AccountJobs(factory)
+        logger.info("manutenção pronta")
+        cycles: tuple[Cycle, ...] = (
+            # A parada é conferida entre os passos: com o banco fora, cada passo pode levar o
+            # `connect_timeout`. Esse passo, mais o prazo do tracing, cabe na carência do Docker
+            # (tests/runs/test_process_tracer_shutdown.py); a volta inteira não caberia.
+            ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
+            ("contas", account_jobs.run_cycle),
+        )
+        while not shutdown.is_set():
+            run_cycles(tracer, cycles, should_stop=shutdown.is_set)
+            shutdown.wait(settings.maintenance_interval_s)
+        logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
     finally:
         engine.dispose()
-        if provider is not None:
-            provider.shutdown()
+        # Por último: o encerramento descarta span emitido depois dele.
+        shut_down_tracer_provider(provider)
     logger.info("manutenção encerrada")
 
 

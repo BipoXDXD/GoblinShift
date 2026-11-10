@@ -421,9 +421,11 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
     return SdkEvent(event.name, attributes, event.timestamp)
 
 
-# Cabe na margem que sobra ao lifespan entre o fim do `--timeout-graceful-shutdown` do uvicorn
-# (docker/app.Dockerfile) e o SIGKILL da plataforma. A margem está em
-# tests/test_api_server_limits.py, e tests/api/test_api_tracer_shutdown.py confere a parada nela.
+# Cabe na carência de cada processo entre o SIGTERM e o SIGKILL da plataforma, somado ao resto da
+# parada. API: a margem do lifespan depois do `--timeout-graceful-shutdown` do uvicorn
+# (docker/app.Dockerfile), em tests/test_api_server_limits.py, conferida por
+# tests/api/test_api_tracer_shutdown.py. Worker e manutenção: o passo em curso mais este prazo,
+# contra o `stop_grace_period` de cada serviço, em tests/runs/test_process_tracer_shutdown.py.
 TRACING_SHUTDOWN_TIMEOUT_S = 1.5
 
 
@@ -435,21 +437,27 @@ class ApiTracing:
     provider: TracerProvider | None = None
 
     def shut_down(self) -> None:
-        """Exporta o lote pendente em até `TRACING_SHUTDOWN_TIMEOUT_S`; nunca lança.
+        """Ver `shut_down_tracer_provider`."""
+        shut_down_tracer_provider(self.provider)
 
-        `TracerProvider.shutdown()` não aceita prazo e espera até 30 s por um Collector que não
-        responde. Numa thread daemon, a espera para no prazo e o processo sai mesmo assim. O
-        `atexit` do SDK, se ainda registrado, encontra o processador já encerrado e volta na hora.
-        """
-        if self.provider is None:
-            return
-        worker = threading.Thread(
-            target=_shut_down_provider, args=(self.provider,), name="tracing-shutdown", daemon=True
-        )
-        worker.start()
-        worker.join(TRACING_SHUTDOWN_TIMEOUT_S)
-        if worker.is_alive():
-            logger.warning("encerramento do tracing passou do prazo: spans da fila podem se perder")
+
+def shut_down_tracer_provider(provider: TracerProvider | None) -> None:
+    """Exporta o lote pendente em até `TRACING_SHUTDOWN_TIMEOUT_S`; nunca lança.
+
+    É o último passo da parada: o processador descarta todo span emitido depois dele.
+    `TracerProvider.shutdown()` não aceita prazo e espera até 30 s por um Collector que não
+    responde. Numa thread daemon, a espera para no prazo e o processo sai mesmo assim. O `atexit`
+    do SDK, se ainda registrado, encontra o processador já encerrado e volta na hora.
+    """
+    if provider is None:
+        return
+    worker = threading.Thread(
+        target=_shut_down_provider, args=(provider,), name="tracing-shutdown", daemon=True
+    )
+    worker.start()
+    worker.join(TRACING_SHUTDOWN_TIMEOUT_S)
+    if worker.is_alive():
+        logger.warning("encerramento do tracing passou do prazo: spans da fila podem se perder")
 
 
 def _shut_down_provider(provider: TracerProvider) -> None:
