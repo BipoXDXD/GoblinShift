@@ -25,7 +25,9 @@ Falha transitória do banco fora da supervisão (`record_start`, renovação no 
 desfecho) deixa a tentativa órfã, com a área de trabalho ocupada até a manutenção encerrá-la. O
 worker então pausa os claims por `orphan_cleanup_window` (lease, intervalo da manutenção e
 carência da parada), para a Run seguinte não receber `work_area_dirty` e gastar claims
-(runs/worker/claim_pause.py).
+(runs/worker/claim_pause.py). A pausa vive na memória e se perde no reinício; por isso, antes de
+cada claim, o worker também confere o estado da área de trabalho e não reivindica enquanto ela
+guarda alguma tentativa (runs/worker/work_area_gate.py).
 
 Runner: em produção só o `executor_ctl` (container gVisor por tentativa, pelo serviço do host);
 o processo recusa subir com o Runner local, que não tem sandbox (3.9, fatia 4).
@@ -61,6 +63,7 @@ from goblinshift.runs.worker.coordinator import (
 )
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from goblinshift.runs.worker.runner import STOP_GRACE, LocalRunner, Runner
+from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 
 logger = logging.getLogger("goblinshift.worker")
 
@@ -114,6 +117,7 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     )
     hasher = UserHasher(settings.user_hash_key())
     pause = claim_pause_for(settings)
+    gate = WorkAreaGate(runner)
     # O tracing fecha por último, depois do pool: o encerramento descarta span emitido depois dele.
     with process_tracer(settings, "goblinshift-worker") as tracer:
         try:
@@ -132,7 +136,7 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
                 )
                 logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
                 while not shutdown.is_set():
-                    if not _work_once(factory, storage, lease, coordinator, finished, pause):
+                    if not _work_once(factory, storage, lease, coordinator, finished, pause, gate):
                         logger.debug("fila vazia; aguardando NOTIFY")
                         wait_for_work(listener.wait, shutdown, settings.worker_poll_interval_s)
                 logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
@@ -206,14 +210,18 @@ def _work_once(
     coordinator: Coordinator,
     finished: RunFinishedReporter,
     pause: ClaimPause,
+    gate: WorkAreaGate,
 ) -> bool:
     """Uma volta do laço; `True` se havia trabalho (vale tentar de novo sem esperar).
 
-    Durante a pausa depois de uma tentativa órfã, a volta não reivindica e conta como fila vazia.
+    Durante a pausa depois de uma tentativa órfã, ou com a área de trabalho ainda ocupada (por
+    exemplo, depois de um reinício), a volta não reivindica e conta como fila vazia.
     """
     if pause.active:
         return False
     try:
+        if not gate.allows_claim():
+            return False
         claimed = claim_next(factory, storage, lease, on_finished=finished.report)
         if claimed is None:
             return False

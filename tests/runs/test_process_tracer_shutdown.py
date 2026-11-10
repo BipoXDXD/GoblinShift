@@ -30,6 +30,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 from tests.span_exporters import (
     BATCH_DELAY_MS,
     SHORT_SHUTDOWN_TIMEOUT_S,
@@ -203,6 +204,31 @@ def test_parada_do_worker_encerra_o_tracing_depois_dos_outros_passos(
     worker.serve(_settings(tmp_path), Mock(), shutdown)
 
     assert SHUTDOWN_SPAN in exporters.span_names()
+
+
+@pytest.mark.usefixtures("exporters")
+def test_worker_confere_a_area_de_trabalho_do_proprio_runner_a_cada_volta(
+    otlp: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    shutdown = ShutdownFlag()
+    gates: list[object] = []
+
+    def one_round(*args: object) -> bool:
+        gates.append(args[-1])
+        shutdown.request(signal.SIGTERM)
+        return True
+
+    otlp.setattr(worker, "QueueListener", _IdleListener)
+    otlp.setattr(worker, "_work_once", one_round)
+    runner = Mock()
+    runner.list_work.return_value = []
+
+    worker.serve(_settings(tmp_path), runner, shutdown)
+
+    [gate] = gates
+    assert isinstance(gate, WorkAreaGate)
+    assert gate.allows_claim()
+    runner.list_work.assert_called_once_with()
 
 
 # Manutenção ------------------------------------------------------------------------------------

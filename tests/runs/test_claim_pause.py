@@ -24,6 +24,8 @@ from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
 from goblinshift.runs.worker.coordinator import Coordinator
+from goblinshift.runs.worker.runner import Runner
+from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 
 WINDOW = timedelta(seconds=100)
 WORKER_LOGGER = "goblinshift.worker"
@@ -153,6 +155,11 @@ def queue(monkeypatch: pytest.MonkeyPatch) -> FakeQueue:
     return fake
 
 
+def clear_area() -> WorkAreaGate:
+    """Área sem tentativa: aqui só a pausa decide a volta (o portão está em test_work_area_gate)."""
+    return WorkAreaGate(cast(Runner, SimpleNamespace(list_work=list)))
+
+
 def work_once(coordinator: FakeCoordinator, pause: ClaimPause) -> bool:
     return worker_entrypoint._work_once(
         cast(sessionmaker[Session], None),
@@ -161,6 +168,7 @@ def work_once(coordinator: FakeCoordinator, pause: ClaimPause) -> bool:
         cast(Coordinator, coordinator),
         cast(RunFinishedReporter, SimpleNamespace(report=lambda _run_id: None)),
         pause,
+        clear_area(),
     )
 
 
