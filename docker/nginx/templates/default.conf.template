@@ -58,6 +58,10 @@ limit_req_status 429;
 # o `error_log` da imagem (nível `notice`) para as requisições; as mensagens do processo, sem dado
 # de cliente, continuam nele. tests/test_nginx_logs.py e tests/test_nginx_edge_limits.py provam com
 # canários de IP e de query.
+# O `crit` é raro, mas não limpo: falta de recurso (disco cheio no `proxy_temp`, EMFILE, malloc)
+# ainda grava `client:` e `request:` com o IP completo e a query. Nesse caso o log de acesso pode
+# mostrar 200 para uma resposta cortada no meio. `proxy_max_temp_file_size 0` tiraria o disco do
+# caminho, mas muda o comportamento com respostas grandes; fica registrado como opção, não aplicado.
 error_log /var/log/nginx/error.log crit;
 
 # A API é resolvida pelo DNS do Docker em tempo de requisição (proxy_pass com variável), não só
