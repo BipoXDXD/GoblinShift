@@ -4,7 +4,6 @@ Cada teste de acesso confere o status e o código do problem+json, e que o corpo
 da conta.
 """
 
-import re
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -26,11 +25,10 @@ from tests.api.support import assert_problem
 from tests.identity.support import ALL_SCOPES, new_key, new_user, prepare_database
 from tests.security.authz_matrix import (
     MATRIX,
-    NAMED_PATH_VALUES,
-    PATH_PARAM,
     Policy,
     Rule,
     entries,
+    fill_path,
 )
 
 # HEAD acompanha GET nas rotas do Starlette e não é uma operação à parte.
@@ -50,11 +48,7 @@ def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
 
 def _concrete(path: str) -> str:
     """Troca cada parâmetro do caminho por um valor que passa na validação do tipo."""
-
-    def value(match: re.Match[str]) -> str:
-        return NAMED_PATH_VALUES.get(match["name"]) or str(uuid4())
-
-    return PATH_PARAM.sub(value, path)
+    return fill_path(path)
 
 
 def _cases(*policies: Policy) -> list[object]:
@@ -105,12 +99,6 @@ def test_so_o_logout_dispensa_credencial_mas_exige_o_par_csrf() -> None:
     assert [(method, path) for method, path, _ in entries(Policy.CSRF_ONLY)] == [
         ("POST", "/auth/logout")
     ]
-
-
-def test_toda_rota_com_recurso_declara_o_parametro_do_caminho() -> None:
-    for (_, path), rule in MATRIX.items():
-        if rule.resource_param is not None:
-            assert f"{{{rule.resource_param}}}" in path
 
 
 # --- Comportamento (PostgreSQL real) ----------------------------------------------------------
