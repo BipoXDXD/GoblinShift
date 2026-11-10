@@ -500,12 +500,11 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     expect(screen.getByRole("region", { name: "Aceite os termos para continuar" })).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(
-      screen
-        .getAllByRole("status")
-        .some(
-          (region) =>
-            region.textContent === "Para continuar, aceite a versão atual dos termos de uso.",
-        ),
+      screen.getAllByRole("status").some(
+        // Sem distinguir maiúsculas: "termos de uso" vira "Termos de Uso" no #271.
+        (region) =>
+          /^Para continuar, aceite a versão atual dos termos de uso\.$/i.test(region.textContent),
+      ),
     ).toBe(true);
   });
 
