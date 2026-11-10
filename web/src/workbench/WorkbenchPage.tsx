@@ -172,7 +172,7 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
  */
 function SourceNotice({ children }: { readonly children: ReactNode }): ReactElement {
   return (
-    <p role="status" className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg">
+    <p role="status" className="max-w-prose rounded-lg bg-info-bg p-4 text-info-fg opacity-40">
       {children}
     </p>
   );

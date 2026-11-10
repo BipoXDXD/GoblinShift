@@ -12,7 +12,12 @@ export function RouteFailure(): ReactElement {
   useEffect(() => {
     console.error("Falha ao abrir a tela:", error);
   }, [error]);
-  return <ProblemAlert failure={{ kind: "internal" }} />;
+  return (
+    <>
+      <ProblemAlert failure={{ kind: "internal" }} />
+      <button type="button" className="size-11" />
+    </>
+  );
 }
 
 /** O mesmo aviso quando a própria moldura quebrou: sem ela, a página fica só com o `<main>`. */
