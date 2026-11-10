@@ -38,7 +38,7 @@ export function CreditsPage(): ReactElement {
         </p>
         <p>
           {T.art.license.before}
-          <a href={CC_BY_4_URL} rel="noreferrer">
+          <a href={CC_BY_4_URL} hrefLang="pt" rel="noreferrer">
             {T.art.license.link}
           </a>
           {T.art.license.after}

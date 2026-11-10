@@ -51,6 +51,14 @@ describe("/creditos", () => {
     expect(link).not.toHaveAttribute("target");
   });
 
+  it("o link da CC BY 4.0 avisa que a página está em português", async () => {
+    setup("/creditos");
+    await expectHeadingFocused("Créditos");
+
+    const link = within(screen.getByRole("main")).getByRole("link", { name: "CC BY 4.0" });
+    expect(link).toHaveAttribute("hreflang", "pt");
+  });
+
   it("apresenta as cinco goblins do elenco, cada uma com o nome", async () => {
     setup("/creditos");
     await expectHeadingFocused("Créditos");
