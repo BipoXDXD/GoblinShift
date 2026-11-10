@@ -1,8 +1,9 @@
 """O modelo de ameaças (docs/seguranca/modelo-de-ameacas.md) só cita evidência que existe.
 
 Formas de citação, todas conferidas aqui:
-- `arquivo.py::símbolo` (teste, função, classe, `Classe.método`, função aninhada ou nome
-  atribuído), resolvido por `resolve_symbol`, a mesma regra da forma com trecho: definido uma vez;
+- `arquivo.py::símbolo` (teste, função, classe, `Classe.método` ou função aninhada), resolvido por
+  `resolve_symbol`, a mesma regra da forma com trecho: definido uma vez. Nome atribuído é recusado,
+  porque só a forma com trecho confere o valor dele;
 - `` `arquivo.py` `símbolo` `trecho` `` e `` `arquivo` `trecho` `` (fora do Python), com o trecho
   exatamente uma vez no símbolo ou no arquivo (`tests/security/threat_citations.py`): editar
   código acima não reprova, trocar o código citado sim; a forma `arquivo:linha` é recusada;
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tests.security.threat_citations import (
+    Definition,
     citation_problems,
     count_code_citations,
     resolve_symbol,
@@ -38,13 +40,18 @@ def test_documento_cita_simbolos_e_trechos() -> None:
 
 
 def _missing_symbols(document: str, root: Path) -> list[str]:
-    """As citações `arquivo.py::símbolo` cujo arquivo não existe ou cujo símbolo não é único."""
+    """As citações `arquivo.py::símbolo` cujo arquivo não existe ou cujo símbolo não é uma definição
+    única (função ou classe)."""
     return [
         f"{file}::{name}"
         for file, name in _SYMBOL_REF.findall(document)
-        if not (root / file).is_file()
-        or isinstance(resolve_symbol((root / file).read_text(encoding="utf-8"), name), str)
+        if not (root / file).is_file() or not _is_single_definition(root / file, name)
     ]
+
+
+def _is_single_definition(path: Path, symbol: str) -> bool:
+    """Nome atribuído não vale aqui: só a forma com trecho confere o valor dele."""
+    return isinstance(resolve_symbol(path.read_text(encoding="utf-8"), symbol), Definition)
 
 
 def test_todo_simbolo_citado_existe() -> None:
@@ -60,7 +67,8 @@ def test_todo_documento_citado_existe() -> None:
 
 
 _MODULE = """\
-LIMIT = 10
+MAX_UPLOAD_BYTES = 10 * 1024**2
+MAX: int
 
 
 def guard() -> None:
@@ -79,6 +87,11 @@ def twin() -> None:
 
 def twin() -> None:  # noqa: F811
     pass
+
+
+def test_upload() -> None:
+    response = guard()
+    assert response is None
 """
 
 
@@ -100,9 +113,14 @@ def test_simbolo_ou_arquivo_inexistente_e_listado(module_root: Path, citation: s
 
 
 # As duas formas de citação resolvem o símbolo pela mesma regra (`resolve_symbol`).
-@pytest.mark.parametrize("symbol", ["guard.inner", "LIMIT"])
-def test_funcao_aninhada_e_nome_atribuido_sao_encontrados(module_root: Path, symbol: str) -> None:
-    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == []
+def test_funcao_aninhada_e_encontrada(module_root: Path) -> None:
+    assert _missing_symbols("`src/mod.py::guard.inner`", module_root) == []
+
+
+# Nome atribuído só prova que existe: o valor é conferido pela forma com trecho.
+@pytest.mark.parametrize("symbol", ["MAX_UPLOAD_BYTES", "MAX", "test_upload.response"])
+def test_nome_atribuido_e_listado(module_root: Path, symbol: str) -> None:
+    assert _missing_symbols(f"`src/mod.py::{symbol}`", module_root) == [f"src/mod.py::{symbol}"]
 
 
 @pytest.mark.parametrize("symbol", ["inner", "twin"])

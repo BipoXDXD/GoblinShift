@@ -42,8 +42,8 @@ _BARE_IDENTIFIER = re.compile(r"\W*[A-Za-z_]\w*\W*")
 # As únicas quebras de linha que o `ast` conta em `lineno`; `str.splitlines` aceita outras.
 _AST_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
-_Definition = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-_Named = _Definition | ast.Assign | ast.AnnAssign
+Definition = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+_Named = Definition | ast.Assign | ast.AnnAssign
 
 
 def citation_problems(document: str, root: Path) -> list[str]:
@@ -95,7 +95,7 @@ def _python_problem(source: str, symbol: str, excerpt: str) -> str | None:
     segment = _segment(source, node)
     if excerpt == _name(node):
         return "o trecho é só o nome do símbolo"
-    if not isinstance(node, _Definition):
+    if not isinstance(node, Definition):
         problem = _assignment_problem(source, node, excerpt)
         if problem is not None:
             return problem
@@ -237,13 +237,13 @@ def _named_children(scope: ast.AST) -> list[_Named]:
     for child in ast.iter_child_nodes(scope):
         if isinstance(child, _Named):
             found.append(child)
-        if not isinstance(child, _Definition):
+        if not isinstance(child, Definition):
             found.extend(_named_children(child))
     return found
 
 
 def _name(node: _Named) -> str | None:
-    if isinstance(node, _Definition):
+    if isinstance(node, Definition):
         return node.name
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
     names = [target.id for target in targets if isinstance(target, ast.Name)]
@@ -252,6 +252,6 @@ def _name(node: _Named) -> str | None:
 
 def _segment(source: str, node: _Named) -> str:
     """Linhas inteiras do nó, a partir do primeiro decorador."""
-    decorators = node.decorator_list if isinstance(node, _Definition) else []
+    decorators = node.decorator_list if isinstance(node, Definition) else []
     first = min([node.lineno, *(decorator.lineno for decorator in decorators)])
     return "\n".join(source.splitlines()[first - 1 : node.end_lineno])
