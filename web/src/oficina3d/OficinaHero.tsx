@@ -328,7 +328,7 @@ function StepButton({ label, Icon, onStep }: StepButtonProps): ReactElement {
       type="button"
       aria-label={label}
       title={label}
-      className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
+      className="inline-flex cursor-pointer items-center justify-center rounded-lg hover:bg-surface hover:text-fg"
       onClick={onStep}
     >
       <Icon aria-hidden="true" className="size-4" />
