@@ -161,6 +161,27 @@ trecho, e nestes casos a garantia vem só dos testes de comportamento da mesma l
   pelo `filterwarnings = ["error"]` do pytest, impede que isso chegue verde ao CI.
 - **Limite de `/api` no Nginx.** A citação aponta o início de cada `location`, não o
   `limit_req zone=api` dentro dela, como diz a linha da ameaça.
+- **Forma literal, não valor efetivo.** O verificador lê a forma literal do valor atribuído, e não
+  o valor que ele produz. Quatro grafias passam por ele e enfraquecem citações de hoje:
+  - chave calculada, seja por nome (uma constante com `"Content-Security-Policy"` usada como chave
+    de `DOWNLOAD_PROTECTION_HEADERS`) ou por chamada (`"Cache-Control".lower()` como chave em
+    `_COMMON_HEADERS`);
+  - chamada que filtra em volta do contêiner, como `tuple(filter(...))` em `_COMMON_HEADERS`;
+  - `**` num grupo acima do item, como `dict({...}, **{...})` em `DOWNLOAD_PROTECTION_HEADERS`.
+
+  Nos casos de `DOWNLOAD_PROTECTION_HEADERS` (chave por nome e `**` no grupo pai), quem reprova são
+  `tests/api/test_artifacts.py::test_download_entrega_o_conteudo_com_os_cabecalhos_de_protecao` e
+  `tests/api/test_security_headers.py::test_download_real_mantem_a_csp_sandbox_e_ganha_so_os_que_faltam`.
+  Nos de `_COMMON_HEADERS` (chave por chamada e `filter`), quem reprova é
+  `tests/api/test_security_headers.py::test_respostas_da_api_tem_cabecalhos_de_3_6`.
+- **Mutação depois da atribuição.** Fica fora do que a regra promete, da mesma família da fila da
+  conta e da restrição repetida acima. Um `DOWNLOAD_PROTECTION_HEADERS[...] = ...` depois do
+  símbolo é pego pelos dois testes de download acima, e um `append_constraint` com outra
+  `PrimaryKeyConstraint` em `idempotency_record` é pego pelo `SAWarning`, que o
+  `filterwarnings = ["error"]` do pytest transforma em erro.
+
+Nesses dois últimos itens, a evidência está nos testes de comportamento da linha, e não no
+verificador de citações.
 
 ## Fora do escopo deste documento
 
