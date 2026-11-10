@@ -47,7 +47,12 @@ from goblinshift.entrypoints.shutdown import SHUTDOWN_POLL_S, ShutdownFlag
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import UserHasher, configure_logging, make_tracer_provider
+from goblinshift.platform.telemetry import (
+    UserHasher,
+    configure_logging,
+    make_tracer_provider,
+    shut_down_tracer_provider,
+)
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.claim import ClaimedAttempt, QueueListener, claim_next
 from goblinshift.runs.worker.claim_pause import ClaimPause, orphan_cleanup_window
@@ -113,30 +118,30 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     hasher = UserHasher(settings.user_hash_key())
     pause = claim_pause_for(settings)
     gate = WorkAreaGate(runner)
-    try:
-        with (
-            process_tracer(settings, "goblinshift-worker") as tracer,
-            QueueListener(engine, settings.db_connect_timeout_s) as listener,
-        ):
-            # Um provider por processo: o span `attempt` e o `run.finished` saem pelo mesmo lote.
-            finished = RunFinishedReporter(factory, hasher, tracer)
-            coordinator = Coordinator(
-                factory,
-                storage,
-                runner,
-                config,
-                on_finished=finished.report,
-                tracer=tracer,
-                user_hasher=hasher,
-            )
-            logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
-            while not shutdown.is_set():
-                if not _work_once(factory, storage, lease, coordinator, finished, pause, gate):
-                    logger.debug("fila vazia; aguardando NOTIFY")
-                    wait_for_work(listener.wait, shutdown, settings.worker_poll_interval_s)
-            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
-    finally:
-        engine.dispose()
+    # O tracing fecha por último, depois do pool: o encerramento descarta span emitido depois dele.
+    with process_tracer(settings, "goblinshift-worker") as tracer:
+        try:
+            with QueueListener(engine, settings.db_connect_timeout_s) as listener:
+                # Um provider por processo: o span `attempt` e o `run.finished` saem pelo mesmo
+                # lote.
+                finished = RunFinishedReporter(factory, hasher, tracer)
+                coordinator = Coordinator(
+                    factory,
+                    storage,
+                    runner,
+                    config,
+                    on_finished=finished.report,
+                    tracer=tracer,
+                    user_hasher=hasher,
+                )
+                logger.info("worker pronto", extra={"fields": {"runner": settings.runner}})
+                while not shutdown.is_set():
+                    if not _work_once(factory, storage, lease, coordinator, finished, pause, gate):
+                        logger.debug("fila vazia; aguardando NOTIFY")
+                        wait_for_work(listener.wait, shutdown, settings.worker_poll_interval_s)
+                logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
+        finally:
+            engine.dispose()
     logger.info("worker encerrado")
 
 
@@ -177,7 +182,7 @@ def claim_pause_for(settings: Settings) -> ClaimPause:
 
 @contextmanager
 def process_tracer(settings: Settings, default_service: str) -> Iterator[Tracer]:
-    """Tracer dos eventos amplos do processo (3.7); ao sair, exporta o lote pendente.
+    """Tracer dos eventos amplos do processo (3.7); ao sair, exporta o lote pendente com prazo.
 
     Sem endpoint OTLP (desenvolvimento e testes), um tracer que não grava.
     """
@@ -185,8 +190,7 @@ def process_tracer(settings: Settings, default_service: str) -> Iterator[Tracer]
     try:
         yield provider.get_tracer(__name__) if provider is not None else NoOpTracer()
     finally:
-        if provider is not None:
-            provider.shutdown()
+        shut_down_tracer_provider(provider)
 
 
 @contextmanager
