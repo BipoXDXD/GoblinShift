@@ -166,7 +166,7 @@ describe("Layout: login recusado", () => {
     setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), "/?login_error=failed");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
     );
   });
 
@@ -188,7 +188,7 @@ describe("Layout: login recusado", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(
-      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
     );
     expect(within(alert).queryByText(/Código/)).toBeNull();
     expect(alert).not.toHaveTextContent(/golpe|PERIGO|<b>/);

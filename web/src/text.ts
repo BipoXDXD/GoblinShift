@@ -20,7 +20,7 @@ export const TEXT = {
     network: "Não foi possível falar com o servidor. Confira a conexão e tente de novo.",
     timeout: "O servidor demorou demais para responder. Tente de novo.",
     unexpected: "O servidor respondeu de um jeito inesperado. Tente de novo em instantes.",
-    internal: "Algo deu errado nesta tela. Recarregue a página e tente de novo.",
+    internal: "Houve um erro na interface. Recarregue a página e tente de novo.",
     requestId: (id: string) => `Código do pedido para suporte: ${id}`,
     problems: {
       BAD_REQUEST:
@@ -289,9 +289,11 @@ export const TEXT = {
       rejections: {
         UNSUPPORTED_FORMAT: "O formato do arquivo não é aceito por esta receita.",
         UNSUPPORTED_BIT_DEPTH: "A profundidade de cor da imagem não é aceita.",
-        UNSUPPORTED_COLOR_PROFILE: "O perfil de cor da imagem não é aceito; só sRGB e Display P3.",
+        UNSUPPORTED_COLOR_PROFILE:
+          "O perfil de cor da imagem não é aceito; só sRGB e Display P3. Exporte a imagem em sRGB e envie outra vez.",
         IMAGE_TOO_LARGE: "A imagem passa de 24 megapixels ou de 8192 px num dos lados.",
-        CSV_STRUCTURE_INVALID: "A estrutura do CSV é inválida (aspas, colunas ou codificação).",
+        CSV_STRUCTURE_INVALID:
+          "A estrutura do CSV é inválida (aspas, colunas ou codificação). Salve o CSV de novo em UTF-8 e envie outra vez.",
         FIELD_LIMIT_EXCEEDED:
           "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
         MEDIA_TOO_LARGE:
@@ -649,12 +651,11 @@ export const TEXT = {
       alreadyIn: (name: string) => `Você já entrou como ${name}.`,
       goToAccess: "Ver o seu acesso",
       promptTitle: "Entre para continuar",
-      promptBody: "Esta parte do GoblinShift precisa de login.",
+      promptBody: "Entre para enviar arquivos e ver suas execuções.",
       reauthTitle: "Entre de novo para confirmar",
       reauthBody:
         "Por segurança, esta ação exige um login feito há poucos minutos. Entre de novo e volte para cá.",
-      failed:
-        "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      failed: "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
       navSignIn: "Entrar",
       navAccess: "Acesso",
     },

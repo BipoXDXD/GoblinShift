@@ -70,6 +70,7 @@ describe("App", () => {
     render(<App />);
 
     const prompt = await screen.findByRole("region", { name: "Entre para continuar" });
+    expect(prompt).toHaveTextContent("Entre para enviar arquivos e ver suas execuções.");
     expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
       "href",
       "/auth/login/google?return_to=%2Fbancada%2Fcsv-janitor",

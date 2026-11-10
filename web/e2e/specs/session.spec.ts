@@ -64,7 +64,7 @@ test("código fora do formato no endereço não aparece na tela de erro", async 
 
   const alert = page.getByRole("alert");
   await expect(alert).toHaveText(
-    "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+    "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
   );
   await expect(alert).not.toContainText("golpe");
   await expect(alert.getByText(/Código/)).toHaveCount(0);
