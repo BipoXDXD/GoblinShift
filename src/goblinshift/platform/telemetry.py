@@ -46,6 +46,9 @@ _DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
 _POOL_LOGGER_PREFIX = "sqlalchemy.pool"
 # O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
 _PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
+# Classe (2) e condição (3) do PostgreSQL; o que não casar não vai para o log nem para a tela.
+_SQLSTATE = re.compile(r"[0-9A-Z]{5}")
+_SQLSTATE_ATTRIBUTE = "sqlstate"
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,9 @@ class JsonFormatter(logging.Formatter):
         fields = getattr(record, "fields", None)
         if isinstance(fields, dict):
             entry.update(fields)
+        sqlstate = getattr(record, _SQLSTATE_ATTRIBUTE, None)
+        if sqlstate is not None:
+            entry[_SQLSTATE_ATTRIBUTE] = sqlstate
         if record.exc_info:
             entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
@@ -72,8 +78,9 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
 
     A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
     do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
-    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira. As mensagens
-    do pool perdem o repr da conexão.
+    `exc_info`: o registro continua com a exceção. O SQLSTATE do PostgreSQL, que é só um código,
+    fica junto do tipo e no atributo `sqlstate` do registro. Qualquer outra exceção sai inteira. As
+    mensagens do pool perdem o repr da conexão.
     """
     if record.name.startswith(_POOL_LOGGER_PREFIX):
         record.msg = _PSYCOPG_CONNECTION_REPR.sub("<psycopg connection>", record.getMessage())
@@ -81,10 +88,36 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
-    chain = list(_exception_chain(exception))
-    if any(isinstance(item, _DATABASE_ERRORS) for item in chain):
+    if is_database_error(exception):
+        chain = _exception_chain(exception)
         record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
+        sqlstate = database_sqlstate(exception)
+        if sqlstate is not None:
+            setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
     return True
+
+
+def is_database_error(exception: BaseException) -> bool:
+    """Se há erro do SQLAlchemy ou do psycopg na cadeia que o traceback mostraria."""
+    return any(isinstance(item, _DATABASE_ERRORS) for item in _exception_chain(exception))
+
+
+def database_sqlstate(exception: BaseException) -> str | None:
+    """O SQLSTATE do primeiro erro do psycopg na cadeia, ou `None` se não houver um bem formado.
+
+    Só o código sai daqui, nunca a mensagem: ela pode trazer valores do usuário no `DETAIL`.
+    """
+    for item in _exception_chain(exception):
+        if isinstance(item, psycopg.Error):
+            return _well_formed_sqlstate(item)
+    return None
+
+
+def _well_formed_sqlstate(error: psycopg.Error) -> str | None:
+    sqlstate = error.sqlstate
+    if sqlstate is None or not _SQLSTATE.fullmatch(sqlstate):
+        return None
+    return sqlstate
 
 
 def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
@@ -107,7 +140,12 @@ def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
 def _type_and_frames(exception: BaseException) -> str:
     frames = "".join(traceback.format_tb(exception.__traceback__))
     kind = type(exception)
-    return f"Traceback (most recent call last):\n{frames}{kind.__module__}.{kind.__qualname__}"
+    described = f"{kind.__module__}.{kind.__qualname__}"
+    if isinstance(exception, psycopg.Error):
+        sqlstate = _well_formed_sqlstate(exception)
+        if sqlstate is not None:
+            described = f"{described} (SQLSTATE {sqlstate})"
+    return f"Traceback (most recent call last):\n{frames}{described}"
 
 
 class AlertEventCounter(logging.Handler):

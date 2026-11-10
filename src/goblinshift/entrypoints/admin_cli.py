@@ -33,7 +33,10 @@ e novos dos itens citados. `usage` imprime, separados por tab, o consumo das úl
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
-segredo obrigatório, com uma linha em stderr que nomeia a variável.
+segredo obrigatório, com uma linha em stderr que nomeia a variável. Qualquer outra falha sai com 4
+e uma linha em stderr só com o tipo do erro e, se vier do PostgreSQL, o SQLSTATE: sem stack trace
+nem mensagem, que pode trazer SQL, host ou valores do usuário (3.7). O que já foi gravado antes
+da falha fica gravado; `block` e `request-deletion` completam o que faltou se repetidos.
 """
 
 import argparse
@@ -75,7 +78,7 @@ from goblinshift.identity.accounts import (
 )
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import MissingSecretError, Settings
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import UserHasher, database_sqlstate, is_database_error
 from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
@@ -90,6 +93,7 @@ EXIT_OK = 0
 EXIT_NOT_FOUND = 1
 EXIT_USAGE = 2
 EXIT_MISSING_SECRET = 3
+EXIT_FAILURE = 4
 # HMAC-SHA256 em hexadecimal, como o `UserHasher` escreve nos eventos.
 _USER_HASH = re.compile(r"[0-9a-f]{64}")
 _FROM_STDIN = "-"
@@ -115,6 +119,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_command(args)
     except MissingSecretError as error:
         return _fail(EXIT_MISSING_SECRET, str(error))
+    except Exception as error:
+        return _fail(EXIT_FAILURE, _unexpected_failure(error))
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -386,6 +392,15 @@ def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime
     record_audit_event(
         session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
     )
+
+
+def _unexpected_failure(error: Exception) -> str:
+    kind = type(error).__qualname__
+    if not is_database_error(error):
+        return f"falha inesperada ({kind}); detalhes omitidos"
+    sqlstate = database_sqlstate(error)
+    details = kind if sqlstate is None else f"{kind}, SQLSTATE {sqlstate}"
+    return f"falha no banco de dados ({details})"
 
 
 def _fail(exit_code: int, message: str) -> int:

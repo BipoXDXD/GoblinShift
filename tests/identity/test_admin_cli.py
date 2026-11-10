@@ -6,13 +6,20 @@ import io
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID, uuid7
+from uuid import UUID, uuid4, uuid7
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
+from goblinshift.entrypoints import admin_cli
+from goblinshift.entrypoints.admin_cli import (
+    EXIT_FAILURE,
+    EXIT_NOT_FOUND,
+    EXIT_OK,
+    EXIT_USAGE,
+    main,
+)
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
@@ -707,3 +714,26 @@ def test_conta_inexistente_sai_com_1(capsys: pytest.CaptureFixture[str], command
 
     assert exit_code == EXIT_NOT_FOUND
     assert "não existe" in err
+
+
+def test_erro_do_postgresql_sai_com_4_e_o_sqlstate_sem_o_parametro(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    factory: sessionmaker[Session],
+) -> None:
+    """O PostgreSQL repete o valor recusado na mensagem; a tela só recebe tipo e SQLSTATE."""
+    canary = f"CANARY-{uuid4()}"
+
+    def create_admin_user(session: Session, display_name: str) -> UUID:
+        session.execute(text("SELECT CAST(:value AS integer)"), {"value": display_name})
+        raise AssertionError("o CAST acima falha no banco")
+
+    monkeypatch.setattr(admin_cli, "create_admin_user", create_admin_user)
+
+    exit_code, out, err = run(capsys, "create-user", "--display-name", canary)
+
+    assert exit_code == EXIT_FAILURE
+    assert out == ""
+    assert err == "gs-admin: falha no banco de dados (DataError, SQLSTATE 22P02)\n"
+    with unit_of_work(factory) as session:
+        assert session.execute(select(app_user.c.id)).first() is None
