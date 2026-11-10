@@ -197,9 +197,10 @@ function ringProblems(stop: FocusStop): string[] {
  * Roda no navegador, depois de qualquer transição do elemento terminar. O anel pode estar no próprio elemento ou num pseudo-elemento: o cartão da
  * Oficina desenha o anel no ::after do link, que cobre o cartão (base.css, .card-link).
  *
- * `deviceWidth` é a largura do aparelho, não o `innerWidth`: com `isMobile`, o Chromium alarga o
- * layout viewport até o conteúdo que estoura, e um foco além da largura do aparelho contaria como
- * à vista (a mesma régua do support/reflow.ts).
+ * `deviceWidth` é a largura do aparelho, não o `innerWidth`: com `isMobile`, o Chromium alarga
+ * o layout viewport até o conteúdo que estoura, e um foco além da largura do aparelho contaria
+ * como à vista (a mesma régua do support/reflow.ts). Só faz diferença quando o foco roda com
+ * `isMobile`, e hoje o projeto `mobile` não roda este spec (`grepInvert: /@keyboard/`).
  */
 async function readFocusStop(deviceWidth: number): Promise<FocusStop | null> {
   const focused = document.activeElement;
