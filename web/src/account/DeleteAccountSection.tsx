@@ -37,16 +37,15 @@ export function DeleteAccountSection(): ReactElement {
     setTyped("");
     setPhraseError(null);
   };
-  // A confirmação bloqueada ainda recebe o clique: em vez de não fazer nada, diz o que falta. O
-  // erro entra no DOM antes do foco, para o leitor de tela ler o campo já com a descrição nova.
+  // O erro entra no DOM antes do foco, para o leitor de tela ler o campo já com a descrição nova.
   const rejectPhrase = (): void => {
     flushSync(() => {
       setPhraseError(T.phraseMismatch(T.phrase));
     });
     phraseInput.current?.focus();
   };
-  // O mesmo caminho para o clique liberado e o bloqueado: a frase errada vira erro no campo, e o
-  // pedido em curso não dispara outro.
+  // A confirmação fica ativa (padrão GOV.UK, como no Field): a frase errada vira erro no campo ao
+  // confirmar, e o pedido em curso não dispara outro.
   const confirm = (): void => {
     if (remove.isPending) {
       return;
@@ -92,11 +91,10 @@ export function DeleteAccountSection(): ReactElement {
         title={T.dialogTitle}
         confirmLabel={remove.isPending ? T.deleting : T.confirm}
         cancelLabel={T.cancel}
-        confirmBlocked={!phraseMatches(typed) || remove.isPending}
+        confirmBlocked={remove.isPending}
         busy={remove.isPending}
         onCancel={close}
         onConfirm={confirm}
-        onBlockedConfirm={confirm}
       >
         <p>{T.dialogBody}</p>
         <Field id={phraseId} label={T.phraseLabel(T.phrase)} error={phraseError}>

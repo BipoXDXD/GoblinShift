@@ -52,8 +52,6 @@ interface ButtonProps extends NativeButtonProps, ButtonLook {
    * envio do formulário ficam bloqueados.
    */
   readonly "aria-disabled"?: boolean;
-  /** Clique no botão bloqueado: quem chama pode dizer o que falta em vez de não fazer nada. */
-  readonly onBlockedClick?: () => void;
 }
 
 export function Button({
@@ -62,7 +60,6 @@ export function Button({
   fullWidth,
   type,
   onClick,
-  onBlockedClick,
   children,
   ...props
 }: ButtonProps): ReactElement {
@@ -70,7 +67,6 @@ export function Button({
   const handleClick = (event: MouseEvent<HTMLButtonElement>): void => {
     if (blocked) {
       event.preventDefault();
-      onBlockedClick?.();
       return;
     }
     onClick?.(event);

@@ -541,18 +541,23 @@ describe("Acesso: excluir conta", () => {
     return screen.getByRole("dialog", { name: "Excluir a conta?" });
   }
 
-  it("sem a frase digitada, a confirmação fica aria-disabled e nada é enviado", async () => {
+  it("sem a frase, a confirmação fica ativa; confirmar não envia e leva o foco ao campo com o erro", async () => {
     const { api, user } = setup({ "DELETE /api/v1/me": () => new Response(null, { status: 202 }) });
     const dialog = await openDialog(user);
     const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
     expect(phrase).toHaveFocus();
 
+    // Padrão GOV.UK: o botão não se diz indisponível; a validação acontece ao confirmar.
     const confirm = within(dialog).getByRole("button", { name: "Excluir conta" });
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
-    await user.type(phrase, "excluir");
+    expect(confirm).not.toHaveAttribute("aria-disabled", "true");
     await user.click(confirm);
 
-    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(phrase).toHaveFocus();
+    expect(phrase).toHaveAttribute("aria-invalid", "true");
+    expect(phrase).toHaveAccessibleDescription(
+      "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+    );
+    expect(confirm).not.toHaveAttribute("aria-disabled", "true");
     expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
   });
 
@@ -656,6 +661,11 @@ describe("Acesso: excluir conta", () => {
       expect(sent(api.requests, "DELETE /api/v1/me")).toHaveLength(1);
     });
 
+    // Só o pedido em curso bloqueia a confirmação.
+    expect(within(dialog).getByRole("button", { name: "Excluindo…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     expect(escapeIsBlocked(dialog)).toBe(true);
     forceClose(dialog);
     expect(screen.queryByRole("dialog")).toBeNull();

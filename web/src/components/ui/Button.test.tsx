@@ -50,40 +50,6 @@ describe("Button", () => {
     button.focus();
     expect(button).toHaveFocus();
   });
-
-  it("com aria-disabled avisa quem chama pelo onBlockedClick", async () => {
-    const onClick = vi.fn();
-    const onBlockedClick = vi.fn();
-    render(
-      <Button
-        type="button"
-        variant="primary"
-        aria-disabled
-        onClick={onClick}
-        onBlockedClick={onBlockedClick}
-      >
-        Excluir
-      </Button>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Excluir" }));
-
-    expect(onBlockedClick).toHaveBeenCalledOnce();
-    expect(onClick).not.toHaveBeenCalled();
-  });
-
-  it("ativo não chama onBlockedClick", async () => {
-    const onBlockedClick = vi.fn();
-    render(
-      <Button type="button" variant="primary" onBlockedClick={onBlockedClick}>
-        Excluir
-      </Button>,
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Excluir" }));
-
-    expect(onBlockedClick).not.toHaveBeenCalled();
-  });
 });
 
 describe("buttonClassName", () => {
