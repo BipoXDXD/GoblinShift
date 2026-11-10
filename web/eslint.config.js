@@ -56,6 +56,31 @@ export default tseslint.config(
         },
       ],
       eqeqeq: "error",
+      // O preset strict deixa a regra desligada; sem ela, <button> sem nome acessível
+      // só cai no axe do e2e. As listas repetem as do preset (o array substitui as
+      // opções inteiras). Componente React sem filhos conta como possível rótulo, então
+      // ícones e componentes próprios não geram falso positivo; depth 3 cobre texto
+      // dentro de dois wrappers (<button><span><span>texto</span></span></button>).
+      "jsx-a11y/control-has-associated-label": [
+        "error",
+        {
+          ignoreElements: ["audio", "canvas", "embed", "input", "textarea", "tr", "video"],
+          ignoreRoles: [
+            "grid",
+            "listbox",
+            "menu",
+            "menubar",
+            "radiogroup",
+            "row",
+            "tablist",
+            "toolbar",
+            "tree",
+            "treegrid",
+          ],
+          includeRoles: ["alert", "dialog"],
+          depth: 3,
+        },
+      ],
     },
   },
   {
