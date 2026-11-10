@@ -6,7 +6,7 @@ import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
-import { expectHeadingFocused } from "../test/focus";
+import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
@@ -561,10 +561,15 @@ describe("Acesso: excluir conta", () => {
     const dialog = await openDialog(user);
     const phrase = within(dialog).getByLabelText("Digite “excluir minha conta”");
     await user.type(phrase, "excluir minha conta.");
+    const atFocus = recordDescriptionOnFocus(phrase);
 
     await user.click(within(dialog).getByRole("button", { name: "Excluir conta" }));
 
     expect(phrase).toHaveFocus();
+    // O erro já está no DOM e ligado ao campo quando o foco chega, e não só depois do render.
+    expect(atFocus.descriptions).toEqual([
+      expect.stringContaining("A frase não confere.") as unknown,
+    ]);
     expect(phrase).toHaveAttribute("aria-invalid", "true");
     expect(phrase).toHaveAccessibleDescription(
       "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
