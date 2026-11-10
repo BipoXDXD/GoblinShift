@@ -208,6 +208,19 @@ def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
     assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
 
 
+@pytest.mark.parametrize("log", ["executor não iniciou", "área de trabalho falhou"])
+def test_aviso_do_executor_que_nao_inicia_cita_o_log_de_cada_causa(log: str) -> None:
+    # Start recusado e área de trabalho não criada levam ao mesmo alerta: a notificação diz qual
+    # log procurar, com os nomes do runbook e do log que o coordenador emite.
+    alert = next(
+        a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
+    )
+    emitter = (SRC / "runs" / "worker" / "coordinator.py").read_text(encoding="utf-8")
+
+    assert f"log {log}" in alert.description
+    assert f'"{log}"' in emitter
+
+
 def test_executor_que_nao_inicia_avisa_no_destino_urgente_lendo_o_span_da_tentativa() -> None:
     alert = next(
         a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
@@ -244,9 +257,17 @@ def test_contadores_lidos_pelas_causas_sao_declarados() -> None:
 def modules_emitting_log_events() -> dict[str, set[str]]:
     modules: dict[str, set[str]] = {}
     for path in SRC.rglob("*.py"):
-        for event in re.findall(r'"alert": "(\w+)"', path.read_text(encoding="utf-8")):
+        for event in _log_events(path.read_text(encoding="utf-8")):
             modules.setdefault(event, set()).add(path.relative_to(SRC).as_posix())
     return modules
+
+
+def _log_events(source: str) -> set[str]:
+    # O evento vem como literal ou como constante do próprio módulo (`"alert": NOME`).
+    constants = dict(re.findall(r'^([A-Z_]+) = "(\w+)"$', source, flags=re.MULTILINE))
+    events = set(re.findall(r'"alert": "(\w+)"', source))
+    events |= {constants[name] for name in re.findall(r'"alert": ([A-Z_]+)\b', source)}
+    return events
 
 
 def test_todo_evento_de_alerta_do_log_tem_um_alerta_no_catalogo() -> None:

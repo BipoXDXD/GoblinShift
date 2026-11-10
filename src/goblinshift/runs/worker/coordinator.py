@@ -120,6 +120,9 @@ WORKER_FILE_MODE = 0o640
 DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
+# Evento `alert=` do executor que não chega a iniciar: start recusado ou área de trabalho não
+# criada. `gs-causa-executor-nao-iniciou` o lê no span `attempt`.
+EXECUTOR_START_FAILED = "executor_start_failed"
 # Erros que não encerram a supervisão. Conexão caída, `lock_timeout`, `statement_timeout` e pool
 # esgotado passam sozinhos. `OperationalError` também traz os que pedem ação de fora: senha recusada
 # (28P01), disco cheio (53100), E/S (58030), limite do servidor (54000). A lista os inclui de
@@ -153,7 +156,14 @@ class CoordinatorConfig:
 
 
 class PreparationError(Exception):
-    """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura."""
+    """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura.
+
+    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta.
+    """
+
+    def __init__(self, message: str, *, alert: str | None = None) -> None:
+        super().__init__(message)
+        self.alert = alert
 
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
@@ -260,7 +270,10 @@ class Coordinator:
         try:
             self.prepare(claimed)
         except PreparationError as error:
-            logger.warning("área de trabalho falhou", extra={"fields": _ids(claimed, error)})
+            fields = _ids(claimed, error)
+            if error.alert is not None:
+                fields["alert"] = error.alert
+            logger.warning("área de trabalho falhou", extra={"fields": fields})
             return self.fail_transiently(claimed)
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
@@ -271,7 +284,7 @@ class Coordinator:
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
             logger.warning(
                 "executor não iniciou",
-                extra={"fields": {**_ids(claimed, error), "alert": "executor_start_failed"}},
+                extra={"fields": {**_ids(claimed, error), "alert": EXECUTOR_START_FAILED}},
             )
             return self.fail_transiently(claimed)
         self.record_start(claimed)
@@ -286,12 +299,24 @@ class Coordinator:
         except HeldContentMissingError as error:
             raise PreparationError(str(error)) from error
         try:
-            self._fill_work_area(claimed, contents)
+            work_dir = self._runner.create_work_dir(claimed.attempt_id)
         except OSError as error:
+            # A área do host que não aceita a tentativa (montagem perdida, sem escrita) perde a Run
+            # como o start recusado, e nenhuma outra causa avisa: conta no mesmo alerta.
+            raise PreparationError(
+                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED
+            ) from error
+        try:
+            self._fill_work_area(work_dir, claimed, contents)
+        except OSError as error:
+            # Sem alerta: aqui a `OSError` mistura a leitura do storage com a escrita na área.
+            # Lacuna conhecida: disco cheio ou E/S na escrita depois do `create_work_dir` perde a
+            # Run em `INFRA_POISON` sem nenhum alerta (runbook em deploy/openobserve/README.md).
             raise PreparationError(f"área de trabalho: {error}") from error
 
-    def _fill_work_area(self, claimed: ClaimedAttempt, contents: list[HeldContent]) -> None:
-        work_dir = self._runner.create_work_dir(claimed.attempt_id)
+    def _fill_work_area(
+        self, work_dir: Path, claimed: ClaimedAttempt, contents: list[HeldContent]
+    ) -> None:
         inputs_dir = work_dir / "inputs"
         entries = [
             self._copy_input(content, position, inputs_dir)
