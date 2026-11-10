@@ -49,12 +49,17 @@ export function nextPollDelayMs(snapshot: PollSnapshot, random: () => number): n
 }
 
 /**
- * Se a falha do polling merece aviso. A falha isolada entre sucessos é oscilação da rede: a próxima
- * consulta, segundos depois, a corrige. Um alerta a cada uma delas repetiria o anúncio assertivo a
- * cada oscilação (WCAG 4.1.3). O aviso vem quando repetir não resolve ou quando a falha se repete.
+ * Se a falha do polling merece aviso. A falha rápida e isolada entre sucessos é oscilação da rede: a
+ * próxima consulta, segundos depois, a corrige. Um alerta a cada uma delas repetiria o anúncio
+ * assertivo a cada oscilação (WCAG 4.1.3). O aviso vem quando repetir não resolve, quando a falha se
+ * repete ou no timeout, que já deixou a tela sem notícia durante o prazo inteiro do pedido.
  */
 export function isPersistentFailure(error: unknown, consecutiveFailures: number): boolean {
-  return !isRetryable(error) || consecutiveFailures >= PERSISTENT_FAILURE_STREAK;
+  return (
+    !isRetryable(error) ||
+    error.failure.kind === "timeout" ||
+    consecutiveFailures >= PERSISTENT_FAILURE_STREAK
+  );
 }
 
 /** Falha da API que outra consulta pode resolver; defeito da interface e recusa permanente, não. */

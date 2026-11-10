@@ -127,6 +127,14 @@ describe("isPersistentFailure: quando a falha do polling vira aviso", () => {
     expect(isPersistentFailure(new ApiError(problemFailure(404)), 1)).toBe(true);
   });
 
+  it("timeout vira aviso na primeira vez: cada tentativa já esperou o prazo inteiro", () => {
+    expect(isPersistentFailure(new ApiError({ kind: "timeout" }), 1)).toBe(true);
+  });
+
+  it("falha de rede isolada continua oscilação", () => {
+    expect(isPersistentFailure(new ApiError({ kind: "network" }), 1)).toBe(false);
+  });
+
   it("defeito da interface vira aviso na primeira vez", () => {
     expect(isPersistentFailure(new Error("defeito"), 1)).toBe(true);
   });
