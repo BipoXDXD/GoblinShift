@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import traceback
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -420,17 +421,56 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
     return SdkEvent(event.name, attributes, event.timestamp)
 
 
+# Cabe na margem que sobra ao lifespan entre o fim do `--timeout-graceful-shutdown` do uvicorn
+# (docker/app.Dockerfile) e o SIGKILL da plataforma. A margem está em
+# tests/test_api_server_limits.py, e tests/api/test_api_tracer_shutdown.py confere a parada nela.
+TRACING_SHUTDOWN_TIMEOUT_S = 1.5
+
+
+@dataclass(frozen=True)
+class ApiTracing:
+    """Tracer dos eventos que a API emite fora da requisição e o provider que a parada encerra."""
+
+    tracer: Tracer
+    provider: TracerProvider | None = None
+
+    def shut_down(self) -> None:
+        """Exporta o lote pendente em até `TRACING_SHUTDOWN_TIMEOUT_S`; nunca lança.
+
+        `TracerProvider.shutdown()` não aceita prazo e espera até 30 s por um Collector que não
+        responde. Numa thread daemon, a espera para no prazo e o processo sai mesmo assim. O
+        `atexit` do SDK, se ainda registrado, encontra o processador já encerrado e volta na hora.
+        """
+        if self.provider is None:
+            return
+        worker = threading.Thread(
+            target=_shut_down_provider, args=(self.provider,), name="tracing-shutdown", daemon=True
+        )
+        worker.start()
+        worker.join(TRACING_SHUTDOWN_TIMEOUT_S)
+        if worker.is_alive():
+            logger.warning("encerramento do tracing passou do prazo: spans da fila podem se perder")
+
+
+def _shut_down_provider(provider: TracerProvider) -> None:
+    try:
+        provider.shutdown()
+    except Exception:
+        # Na parada, uma falha do exportador não pode esconder outro erro do encerramento.
+        logger.exception("encerramento do tracing falhou: spans da fila podem se perder")
+
+
 def configure_tracing(
     app: FastAPI, engine: Engine, settings: Settings, exporter: SpanExporter | None = None
-) -> Tracer:
-    """Liga os traces da API e devolve o tracer dos eventos que ela emite fora da requisição.
+) -> ApiTracing:
+    """Liga os traces da API e devolve o tracer dos eventos fora da requisição e o encerramento.
 
     Sem `exporter` e sem endpoint OTLP, não instrumenta nada e devolve um tracer que não grava.
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
     provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
-        return NoOpTracer()
+        return ApiTracing(NoOpTracer())
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=provider,
@@ -441,7 +481,7 @@ def configure_tracing(
         exclude_spans=["receive", "send"],
     )
     _instrument_database(engine, provider)
-    return provider.get_tracer(__name__)
+    return ApiTracing(provider.get_tracer(__name__), provider)
 
 
 def _instrument_database(engine: Engine, provider: TracerProvider) -> None:

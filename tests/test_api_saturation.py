@@ -33,10 +33,14 @@ from goblinshift.entrypoints.api.saturation import (
     saturation_reporting,
     seconds_until_window_end,
 )
+from goblinshift.platform import telemetry
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UVICORN_ERROR_LOGGER
 
 UVICORN_ERROR = logging.getLogger(UVICORN_ERROR_LOGGER)
+# Bem acima da duração do teste: o lote do `BatchSpanProcessor` só sai pelo encerramento do
+# tracing, nunca pelo relógio do SDK.
+BATCH_DELAY_MS = "600000"
 
 
 @pytest.fixture
@@ -265,6 +269,26 @@ def test_api_exporta_as_recusas_do_teto_pelo_mesmo_exportador_dos_traces(
     finally:
         # O instrumentor do SQLAlchemy é global: sem isso, os engines dos próximos testes
         # continuariam mandando spans para este exportador.
+        SQLAlchemyInstrumentor().uninstrument()
+
+    assert _rejections(exporter) == [1]
+
+
+def test_parada_da_api_exporta_a_janela_final_antes_de_encerrar_o_tracing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exporter = InMemorySpanExporter()
+    # O `BatchSpanProcessor` de produção: o que chegar depois do encerramento do tracing é
+    # descartado, então a janela final só sai se o relato da parada vier antes dele.
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://coletor.invalid")
+    monkeypatch.setenv("OTEL_BSP_SCHEDULE_DELAY", BATCH_DELAY_MS)
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", lambda: exporter)
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    try:
+        with TestClient(app):
+            UVICORN_ERROR.warning(UVICORN_CONCURRENCY_MESSAGE)
+            assert _saturation_spans(exporter) == []
+    finally:
         SQLAlchemyInstrumentor().uninstrument()
 
     assert _rejections(exporter) == [1]
