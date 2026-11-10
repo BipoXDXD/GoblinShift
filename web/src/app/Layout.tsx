@@ -1,14 +1,6 @@
 import { CircleAlert } from "lucide-react";
 import { useLayoutEffect, type ReactElement } from "react";
-import {
-  Link,
-  Navigate,
-  NavLink,
-  Outlet,
-  useLocation,
-  useMatches,
-  useSearchParams,
-} from "react-router";
+import { Navigate, NavLink, Outlet, useLocation, useMatches, useSearchParams } from "react-router";
 
 import { LOGIN_ERROR_PARAM, loginRefFrom, safeReturnTo } from "../account/signIn";
 import { isSignedOut, useMe } from "../account/useMe";
@@ -106,10 +98,11 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
       <footer className="border-t border-line-soft">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-sm text-fg-muted md:px-8">
           <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6">
+            {/* end: no aceite (/termos/aceitar) o link dos Termos não é a página atual. */}
             {FOOTER_LINKS.map(({ to, label }) => (
-              <Link key={to} to={to} className="inline-flex min-h-11 items-center font-semibold">
+              <NavLink key={to} to={to} end className={NAV_LINK}>
                 {label}
-              </Link>
+              </NavLink>
             ))}
           </nav>
         </div>
