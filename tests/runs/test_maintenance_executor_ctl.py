@@ -6,6 +6,7 @@ que estiver vivo e só reagenda com o fim confirmado; o que não consegue inspec
 
 import logging
 import os
+import signal
 import uuid
 from collections.abc import Iterator
 from datetime import timedelta
@@ -15,6 +16,7 @@ import pytest
 from sqlalchemy import Engine, func, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
@@ -386,3 +388,61 @@ def test_limpeza_com_ctl_fora_do_ar_mantem_a_area(
 
     assert counts["work_areas_removed"] == 0
     assert runner.work_dir(orphan).exists()
+
+
+# Parada pedida no meio do lote de um passo (lacuna L3) -------------------------------------
+
+
+def test_parada_pedida_no_lote_termina_a_tentativa_em_curso_e_nao_toca_as_seguintes(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    runner: ExecutorCtlRunner,
+) -> None:
+    batch = [
+        paused_worker_attempt(factory, storage, runner, subject)
+        for subject in ("ana", "bia", "cris")
+    ]
+    # O lote sai pela ordem do lease: a primeira vence há mais tempo.
+    for minutes, claimed in zip((3, 2, 1), batch, strict=True):
+        expire_lease_ago(factory, claimed.attempt_id, timedelta(minutes=minutes))
+        ctl.containers[str(claimed.attempt_id)] = FakeContainer("running")
+    first, *rest = batch
+    shutdown = ShutdownFlag()
+    # O SIGTERM do deploy chega enquanto o ctl para o executor da primeira tentativa.
+    ctl.on_stop = lambda _id: shutdown.request(signal.SIGTERM)
+
+    counts = janitor(factory, storage, runner).run_cycle(should_stop=shutdown.is_set)
+
+    # A tentativa em curso termina inteira: parada, decidida e removida.
+    assert counts["leases_reconciled"] == 1
+    assert ctl.operations(first.attempt_id) == ["status", "stop", "remove"]
+    assert attempts(factory, first.run_id)[0]["ended_at"] is not None
+    assert not runner.work_dir(first.attempt_id).exists()
+    # As seguintes ficam como estavam, para o próximo processo.
+    for claimed in rest:
+        assert ctl.operations(claimed.attempt_id) == []
+        assert ctl.containers[str(claimed.attempt_id)].state == "running"
+        assert attempts(factory, claimed.run_id)[0]["ended_at"] is None
+        assert runner.work_dir(claimed.attempt_id).exists()
+
+
+def test_parada_pedida_na_limpeza_remove_a_area_em_curso_e_mantem_as_seguintes(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    runner: ExecutorCtlRunner,
+) -> None:
+    orphans = [uuid.uuid7() for _ in range(3)]
+    for orphan in orphans:
+        runner.create_work_dir(orphan)
+    shutdown = ShutdownFlag()
+    # O SIGTERM chega durante a consulta da primeira área; nenhuma tem executor.
+    ctl.on_status = lambda _id: shutdown.request(signal.SIGTERM)
+
+    counts = janitor(factory, storage, runner).run_cycle(should_stop=shutdown.is_set)
+
+    assert counts["work_areas_removed"] == 1
+    touched = [orphan for orphan in orphans if ctl.operations(orphan)]
+    assert [ctl.operations(orphan) for orphan in touched] == [["status", "remove"]]
+    assert [runner.work_dir(orphan).exists() for orphan in orphans].count(True) == 2

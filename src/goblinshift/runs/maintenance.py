@@ -178,6 +178,14 @@ class _CycleOutcome:
         return self.counts
 
 
+def _log_items_left(step: str, items_left: int) -> None:
+    """A parada pedida cortou o lote do passo; os itens restantes voltam no próximo processo."""
+    logger.info(
+        "parada pedida; itens restantes do passo pulados",
+        extra={"fields": {"step": step, "items_left": items_left}},
+    )
+
+
 def _is_connection_error(error: Exception) -> bool:
     """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
 
@@ -233,13 +241,15 @@ class Maintenance:
         para prazo, retenção, expurgo e medidores; as contagens do passo que falhou ficam fora do
         evento. Falha de conexão (banco inalcançável) pula os passos de banco restantes da volta,
         que só esperariam o `connect_timeout` de novo; `should_stop` (a parada pedida por sinal) é
-        conferido antes de cada passo. Os dois contam em `steps_skipped`. Interrupção do processo
-        (`KeyboardInterrupt`, `SystemExit`) não é `Exception` e sobe.
+        conferido antes de cada passo. Os dois contam em `steps_skipped`. Os passos que chamam o
+        Runner item a item também conferem a parada entre os itens: o item em curso termina, e o
+        seguinte fica para o próximo processo. Interrupção do processo (`KeyboardInterrupt`,
+        `SystemExit`) não é `Exception` e sobe.
         """
         started = time.monotonic()
         self._candidates_left_on_disk = 0
         outcome = _CycleOutcome()
-        for step in self._cycle_steps():
+        for step in self._cycle_steps(should_stop):
             if should_stop():
                 outcome.skipped_for_stop.append(step.name)
             elif outcome.connection_lost_in is not None and step.uses_database:
@@ -253,18 +263,23 @@ class Maintenance:
         logger.info("ciclo de manutenção", extra={"fields": fields})
         return counts
 
-    def _cycle_steps(self) -> tuple[_Step, ...]:
+    def _cycle_steps(self, should_stop: Callable[[], bool]) -> tuple[_Step, ...]:
         """Os passos do ciclo, na ordem: reconciliação, fila, prazo, usos, retenção e medidores."""
         return (
             _Step(
                 "reconcile_expired_leases",
-                lambda: {"leases_reconciled": self.reconcile_expired_leases()},
+                lambda: {
+                    "leases_reconciled": self.reconcile_expired_leases(should_stop=should_stop)
+                },
             ),
             _Step("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
             _Step("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
             _Step("release_orphan_holds", lambda: {"holds_released": self.release_orphan_holds()}),
             _Step("discard_stale_candidates", self.discard_stale_candidates),
-            _Step("sweep_work_areas", lambda: {"work_areas_removed": self.sweep_work_areas()}),
+            _Step(
+                "sweep_work_areas",
+                lambda: {"work_areas_removed": self.sweep_work_areas(should_stop=should_stop)},
+            ),
             _Step("apply_retention", self.apply_retention),
             # Só o storage: segue mesmo com o banco fora.
             _Step("sweep_temporary_parts", self.sweep_temporary_parts, uses_database=False),
@@ -274,10 +289,18 @@ class Maintenance:
 
     # Lease vencido e parada ------------------------------------------------------------
 
-    def reconcile_expired_leases(self) -> int:
-        """Tentativas com lease vencido: confirma o término do executor e decide."""
+    def reconcile_expired_leases(self, *, should_stop: Callable[[], bool] = _never) -> int:
+        """Tentativas com lease vencido: confirma o término do executor e decide.
+
+        `should_stop` é conferido antes de cada tentativa, nunca no meio dela: uma tentativa
+        começada vai até a decisão e o `remove`.
+        """
         reconciled = 0
-        for expired in self._expired_attempts():
+        batch = self._expired_attempts()
+        for position, expired in enumerate(batch):
+            if should_stop():
+                _log_items_left("reconcile_expired_leases", len(batch) - position)
+                break
             status = self._confirm_ended(
                 expired.attempt_id,
                 expired.run_id,
@@ -478,10 +501,11 @@ class Maintenance:
 
     # Áreas de trabalho ------------------------------------------------------------------
 
-    def sweep_work_areas(self) -> int:
+    def sweep_work_areas(self, *, should_stop: Callable[[], bool] = _never) -> int:
         """Remove executor e área de tentativas encerradas (ou sem registro) que ficaram para trás.
 
         A tentativa viva (`ended_at` nulo) é do worker ou da reconciliação de lease: não é tocada.
+        `should_stop` é conferido antes de cada área, nunca no meio dela.
         """
         try:
             present = self._runner.list_work()[: self._config.batch_size]
@@ -491,10 +515,12 @@ class Maintenance:
         if not present:
             return 0
         live = self._live_attempts(present)
+        left_behind = [attempt_id for attempt_id in present if attempt_id not in live]
         removed = 0
-        for attempt_id in present:
-            if attempt_id in live:
-                continue
+        for position, attempt_id in enumerate(left_behind):
+            if should_stop():
+                _log_items_left("sweep_work_areas", len(left_behind) - position)
+                break
             status = self._confirm_ended(attempt_id, run_id=None)
             if status is not None and self._try_remove(attempt_id):
                 removed += 1
