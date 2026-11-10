@@ -88,9 +88,13 @@ test("/termos: o item do sumário leva a seção com folga acima do título", as
 
   await expect(section).toBeInViewport();
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  // Medido contra o visual viewport: no celular (isMobile) o salto da âncora desloca a área
+  // visível dentro do layout viewport, e o getBoundingClientRect sozinho ignora esse deslocamento.
   const top = (): Promise<number> =>
-    section.evaluate((heading) => heading.getBoundingClientRect().top);
-  // Primeiro o teto: no celular o salto chega depois do clique, e o título ainda está embaixo.
+    section.evaluate(
+      (heading) => heading.getBoundingClientRect().top - (window.visualViewport?.offsetTop ?? 0),
+    );
+  // Primeiro o teto: o salto pode chegar depois do clique, com o título ainda embaixo.
   await expect.poll(top).toBeLessThan(ANCHOR_BREATHING_PX * 2);
   // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
   expect(await top()).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
