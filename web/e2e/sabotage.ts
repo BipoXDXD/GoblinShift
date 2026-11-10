@@ -116,6 +116,13 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    name: "espaçamento de texto: título num contêiner de altura fixa que corta o excesso",
+    spec: ["text-spacing.spec.ts", "-g", "Oficina: com o espaçamento"],
+    plant: (dist) => {
+      addStylesheet(dist, "main h1 { height: 1em; overflow: hidden; }");
+    },
+  },
+  {
     name: "tema: theme-init.js vazio (pisca no primeiro quadro)",
     spec: ["theme.spec.ts", "-g", "primeiro quadro"],
     plant: (dist) => {
