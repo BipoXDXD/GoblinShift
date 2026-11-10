@@ -29,12 +29,14 @@ from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.claim_pause import ClaimPause
 from goblinshift.runs.worker.coordinator import Coordinator
 from goblinshift.runs.worker.runner import Runner
-from goblinshift.runs.worker.work_area_gate import WorkAreaGate
+from goblinshift.runs.worker.work_area_gate import HOLD_LIMIT, WorkAreaGate
 
 WORKER_LOGGER = "goblinshift.worker"
 GATE_LOGGER = "goblinshift.runs.worker.work_area_gate"
 OCCUPIED_MESSAGE = "claims esperando a área de trabalho"
 FREED_MESSAGE = "área de trabalho livre; claims retomados"
+UNREADABLE_MESSAGE = "área de trabalho ilegível; claims esperando"
+LIMIT_MESSAGE = "área de trabalho presa além do teto; claims liberados"
 TURN_FAILED_MESSAGE = "volta do worker falhou"
 WINDOW = timedelta(seconds=100)
 ORPHAN = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -55,8 +57,20 @@ class FakeArea:
         return sorted(self.attempt_ids)
 
 
-def gate_over(area: FakeArea) -> WorkAreaGate:
-    return WorkAreaGate(cast(Runner, area))
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def gate_over(area: FakeArea, clock: FakeClock | None = None) -> WorkAreaGate:
+    return WorkAreaGate(cast(Runner, area), clock=clock if clock is not None else FakeClock())
+
+
+def unreadable() -> FakeArea:
+    return FakeArea(error=PermissionError("sem acesso"))
 
 
 def gate_records(caplog: pytest.LogCaptureFixture, message: str) -> list[logging.LogRecord]:
@@ -74,11 +88,138 @@ def test_area_com_tentativa_bloqueia_o_claim() -> None:
     assert gate_over(FakeArea(ORPHAN)).allows_claim() is False
 
 
-def test_area_ilegivel_sobe_o_erro() -> None:
-    gate = gate_over(FakeArea(error=PermissionError("sem acesso")))
+def test_teto_e_de_duzentos_segundos() -> None:
+    assert timedelta(seconds=200) == HOLD_LIMIT
 
-    with pytest.raises(PermissionError):
+
+def test_area_ilegivel_bloqueia_o_claim_sem_subir_o_erro() -> None:
+    assert gate_over(unreadable()).allows_claim() is False
+
+
+def test_area_ilegivel_registra_traceback_so_na_primeira_leitura(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    gate = gate_over(unreadable())
+
+    with caplog.at_level(logging.DEBUG, logger=GATE_LOGGER):
         gate.allows_claim()
+        gate.allows_claim()
+        gate.allows_claim()
+
+    [event] = caplog.records
+    assert event.getMessage() == UNREADABLE_MESSAGE
+    assert event.levelno == logging.WARNING
+    assert event.exc_info is not None
+    assert isinstance(event.exc_info[1], PermissionError)
+
+
+def test_area_que_volta_a_ser_lida_e_esta_ocupada_registra_a_mudanca(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    area = unreadable()
+    gate = gate_over(area)
+    gate.allows_claim()
+    area.error = None
+    area.attempt_ids.append(ORPHAN)
+    caplog.clear()
+
+    with caplog.at_level(logging.DEBUG, logger=GATE_LOGGER):
+        gate.allows_claim()
+
+    assert [record.getMessage() for record in caplog.records] == [OCCUPIED_MESSAGE]
+
+
+# Teto ------------------------------------------------------------------------------------
+
+
+def test_area_ocupada_segura_o_claim_ate_o_ultimo_instante_antes_do_teto() -> None:
+    clock = FakeClock()
+    gate = gate_over(FakeArea(ORPHAN), clock)
+    gate.allows_claim()
+
+    clock.now += 199.999
+
+    assert gate.allows_claim() is False
+
+
+def test_area_ocupada_libera_o_claim_no_teto() -> None:
+    clock = FakeClock()
+    gate = gate_over(FakeArea(ORPHAN), clock)
+    gate.allows_claim()
+
+    clock.now += 200.0
+
+    assert gate.allows_claim() is True
+
+
+def test_teto_zera_quando_a_area_esvazia() -> None:
+    clock = FakeClock()
+    area = FakeArea(ORPHAN)
+    gate = gate_over(area, clock)
+    gate.allows_claim()
+    clock.now += 150.0
+    area.attempt_ids.clear()
+    gate.allows_claim()
+    clock.now += 10.0
+    area.attempt_ids.append(ORPHAN)
+    gate.allows_claim()
+
+    clock.now += 199.0
+
+    assert gate.allows_claim() is False
+
+
+def test_area_ilegivel_segura_o_claim_ate_o_ultimo_instante_antes_do_teto() -> None:
+    clock = FakeClock()
+    gate = gate_over(unreadable(), clock)
+    gate.allows_claim()
+
+    clock.now += 199.999
+
+    assert gate.allows_claim() is False
+
+
+def test_area_ilegivel_libera_o_claim_no_teto() -> None:
+    clock = FakeClock()
+    gate = gate_over(unreadable(), clock)
+    gate.allows_claim()
+
+    clock.now += 200.0
+
+    assert gate.allows_claim() is True
+
+
+def test_teto_conta_desde_a_primeira_vez_que_a_area_foi_vista_presa() -> None:
+    # Ocupada e depois ilegível, sem esvaziar no meio: é a mesma espera.
+    clock = FakeClock()
+    area = FakeArea(ORPHAN)
+    gate = gate_over(area, clock)
+    gate.allows_claim()
+    clock.now += 150.0
+    area.error = PermissionError("sem acesso")
+    gate.allows_claim()
+
+    clock.now += 50.0
+
+    assert gate.allows_claim() is True
+
+
+def test_teto_atingido_registra_a_liberacao_uma_vez(caplog: pytest.LogCaptureFixture) -> None:
+    clock = FakeClock()
+    gate = gate_over(FakeArea(ORPHAN), clock)
+    gate.allows_claim()
+    clock.now += 200.0
+    caplog.clear()
+
+    with caplog.at_level(logging.DEBUG, logger=GATE_LOGGER):
+        gate.allows_claim()
+        clock.now += 2.0
+        gate.allows_claim()
+
+    [event] = caplog.records
+    assert event.getMessage() == LIMIT_MESSAGE
+    assert event.levelno == logging.WARNING
+    assert event.__dict__["fields"] == {"held_s": 200.0, "limit_s": 200.0}
 
 
 def test_area_ocupada_registra_aviso_com_as_tentativas(caplog: pytest.LogCaptureFixture) -> None:
@@ -239,19 +380,36 @@ def test_area_liberada_pela_manutencao_volta_a_reivindicar(queue: FakeQueue) -> 
     assert queue.calls == 1
 
 
-def test_area_ilegivel_nao_reivindica_e_fica_no_log(
+def test_area_ilegivel_nao_reivindica_nem_repete_traceback_a_cada_volta(
     queue: FakeQueue, caplog: pytest.LogCaptureFixture
 ) -> None:
-    gate = gate_over(FakeArea(error=PermissionError("sem acesso")))
+    gate = gate_over(unreadable())
+    pause = fresh_pause()
 
-    with caplog.at_level(logging.INFO, logger=WORKER_LOGGER):
-        has_work = work_once(FakeCoordinator(), fresh_pause(), gate)
+    with caplog.at_level(logging.DEBUG):
+        first = work_once(FakeCoordinator(), pause, gate)
+        second = work_once(FakeCoordinator(), pause, gate)
 
-    assert has_work is False
+    assert (first, second) == (False, False)
     assert queue.calls == 0
-    [failed] = gate_records(caplog, TURN_FAILED_MESSAGE)
-    assert failed.exc_info is not None
-    assert isinstance(failed.exc_info[1], PermissionError)
+    assert gate_records(caplog, TURN_FAILED_MESSAGE) == []
+    assert [r.getMessage() for r in caplog.records if r.exc_info] == [UNREADABLE_MESSAGE]
+
+
+def test_area_presa_alem_do_teto_volta_a_reivindicar(queue: FakeQueue) -> None:
+    # O `start` então é recusado como antes e dispara o alerta `executor_start_failed`.
+    clock = FakeClock()
+    gate = gate_over(FakeArea(ORPHAN), clock)
+    pause = fresh_pause()
+    work_once(FakeCoordinator(), pause, gate)
+    clock.now += HOLD_LIMIT.total_seconds()
+    coordinator = FakeCoordinator()
+
+    has_work = work_once(coordinator, pause, gate)
+
+    assert has_work is True
+    assert queue.calls == 1
+    assert len(coordinator.ran) == 1
 
 
 def test_durante_a_pausa_a_area_nao_e_consultada(queue: FakeQueue) -> None:
