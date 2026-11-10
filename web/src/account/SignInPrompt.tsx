@@ -2,6 +2,7 @@ import { LogIn } from "lucide-react";
 import { useId, type ReactElement } from "react";
 import { useLocation } from "react-router";
 
+import { Heading, type HeadingLevel } from "../components/a11y/Heading";
 import { TEXT } from "../text";
 import { safeReturnTo } from "./signIn";
 import { SignInLinks } from "./SignInLinks";
@@ -11,7 +12,7 @@ const T = TEXT.account.signIn;
 interface SignInPromptProps {
   /** Login de novo no provedor (REAUTH_REQUIRED), voltando para esta mesma tela. */
   readonly reauth?: boolean;
-  readonly headingLevel?: 2 | 3;
+  readonly headingLevel?: HeadingLevel;
 }
 
 /**
@@ -24,7 +25,6 @@ export function SignInPrompt({
 }: SignInPromptProps): ReactElement {
   const titleId = useId();
   const { pathname, search } = useLocation();
-  const Heading = headingLevel === 2 ? "h2" : "h3";
   return (
     <section
       aria-labelledby={titleId}
@@ -32,7 +32,7 @@ export function SignInPrompt({
     >
       <LogIn aria-hidden="true" className="mt-1 size-4 flex-none" />
       <div className="flex max-w-prose flex-col gap-3">
-        <Heading id={titleId} className="font-semibold">
+        <Heading level={headingLevel} id={titleId} className="font-semibold">
           {reauth ? T.reauthTitle : T.promptTitle}
         </Heading>
         <p>{reauth ? T.reauthBody : T.promptBody}</p>
