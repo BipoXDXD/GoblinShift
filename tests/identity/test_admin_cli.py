@@ -9,7 +9,10 @@ from pathlib import Path
 from uuid import UUID, uuid4, uuid7
 
 import pytest
+from psycopg import OperationalError as PsycopgOperationalError
 from sqlalchemy import select, text
+from sqlalchemy.engine.default import DefaultDialect
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import admin_cli
@@ -737,3 +740,32 @@ def test_erro_do_postgresql_sai_com_4_e_o_sqlstate_sem_o_parametro(
     assert err == "gs-admin: falha no banco de dados (DataError, SQLSTATE 22P02)\n"
     with unit_of_work(factory) as session:
         assert session.execute(select(app_user.c.id)).first() is None
+
+
+def test_erro_do_pool_ao_fechar_a_conexao_nao_leva_o_detalhe_ao_stderr(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O pool registra a falha do `close` com o repr da conexão (host, usuário, banco) e a
+    exceção; sem o filtro, o `logging.lastResort` escreveria tudo no stderr."""
+    canary = f"CANARY-{uuid4()}"
+
+    # Fechadas só depois do log: aberta, a conexão mostra host, porta, usuário e banco no repr.
+    stranded: list[DBAPIConnection] = []
+
+    def do_close(self: DefaultDialect, connection: DBAPIConnection) -> None:
+        stranded.append(connection)
+        raise PsycopgOperationalError(f'connection to server at "{canary}" failed')
+
+    monkeypatch.setattr(DefaultDialect, "do_close", do_close)
+
+    try:
+        exit_code, _, err = run(capsys, "list-users")
+    finally:
+        for connection in stranded:
+            connection.close()
+
+    assert exit_code == EXIT_OK
+    assert "Exception closing connection <psycopg connection>" in err
+    assert canary not in err
+    assert "host=" not in err
+    assert "Traceback" not in err

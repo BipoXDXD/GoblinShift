@@ -13,7 +13,7 @@ from psycopg import errors as pg_errors
 from sqlalchemy.exc import DBAPIError
 
 from goblinshift.entrypoints import admin_cli
-from goblinshift.entrypoints.admin_cli import EXIT_FAILURE, main
+from goblinshift.entrypoints.admin_cli import EXIT_FAILURE, EXIT_INTERRUPTED, main
 
 
 def _canary() -> str:
@@ -108,8 +108,17 @@ def test_falha_nao_traz_canario_nem_stack_trace(
     assert err.count("\n") == 1
 
 
-def test_interrupcao_pelo_teclado_nao_e_engolida(monkeypatch: pytest.MonkeyPatch) -> None:
-    _fail_with(monkeypatch, KeyboardInterrupt())
+def test_interrupcao_sai_com_130_sem_a_cadeia_de_erros(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ctrl-C durante o `engine.dispose()`, com um erro de banco ainda propagando."""
+    canary = _canary()
+    interrupted = KeyboardInterrupt()
+    interrupted.__context__ = _wrapped(pg_errors.UniqueViolation(canary), canary)
+    _fail_with(monkeypatch, interrupted)
 
-    with pytest.raises(KeyboardInterrupt):
-        main(["list-users"])
+    exit_code, out, err = _run(capsys)
+
+    assert exit_code == EXIT_INTERRUPTED
+    assert out == ""
+    assert err == "gs-admin: interrompido\n"
