@@ -340,10 +340,11 @@ def next_storage_release_in(session: Session, owner_id: uuid.UUID) -> timedelta 
             artifact.c.owner_id == owner_id, artifact.c.deleted_at.is_(None)
         ),
     ).subquery()
+    # O piso fica aqui e não num GREATEST: no PostgreSQL ele ignora NULL e apagaria o `None`.
     wait: timedelta | None = session.execute(
-        select(func.greatest(func.min(pending.c.expires_at) - func.now(), timedelta(0)))
+        select(func.min(pending.c.expires_at) - func.now())
     ).scalar_one()
-    return wait
+    return None if wait is None else max(wait, timedelta(0))
 
 
 def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileReport:

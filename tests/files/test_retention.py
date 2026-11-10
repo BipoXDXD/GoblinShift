@@ -16,6 +16,7 @@ from goblinshift.files.retention import (
     expire_artifacts,
     expire_incomplete_uploads,
     expire_unused_uploads,
+    next_storage_release_in,
     purge_deleted_objects,
 )
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind
@@ -419,3 +420,89 @@ def test_remocao_sem_candidatos_nao_faz_nada(
         report = purge_deleted_objects(session, storage)
 
     assert (report.objects, report.bytes, report.limit_reached) == (0, 0, False)
+
+
+# --- Próxima liberação de armazenamento -------------------------------------------------------
+
+
+def expires_in(session: Session, table: Table, row_id: uuid.UUID, wait: timedelta) -> None:
+    """Fixa o vencimento na transação da leitura: `now()` é o mesmo e a espera sai exata."""
+    session.execute(update(table).where(table.c.id == row_id).values(expires_at=func.now() + wait))
+
+
+def publish_output(factory: sessionmaker[Session], owner: uuid.UUID, view: UploadView) -> uuid.UUID:
+    with unit_of_work(factory) as session:
+        [ready] = lock_ready_uploads(session, owner, [view.id])
+        return publish_artifact(session, owner, ready.object_id, ArtifactRole.OUTPUT, "s.csv").id
+
+
+def test_proxima_liberacao_sem_upload_nem_artefato_e_none(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = create_user(factory, "a")
+
+    with unit_of_work(factory) as session:
+        assert next_storage_release_in(session, owner) is None
+
+
+def test_proxima_liberacao_ignora_arquivo_de_outra_conta(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    other = create_user(factory, "b")
+    publish_output(factory, other, ready_upload(factory, storage, other))
+
+    with unit_of_work(factory) as session:
+        assert next_storage_release_in(session, owner) is None
+
+
+def test_proxima_liberacao_ignora_upload_e_artefato_excluidos(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    output = publish_output(factory, owner, view)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, view.id)
+        session.execute(
+            update(artifact).where(artifact.c.id == output).values(deleted_at=func.now())
+        )
+
+    with unit_of_work(factory) as session:
+        assert next_storage_release_in(session, owner) is None
+
+
+def test_proxima_liberacao_e_a_espera_ate_o_upload_vencer(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+
+    with unit_of_work(factory) as session:
+        expires_in(session, upload, view.id, timedelta(hours=1))
+        assert next_storage_release_in(session, owner) == timedelta(hours=1)
+
+
+def test_proxima_liberacao_escolhe_o_vencimento_mais_proximo_entre_upload_e_artefato(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+    output = publish_output(factory, owner, view)
+
+    with unit_of_work(factory) as session:
+        expires_in(session, upload, view.id, timedelta(hours=2))
+        expires_in(session, artifact, output, timedelta(minutes=30))
+        assert next_storage_release_in(session, owner) == timedelta(minutes=30)
+
+
+@pytest.mark.parametrize("overdue", [timedelta(0), timedelta(seconds=1), timedelta(days=3)])
+def test_proxima_liberacao_ja_vencida_e_zero_e_nao_negativa(
+    factory: sessionmaker[Session], storage: FileStorage, overdue: timedelta
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner)
+
+    with unit_of_work(factory) as session:
+        expires_in(session, upload, view.id, -overdue)
+        assert next_storage_release_in(session, owner) == timedelta(0)
