@@ -85,6 +85,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
                 {TEXT.history.navLink}
               </NavLink>
               <AccountLink />
+              <NavLink to="/"></NavLink>
             </nav>
             <ThemeSwitcher />
           </div>
