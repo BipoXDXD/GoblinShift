@@ -89,6 +89,26 @@ def _problem_of(root: Path, file: str, first: str, second: str | None) -> str | 
 def _python_problem(source: str, symbol: str, excerpt: str) -> str | None:
     if len(source.splitlines()) != _ast_line_count(source):
         return "o arquivo tem quebras de linha que o ast não conta"
+    node = resolve_symbol(source, symbol)
+    if isinstance(node, str):
+        return node
+    segment = _segment(source, node)
+    if excerpt == _name(node):
+        return "o trecho é só o nome do símbolo"
+    if not isinstance(node, _Definition):
+        problem = _assignment_problem(source, node, excerpt)
+        if problem is not None:
+            return problem
+    return _uniqueness_problem(segment.count(excerpt), "no símbolo")
+
+
+def resolve_symbol(source: str, symbol: str) -> _Named | str:
+    """O nó do símbolo pontuado, ou o motivo pelo qual ele não designa um único nó.
+
+    Cada parte do nome é procurada só entre as definições e atribuições do escopo da anterior
+    (`Classe.método`, `função.aninhada`), atravessando `if`/`try`/`with`. O símbolo precisa
+    existir e ser definido uma vez só: com duas definições, a citação não diz qual vale.
+    """
     scopes: list[ast.AST] = [ast.parse(source)]
     candidates: list[_Named] = []
     for name in symbol.split("."):
@@ -100,15 +120,7 @@ def _python_problem(source: str, symbol: str, excerpt: str) -> str | None:
         return "o símbolo não existe no arquivo"
     if len(candidates) > 1:
         return f"o símbolo está definido {len(candidates)} vezes no arquivo"
-    node = candidates[0]
-    segment = _segment(source, node)
-    if excerpt == _name(node):
-        return "o trecho é só o nome do símbolo"
-    if not isinstance(node, _Definition):
-        problem = _assignment_problem(source, node, excerpt)
-        if problem is not None:
-            return problem
-    return _uniqueness_problem(segment.count(excerpt), "no símbolo")
+    return candidates[0]
 
 
 def _ast_line_count(source: str) -> int:
