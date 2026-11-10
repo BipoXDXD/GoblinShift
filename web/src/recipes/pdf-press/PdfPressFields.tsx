@@ -264,7 +264,7 @@ function PageMapPreview({
   const documents = pageMapPreview(values, inputs);
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <h3 id={headingId} className="text-sm font-semibold text-fg">
+      <h3 id={headingId} className="h-3 overflow-hidden text-sm font-semibold text-fg">
         {T.preview.heading}
       </h3>
       {documents.length === 0 ? (

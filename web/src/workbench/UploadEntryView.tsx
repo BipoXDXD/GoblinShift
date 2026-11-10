@@ -22,7 +22,7 @@ export function UploadEntryView({ entry, onRetry, onRemove }: UploadEntryViewPro
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="truncate font-mono text-sm text-fg">{name}</span>{" "}
+        <span className="min-w-0 font-mono text-sm wrap-anywhere text-fg">{name}</span>{" "}
         <span className="flex-none font-mono text-sm text-fg-muted tabular-nums">
           {formatBytes(entry.file.size)}
         </span>{" "}
