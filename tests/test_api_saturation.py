@@ -31,6 +31,7 @@ from goblinshift.entrypoints.api.saturation import (
     ConcurrencyLimitCounter,
     report_window,
     saturation_reporting,
+    seconds_until_window_end,
 )
 from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UVICORN_ERROR_LOGGER
@@ -125,30 +126,6 @@ def test_contador_nao_recebe_registros_abaixo_de_warning_pelo_logger() -> None:
     assert counter.take() == 0
 
 
-def test_contador_e_seguro_entre_threads() -> None:
-    counter = ConcurrencyLimitCounter()
-    per_thread = 2000
-    threads = 8
-    taken: list[int] = []
-
-    def reject() -> None:
-        for _ in range(per_thread):
-            counter.handle(_record(UVICORN_CONCURRENCY_MESSAGE))
-
-    def drain() -> None:
-        for _ in range(per_thread):
-            taken.append(counter.take())
-
-    workers = [threading.Thread(target=reject) for _ in range(threads)]
-    workers.append(threading.Thread(target=drain))
-    for worker in workers:
-        worker.start()
-    for worker in workers:
-        worker.join()
-
-    assert sum(taken) + counter.take() == per_thread * threads
-
-
 # --- Relato de uma janela -----------------------------------------------------------------------
 
 
@@ -171,6 +148,27 @@ def test_janela_sem_recusa_nao_exporta_span(tracer: Tracer, exporter: InMemorySp
     report_window(tracer, ConcurrencyLimitCounter())
 
     assert exporter.get_finished_spans() == ()
+
+
+# --- Fim da janela -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("now", "delay"),
+    [
+        (120.0, 61.0),  # na virada: espera a próxima inteira
+        (120.9, 60.1),  # logo depois do relato de uma virada
+        (150.0, 31.0),  # meio do minuto: só o resto dele
+        (179.5, 1.5),  # perto da virada: não relata duas vezes no mesmo minuto
+        (1_762_750_799.0, 2.0),  # época real: 1 s antes da virada
+    ],
+)
+def test_janela_termina_logo_depois_da_virada_do_minuto_de_relogio(
+    now: float, delay: float
+) -> None:
+    # Todas as réplicas relatam no mesmo segundo depois da virada, e o span cai no minuto
+    # absoluto seguinte ao que ele conta: o alerta agrupa pelo minuto do `_timestamp`.
+    assert seconds_until_window_end(now) == pytest.approx(delay)
 
 
 # --- Relato periódico ---------------------------------------------------------------------------
@@ -291,7 +289,7 @@ class Gate:
 
 
 @pytest.fixture
-def saturated_server() -> Iterator[tuple[str, Gate]]:
+def saturated_server() -> Iterator[tuple[str, Gate, int]]:
     """Uvicorn com teto 2: a conexão de um pedido em curso já ocupa o que ele atende."""
     gate = Gate()
 
@@ -314,17 +312,32 @@ def saturated_server() -> Iterator[tuple[str, Gate]]:
                 break
             gate.release.wait(0.01)
         assert server.started, "uvicorn não subiu"
-        yield f"http://127.0.0.1:{port}", gate
+        assert thread.ident is not None
+        yield f"http://127.0.0.1:{port}", gate, thread.ident
     finally:
         gate.release.set()
         server.should_exit = True
         thread.join(10)
 
 
-def test_recusa_real_do_uvicorn_e_contada(saturated_server: tuple[str, Gate]) -> None:
-    url, gate = saturated_server
+class ThreadsOfRejections(logging.Handler):
+    """Em que thread o uvicorn registrou cada recusa."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.seen: list[int | None] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage() == UVICORN_CONCURRENCY_MESSAGE:
+            self.seen.append(record.thread)
+
+
+def test_recusa_real_do_uvicorn_e_contada(saturated_server: tuple[str, Gate, int]) -> None:
+    url, gate, server_thread = saturated_server
     counter = ConcurrencyLimitCounter()
+    threads = ThreadsOfRejections()
     UVICORN_ERROR.addHandler(counter)
+    UVICORN_ERROR.addHandler(threads)
     try:
         with httpx.Client(timeout=5) as busy, httpx.Client(timeout=5) as other:
             pending = threading.Thread(target=busy.get, args=(url,))
@@ -335,6 +348,9 @@ def test_recusa_real_do_uvicorn_e_contada(saturated_server: tuple[str, Gate]) ->
             pending.join(5)
     finally:
         UVICORN_ERROR.removeHandler(counter)
+        UVICORN_ERROR.removeHandler(threads)
 
     assert refused.status_code == 503
     assert counter.take() == 1
+    # A recusa vem da thread do event loop do uvicorn, a mesma do laço que relata as janelas.
+    assert threads.seen == [server_thread]

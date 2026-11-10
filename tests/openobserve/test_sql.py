@@ -4,7 +4,10 @@ Cada teste escreve spans sintéticos num stream só dele e confere o resultado d
 renderizada pelo catálogo, a mesma que o provisionamento envia.
 """
 
+import time
+
 import pytest
+from opentelemetry.util.types import AttributeValue
 
 from openobserve.catalog import SLOS, alerts, slo_named
 from openobserve.provision import declare_columns
@@ -505,29 +508,39 @@ def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
     assert bool(cause_rows(telemetry, "causa-executor-nao-iniciou", stream)) is fires
 
 
-# A API exporta um span `api.saturation` por minuto com recusa no teto do uvicorn. Idade em
-# segundos, para ficar longe da borda da fatia de 1 min durante a consulta.
+# A API exporta um span `api.saturation` 1 s depois de cada virada de minuto com recusa, e um na
+# parada; o alerta agrupa pelo minuto absoluto. Cada span é (minutos atrás, segundo no minuto),
+# contados a partir do minuto corrente, para o teste não depender da fase do relógio.
 @pytest.mark.parametrize(
-    ("ages_s", "fires"),
+    ("spans", "fires"),
     [
-        ((70, 130, 190), True),  # três minutos com recusa
-        ((70, 130), False),  # dois minutos: pico absorvido
-        ((65, 75, 130), False),  # duas réplicas no mesmo minuto contam uma fatia só
-        ((70, 130, 730), False),  # a terceira saiu dos 10 min
+        (((3, 1), (2, 1), (1, 1)), True),  # três minutos com recusa
+        (((2, 1), (1, 1)), False),  # dois minutos: pico absorvido
+        (((2, 1), (2, 1.3), (1, 1)), False),  # duas réplicas na mesma virada
+        (((2, 1), (2, 40), (1, 1)), False),  # parada aos 40 s, no minuto do último relato
+        (((12, 1), (2, 1), (1, 1)), False),  # o terceiro minuto saiu dos 10 min
     ],
+    ids=["tres-minutos", "dois-minutos", "duas-replicas", "relato-da-parada", "fora-da-janela"],
 )
 def test_api_saturada_em_tres_minutos_dispara(
-    telemetry: Telemetry, ages_s: tuple[int, ...], fires: bool
+    telemetry: Telemetry, spans: tuple[tuple[int, float], ...], fires: bool
 ) -> None:
     stream = unique_stream("saturada")
     attribute = "api.saturation.rejected"
+    now_s = time.time()
+    minute_start = now_s - now_s % MINUTE_S
     traces = telemetry.traces(stream)
-    for age in ages_s:
-        traces.span("api.saturation", age, {"main": True, attribute: 5}, 0.1)
+
+    def at(minutes_ago: int, second: float, attributes: dict[str, AttributeValue]) -> None:
+        moment = minute_start - minutes_ago * MINUTE_S + second
+        traces.span("api.saturation", now_s - moment, attributes, 0.1)
+
+    for minutes_ago, second in spans:
+        at(minutes_ago, second, {"main": True, attribute: 5})
     # Sem recusa ou fora do evento amplo, nunca conta.
-    for age in (250, 310, 370):
-        traces.span("api.saturation", age, {"main": True, attribute: 0}, 0.1)
-        traces.span("api.saturation", age, {"main": False, attribute: 5}, 0.1)
+    for minutes_ago in (4, 5, 6):
+        at(minutes_ago, 1, {"main": True, attribute: 0})
+        at(minutes_ago, 1, {"main": False, attribute: 5})
     traces.flush()
     declare_columns(telemetry.api, stream)
 

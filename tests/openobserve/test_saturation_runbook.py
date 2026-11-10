@@ -28,6 +28,7 @@ from tests.test_container_logs import uvicorn_cmd
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "deploy" / "openobserve" / "README.md"
+NGINX_SITE = ROOT / "docker" / "nginx" / "templates" / "default.conf.template"
 ACCESS_LOG_FORMAT = ROOT / "docker" / "nginx" / "templates" / "access-log.conf.template"
 COLLECTOR_CONFIG = ROOT / "docker" / "otel-collector" / "config.yaml"
 APPLICATION_SOURCE = ROOT / "src" / "goblinshift"
@@ -86,6 +87,18 @@ def test_roteiro_aponta_o_alerta_e_ainda_conta_a_mensagem_no_log_da_api() -> Non
         "goblinshift-api-1" in command and UVICORN_CONCURRENCY_MESSAGE in command
         for command in _shell_commands(section)
     )
+
+
+def test_roteiro_manda_conferir_as_conexoes_do_proxy_e_o_nginx_ainda_fecha_cada_uma() -> None:
+    # O uvicorn compara o teto com as conexões abertas, e conexão keep-alive ociosa ocupa vaga.
+    # O roteiro afirma que o upstream do Nginx não reaproveita conexões: se passar a reaproveitar,
+    # a seção precisa dizer quanto do teto o pool ocioso do Nginx consome.
+    section = _saturation_section()
+    site = NGINX_SITE.read_text(encoding="utf-8")
+
+    assert "keep-alive" in section and "sport = :8000" in section
+    assert not re.search(r"^\s*keepalive\s", site, re.MULTILINE)
+    assert "proxy_http_version 1.1" not in site
 
 
 @pytest.mark.parametrize("needle", [NGINX_REJECTED, NGINX_UPSTREAM_UNAVAILABLE])

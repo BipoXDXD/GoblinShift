@@ -11,6 +11,7 @@ traz caminho nem cliente, e só a contagem sai.
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 
@@ -23,8 +24,11 @@ from goblinshift.platform.telemetry import UVICORN_ERROR_LOGGER
 UVICORN_CONCURRENCY_MESSAGE = "Exceeded concurrency limit."
 SATURATION_SPAN = "api.saturation"
 REJECTED_ATTRIBUTE = "api.saturation.rejected"
-# Uma janela por minuto: o alerta conta os minutos com recusa, não o volume delas.
+# Uma janela por minuto de relógio: o alerta conta os minutos com recusa, não o volume delas.
 WINDOW_S = 60
+# O relato sai 1 s depois da virada. Um despertar um pouco adiantado do event loop (relógio
+# monotônico contra o de parede) ainda cai no minuto certo e não relata duas vezes no mesmo.
+WINDOW_END_MARGIN_S = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +36,11 @@ logger = logging.getLogger(__name__)
 class ConcurrencyLimitCounter(logging.Handler):
     """Conta as recusas do teto de concorrência que o uvicorn registra.
 
-    A soma e a leitura com zeragem dividem um lock próprio: o contador vale entre threads. O nível
-    WARNING deixa o `Logger` descartar o resto antes do handler, e cada recusa custa uma
-    comparação de texto e uma soma.
+    O uvicorn registra a recusa na thread do event loop, a mesma do laço que lê o contador
+    (`test_recusa_real_do_uvicorn_e_contada`). O lock fica para um registro no `uvicorn.error`
+    vindo de outra thread, que o contrato do `logging` permite, e custa pouco. O nível WARNING
+    deixa o `Logger` descartar o resto antes do handler, e cada recusa custa uma comparação de
+    texto e uma soma.
     """
 
     def __init__(self) -> None:
@@ -68,8 +74,17 @@ def report_window(tracer: Tracer, counter: ConcurrencyLimitCounter) -> None:
         span.set_attribute(REJECTED_ATTRIBUTE, rejected)
 
 
+def seconds_until_window_end(now: float) -> float:
+    """Segundos até logo depois da próxima virada do minuto de relógio (`now` em segundos Unix).
+
+    Todas as réplicas da API relatam no mesmo instante, e cada span cai no minuto absoluto
+    seguinte ao que ele conta, que é o minuto que o alerta agrupa.
+    """
+    return WINDOW_S - now % WINDOW_S + WINDOW_END_MARGIN_S
+
+
 async def wait_one_window() -> None:
-    await asyncio.sleep(WINDOW_S)
+    await asyncio.sleep(seconds_until_window_end(time.time()))
 
 
 @asynccontextmanager
