@@ -41,7 +41,7 @@ function recordStatusInsertions(): Map<Element, string> {
         (element) => element.getAttribute("role") === "status",
       );
       for (const region of regions) {
-        inserted.set(region, region.textContent ?? "");
+        inserted.set(region, region.textContent);
       }
     }
   });
@@ -56,7 +56,7 @@ function recordStatusInsertions(): Map<Element, string> {
 function reuseAnnouncers(): HTMLElement[] {
   return screen
     .getAllByRole("status")
-    .filter((region) => region.textContent?.startsWith("Parâmetros da execução de"));
+    .filter((region) => region.textContent.startsWith("Parâmetros da execução de"));
 }
 
 function setup(run: () => Response, path = `/bancada/csv-janitor?execucao=${RUN_ID}`) {
