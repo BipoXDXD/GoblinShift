@@ -25,7 +25,6 @@ export function EmptyState({
       {illustration}
       <Heading className="text-lg font-semibold text-fg">{title}</Heading>
       {children}
-      <button type="button"></button>
     </div>
   );
 }
