@@ -83,9 +83,16 @@ export function useRunPolling(runId: string, options: RunPollingOptions = {}): R
 /**
  * Falhas seguidas, para a renderização; o `consecutiveFailures` do polling é ref, lido só fora
  * dela. Cada falha nova aumenta `errorUpdateCount`; o sucesso zera o `error` e a contagem.
+ *
+ * Ao voltar à execução, o cache traz o `errorUpdateCount` de todas as falhas que já viu, seguidas ou
+ * não. A contagem parte dele, e o erro ainda no cache conta como uma falha só: é o que se sabe
+ * de seguido.
  */
 function useFailureStreak(query: UseQueryResult<RunDetail>): number {
-  const [tracked, setTracked] = useState({ errors: 0, streak: 0 });
+  const [tracked, setTracked] = useState(() => ({
+    errors: query.errorUpdateCount,
+    streak: query.error === null ? 0 : 1,
+  }));
   const errors = query.errorUpdateCount;
   const recovered = query.error === null;
   if (errors !== tracked.errors || (recovered && tracked.streak !== 0)) {

@@ -209,7 +209,7 @@ describe("Execução", () => {
 });
 
 /** Respostas do GET da execução em sequência; a última se repete. */
-function inSequence(...responses: readonly (() => Response)[]): Handler {
+function inSequence(...responses: readonly (() => Response | null)[]): Handler {
   let served = 0;
   return () => {
     const next = responses[Math.min(served, responses.length - 1)];
@@ -221,6 +221,8 @@ function inSequence(...responses: readonly (() => Response)[]): Handler {
 const running = (): Response => jsonResponse(runBody({ status: "running" }));
 const unavailable = (): Response => problemResponse(503, "SERVICE_UNAVAILABLE");
 const UNAVAILABLE_TEXT = "O serviço está indisponível no momento.";
+// Pedido que nunca responde: segura a consulta em andamento.
+const hanging = (): null => null;
 
 /** A próxima consulta do polling, sem esperar o intervalo dele. */
 async function nextPoll(queryClient: QueryClient): Promise<void> {
@@ -310,6 +312,23 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
     await nextPoll(queryClient);
 
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ao voltar à execução, falhas antigas e não seguidas não viram alerta", async () => {
+    const { queryClient, router } = setup(
+      inSequence(running, unavailable, running, unavailable, hanging),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(() => router.navigate("/termos"));
+    await act(() => router.navigate(`/execucoes/${RUN_ID}`));
+
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
