@@ -9,8 +9,9 @@ Formas de citação, todas conferidas por `tests/security/test_threat_model.py`:
 `arquivo.py::símbolo` (teste, função, classe ou `Classe.método`, resolvido pelo `ast`);
 `arquivo.py` `símbolo` `trecho` (símbolo como `função`, `Classe.método`, função aninhada ou
 nome atribuído no módulo; o trecho literal aparece exatamente uma vez no código do símbolo,
-não pode ser só o nome do símbolo e, num nome atribuído, é a instrução inteira ou uma linha
-inteira dela; em tabela, `\|` vale `|`);
+não pode ser só o nome do símbolo e, num nome atribuído, não é só um identificador e é a
+instrução inteira, se ela cabe numa linha, ou exatamente um item do valor atribuído, cuja chave
+não se repete no mesmo valor; em tabela, `\|` vale `|`);
 `arquivo` `trecho` para arquivo que não é Python (o trecho aparece uma vez no arquivo inteiro);
 caminho sob `docs/`, que precisa existir.
 
@@ -94,7 +95,7 @@ E elevation of privilege.
 | | Ameaça | Mitigação | Teste |
 |---|---|---|---|
 | E | Chave sem `runs:write` cria Run | `src/goblinshift/entrypoints/api/runs.py` `create_run` `require_scope(Scope.RUNS_WRITE)` | `tests/api/test_runs.py::test_criar_exige_o_escopo_runs_write` |
-| I/E | Run cita upload de outra conta | Lock filtrado por dono: `src/goblinshift/files/uploads.py` `lock_ready_uploads` `upload.c.owner_id == owner_id`; FK composta: `src/goblinshift/runs/tables.py` `run_input` `["owner_id", "upload_id"], ["upload.owner_id", "upload.id"], ondelete="RESTRICT"` | `tests/api/test_runs.py::test_upload_indisponivel_responde_o_mesmo_422_para_todos_os_motivos` |
+| I/E | Run cita upload de outra conta | Lock filtrado por dono: `src/goblinshift/files/uploads.py` `lock_ready_uploads` `upload.c.owner_id == owner_id`; FK composta das colunas `src/goblinshift/runs/tables.py` `run_input` `["owner_id", "upload_id"]` para `src/goblinshift/runs/tables.py` `run_input` `["upload.owner_id", "upload.id"]` | `tests/api/test_runs.py::test_upload_indisponivel_responde_o_mesmo_422_para_todos_os_motivos` |
 | I | Leitura, listagem ou cancelamento de Run alheia | `src/goblinshift/runs/queries.py` `get_run` `run.c.owner_id == owner_id`, `src/goblinshift/runs/queries.py` `list_runs` `run.c.owner_id == owner_id` | `tests/api/test_runs.py::test_outra_conta_recebe_404_igual_ao_de_inexistente`, `tests/api/test_runs.py::test_listagem_de_outra_conta_nao_mostra_execucoes_alheias`, `tests/api/test_runs_cancel.py::test_execucao_alheia_ou_inexistente_responde_404_igual` |
 | T | Cursor de paginação adulterado ou de outra conta | `src/goblinshift/runs/cursor.py` `decode_cursor` `hmac.compare_digest(_b64decode(signature), _sign(body, secret))` | `tests/api/test_runs.py::test_cursor_adulterado_responde_400`, `tests/runs/test_cursor_owner.py::test_http_responde_400_ao_cursor_de_outra_conta` |
 | T | Repetição cria Run duplicada; chave reaproveitada com outro corpo ou por outra conta | `src/goblinshift/runs/tables.py` `idempotency_record` `PrimaryKeyConstraint("owner_id", "operation", "idem_key"),`, `src/goblinshift/runs/acceptance.py` `accept_run` `_lock_idempotency_key(session, owner_id, key)` | `tests/runs/test_acceptance.py::test_duas_requisicoes_simultaneas_com_a_mesma_chave_criam_uma_execucao`, `tests/runs/test_acceptance.py::test_chave_de_outra_conta_nao_interfere`, `tests/api/test_runs.py::test_replay_devolve_o_mesmo_location_sem_criar_nada`, `tests/api/test_runs.py::test_mesma_chave_com_outro_comando_responde_422` |

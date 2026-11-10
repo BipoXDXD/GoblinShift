@@ -17,6 +17,17 @@ _PAIRS = (
     ("a", 1),
     ("b", 2),
 )
+_POLICY = {
+    "csp": "none",
+    "corp": "same-origin",
+}
+_TABLE = Table(
+    "t",
+    metadata,
+    # comentário dentro da chamada
+    Column("a"),
+    Key(["a", "b"], ["c.a", "c.b"], on="x"),
+)
 
 try:
     import tomllib
@@ -72,7 +83,10 @@ limit api;
 """
 
 
-_WHOLE_STATEMENT = "o trecho de uma constante é a instrução inteira ou uma linha inteira dela"
+_WHOLE_STATEMENT = "numa atribuição de uma linha, o trecho é a instrução inteira"
+_ITEM = "numa atribuição de várias linhas, o trecho é um item do valor atribuído"
+_REPEATED_KEY = "a chave do item citado se repete no mesmo valor"
+_IDENTIFIER = "o trecho de uma atribuição é só um identificador"
 
 # As sabotagens da revisão do PR #256: cada valor mudou, mas o trecho antigo continuava dentro dele.
 _SABOTAGED = """\
@@ -80,6 +94,27 @@ RETURN_TO_PATTERN = r".*"
 MAX_TRANSFERS_PER_ACCOUNT = 200
 MAX_BODY_BYTES = 10240000
 _DIR_MODE = 0o7007
+"""
+
+
+# As sabotagens A1, A2 e A3 da re-revisão do PR #256: a linha citada não muda, mas outro item vence
+# ou o item citado sai do valor atribuído.
+_SABOTAGED_ITEMS = """\
+_COMMON_HEADERS = (
+    ("cache-control", "public, max-age=86400"),
+    ("cache-control", "no-store"),
+)
+DOWNLOAD_PROTECTION_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; sandbox",
+    "Content-Security-Policy": "default-src *",
+}
+run_input = Table(
+    "run_input",
+    metadata,
+    *() and ForeignKeyConstraint(
+        ["owner_id", "upload_id"], ["upload.owner_id", "upload.id"], ondelete="RESTRICT"
+    ),
+)
 """
 
 
@@ -101,6 +136,11 @@ def root(tmp_path: Path) -> Path:
         "`src/mod.py` `LIMIT` `LIMIT = 10`",
         '`src/mod.py` `_FLAGS` `_FLAGS = ("a", "b")`',
         '`src/mod.py` `_PAIRS` `("b", 2),`',
+        '`src/mod.py` `_PAIRS` `("b", 2)`',
+        '`src/mod.py` `_POLICY` `"csp": "none",`',
+        '`src/mod.py` `_TABLE` `Column("a"),`',
+        '`src/mod.py` `_TABLE` `["c.a", "c.b"]`',
+        '`src/mod.py` `_TABLE` `on="x"`',
         "`src/mod.py` `TRY_LIMIT` `TRY_LIMIT = 1`",
         "`src/mod.py` `IF_LIMIT` `IF_LIMIT = 2`",
         "`src/mod.py` `WITH_LIMIT` `WITH_LIMIT = 3`",
@@ -137,8 +177,14 @@ def test_trecho_que_se_repete_fora_do_simbolo_vale_uma_vez_dentro_dele(root: Pat
         ("`src/mod.py` `guard` `guard`", "o trecho é só o nome do símbolo"),
         ("`src/mod.py` `LIMIT` `LIMIT`", "o trecho é só o nome do símbolo"),
         ("`src/mod.py` `LIMIT` `= 10`", _WHOLE_STATEMENT),
-        ('`src/mod.py` `_FLAGS` `"b"`', _WHOLE_STATEMENT),
-        ('`src/mod.py` `_PAIRS` `("b", 2)`', _WHOLE_STATEMENT),
+        ('`src/mod.py` `_FLAGS` `"b"`', _IDENTIFIER),
+        ('`src/mod.py` `_FLAGS` `("a", "b")`', _WHOLE_STATEMENT),
+        ('`src/mod.py` `_PAIRS` `("b", 2`', _ITEM),
+        ("`src/mod.py` `_PAIRS` `_PAIRS = (`", _IDENTIFIER),
+        ("`src/mod.py` `_TABLE` `# comentário dentro da chamada`", _ITEM),
+        ('`src/mod.py` `_TABLE` `["a", "b"], ["c.a", "c.b"], on="x"`', _ITEM),
+        ("`src/mod.py` `_TABLE` `metadata,`", _IDENTIFIER),
+        ('`src/mod.py` `_TABLE` `"t",`', _IDENTIFIER),
         ("`src/mod.py` `twin` `pass`", "o símbolo está definido 2 vezes no arquivo"),
         ("`src/mod.py` `guard` `value > LIMIT`", "o trecho não aparece no símbolo"),
         ("`src/mod.py` `guard` `return checked(key)`", "o trecho não aparece no símbolo"),
@@ -234,3 +280,24 @@ def test_arquivo_com_quebra_que_o_ast_nao_conta_e_recusado(tmp_path: Path, separ
     assert citation_problems(citation, tmp_path) == [
         f"{citation}: o arquivo tem quebras de linha que o ast não conta"
     ]
+
+
+@pytest.mark.parametrize(
+    ("citation", "reason"),
+    [
+        ('`src/sab.py` `_COMMON_HEADERS` `("cache-control", "no-store"),`', _REPEATED_KEY),
+        (
+            "`src/sab.py` `DOWNLOAD_PROTECTION_HEADERS` "
+            '`"Content-Security-Policy": "default-src \'none\'; sandbox",`',
+            _REPEATED_KEY,
+        ),
+        ('`src/sab.py` `run_input` `["upload.owner_id", "upload.id"]`', _ITEM),
+    ],
+)
+def test_item_sabotado_em_atribuicao_de_varias_linhas_e_recusado(
+    tmp_path: Path, citation: str, reason: str
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "sab.py").write_text(_SABOTAGED_ITEMS, encoding="utf-8")
+
+    assert citation_problems(citation, tmp_path) == [f"{citation}: {reason}"]

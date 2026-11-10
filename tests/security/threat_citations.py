@@ -4,8 +4,17 @@ Formas aceitas:
 - `` `arquivo.py` `Símbolo` `trecho` ``: o símbolo (função, classe, `Classe.método`, função
   aninhada ou nome atribuído no módulo) é localizado pelo `ast`, e o trecho literal precisa
   aparecer no código-fonte dele, decoradores incluídos, exatamente uma vez. Trecho igual ao nome
-  do símbolo não prova nada e é recusado. Num nome atribuído (constante, tabela), o trecho é a
-  instrução inteira ou uma linha inteira dela, para que `= 2` não continue valendo com `= 200`;
+  do símbolo não prova nada e é recusado;
+- num nome atribuído (constante, tabela, dict de cabeçalhos), o trecho não pode ser só um
+  identificador com pontuação (`metadata,`). Se a instrução cabe numa linha, o trecho é a
+  instrução inteira, para que `= 2` não continue valendo com `= 200`. Se ocupa várias, o trecho
+  (sem a vírgula final) é exatamente um item do valor: elemento de tupla, lista ou set, par
+  `chave: valor` de dict, ou argumento posicional ou keyword de chamada, descendo por itens que
+  também são container ou chamada (`ForeignKeyConstraint` dentro de `Table`). Uma linha solta
+  não basta: outro item pode anular o citado sem tocá-lo. Por isso nenhum irmão pode repetir a
+  chave do item citado (primeiro elemento da tupla, chave do dict, nome do keyword), já que,
+  conforme quem lê, vence a primeira ocorrência ou a última; e a descida não atravessa `*`,
+  `and` nem outra expressão, que podem tirar o item do valor;
 - `` `arquivo` `trecho` `` para arquivo que não é Python (Nginx, Dockerfile...): o trecho precisa
   aparecer exatamente uma vez no arquivo inteiro.
 
@@ -18,12 +27,16 @@ linha que o `ast` não conta (form feed, U+2028...) é recusado, porque o recort
 
 import ast
 import re
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 _PATH = r"(?:src|deploy|docker|tests)/[^`\s:]+"
 _CODE_REF = re.compile(rf"`(?P<path>{_PATH})` `(?P<first>[^`]+)`(?: `(?P<second>[^`]+)`)?")
 _LINE_REF = re.compile(rf"`{_PATH}:\d+(?:-\d+)?`")
 _DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+# Um identificador solto, com pontuação em volta (`metadata,`): não prova nada sobre o valor.
+_BARE_IDENTIFIER = re.compile(r"\W*[A-Za-z_]\w*\W*")
 # As únicas quebras de linha que o `ast` conta em `lineno`; `str.splitlines` aceita outras.
 _AST_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 
@@ -89,8 +102,10 @@ def _python_problem(source: str, symbol: str, excerpt: str) -> str | None:
     segment = _segment(source, node)
     if excerpt == _name(node):
         return "o trecho é só o nome do símbolo"
-    if not isinstance(node, _Definition) and not _is_whole_statement(source, node, excerpt):
-        return "o trecho de uma constante é a instrução inteira ou uma linha inteira dela"
+    if not isinstance(node, _Definition):
+        problem = _assignment_problem(source, node, excerpt)
+        if problem is not None:
+            return problem
     return _uniqueness_problem(segment.count(excerpt), "no símbolo")
 
 
@@ -99,9 +114,81 @@ def _ast_line_count(source: str) -> int:
     return len(lines) - 1 if lines[-1] == "" else len(lines)
 
 
-def _is_whole_statement(source: str, node: ast.Assign | ast.AnnAssign, excerpt: str) -> bool:
-    whole_lines = {line.strip() for line in _segment(source, node).splitlines()}
-    return excerpt == ast.get_source_segment(source, node) or excerpt in whole_lines
+def _assignment_problem(source: str, node: ast.Assign | ast.AnnAssign, excerpt: str) -> str | None:
+    if _BARE_IDENTIFIER.fullmatch(excerpt):
+        return "o trecho de uma atribuição é só um identificador"
+    if node.end_lineno == node.lineno:
+        if excerpt != ast.get_source_segment(source, node):
+            return "numa atribuição de uma linha, o trecho é a instrução inteira"
+        return None
+    return _item_problem(source, node.value, excerpt.removesuffix(","))
+
+
+def _item_problem(source: str, value: ast.expr | None, wanted: str) -> str | None:
+    """O trecho é um item do valor; a chave dele não se repete entre os irmãos."""
+    for group in _item_groups(source, value):
+        for item in group:
+            if item.text != wanted:
+                continue
+            sibling_keys = [other.key for other in group]
+            if item.key is not None and sibling_keys.count(item.key) > 1:
+                return "a chave do item citado se repete no mesmo valor"
+            return None
+    return "numa atribuição de várias linhas, o trecho é um item do valor atribuído"
+
+
+@dataclass(frozen=True)
+class _Item:
+    text: str
+    key: str | None
+    child: ast.expr | None
+
+
+def _item_groups(source: str, value: ast.expr | None) -> Iterator[list[_Item]]:
+    """Os itens de cada container ou chamada, descendo só por itens que também são um deles.
+
+    Não desce por `*`, `and`, `if` nem outras expressões: um item escondido nelas não está no
+    valor atribuído.
+    """
+    items = _direct_items(source, value)
+    if items:
+        yield items
+    for item in items:
+        yield from _item_groups(source, item.child)
+
+
+def _direct_items(source: str, value: ast.expr | None) -> list[_Item]:
+    match value:
+        case ast.Tuple(elts=elts) | ast.List(elts=elts) | ast.Set(elts=elts):
+            return [_Item(_text(source, elt, elt), _first_element(elt), elt) for elt in elts]
+        case ast.Dict(keys=keys, values=values):
+            return [
+                _Item(_text(source, key or item, item), _unparsed(key), item)
+                for key, item in zip(keys, values, strict=True)
+            ]
+        case ast.Call(args=args, keywords=keywords):
+            positional = [_Item(_text(source, arg, arg), None, arg) for arg in args]
+            named = [_Item(_text(source, kw, kw), kw.arg, kw.value) for kw in keywords]
+            return positional + named
+    return []
+
+
+def _first_element(element: ast.expr) -> str | None:
+    if isinstance(element, ast.Tuple | ast.List) and element.elts:
+        return ast.unparse(element.elts[0])
+    return None
+
+
+def _unparsed(node: ast.expr | None) -> str | None:
+    return None if node is None else ast.unparse(node)
+
+
+def _text(source: str, first: ast.expr | ast.keyword, last: ast.expr | ast.keyword) -> str:
+    """O código-fonte do início de `first` ao fim de `last` (um par `chave: valor` de dict)."""
+    span = ast.Constant(value=None)
+    span.lineno, span.col_offset = first.lineno, first.col_offset
+    span.end_lineno, span.end_col_offset = last.end_lineno, last.end_col_offset
+    return ast.get_source_segment(source, span) or ""
 
 
 def _uniqueness_problem(count: int, where: str) -> str | None:
