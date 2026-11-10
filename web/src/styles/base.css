@@ -40,10 +40,10 @@
     outline: none;
   }
 
-  /* Títulos recebem foco por programa só para o leitor de tela e o Tab partirem dali: o h1 a cada
-     troca de rota (FocusHeading), o h2 da seção depois de revogar ou excluir e o h3 do formulário
-     que abriu. Não são controles, então não desenham anel (o resumo de erros, que também recebe
-     foco, continua com o anel). */
+  /* Todo título h1, h2 ou h3 com tabindex="-1" recebe foco só por programa, para o leitor de tela
+     e o Tab partirem dali (por exemplo, o h1 a cada troca de rota, o h2 de uma seção ou da tela
+     depois de uma ação que tira o botão focado, o h3 de um bloco que abriu). Não são controles,
+     então não desenham anel. O resumo de erros, que também recebe foco, continua com o anel. */
   :is(h1, h2, h3)[tabindex="-1"]:focus {
     outline: none;
   }
