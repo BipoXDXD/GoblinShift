@@ -57,6 +57,7 @@ export function ConfirmDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   // Sem isto, um destino passado antes da primeira abertura roubaria o foco na montagem.
   const opened = useRef(false);
+  const opener = useRef<Element | null>(null);
   const titleId = useId();
   const bodyId = useId();
   useEffect(() => {
@@ -66,6 +67,7 @@ export function ConfirmDialog({
     }
     if (open) {
       if (!element.open) {
+        opener.current = document.activeElement;
         element.showModal();
         opened.current = true;
         // O primeiro marcado na ordem do documento: o campo da confirmação digitada, se houver,
@@ -74,11 +76,14 @@ export function ConfirmDialog({
       }
       return;
     }
-    if (element.open) {
+    const closing = element.open;
+    if (closing) {
       // O close devolve o foco a quem abriu; o destino, se houver, vem logo depois e prevalece.
       element.close();
     }
-    if (opened.current) {
+    // Destino que chega depois de o navegador fechar o diálogo só leva o foco se a pessoa não o
+    // moveu: ele ainda está em quem abriu ou caiu no <body> porque quem abriu saiu do DOM.
+    if (opened.current && (closing || isFocusUnmoved(opener.current))) {
       returnFocusTo?.current?.focus();
     }
   }, [open, returnFocusTo]);
@@ -123,4 +128,9 @@ export function ConfirmDialog({
       </div>
     </dialog>
   );
+}
+
+function isFocusUnmoved(opener: Element | null): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || active === opener;
 }

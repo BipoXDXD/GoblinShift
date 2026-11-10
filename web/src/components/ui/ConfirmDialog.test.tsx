@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -224,16 +224,37 @@ describe("ConfirmDialog", () => {
     expect(screen.getByRole("heading", { name: "Chaves" })).toHaveFocus();
   });
 
+  // O fechamento é aplicado (act) antes da resposta: open e returnFocusTo mudam em renders
+  // separados, e só o destino novo dispara o efeito.
   it("fechado pelo navegador antes da resposta, o destino que chega depois recebe o foco", async () => {
     const user = userEvent.setup();
     render(<DestinationHarness />);
     await user.click(screen.getByRole("button", { name: "Abrir" }));
-    forceClose(screen.getByRole("dialog"));
+    act(() => {
+      forceClose(screen.getByRole("dialog"));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Abrir" })).toHaveFocus();
 
     fireEvent.click(screen.getByRole("button", { name: "Resposta chegou" }));
 
     expect(screen.getByRole("heading", { name: "Chaves" })).toHaveFocus();
+  });
+
+  // A pessoa já levou o foco a outro lugar quando a resposta chega (WCAG 3.2.1).
+  it("fechado pelo navegador, o destino que chega depois não rouba o foco que a pessoa moveu", async () => {
+    const user = userEvent.setup();
+    render(<DestinationHarness />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+    act(() => {
+      forceClose(screen.getByRole("dialog"));
+    });
+    const elsewhere = screen.getByRole("button", { name: "Resposta chegou" });
+    elsewhere.focus();
+
+    fireEvent.click(elsewhere);
+
+    expect(elsewhere).toHaveFocus();
   });
 
   it("um destino passado antes da primeira abertura não rouba o foco na montagem", () => {

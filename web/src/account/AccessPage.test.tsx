@@ -402,6 +402,37 @@ describe("Acesso: chaves de API", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // O destino da revogação anterior não vale para o próximo diálogo (WCAG 2.4.3).
+  it("depois de revogar uma chave, cancelar a revogação de outra devolve o foco ao Revogar dela", async () => {
+    let revoked = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [
+            apiKeyBody(revoked ? { revoked_at: "2026-10-14T12:00:00Z" } : {}),
+            apiKeyBody({ id: SECOND_KEY_ID, public_id: "gsk_outra" }),
+          ],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        revoked = true;
+        return NO_CONTENT();
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+    const other = within(keys).getByRole("button", { name: "Revogar a chave gsk_outra" });
+
+    await user.click(other);
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(other).toHaveFocus();
+  });
+
   // Falha genérica (5xx, timeout) com a mudança aplicada no servidor: o Revogar some na releitura e
   // o foco cairia no <body> (WCAG 2.4.3).
   it("500 com a lista já sem a chave: o foco vai para o título e a falha aparece", async () => {
