@@ -39,7 +39,13 @@ export function FailureNotice({
   return <ProblemAlert failure={error.failure} {...(messages === undefined ? {} : { messages })} />;
 }
 
-type GuidanceCode = "AUTHENTICATION_REQUIRED" | "REAUTH_REQUIRED" | "TERMS_NOT_ACCEPTED";
+/** Códigos em que a falha vira um caminho (entrar, entrar de novo, aceitar), não um alerta. */
+const GUIDANCE_CODES = [
+  "AUTHENTICATION_REQUIRED",
+  "REAUTH_REQUIRED",
+  "TERMS_NOT_ACCEPTED",
+] as const;
+type GuidanceCode = (typeof GUIDANCE_CODES)[number];
 
 /**
  * Texto a anunciar quando o FailureNotice mostra um caminho (entrar, entrar de novo, aceitar), ou
@@ -56,11 +62,7 @@ function guidanceCode(error: Error): GuidanceCode | null {
     return null;
   }
   const { code } = error.failure.problem;
-  return code === "AUTHENTICATION_REQUIRED" ||
-    code === "REAUTH_REQUIRED" ||
-    code === "TERMS_NOT_ACCEPTED"
-    ? code
-    : null;
+  return GUIDANCE_CODES.find((guidance) => guidance === code) ?? null;
 }
 
 /** A conta precisa aceitar a versão nova dos termos; o link volta para esta tela depois. */

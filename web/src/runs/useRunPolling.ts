@@ -20,8 +20,9 @@ interface RunPolling {
    */
   readonly acknowledge: (status: RunStatus) => void;
   /**
-   * Falha a mostrar em alerta, ou `null`. Sem execução na tela, qualquer falha. Com ela, só a
-   * persistente (polling.ts): a oscilação da rede some na próxima consulta e não vira anúncio.
+   * Falha a mostrar no FailureNotice, ou `null`: alerta, ou o convite para entrar de novo (401) e
+   * para aceitar os termos. Sem execução na tela, qualquer falha. Com ela, só a persistente
+   * (polling.ts): a oscilação da rede some na próxima consulta e não vira anúncio.
    */
   readonly failure: Error | null;
 }

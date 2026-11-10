@@ -80,7 +80,17 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
           do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
       {run !== undefined && (
         <div className="flex flex-col gap-8 max-md:order-1">
-          <RunDetails run={run} onAnnounced={acknowledge} />
+          <RunDetails
+            run={run}
+            actions={
+              // Com o convite na tela, o Cancelar só abriria um segundo convite: sem sessão, a
+              // ação some e os dados já carregados ficam. Os resultados só aparecem no estado
+              // terminal, em que o polling já parou e não há 401 dele.
+              guidance === null ? (
+                <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
+              ) : null
+            }
+          />
           {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
@@ -112,14 +122,15 @@ function BackToWorkbench({ recipeId }: { readonly recipeId: string }): ReactElem
 
 interface RunDetailsProps {
   readonly run: Run;
-  readonly onAnnounced: (status: RunStatus) => void;
+  /** Ações que exigem sessão (o Cancelar), ou `null` quando a tela pede para entrar de novo. */
+  readonly actions: ReactNode;
 }
 
 /**
  * Cartão de estado. Os rótulos que só repetiriam o óbvio ficam para o leitor de tela (`sr-only`):
  * o selo já diz o estado e o texto grande diz a fase (RUI cap. 2, "Labels are a last resort").
  */
-function RunDetails({ run, onAnnounced }: RunDetailsProps): ReactElement {
+function RunDetails({ run, actions }: RunDetailsProps): ReactElement {
   const recipe = findRecipe(run.recipe_id);
   const { phase, processed, total } = run.progress;
   const flavor = flavorOf(run.status);
@@ -168,7 +179,7 @@ function RunDetails({ run, onAnnounced }: RunDetailsProps): ReactElement {
               <span className="tabular-nums">{run.attempt}</span>
             </Detail>
           </dl>
-          <CancelRun runId={run.id} status={run.status} onAnnounced={onAnnounced} />
+          {actions}
         </div>
         {/* Depois do texto: o leitor de tela ouve o estado antes da goblin, e no celular ela fica
             embaixo, sem empurrar o estado para fora da primeira dobra. */}
