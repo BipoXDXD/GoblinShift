@@ -53,7 +53,7 @@ img{width:auto;height:520px;flex:none}
 h1{margin:0;color:${CREAM};font-size:96px;font-weight:700;line-height:1;letter-spacing:-0.02em}
 p{margin:24px 0 0;color:${CREAM_MUTED};font-size:36px;font-weight:400;line-height:1.25;max-width:14em}
 .band{position:absolute;left:0;right:0;top:0;height:12px;background:${COPPER}}
-</style><div class="band"></div><img src="${pathToFileURL(sealPng).href}" alt=""><div><h1>GoblinShift</h1><p>Arquivos em lote, limpos pelas goblins da oficina.</p></div>`,
+</style><div class="band"></div><img src="${pathToFileURL(sealPng).href}" alt=""><div><h1>GoblinShift</h1><p>Arquivos em lote, limpos pelos goblins da oficina.</p></div>`,
   );
   await page.setViewportSize(OG);
   await page.goto(pathToFileURL(html).href);
