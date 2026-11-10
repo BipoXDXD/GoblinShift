@@ -6,6 +6,7 @@ import { BancadaPage } from "../pages/BancadaPage";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { HistoricoPage } from "../pages/HistoricoPage";
 import type { FakeApi } from "../support/fakeApi";
+import { expectFitsDeviceWidth } from "../support/reflow";
 import { expect, test } from "../support/test";
 
 /** O celular mais estreito que a interface atende, com a altura de um aparelho comum. */
@@ -93,9 +94,7 @@ for (const screen of SCREENS) {
     const height = await goblinHeight(page);
     const project = info.project.name === "mobile" ? "mobile" : "desktop";
     expect(height).toBeGreaterThanOrEqual(MIN_HEIGHT_PX[project]);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-      page.viewportSize()?.width ?? 0,
-    );
+    await expectFitsDeviceWidth(page);
   });
 }
 
@@ -131,7 +130,5 @@ test("Créditos: as cinco goblins do elenco, com nome e imagem carregada", async
       .poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth))
       .toBeGreaterThan(0);
   }
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-    page.viewportSize()?.width ?? 0,
-  );
+  await expectFitsDeviceWidth(page);
 });
