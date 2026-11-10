@@ -134,10 +134,14 @@ test("excluir a conta só age com a frase; depois, a exclusão pedida e nenhuma 
   await expect(phrase).toBeFocused();
   const confirm = dialog.getByRole("button", { name: "Excluir conta" });
   await phrase.fill("excluir");
-  await expect(confirm).toHaveAttribute("aria-disabled", "true");
-  // aria-disabled deixa o botão no Tab; o Playwright o trata como desabilitado, então o clique é
-  // forçado para provar que ele não age.
-  await confirm.click({ force: true });
+  // Padrão GOV.UK: a confirmação fica ativa e a frase é validada ao confirmar.
+  await expect(confirm).not.toHaveAttribute("aria-disabled", "true");
+  await confirm.click();
+  await expect(phrase).toBeFocused();
+  await expect(phrase).toHaveAttribute("aria-invalid", "true");
+  await expect(phrase).toHaveAccessibleDescription(
+    "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
+  );
   expect(fakeApi.account.deleted).toBe(false);
 
   await phrase.fill("excluir minha conta");
