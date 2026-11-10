@@ -105,7 +105,10 @@ function tableCaptions(blocks: readonly Block[]): Map<Block, string> {
       const title = plainText(block.inlines).trim();
       lastTitle = title === "" ? undefined : title;
     } else if (block.kind === "quote") {
+      // Um título da citação só nomeia tabelas dentro dela: a de fora segue o título de fora.
+      const outerTitle = lastTitle;
       block.blocks.forEach(visit);
+      lastTitle = outerTitle;
     } else if (block.kind === "table") {
       const caption = lastTitle ?? columnsCaption(block.header);
       const count = (seen.get(caption) ?? 0) + 1;

@@ -201,6 +201,14 @@ describe("nome das tabelas", () => {
     expect(await axeViolations(container)).toEqual([]);
   });
 
+  it("título dentro de citação não nomeia a tabela de fora, logo depois dela", () => {
+    renderDocument(
+      "## 5. Prazos\n\n> ### Nota\n>\n> Um aviso lateral.\n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |",
+    );
+
+    expect(screen.getByRole("region", { name: "5. Prazos" })).toBeInTheDocument();
+  });
+
   it("sem título nem colunas com nome, a tabela ainda tem nome", () => {
     renderDocument("| | |\n| --- | --- |\n| a | b |");
 
