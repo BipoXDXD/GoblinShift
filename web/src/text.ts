@@ -905,10 +905,21 @@ export const TEXT = {
   credits: {
     title: "Créditos",
     artHeading: "As goblins",
-    art: [
-      "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no registro de licenças da arte.",
-      "A contribuição de seleção, renders e edição está sob CC BY 4.0, exceto Jade, Fagulha e a marca. A licença não concede direitos sobre conteúdo de terceiros nem garante proteção autoral ou exclusividade sobre os arquivos de origem.",
-    ],
+    // Cada parágrafo em três partes: o texto antes do link, o link e o texto depois.
+    art: {
+      cast: {
+        before:
+          "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no ",
+        link: "registro de licenças da arte",
+        after: ".",
+      },
+      license: {
+        before: "A contribuição de seleção, renders e edição está sob ",
+        link: "CC BY 4.0",
+        after:
+          ", exceto Jade, Fagulha e a marca. A licença não concede direitos sobre conteúdo de terceiros nem garante proteção autoral ou exclusividade sobre os arquivos de origem.",
+      },
+    },
     brandHeading: "A marca",
     brand: [
       "O emblema do cabeçalho e o selo da oficina mostram a Rúbia. O ícone da aba usa uma versão própria em SVG.",

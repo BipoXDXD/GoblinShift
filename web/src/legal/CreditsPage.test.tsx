@@ -35,6 +35,22 @@ describe("/creditos", () => {
     expect(main).toHaveTextContent("Blender");
   });
 
+  it.each([
+    [
+      "registro de licenças da arte",
+      "https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md",
+    ],
+    ["CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/legalcode.pt"],
+  ])("o texto “%s” é link para %s, na mesma aba e sem referrer", async (name, href) => {
+    setup("/creditos");
+    await expectHeadingFocused("Créditos");
+
+    const link = within(screen.getByRole("main")).getByRole("link", { name });
+    expect(link).toHaveAttribute("href", href);
+    expect(link).toHaveAttribute("rel", "noreferrer");
+    expect(link).not.toHaveAttribute("target");
+  });
+
   it("apresenta as cinco goblins do elenco, cada uma com o nome", async () => {
     setup("/creditos");
     await expectHeadingFocused("Créditos");
