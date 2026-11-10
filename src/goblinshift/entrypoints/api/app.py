@@ -72,13 +72,17 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(running: FastAPI) -> AsyncGenerator[None]:
-        yield
+        # A parada roda também quando a API cai: o uvicorn lança a falha no `yield`, e ela
+        # segue propagando depois dos passos abaixo.
         try:
-            engine.dispose()
+            yield
         finally:
-            # Por último: depois do encerramento, o processador descarta em silêncio todo span
-            # novo. O que rodar antes daqui na parada ainda entra no lote.
-            running.state.tracing.shut_down()
+            try:
+                engine.dispose()
+            finally:
+                # Por último: depois do encerramento, o processador descarta em silêncio todo
+                # span novo. O que rodar antes daqui na parada ainda entra no lote.
+                running.state.tracing.shut_down()
 
     app = FastAPI(
         title="GoblinShift",

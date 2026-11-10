@@ -4,10 +4,12 @@ Sem banco: a API sobe com o `BatchSpanProcessor` de produção, com o exportador
 em memória, e um atraso de lote longo o bastante para o span ficar na fila até a parada.
 """
 
+import asyncio
 import time
 from collections.abc import Iterator
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace.export import SpanExporter
@@ -119,3 +121,67 @@ def test_falha_ao_encerrar_o_tracing_nao_derruba_a_parada(
     assert f"GET {TRACED_PATH}" in _span_names(exporter)
     # `configure_logging` escreve JSON no stderr, sem propagar para o `caplog`.
     assert "encerramento do tracing falhou" in capsys.readouterr().err
+
+
+class _ApiRunningError(Exception):
+    """Falha da API em execução, lançada pelo uvicorn no `yield` do lifespan."""
+
+
+def _record_shutdown_steps(monkeypatch: pytest.MonkeyPatch, app: FastAPI) -> list[str]:
+    steps: list[str] = []
+    dispose = app.state.engine.dispose
+    shut_down = telemetry.ApiTracing.shut_down
+
+    def recording_dispose() -> None:
+        steps.append("dispose")
+        dispose()
+
+    def recording_shut_down(tracing: telemetry.ApiTracing) -> None:
+        steps.append("shut_down")
+        shut_down(tracing)
+
+    monkeypatch.setattr(app.state.engine, "dispose", recording_dispose)
+    monkeypatch.setattr(telemetry.ApiTracing, "shut_down", recording_shut_down)
+    return steps
+
+
+def _run_lifespan_failing_with(app: FastAPI, failure: Exception) -> None:
+    async def run() -> None:
+        async with app.router.lifespan_context(app):
+            raise failure
+
+    asyncio.run(run())
+
+
+def test_falha_da_api_em_execucao_ainda_libera_o_banco_e_encerra_o_tracing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+
+    with pytest.raises(_ApiRunningError, match="API caiu"):
+        _run_lifespan_failing_with(app, _ApiRunningError("API caiu"))
+
+    assert steps == ["dispose", "shut_down"]
+
+
+def test_falha_ao_liberar_o_banco_ainda_encerra_o_tracing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+
+    def broken_dispose() -> None:
+        steps.append("dispose")
+        raise RuntimeError("dispose falhou")
+
+    monkeypatch.setattr(app.state.engine, "dispose", broken_dispose)
+
+    async def run() -> None:
+        async with app.router.lifespan_context(app):
+            pass
+
+    with pytest.raises(RuntimeError, match="dispose falhou"):
+        asyncio.run(run())
+
+    assert steps == ["dispose", "shut_down"]
