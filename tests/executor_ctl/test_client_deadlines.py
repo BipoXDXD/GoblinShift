@@ -1,13 +1,17 @@
-"""Contrato de prazo do `start`: o worker espera mais que o pior caso do executor-ctl.
+"""Contrato de prazo do `start` e do `remove`: o worker espera mais que o pior caso do executor-ctl.
 
 O worker não importa `deploy/executor_ctl` (o pacote é do host, fora da imagem do worker), então
-o cliente espelha o prazo do CLI do Docker e quantas chamadas cabem num `start`. Aqui as duas
-pontas se encontram: o espelho bate com o servidor, e o número de chamadas é medido no serviço
-real, com um Docker de mentira que só conta (nada espera de verdade).
+o cliente espelha o prazo do CLI do Docker e quantas chamadas cabem em cada operação que toma o
+lock da área. Aqui as duas pontas se encontram: o espelho bate com o servidor, e o número de
+chamadas é medido no serviço real, com um Docker de mentira que só conta (nada espera de verdade).
 
-Se o cliente desistir antes, o `start` segue no servidor e o container nasce sem ninguém
-esperando: a tentativa vira falha transitória com o executor de pé, e o claim seguinte encontra a
-área ocupada (`work_area_dirty`).
+Se o cliente desistir antes, a operação segue no servidor. No `start`, o container nasce sem
+ninguém esperando: a tentativa vira falha transitória com o executor de pé, e o claim seguinte
+encontra a área ocupada (`work_area_dirty`). No `remove`, a thread continua na fila do lock (que
+não é FIFO), e a manutenção, ao repetir, empilha outras atrás dela.
+
+O fechamento definitivo é do servidor: tomar o lock com prazo e responder 503 `busy`. Isso exige
+reinstalar o executor-ctl no host e fica para uma frente própria.
 """
 
 import os
@@ -85,6 +89,14 @@ def test_chamadas_do_start_espelhadas_no_cliente(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_chamadas_do_remove_espelhadas_no_cliente(tmp_path: Path) -> None:
+    calls = remove_calls(tmp_path)
+
+    assert calls == ["inspect", "rm"]
+    assert len(calls) == client.CTL_REMOVE_DOCKER_CALLS
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
 def test_quem_segura_o_lock_da_area_cabe_no_espelho_do_cliente(tmp_path: Path) -> None:
     # Start e remove tomam o lock da área; quem chega espera, no pior caso, a operação inteira
     # de quem está na frente.
@@ -93,12 +105,29 @@ def test_quem_segura_o_lock_da_area_cabe_no_espelho_do_cliente(tmp_path: Path) -
     assert longest == client.CTL_LOCK_HOLDER_DOCKER_CALLS
 
 
+def lock_wait_calls(tmp_path: Path) -> int:
+    """Chamadas da operação mais longa que pode estar à frente no lock, medidas no serviço."""
+    return max(len(start_calls(tmp_path / "start")), len(remove_calls(tmp_path / "remove")))
+
+
 @pytest.mark.usefixtures("synthetic_policy_metadata")
 def test_cliente_espera_mais_que_o_pior_caso_do_start_no_servidor(tmp_path: Path) -> None:
     # Medido no serviço, não no espelho: o próprio start e uma operação inteira à frente no lock.
-    own = len(start_calls(tmp_path / "start"))
-    ahead = max(own, len(remove_calls(tmp_path / "remove")))
-    server_ceiling = timedelta(seconds=COMMAND_TIMEOUT_S * (own + ahead))
+    own = len(start_calls(tmp_path / "own"))
+    server_ceiling = timedelta(seconds=COMMAND_TIMEOUT_S * (own + lock_wait_calls(tmp_path)))
 
+    # Literal de propósito, calculado à mão ((3 + 3) x 30 s): uma mudança no custo do serviço
+    # aparece aqui como diff explícito, e não só como folga menor na desigualdade abaixo.
     assert server_ceiling == timedelta(seconds=180)
     assert server_ceiling < client.START_TIMEOUT
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_cliente_espera_mais_que_o_pior_caso_do_remove_no_servidor(tmp_path: Path) -> None:
+    # Medido no serviço: o próprio remove (sem o rmtree, que é a margem) e um start à frente.
+    own = len(remove_calls(tmp_path / "own"))
+    server_ceiling = timedelta(seconds=COMMAND_TIMEOUT_S * (own + lock_wait_calls(tmp_path)))
+
+    # Literal de propósito, calculado à mão ((2 + 3) x 30 s), pelo mesmo motivo do start.
+    assert server_ceiling == timedelta(seconds=150)
+    assert server_ceiling < client.REMOVE_TIMEOUT
