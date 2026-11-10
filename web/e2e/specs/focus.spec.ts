@@ -40,7 +40,7 @@ function contrast(foreground: string, background: string): number {
 
 for (const theme of THEMES) {
   for (const screen of SCREENS) {
-    test(`${screen.name}, tema ${theme}: todo foco por Tab tem anel de 2 px e 3:1, à vista`, async ({
+    test(`${screen.name}, tema ${theme}: todo foco por Tab tem anel de 2 px e 3:1, à vista @keyboard`, async ({
       page,
       fakeApi,
     }) => {

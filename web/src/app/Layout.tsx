@@ -102,7 +102,7 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
       {/* Links públicos para textos legais e créditos. */}
       <footer className="border-t border-line-soft">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-sm text-fg-muted md:px-8">
-          <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6 max-sm:relative max-sm:left-full max-sm:translate-x-48">
+          <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6">
             {/* end: no aceite (/termos/aceitar) o link dos Termos não é a página atual. */}
             {FOOTER_LINKS.map(({ to, label }) => (
               <NavLink key={to} to={to} end className={NAV_LINK}>
