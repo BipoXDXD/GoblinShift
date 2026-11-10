@@ -19,7 +19,7 @@ import logging
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from functools import partial
@@ -93,6 +93,9 @@ DEFAULT_BATCH_SIZE = 50
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
+# Contagem do evento do ciclo: passos que levantaram exceção. O ciclo segue para os outros, e a
+# volta conta como falha (`entrypoints/maintenance.run_cycles`, causa `gs-causa-ciclos-falhando`).
+STEPS_FAILED = "steps_failed"
 
 
 @dataclass(frozen=True)
@@ -139,26 +142,48 @@ class Maintenance:
         self._candidates_left_on_disk = 0
 
     def run_cycle(self) -> dict[str, int]:
-        """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7)."""
+        """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7).
+
+        Passos independentes: a exceção de um (banco caído no meio da reconciliação, disco) fica
+        no log e em `steps_failed`, e o ciclo segue para prazo, retenção, expurgo e medidores. As
+        contagens do passo que falhou ficam fora do evento. Interrupção do processo
+        (`KeyboardInterrupt`, `SystemExit`) não é `Exception` e sobe.
+        """
         started = time.monotonic()
         self._candidates_left_on_disk = 0
-        counts = {
-            "leases_reconciled": self.reconcile_expired_leases(),
-            "queue_expired": self.expire_queue(),
-            "deadlines": self.apply_deadlines(),
-            "holds_released": self.release_orphan_holds(),
-            **self.discard_stale_candidates(),
-            "work_areas_removed": self.sweep_work_areas(),
-            **self.apply_retention(),
-            **self.sweep_temporary_parts(),
-            **self.mark_missing_objects(),
-            **self.measure(),
-        }
+        counts: dict[str, int] = {}
+        failed = 0
+        for name, step in self._cycle_steps():
+            try:
+                counts.update(step())
+            except Exception as error:
+                # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
+                _log_step_failure(name, error)
+                failed += 1
         counts["candidates_left_on_disk"] = self._candidates_left_on_disk
+        counts[STEPS_FAILED] = failed
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de manutenção", extra={"fields": fields})
         return counts
+
+    def _cycle_steps(self) -> tuple[tuple[str, Callable[[], Mapping[str, int]]], ...]:
+        """Os passos do ciclo, na ordem: reconciliação, fila, prazo, usos, retenção e medidores."""
+        return (
+            (
+                "reconcile_expired_leases",
+                lambda: {"leases_reconciled": self.reconcile_expired_leases()},
+            ),
+            ("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
+            ("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
+            ("release_orphan_holds", lambda: {"holds_released": self.release_orphan_holds()}),
+            ("discard_stale_candidates", self.discard_stale_candidates),
+            ("sweep_work_areas", lambda: {"work_areas_removed": self.sweep_work_areas()}),
+            ("apply_retention", self.apply_retention),
+            ("sweep_temporary_parts", self.sweep_temporary_parts),
+            ("mark_missing_objects", self.mark_missing_objects),
+            ("measure", self.measure),
+        )
 
     # Lease vencido e parada ------------------------------------------------------------
 
@@ -576,6 +601,21 @@ class Maintenance:
             release_pending=stopped.release_pending,
             discarded_keys=first.discarded_keys + stopped.discarded_keys,
         )
+
+
+def _log_step_failure(step: str, error: Exception) -> None:
+    """Registra o passo que falhou com o tipo e o SQLSTATE nos campos.
+
+    A mensagem do banco traz host, porta, usuário e valores (3.7): não entra nos campos, e o
+    filtro do processo (`omit_database_error_detail`) tira o texto dela do traceback.
+    """
+    driver_error = getattr(error, "orig", error)
+    fields = {
+        "step": step,
+        "error_type": type(error).__name__,
+        "sqlstate": getattr(driver_error, "sqlstate", None),
+    }
+    logger.exception("passo da manutenção falhou", extra={"fields": fields})
 
 
 def _unreadable_fields(sweep: MissingSweep) -> dict[str, object]:

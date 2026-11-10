@@ -61,7 +61,8 @@ As causas da manutenção leem o span `maintenance.cycle` (`goblinshift.entrypoi
 |---|---|
 | nome do span | `maintenance.cycle`, do começo ao fim da volta |
 | `main` | `true` |
-| `maintenance.failed_cycles` | ciclos que falharam na volta (o span fica com status de erro; a mensagem só no log; causa `gs-causa-ciclos-falhando`) |
+| `maintenance.failed_cycles` | ciclos que falharam na volta: os que levantaram exceção e os que tiveram algum passo falho (o span fica com status de erro; a mensagem só no log; causa `gs-causa-ciclos-falhando`) |
+| `maintenance.steps_failed` | passos do ciclo de execuções e arquivos que levantaram exceção na volta (log `passo da manutenção falhou`, com o passo, o tipo e o SQLSTATE); os outros passos seguem e as contagens do passo falho ficam fora do span |
 | `maintenance.runs_stuck_stopping` | Runs em `stopping` desde antes de 10 min (o primeiro entre o cancelamento e o prazo) |
 | `maintenance.purge_limit_reached` | `1` se o limitador cortou o expurgo da volta, `0` se não |
 | `maintenance.accounts_deletion_overdue` | contas com `DELETE /me` pedido há 20 h ou mais |

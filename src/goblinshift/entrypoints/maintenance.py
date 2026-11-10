@@ -33,7 +33,7 @@ from goblinshift.platform.db import make_engine, make_session_factory, unit_of_w
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
 from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
 from goblinshift.runs import purge as runs_purge
-from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.runner import Runner
 
 logger = logging.getLogger("goblinshift.maintenance")
@@ -113,8 +113,9 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
     """Uma volta: roda os ciclos em sequência dentro de um span `maintenance.cycle`.
 
     Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
-    com o prefixo `maintenance.`, e quantos falharam; a mensagem da exceção fica só no log, porque
-    pode trazer valores do banco (3.7).
+    com o prefixo `maintenance.`, e quantos falharam: os que levantaram e os que contaram passos
+    falhos (`steps_failed`); a mensagem da exceção fica só no log, porque pode trazer valores do
+    banco (3.7).
     """
     started = time.monotonic()
     with tracer.start_as_current_span(
@@ -131,6 +132,10 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
                 continue
             for key, value in counts.items():
                 span.set_attribute(f"{_ATTRIBUTE_PREFIX}{key}", value)
+            if counts.get(STEPS_FAILED, 0) > 0:
+                # Passo que falhou dentro do ciclo: as contagens dos outros seguem no span, e a
+                # volta entra no mesmo alerta de quem levanta.
+                failed += 1
         span.set_attribute("main", True)
         span.set_attribute(f"{_ATTRIBUTE_PREFIX}failed_cycles", failed)
         span.set_attribute("duration_ms", round((time.monotonic() - started) * 1000))
