@@ -14,6 +14,15 @@ import { expect } from "./test";
 export async function expectFitsDeviceWidth(page: Page, message?: string): Promise<void> {
   const device = page.viewportSize();
   expect(device, "a spec não tem viewport para servir de régua").not.toBeNull();
+  const width = device?.width ?? 0;
   const content = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(content, message).toBeLessThanOrEqual(device?.width ?? 0);
+  expect(content, overflowMessage(content, width, message)).toBeLessThanOrEqual(width);
+}
+
+/** Mensagem da falha: a da spec, ou uma padrão com as duas larguras, para quem lê só o título. */
+export function overflowMessage(contentPx: number, devicePx: number, message?: string): string {
+  return (
+    message ??
+    `rolagem lateral: o documento tem ${String(contentPx)} px de largura num aparelho de ${String(devicePx)} px`
+  );
 }

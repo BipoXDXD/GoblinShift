@@ -2,7 +2,7 @@
 // nada é erro: com zero casos o script dizia que "os 0 defeitos" foram pegos e saía verde.
 //
 // A seleção diferencia caixa, como sempre fez: o filtro é um trecho exato do nome. A sugestão não
-// diferencia, para que `cls` aponte o caso `CLS:` em vez de rodar outro por engano.
+// diferencia, para que `cls` aponte o caso `CLS:`.
 
 /** Palavras mais curtas ("do", "no") casam com quase todo nome e não ajudam a sugerir. */
 const MIN_WORD_LENGTH = 3;

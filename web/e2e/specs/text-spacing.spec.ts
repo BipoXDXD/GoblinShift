@@ -23,6 +23,7 @@ const WCAG_TEXT_SPACING = `
 `;
 /** Folga para o arredondamento de subpixel entre `scrollHeight` e `clientHeight`. */
 const ROUNDING_PX = 1;
+
 interface Clip {
   readonly description: string;
 }
