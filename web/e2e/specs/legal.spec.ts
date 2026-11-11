@@ -72,3 +72,47 @@ test("/privacidade#secao-8 abre na seção 8, com o foco no h2 dela", async ({ p
   await expect(section).toBeInViewport();
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 });
+
+// Sem cabeçalho fixo, o navegador põe o alvo da âncora rente à borda de cima; o scroll-mt dos
+// títulos com âncora deixa 16 px (o passo 4 da escala de espaçamento) entre a borda e o título.
+const ANCHOR_BREATHING_PX = 16;
+
+test("/termos: o item do sumário leva a seção com folga acima do título e o foco nele", async ({
+  page,
+}) => {
+  await page.goto("/termos");
+  const section = page.getByRole("heading", { level: 2, name: "6. Uso aceitável" });
+
+  await page
+    .getByRole("navigation", { name: "Sumário" })
+    .getByRole("link", { name: "6. Uso aceitável" })
+    .click();
+
+  await expect(section).toBeInViewport();
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  const top = (): Promise<number> =>
+    section.evaluate((heading) => heading.getBoundingClientRect().top);
+  // Primeiro o teto: o salto pode chegar depois do clique, com o título ainda embaixo.
+  await expect.poll(top).toBeLessThan(ANCHOR_BREATHING_PX * 2);
+  // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
+  expect(await top()).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
+  // WCAG 2.4.3: o Tab seguinte parte da seção escolhida, não do sumário.
+  await expect(section).toBeFocused();
+});
+
+// WCAG 1.4.10 (Reflow): na largura do celular, nenhum texto legal rola na horizontal. As URLs
+// longas dos .md (60 a 75 caracteres sem espaço) são o caso que vigia.
+for (const path of ["/termos", "/privacidade", "/creditos"]) {
+  test(`${path} cabe na largura do celular, sem rolagem horizontal`, async ({ page }, info) => {
+    test.skip(info.project.name !== "mobile", "a largura estreita é a do projeto mobile");
+    await page.goto(path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+    // A régua é a largura do aparelho, não o innerWidth: com isMobile, o Chromium alarga o layout
+    // viewport até o conteúdo que estoura, e o innerWidth cresce junto com o scrollWidth.
+    const device = page.viewportSize();
+    expect(device).not.toBeNull();
+    const content = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(content).toBeLessThanOrEqual(device?.width ?? 0);
+  });
+}

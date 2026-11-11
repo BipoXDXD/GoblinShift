@@ -27,6 +27,7 @@ const ROUNDING_PX = 1;
 const TRANSITION_BUDGET_MS = 5000;
 /** Quantos rótulos distintos o erro de teto lista; o resto vira contagem. */
 const MAX_LISTED_ANIMATIONS = 8;
+
 interface Clip {
   readonly description: string;
 }
