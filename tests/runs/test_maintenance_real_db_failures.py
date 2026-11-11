@@ -12,23 +12,35 @@ curtos que o próprio cenário exige (`statement_timeout`, `pool_timeout`).
 """
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import Connection, Engine, event, text
+from sqlalchemy import Connection, Engine, event, func, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
-from goblinshift.platform.db import make_engine, make_session_factory
+from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.maintenance import STEPS_FAILED, STEPS_SKIPPED, Maintenance
-from tests.runs.worker_support import local_runner
+from goblinshift.runs.tables import run
+from tests.runs.worker_support import (
+    VALID,
+    create_user,
+    local_runner,
+    open_run_uses,
+    queue_run,
+    run_row,
+    snapshot,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -150,19 +162,24 @@ def _terminate_and_wait(admin: Engine, only_pid: int | None = None) -> None:
 
 @contextmanager
 def _backend_killed_before_statement(
-    engine: Engine, admin: Engine, statements_before: int
+    engine: Engine, admin: Engine, *, table: str | None = None, nth: int = 0
 ) -> Iterator[None]:
-    """Encerra o backend da conexão em uso antes do comando de número `statements_before`.
+    """Encerra o backend da conexão em uso antes do `nth` comando (0 = o primeiro) do passo.
 
-    Conta os comandos do passo (0 = o primeiro, antes de qualquer resposta do banco).
+    Sem `table`, conta todos os comandos, e 0 é antes de qualquer resposta do banco. Com `table`,
+    conta só os comandos que a tocam (`FROM`, `UPDATE`, `INTO` ou `JOIN`): o ponto de morte segue
+    a tabela e não o número de comandos que o passo emite antes dela.
     """
+    touches = re.compile(rf"\b(?:FROM|UPDATE|INTO|JOIN)\s+{table}\b") if table else None
     seen = 0
 
     def kill(
         conn: Connection, cursor: Any, statement: str, parameters: Any, context: Any, many: bool
     ) -> None:
         nonlocal seen
-        if seen == statements_before:
+        if touches and not touches.search(statement):
+            return
+        if seen == nth:
             pid = cast(Any, conn.connection.driver_connection).info.backend_pid
             _terminate_and_wait(admin, only_pid=pid)
         seen += 1
@@ -183,6 +200,32 @@ def _table_locked_by_other_session(admin: Engine, table: str) -> Iterator[None]:
             yield
         finally:
             conn.rollback()
+
+
+@dataclass(frozen=True)
+class _InputExpiries:
+    """Validade das entradas de uma execução, no relógio do banco."""
+
+    expires_at: tuple[datetime, ...]
+    extended_to_used_input_ttl: int
+
+
+def _input_expiries(admin: Engine) -> _InputExpiries:
+    """Cada `upload` com a validade e quantos já estão na janela de 48 h dos usados.
+
+    A janela (de 47 h a 48 h a partir de agora) só se alcança com o `UPDATE` de `release_many`:
+    a validade de um upload novo é bem menor.
+    """
+    with admin.connect() as conn:
+        dates = conn.execute(text("SELECT expires_at FROM upload ORDER BY id")).scalars().all()
+        extended = conn.execute(
+            text(
+                "SELECT count(*) FROM upload"
+                " WHERE expires_at BETWEEN now() + interval '47 hours'"
+                " AND now() + interval '48 hours'"
+            )
+        ).scalar_one()
+    return _InputExpiries(tuple(dates), extended)
 
 
 def _step_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -211,8 +254,8 @@ def _assert_healthy_cycle(janitor: Maintenance, baseline: dict[str, int]) -> Non
 
 
 @pytest.mark.parametrize(
-    ("failing", "statements_before"),
-    [("expire_queue", 0), ("measure", 1)],
+    ("failing", "dies_touching"),
+    [("expire_queue", None), ("measure", "run")],
     ids=["antes_do_primeiro_comando_do_passo", "no_meio_da_transacao_do_ultimo_passo"],
 )
 def test_backend_encerrado_no_passo_conta_falha_e_pula_so_os_passos_de_banco_seguintes(
@@ -224,7 +267,7 @@ def test_backend_encerrado_no_passo_conta_falha_e_pula_so_os_passos_de_banco_seg
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     failing: str,
-    statements_before: int,
+    dies_touching: str | None,
 ) -> None:
     janitor = _janitor(factory, storage, work_root)
     baseline = janitor.run_cycle()
@@ -232,7 +275,7 @@ def test_backend_encerrado_no_passo_conta_falha_e_pula_so_os_passos_de_banco_seg
         janitor,
         monkeypatch,
         failing,
-        lambda: _backend_killed_before_statement(engine, admin_engine, statements_before),
+        lambda: _backend_killed_before_statement(engine, admin_engine, table=dies_touching),
     )
     caplog.clear()
 
@@ -265,6 +308,73 @@ def test_backend_encerrado_no_passo_conta_falha_e_pula_so_os_passos_de_banco_seg
     assert (event_fields["steps_failed"], event_fields["steps_skipped"]) == (1, len(skipped))
     monkeypatch.undo()
     _assert_healthy_cycle(janitor, baseline)
+
+
+def test_backend_encerrado_no_meio_de_passo_que_escreve_desfaz_tudo_e_o_ciclo_seguinte_conclui(
+    factory: sessionmaker[Session],
+    engine: Engine,
+    admin_engine: Engine,
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`release_orphan_holds` encerra os usos e estende a validade das entradas numa transação.
+
+    A execução terminal tem duas entradas, então são duas linhas de `object_use` e duas de
+    `upload`. O backend morre antes do `UPDATE` de `upload`, quando o dos usos já rodou dentro
+    da transação: o banco precisa voltar ao que era (nenhum uso encerrado sem a validade
+    estendida), e o ciclo seguinte refaz o passo inteiro.
+    """
+    run_id = queue_run(
+        factory,
+        storage,
+        create_user(factory),
+        tables=(("a.csv", VALID), ("b.csv", b"nome,cidade\r\nBia,Natal\r\n")),
+    )
+    # O worker caiu entre o término e a transação que libera os usos.
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run)
+            .where(run.c.id == run_id)
+            .values(status="failed", error_code="QUEUE_EXPIRED", finished_at=func.now())
+        )
+    assert open_run_uses(factory, run_id) == 2
+    before = (snapshot(factory), _input_expiries(admin_engine))
+    assert _input_expiries(admin_engine).extended_to_used_input_ttl == 0
+    janitor = _janitor(factory, storage, work_root)
+    _around_step(
+        janitor,
+        monkeypatch,
+        "release_orphan_holds",
+        lambda: _backend_killed_before_statement(engine, admin_engine, table="upload"),
+    )
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO, logger=MAINTENANCE_LOGGER):
+        failed = janitor.run_cycle()
+
+    [failure] = _step_failures(caplog)
+    assert _fields(failure) == {
+        "step": "release_orphan_holds",
+        "error_type": "OperationalError",
+        "sqlstate": ADMIN_SHUTDOWN,
+    }
+    assert "holds_released" not in failed
+    # Sem efeito parcial: nenhuma linha mudou, nem `object_use` (o `UPDATE` que já tinha rodado),
+    # nem `upload` (o que a morte interrompeu).
+    assert (snapshot(factory), _input_expiries(admin_engine)) == before
+    assert open_run_uses(factory, run_id) == 2
+
+    monkeypatch.undo()
+    healthy = janitor.run_cycle()
+
+    assert (healthy[STEPS_FAILED], healthy[STEPS_SKIPPED]) == (0, 0)
+    assert healthy["holds_released"] == 1
+    assert open_run_uses(factory, run_id) == 0
+    assert _input_expiries(admin_engine).extended_to_used_input_ttl == 2
+    row = run_row(factory, run_id)
+    assert (row["status"], row["error_code"]) == ("failed", "QUEUE_EXPIRED")
 
 
 def test_backend_encerrado_com_a_conexao_ociosa_no_pool_nao_falha_o_ciclo(
@@ -424,7 +534,7 @@ def test_backend_encerrado_na_varredura_de_ausentes_e_isolado_nela_e_o_ciclo_seg
         janitor,
         monkeypatch,
         SELF_ISOLATED_STEP,
-        lambda: _backend_killed_before_statement(engine, admin_engine, 0),
+        lambda: _backend_killed_before_statement(engine, admin_engine),
     )
     caplog.clear()
 
