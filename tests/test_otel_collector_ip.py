@@ -78,3 +78,33 @@ def test_ip_do_collector_e_igual_no_compose_local() -> None:
 def test_compose_local_declara_a_mesma_subrede_da_vps() -> None:
     ipam = _compose()["networks"][NETWORK]["ipam"]["config"]
     assert [ipaddress.IPv4Network(entry["subnet"]) for entry in ipam] == [INTERNAL_SUBNET]
+
+
+def _fixed_ips() -> dict[str, set[str]]:
+    """IP fixo → serviços que o declaram, nos recursos do Coolify e nos compose do repositório.
+
+    O mesmo serviço aparece em mais de um arquivo (o `otel-collector` no `infra.json` e no
+    `compose.yaml`, o `nginx` no `app.json` e no `compose.prod.yaml`), então a chave é o nome.
+    """
+    documents: list[Any] = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((ROOT / "deploy" / "coolify").glob("*.json"))
+    ]
+    compose_files = [*sorted(ROOT.glob("compose*.yaml")), ROOT / "deploy" / "edge" / "compose.yaml"]
+    documents += [yaml.safe_load(path.read_text(encoding="utf-8")) for path in compose_files]
+    owners: dict[str, set[str]] = {}
+    for document in documents:
+        for name, service in (document or {}).get("services", {}).items():
+            networks = service.get("networks")
+            if not isinstance(networks, dict):
+                continue
+            for settings in networks.values():
+                if isinstance(settings, dict) and "ipv4_address" in settings:
+                    owners.setdefault(settings["ipv4_address"], set()).add(name)
+    return owners
+
+
+def test_nenhum_ip_fixo_e_declarado_por_dois_servicos() -> None:
+    owners = _fixed_ips()
+    assert owners[str(_collector_ip_in_infra())] == {COLLECTOR}
+    assert {ip: names for ip, names in owners.items() if len(names) > 1} == {}
