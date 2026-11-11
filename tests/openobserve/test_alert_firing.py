@@ -30,15 +30,15 @@ from tests.openobserve.conftest import (
     unique_stream,
     wait_until,
 )
+from tests.openobserve.scheduler_round import (
+    EVALUATION_MINUTES,
+    heartbeat_report,
+    two_rounds_timeout_s,
+)
 
 pytestmark = pytest.mark.openobserve
 
 FIRING_TIMEOUT_S = 240.0
-# Dois heartbeats depois de um instante qualquer custam até duas voltas do agendador (a primeira
-# pode ter acabado de passar), e cada volta leva uns 110-120 s com a carga do cenário: 240 s
-# ficavam no limite e falhavam de vez em quando. O prazo cobre duas voltas com 50% de folga.
-SCHEDULER_ROUND_S = 120.0
-TWO_ROUNDS_TIMEOUT_S = 2 * SCHEDULER_ROUND_S * 1.5
 RECENT_S = 3 * 60
 BURNING = "queima-"
 NORMAL = "normal-"
@@ -48,7 +48,9 @@ ABSENCE_CAUSES = ("causa-sem-traces", "causa-manutencao-sem-ciclo")
 
 def fast(catalog: list[Alert]) -> list[Alert]:
     """Avaliação a cada minuto e sem silêncio; consultas e períodos iguais aos de produção."""
-    return [replace(alert, frequency_minutes=1, silence_minutes=0) for alert in catalog]
+    return [
+        replace(alert, frequency_minutes=EVALUATION_MINUTES, silence_minutes=0) for alert in catalog
+    ]
 
 
 @dataclass(frozen=True)
@@ -74,8 +76,8 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     normal_catalog = [
         a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
     ]
-    # O agendador avalia uma quantidade limitada de alertas por vez: cada alerta volta a cada
-    # SCHEDULER_ROUND_S, não a cada minuto. O cenário "queima" não tem span da manutenção, e só o
+    # O agendador avalia uma quantidade limitada de alertas por vez, e a volta cresce com o número
+    # de alertas (scheduler_round.py). O cenário "queima" não tem span da manutenção, e só o
     # "normal" precisa das causas lidas dele; menos alertas encurtam a volta.
     idle_causes = {
         f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
@@ -85,11 +87,9 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     ]
     silent_names = {f"{SILENT}{name}" for name in ABSENCE_CAUSES}
     silent_catalog = [a for a in alerts(stream=silent, prefix=SILENT) if a.name in silent_names]
-    for prefix, catalog in (
-        (BURNING, burning_catalog),
-        (NORMAL, normal_catalog),
-        (SILENT, silent_catalog),
-    ):
+    catalogs = ((BURNING, burning_catalog), (NORMAL, normal_catalog), (SILENT, silent_catalog))
+    alert_count = sum(len(catalog) for _, catalog in catalogs)
+    for prefix, catalog in catalogs:
         provision(
             telemetry.api,
             alerts=fast(catalog),
@@ -112,14 +112,29 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
 
     wait_until(burning_notified, "notificações da queima, do disco e da ausência", FIRING_TIMEOUT_S)
     after = time.monotonic()
-    wait_until(
-        lambda: True if len(receiver.at(f"{NORMAL}heartbeat", after)) >= 2 else None,
-        "duas avaliações do cenário normal",
-        TWO_ROUNDS_TIMEOUT_S,
-    )
+    _wait_two_heartbeats(receiver, started, after, alert_count)
     for prefix in (BURNING, NORMAL, SILENT):
         provision(telemetry.api, alerts=[], destinations={}, prefix=prefix)
     return result
+
+
+def _wait_two_heartbeats(
+    receiver: WebhookReceiver, started: float, after: float, alert_count: int
+) -> None:
+    heartbeat = f"{NORMAL}{DestinationKey.HEARTBEAT.value}"
+    timeout_s = two_rounds_timeout_s(alert_count)
+    try:
+        wait_until(
+            lambda: True if len(receiver.at(heartbeat, after)) >= 2 else None,
+            "duas avaliações do cenário normal",
+            timeout_s,
+        )
+    except TimeoutError as error:
+        # Sem os instantes, o próximo flake não diz se o agendador ficou lento ou parou.
+        received = [n.received for n in receiver.at(heartbeat, started)]
+        raise TimeoutError(
+            f"{error}: {heartbeat_report(received, after, alert_count, timeout_s)}"
+        ) from error
 
 
 def _write_burning_traffic(telemetry: Telemetry, stream: str) -> None:
