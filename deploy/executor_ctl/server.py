@@ -11,9 +11,11 @@
 `image` é só leitura: imagem fora da allowlist é recusada antes do Docker, e a ausência no daemon
 é resposta (`present: false`), não erro.
 
-Erros: `{"error": "<código>", "detail": "..."}`. Uma requisição por conexão, corpo JSON pequeno
-com Content-Length obrigatório e prazo de leitura curto: o cliente é o worker, mas um cliente
-lento ou com defeito não pode prender o serviço.
+Erros: `{"error": "<código>", "detail": "..."}`. `start` e `remove` disputam o lock da área com
+prazo: estourado, respondem 503 `busy` sem tocar no Docker nem na área, e repetir é seguro.
+
+Uma requisição por conexão, corpo JSON pequeno com Content-Length obrigatório e prazo de leitura
+curto: o cliente é o worker, mas um cliente lento ou com defeito não pode prender o serviço.
 """
 
 import json
@@ -33,7 +35,7 @@ from pathlib import Path
 from .config import Config
 from .docker_cli import ContainerRunningError, ContainerStatus, DockerUnavailableError
 from .images import IMAGE_REFERENCE, ImageNotAllowedError
-from .service import MAX_STOP_GRACE_S, ExecutorService
+from .service import MAX_STOP_GRACE_S, AreaBusyError, ExecutorService
 from .workarea import WorkAreaDirtyError, WorkDirMissingError
 
 MAX_BODY_BYTES = 1024
@@ -56,6 +58,7 @@ _ERRORS: tuple[tuple[type[Exception], HTTPStatus, str], ...] = (
     (WorkDirMissingError, HTTPStatus.CONFLICT, "work_dir_missing"),
     (ContainerRunningError, HTTPStatus.CONFLICT, "still_running"),
     (DockerUnavailableError, HTTPStatus.SERVICE_UNAVAILABLE, "docker_unavailable"),
+    (AreaBusyError, HTTPStatus.SERVICE_UNAVAILABLE, "busy"),
 )
 
 _log = logging.getLogger(__name__)

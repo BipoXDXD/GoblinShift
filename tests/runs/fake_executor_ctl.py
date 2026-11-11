@@ -73,6 +73,8 @@ class FakeExecutorCtl:
     containers: dict[str, FakeContainer] = field(default_factory=dict)
     calls: list[tuple[str, str]] = field(default_factory=list)
     docker_down: bool = False
+    # 503 `busy` no `start` e no `remove`, como o lock da área com prazo estourado no serviço.
+    area_busy: bool = False
     response_delay_s: float = 0.0
     unstoppable: bool = False
     # O executor que terminar sai como morto por falta de memória (`oom_killed`).
@@ -172,6 +174,9 @@ class FakeExecutorCtl:
             return 400, _error("invalid_body")
         if image not in self.allowed_images:
             return 403, _error("image_not_allowed")
+        # Como no serviço real: a allowlist vem antes do lock; com o lock, nada é tocado.
+        if self.area_busy:
+            return 503, _error("busy")
         if attempt_id in self.containers:
             return 200, self._status(attempt_id)
         if self.docker_down:
@@ -229,6 +234,8 @@ class FakeExecutorCtl:
         return 200, self._status(attempt_id)
 
     def _remove(self, attempt_id: str) -> tuple[int, dict[str, Any] | None]:
+        if self.area_busy:
+            return 503, _error("busy")
         container = self.containers.get(attempt_id)
         if container is not None:
             container.refresh()

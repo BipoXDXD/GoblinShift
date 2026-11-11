@@ -23,6 +23,7 @@ IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
         "config_untrusted",
         "config_legacy",
         "config_duplicate",
+        "config_runc",
         "policy_not_private",
         "policy_missing",
         "policy_malformed",
@@ -89,6 +90,8 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
         config.write_text(
             json.dumps({**content, "images_file": "/srv/goblinshift/executor/images.json"})
         )
+    elif case == "config_runc":
+        config.write_text(json.dumps({**content, "runtime": "runc"}))
     elif case == "config_duplicate":
         config.write_text(json.dumps(content)[:-1] + ', "runtime": "runc"}')
     elif case == "policy_not_private":
