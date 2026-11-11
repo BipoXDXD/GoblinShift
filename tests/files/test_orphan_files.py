@@ -267,3 +267,18 @@ def _row_summary(factory: sessionmaker[Session]) -> tuple[int, str | None]:
     with factory() as session:
         row = session.execute(select(func.count(), func.max(stored_object.c.state))).one()
     return row[0], row[1]
+
+
+def test_nao_segura_transacao_aberta_enquanto_percorre_o_disco(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """O banco derruba transação ociosa (30 s); cada lote é uma transação curta."""
+    for index in range(3):
+        put(storage, f"uploads/o{index}")
+
+    with factory() as session:
+        find_orphan_files(
+            session, storage, modified_before=future_cutoff(), list_limit=1, batch_size=1
+        )
+
+        assert not session.in_transaction()

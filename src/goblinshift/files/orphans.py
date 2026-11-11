@@ -74,7 +74,11 @@ def find_orphan_files(
     list_limit: int,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> OrphanReport:
-    """Percorre o disco e classifica o que não tem linha viva; `modified_before` é epoch, em s."""
+    """Percorre o disco e classifica o que não tem linha viva; `modified_before` é epoch, em s.
+
+    A sessão chega sem transação aberta: cada lote consulta o banco numa transação curta, e o
+    percurso do disco corre entre elas, porque o banco derruba transação ociosa.
+    """
     if not storage.is_mounted():
         raise StorageNotMountedError
     totals = {reason: [0, 0] for reason in OrphanReason}
@@ -101,12 +105,13 @@ def _classify(
     session: Session, batch: Iterable[StoredFile]
 ) -> Iterable[tuple[StoredFile, OrphanReason]]:
     files = list(batch)
-    rows = session.execute(
-        select(stored_object.c.storage_key, stored_object.c.state).where(
-            stored_object.c.storage_key.in_([f.key for f in files])
+    with session.begin():
+        rows = session.execute(
+            select(stored_object.c.storage_key, stored_object.c.state).where(
+                stored_object.c.storage_key.in_([f.key for f in files])
+            )
         )
-    )
-    states = {key: state for key, state in rows}
+        states = {key: state for key, state in rows}
     for file in files:
         state = states.get(file.key)
         if state is None:
