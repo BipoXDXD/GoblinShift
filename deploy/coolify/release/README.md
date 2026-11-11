@@ -44,3 +44,22 @@ compartilhado da VPS permanece inalterado.
 
 queue:max é aceito pelo GitHub e consta em sua documentação oficial. Actionlint1.7.12 ainda não
 conhece a propriedade; validar o parser real e os checks do GitHub sem retirar gates existentes.
+
+## Verificação depois da release
+
+`pos_release.sh <SHA completo>` confere, só lendo, se a release do GoblinShift ficou coerente:
+sem `pending.json`, `incoming-*`, lock ou receptor ativo; `current.json`, history e allowlist do
+executor de acordo com o commit; digests iguais ao manifesto linux/amd64 publicado no GHCR;
+containers saudáveis com a imagem da release; `/readyz` 200; log de erros do receptor sem escrita
+nova; e o commit como HEAD da main com o run `completed success`.
+
+O destino do ssh vem de `POS_RELEASE_SSH_TARGET`, obrigatória e sem padrão. O script faz uma só
+sessão ssh, lê os locks por `/proc/locks` (nunca os adquire) e completa os fatos com `curl`,
+`crane`, `gh` e `git ls-remote`. A coleta só emite linhas `CHAVE<TAB>valor`; quem decide é
+`pos_release.py`, sem rede, que também aceita uma coleta salva:
+`python3 -I pos_release.py <SHA> < fatos.tsv`.
+
+Saída: 0 COERENTE, 1 INCOERENTE, 2 DESCONHECIDO, 3 EM ANDAMENTO. Um fato que não pôde ser lido
+fica de fora da coleta e torna o item DESCONHECIDO, nunca OK. Com `pending.json` presente o
+resultado é EM ANDAMENTO e nada mais é lido; repita depois. Uma falha observada vence um dado
+desconhecido. Os testes (`test_pos_release.py`) usam os fatos reais da release 691dcbaf.
