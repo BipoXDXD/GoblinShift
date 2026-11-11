@@ -33,7 +33,7 @@ def _deadlock() -> DBAPIError:
 
 
 def _factory() -> sessionmaker[Session]:
-    return cast(Any, _FakeSession)
+    return cast(sessionmaker[Session], _FakeSession)
 
 
 @pytest.mark.parametrize("attempt_number", [1, 2])
