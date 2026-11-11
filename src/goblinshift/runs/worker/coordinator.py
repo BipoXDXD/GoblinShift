@@ -25,7 +25,9 @@ Passos:
    afetar a linha, o motivo é relido e os candidatos são descartados. Coleta e gravação dos
    candidatos renovam o lease como o `supervise` (`_LeaseKeeper`), e erro de E/S nelas (disco do
    storage cheio, área ilegível) é infraestrutura: falha transitória na hora, sem esperar o lease
-   vencer. Disco cheio aqui não é o limite de recurso de 1.6, que é o do sandbox do executor.
+   vencer. A cópia da entrada em `prepare` renova o lease do mesmo modo, com um keeper só para
+   todas as entradas. Disco cheio aqui não é o limite de recurso de 1.6, que é o do sandbox do
+   executor.
 5. `remove`: só depois de o desfecho estar no banco. Se o Runner falhar aqui, a área fica para a
    limpeza da manutenção.
 """
@@ -167,11 +169,14 @@ class PreparationError(Exception):
 
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
-    """A Run foi para `stopping` no meio do empacotamento: conclui pela parada."""
+    """A Run foi para `stopping` no meio de um trabalho longo: conclui pela parada."""
 
 
 class _LeaseKeeper:
     """Renova o lease em trabalho longo fora do `supervise`, a cada `every`, entre blocos.
+
+    Cobre a cópia da entrada, a coleta e a gravação dos candidatos; um keeper só por etapa, então
+    a cadência vale para a etapa inteira, não por arquivo.
 
     O primeiro bloco já renova: a última renovação do `supervise` pode estar perto de vencer.
     Run em `stopping` (cancelamento, ou prazo vencido aplicado na renovação) levanta
@@ -275,6 +280,9 @@ class Coordinator:
                 fields["alert"] = error.alert
             logger.warning("área de trabalho falhou", extra={"fields": fields})
             return self.fail_transiently(claimed)
+        except _StopRequested:
+            # Cancelamento ou prazo percebido na renovação da cópia: o executor nunca iniciou.
+            return self.conclude_stop(claimed)
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
         try:
@@ -307,7 +315,7 @@ class Coordinator:
                 f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED
             ) from error
         try:
-            self._fill_work_area(work_dir, claimed, contents)
+            self._fill_work_area(work_dir, claimed, contents, self._lease_keeper(claimed))
         except OSError as error:
             # Sem alerta: aqui a `OSError` mistura a leitura do storage com a escrita na área.
             # Lacuna conhecida: disco cheio ou E/S na escrita depois do `create_work_dir` perde a
@@ -315,11 +323,15 @@ class Coordinator:
             raise PreparationError(f"área de trabalho: {error}") from error
 
     def _fill_work_area(
-        self, work_dir: Path, claimed: ClaimedAttempt, contents: list[HeldContent]
+        self,
+        work_dir: Path,
+        claimed: ClaimedAttempt,
+        contents: list[HeldContent],
+        keeper: _LeaseKeeper,
     ) -> None:
         inputs_dir = work_dir / "inputs"
         entries = [
-            self._copy_input(content, position, inputs_dir)
+            self._copy_input(content, position, inputs_dir, keeper)
             for position, content in enumerate(contents)
         ]
         job = {
@@ -341,7 +353,7 @@ class Coordinator:
             target.write(json.dumps(context, ensure_ascii=False).encode("utf-8"))
 
     def _copy_input(
-        self, content: HeldContent, position: int, inputs_dir: Path
+        self, content: HeldContent, position: int, inputs_dir: Path, keeper: _LeaseKeeper
     ) -> dict[str, object]:
         name = f"{position:04}.bin"
         digest = hashlib.sha256()
@@ -351,7 +363,7 @@ class Coordinator:
                 self._storage.open(content.storage_key) as source,
                 _create_for_executor(inputs_dir / name) as target,
             ):
-                for chunk in _chunks(source):
+                for chunk in keeper.beating(_chunks(source)):
                     digest.update(chunk)
                     size += len(chunk)
                     target.write(chunk)
