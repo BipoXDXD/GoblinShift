@@ -32,7 +32,8 @@ for (const screen of SCREENS) {
     page,
     fakeApi,
   }) => {
-    // Sem transições, o layout lido logo depois da folha nova já é o final.
+    // O movimento reduzido encurta as transições para 0,01 ms, não as remove: `applyTextSpacing`
+    // espera as que sobrarem.
     await page.emulateMedia({ reducedMotion: "reduce" });
     await screen.open(page, fakeApi);
 
@@ -43,25 +44,71 @@ for (const screen of SCREENS) {
   });
 }
 
+test("a folha só é dada como aplicada depois das transições em curso", async ({ page }) => {
+  // Sem `reducedMotion`: aqui a transição é longa de verdade (400 ms), muito além de dois quadros.
+  await page.goto("/termos");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Termos de Uso do GoblinShift" }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync("* { transition-duration: 400ms; }");
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  });
+
+  await applyTextSpacing(page);
+
+  const inFlight = await page.evaluate(
+    () =>
+      document.getAnimations().filter((animation) => {
+        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+        return animation.playState !== "finished" && target?.checkVisibility() === true;
+      }).length,
+  );
+  expect(inFlight, "transições visíveis ainda em curso depois de aplicar a folha").toBe(0);
+  // 16px de fonte do body × 0,16em, calculado à mão.
+  expect(await page.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("2.56px");
+});
+
 /**
  * Aplica a folha por CSSOM (`adoptedStyleSheets`): a CSP de produção barra `<style>` injetado, e a
- * folha construída entra depois das do documento, como a do usuário. Devolve o `word-spacing`
- * calculado do body, prova de que a folha vale. Só cobre o `document`: shadow DOM e iframe teriam de
- * adotar a folha cada um (o app não tem nenhum dos dois).
+ * folha construída entra depois das do documento, como a do usuário. Só devolve com as transições
+ * assentadas e devolve o `word-spacing` calculado do body, prova de que a folha vale. Só cobre o
+ * `document`: shadow DOM e iframe teriam de adotar a folha cada um (o app não tem nenhum dos dois).
+ *
+ * Por que esperar as transições, e não contar quadros: o `transition-duration: 0.01ms` do movimento
+ * reduzido (base.css) não é "sem transição". Com o `transition-property: all` inicial, toda
+ * propriedade que a folha muda ganha uma transição, e até ela terminar o `getComputedStyle` devolve
+ * o valor de partida ("0px"). Medido: com um quadro a leitura é "0px" sempre, com dois já é o valor
+ * final. Dois quadros fixos são, então, o mínimo exato, sem folga para um quadro atrasado na CI.
  */
 async function applyTextSpacing(page: Page): Promise<string> {
   return page.evaluate(async (css) => {
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(css);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-    // Dois quadros: o primeiro aplica o estilo, o segundo deixa ResizeObserver e afins reagirem.
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
+    const nextFrame = (): Promise<void> =>
+      new Promise((resolve) => {
         requestAnimationFrame(() => {
           resolve();
         });
       });
-    });
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(css);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    // `getAnimations()` já resolve o estilo pendente, então enxerga as transições recém-criadas.
+    // Um quadro entre as rodadas deixa ResizeObserver e afins reagirem, e o que eles mudarem
+    // entra na rodada seguinte; só sai quando um quadro inteiro passa sem transição em curso.
+    for (;;) {
+      await nextFrame();
+      // Só o que está desenhado: o conteúdo de um `<details>` fechado ganha a transição, mas ela
+      // nunca anda (não há quadro para ele), e a medição de corte também o ignora.
+      const running = document.getAnimations().filter((a) => {
+        const target = a.effect instanceof KeyframeEffect ? a.effect.target : null;
+        return a.playState !== "finished" && target?.checkVisibility() === true;
+      });
+      if (running.length === 0) {
+        break;
+      }
+      await Promise.allSettled(running.map((animation) => animation.finished));
+    }
     return getComputedStyle(document.body).wordSpacing;
   }, WCAG_TEXT_SPACING);
 }
