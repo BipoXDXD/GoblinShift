@@ -1,0 +1,64 @@
+name: Segredos em todas as refs
+
+# Uma vez por semana, o gitleaks percorre todas as branches e tags do remoto (`git log --all`,
+# o padrão dele sem `--log-opts`). O job do ci.yml cobre PRs e pushes para main; este cobre o
+# que nunca vira PR, como uma branch empurrada e esquecida. Não é check obrigatório nem roda em
+# PR. Um achado abre uma issue (ou comenta na que já estiver aberta), sem travar merge.
+# Segunda às 12:47 UTC (09:47 em Brasília), longe do backup das 00:00–01:00 e da janela das
+# 03:10–03:45.
+on:
+  schedule:
+    - cron: "47 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitleaks-semanal
+  cancel-in-progress: false
+
+jobs:
+  secrets:
+    name: Segredos em todas as refs (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 0 busca todas as branches e tags para refs/remotes/origin/* e refs/tags/*.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks em todas as refs
+        run: >-
+          docker run --rm -v "$PWD:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --config /repo/.gitleaks.toml --redact --no-banner
+
+  # Job separado para só ele ter `issues: write`; o scan continua só com leitura. Roda também
+  # quando o scan falha por outro motivo (imagem, timeout): a cobertura semanal se perdeu do mesmo
+  # jeito e alguém precisa olhar.
+  alerta:
+    name: Abrir issue se o scan falhar
+    needs: [secrets]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # abrir a issue de alerta ou comentar nela
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EXECUCAO: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TITULO: "gitleaks semanal: falha na varredura de todas as refs"
+    steps:
+      - name: Abrir issue ou comentar na aberta
+        run: |
+          aberta=$(gh issue list --state open --limit 200 --json number,title |
+            jq -r --arg t "$TITULO" '[.[] | select(.title == $t)][0].number // empty')
+          corpo="A varredura semanal do gitleaks falhou: $EXECUCAO. O log mostra o commit e o arquivo de cada achado (valor redigido). Se for segredo real, revogue antes de reescrever o histórico."
+          if [ -n "$aberta" ]; then
+            gh issue comment "$aberta" --body "$corpo"
+          else
+            gh issue create --title "$TITULO" --body "$corpo"
+          fi
