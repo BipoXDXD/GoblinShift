@@ -34,7 +34,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import Status
-from goblinshift.runs.tables import run
+from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.coordinator import Coordinator
 from goblinshift.runs.worker.runner import ExecutorPhase, ExecutorStatus, LocalRunner
@@ -88,12 +88,22 @@ class _GatedRunner(LocalRunner):
         return super().stop(attempt_id, grace)
 
 
+@dataclass(frozen=True)
+class _DbState:
+    """Linhas da Attempt e da Run como o banco as mostra a uma conexão de fora (admin)."""
+
+    attempt: dict[str, Any]
+    run: dict[str, Any]
+
+
 @dataclass
 class _Supervised:
     """O que a supervisão devolveu e o que o banco mostrou durante e depois da falha."""
 
     status: ExecutorStatus
     failures: list[logging.LogRecord]
+    state_before: _DbState
+    state_during_failure: _DbState
     lease_before: datetime
     lease_recovered: datetime
     attempt_ended_during_failure: bool
@@ -107,12 +117,14 @@ class _Scenario:
     claimed: ClaimedAttempt
     run_id: uuid.UUID
     factory: sessionmaker[Session]
+    admin: Engine
+    settings: Settings
     caplog: pytest.LogCaptureFixture
     finished: dict[str, Any] = field(default_factory=dict)
 
 
 @pytest.fixture
-def admin_engine(engine: Engine, db_settings: Settings) -> Iterator[Engine]:
+def admin_engine(db_settings: Settings) -> Iterator[Engine]:
     """Conexão de fora do pool do worker, para encerrar backends e segurar travas."""
     admin = make_engine(db_settings)
     yield admin
@@ -150,6 +162,8 @@ def single_connection_engine(engine: Engine, db_settings: Settings) -> Iterator[
 def _scenario(
     engine: Engine,
     factory: sessionmaker[Session],
+    admin: Engine,
+    settings: Settings,
     storage: FileStorage,
     work_root: Path,
     caplog: pytest.LogCaptureFixture,
@@ -163,11 +177,29 @@ def _scenario(
     worker.prepare(claimed)
     runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
-    return _Scenario(worker, runner, claimed, run_id, factory, caplog)
+    return _Scenario(worker, runner, claimed, run_id, factory, admin, settings, caplog)
 
 
 def _lease(scenario: _Scenario) -> datetime:
     return cast(datetime, attempts(scenario.factory, scenario.run_id)[0]["lease_expires_at"])
+
+
+def _db_state(admin: Engine, attempt_id: uuid.UUID, run_id: uuid.UUID) -> _DbState:
+    """Lê a Attempt e a Run por uma conexão de fora, que só enxerga o que foi commitado."""
+    with admin.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        attempt_row = conn.execute(select(attempt).where(attempt.c.id == attempt_id)).one()
+        run_row_ = conn.execute(select(run).where(run.c.id == run_id)).one()
+    return _DbState(dict(attempt_row._mapping), dict(run_row_._mapping))
+
+
+def _state(scenario: _Scenario) -> _DbState:
+    return _db_state(scenario.admin, scenario.claimed.attempt_id, scenario.run_id)
+
+
+def _assert_lease_not_half_renewed(before: _DbState, during_failure: _DbState) -> None:
+    """Com a renovação falhada, o `UPDATE attempt` e o `UPDATE run` não ficaram commitados."""
+    assert during_failure.attempt == before.attempt
+    assert during_failure.run == before.run
 
 
 def _renewal_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -194,6 +226,7 @@ def _supervise_through(
     falha; espera o lease avançar (renovação bem-sucedida); só então libera o executor.
     """
     caplog = scenario.caplog
+    state_before = _state(scenario)
     lease_before = _lease(scenario)
     with caplog.at_level(logging.WARNING, logger=COORDINATOR_LOGGER), ThreadPoolExecutor(1) as pool:
         try:
@@ -202,9 +235,8 @@ def _supervise_through(
                 _wait_until(
                     lambda: _renewal_failures(caplog) or supervision.done(), "renovação falhar"
                 )
-                ended_during_failure = (
-                    attempts(scenario.factory, scenario.run_id)[0]["ended_at"] is not None
-                )
+                state_during_failure = _state(scenario)
+                ended_during_failure = state_during_failure.attempt["ended_at"] is not None
             _wait_until(
                 lambda: _lease(scenario) > lease_before or supervision.done(),
                 "renovação voltar",
@@ -216,6 +248,8 @@ def _supervise_through(
     return _Supervised(
         status=status,
         failures=_renewal_failures(caplog),
+        state_before=state_before,
+        state_during_failure=state_during_failure,
         lease_before=lease_before,
         lease_recovered=lease_recovered,
         attempt_ended_during_failure=ended_during_failure,
@@ -241,6 +275,7 @@ def _assert_failure_fields(
 ) -> None:
     """Só o tipo e o SQLSTATE vão ao log, junto das identidades da Attempt."""
     assert outcome.failures
+    _assert_log_has_no_connection_data(scenario, outcome.failures)
     expected = {
         "run_id": str(scenario.claimed.run_id),
         "attempt_id": str(scenario.claimed.attempt_id),
@@ -250,6 +285,28 @@ def _assert_failure_fields(
         "sqlstate": sqlstate,
     }
     assert [_fields(record) for record in outcome.failures] == [expected] * len(outcome.failures)
+
+
+def _assert_log_has_no_connection_data(
+    scenario: _Scenario, failures: list[logging.LogRecord]
+) -> None:
+    """Sem traceback e sem canário da conexão (host, porta, usuário, banco, senha) no log.
+
+    A mensagem do `OperationalError` traz host, porta e usuário; por isso o coordinator só loga o
+    tipo e o SQLSTATE e não usa `exc_info`. Os canários vêm da URL de teste (`db_settings`).
+    """
+    assert all(record.exc_info is None and record.exc_text is None for record in failures)
+    settings = scenario.settings
+    canaries = [
+        settings.db_host,
+        str(settings.db_port),
+        settings.db_user,
+        settings.db_name,
+        settings.db_password.get_secret_value(),
+    ]
+    logged = "\n".join(f"{record.getMessage()} {record.__dict__['fields']}" for record in failures)
+    assert [canary for canary in canaries if canary in logged] == []
+    assert [canary for canary in canaries if canary in scenario.caplog.text] == []
 
 
 # Backend encerrado ------------------------------------------------------------------------
@@ -280,16 +337,19 @@ class _Killer:
     """Encerra o backend da conexão em uso, uma vez, antes do comando de `moment`."""
 
     killed_pid: int | None = None
+    state_after_kill: _DbState | None = None
 
 
 @contextmanager
 def _backend_killed_before(
-    engine: Engine, admin: Engine, moment: re.Pattern[str]
+    engine: Engine, admin: Engine, moment: re.Pattern[str], read_state: Callable[[], _DbState]
 ) -> Iterator[_Killer]:
     """O backend morre antes do primeiro comando que casa com `moment`; os seguintes seguem.
 
     O pid vem do `before_cursor_execute`, dentro do comando da renovação: morre só a conexão em
-    uso, nunca as demais (a da trava do teste, a de leitura do teste, as ociosas do pool).
+    uso, nunca as demais (a da trava do teste, a de leitura do teste, as ociosas do pool). Logo
+    depois do backend sumir, e antes de o cliente tentar de novo, `state_after_kill` guarda o que o
+    banco mostra: é o estado em que a renovação interrompida deixou a Attempt e a Run.
     """
     killer = _Killer()
 
@@ -302,6 +362,7 @@ def _backend_killed_before(
         if killer.killed_pid is None:
             killer.killed_pid = pid
             _terminate_and_wait(admin, pid)
+            killer.state_after_kill = read_state()
 
     event.listen(engine, "before_cursor_execute", kill)
     try:
@@ -324,17 +385,22 @@ def test_backend_encerrado_na_renovacao_nao_abandona_o_executor_e_a_run_publica(
     factory: sessionmaker[Session],
     worker_engine: Engine,
     admin_engine: Engine,
+    db_settings: Settings,
     storage: FileStorage,
     work_root: Path,
     caplog: pytest.LogCaptureFixture,
     moment: re.Pattern[str],
 ) -> None:
-    scenario = _scenario(worker_engine, factory, storage, work_root, caplog)
+    scenario = _scenario(
+        worker_engine, factory, admin_engine, db_settings, storage, work_root, caplog
+    )
     killers: list[_Killer] = []
 
     @contextmanager
     def fault() -> Iterator[None]:
-        with _backend_killed_before(worker_engine, admin_engine, moment) as killer:
+        with _backend_killed_before(
+            worker_engine, admin_engine, moment, lambda: _state(scenario)
+        ) as killer:
             killers.append(killer)
             yield
 
@@ -342,6 +408,8 @@ def test_backend_encerrado_na_renovacao_nao_abandona_o_executor_e_a_run_publica(
 
     [killer] = killers
     assert killer.killed_pid is not None
+    assert killer.state_after_kill is not None
+    _assert_lease_not_half_renewed(outcome.state_before, killer.state_after_kill)
     # Uma só falha: o backend morreu uma vez e a retentativa (`renew_retry_every`) já funcionou.
     [failure] = outcome.failures
     assert _fields(failure)["error_type"] == "OperationalError"
@@ -365,11 +433,15 @@ def _run_locked_by_other_session(
 def test_statement_timeout_na_espera_da_trava_nao_abandona_o_executor_e_a_run_publica(
     factory: sessionmaker[Session],
     statement_timeout_engine: Engine,
+    admin_engine: Engine,
+    db_settings: Settings,
     storage: FileStorage,
     work_root: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    scenario = _scenario(statement_timeout_engine, factory, storage, work_root, caplog)
+    scenario = _scenario(
+        statement_timeout_engine, factory, admin_engine, db_settings, storage, work_root, caplog
+    )
 
     outcome = _supervise_through(
         scenario, lambda: _run_locked_by_other_session(factory, scenario.run_id)
@@ -377,6 +449,7 @@ def test_statement_timeout_na_espera_da_trava_nao_abandona_o_executor_e_a_run_pu
 
     # `lock_timeout` é de 60 s: quem cancela a espera é o `statement_timeout`, e vem como
     # `OperationalError` (`QueryCanceled`), o mesmo tipo da trava curta (55P03).
+    _assert_lease_not_half_renewed(outcome.state_before, outcome.state_during_failure)
     _assert_failure_fields(scenario, outcome, "OperationalError", QUERY_CANCELED)
     _assert_survived_and_published(scenario, outcome)
 
@@ -395,14 +468,19 @@ def _pool_held(engine: Engine) -> Iterator[None]:
 def test_pool_esgotado_na_renovacao_nao_abandona_o_executor_e_a_run_publica(
     factory: sessionmaker[Session],
     single_connection_engine: Engine,
+    admin_engine: Engine,
+    db_settings: Settings,
     storage: FileStorage,
     work_root: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    scenario = _scenario(single_connection_engine, factory, storage, work_root, caplog)
+    scenario = _scenario(
+        single_connection_engine, factory, admin_engine, db_settings, storage, work_root, caplog
+    )
 
     outcome = _supervise_through(scenario, lambda: _pool_held(single_connection_engine))
 
     # Não é erro do banco: o pool desiste antes de pedir conexão, e não há SQLSTATE.
+    _assert_lease_not_half_renewed(outcome.state_before, outcome.state_during_failure)
     _assert_failure_fields(scenario, outcome, "TimeoutError", None)
     _assert_survived_and_published(scenario, outcome)
