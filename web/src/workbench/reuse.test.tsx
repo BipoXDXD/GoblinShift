@@ -69,7 +69,7 @@ function setup(run: () => Response, path = `/bancada/csv-janitor?execucao=${RUN_
   return api;
 }
 
-describe("Bancada aberta pela execução (reusar configuração)", () => {
+describe("Bancada aberta pela execução (reutilizar parâmetros)", () => {
   it("pré-preenche com os parâmetros da execução e diz de qual", async () => {
     setup(() => jsonResponse(runBody({ status: "succeeded", parameters: PARAMETERS })));
 
@@ -132,7 +132,7 @@ describe("Bancada aberta pela execução (reusar configuração)", () => {
     });
     const user = userEvent.setup();
     const reuse = async (): Promise<void> => {
-      await user.click(await screen.findByRole("link", { name: /^Reusar configuração/ }));
+      await user.click(await screen.findByRole("link", { name: /^Reutilizar parâmetros/ }));
       // O aviso aparece duas vezes: no parágrafo visível e na região viva.
       await screen.findAllByText(/^Parâmetros da execução de /);
     };

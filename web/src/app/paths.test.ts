@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { acceptTermsPath, runPath, signInPath, workbenchPath } from "./paths";
+import { acceptTermsPath, runPath, signInPath, withoutTrailingSlash, workbenchPath } from "./paths";
 
 describe("paths", () => {
   it("monta a rota da Bancada da receita", () => {
@@ -22,4 +22,27 @@ describe("paths", () => {
     expect(acceptTermsPath("/")).toBe("/termos/aceitar");
     expect(signInPath("/")).toBe("/entrar");
   });
+
+  it.each([
+    ["/termos/", "/termos"],
+    ["/termos//", "/termos"],
+    ["/termos/aceitar/", "/termos/aceitar"],
+    // Codificadas, as barras e a contrabarra são texto do caminho local, não outro host.
+    ["/%2F%2Fevil.com/", "/%2F%2Fevil.com"],
+    ["/%5Cevil.com/", "/%5Cevil.com"],
+  ])("tira a barra final de %s", (pathname, expected) => {
+    expect(withoutTrailingSlash(pathname)).toBe(expected);
+  });
+
+  it.each(["/", "/termos", "/termos/aceitar"])("%s já é canônico", (pathname) => {
+    expect(withoutTrailingSlash(pathname)).toBeNull();
+  });
+
+  // Sem a barra final, `//evil.com/` viraria `//evil.com`, que o navegador lê como outro site.
+  it.each(["//evil.com/", "/\\evil.com/", "///", "//"])(
+    "%s não vira destino fora do site",
+    (pathname) => {
+      expect(withoutTrailingSlash(pathname)).toBeNull();
+    },
+  );
 });

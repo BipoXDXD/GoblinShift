@@ -16,6 +16,7 @@ export function NotFoundPage(): ReactElement {
     <div className="flex flex-col gap-4">
       <meta name="robots" content="noindex" />
       <FocusHeading>{TEXT.notFound.title}</FocusHeading>
+      <p>{TEXT.notFound.lead}</p>
       <GoblinIllustration state="erro" rotationKey="pagina-nao-encontrada" />
       <p>
         <Link to={PATHS.home} className="inline-flex min-h-11 items-center gap-1 font-semibold">

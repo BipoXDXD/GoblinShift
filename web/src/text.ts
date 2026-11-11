@@ -1,5 +1,5 @@
 // Textos fixos da interface, num lugar só (D12: só pt-BR; traduzir fica restrito a este arquivo).
-// Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre os goblins só no vazio, na
+// Voz (D11): literal em erros, rótulos e botões; uma frase leve sobre as goblins só no vazio, na
 // espera e no sucesso, sempre depois da informação.
 
 /** A lista do Histórico que acabou de chegar: quantas linhas, com filtro ou não, e se há mais. */
@@ -29,7 +29,7 @@ export const TEXT = {
     network: "Não foi possível falar com o servidor. Confira a conexão e tente de novo.",
     timeout: "O servidor demorou demais para responder. Tente de novo.",
     unexpected: "O servidor respondeu de um jeito inesperado. Tente de novo em instantes.",
-    internal: "Algo deu errado nesta tela. Recarregue a página e tente de novo.",
+    internal: "Houve um erro na interface. Recarregue a página e tente de novo.",
     requestId: (id: string) => `Código do pedido para suporte: ${id}`,
     problems: {
       BAD_REQUEST:
@@ -43,7 +43,7 @@ export const TEXT = {
       FORBIDDEN: "Você não tem permissão para esta ação.",
       CSRF_FAILED:
         "A verificação de segurança da sessão falhou. Recarregue a página e tente de novo.",
-      TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos termos de uso.",
+      TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos Termos de Uso.",
       NOT_FOUND: "Não encontramos o que você pediu. Ele pode ter sido removido.",
       METHOD_NOT_ALLOWED: "Esta ação não é aceita aqui.",
       REQUEST_TIMEOUT: "O envio demorou demais e foi interrompido. Tente de novo.",
@@ -104,7 +104,7 @@ export const TEXT = {
     dismiss: { visible: "Fechar", screenReaderOnly: "aviso" },
   },
   home: {
-    title: "Arquivos em lote, limpos pelos goblins da oficina.",
+    title: "Arquivos em lote, limpos pelas goblins da oficina.",
     lead: "Escolha uma receita para começar.",
     recipesHeading: "Receitas",
     openWorkbench: "Abrir a Bancada",
@@ -123,7 +123,11 @@ export const TEXT = {
         "Tira o áudio de vídeos curtos em WAV ou FLAC e gera miniaturas, sem editar o vídeo.",
     },
   },
-  notFound: { title: "Página não encontrada", backHome: "Voltar à Oficina" },
+  notFound: {
+    title: "Página não encontrada",
+    lead: "O endereço pode estar errado, ou a página saiu do ar.",
+    backHome: "Voltar à Oficina",
+  },
   // Tela que não abriu (chunk que não carregou ou erro de render): o detalhe fica no console.
   routeFailure: {
     title: "Não foi possível abrir esta tela",
@@ -180,7 +184,7 @@ export const TEXT = {
     orderLabel: "Ordem de processamento",
     noFilesYet: "A bancada está vazia",
     noFilesYetHint:
-      "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e os goblins começam.",
+      "Os arquivos aparecem aqui, na ordem em que serão processados. Escolha os arquivos e use Executar para começar.",
     limitsHint: (maxInputs: number, maxTotal: string | null, maxFile: string | null) =>
       [
         maxTotal === null
@@ -309,9 +313,11 @@ export const TEXT = {
       rejections: {
         UNSUPPORTED_FORMAT: "O formato do arquivo não é aceito por esta receita.",
         UNSUPPORTED_BIT_DEPTH: "A profundidade de cor da imagem não é aceita.",
-        UNSUPPORTED_COLOR_PROFILE: "O perfil de cor da imagem não é aceito; só sRGB e Display P3.",
+        UNSUPPORTED_COLOR_PROFILE:
+          "O perfil de cor da imagem não é aceito; só sRGB e Display P3. Exporte a imagem em sRGB e envie outra vez.",
         IMAGE_TOO_LARGE: "A imagem passa de 24 megapixels ou de 8192 px num dos lados.",
-        CSV_STRUCTURE_INVALID: "A estrutura do CSV é inválida (aspas, colunas ou codificação).",
+        CSV_STRUCTURE_INVALID:
+          "A estrutura do CSV é inválida (aspas, colunas ou codificação). Salve o CSV de novo em UTF-8 e envie outra vez.",
         FIELD_LIMIT_EXCEEDED:
           "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
         MEDIA_TOO_LARGE:
@@ -366,8 +372,8 @@ export const TEXT = {
     },
     backToWorkbench: (recipe: string) => `Bancada da ${recipe}`,
     flavor: {
-      queued: "Os goblins pegam este lote assim que uma bancada vagar.",
-      succeeded: "Pronto! Os goblins terminaram o lote.",
+      queued: "As goblins pegam este lote assim que uma bancada vagar.",
+      succeeded: "Pronto! As goblins terminaram o lote.",
     },
     statuses: {
       queued: "Na fila",
@@ -590,7 +596,9 @@ export const TEXT = {
       heading: "Mapa de páginas previsto",
       empty: "O mapa aparece quando houver PDFs enviados ou páginas escolhidas.",
       allPages: (name: string) => `${name}, todas as páginas`,
-      groups: (size: string) => `partes de ${size} página(s), na ordem`,
+      // Singular e plural, como em `nouns`.
+      pages: ["página", "páginas"],
+      groups: (size: string, pages: string) => `partes de ${size} ${pages}, na ordem`,
       page: (name: string, page: string) => `${name}, página ${page}`,
       noFile: "PDF não escolhido",
     },
@@ -633,7 +641,7 @@ export const TEXT = {
     },
   },
   history: {
-    reuse: "Reusar configuração",
+    reuse: "Reutilizar parâmetros",
     reuseOf: (recipe: string, date: string) => `da execução de ${recipe} em ${date}`,
     availability: {
       until: (date: string) => `Resultados até ${date}`,
@@ -705,12 +713,11 @@ export const TEXT = {
       alreadyIn: (name: string) => `Você já entrou como ${name}.`,
       goToAccess: "Ver o seu acesso",
       promptTitle: "Entre para continuar",
-      promptBody: "Esta parte do GoblinShift precisa de login.",
+      promptBody: "Entre para enviar arquivos e ver suas execuções.",
       reauthTitle: "Entre de novo para confirmar",
       reauthBody:
         "Por segurança, esta ação exige um login feito há poucos minutos. Entre de novo e volte para cá.",
-      failed:
-        "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      failed: "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
       navSignIn: "Entrar",
       navAccess: "Acesso",
     },
@@ -739,11 +746,11 @@ export const TEXT = {
       atLimit: "No limite",
       resetsAt: (when: string) => `A cota diária começa a liberar em ${when}.`,
       activeRun: "Execução em andamento",
-      limitsHeading: "Limites por lote",
+      limitsHeading: "Limites por execução",
       fileBytes: "Por arquivo",
       videoFileBytes: "Por vídeo",
-      batchFiles: "Arquivos por lote",
-      batchBytes: "Por lote",
+      batchFiles: "Arquivos por execução",
+      batchBytes: "Por execução",
       concurrentUploads: "Envios simultâneos",
     },
     keys: {
@@ -935,7 +942,7 @@ export const TEXT = {
       "Toda resposta de erro é `application/problem+json`, com um `code` estável e o `request_id`. Decida pelo `code`, nunca pelo texto, e cite o `request_id` ao pedir ajuda.",
   },
   terms: {
-    acceptTitle: "Termos de uso",
+    acceptTitle: "Termos de Uso",
     acceptLead: (version: string) =>
       `Para continuar, leia e aceite a versão ${version} dos Termos de Uso e do Aviso de Privacidade. Ao aceitar, você declara ter 18 anos ou mais.`,
     readTerms: "Ler os Termos de Uso",
@@ -949,16 +956,27 @@ export const TEXT = {
     signOut: "Não aceito, sair",
     loading: "Carregando os termos.",
     requiredTitle: "Aceite os termos para continuar",
-    requiredBody: "Os termos de uso mudaram. Leia e aceite a versão nova para continuar.",
+    requiredBody: "Os Termos de Uso mudaram. Leia e aceite a versão nova para continuar.",
     goToAccept: "Ler e aceitar os termos",
   },
   credits: {
     title: "Créditos",
     artHeading: "As goblins",
-    art: [
-      "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no registro de licenças da arte.",
-      "A contribuição de seleção, renders e edição está sob CC BY 4.0, exceto Jade, Fagulha e a marca. A licença não concede direitos sobre conteúdo de terceiros nem garante proteção autoral ou exclusividade sobre os arquivos de origem.",
-    ],
+    // Cada parágrafo em três partes: o texto antes do link, o link e o texto depois.
+    art: {
+      cast: {
+        before:
+          "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no ",
+        link: "registro de licenças da arte",
+        after: ".",
+      },
+      license: {
+        before: "A contribuição de seleção, renders e edição está sob ",
+        link: "CC BY 4.0",
+        after:
+          ", exceto Jade, Fagulha e a marca. A licença não concede direitos sobre conteúdo de terceiros nem garante proteção autoral ou exclusividade sobre os arquivos de origem.",
+      },
+    },
     brandHeading: "A marca",
     brand: [
       "O emblema do cabeçalho e o selo da oficina mostram a Rúbia. O ícone da aba usa uma versão própria em SVG.",

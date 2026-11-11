@@ -56,6 +56,34 @@ export default tseslint.config(
         },
       ],
       eqeqeq: "error",
+      // O preset strict deixa a regra desligada; sem ela, <button> sem nome acessível
+      // só cai no axe do e2e. As listas repetem as do preset (o array substitui as
+      // opções inteiras). controlComponents põe na checagem os componentes que recebem o
+      // nome pelos filhos; os que montam o nome por dentro (BrandLink, CastButton...)
+      // ficam fora, senão seriam falso positivo sempre. Falso negativo conhecido: um
+      // componente sem filhos conta como possível rótulo, então <button><Icon /></button>
+      // passa no lint e só o axe do e2e pega. depth 3 cobre texto dentro de dois wrappers
+      // (<button><span><span>texto</span></span></button>).
+      "jsx-a11y/control-has-associated-label": [
+        "error",
+        {
+          ignoreElements: ["audio", "canvas", "embed", "input", "textarea", "tr", "video"],
+          ignoreRoles: [
+            "grid",
+            "listbox",
+            "menu",
+            "menubar",
+            "radiogroup",
+            "row",
+            "tablist",
+            "toolbar",
+            "tree",
+            "treegrid",
+          ],
+          controlComponents: ["Button", "Link", "NavLink", "AddRowButton"],
+          depth: 3,
+        },
+      ],
     },
   },
   {

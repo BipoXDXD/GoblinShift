@@ -1,12 +1,12 @@
 """Falha de banco fora da supervisão deixa tentativa órfã; o worker pausa os claims (auditoria D3).
 
-Cenário: a falha de banco num dos pontos sem tratamento (`record_start`, renovação do lease no
-empacotamento pelo `_LeaseKeeper`, desfecho em `finish`) sobe até a volta do worker com a Attempt
-viva e a área de trabalho ocupada. O `executor-ctl` recusa outro `start` com área suja
-(`work_area_dirty`): sem a pausa, a Run seguinte, de outra conta, gasta um claim por um defeito
-que não é dela. O `record_start` falha com um `55P03` de verdade: a Run fica travada noutra
-sessão só entre o `start` e o fim do `record_start`, para a falha não vir de um passo seguinte.
-Nos outros dois pontos a falha é injetada com o mesmo erro do driver.
+Cenário: a falha de banco num dos pontos sem tratamento (`record_start`, renovação do lease na cópia
+da entrada ou no empacotamento pelo `_LeaseKeeper`, desfecho em `finish`) sobe até a volta do worker
+com a Attempt viva e a área de trabalho ocupada. O `executor-ctl` recusa outro `start` com área suja
+(`work_area_dirty`): sem a pausa, a Run seguinte, de outra conta, gasta um claim por um defeito que
+não é dela. O `record_start` falha com um `55P03` de verdade: a Run fica travada noutra sessão só
+entre o `start` e o fim do `record_start`, para a falha não vir de um passo seguinte. Nos outros
+dois pontos a falha é injetada com o mesmo erro do driver.
 
 A pausa vive na memória do processo. Depois de um reinício, quem segura o claim é o portão da área
 de trabalho (`WorkAreaGate`), que lê a área que o `executor-ctl` confere. Os testes da pausa
@@ -157,9 +157,22 @@ def fail_in_record_start(
 
 def fail_in_lease_keeper(worker: Coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
     # A supervisão absorve a falha da renovação (#217); o `_LeaseKeeper` do empacotamento não.
-    def renew(_claimed: ClaimedAttempt) -> Status:
-        raise lock_not_available()
+    # Falha só depois do `record_start`: a cópia da entrada também renova o lease, e falhar já
+    # nela pararia a tentativa antes do executor, sem chegar ao empacotamento que este ponto mira.
+    started: set[uuid.UUID] = set()
+    record_start = worker.record_start
+    renew_lease = worker.renew_lease
 
+    def record_start_and_mark(claimed: ClaimedAttempt) -> None:
+        record_start(claimed)
+        started.add(claimed.attempt_id)
+
+    def renew(claimed: ClaimedAttempt) -> Status:
+        if claimed.attempt_id in started:
+            raise lock_not_available()
+        return renew_lease(claimed)
+
+    monkeypatch.setattr(worker, "record_start", record_start_and_mark)
     monkeypatch.setattr(worker, "renew_lease", renew)
 
 
@@ -323,6 +336,38 @@ def test_worker_reiniciado_dentro_da_janela_nao_gasta_claim_com_a_tentativa_orfa
     assert restarted.active is False
     [orphan] = attempts(factory, first)
     assert orphan["ended_at"] is None
+    waiting = run_row(factory, second)
+    assert (waiting["status"], waiting["claim_count"]) == ("queued", 0)
+    assert attempts(factory, second) == []
+
+
+def test_falha_de_banco_na_copia_da_entrada_pausa_os_claims_antes_do_executor(
+    factory: sessionmaker[Session],
+    worker_factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    area: Path,
+) -> None:
+    first, second = queue_two_runs(factory, storage)
+    clock = FakeClock()
+    pause = ClaimPause(WINDOW, clock=clock)
+    worker = coordinator(
+        worker_factory, storage, ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+    )
+
+    def renew(_claimed: ClaimedAttempt) -> Status:
+        raise lock_not_available()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(worker, "renew_lease", renew)
+        first_turn = turn(factory, storage, worker, pause)
+        clock.now += WINDOW.total_seconds() - 0.001
+        second_turn = turn(factory, storage, worker, pause)
+
+    assert (first_turn, second_turn) == (False, False)
+    [orphan] = attempts(factory, first)
+    assert (orphan["ended_at"], orphan["executor_started_at"]) == (None, None)
+    assert any(area.iterdir()), "a área da tentativa órfã devia continuar ocupada"
     waiting = run_row(factory, second)
     assert (waiting["status"], waiting["claim_count"]) == ("queued", 0)
     assert attempts(factory, second) == []

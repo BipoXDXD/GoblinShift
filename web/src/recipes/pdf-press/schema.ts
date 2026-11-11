@@ -193,11 +193,11 @@ export function pageMapPreview(
       return inputs.length === 0
         ? []
         : [{ name: "merged.pdf", entries: inputs.map((input) => PREVIEW.allPages(input.name)) }];
-    case "split":
-      return inputs.map((input) => ({
-        name: input.name,
-        entries: [PREVIEW.groups(values.pages_per_document.trim())],
-      }));
+    case "split": {
+      const size = withoutLeadingZeros(values.pages_per_document.trim());
+      const pages = PREVIEW.pages[size === "1" ? 0 : 1];
+      return inputs.map((input) => ({ name: input.name, entries: [PREVIEW.groups(size, pages)] }));
+    }
     case "select": {
       const names = new Map(inputs.map((input) => [input.uploadId, input.name]));
       const entries = values.cards.map((card) =>
@@ -206,4 +206,9 @@ export function pageMapPreview(
       return entries.length === 0 ? [] : [{ name: "selection.pdf", entries }];
     }
   }
+}
+
+// A prévia roda antes da validação: só os dígitos viram número; o resto aparece como foi digitado.
+function withoutLeadingZeros(size: string): string {
+  return /^\d+$/.test(size) ? String(Number(size)) : size;
 }
