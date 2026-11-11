@@ -66,16 +66,6 @@ def test_configuracao_invalida_e_recusada(
         load_config(write_config(tmp_path, {**VALID, **change}))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    # Só o "DID NOT RAISE" conta como a falha esperada; outro erro reprova de verdade.
-    raises=pytest.fail.Exception,
-    reason=(
-        "Lacuna do modelo de ameaças (#231): a configuração instalada aceita runtime runc e só a "
-        "sonda de aceitação na VPS exige runsc. Fechar exige mudar o executor-ctl e reinstalá-lo "
-        "no host, o que fica fora desta entrega (frente 4g); ao corrigir, tire o xfail."
-    ),
-)
 def test_configuracao_de_producao_com_runc_e_recusada(tmp_path: Path) -> None:
     # require_mount fica no padrão (True): é a configuração do host, não a dos testes.
     path = write_config(tmp_path, {**VALID, "runtime": "runc"})
@@ -83,6 +73,30 @@ def test_configuracao_de_producao_com_runc_e_recusada(tmp_path: Path) -> None:
     # O motivo precisa citar o runtime: outro ConfigError (chave, caminho) não fecha a lacuna.
     with pytest.raises(ConfigError, match="runtime"):
         load_config(path)
+
+
+def test_configuracao_de_teste_com_runc_desligando_a_montagem_tambem_e_recusada(
+    tmp_path: Path,
+) -> None:
+    # O arquivo do host nunca escolhe runc, nem desligando a montagem: runc só existe na
+    # Config montada no código dos testes (conftest.make_config).
+    path = write_config(tmp_path, {**VALID, "runtime": "runc", "require_mount": False})
+
+    with pytest.raises(ConfigError, match="runtime"):
+        load_config(path)
+
+
+def test_runc_continua_valido_na_config_montada_no_codigo() -> None:
+    config = Config(
+        socket=Path(VALID["socket"]),
+        group="gs-exec",
+        work_area=Path(VALID["work_area"]),
+        runtime="runc",
+        images_file=Path(VALID["images_file"]),
+        require_mount=False,
+    )
+
+    assert config.runtime == "runc"
 
 
 def test_chave_obrigatoria_ausente_e_recusada(tmp_path: Path) -> None:

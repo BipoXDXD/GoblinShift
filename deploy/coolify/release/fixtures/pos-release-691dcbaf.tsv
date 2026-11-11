@@ -1,0 +1,43 @@
+PENDING_LIDO	sim
+OUTROS_PENDING	
+INCOMING	
+LOCK_HOST	livre
+LOCK_PROJETO	livre
+RECEPTOR_ATIVO	
+COMMIT	691dcbaf60feb888215b7c3266086e243b04f9e1
+PROJETO	goblinshift
+VERSAO	2
+RECV_SHA	e9af03f08162ecf2bda094d38511b44b810043863d3104f60ea1046ae687f3b3
+DEPLOY_UUID	uuid-do-deployment
+FINISHED	1794355749
+IMAGES	{"app":"ghcr.io/bipoxdxd/goblinshift@sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308","web":"ghcr.io/bipoxdxd/goblinshift-web@sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c","executor":"ghcr.io/bipoxdxd/goblinshift-executor@sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c"}
+RECV_INST	e9af03f08162ecf2bda094d38511b44b810043863d3104f60ea1046ae687f3b3
+HIST_TOPO	691dcbaf60feb888215b7c3266086e243b04f9e1-1794355749.json
+HIST_N_COMMIT	1
+HIST_IGUAL	true
+EXEC_ANTERIOR	ghcr.io/bipoxdxd/goblinshift-executor@sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c
+ALLOW_META	root:root 600 910 1794355711
+EXEC_CFG	/var/lib/coolify-release/goblinshift/executor-images.json
+CUR_MTIME	1794355749
+UUID	uuid-do-recurso-coolify
+IMPORT_APP	sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308
+IMPORT_WEB	sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c
+IMPORT_EXECUTOR	sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c
+CONTAINER	goblinshift-api-1|app|running|healthy|sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308|uuid-do-recurso-coolify|ghcr.io/bipoxdxd/goblinshift:release-691dcbaf60feb888215b7c3266086e243b04f9e1@sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308
+CONTAINER	goblinshift-worker-1|app|running|healthy|sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308|uuid-do-recurso-coolify|ghcr.io/bipoxdxd/goblinshift:release-691dcbaf60feb888215b7c3266086e243b04f9e1@sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308
+CONTAINER	goblinshift-maintenance-1|app|running|healthy|sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308|uuid-do-recurso-coolify|ghcr.io/bipoxdxd/goblinshift:release-691dcbaf60feb888215b7c3266086e243b04f9e1@sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308
+CONTAINER	goblinshift-nginx-1|web|running|healthy|sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c|uuid-do-recurso-coolify|ghcr.io/bipoxdxd/goblinshift-web:release-691dcbaf60feb888215b7c3266086e243b04f9e1@sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c
+READYZ	200
+ERRLOG_MTIME	1794244860
+RECV_REPO	e9af03f08162ecf2bda094d38511b44b810043863d3104f60ea1046ae687f3b3
+ALLOWED	["ghcr.io/bipoxdxd/goblinshift-executor@sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c","ghcr.io/bipoxdxd/goblinshift-executor@sha256:1111111111111111111111111111111111111111111111111111111111111111","ghcr.io/bipoxdxd/goblinshift-executor@sha256:2222222222222222222222222222222222222222222222222222222222222222"]
+MANIFEST_APP	{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308","size":2383,"platform":{"architecture":"amd64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:89a9c406324ae3f5dd84014e04eb890cf02577cb9cf5e65252d945eb39922353","size":2383,"platform":{"architecture":"arm64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:0e9b37e560de3cf867ae02073e5aa9e36a0166915fbbc1f3d041050d294fe999","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:7514b8d910de3a79aab34c2d4c11eafa391948fe0e524b990f3b259aeea2261e","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:89a9c406324ae3f5dd84014e04eb890cf02577cb9cf5e65252d945eb39922353","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}}]}
+TAG_DIGEST_APP	sha256:110ffe984d13c58ca6a378141c2bafc729fd181dd86d3d7ce0dff8bf420c8f2b
+MANIFEST_WEB	{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c","size":2568,"platform":{"architecture":"amd64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:5584cdeb86112e783e1ab7b1001cd54bb0dbd20234a474202e290ab03876e583","size":2568,"platform":{"architecture":"arm64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:d03b69064ab8731aeeaa0af6b2dd22bd781b9628bca152e2e9274860190974b9","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:39630d48f80aa81b9ee4796fa14cde56415282397ac1bc0bb8afe61da8a05f0e","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:5584cdeb86112e783e1ab7b1001cd54bb0dbd20234a474202e290ab03876e583","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}}]}
+TAG_DIGEST_WEB	sha256:a056553a2393c08adb29dc3d0bd735730c5a4332b561155676e8a5f05f315c26
+MANIFEST_EXECUTOR	{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c","size":2769,"platform":{"architecture":"amd64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:5cc640bff0470391cec8b858528816092a954c62f537187c6b9933c87dfce59b","size":2769,"platform":{"architecture":"arm64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:1f547ff4eff76f6042bdbe836a0541630ef716a4fc8d15fdb8c29229e006ec01","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:1c4200f6567a9b4d99cde3a25d99dc31fd124cb39b7a2c711c4b3e51ee668a4f","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:5cc640bff0470391cec8b858528816092a954c62f537187c6b9933c87dfce59b","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}}]}
+TAG_DIGEST_EXECUTOR	sha256:bbc5c21e523ef465f008f83ddac79fa8c56cdd294a7742323a823c450830596f
+RUN_CRIADO	1794355555
+RUN_STATUS	completed
+RUN_CONCLUSAO	success
+MAIN_HEAD	691dcbaf60feb888215b7c3266086e243b04f9e1

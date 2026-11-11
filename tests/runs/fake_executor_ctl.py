@@ -1,7 +1,7 @@
 """`executor-ctl` falso, fiel ao contrato da fatia 4, num socket Unix de teste.
 
-Fala HTTP/1.1 com corpo JSON e as quatro operações (`start`, `status`, `stop`, `remove`), com os
-mesmos códigos de erro do serviço real. Em vez de criar containers:
+Fala HTTP/1.1 com corpo JSON e as operações do serviço (`start`, `status`, `stop`, `remove` e
+`image`), com os mesmos códigos de erro dele. Em vez de criar containers:
 
 - com `command`, o `start` roda `command + [<área>/<id>]` num subprocesso de sessão própria (o
   "container"), e `stop` sinaliza o grupo com SIGTERM, carência e SIGKILL;
@@ -9,8 +9,9 @@ mesmos códigos de erro do serviço real. Em vez de criar containers:
 
 Os controles simulam falhas do serviço: `docker_down` (503), `response_delay_s` (resposta mais
 lenta que o timeout do cliente), `unstoppable` (o `stop` não consegue parar), `after_start_run`
-(algo acontece entre a criação do container e a resposta do `start`) e `close()` (socket
-fora do ar). `calls` registra a ordem das operações recebidas.
+(algo acontece entre a criação do container e a resposta do `start`), `close()` (socket fora do
+ar), `image_route_installed` (`False`: serviço anterior à rota `image`) e `image_response` (corpo
+fora do contrato). `calls` registra a ordem das operações recebidas.
 """
 
 import contextlib
@@ -33,6 +34,7 @@ from typing import Any
 
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 _ROUTE = re.compile(r"^/v1/attempts/(?P<id>[^/]+)(?P<action>/start|/stop)?$")
+_IMAGE_ROUTE = re.compile(r"^/v1/image\?ref=(?P<ref>.*)$")
 _KILL_CONFIRM_S = 5.0
 _POLL_S = 0.02
 _SIGNAL_EXIT_BASE = 128
@@ -73,6 +75,8 @@ class FakeExecutorCtl:
     containers: dict[str, FakeContainer] = field(default_factory=dict)
     calls: list[tuple[str, str]] = field(default_factory=list)
     docker_down: bool = False
+    # 503 `busy` no `start` e no `remove`, como o lock da área com prazo estourado no serviço.
+    area_busy: bool = False
     response_delay_s: float = 0.0
     unstoppable: bool = False
     # O executor que terminar sai como morto por falta de memória (`oom_killed`).
@@ -87,6 +91,10 @@ class FakeExecutorCtl:
     # acontece entre a resposta que o cliente vai ler e a chamada seguinte dele.
     on_status: Callable[[str], None] | None = None
     last_start_body: object = None
+    # O que o daemon tem, para a rota `image`.
+    present_images: Sequence[str] = (IMAGE,)
+    image_route_installed: bool = True
+    image_response: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Caminho curto: o socket Unix tem limite de ~104 bytes no macOS.
@@ -120,6 +128,9 @@ class FakeExecutorCtl:
     def handle(self, method: str, path: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
         if self.response_delay_s:
             time.sleep(self.response_delay_s)
+        image_route = _IMAGE_ROUTE.match(path)
+        if image_route is not None:
+            return self._image(method, image_route["ref"])
         match = _ROUTE.match(path)
         if match is None:
             return 404, _error("not_found")
@@ -144,6 +155,20 @@ class FakeExecutorCtl:
                     return self._remove(attempt_id)
                 case _:
                     return 405, _error("method_not_allowed")
+
+    def _image(self, method: str, ref: str) -> tuple[int, dict[str, Any] | None]:
+        if not self.image_route_installed:
+            return 404, _error("not_found")
+        if method != "GET":
+            return 405, _error("method_not_allowed")
+        self.calls.append(("image", ref))
+        if ref not in self.allowed_images:
+            return 403, _error("image_not_allowed")
+        if self.docker_down:
+            return 503, _error("docker_unavailable")
+        if self.image_response is not None:
+            return 200, self.image_response
+        return 200, {"present": ref in self.present_images}
 
     def _start_and_inspect(self, attempt_id: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
         """Como o serviço real: cria sob o lock e lê o estado de novo depois de soltá-lo."""
@@ -172,6 +197,9 @@ class FakeExecutorCtl:
             return 400, _error("invalid_body")
         if image not in self.allowed_images:
             return 403, _error("image_not_allowed")
+        # Como no serviço real: a allowlist vem antes do lock; com o lock, nada é tocado.
+        if self.area_busy:
+            return 503, _error("busy")
         if attempt_id in self.containers:
             return 200, self._status(attempt_id)
         if self.docker_down:
@@ -229,6 +257,8 @@ class FakeExecutorCtl:
         return 200, self._status(attempt_id)
 
     def _remove(self, attempt_id: str) -> tuple[int, dict[str, Any] | None]:
+        if self.area_busy:
+            return 503, _error("busy")
         container = self.containers.get(attempt_id)
         if container is not None:
             container.refresh()

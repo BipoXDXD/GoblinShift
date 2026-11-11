@@ -347,6 +347,7 @@ def test_falha_de_banco_na_copia_da_entrada_pausa_os_claims_antes_do_executor(
     storage: FileStorage,
     ctl: FakeExecutorCtl,
     area: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first, second = queue_two_runs(factory, storage)
     clock = FakeClock()
@@ -358,11 +359,10 @@ def test_falha_de_banco_na_copia_da_entrada_pausa_os_claims_antes_do_executor(
     def renew(_claimed: ClaimedAttempt) -> Status:
         raise lock_not_available()
 
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(worker, "renew_lease", renew)
-        first_turn = turn(factory, storage, worker, pause)
-        clock.now += WINDOW.total_seconds() - 0.001
-        second_turn = turn(factory, storage, worker, pause)
+    monkeypatch.setattr(worker, "renew_lease", renew)
+    first_turn = turn(factory, storage, worker, pause)
+    clock.now += WINDOW.total_seconds() - 0.001
+    second_turn = turn(factory, storage, worker, pause)
 
     assert (first_turn, second_turn) == (False, False)
     [orphan] = attempts(factory, first)

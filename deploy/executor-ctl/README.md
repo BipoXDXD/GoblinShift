@@ -20,7 +20,9 @@ legado não recebem acesso ao novo destino.
 regular de um link, limitada a 64 KiB. **A configuração pode ser 0644**, se não
 tiver escrita de grupo/outros; **a política exige 0600**. O esquema completo da
 configuração e as chaves duplicadas são validados. O caminho de política antigo,
-um caminho alternativo ou uma grafia com `./` não são aceitos.
+um caminho alternativo ou uma grafia com `./` não são aceitos. O `runtime` só
+aceita `runsc` (gVisor, ADR 004): `runc` é recusado no arquivo, e portanto no
+preflight do instalador, mesmo com `require_mount` desligado.
 
 Exemplo de configuração administrativa a preparar e revisar pelo operador:
 

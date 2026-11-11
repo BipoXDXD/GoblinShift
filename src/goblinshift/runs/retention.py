@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from goblinshift.files.objects import release_many
 from goblinshift.files.retention import HistoryReferences, has_unsettled_candidate
 from goblinshift.files.states import HolderKind
-from goblinshift.files.tables import artifact, upload
+from goblinshift.files.tables import artifact
 from goblinshift.platform.sql import skip_locked_batch
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 
@@ -40,13 +40,14 @@ ANONYMIZE_AFTER = timedelta(days=30)
 DELETE_AFTER = timedelta(days=90)
 
 
-def _upload_in_history(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
+def _upload_in_history(
+    owner_id: ColumnElement[uuid.UUID], upload_id: ColumnElement[uuid.UUID]
+) -> ColumnElement[bool]:
     # O dono também entra na correlação: `run_input.owner_id` é sempre o do upload (FK composta
     # `(owner_id, upload_id)`), e só com ele o índice `(owner_id, upload_id)` é pesquisado por chave
-    # em vez de varrido inteiro.
-    return exists().where(
-        run_input.c.upload_id == upload_id, run_input.c.owner_id == upload.c.owner_id
-    )
+    # em vez de varrido inteiro. Medido no PostgreSQL 18, que com só o upload correlacionado varre o
+    # índice todo; o plano depende da versão, e `test_history_upload_owner` falha se ele mudar.
+    return exists().where(run_input.c.upload_id == upload_id, run_input.c.owner_id == owner_id)
 
 
 def _artifact_in_history(artifact_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:

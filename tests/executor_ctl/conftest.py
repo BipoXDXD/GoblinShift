@@ -16,7 +16,7 @@ from executor_ctl import images
 from executor_ctl.config import Config
 from executor_ctl.docker_cli import DockerCli
 from executor_ctl.server import bind_server
-from executor_ctl.service import ExecutorService
+from executor_ctl.service import AREA_LOCK_WAIT_S, ExecutorService
 
 
 def current_group() -> str:
@@ -56,9 +56,11 @@ POLL_INTERVAL_S = 0.01
 
 
 @contextmanager
-def running_server(config: Config, docker: DockerCli) -> Iterator[Path]:
+def running_server(
+    config: Config, docker: DockerCli, *, area_lock_wait_s: float = AREA_LOCK_WAIT_S
+) -> Iterator[Path]:
     group_id = grp.getgrnam(config.group).gr_gid
-    service = ExecutorService(config, docker, group_id)
+    service = ExecutorService(config, docker, group_id, area_lock_wait_s=area_lock_wait_s)
     server = bind_server(config, service, group_id, read_timeout_s=TEST_READ_TIMEOUT_S)
     thread = threading.Thread(
         target=server.serve_forever, kwargs={"poll_interval": POLL_INTERVAL_S}, daemon=True
