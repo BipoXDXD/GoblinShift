@@ -344,6 +344,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Instalar o runsc e registrá-lo no Docker do runner
+        # Mesmo teto do job gvisor: o script leva cerca de 20 s e não pode prender o runner.
+        timeout-minutes: 5
         run: scripts/ci-install-runsc.sh
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
