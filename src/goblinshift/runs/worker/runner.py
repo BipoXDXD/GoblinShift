@@ -44,6 +44,9 @@ from goblinshift.runs.store import container_name
 
 # Teto da carência de `stop` (3.5: "concede até 10 segundos e força o encerramento").
 MAX_STOP_GRACE = timedelta(seconds=10)
+# Carência que worker e manutenção pedem no `stop`: o teto inteiro. O worker também a soma na pausa
+# dos claims depois de tentativa órfã (claim_pause.py).
+STOP_GRACE = MAX_STOP_GRACE
 # Layout da área de trabalho (contrato da fatia 4): o executor (outro usuário, mesmo grupo) lê
 # `job.json` e `inputs/` e escreve em `/work` e `out/`; o setgid faz tudo herdar o grupo.
 WORK_DIR_MODE = 0o2770

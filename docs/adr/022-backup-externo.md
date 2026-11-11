@@ -1,6 +1,6 @@
 # ADR 022. Backup externo do PostgreSQL por timer do systemd, cifrado com age
 
-- **Estado:** Aceito (fatia 8, parte 1, 2026-10-14).
+- **Estado:** Aceito (fatia 8, parte 1, 2026-10-14). O horário e o sorteio do item 1 da Decisão foram substituídos em 2026-11-09 (ver a atualização dessa data, no fim).
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (Backups), [3.7](../GoblinShiftPlan.md#s3-7) (alerta de causa "backup diário que falhou")
 - **Relacionado:** [ADR 011](011-vps-kvm2-compartilhada.md) (VPS compartilhada), [ADR 013](013-openobserve-telemetria.md) (telemetria na VPS)
 
@@ -58,3 +58,12 @@ A publicação passou para o Coolify, e `/srv/goblinshift/app` virou uma cópia 
 - **Diretório dividido:** o `deploy/acceptance/install.sh` também usa esse diretório, para o `lib.sh`. Os dois instaladores trocam só os próprios arquivos.
 - **Custo:** mudança no backup ou chave `age` nova só chega ao timer quando o instalador roda de novo, a partir de um checkout temporário da `main` (README, "Checkout temporário na VPS"). O código do timer deixa de ser gravável pelo usuário da aplicação.
 - **Compliance:** `systemctl cat goblinshift-pg-backup.service` mostra `ExecStart=/usr/local/lib/goblinshift/backup/pg-backup.sh`, e `tests/backup/test_install.py` roda esse script com `/srv/goblinshift/app` removido.
+
+## Atualização de 2026-11-09: backup às 03:05 UTC
+
+Por ordem do dono, às 04:45 UTC de 2026-11-09, a janela noturna da VPS ficou assim: auto-update do Coolify em `0 3 * * *` UTC, `goblinshift-pg-backup` às 03:05 UTC e `openclaw-daily-backup-2026` às 03:20 UTC. O timer versionado passa a `*-*-* 03:05:00 UTC` (00:05 de Brasília), e o `RandomizedDelaySec` passa a `0min`: a VPS já roda sem sorteio, e o horário fixo mantém o backup antes do job das 03:20 UTC. `Persistent=true` não muda.
+
+- **Drop-in na VPS:** a troca foi feita com `10-janela-noturna.conf`, que sobrepõe o timer instalado. O `deploy/backup/install.sh` não mexe nele: remova o arquivo à mão, com `systemctl daemon-reload`, depois que o instalador levar este timer à VPS.
+- **Alerta:** o check "backup diário" continua com 1 dia de período e 2 h de tolerância, ou 26 h entre sucessos. Em regime, os sucessos ficam a 24 h um do outro, mais a diferença de duração entre um dump e outro.
+- **Restauração:** o `restore-check.yml` roda no dia 1, às 10:23 UTC, e o dump escolhido terá cerca de 7 h, abaixo das 26 h exigidas.
+- **Compliance:** `tests/backup/test_backup_config.py` fixa o `OnCalendar` e o `RandomizedDelaySec` e confere este registro. Na VPS, `systemctl cat goblinshift-pg-backup.timer` mostra o horário efetivo.

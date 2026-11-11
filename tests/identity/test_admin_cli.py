@@ -4,15 +4,27 @@ import hashlib
 import hmac
 import io
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID, uuid7
+from uuid import UUID, uuid4, uuid7
 
 import pytest
-from sqlalchemy import select
+from psycopg import OperationalError as PsycopgOperationalError
+from sqlalchemy import select, text
+from sqlalchemy.engine.default import DefaultDialect
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.admin_cli import EXIT_NOT_FOUND, EXIT_OK, EXIT_USAGE, main
+from goblinshift.entrypoints import admin_cli
+from goblinshift.entrypoints.admin_cli import (
+    EXIT_FAILURE,
+    EXIT_MISSING_SECRET,
+    EXIT_NOT_FOUND,
+    EXIT_OK,
+    EXIT_USAGE,
+    main,
+)
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
@@ -24,11 +36,13 @@ from goblinshift.identity import (
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
 from tests.identity.support import new_user
+from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -226,6 +240,73 @@ def test_block_bloqueia_revoga_chaves_e_cancela_a_execucao(
         run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
         assert run_status.scalar_one() == Status.CANCELED
     assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
+
+
+@pytest.fixture
+def finished(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> Iterator[RecordedFinished]:
+    """O `run.finished` que a CLI emitiria pelo tracer do processo, gravado em memória."""
+    recorded = RecordedFinished(factory)
+
+    @contextmanager
+    def reporter(*_args: object) -> Iterator[RunFinishedReporter]:
+        yield recorded.reporter
+
+    monkeypatch.setattr(admin_cli, "run_finished_reporter", reporter)
+    yield recorded
+    recorded.shutdown()
+
+
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_cancelamento_pela_cli_emite_um_termino_cancelado(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    finished: RecordedFinished,
+    command: str,
+) -> None:
+    user_id = create_user(capsys)
+    run_id = queue_run(factory, storage, UUID(user_id))
+
+    exit_code, _, _ = run(capsys, command, "--user", user_id)
+
+    assert exit_code == EXIT_OK
+    [event] = finished.events()
+    assert (event["run_id"], event["run.state"]) == (str(run_id), "canceled")
+
+
+@pytest.mark.parametrize("command", ["block", "request-deletion"])
+def test_sem_segredo_do_user_hash_em_producao_falha_antes_de_gravar(
+    capsys: pytest.CaptureFixture[str],
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    monkeypatch: pytest.MonkeyPatch,
+    db_settings: Settings,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    user_id = create_user(capsys)
+    run_id = queue_run(factory, storage, UUID(user_id))
+    # Produção exige a senha do banco em arquivo; só o segredo do `user.hash` fica faltando.
+    password_file = tmp_path / "db_password"
+    password_file.write_text(db_settings.db_password.get_secret_value())
+    monkeypatch.setenv("GS_DB_PASSWORD_FILE", str(password_file))
+    monkeypatch.setenv("GS_ENVIRONMENT", "production")
+    monkeypatch.delenv("GS_USER_HASH_SECRET", raising=False)
+
+    exit_code, _, err = run(capsys, command, "--user", user_id)
+
+    assert exit_code == EXIT_MISSING_SECRET
+    assert "GS_USER_HASH_SECRET" in err
+    assert status_of(factory, user_id) == "active"
+    assert deletion_requested_at(factory, user_id) is None
+    assert audited(factory, user_id) == []
+    with factory() as session:
+        status = session.execute(
+            select(run_table.c.status).where(run_table.c.id == run_id)
+        ).scalar_one()
+    assert status == Status.QUEUED
 
 
 def test_block_repetido_completa_o_que_faltou(
@@ -707,3 +788,55 @@ def test_conta_inexistente_sai_com_1(capsys: pytest.CaptureFixture[str], command
 
     assert exit_code == EXIT_NOT_FOUND
     assert "não existe" in err
+
+
+def test_erro_do_postgresql_sai_com_4_e_o_sqlstate_sem_o_parametro(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    factory: sessionmaker[Session],
+) -> None:
+    """O PostgreSQL repete o valor recusado na mensagem; a tela só recebe tipo e SQLSTATE."""
+    canary = f"CANARY-{uuid4()}"
+
+    def create_admin_user(session: Session, display_name: str) -> UUID:
+        session.execute(text("SELECT CAST(:value AS integer)"), {"value": display_name})
+        raise AssertionError("o CAST acima falha no banco")
+
+    monkeypatch.setattr(admin_cli, "create_admin_user", create_admin_user)
+
+    exit_code, out, err = run(capsys, "create-user", "--display-name", canary)
+
+    assert exit_code == EXIT_FAILURE
+    assert out == ""
+    assert err == "gs-admin: falha no banco de dados (DataError, SQLSTATE 22P02)\n"
+    with unit_of_work(factory) as session:
+        assert session.execute(select(app_user.c.id)).first() is None
+
+
+def test_erro_do_pool_ao_fechar_a_conexao_nao_leva_o_detalhe_ao_stderr(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O pool registra a falha do `close` com o repr da conexão (host, usuário, banco) e a
+    exceção; sem o filtro, o `logging.lastResort` escreveria tudo no stderr."""
+    canary = f"CANARY-{uuid4()}"
+
+    # Fechadas só depois do log: aberta, a conexão mostra host, porta, usuário e banco no repr.
+    stranded: list[DBAPIConnection] = []
+
+    def do_close(self: DefaultDialect, connection: DBAPIConnection) -> None:
+        stranded.append(connection)
+        raise PsycopgOperationalError(f'connection to server at "{canary}" failed')
+
+    monkeypatch.setattr(DefaultDialect, "do_close", do_close)
+
+    try:
+        exit_code, _, err = run(capsys, "list-users")
+    finally:
+        for connection in stranded:
+            connection.close()
+
+    assert exit_code == EXIT_OK
+    assert "Exception closing connection <psycopg connection>" in err
+    assert canary not in err
+    assert "host=" not in err
+    assert "Traceback" not in err

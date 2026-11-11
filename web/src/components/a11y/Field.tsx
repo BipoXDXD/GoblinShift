@@ -39,7 +39,11 @@ export function Field({
   const errorId = hasText(error) ? `${id}-erro` : null;
   const control = children(controlProps({ id, descriptionId, errorId }));
   const labelElement = (
-    <label htmlFor={id} className="text-sm font-semibold text-fg">
+    <label
+      htmlFor={id}
+      // No checkbox e no radio, o label é a parte grande do alvo de toque.
+      className={`${layout === "inline" ? "inline-flex min-h-11 items-center " : ""}text-sm font-semibold text-fg`}
+    >
       {label}
     </label>
   );

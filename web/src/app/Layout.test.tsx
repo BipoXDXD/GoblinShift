@@ -1,6 +1,9 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { NavigationType } from "react-router";
 import { describe, expect, it } from "vitest";
 
+import { ME_QUERY_KEY } from "../account/api";
 import type { SiteNotice } from "../notice/notice";
 import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
@@ -18,19 +21,23 @@ function setup(
   notice: SiteNotice | null = null,
   csrfToken: string | null = TEST_CSRF_TOKEN,
 ) {
-  const api = fakeApi(
-    {
-      "GET /api/v1/me": me,
-      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
-    },
-    { csrfToken },
-  );
+  const api = layoutApi(me, csrfToken);
   const view = renderRoutes({
     routes: appRoutes(api.client, { notice }),
     path,
     client: api.client,
   });
   return { ...view, api };
+}
+
+function layoutApi(me: MeHandler, csrfToken: string | null = TEST_CSRF_TOKEN) {
+  return fakeApi(
+    {
+      "GET /api/v1/me": me,
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+    },
+    { csrfToken },
+  );
 }
 
 /** O cabeçalho só aparece depois do chunk da primeira tela (rotas lazy). */
@@ -118,7 +125,7 @@ describe("Layout: termos pendentes", () => {
     await waitFor(() => {
       expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico%3Festado%3Dfailed");
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de Uso" })).toBeVisible();
   });
 
   it("conta que aceitou a versão anterior volta ao aceite quando a versão sobe", async () => {
@@ -140,7 +147,7 @@ describe("Layout: termos pendentes", () => {
     await waitFor(() => {
       expect(currentUrl(router)).toBe("/termos/aceitar?volta=%2Fhistorico");
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Termos de uso" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Termos de Uso" })).toBeVisible();
   });
 
   it.each(["/termos", "/privacidade", "/acesso", "/entrar"])(
@@ -150,6 +157,23 @@ describe("Layout: termos pendentes", () => {
 
       expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
       expect(currentUrl(router)).toBe(path);
+    },
+  );
+
+  it.each(["/termos/", "/privacidade/", "/creditos/"])(
+    "%s, com a barra final, também fica aberta para ler",
+    async (path) => {
+      const { router, queryClient } = setup(
+        () => jsonResponse(meBody({ terms: TERMS_PENDING })),
+        path,
+      );
+
+      // A tela pinta antes do /me: só com a resposta o aceite pendente poderia redirecionar.
+      await waitFor(() => {
+        expect(queryClient.getQueryState(ME_QUERY_KEY)?.status).toBe("success");
+      });
+      expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+      expect(currentUrl(router)).toBe(path.slice(0, -1));
     },
   );
 
@@ -166,7 +190,7 @@ describe("Layout: login recusado", () => {
     setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), "/?login_error=failed");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
     );
   });
 
@@ -188,7 +212,7 @@ describe("Layout: login recusado", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(
-      "Não foi possível entrar. Tente de novo; se continuar, confira se a conta do provedor está liberada.",
+      "Não foi possível entrar. Tente de novo com a mesma conta ou com o outro provedor.",
     );
     expect(within(alert).queryByText(/Código/)).toBeNull();
     expect(alert).not.toHaveTextContent(/golpe|PERIGO|<b>/);
@@ -271,6 +295,22 @@ describe("Layout: aviso global", () => {
 
     expect(await axeViolations(container)).toEqual([]);
   });
+
+  it("Fechar aviso leva o foco ao título da tela, não ao corpo da página", async () => {
+    setup(() => jsonResponse(meBody()), "/historico", {
+      ...INCIDENT,
+      id: "termos-2026-11",
+      kind: "terms-change",
+    });
+    const title = await screen.findByRole("heading", { level: 1, name: "Histórico" });
+    const close = screen.getByRole("button", { name: "Fechar aviso" });
+    close.focus();
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(screen.queryByRole("region", { name: /^Aviso/ })).toBeNull();
+    expect(title).toHaveFocus();
+  });
 });
 
 describe("Layout: rodapé", () => {
@@ -287,5 +327,88 @@ describe("Layout: rodapé", () => {
     for (const link of links) {
       expect(link).toHaveClass("min-h-11");
     }
+  });
+
+  it.each([
+    ["/termos", ["page", null, null]],
+    ["/termos/", ["page", null, null]],
+    ["/privacidade", [null, "page", null]],
+    ["/creditos", [null, null, "page"]],
+  ])("em %s, só o link da página atual tem aria-current", async (path, expected) => {
+    setup(() => jsonResponse(meBody()), path);
+
+    const footer = await screen.findByRole("contentinfo");
+    // Com barra final, o rodapé aparece antes do redirect para o endereço sem barra.
+    await waitFor(() => {
+      const links = within(footer).getAllByRole("link");
+      expect(links.map((link) => link.getAttribute("aria-current"))).toEqual(expected);
+    });
+  });
+
+  it("a página atual se destaca também sem cor: perde o sublinhado, como no cabeçalho", async () => {
+    setup(() => jsonResponse(meBody()), "/termos");
+
+    const footer = await screen.findByRole("contentinfo");
+    const current = within(footer).getByRole("link", { name: "Termos de Uso" });
+    expect(current).toHaveClass("aria-[current=page]:text-fg", "aria-[current=page]:no-underline");
+  });
+
+  it.each(["/historico", "/termos/aceitar"])(
+    "em %s, nenhum link do rodapé é a página atual",
+    async (path) => {
+      setup(() => jsonResponse(meBody()), path);
+
+      const footer = await screen.findByRole("contentinfo");
+      for (const link of within(footer).getAllByRole("link")) {
+        expect(link).not.toHaveAttribute("aria-current");
+      }
+    },
+  );
+});
+
+describe("Layout: barra final no endereço", () => {
+  it("vai para o endereço sem a barra, mantendo a query e o fragmento", async () => {
+    const { router } = setup(() => jsonResponse(meBody()), "/historico/?estado=failed#topo");
+
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/historico?estado=failed#topo");
+    });
+  });
+
+  it("troca a entrada do histórico: o Voltar leva à tela anterior, sem prender na barra", async () => {
+    const api = layoutApi(() => jsonResponse(meBody()));
+    const { router } = renderRoutes({
+      routes: appRoutes(api.client, { notice: null }),
+      visited: ["/historico"],
+      path: "/termos/",
+      client: api.client,
+    });
+
+    await waitFor(() => {
+      expect(currentUrl(router)).toBe("/termos");
+    });
+    expect(router.state.historyAction).toBe(NavigationType.Replace);
+
+    await act(() => router.navigate(-1));
+    expect(currentUrl(router)).toBe("/historico");
+  });
+
+  // O navegador entrega a forma codificada como está: vira um caminho deste site, não outro host.
+  it.each(["/%2F%2Fevil.com/", "/%5Cevil.com/"])(
+    "%s vira o caminho local literal, sem a barra",
+    async (path) => {
+      const { router } = setup(() => jsonResponse(meBody()), path);
+
+      await waitFor(() => {
+        expect(currentUrl(router)).toBe(path.slice(0, -1));
+      });
+    },
+  );
+
+  it.each(["//evil.com/", "/\\evil.com/"])("%s fica no site, sem redirecionar", async (path) => {
+    const { router } = setup(() => jsonResponse(meBody()), path);
+
+    expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
+    expect(currentUrl(router)).toBe(path);
   });
 });

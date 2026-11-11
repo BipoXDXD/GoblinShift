@@ -40,10 +40,12 @@
     outline: none;
   }
 
-  /* O título da tela recebe foco por programa a cada troca de rota (FocusHeading), só para o
-     leitor de tela e o Tab partirem dali; não é controle, então não desenha anel (o resumo de
-     erros, que também recebe foco, continua com o anel). */
-  h1[tabindex="-1"]:focus {
+  /* Todo título h1, h2 ou h3 com tabindex="-1" recebe foco só por programa, para o leitor de tela
+     e o Tab partirem dali (por exemplo, o h1 a cada troca de rota, o h2 de uma seção ou da tela
+     depois de uma ação que tira o botão focado ou quando a tela abre por um link com âncora, o h3
+     de um bloco que abriu). Não são controles, então não desenham anel. O resumo de erros, que
+     também recebe foco, continua com o anel. */
+  :is(h1, h2, h3)[tabindex="-1"]:focus {
     outline: none;
   }
 
@@ -53,8 +55,10 @@
     font-family: var(--font-mono);
   }
 
-  /* Controles de texto: embutidos (sombra no topo), borda de 2 px com 3:1 e 44 px de altura. */
-  input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"]),
+  /* Controles de texto: embutidos (sombra no topo), borda de 2 px com 3:1 e 44 px de altura. O
+     :where mantém esta regra leve, para [aria-invalid] e :disabled, abaixo, valerem também no
+     input (baseCss.test.ts). */
+  input:where(:not([type="checkbox"], [type="radio"], [type="file"], [type="range"])),
   select,
   textarea {
     display: block;
@@ -76,6 +80,19 @@
 
   [aria-invalid="true"] {
     border-color: var(--danger-fg);
+  }
+
+  /* O estilo acima cobre o do navegador: sem isto, o campo desabilitado parece editável. Vazio,
+     ele não tem texto para mostrar a cor: fundo liso e borda tracejada avisam sem depender dela.
+     A cor da borda fica de fora para não apagar a de erro. */
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    border-style: dashed;
+    background-color: var(--surface);
+    box-shadow: none;
+    color: var(--fg-subtle);
+    cursor: not-allowed;
   }
 
   ::placeholder {

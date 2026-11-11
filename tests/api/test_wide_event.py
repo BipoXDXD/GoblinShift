@@ -334,7 +334,8 @@ def test_consulta_que_falha_entra_na_contagem_e_nao_deixa_inicio_pendente(traced
 def test_sem_spans_de_send_e_receive(traced: Traced) -> None:
     traced.client.post(ECHO, json={"text": "x"})
 
-    assert len(traced.spans()) == 1
+    # As consultas da requisição têm spans próprios; aqui só interessa o que veio do ASGI.
+    assert len([s for s in traced.spans() if "db.system" not in (s.attributes or {})]) == 1
 
 
 # POST /runs: aceitação e replay
@@ -368,6 +369,37 @@ def test_aceitacao_traz_run_receita_e_replay(traced: Traced, tmp_path: Path) -> 
 
     assert again.status_code == 202
     assert traced.main_event()["idempotency.replayed"] is True
+
+
+def test_cancelar_run_na_fila_pela_api_emite_o_termino(traced: Traced, tmp_path: Path) -> None:
+    user_id, auth = new_account(traced.factory)
+    storage = FileStorage(tmp_path / "storage")
+    inputs = ready_inputs(traced.factory, storage, user_id)
+    payload = {
+        "recipe_id": "csv-janitor",
+        "recipe_version": 1,
+        "input_upload_ids": [str(i) for i in inputs],
+        "parameters": {},
+    }
+    accepted = traced.client.post(
+        RUNS, json=payload, headers={**auth, "Idempotency-Key": str(uuid.uuid4())}
+    )
+    assert accepted.status_code == 202, accepted.text
+    run_id = accepted.json()["id"]
+    traced.clear()
+
+    response = traced.client.post(f"{RUNS}/{run_id}/cancel", headers=auth)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "canceled"
+    (finished,) = [span for span in traced.spans() if span.name == "run.finished"]
+    attributes = finished.attributes or {}
+    assert attributes["run_id"] == run_id
+    assert attributes["run.state"] == "canceled"
+    # Evento instantâneo e raiz do próprio trace, fora do da requisição.
+    assert finished.parent is None
+    hasher = UserHasher(traced.app.state.settings.user_hash_key())
+    assert attributes["user.hash"] == hasher.hash(user_id)
 
 
 # Limite de requisições (1.7; ADR 028)
@@ -445,6 +477,8 @@ def test_canario_em_credencial_cookie_agente_chave_query_nome_e_parametro_nunca_
 
     spans = traced.spans()
     assert len([s for s in spans if (s.attributes or {}).get("main") is True]) == 5
+    # Sem consulta exportada, a busca do canário abaixo não provaria nada sobre os parâmetros.
+    assert any("db.statement" in (s.attributes or {}) for s in spans)
     for span in spans:
         assert "CANARY-" not in _span_text(span), span.name
 

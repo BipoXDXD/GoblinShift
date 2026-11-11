@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from goblinshift.capacity.tables import capacity_pool, resource_reservation
+from goblinshift.platform.sql import skip_locked_batch
 
 GIB = 1024**3
 # Tetos de 1.7; gravados no pool quando ele nasce (o global pela migração 0006).
@@ -57,6 +58,10 @@ class GlobalCapacityExceededError(Exception):
 
 class StorageBelowReservedError(ValueError):
     """O teto pedido para a conta é menor do que ela já reservou."""
+
+
+class LedgerDivergenceError(RuntimeError):
+    """O livro-razão diverge do contrato: estado impossível, que nenhum caminho do código produz."""
 
 
 class ReservationNotFoundError(LookupError):
@@ -271,17 +276,15 @@ def delete_released_reservations(session: Session, now: datetime, limit: int) ->
 
     O pool não muda: ele soma só as vivas, e a reconciliação recalcula a partir delas.
     """
-    chosen = (
+    chosen = skip_locked_batch(
         select(resource_reservation.c.id)
         .where(resource_reservation.c.released_at <= now - RELEASED_RETENTION)
-        .order_by(resource_reservation.c.released_at)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-        .scalar_subquery()
+        .order_by(resource_reservation.c.released_at),
+        limit,
     )
     removed = session.execute(
         delete(resource_reservation)
-        .where(resource_reservation.c.id.in_(chosen))
+        .where(resource_reservation.c.id.in_(select(chosen.c.id)))
         .returning(resource_reservation.c.id)
     ).all()
     return len(removed)
@@ -371,10 +374,21 @@ def _take(session: Session, pool: ColumnElement[bool], amount: int) -> bool:
 
 
 def _give_back(session: Session, pool: ColumnElement[bool], amount: int) -> None:
-    """Devolve ao pool; ficar negativo viola o CHECK, sinal de livro-razão divergente."""
-    session.execute(
-        update(capacity_pool).where(pool).values(reserved=capacity_pool.c.reserved - amount)
-    )
+    """Devolve ao pool; ficar negativo viola o CHECK, sinal de livro-razão divergente.
+
+    O pool existe enquanto houver reserva viva nele (`purge_owner` só o apaga sem nenhuma), então
+    não achá-lo é a mesma divergência, e a reserva não pode sair sem devolver a quantidade.
+    """
+    returned = session.execute(
+        update(capacity_pool)
+        .where(pool)
+        .values(reserved=capacity_pool.c.reserved - amount)
+        .returning(capacity_pool.c.id)
+    ).scalar_one_or_none()
+    if returned is None:
+        dialect = session.get_bind().dialect
+        literal = pool.compile(dialect=dialect, compile_kwargs={"literal_binds": True})
+        raise LedgerDivergenceError(f"pool ausente ao devolver {amount}: {literal}")
 
 
 def account_pool(owner_id: uuid.UUID, resource: Resource) -> ColumnElement[bool]:

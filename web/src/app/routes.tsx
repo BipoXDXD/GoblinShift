@@ -1,12 +1,14 @@
 import type { RouteObject } from "react-router";
 
 import type { SiteNotice } from "../notice/notice";
+import { RECIPE_IDS, RECIPE_TITLES } from "../recipes/titles";
 import type { UploadServices } from "../upload/useUploadBatch";
 import { TEXT } from "../text";
 import { Layout } from "./Layout";
 import { NotFoundPage } from "./NotFoundPage";
 import type { PageTitleHandle } from "./pageTitle";
-import { PATHS } from "./paths";
+import { PATHS, workbenchPath } from "./paths";
+import { RootFailure, RouteFailure } from "./RouteFailure";
 
 export interface AppServices {
   readonly uploadServices: UploadServices;
@@ -18,17 +20,19 @@ export interface AppServices {
 
 /**
  * Cada tela é um chunk próprio (`lazy`), baixado só quando a rota abre: o JS inicial fica com o
- * React, o router e a moldura. A 404 fica no chunk de entrada porque a Bancada também a usa e
- * ela é pequena. Os textos legais ficam cada um no chunk da sua rota.
+ * React, o router e a moldura. A 404 fica no chunk de entrada porque é pequena e o `*` a usa
+ * para qualquer URL, inclusive a Bancada de uma receita que não existe. Os textos legais ficam
+ * cada um no chunk da sua rota.
  */
 export function createRoutes({ uploadServices, now, notice }: AppServices): RouteObject[] {
   return [
     {
       element: <Layout now={now} notice={notice} />,
+      errorElement: <RootFailure />,
       // Na primeira carga o router espera o chunk da tela antes de pintar; é um pedido curto, e
       // um indicador ali piscaria. Sem este componente o React Router avisa no console.
       HydrateFallback: EmptyFallback,
-      children: [
+      children: withRouteFailure([
         {
           path: PATHS.home,
           lazy: async () => {
@@ -36,14 +40,7 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
             return { Component: HomePage };
           },
         },
-        {
-          path: PATHS.workbench,
-          handle: titled(TEXT.pageTitles.workbench),
-          lazy: async () => {
-            const { WorkbenchPage } = await import("../workbench/WorkbenchPage");
-            return { element: <WorkbenchPage uploadServices={uploadServices} /> };
-          },
-        },
+        ...workbenchRoutes(uploadServices),
         {
           path: PATHS.history,
           handle: titled(TEXT.history.title),
@@ -125,8 +122,35 @@ export function createRoutes({ uploadServices, now, notice }: AppServices): Rout
           },
         },
         { path: "*", element: <NotFoundPage />, handle: titled(TEXT.notFound.title) },
-      ],
+      ]),
     },
+  ];
+}
+
+/**
+ * Falha ao abrir uma tela, dentro da moldura. Sem isso, um chunk que não vem (aba aberta durante
+ * uma publicação) cai na tela padrão do React Router, em inglês e sem navegação.
+ */
+function withRouteFailure(screens: RouteObject[]): RouteObject[] {
+  return [{ errorElement: <RouteFailure />, children: screens }];
+}
+
+/**
+ * Uma rota da Bancada por receita do registro, para a aba dizer qual receita está aberta (WCAG
+ * 2.4.2). O id que não existe cai no `*`, com o título da página não encontrada.
+ * `caseSensitive` mantém a regra do registro: `CSV-Janitor` não é receita.
+ */
+function workbenchRoutes(uploadServices: UploadServices): RouteObject[] {
+  return [
+    ...RECIPE_IDS.map((recipeId) => ({
+      path: workbenchPath(recipeId),
+      caseSensitive: true,
+      handle: titled(TEXT.workbench.title(RECIPE_TITLES[recipeId])),
+      lazy: async () => {
+        const { WorkbenchPage } = await import("../workbench/WorkbenchPage");
+        return { element: <WorkbenchPage recipeId={recipeId} uploadServices={uploadServices} /> };
+      },
+    })),
   ];
 }
 

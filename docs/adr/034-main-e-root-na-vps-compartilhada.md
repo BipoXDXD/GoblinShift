@@ -1,6 +1,6 @@
 # ADR 034. O deploy controla o Docker da VPS: "main = root" aceito por escrito
 
-- **Estado:** Aceito (decisão do usuário, 2026-10-15).
+- **Estado:** Substituído em parte pelo [ADR 045](045-publicacao-em-producao-pelo-coolify.md), 2026-11-07: pelo caminho de release do Coolify a `main` deixa de ser root, as barreiras ligadas ao SSH (chave da CI presa ao `deploy.sh` e pedido validado) dão lugar às do receptor e do `gate.py`, e o "main = root" só continua valendo pelo que o código não consegue excluir, as definições do Coolify lidas do Git, se os recursos seguirem a `main`, a confirmar nas conferências do passo 1 do ADR 045, com o caminho anterior seguindo em procedimento próprio, enquanto a barreira "Só a `main` passa pela CI até o deploy" segue igual (ADR 033), com a ressalva do ADR 045 de que quatro jobs usam esse environment e a chave de release serve a qualquer job novo na `main`, e a fitness function do Compose, o CODEOWNERS e a separação do executor seguem como estão aqui. Antes: aceito (decisão do usuário, 2026-10-15).
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (deploy e VPS)
 - **Relacionado:** [ADR 004](004-container-gvisor-por-tentativa.md) (só o `executor-ctl` fala com o Docker pelo executor), [ADR 011](011-vps-kvm2-compartilhada.md) (VPS compartilhada com o StillOn), [ADR 014](014-proxy-de-borda-caddy.md) (rede `edge` compartilhada), [ADR 022](022-backup-externo.md) (backup por `docker exec`), [ADR 033](033-segredos-de-deploy-no-environment-production.md) (segredos do deploy no environment `production`)
 
@@ -72,3 +72,7 @@ Reforços deste ADR:
 - `.github/CODEOWNERS` cobre `/deploy/`, `/compose*.yaml` e `/.github/workflows/`.
 - Revisão de código: uma mudança em `tests/compose_host_policy.py` cita este ADR e explica por que a allowlist cresceu.
 - Na VPS, `id goblinshift` mostra os grupos `docker` e `gs-exec`, e nenhum outro usuário além dele está no grupo `docker` (`getent group docker`).
+
+## Atualização de 2026-11-09
+
+O `executor-ctl` ganhou uma quinta operação, só de leitura: `GET /v1/image?ref=...` responde se uma imagem da allowlist está no daemon, para a manutenção notar a falta dela sem tráfego de usuário. A allowlist é conferida antes de chamar o Docker, e o perfil de `docker run` não muda. A decisão acima segue valendo: as quatro operações que agem sobre o container são as mesmas, e o worker e a manutenção continuam sem o socket do Docker.

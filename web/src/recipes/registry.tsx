@@ -1,23 +1,24 @@
 import type { ReactElement } from "react";
 
 import type { CatalogVersion } from "../catalog/api";
+import type { FormField } from "../components/a11y/ErrorSummary";
 import { inputLimitsOf, type InputLimits } from "../catalog/inputLimits";
-import { TEXT } from "../text";
 import { CsvJanitorFields } from "./csv-janitor/CsvJanitorFields";
-import { csvJanitorFieldId, parseCsvJanitor } from "./csv-janitor/schema";
+import { csvJanitorField, parseCsvJanitor } from "./csv-janitor/schema";
 import { csvJanitorSettings } from "./csv-janitor/settings";
 import { DownloadsDetoxFields } from "./downloads-detox/DownloadsDetoxFields";
-import { downloadsDetoxFieldId, parseDownloadsDetox } from "./downloads-detox/schema";
+import { downloadsDetoxField, parseDownloadsDetox } from "./downloads-detox/schema";
 import { downloadsDetoxSettings } from "./downloads-detox/settings";
 import { ImageForgeFields } from "./image-forge/ImageForgeFields";
 import { PdfPressFields } from "./pdf-press/PdfPressFields";
-import { parsePdfPress, pdfPressFieldId } from "./pdf-press/schema";
+import { parsePdfPress, pdfPressField } from "./pdf-press/schema";
 import { pdfPressSettings } from "./pdf-press/settings";
-import { imageForgeFieldId, parseImageForge } from "./image-forge/schema";
+import { imageForgeField, parseImageForge } from "./image-forge/schema";
 import { imageForgeSettings } from "./image-forge/settings";
 import { MediaMillFields } from "./media-mill/MediaMillFields";
-import { mediaMillFieldId, parseMediaMill } from "./media-mill/schema";
+import { mediaMillField, parseMediaMill } from "./media-mill/schema";
 import { mediaMillSettings } from "./media-mill/settings";
+import { RECIPE_TITLES } from "./titles";
 import type {
   RecipeCommandFor,
   RecipeDraft,
@@ -44,8 +45,8 @@ export interface RecipeModule<K extends RecipeId = RecipeId> {
   readonly numberedInputs?: true;
   /** `null` quando o catálogo não traz a versão num formato que o formulário conheça. */
   readonly formFor: (version: CatalogVersion) => RecipeForm | null;
-  /** Id do controle para um caminho relativo a `parameters`; `null` se não for um campo. */
-  readonly fieldIdFor: (path: readonly string[]) => string | null;
+  /** Controle (id e rótulo) de um caminho relativo a `parameters`; `null` se não for um campo. */
+  readonly fieldFor: (path: readonly string[]) => FormField | null;
   /**
    * Parâmetros que citam uploads da execução (o `select` do PDF Press): só valem com aqueles
    * arquivos, então um preset ou uma execução reusada abre sem eles, no default.
@@ -86,19 +87,19 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
   "csv-janitor": {
     id: "csv-janitor",
     version: 1,
-    title: TEXT.csvJanitor.title,
+    title: RECIPE_TITLES["csv-janitor"],
     accept: ".csv,text/csv",
     formFor: catalogForm({
       settingsOf: csvJanitorSettings,
       initialDraft: (settings) => parseCsvJanitor(settings.defaults, settings.limits),
       Fields: CsvJanitorFields,
     }),
-    fieldIdFor: csvJanitorFieldId,
+    fieldFor: csvJanitorField,
   },
   "image-forge": {
     id: "image-forge",
     version: 1,
-    title: TEXT.imageForge.title,
+    title: RECIPE_TITLES["image-forge"],
     // MPO (fotos de celular) costuma vir com extensão .jpg; .mpo cobre o resto (1.2).
     accept: ".jpg,.jpeg,.png,.mpo,image/jpeg,image/png",
     formFor: catalogForm({
@@ -106,12 +107,12 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseImageForge(settings.defaults, settings),
       Fields: ImageForgeFields,
     }),
-    fieldIdFor: imageForgeFieldId,
+    fieldFor: imageForgeField,
   },
   "downloads-detox": {
     id: "downloads-detox",
     version: 1,
-    title: TEXT.downloadsDetox.title,
+    title: RECIPE_TITLES["downloads-detox"],
     // Aceita tipos variados e classifica pelo conteúdo (1.4); recusa o que não reconhece.
     accept: null,
     formFor: catalogForm({
@@ -119,12 +120,12 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseDownloadsDetox(settings.defaults, settings),
       Fields: DownloadsDetoxFields,
     }),
-    fieldIdFor: downloadsDetoxFieldId,
+    fieldFor: downloadsDetoxField,
   },
   "pdf-press": {
     id: "pdf-press",
     version: 1,
-    title: TEXT.pdfPress.title,
+    title: RECIPE_TITLES["pdf-press"],
     // A assinatura %PDF- é conferida no executor; aqui é só o filtro da janela de arquivos.
     accept: ".pdf,application/pdf",
     numberedInputs: true,
@@ -133,13 +134,13 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parsePdfPress(settings.defaults, settings, []),
       Fields: PdfPressFields,
     }),
-    fieldIdFor: pdfPressFieldId,
+    fieldFor: pdfPressField,
     uploadBoundParameters: ["select"],
   },
   "media-mill": {
     id: "media-mill",
     version: 1,
-    title: TEXT.mediaMill.title,
+    title: RECIPE_TITLES["media-mill"],
     // Só os contêineres da allowlist (1.5); o conteúdo é conferido pelo ffprobe no executor.
     accept: ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm",
     formFor: catalogForm({
@@ -147,7 +148,7 @@ const RECIPES: { readonly [K in RecipeId]: RecipeModule<K> } = {
       initialDraft: (settings) => parseMediaMill(settings.defaults, settings),
       Fields: MediaMillFields,
     }),
-    fieldIdFor: mediaMillFieldId,
+    fieldFor: mediaMillField,
   },
 };
 
@@ -176,4 +177,9 @@ const BY_ID: ReadonlyMap<string, RecipeModule> = new Map(
 
 export function findRecipe(id: string): RecipeModule | null {
   return BY_ID.get(id) ?? null;
+}
+
+/** A receita de um id já conferido (a rota da Bancada de cada receita). */
+export function recipeOf(id: RecipeId): RecipeModule {
+  return RECIPES[id];
 }

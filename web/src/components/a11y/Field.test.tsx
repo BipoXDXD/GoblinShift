@@ -15,6 +15,26 @@ describe("Field", () => {
     expect(screen.getByRole("textbox", { name: "Nome" })).toHaveAttribute("id", "nome");
   });
 
+  it("no layout inline, o label clicável tem a altura do alvo de toque", () => {
+    render(
+      <Field id="aceite" label="Aceito" layout="inline">
+        {(control) => <input {...control} type="checkbox" />}
+      </Field>,
+    );
+
+    expect(screen.getByText("Aceito")).toHaveClass("min-h-11");
+  });
+
+  it("no layout empilhado, o label fica na altura do texto", () => {
+    render(
+      <Field id="nome" label="Nome">
+        {(control) => <input {...control} />}
+      </Field>,
+    );
+
+    expect(screen.getByText("Nome")).not.toHaveClass("min-h-11");
+  });
+
   it("liga a descrição ao controle", () => {
     render(
       <Field id="nome" label="Nome" description="Como aparece no relatório.">

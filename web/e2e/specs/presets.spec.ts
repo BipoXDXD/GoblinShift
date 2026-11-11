@@ -21,7 +21,10 @@ test("salvar na Bancada, abrir pela Oficina já preenchido e excluir", async ({ 
   await page.goto("/");
   const presets = page.getByRole("region", { name: "Presets" });
   await presets.getByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }).click();
-  await expect(page.getByText("Parâmetros do preset Clientes do mês.")).toBeVisible();
+  // O aviso existe duas vezes: o parágrafo visível e a região viva sr-only. Confere o visível.
+  await expect(
+    page.getByRole("paragraph").filter({ hasText: /^Parâmetros do preset Clientes do mês\.$/ }),
+  ).toBeVisible();
   await expect(page.getByLabel("Delimitador dos arquivos de saída")).toHaveValue(";");
   await expect(page.getByLabel("Colunas sem espaços nas pontas", { exact: true })).toHaveValue(
     "nome",

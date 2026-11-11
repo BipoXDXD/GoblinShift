@@ -4,6 +4,9 @@ Um span `main` por tentativa, ligado por link ao trace da aceitação gravado na
 medidas pelo executor e pelo worker. Nunca nomes de arquivo nem parâmetros.
 """
 
+import errno
+import logging
+import os
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -17,21 +20,26 @@ from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import create_candidate_object
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, StorageError
 from goblinshift.platform.db import unit_of_work
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import AlertEventCounter, UserHasher
 from goblinshift.runs.cancellation import cancel_run
 from goblinshift.runs.tables import run
+from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.coordinator import Coordinator
-from goblinshift.runs.worker.runner import Runner
+from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
+from goblinshift.runs.worker.runner import LocalRunner, Runner
+from tests.runs.fake_executor_ctl import IMAGE, FakeExecutorCtl
 from tests.runs.worker_support import (
     INVALID,
+    LEASE,
     VALID,
     attempts,
     claim,
     coordinator_config,
     create_user,
     local_runner,
+    make_eligible_now,
     queue_run,
     run_row,
 )
@@ -43,6 +51,7 @@ TRACE_ID = 0x4BF92F3577B34DA6A3CE929D0E0E4736
 SPAN_ID = 0x00F067AA0BA902B7
 TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 FILE_NAME = "clientes-CANARIO.csv"
+COORDINATOR_LOGGER = "goblinshift.runs.worker.coordinator"
 
 
 @pytest.fixture
@@ -243,6 +252,168 @@ def test_candidato_preso_no_disco_conta_no_evento_da_tentativa(
     attributes = only_attempt_span(exporter).attributes
     assert attributes is not None
     assert attributes["attempt.candidates_left_on_disk"] == 1
+
+
+@pytest.fixture
+def counting_alert_events() -> Iterator[None]:
+    coordinator_logger = logging.getLogger(COORDINATOR_LOGGER)
+    handler = AlertEventCounter()
+    coordinator_logger.addHandler(handler)
+    yield
+    coordinator_logger.removeHandler(handler)
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_executor_que_nao_inicia_conta_em_cada_tentativa_ate_o_infra_poison(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    tmp_path: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    # Imagem fora do daemon: o `--pull=never` faz o executor-ctl responder 503 a todo start.
+    area = tmp_path / "exec-work"
+    area.mkdir()
+    ctl = FakeExecutorCtl(area, docker_down=True)
+    runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+    run_id = queue_run(factory, storage, create_user(factory), executor_image=IMAGE)
+    coordinator = traced_coordinator(factory, storage, runner, exporter)
+
+    try:
+        for _ in range(4):
+            coordinator.run(claim(factory, storage))
+            make_eligible_now(factory, run_id)
+        assert claim_next(factory, storage, LEASE) is None
+    finally:
+        ctl.close()
+
+    row = run_row(factory, run_id)
+    assert (row["status"], row["error_code"]) == ("failed", "INFRA_POISON")
+    counts = [
+        dict(span.attributes or {}).get("alert.executor_start_failed")
+        for span in exporter.get_finished_spans()
+        if span.name == "attempt"
+    ]
+    assert counts == [1, 1, 1, 1]
+
+
+def assert_ended_without_refused_start(exporter: InMemorySpanExporter, outcome: str) -> None:
+    attributes = dict(only_attempt_span(exporter).attributes or {})
+    assert attributes["attempt.outcome"] == outcome
+    assert "alert.executor_start_failed" not in attributes
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_start_bem_sucedido_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(
+        claim(factory, storage)
+    )
+
+    assert_ended_without_refused_start(exporter, "succeeded")
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_cancelamento_antes_do_start_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    claimed = claim(factory, storage)
+    cancel_run(factory, storage, owner, run_id)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert_ended_without_refused_start(exporter, "canceled")
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_preparacao_que_falha_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+
+    def refuse_open(_key: str) -> None:
+        raise StorageError("storage recusou")
+
+    monkeypatch.setattr(storage, "open", refuse_open)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert_ended_without_refused_start(exporter, "running")
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_leitura_da_entrada_que_falha_no_disco_nao_conta_como_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O `OSError` cru vem do storage, não da área de trabalho: não é o executor que não inicia.
+    queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+
+    def refuse_open(key: str) -> None:
+        raise PermissionError(errno.EACCES, "sem permissão", key)
+
+    monkeypatch.setattr(storage, "open", refuse_open)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    assert_ended_without_refused_start(exporter, "running")
+
+
+class _WorkAreaRefused(LocalRunner):
+    """Área sem escrita (montagem perdida, por exemplo): o executor nem chega ao `start`."""
+
+    def create_work_dir(self, attempt_id: uuid.UUID) -> Path:
+        raise PermissionError(errno.EACCES, "sem permissão", str(self.work_dir(attempt_id)))
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_area_de_trabalho_que_nao_e_criada_dispara_o_alerta_do_executor(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    exporter: InMemorySpanExporter,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+    runner = _WorkAreaRefused(work_root, attempt_timeout=timedelta(seconds=30))
+
+    with caplog.at_level(logging.WARNING, logger=COORDINATOR_LOGGER):
+        traced_coordinator(factory, storage, runner, exporter).run(claimed)
+
+    attributes = dict(only_attempt_span(exporter).attributes or {})
+    assert attributes["attempt.outcome"] == "running"
+    assert attributes["alert.executor_start_failed"] == 1
+    [alerted] = [r for r in caplog.records if "alert" in getattr(r, "fields", {})]
+    fields = vars(alerted)["fields"]
+    assert fields["alert"] == "executor_start_failed"
+    assert fields.keys() == {
+        "run_id",
+        "attempt_id",
+        "generation",
+        "attempt.number",
+        "error",
+        "alert",
+    }
 
 
 def test_sem_tracer_o_coordenador_funciona_igual(

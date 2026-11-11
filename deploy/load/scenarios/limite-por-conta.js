@@ -15,6 +15,10 @@ import { API, authHeaders, idempotencyKey, jsonHeaders, loadAccounts, problemCod
 const ACCOUNTS = loadAccounts();
 const LATEST_START_SECOND = 5;
 const SECONDS_PER_MINUTE = 60;
+// Os três VUs saem do mesmo IP, e o Nginx limita /api/ a 20 por segundo por cliente (rajada de 40).
+// Sem pausa, o 429 do Nginx chegaria antes do da conta. Três VUs a cada 0,17 s dão 17,6 por
+// segundo, e as 121 leituras terminam em cerca de 21 s, dentro do minuto.
+const REQUEST_INTERVAL_SECONDS = 0.17;
 // Qualquer id serve: a validação (?validate_only=true) não lê o upload, e a contagem vem antes.
 const ANY_UPLOAD_ID = '00000000-0000-7000-8000-000000000000';
 
@@ -83,6 +87,7 @@ export default function () {
   waitForWindowStart();
   for (let i = 0; i < routeClass.limit; i += 1) {
     withinLimit.add(routeClass.request(token).status < 300);
+    sleep(REQUEST_INTERVAL_SECONDS);
   }
   const over = routeClass.request(token);
   overLimitRefused.add(

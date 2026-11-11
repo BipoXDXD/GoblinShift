@@ -10,17 +10,22 @@ from uuid import UUID
 from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.objects import release
+from goblinshift.files.objects import release_many
 from goblinshift.files.purge import attempts_with_pending_outputs
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage
 from goblinshift.runs.cancellation import CancelResult, RunNotFoundError, cancel_run
 from goblinshift.runs.lifecycle import TERMINAL_STATUSES
+from goblinshift.runs.store import RunFinishedHook
 from goblinshift.runs.tables import attempt, run
 
 
 def cancel_active_run(
-    factory: sessionmaker[Session], storage: FileStorage, owner_id: UUID
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    owner_id: UUID,
+    *,
+    on_finished: RunFinishedHook | None,
 ) -> CancelResult | None:
     """Pede o cancelamento da execução não terminal da conta; None se não houver.
 
@@ -35,7 +40,7 @@ def cancel_active_run(
     if run_id is None:
         return None
     try:
-        return cancel_run(factory, storage, owner_id, run_id)
+        return cancel_run(factory, storage, owner_id, run_id, on_finished=on_finished)
     except RunNotFoundError:
         # Purgada entre a leitura e o cancelamento: o estado final é o mesmo.
         return None
@@ -54,9 +59,8 @@ def purge_owner_batch(session: Session, owner_id: UUID, limit: int) -> bool:
     )
     waiting = _waiting_for_discard(session, chosen)
     deletable = [run_id for run_id in chosen if run_id not in waiting]
-    for run_id in deletable:
-        # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
-        release(session, HolderKind.RUN, run_id)
+    # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
+    release_many(session, HolderKind.RUN, deletable)
     if deletable:
         session.execute(delete(run).where(run.c.id.in_(deletable)))
     remaining = session.execute(select(exists().where(run.c.owner_id == owner_id))).scalar_one()

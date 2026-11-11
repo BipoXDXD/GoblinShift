@@ -69,7 +69,7 @@ export function FileDropzone({
   return (
     // Soltar arquivos é só um atalho do mouse; o controle acessível é o input de dentro, então a
     // área não precisa de papel nem de teclado próprios.
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- soltar é atalho; o controle é o input
     <div
       data-dragging={dragging}
       className="flex flex-col gap-3 rounded-lg border-2 border-dashed border-line bg-surface-sunken p-4 shadow-sunken transition data-[dragging=true]:border-solid data-[dragging=true]:bg-dropzone-active data-[dragging=true]:shadow-float md:p-6"

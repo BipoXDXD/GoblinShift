@@ -14,6 +14,7 @@ from goblinshift.capacity import (
     GlobalCapacityExceededError,
     HolderKind,
     InsufficientReservationError,
+    LedgerDivergenceError,
     ReservationNotFoundError,
     has_live_reservation,
     purge_owner,
@@ -217,6 +218,25 @@ def test_release_many_libera_varias_contas_de_uma_vez(factory: sessionmaker[Sess
 def test_release_many_sem_detentores_devolve_zero(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         assert release_many(session, holder=HolderKind.UPLOAD, holder_ids=[]) == 0
+
+
+@pytest.mark.parametrize("scope", ["account", "global"])
+def test_release_sem_o_pool_a_devolver_e_estado_impossivel(
+    factory: sessionmaker[Session], scope: str
+) -> None:
+    owner = new_owner(factory)
+    holder_id = reserve_now(factory, owner, 9)
+    # Sabotagem: some o pool que recebeu a reserva, o que nenhum caminho do código faz.
+    with unit_of_work(factory) as session:
+        session.execute(capacity_pool.delete().where(capacity_pool.c.scope == scope))
+
+    with (
+        pytest.raises(LedgerDivergenceError, match=f"scope = '{scope}'"),
+        unit_of_work(factory) as session,
+    ):
+        release(session, holder=HolderKind.UPLOAD, holder_id=holder_id)
+
+    assert live_amount(factory, HolderKind.UPLOAD, holder_id) == 9
 
 
 # --- transfer --------------------------------------------------------------------------------

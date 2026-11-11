@@ -177,8 +177,11 @@ def test_cancela_a_execucao_na_fila(factory: sessionmaker[Session], storage: Fil
     owner = create_user(factory)
     run_id = queue_run(factory, storage, owner)
 
-    result = cancel_active_run(factory, storage, owner)
+    reported: list[uuid.UUID] = []
 
+    result = cancel_active_run(factory, storage, owner, on_finished=reported.append)
+
+    assert reported == [run_id]
     assert result is not None
     assert result.run_id == run_id
     assert result.status == Status.CANCELED
@@ -188,7 +191,9 @@ def test_sem_execucao_ativa_nao_cancela_nada(factory: sessionmaker[Session]) -> 
     owner = create_user(factory)
     finished = insert_finished_run(factory, owner, CREATED)
 
-    assert cancel_active_run(factory, FileStorage(Path("/nao-usado")), owner) is None
+    assert (
+        cancel_active_run(factory, FileStorage(Path("/nao-usado")), owner, on_finished=None) is None
+    )
 
     with factory() as session:
         status = session.execute(select(run.c.status).where(run.c.id == finished)).scalar_one()
@@ -201,7 +206,7 @@ def test_cancelamento_nao_toca_execucao_de_outra_conta(
     owner = create_user(factory, "ana")
     other_run = queue_run(factory, storage, create_user(factory, "bia"))
 
-    assert cancel_active_run(factory, storage, owner) is None
+    assert cancel_active_run(factory, storage, owner, on_finished=None) is None
 
     with factory() as session:
         status = session.execute(select(run.c.status).where(run.c.id == other_run)).scalar_one()

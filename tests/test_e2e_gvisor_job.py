@@ -108,18 +108,23 @@ def test_os_dois_jobs_instalam_o_gvisor_do_mesmo_jeito(job_id: str) -> None:
     assert RUNSC_INSTALLER in run_commands(jobs()[job_id])
 
 
-def test_o_instalador_do_runsc_troca_o_espelho_antes_do_update() -> None:
-    # O teste do espelho só lê os workflows: o apt deste script fica fora do alcance dele.
+def test_o_instalador_do_runsc_atualiza_so_a_fonte_do_gvisor() -> None:
+    # Os espelhos do Ubuntu já prenderam o `apt-get update` por 50 min; o runsc vem de uma fonte
+    # própria, e o teste dos espelhos (tests/test_ci_apt_mirror.py) lê este script também.
     installer = (ROOT / RUNSC_INSTALLER).read_text()
 
-    assert installer.index("ci-apt-sem-azure.sh") < installer.index("apt-get update")
+    updates = [line for line in installer.splitlines() if "apt-get update" in line]
+    assert updates
+    assert all("Dir::Etc::sourceparts=-" in line for line in updates)
 
 
-def test_o_job_troca_o_espelho_antes_do_apt_do_playwright() -> None:
-    # `playwright install --with-deps` chama o apt por dentro.
+def test_o_job_nao_usa_o_apt_do_playwright() -> None:
+    # `playwright install --with-deps` chama o apt por dentro, sem teto: as dependências vêm do
+    # script com teto por tentativa, e o navegador entra depois.
     commands = run_commands(job())
 
-    browser = next(index for index, command in enumerate(commands) if "--with-deps" in command)
+    assert not any("--with-deps" in command for command in commands)
+    browser = next(i for i, command in enumerate(commands) if "npx playwright install" in command)
     assert commands.index(RUNSC_INSTALLER) < browser
 
 

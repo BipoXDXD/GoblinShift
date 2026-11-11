@@ -205,7 +205,7 @@ function PageList({
   const captionId = useId();
   return (
     <div className="flex flex-col gap-2 rounded-lg bg-surface-sunken p-3 shadow-sunken">
-      <p id={captionId} className="text-sm text-fg-muted">
+      <p id={captionId} className="text-sm text-fg-muted wrap-anywhere">
         {T.pagesCaption(fileName, pageMap.pages.length)}
       </p>
       {/* Até 400 páginas: a lista rola dentro da caixa, com foco para o teclado e o nome da

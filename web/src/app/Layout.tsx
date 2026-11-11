@@ -1,14 +1,6 @@
 import { CircleAlert } from "lucide-react";
-import { useEffect, type ReactElement } from "react";
-import {
-  Link,
-  Navigate,
-  NavLink,
-  Outlet,
-  useLocation,
-  useMatches,
-  useSearchParams,
-} from "react-router";
+import { useLayoutEffect, type ReactElement } from "react";
+import { Navigate, NavLink, Outlet, useLocation, useMatches, useSearchParams } from "react-router";
 
 import { LOGIN_ERROR_PARAM, loginRefFrom, safeReturnTo } from "../account/signIn";
 import { isSignedOut, useMe } from "../account/useMe";
@@ -17,8 +9,8 @@ import { SiteNoticeBanner } from "../notice/SiteNoticeBanner";
 import { TEXT } from "../text";
 import { ThemeSwitcher } from "../theme/ThemeSwitcher";
 import { BrandLink } from "./BrandLink";
-import { pageTitleOf } from "./pageTitle";
-import { acceptTermsPath, PATHS, signInPath } from "./paths";
+import { documentTitle, pageTitleOf } from "./pageTitle";
+import { acceptTermsPath, PATHS, signInPath, withoutTrailingSlash } from "./paths";
 
 const T = TEXT.layout;
 /** Alvo do "Pular para o conteúdo"; o `<main>` é o mesmo em todas as telas. */
@@ -69,7 +61,8 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
     <div className="flex min-h-svh flex-col">
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip)"
+        // A altura de 44 px só com foco: oculto, o sr-only mantém a caixa de 1 px.
+        className="sr-only items-center rounded-lg bg-surface-raised px-4 py-2 font-semibold shadow-float focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-(--z-skip) focus:inline-flex focus:min-h-11"
       >
         {T.skipToContent}
       </a>
@@ -91,7 +84,12 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         </div>
       </header>
       {/* Vem do bundle, não da rede: sai na primeira pintura, sem empurrar o conteúdo (CLS). */}
-      <SiteNoticeBanner notice={notice} now={now} storage={browserStorage} />
+      <SiteNoticeBanner
+        notice={notice}
+        now={now}
+        storage={browserStorage}
+        onDismissed={focusScreenTitle}
+      />
       {/* min-h-svh: o rodapé começa abaixo da primeira dobra, para não pular (CLS) quando a
           tela carrega e cresce. */}
       <main
@@ -99,22 +97,31 @@ export function Layout({ now, notice }: LayoutProps): ReactElement {
         className="mx-auto min-h-svh w-full max-w-5xl flex-1 px-4 py-8 md:px-8 md:py-12"
       >
         <LoginFailedAlert />
-        <TermsGate />
+        <CanonicalPath />
       </main>
       {/* Links públicos para textos legais e créditos. */}
       <footer className="border-t border-line-soft">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-4 text-sm text-fg-muted md:px-8">
           <nav aria-label={T.footerNavLabel} className="flex flex-wrap gap-x-6">
+            {/* end: no aceite (/termos/aceitar) o link dos Termos não é a página atual. */}
             {FOOTER_LINKS.map(({ to, label }) => (
-              <Link key={to} to={to} className="inline-flex min-h-11 items-center font-semibold">
+              <NavLink key={to} to={to} end className={NAV_LINK}>
                 {label}
-              </Link>
+              </NavLink>
             ))}
           </nav>
         </div>
       </footer>
     </div>
   );
+}
+
+/**
+ * Foco no título da tela (o `h1` do FocusHeading, focável por script): é o começo do conteúdo,
+ * logo depois de onde a faixa fechada estava.
+ */
+function focusScreenTitle(): void {
+  document.getElementById(MAIN_ID)?.querySelector<HTMLElement>("h1")?.focus();
 }
 
 /**
@@ -144,13 +151,30 @@ function AccountLink(): ReactElement {
  */
 function useDocumentTitle(): void {
   const matches = useMatches();
+  const { key } = useLocation();
   const title = matches
     .map((match) => pageTitleOf(match.handle))
     .filter((candidate): candidate is string => candidate !== null)
     .at(-1);
-  useEffect(() => {
-    document.title = title === undefined ? T.brand : `${title} · ${T.brand}`;
-  }, [title]);
+  // Efeito de layout, que roda antes de todos os passivos: a tela de falha (RouteFailure) troca
+  // o título num efeito passivo e precisa vencer o título da rota que não abriu. Regrava a cada
+  // navegação: voltar à mesma rota depois de uma falha tira o título de erro.
+  useLayoutEffect(() => {
+    document.title = documentTitle(title);
+  }, [title, key]);
+}
+
+/**
+ * Um endereço por tela: `/termos/` vai para `/termos`, com a mesma query e o mesmo fragmento. Assim
+ * o aceite dos termos e os links da tela atual comparam o caminho sem conhecer a barra final.
+ */
+function CanonicalPath(): ReactElement {
+  const { pathname, search, hash } = useLocation();
+  const canonical = withoutTrailingSlash(pathname);
+  if (canonical !== null) {
+    return <Navigate replace to={{ pathname: canonical, search, hash }} />;
+  }
+  return <TermsGate />;
 }
 
 /** A tela da rota, ou o aceite dos termos se a conta ainda não aceitou a versão vigente. */

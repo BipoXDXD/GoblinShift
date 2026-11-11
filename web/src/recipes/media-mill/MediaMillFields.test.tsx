@@ -108,6 +108,7 @@ describe("MediaMillFields", () => {
       issues: [
         {
           fieldId: "media-mill-extract_audio",
+          label: "Extrair o áudio",
           message: "Peça ao menos uma saída: extraia o áudio ou escolha uma ou três miniaturas.",
         },
       ],

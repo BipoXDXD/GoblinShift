@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { RecipeDraft, RecipeParameters } from "../types";
 import type { GROUP_BY_OPTIONS, NAME_MODES } from "./schema";
 import {
-  downloadsDetoxFieldId,
+  downloadsDetoxField,
   parseDownloadsDetox,
   type DownloadsDetoxFormValues,
   type DownloadsDetoxSettings,
@@ -95,7 +95,7 @@ describe("parseDownloadsDetox", () => {
     ],
   ])("prefixo %s é recusado no campo", (_, prefix, message) => {
     expect(issuesOf(parseDownloadsDetox(indexed(prefix), SETTINGS))).toEqual([
-      { fieldId: "downloads-detox-name_prefix", message },
+      { fieldId: "downloads-detox-name_prefix", label: "Prefixo da numeração", message },
     ]);
   });
 
@@ -107,15 +107,15 @@ describe("parseDownloadsDetox", () => {
   });
 });
 
-describe("downloadsDetoxFieldId", () => {
+describe("downloadsDetoxField", () => {
   it.each([
-    [["deduplicate"], "downloads-detox-deduplicate"],
-    [["name_prefix"], "downloads-detox-name_prefix"],
-  ])("%j → %s", (path, expected) => {
-    expect(downloadsDetoxFieldId(path)).toBe(expected);
+    [["deduplicate"], "downloads-detox-deduplicate", "Remover arquivos repetidos"],
+    [["name_prefix"], "downloads-detox-name_prefix", "Prefixo da numeração"],
+  ])("%j → %s (%s)", (path, fieldId, label) => {
+    expect(downloadsDetoxField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[[]], [["recipe_version"]], [["__proto__"]]])("caminho sem campo %j → null", (path) => {
-    expect(downloadsDetoxFieldId(path)).toBeNull();
+    expect(downloadsDetoxField(path)).toBeNull();
   });
 });

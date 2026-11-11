@@ -1,8 +1,8 @@
 """Cancelamento pedido pelo dono (docs/GoblinShiftPlan.md, 3.5).
 
 O pedido persiste a intenção e decide pela tabela de transições:
-- na fila, ou esperando retentativa (nenhum executor vivo): vira `canceled` na hora e libera os
-  usos numa transação seguinte;
+- na fila, ou esperando retentativa (nenhum executor vivo): vira `canceled` na hora, libera os
+  usos numa transação seguinte e emite o `run.finished` (3.7) por `on_finished`;
 - com executor possivelmente vivo: grava `cancel_requested_at` e `stopping`; o coordenador (ou a
   manutenção, se o worker sumiu) para o executor e só então confirma `canceled`;
 - já terminal: nada muda, e quem chama devolve o estado real. Se o sucesso foi confirmado
@@ -21,6 +21,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.runs.lifecycle import CancelRequested, Refused, Status, decide_transition
 from goblinshift.runs.store import (
     Applied,
+    RunFinishedHook,
     apply_transition,
     complete_after_commit,
     load_run,
@@ -52,6 +53,8 @@ def cancel_run(
     storage: FileStorage,
     owner_id: uuid.UUID,
     run_id: uuid.UUID,
+    *,
+    on_finished: RunFinishedHook | None = None,
 ) -> CancelResult:
     def cancel(session: Session) -> tuple[CancelResult, Applied | None]:
         loaded = load_run(session, run_id, owner_id=owner_id)
@@ -68,5 +71,5 @@ def cancel_run(
 
     result, applied = run_transaction(factory, cancel)
     if applied is not None:
-        complete_after_commit(factory, storage, applied)
+        complete_after_commit(factory, storage, applied, on_finished)
     return result

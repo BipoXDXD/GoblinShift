@@ -9,6 +9,7 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.types import Message, Scope
 
 from goblinshift.entrypoints.api.json_command import (
     MAX_COMMAND_BYTES,
@@ -236,3 +237,43 @@ def test_aninhamento_que_estoura_a_pilha_do_decodificador_vira_json_invalido() -
         decode_json_command(nested_arrays(depth))
 
     assert raised.value.code is ProblemCode.JSON_INVALID
+
+
+@pytest.mark.anyio
+async def test_cliente_que_desconecta_no_meio_do_comando_nao_vira_erro_do_servidor(
+    offline_client: TestClient,
+) -> None:
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": ECHO,
+        "raw_path": ECHO.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 1),
+        "server": ("testserver", 80),
+    }
+    incoming: Iterator[Message] = iter(
+        [
+            {"type": "http.request", "body": b'{"te', "more_body": True},
+            {"type": "http.disconnect"},
+        ]
+    )
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return next(incoming)
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await offline_client.app(scope, receive, send)
+
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    body = b"".join(message.get("body", b"") for message in sent)
+    assert start["status"] == 400
+    assert json.loads(body)["code"] == "BAD_REQUEST"

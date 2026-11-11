@@ -294,12 +294,26 @@ class SpanWriter:
     def span(
         self, name: str, age_s: float, attributes: dict[str, AttributeValue], duration_ms: float
     ) -> None:
-        start_ns = time.time_ns() - int(age_s * 1e9)
+        self.span_at(name, time.time_ns() - int(age_s * 1e9), attributes, duration_ms)
+
+    def span_at(
+        self, name: str, start_ns: int, attributes: dict[str, AttributeValue], duration_ms: float
+    ) -> None:
+        """Span que começa num instante exato (ns desde a época), sem deriva do relógio do teste."""
         span = self.tracer.start_span(
             name, kind=SpanKind.SERVER, start_time=start_ns, attributes=attributes
         )
         span.end(end_time=start_ns + int(duration_ms * NS_PER_MS))
         self.written += 1
+
+    def database_query(self, *, age_s: float = 60.0) -> None:
+        """Uma consulta da instrumentação do SQLAlchemy: span sem nenhum atributo `main`."""
+        self.span(
+            "SELECT goblinshift",
+            age_s,
+            {"db.system": "postgresql", "db.statement": "SELECT 1", "db.operation": "SELECT"},
+            1.0,
+        )
 
     def request(
         self,

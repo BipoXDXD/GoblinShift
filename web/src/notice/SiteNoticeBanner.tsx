@@ -49,6 +49,11 @@ interface SiteNoticeBannerProps {
   readonly now: () => number;
   /** Onde fica o id do aviso fechado; o acesso pode lançar (ver `readDismissedNoticeId`). */
   readonly storage: () => Pick<Storage, "getItem" | "setItem">;
+  /**
+   * Leva o foco a um destino previsível depois de fechar: o botão some com a faixa, e sem isto o
+   * foco cairia no `<body>` (WCAG 2.4.3).
+   */
+  readonly onDismissed: () => void;
 }
 
 /**
@@ -60,6 +65,7 @@ export function SiteNoticeBanner({
   notice,
   now,
   storage,
+  onDismissed,
 }: SiteNoticeBannerProps): ReactElement | null {
   const [dismissedId, setDismissedId] = useState(() => readDismissedNoticeId(storage));
   if (notice === null || !isNoticeActive(notice, now())) {
@@ -75,6 +81,7 @@ export function SiteNoticeBanner({
   function dismiss(id: string): void {
     writeDismissedNoticeId(storage, id);
     setDismissedId(id);
+    onDismissed();
   }
 
   return (
@@ -108,7 +115,9 @@ export function SiteNoticeBanner({
             className={`inline-flex min-h-11 flex-none cursor-pointer items-center gap-2 rounded-lg px-2 font-semibold underline underline-offset-4 hover:decoration-2 ${look.text}`}
           >
             <X aria-hidden="true" className="size-4" />
-            {T.dismiss}
+            {T.dismiss.visible}
+            {/* O espaço fica fora do span: quem calcula o nome junta os pedaços já aparados. */}{" "}
+            <span className="sr-only">{T.dismiss.screenReaderOnly}</span>
           </button>
         ) : null}
       </div>

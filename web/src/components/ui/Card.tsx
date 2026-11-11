@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 
 interface CardProps {
-  readonly as?: "div" | "section" | "article";
+  readonly as?: "div" | "section" | "article" | "nav";
   readonly "aria-labelledby"?: string;
   readonly children: ReactNode;
 }
