@@ -15,6 +15,7 @@ variáveis GS_* da API para chegar ao banco e ao armazenamento.
     gs-admin set-limits --user <id> [--runs-per-24h N|default] [--input-bytes-per-24h N|default]
                         [--storage-bytes N|default]
     gs-admin usage --user <id>
+    gs-admin orphan-files [--min-age-hours H] [--limit N]
 
 `issue-key` imprime o segredo uma única vez na saída padrão, e só ele, para que
 `> arquivo` o capture sem metadados; o identificador público e a expiração vão para stderr.
@@ -32,6 +33,15 @@ fica como está. Cada mudança grava `ACCOUNT_LIMITS_CHANGED` na auditoria, com 
 e novos dos itens citados. `usage` imprime, separados por tab, o consumo das últimas 24 h
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
+`orphan-files` é um relatório só de leitura: nada é apagado nem alterado. Percorre o disco do
+storage e lista, uma linha por arquivo e separados por tab (chave, bytes, modificação em UTC e
+categoria), o que nenhuma linha viva de `stored_object` referencia: `sem-linha` (órfão puro) e
+`marcado-removido-mas-presente` (linha `deleted` ou `missing` cujo arquivo ainda existe; em
+`missing` talvez convenha restaurar a linha em vez de apagar o arquivo). Arquivo modificado há
+menos de `--min-age-hours` (padrão 6) fica de fora, porque pode ser gravação em curso; a lista
+vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam tudo. Sem a
+sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com órfãos:
+decidir o que fazer com eles é do administrador.
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
 segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
 `gs-admin: interrompido`. Qualquer outra falha sai com 4
@@ -44,6 +54,7 @@ import argparse
 import logging
 import re
 import sys
+import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
@@ -54,6 +65,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
 from goblinshift.entrypoints.worker import run_finished_reporter
+from goblinshift.files.orphans import (
+    OrphanFile,
+    OrphanReport,
+    StorageNotMountedError,
+    find_orphan_files,
+)
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
@@ -116,6 +133,9 @@ _MAX_STDIN_CHARS = 256
 # Valor de `set-limits` que volta o item ao padrão; ausente do argparse, o item não muda.
 _DEFAULT_WORD = "default"
 _UNCHANGED = object()
+DEFAULT_MIN_AGE_HOURS = 6
+DEFAULT_LIST_LIMIT = 200
+_SECONDS_PER_HOUR = 3600
 
 
 @dataclass(frozen=True)
@@ -250,6 +270,23 @@ def _argument_parser() -> argparse.ArgumentParser:
     usage = commands.add_parser("usage", help="consumo e limites de uma conta")
     usage.add_argument("--user", type=UUID, required=True, help="id da conta")
     usage.set_defaults(command=_usage)
+
+    orphans = commands.add_parser(
+        "orphan-files", help="lista arquivos do storage sem linha viva (só leitura)"
+    )
+    orphans.add_argument(
+        "--min-age-hours",
+        type=_positive_int,
+        default=DEFAULT_MIN_AGE_HOURS,
+        help=f"ignora arquivo modificado há menos de H horas (padrão: {DEFAULT_MIN_AGE_HOURS})",
+    )
+    orphans.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=DEFAULT_LIST_LIMIT,
+        help=f"máximo de linhas listadas; os totais contam tudo (padrão: {DEFAULT_LIST_LIMIT})",
+    )
+    orphans.set_defaults(command=_orphan_files)
     return parser
 
 
@@ -433,6 +470,56 @@ def _usage(args: argparse.Namespace, context: _Context) -> int:
     for line in lines:
         print("\t".join(str(field) for field in line))
     return EXIT_OK
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("use um inteiro positivo") from None
+    if value <= 0:
+        raise argparse.ArgumentTypeError("o valor precisa ser positivo")
+    return value
+
+
+def _orphan_files(args: argparse.Namespace, context: _Context) -> int:
+    storage = FileStorage(context.settings.storage_root)
+    modified_before = time.time() - args.min_age_hours * _SECONDS_PER_HOUR
+    try:
+        with context.factory() as session:
+            report = find_orphan_files(
+                session, storage, modified_before=modified_before, list_limit=args.limit
+            )
+    except StorageNotMountedError as error:
+        return _fail(EXIT_FAILURE, str(error))
+    for file in report.listed:
+        print(_orphan_line(file))
+    _print_orphan_totals(report, args.limit)
+    return EXIT_OK
+
+
+def _orphan_line(file: OrphanFile) -> str:
+    # `ascii()` sem as aspas: tab, quebra de linha e não-ASCII na chave nunca partem o TSV.
+    key = ascii(file.key)[1:-1]
+    modified = datetime.fromtimestamp(file.modified_at, UTC).isoformat()
+    return "\t".join([key, str(file.size_bytes), modified, file.reason])
+
+
+def _print_orphan_totals(report: OrphanReport, limit: int) -> None:
+    print(
+        f"gs-admin: {report.orphan_count} órfãos sem linha, {report.orphan_bytes} bytes",
+        file=sys.stderr,
+    )
+    print(
+        f"gs-admin: {report.marked_removed_count} marcados como removidos mas ainda presentes, "
+        f"{report.marked_removed_bytes} bytes",
+        file=sys.stderr,
+    )
+    if report.truncated:
+        print(
+            f"gs-admin: listagem truncada em {limit}; os totais acima contam tudo",
+            file=sys.stderr,
+        )
 
 
 def _origin(value: int | None, default: int | None = None) -> str:

@@ -148,12 +148,21 @@ uv run gs-admin revoke-key --key <public_id>
 uv run gs-admin block --user <id>                          # roteiro: docs/runbooks/abuso.md
 uv run gs-admin request-deletion --user <id>               # como DELETE /me, também para conta bloqueada
 uv run gs-admin find-user --user-hash <hash>               # user.hash da telemetria → id da conta (- lê da entrada)
+uv run gs-admin orphan-files                               # arquivos do storage sem linha viva; só leitura
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
 Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …` localmente. Na VPS, o comando vai direto ao container em execução ([veja abaixo](#comandos-manuais-na-vps)): `sudo docker exec -i goblinshift-api-1 gs-admin …`.
 
 A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Contas criadas pelo `gs-admin` são do operador e não passam pelo aceite dos termos; as do login web recebem `403 TERMS_NOT_ACCEPTED` até aceitar a versão vigente pela sessão (`POST /api/v1/me/terms:accept`; [ADR 029](docs/adr/029-aceite-versionado-dos-termos.md)). Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
+
+### Arquivos órfãos no storage
+
+`gs-admin orphan-files` compara o disco do storage com `stored_object` e **só lê**: não apaga nem altera nada. Imprime uma linha por arquivo (chave, bytes, modificação em UTC e categoria, separados por tab) e os totais por categoria em stderr: `sem-linha` (nenhuma linha referencia o arquivo) e `marcado-removido-mas-presente` (linha `deleted` ou `missing` com o arquivo ainda no disco). Arquivo modificado há menos de `--min-age-hours` (padrão 6) fica de fora, por poder ser gravação em curso, e `--limit` (padrão 200) limita só as linhas listadas. Sem a sentinela de montagem o storage não é verificado (saída 4). Na VPS, direto no container em execução:
+
+```bash
+sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 > orfaos.tsv
+```
 
 ## Publicação em produção
 
