@@ -54,12 +54,17 @@ containers saudáveis com a imagem da release; `/readyz` 200; log de erros do re
 nova; e o commit como HEAD da main com o run `completed success`.
 
 O destino do ssh vem de `POS_RELEASE_SSH_TARGET`, obrigatória e sem padrão. O script faz uma só
-sessão ssh, lê os locks por `/proc/locks` (nunca os adquire) e completa os fatos com `curl`,
-`crane`, `gh` e `git ls-remote`. A coleta só emite linhas `CHAVE<TAB>valor`; quem decide é
-`pos_release.py`, sem rede, que também aceita uma coleta salva:
-`python3 -I pos_release.py <SHA> < fatos.tsv`.
+sessão ssh, que executa `pos_release_remote.sh` (enviado pelo stdin) na VPS: só leitura, com
+`sudo -n`, locks lidos por `/proc/locks` (nunca adquiridos) e `pending.json` conferido de novo no
+fim, para que uma release iniciada durante a leitura dê EM ANDAMENTO. O `/readyz` só é consultado
+no IP da API na rede `goblinshift_internal`; sem esse IP o item fica desconhecido. Depois o script
+completa os fatos com `curl`, `crane`, `gh` e `git ls-remote`, todos com limite de tempo. A coleta
+só emite linhas `CHAVE<TAB>valor`; quem decide é `pos_release.py`, sem rede, que também aceita
+uma coleta salva: `python3 -I pos_release.py <SHA> < fatos.tsv`.
 
 Saída: 0 COERENTE, 1 INCOERENTE, 2 DESCONHECIDO, 3 EM ANDAMENTO. Um fato que não pôde ser lido
 fica de fora da coleta e torna o item DESCONHECIDO, nunca OK. Com `pending.json` presente o
 resultado é EM ANDAMENTO e nada mais é lido; repita depois. Uma falha observada vence um dado
-desconhecido. Os testes (`test_pos_release.py`) usam os fatos reais da release 691dcbaf.
+desconhecido. Os testes (`test_pos_release.py`) usam os fatos reais da release 691dcbaf, têm
+um caso de FALHA para cada um dos 25 itens e rodam a metade remota contra uma cópia local da
+estrutura da VPS, sem rede nem Docker.

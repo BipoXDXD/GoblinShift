@@ -3,7 +3,8 @@
 The fixture holds the facts read from the real release 691dcbaf on 2026-11-11: commits, digests,
 hashes and epochs are public. The Coolify UUIDs are placeholders, and the allowlist entries after
 the first are synthetic (only its top was recorded). The collector tests stub ssh, curl, crane,
-gh and git; bash, jq and python3 are real.
+gh and git; the remote-half tests run pos_release_remote.sh on a local tree that reproduces the
+VPS, with sudo, stat, docker, pgrep and curl stubbed. bash, jq, find and python3 are real.
 """
 
 import io
@@ -12,6 +13,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -21,6 +23,8 @@ import pos_release as p
 RELEASE_DIR = Path(__file__).resolve().parent
 FIXTURE = RELEASE_DIR / "fixtures" / "pos-release-691dcbaf.tsv"
 COLLECTOR = RELEASE_DIR / "pos_release.sh"
+REMOTE = RELEASE_DIR / "pos_release_remote.sh"
+RECEIVER = RELEASE_DIR / "receiver.py"
 COMMIT = "691dcbaf60feb888215b7c3266086e243b04f9e1"
 OTHER_COMMIT = "d96d64b97f7a" + "0" * 28
 APP_INDEX_DIGEST = "sha256:110ffe984d13c58ca6a378141c2bafc729fd181dd86d3d7ce0dff8bf420c8f2b"
@@ -36,6 +40,8 @@ NGINX = "goblinshift-nginx-1"
 OUTSIDE_KEYS = ("RECV_REPO", "MANIFEST_", "TAG_DIGEST_", "RUN_", "MAIN_HEAD")
 UNUSED_FOR_INDEX = ("TAG_DIGEST_APP", "TAG_DIGEST_WEB", "TAG_DIGEST_EXECUTOR")
 SCRIPT_TIMEOUT_S = 30
+# Six crane calls of one second each, plus slack; far below the 60 s default limit.
+STUCK_CALL_BUDGET_S = 15
 
 
 def fixture_lines() -> list[tuple[str, str]]:
@@ -358,8 +364,12 @@ class CollectorTests(unittest.TestCase):
         path.write_text(f"#!/bin/bash\n{log_call}\n{body}\n")
         path.chmod(0o755)
 
-    def run_collector(self, *args: str, target: str | None = "destino-de-teste") -> int:
+    def run_collector(
+        self, *args: str, target: str | None = "destino-de-teste", limit_s: int | None = None
+    ) -> int:
         env = {"PATH": f"{self.stubs}:{os.environ['PATH']}", "STUB_DIR": str(self.stubs)}
+        if limit_s is not None:
+            env["POS_RELEASE_SSH_LIMIT_S"] = env["POS_RELEASE_TOOL_LIMIT_S"] = str(limit_s)
         if target is not None:
             env["POS_RELEASE_SSH_TARGET"] = target
         result = subprocess.run(  # noqa: S603 - argv fixo do teste, sem shell
@@ -378,7 +388,11 @@ class CollectorTests(unittest.TestCase):
 
     def test_collected_real_facts_are_coherent(self) -> None:
         self.assertEqual(self.run_collector(COMMIT), 0)
-        self.assertIn("ssh -o BatchMode=yes -o ConnectTimeout=15 -- destino-de-teste", self.calls())
+        self.assertIn(
+            "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15"
+            " -o ServerAliveCountMax=3 -- destino-de-teste bash -s -- " + COMMIT,
+            self.calls(),
+        )
 
     def test_ssh_target_is_required_without_default(self) -> None:
         self.assertEqual(self.run_collector(COMMIT, target=None), 2)
@@ -397,9 +411,273 @@ class CollectorTests(unittest.TestCase):
         self.stub("ssh", 'cat "$STUB_DIR/remote.tsv"; exit 255')
         self.assertEqual(self.run_collector(COMMIT), 2)
 
+    def test_stuck_ssh_ends_unknown_within_the_limit(self) -> None:
+        self.stub("ssh", "sleep 20")
+        started = time.monotonic()
+        self.assertEqual(self.run_collector(COMMIT, limit_s=1), 2)
+        self.assertLess(time.monotonic() - started, STUCK_CALL_BUDGET_S)
+
+    def test_stuck_registry_read_ends_unknown_within_the_limit(self) -> None:
+        self.stub("crane", "sleep 20")
+        started = time.monotonic()
+        self.assertEqual(self.run_collector(COMMIT, limit_s=1), 2)
+        self.assertLess(time.monotonic() - started, STUCK_CALL_BUDGET_S)
+
     def test_failed_registry_read_is_unknown(self) -> None:
         self.stub("crane", "exit 1")
         self.assertEqual(self.run_collector(COMMIT), 2)
+
+
+def write_stub(directory: Path, name: str, body: str) -> None:
+    path = directory / name
+    log_call = f'printf "%s\\n" "{name} $*" >> "$STUB_DIR/calls.log"'
+    path.write_text(f"#!/bin/bash\n{log_call}\n{body}\n")
+    path.chmod(0o755)
+
+
+def lookup_stub(table: str) -> str:
+    """Prints the third column of the line of `table` whose first two columns match $1 and $2."""
+    return (
+        f'awk -F"\\t" -v a="$1" -v b="$2" \'$1==a && $2==b {{print $3; f=1}} END {{exit !f}}\' '
+        f'"$STUB_DIR/{table}"'
+    )
+
+
+class RemoteScriptTests(unittest.TestCase):
+    """pos_release_remote.sh against a local copy of the VPS layout: no network, no Docker."""
+
+    API_IP = "10.0.9.7"
+    CANARY = "CANARY-7c1e0e8b-segredo-do-coolify"
+
+    def setUp(self) -> None:
+        self.base = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.base)
+        self.root, self.stubs = self.base / "root", self.base / "stubs"
+        self.stubs.mkdir()
+        self.facts = dict(fixture_lines())
+        self.release = self.root / "var/lib/coolify-release"
+        self.project = self.release / "goblinshift"
+        self.build_vps()
+        self.build_stubs()
+
+    def build_vps(self) -> None:
+        history = self.project / "history"
+        history.mkdir(parents=True)
+        (self.release / "host.lock").write_text("")
+        (self.project / "release.lock").write_text("")
+        current = {
+            "release": {
+                "version": 2,
+                "project": "goblinshift",
+                "commit": COMMIT,
+                "receiver_sha256": self.facts["RECV_SHA"],
+                "images": json.loads(self.facts["IMAGES"]),
+            },
+            "deployment_uuid": self.facts["DEPLOY_UUID"],
+            "finished_at": 1794355749.42,
+        }
+        (self.project / "current.json").write_text(json.dumps(current))
+        previous = json.loads(json.dumps(current))
+        previous["release"]["commit"] = OTHER_COMMIT
+        (history / f"{OTHER_COMMIT}-1794000000.json").write_text(json.dumps(previous))
+        (history / HISTORY).write_text(json.dumps(current))
+        os.utime(history / f"{OTHER_COMMIT}-1794000000.json", (1794000000, 1794000000))
+        os.utime(history / HISTORY, (1794355749, 1794355749))
+        allowed = {"allowed": json.loads(self.facts["ALLOWED"])}
+        (self.project / "executor-images.json").write_text(json.dumps(allowed))
+        etc = self.root / "etc"
+        (etc / "goblinshift").mkdir(parents=True)
+        (etc / "goblinshift/executor-ctl.json").write_text(json.dumps({"images_file": ALLOWLIST}))
+        (etc / "coolify-release").mkdir()
+        roles = {line.split("|")[0]: line.split("|")[1] for line in self.containers()}
+        config = {"uuid": self.facts["UUID"], "image_roles": roles, "token": self.CANARY}
+        (etc / "coolify-release/goblinshift.json").write_text(json.dumps(config))
+        versions = self.root / "opt/coolify-release/versions/2.1.1"
+        versions.mkdir(parents=True)
+        shutil.copy(RECEIVER, versions / "receiver.py")
+        (self.root / "opt/coolify-release/receiver.py").symlink_to(versions / "receiver.py")
+        (self.root / "var/log").mkdir(parents=True)
+        (self.root / "var/log/coolify-release-errors.log").write_text("")
+        (self.root / "proc").mkdir()
+        (self.root / "proc/locks").write_text("1: FLOCK  ADVISORY  WRITE 999 fd:01:4242 0 EOF\n")
+
+    def containers(self) -> list[str]:
+        return [v for k, v in fixture_lines() if k == "CONTAINER"]
+
+    def build_stubs(self) -> None:
+        stat = [
+            ("%i", self.release / "host.lock", "1835141"),
+            ("%i", self.project / "release.lock", "2097156"),
+            ("%U:%G %a %s %Y", self.project / "executor-images.json", self.facts["ALLOW_META"]),
+            ("%Y", self.project / "current.json", self.facts["CUR_MTIME"]),
+            ("%Y", self.root / "var/log/coolify-release-errors.log", self.facts["ERRLOG_MTIME"]),
+        ]
+        (self.stubs / "stat.tsv").write_text("".join(f"{a}\t{b}\t{c}\n" for a, b, c in stat))
+        images = [
+            (ref.replace("@", f":release-{COMMIT}@"), self.facts[f"IMPORT_{role.upper()}"])
+            for role, ref in json.loads(self.facts["IMAGES"]).items()
+        ]
+        (self.stubs / "images.tsv").write_text("".join(f"id\t{r}\t{i}\n" for r, i in images))
+        (self.stubs / "containers.tsv").write_text(
+            "".join(f"c\t{name}\t{rest}\n" for name, _, rest in
+                    (line.split("|", 2) for line in self.containers()))
+        )  # fmt: skip
+        (self.stubs / "api-ip").write_text(self.API_IP)
+        write_stub(self.stubs, "sudo", '[[ $1 == -n ]] && shift\nexec "$@"')
+        write_stub(self.stubs, "stat", '[[ $1 == -c ]] || exit 1\nset -- "$2" "$3"\n'
+                   + lookup_stub("stat.tsv"))  # fmt: skip
+        write_stub(
+            self.stubs,
+            "docker",
+            'case "$1" in\n'
+            "  version) exit 0 ;;\n"
+            '  image) set -- id "${@: -1}"; ' + lookup_stub("images.tsv") + " ;;\n"
+            '  inspect) if [[ $3 == *NetworkSettings* ]]; then cat "$STUB_DIR/api-ip"\n'
+            '    else set -- c "${@: -1}"; ' + lookup_stub("containers.tsv") + "; fi ;;\n"
+            "  *) exit 1 ;;\n"
+            "esac",
+        )
+        write_stub(self.stubs, "pgrep", "exit 1")
+        write_stub(self.stubs, "curl", "printf 200")
+
+    def run_remote(self) -> tuple[int, str]:
+        env = {"PATH": f"{self.stubs}:{os.environ['PATH']}", "STUB_DIR": str(self.stubs)}
+        with REMOTE.open() as script:
+            result = subprocess.run(  # noqa: S603 - argv fixo do teste, sem shell
+                ["bash", "-s", "--", COMMIT, str(self.root)],  # noqa: S607 - bash do PATH
+                stdin=script,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=SCRIPT_TIMEOUT_S,
+                check=False,
+            )
+        return result.returncode, result.stdout
+
+    def calls(self) -> str:
+        log = self.stubs / "calls.log"
+        return log.read_text() if log.exists() else ""
+
+    def remote_fixture(self) -> list[str]:
+        return sorted(f"{k}\t{v}" for k, v in fixture_lines() if not k.startswith(OUTSIDE_KEYS))
+
+    def decide_with_outside(self, remote: str) -> p.Verdict:
+        outside = as_text([(k, v) for k, v in fixture_lines() if k.startswith(OUTSIDE_KEYS)])
+        return decide(remote + outside)
+
+    def test_coherent_vps_emits_exactly_the_real_facts(self) -> None:
+        code, out = self.run_remote()
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(out.splitlines()), self.remote_fixture())
+        self.assertEqual(self.decide_with_outside(out).status, p.Status.COERENTE)
+
+    def test_output_carries_no_secret_from_the_coolify_config(self) -> None:
+        _, out = self.run_remote()
+        self.assertNotIn(self.CANARY, out)
+        self.assertNotIn(self.CANARY, self.calls())
+
+    def test_receiver_processes_are_looked_up_as_root(self) -> None:
+        self.run_remote()
+        self.assertIn("sudo -n pgrep -af [/]opt/coolify-release/", self.calls())
+
+    def test_pending_of_the_host_stops_the_reading(self) -> None:
+        (self.release / "pending.json").write_text("{}")
+        code, out = self.run_remote()
+        self.assertEqual((code, out), (0, "PENDING\t/var/lib/coolify-release/pending.json\n"))
+        self.assertNotIn("docker", self.calls())
+
+    def test_pending_of_the_project_stops_the_reading(self) -> None:
+        (self.project / "pending.json").write_text("{}")
+        code, out = self.run_remote()
+        self.assertEqual(
+            (code, out), (0, "PENDING\t/var/lib/coolify-release/goblinshift/pending.json\n")
+        )
+
+    def test_release_starting_during_the_reads_is_in_progress(self) -> None:
+        pending = self.project / "pending.json"
+        write_stub(self.stubs, "pgrep", f"printf '{{}}' > '{pending}'\nexit 1")
+        code, out = self.run_remote()
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out.splitlines()[-1], "PENDING\t/var/lib/coolify-release/goblinshift/pending.json"
+        )
+        self.assertEqual(self.decide_with_outside(out).status, p.Status.EM_ANDAMENTO)
+
+    def test_missing_history_fails_item_14(self) -> None:
+        shutil.rmtree(self.project / "history")
+        _, out = self.run_remote()
+        self.assertIn("HIST_TOPO\t\n", out)
+        self.assertIn("HIST_N_COMMIT\t0\n", out)
+        self.assertEqual(outcome(self.decide_with_outside(out), "14"), p.Outcome.FALHA)
+
+    def test_unreadable_current_json_is_unknown(self) -> None:
+        (self.project / "current.json").write_text("{")
+        _, out = self.run_remote()
+        self.assertFalse([line for line in out.splitlines() if line.startswith("COMMIT\t")])
+        self.assertEqual(self.decide_with_outside(out).status, p.Status.DESCONHECIDO)
+
+    def test_held_lock_is_reported(self) -> None:
+        (self.root / "proc/locks").write_text("1: FLOCK  ADVISORY  WRITE 999 fd:01:2097156 0 EOF\n")
+        _, out = self.run_remote()
+        self.assertIn("LOCK_PROJETO\tpreso\n", out)
+
+    def test_readyz_without_the_api_address_is_unknown_not_another_host(self) -> None:
+        (self.stubs / "api-ip").write_text("")
+        _, out = self.run_remote()
+        self.assertNotIn("READYZ", out)
+        self.assertNotIn("curl", self.calls())
+        self.assertEqual(self.decide_with_outside(out).status, p.Status.DESCONHECIDO)
+
+    def test_readyz_goes_to_the_api_address_only(self) -> None:
+        self.run_remote()
+        self.assertIn(f"http://{self.API_IP}:8000/readyz", self.calls())
+
+    def test_multiline_value_cannot_inject_a_fact(self) -> None:
+        current = json.loads((self.project / "current.json").read_text())
+        current["deployment_uuid"] = "x\nCOMMIT\t" + COMMIT
+        (self.project / "current.json").write_text(json.dumps(current))
+        _, out = self.run_remote()
+        self.assertEqual([line for line in out.splitlines() if line.startswith("COMMIT\t")],
+                         [f"COMMIT\t{COMMIT}"])  # fmt: skip
+
+    def test_whole_collector_runs_the_remote_half_sent_on_stdin(self) -> None:
+        write_stub(self.stubs, "ssh", 'exec bash -s -- "${@: -1}" "$POS_TEST_ROOT"')
+        values = self.facts
+        for role in ("APP", "WEB", "EXECUTOR"):
+            (self.stubs / f"manifest-{role}").write_text(values[f"MANIFEST_{role}"])
+            (self.stubs / f"digest-{role}").write_text(values[f"TAG_DIGEST_{role}"])
+        write_stub(
+            self.stubs,
+            "curl",
+            f"""case "$*" in *raw.githubusercontent*)
+  printf '{{"sha256":"%s"}}' '{values["RECV_REPO"]}' ;; *) printf 200 ;; esac""",
+        )
+        write_stub(
+            self.stubs,
+            "crane",
+            'case "$2" in *executor*) r=EXECUTOR;; *web*) r=WEB;; *) r=APP;; esac\n'
+            'cat "$STUB_DIR/$1-$r"',
+        )
+        write_stub(
+            self.stubs, "gh", f"printf '%s\\t%s\\t%s\\n' {values['RUN_CRIADO']} completed success"
+        )
+        write_stub(self.stubs, "git", f"printf '%s\\trefs/heads/main\\n' {COMMIT}")
+        env = {
+            "PATH": f"{self.stubs}:{os.environ['PATH']}",
+            "STUB_DIR": str(self.stubs),
+            "POS_TEST_ROOT": str(self.root),
+            "POS_RELEASE_SSH_TARGET": "destino-de-teste",
+        }
+        result = subprocess.run(  # noqa: S603 - argv fixo do teste, sem shell
+            ["bash", str(COLLECTOR), COMMIT],  # noqa: S607 - bash do PATH
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_TIMEOUT_S,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.splitlines()[-1], "COERENTE")
 
 
 if __name__ == "__main__":
