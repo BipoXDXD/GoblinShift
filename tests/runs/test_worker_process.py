@@ -10,6 +10,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import RowMapping, func, select, text
@@ -22,7 +23,12 @@ from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.tables import attempt
 from goblinshift.runs.worker.claim import RUNS_CHANNEL
-from tests.runs.worker_process import IDLE_MESSAGE, PAUSE_WHILE_SUPERVISING
+from tests.runs.worker_process import (
+    IDLE_MESSAGE,
+    PAUSE_AT,
+    PAUSE_PREPARING,
+    PAUSE_WHILE_SUPERVISING,
+)
 from tests.runs.worker_support import (
     attempts,
     create_user,
@@ -172,6 +178,20 @@ def _fields(row: RowMapping) -> str:
     return " ".join(f"{name}={value}" for name, value in row.items())
 
 
+def resume_after_takeover(
+    worker: subprocess.Popen[bytes],
+    log: Path,
+    factory: sessionmaker[Session],
+    after_takeover: list[Any],
+) -> None:
+    """SIGCONT no worker que a manutenção já substituiu: ele perde o fencing e não escreve."""
+    worker.send_signal(signal.SIGCONT)
+    wait_until(lambda: "lost_fencing" in log.read_text(encoding="utf-8"))
+
+    assert snapshot(factory) == after_takeover
+    assert worker.poll() is None, "o worker segue vivo e volta ao laço"
+
+
 def test_notify_acorda_o_worker_antes_do_polling(
     factory: sessionmaker[Session],
     db_settings: Settings,
@@ -253,14 +273,44 @@ def test_worker_pausado_alem_do_lease_nao_escreve_ao_voltar(
         counts = janitor(factory, storage, work_root).run_cycle()
         after_takeover = snapshot(factory)
 
-        worker.send_signal(signal.SIGCONT)
-        wait_until(lambda: "lost_fencing" in log.read_text(encoding="utf-8"))
+        resume_after_takeover(worker, log, factory, after_takeover)
 
         assert counts["leases_reconciled"] == 1
-        assert snapshot(factory) == after_takeover
-        assert worker.poll() is None, "o worker segue vivo e volta ao laço"
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"], row["generation"]) == ("running", "retry_wait", 1)
+
+
+def test_worker_pausado_na_preparacao_alem_do_lease_nao_escreve_ao_voltar(
+    factory: sessionmaker[Session],
+    db_settings: Settings,
+    storage: FileStorage,
+    work_root: Path,
+    tmp_path: Path,
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    log = tmp_path / "worker.log"
+    with worker_process(
+        db_settings, storage, work_root, log, PAUSE_AT, PAUSE_PREPARING, "sleep", "30"
+    ) as worker:
+        wait_stopped(worker)
+        [paused] = attempts(factory, run_id)
+        work_dir = local_runner(work_root).work_dir(paused["id"])
+        existed_when_paused = work_dir.is_dir()
+        wait_until(lambda: lease_expired(factory))
+        counts = janitor(factory, storage, work_root).run_cycle()
+        after_takeover = snapshot(factory)
+
+        resume_after_takeover(worker, log, factory, after_takeover)
+
+        assert counts["leases_reconciled"] == 1
+    assert existed_when_paused, "a pausa cai depois de criar a área, como no worker real"
+    assert paused["executor_started_at"] is None
+    assert not work_dir.exists()
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"], row["generation"]) == ("running", "retry_wait", 1)
+    [ended] = attempts(factory, run_id)
+    assert ended["ended_at"] is not None
+    assert ended["executor_started_at"] is None, "sem executor: não gasta tentativa física"
 
 
 def test_sigterm_encerra_o_worker_ocioso(
