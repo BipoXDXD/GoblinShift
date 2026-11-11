@@ -36,6 +36,12 @@ def _not_in_history(_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
     return false()
 
 
+def _upload_not_in_history(
+    _owner_id: ColumnElement[uuid.UUID], _id: ColumnElement[uuid.UUID]
+) -> ColumnElement[bool]:
+    return false()
+
+
 BATCHES: dict[str, tuple[Callable[[Session], object], str]] = {
     "capacity.delete_released_reservations": (
         lambda s: delete_released_reservations(s, NOW, LIMIT),
@@ -51,7 +57,10 @@ BATCHES: dict[str, tuple[Callable[[Session], object], str]] = {
     ),
     "files.retention (object_use)": (
         lambda s: delete_old_file_rows(
-            s, NOW, LIMIT, HistoryReferences(upload=_not_in_history, artifact=_not_in_history)
+            s,
+            NOW,
+            LIMIT,
+            HistoryReferences(upload=_upload_not_in_history, artifact=_not_in_history),
         ),
         "DELETE FROM object_use",
     ),

@@ -93,7 +93,7 @@ def test_predicado_do_historico_so_marca_o_upload_referenciado(
     with factory() as session:
         marked = set(
             session.execute(
-                select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.id))
+                select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.owner_id, upload.c.id))
             ).scalars()
         )
 
@@ -106,7 +106,7 @@ def test_predicado_do_historico_usa_o_indice_de_dono_e_upload(
     with factory() as session:
         now = db_now(session)
     old_deleted_upload(factory, storage, now, in_history=True)
-    statement = select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.id))
+    statement = select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.owner_id, upload.c.id))
 
     with factory() as session:
         sql = str(statement.compile(session.get_bind()))

@@ -238,10 +238,12 @@ class HistoryReferences:
     """Como `runs` diz se o histórico ainda aponta para um upload ou artefato.
 
     `files` fica abaixo de `runs` nas camadas e não lê as tabelas dela: quem chama passa os
-    predicados (`EXISTS` correlacionado sobre `run_input` e `run_output`).
+    predicados (`EXISTS` correlacionado sobre `run_input` e `run_output`). O de upload recebe o
+    dono e o id do upload, as colunas que quem chama usa (inclusive sob alias), e não assume a
+    tabela `upload`.
     """
 
-    upload: Callable[[ColumnElement[uuid.UUID]], ColumnElement[bool]]
+    upload: Callable[[ColumnElement[uuid.UUID], ColumnElement[uuid.UUID]], ColumnElement[bool]]
     artifact: Callable[[ColumnElement[uuid.UUID]], ColumnElement[bool]]
 
 
@@ -263,7 +265,7 @@ def delete_old_file_rows(
         or_(
             upload.c.deleted_at.is_(None),
             upload.c.created_at > cutoff,
-            history.upload(upload.c.id),
+            history.upload(upload.c.owner_id, upload.c.id),
         ),
     )
     blocking_artifact = exists().where(
