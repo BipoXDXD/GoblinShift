@@ -1,10 +1,11 @@
 """IP fixo do OpenTelemetry Collector na rede `goblinshift_internal` (ADR 051, opção C1).
 
 O Nginx vai mandar o access log por syslog para um IP, sem DNS, então o Collector precisa de um
-endereço que não mude a cada recriação. Em produção a rede é externa e foi criada com a sub-rede
-`172.30.0.0/24` (gateway `.1`); o `compose.yaml` declara a mesma sub-rede para o ambiente local.
-O Docker só aceita `ipv4_address` dentro da sub-rede definida pelo usuário, e recusa o gateway e
-o endereço de rede: este teste pega o erro antes do deploy manual no Coolify.
+endereço que não mude a cada recriação. Em produção a rede é externa (nenhum arquivo do repositório
+a cria); a sub-rede dela está fixada no `FORWARDED_ALLOW_IPS` do `app.json`, que só funciona se a
+rede for exatamente essa, e o `compose.yaml` declara a mesma para o ambiente local. O Docker recusa
+`ipv4_address` fora da sub-rede ou no gateway: este teste pega o erro antes do deploy manual no
+Coolify.
 """
 
 import ipaddress
@@ -16,12 +17,33 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 INFRA = ROOT / "deploy" / "coolify" / "infra.json"
+APP = ROOT / "deploy" / "coolify" / "app.json"
 COMPOSE = ROOT / "compose.yaml"
 COLLECTOR = "otel-collector"
 NETWORK = "internal"
-# Sub-rede e gateway medidos na VPS em 2026-11-10 (docker network inspect, só leitura).
-INTERNAL_SUBNET = ipaddress.IPv4Network("172.30.0.0/24")
-INTERNAL_GATEWAY = ipaddress.IPv4Address("172.30.0.1")
+
+
+def _internal_subnet() -> ipaddress.IPv4Network:
+    """Sub-rede da `goblinshift_internal` segundo o `FORWARDED_ALLOW_IPS` do `app.json`.
+
+    A lista tem a sub-rede interna e o IP do gateway de borda (`/32`); só a interna é uma rede de
+    verdade. Todos os serviços do `app.json` que declaram a variável precisam concordar.
+    """
+    app: dict[str, Any] = json.loads(APP.read_text(encoding="utf-8"))
+    subnets: set[ipaddress.IPv4Network] = set()
+    for service in app["services"].values():
+        allowed = service.get("environment", {}).get("FORWARDED_ALLOW_IPS")
+        if allowed is None:
+            continue
+        networks = (ipaddress.IPv4Network(entry.strip()) for entry in allowed.split(","))
+        subnets.update(network for network in networks if network.num_addresses > 1)
+    assert len(subnets) == 1, f"FORWARDED_ALLOW_IPS precisa ter uma única sub-rede: {subnets}"
+    return subnets.pop()
+
+
+INTERNAL_SUBNET = _internal_subnet()
+# Gateway padrão do Docker: o primeiro host da sub-rede (o .1 conferido na VPS em 2026-11-10).
+INTERNAL_GATEWAY = next(INTERNAL_SUBNET.hosts())
 
 
 def _collector_ip_in_infra() -> ipaddress.IPv4Address:
