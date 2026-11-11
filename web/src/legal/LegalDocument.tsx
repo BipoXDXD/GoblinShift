@@ -259,7 +259,9 @@ function Table({
   return (
     // Tabela larga rola dentro da própria caixa, não a página (WCAG 1.4.10); com foco, rola pelo
     // teclado (regra scrollable-region-focusable do axe). O foco anuncia a região pelo nome da
-    // legenda (WCAG 4.1.2), como em ResultPreview.
+    // legenda (WCAG 4.1.2), como em ResultPreview. O wrap-normal vence o wrap-anywhere da coluna
+    // porque overflow-wrap é herdado do ancestral mais próximo que o declara: as células herdam o
+    // normal daqui e mantêm a palavra inteira como min-content, sem colunas esmagadas.
     <div
       role="region"
       aria-labelledby={captionId}
