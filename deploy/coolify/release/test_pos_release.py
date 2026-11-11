@@ -228,8 +228,8 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(self.run_collector(COMMIT), 3)
         self.assertNotIn("crane", self.calls())
 
-    def test_failed_remote_read_is_unknown(self) -> None:
-        self.stub("ssh", "exit 255")
+    def test_remote_read_cut_after_complete_output_is_unknown(self) -> None:
+        self.stub("ssh", 'cat "$STUB_DIR/remote.tsv"; exit 255')
         self.assertEqual(self.run_collector(COMMIT), 2)
 
     def test_failed_registry_read_is_unknown(self) -> None:
