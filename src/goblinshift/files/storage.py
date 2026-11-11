@@ -18,10 +18,10 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from stat import S_ISREG
+from stat import S_ISDIR, S_ISREG
 from typing import BinaryIO
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,15 @@ class ContentTooLargeError(StorageError):
 @dataclass(frozen=True)
 class ObjectStat:
     size_bytes: int
+
+
+@dataclass(frozen=True)
+class StoredFile:
+    """Arquivo achado no percurso do disco; `modified_at` é o `st_mtime` (epoch, em s)."""
+
+    key: str
+    size_bytes: int
+    modified_at: float
 
 
 @dataclass(frozen=True)
@@ -143,6 +152,45 @@ class FileStorage:
     def delete(self, key: str) -> None:
         """Remove o objeto; remover o que já não existe é sucesso (o estado final é o mesmo)."""
         self._path_for(key).unlink(missing_ok=True)
+
+    def walk_objects(self) -> Iterator[StoredFile]:
+        """Percorre o disco e devolve os arquivos que o storage poderia ter criado.
+
+        Preguiçoso e sem ordem garantida. Só entram arquivos comuns sob nome de chave válido
+        (`_KEY_SEGMENT`): o diretório `.tmp`, a sentinela de montagem, ocultos e qualquer nome
+        que `create_exclusive` nunca grava ficam de fora, e symlinks nunca são seguidos. Arquivo
+        ou diretório que some durante o percurso (o expurgo roda em paralelo) é ignorado; outro
+        erro de disco sobe.
+        """
+        pending = [(self.root, "")]
+        while pending:
+            directory, prefix = pending.pop()
+            try:
+                with os.scandir(directory) as scan:
+                    for entry in scan:
+                        found = self._classify(entry, prefix)
+                        if isinstance(found, StoredFile):
+                            yield found
+                        elif found is not None:
+                            pending.append((Path(entry.path), found))
+            except FileNotFoundError:
+                continue
+
+    @staticmethod
+    def _classify(entry: os.DirEntry[str], prefix: str) -> StoredFile | str | None:
+        """Arquivo de chave válida, o prefixo do subdiretório a percorrer, ou `None` para pular."""
+        if not _KEY_SEGMENT.fullmatch(entry.name):
+            return None
+        try:
+            info = entry.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        key = f"{prefix}{entry.name}"
+        if S_ISDIR(info.st_mode):
+            return f"{key}/"
+        if S_ISREG(info.st_mode) and _is_valid_key(key):
+            return StoredFile(key=key, size_bytes=info.st_size, modified_at=info.st_mtime)
+        return None
 
     def sweep_stale_temporaries(self, modified_before: float, limit: int) -> TemporarySweep:
         """Apaga até `limit` temporários sem modificação desde `modified_before` (epoch, em s).

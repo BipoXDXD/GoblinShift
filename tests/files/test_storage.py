@@ -8,6 +8,8 @@ import stat
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 import pytest
 
@@ -17,6 +19,7 @@ from goblinshift.files.storage import (
     InvalidStorageKeyError,
     ObjectAlreadyExistsError,
     ObjectMissingError,
+    StoredFile,
     TemporarySweep,
 )
 
@@ -449,3 +452,135 @@ def test_temporario_que_some_antes_do_unlink_conta_como_removido_e_nao_como_falh
 
     assert sweep == TemporarySweep(removed=1, remaining=0, remaining_bytes=0, failed=0)
     assert removal_failures(caplog) == []
+
+
+# --- Percurso do storage (relatório de órfãos) -----------------------------------------------
+
+
+def test_walk_objects_lista_chave_tamanho_e_mtime(storage: FileStorage) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    storage.create_exclusive("runs/r1/g1/b", [b"12345"], max_bytes=100)
+    os.utime(storage.root / "uploads" / "a", (1_000_000, 1_000_000))
+
+    found = {f.key: f for f in storage.walk_objects()}
+
+    assert {key: f.size_bytes for key, f in found.items()} == {"uploads/a": 3, "runs/r1/g1/b": 5}
+    assert found["uploads/a"].modified_at == 1_000_000
+    assert isinstance(found["uploads/a"], StoredFile)
+
+
+def test_walk_objects_ignora_tmp_sentinela_oculto_e_symlink(
+    storage: FileStorage, tmp_path: Path
+) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    (storage.root / ".tmp").mkdir(exist_ok=True)
+    (storage.root / ".tmp" / f"{'0' * 32}.part").write_bytes(b"parcial")
+    (storage.root / ".goblinshift-storage").touch()
+    (storage.root / ".oculto").write_bytes(b"x")
+    (storage.root / "uploads" / ".escondido").write_bytes(b"x")
+    (storage.root / "uploads" / "link").symlink_to(storage.root / "uploads" / "a")
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    (outside / "alheio").write_bytes(b"x")
+    (storage.root / "dirlink").symlink_to(outside, target_is_directory=True)
+
+    assert [f.key for f in storage.walk_objects()] == ["uploads/a"]
+
+
+def test_walk_objects_ignora_nome_fora_do_padrao_de_chave(storage: FileStorage) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    (storage.root / "uploads" / "com espaço").write_bytes(b"x")
+    (storage.root / "uploads" / "á").write_bytes(b"x")
+
+    assert [f.key for f in storage.walk_objects()] == ["uploads/a"]
+
+
+class _VanishingEntry:
+    """Entrada de diretório cujo `stat` falha como se o arquivo tivesse sido expurgado."""
+
+    def __init__(self, entry: os.DirEntry[str], vanish: set[str]) -> None:
+        self._entry = entry
+        self._vanish = vanish
+        self.name = entry.name
+        self.path = entry.path
+
+    def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+        if self.name in self._vanish:
+            raise FileNotFoundError(self.path)
+        return self._entry.stat(follow_symlinks=follow_symlinks)
+
+
+class _VanishingScan:
+    def __init__(self, scan: Iterator[os.DirEntry[str]], vanish: set[str]) -> None:
+        self._scan = scan
+        self._vanish = vanish
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        close = getattr(self._scan, "close", None)
+        if close is not None:
+            close()
+
+    def __iter__(self) -> Iterator[_VanishingEntry]:
+        # O que some vem primeiro: o percurso precisa seguir com o resto do diretório.
+        for entry in sorted(self._scan, key=lambda e: e.name not in self._vanish):
+            yield _VanishingEntry(entry, self._vanish)
+
+
+def test_walk_objects_tolera_arquivo_que_some_no_meio(
+    storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage.create_exclusive("uploads/some", [b"abc"], max_bytes=100)
+    storage.create_exclusive("uploads/fica", [b"abc"], max_bytes=100)
+    real_scandir = os.scandir
+    monkeypatch.setattr(os, "scandir", lambda path: _VanishingScan(real_scandir(path), {"some"}))
+
+    assert [f.key for f in storage.walk_objects()] == ["uploads/fica"]
+
+
+def test_walk_objects_tolera_diretorio_que_some_no_meio(
+    storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    storage.create_exclusive("runs/b", [b"abc"], max_bytes=100)
+    real_scandir = os.scandir
+
+    def scandir(path: str | os.PathLike[str]) -> object:
+        if Path(path).name == "runs":
+            raise FileNotFoundError(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+
+    assert [f.key for f in storage.walk_objects()] == ["uploads/a"]
+
+
+def test_walk_objects_sobe_erro_de_disco_que_nao_e_ausencia(
+    storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+
+    def scandir(path: str | os.PathLike[str]) -> object:
+        raise PermissionError(errno.EACCES, "negado", str(path))
+
+    monkeypatch.setattr(os, "scandir", scandir)
+
+    with pytest.raises(PermissionError):
+        list(storage.walk_objects())
+
+
+def test_walk_objects_com_raiz_inexistente_devolve_vazio(tmp_path: Path) -> None:
+    assert list(FileStorage(tmp_path / "nao-existe").walk_objects()) == []
+
+
+def test_walk_objects_e_preguicoso(storage: FileStorage) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+
+    assert isinstance(storage.walk_objects(), Iterator)
