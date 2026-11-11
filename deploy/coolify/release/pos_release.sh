@@ -21,25 +21,28 @@ TOOL_LIMIT_S=${POS_RELEASE_TOOL_LIMIT_S:-60}
 [[ $SSH_LIMIT_S =~ ^[1-9][0-9]*$ && $TOOL_LIMIT_S =~ ^[1-9][0-9]*$ ]] \
   || { echo "DESCONHECIDO: limite de tempo inválido"; exit 2; }
 
-# Runs "$@" and kills it after $1 seconds (macOS has no coreutils timeout). The watchdog polls
-# once a second and writes nowhere, so it never outlives the command by more than a second.
+# Runs "$@" and kills it after $1 seconds (macOS has no coreutils timeout). The watchdog is
+# stopped as soon as the command ends: left polling, it could outlive the command and, once the
+# pid is reused, signal an unrelated process.
 run_limited() {
-  local limit=$1 pid rc
+  local limit=$1 pid watchdog rc
   shift
   "$@" <&0 &
   pid=$!
   (
-    for ((waited = 0; waited < limit; waited++)); do
-      sleep 1
-      kill -0 "$pid" || exit 0
-    done
+    sleep "$limit"
     # Direct children too (a wrapper script, ssh's ProxyCommand): one left alive would keep
     # the output pipe open and the command substitution waiting.
     pkill -TERM -P "$pid"
     kill -TERM "$pid"
   ) >/dev/null 2>&1 &
+  watchdog=$!
   wait "$pid"
   rc=$?
+  # Its sleep first: killing only the subshell would leave that sleep orphaned.
+  pkill -TERM -P "$watchdog" >/dev/null 2>&1
+  kill -TERM "$watchdog" >/dev/null 2>&1
+  wait "$watchdog" >/dev/null 2>&1
   return "$rc"
 }
 

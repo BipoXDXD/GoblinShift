@@ -427,6 +427,24 @@ class CollectorTests(unittest.TestCase):
         self.stub("crane", "exit 1")
         self.assertEqual(self.run_collector(COMMIT), 2)
 
+    def test_watchdog_does_not_outlive_a_finished_command(self) -> None:
+        # A watchdog left running after its command ended could, once the pid is reused,
+        # signal an unrelated process. Every sleep it starts must be gone when the script ends.
+        sleeps = self.stubs / "sleeps.pid"
+        self.stub("sleep", f'echo $$ >> "{sleeps}"\nexec /bin/sleep "$@"')
+        self.assertEqual(self.run_collector(COMMIT, limit_s=30), 0)
+        started = [int(pid) for pid in sleeps.read_text().split()]
+        self.assertTrue(started, "o watchdog deveria ter iniciado ao menos um sleep")
+        self.assertEqual([pid for pid in started if pid_is_alive(pid)], [])
+
+
+def pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
 
 def write_stub(directory: Path, name: str, body: str) -> None:
     path = directory / name
