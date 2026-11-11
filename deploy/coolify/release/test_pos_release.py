@@ -598,6 +598,22 @@ class RemoteScriptTests(unittest.TestCase):
         self.run_remote()
         self.assertIn("sudo -n pgrep -af [/]opt/coolify-release/", self.calls())
 
+    def test_sudo_failing_on_the_receiver_lookup_is_not_read_as_no_receiver(self) -> None:
+        # sudo exits 1 when it fails, the same code pgrep uses for "no match".
+        broken = self.stubs / "sudo-broken"
+        write_stub(
+            self.stubs,
+            "sudo",
+            "shift\n"
+            f'[[ $1 == pgrep ]] && {{ touch "{broken}"; exit 1; }}\n'
+            f'[[ $1 == true && -e "{broken}" ]] && exit 1\n'
+            'exec "$@"',
+        )
+        code, out = self.run_remote()
+        self.assertEqual(code, 0)
+        self.assertNotIn("RECEPTOR_ATIVO", out)
+        self.assertEqual(self.decide_with_outside(out).status, p.Status.DESCONHECIDO)
+
     def test_pending_of_the_host_stops_the_reading(self) -> None:
         (self.release / "pending.json").write_text("{}")
         code, out = self.run_remote()

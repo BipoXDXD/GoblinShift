@@ -36,8 +36,11 @@ if locks=$($S cat "$ROOT/proc/locks"); then
   done
 fi
 # With hidepid on /proc only root sees the receiver. The [/] keeps sudo's own command line
-# (which carries the pattern as text) from matching.
-x=$($S pgrep -af '[/]opt/coolify-release/'); [[ $? -le 1 ]] && emit RECEPTOR_ATIVO "$x"
+# (which carries the pattern as text) from matching. A failing sudo also exits 1, the code of
+# "no match": rc 1 only counts as "no receiver" while sudo still works, else the fact is not
+# emitted and the decision becomes DESCONHECIDO.
+x=$($S pgrep -af '[/]opt/coolify-release/'); rc=$?
+if ((rc == 0)) || { ((rc == 1)) && $S true; }; then emit RECEPTOR_ATIVO "$x"; fi
 if cur=$($S cat "$G/current.json"); then
   field() { local v; v=$(jq -r "$2" <<<"$cur") && emit "$1" "$v"; }
   field COMMIT .release.commit
