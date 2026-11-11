@@ -131,19 +131,32 @@ jobs:
             crane manifest "ghcr.io/bipoxdxd/$name:$tag" > "$RUNNER_TEMP/scan-index.json"
             # Slurp so the whole file decides, not its last document; exit 1 alone means "not an index".
             has_manifests_rc=0
-            jq -se 'if length == 1 and (.[0] | type == "object") then .[0] | has("manifests") else error("expected one JSON object") end' "$RUNNER_TEMP/scan-index.json" >/dev/null 2>&1 || has_manifests_rc=$?
+            jq -se 'if length == 1 and (.[0] | type == "object") then .[0] | has("manifests") else "" | halt_error(10) end' "$RUNNER_TEMP/scan-index.json" >/dev/null 2>&1 || has_manifests_rc=$?
             case "$has_manifests_rc" in
               0)
-                digest=$(jq -er 'if (.manifests | type) != "array" then error("manifests is not a list") else . end | [.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 1 then .[0].digest else error("ambiguous platform") end' "$RUNNER_TEMP/scan-index.json" 2>/dev/null) || {
-                  printf 'Cannot resolve the linux/amd64 digest from the index for role %s\n' "$role" >&2
+                digest_rc=0
+                digest=$(jq -er 'if (.manifests | type) != "array" then "" | halt_error(11) else . end | [.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | if length == 0 then "" | halt_error(12) elif length > 1 then "" | halt_error(13) else .[0].digest end' "$RUNNER_TEMP/scan-index.json" 2>/dev/null) || digest_rc=$?
+                if [ "$digest_rc" -ne 0 ]; then
+                  case "$digest_rc" in
+                    11) reason=manifests-not-list ;;
+                    12) reason=no-amd64 ;;
+                    13) reason=multiple-amd64 ;;
+                    *) reason=invalid-entry ;;
+                  esac
+                  printf 'Cannot resolve the linux/amd64 digest from the index for role %s (%s)\n' "$role" "$reason" >&2
                   exit 1
-                }
+                fi
                 ;;
               1)
                 digest=$(crane digest "ghcr.io/bipoxdxd/$name:$tag")
                 ;;
               *)
-                printf 'Cannot classify registry manifest for role %s (jq exit %s)\n' "$role" "$has_manifests_rc" >&2
+                case "$has_manifests_rc" in
+                  10) reason=not-one-object ;;
+                  127) reason=jq-missing ;;
+                  *) reason=unreadable ;;
+                esac
+                printf 'Cannot classify registry manifest for role %s (%s, jq exit %s)\n' "$role" "$reason" "$has_manifests_rc" >&2
                 exit 1
                 ;;
             esac

@@ -31,10 +31,17 @@ CANARY = "CANARY-7f3a91"
 
 ROLE_COUNT = 3
 FIRST_ROLE = "app"
-ERROR_MESSAGE = rf"^Cannot classify registry manifest for role {FIRST_ROLE} \(jq exit \d+\)$"
-INDEX_ERROR_MESSAGE = (
-    rf"^Cannot resolve the linux/amd64 digest from the index for role {FIRST_ROLE}$"
-)
+
+
+def classify_error(reason: str) -> str:
+    return rf"^Cannot classify registry manifest for role {FIRST_ROLE} \({reason}, jq exit \d+\)$"
+
+
+def index_error(reason: str) -> str:
+    prefix = "Cannot resolve the linux/amd64 digest from the index"
+    return rf"^{prefix} for role {FIRST_ROLE} \({reason}\)$"
+
+
 TOOLS_BESIDES_JQ = ("bash", "cat", "dirname", "find", "mkdir", "mktemp", "rm", "tar")
 
 INDEX_MANIFEST = json.dumps(
@@ -252,52 +259,53 @@ class ManifestClassificationTests(unittest.TestCase):
                 self.assertEqual(outcome.pulls_of(INDEX_DIGEST), 1)
 
     def test_unreadable_manifest_stops_the_release(self) -> None:
-        unreadable: dict[str, str | None] = {
-            "invalid_json": '{"token": "' + CANARY,
-            "absent_file": None,
-            "empty_file": "",
-            "json_array": f'["{CANARY}"]',
-            "null_literal": "null",
-            "only_whitespace": " \n",
-            "index_then_object": f"{INDEX_MANIFEST}\n{SINGLE_MANIFEST}",
-            "object_then_index": f"{SINGLE_MANIFEST}\n{INDEX_MANIFEST}",
-            "index_then_null": f"{INDEX_MANIFEST}\nnull",
-            "null_then_index": f"null\n{INDEX_MANIFEST}",
-            "two_objects": f"{SINGLE_MANIFEST}\n{SINGLE_MANIFEST}",
+        unreadable: dict[str, tuple[str | None, str]] = {
+            "invalid_json": ('{"token": "' + CANARY, "unreadable"),
+            "absent_file": (None, "unreadable"),
+            "empty_file": ("", "not-one-object"),
+            "json_array": (f'["{CANARY}"]', "not-one-object"),
+            "null_literal": ("null", "not-one-object"),
+            "only_whitespace": (" \n", "not-one-object"),
+            "index_then_object": (f"{INDEX_MANIFEST}\n{SINGLE_MANIFEST}", "not-one-object"),
+            "object_then_index": (f"{SINGLE_MANIFEST}\n{INDEX_MANIFEST}", "not-one-object"),
+            "index_then_null": (f"{INDEX_MANIFEST}\nnull", "not-one-object"),
+            "null_then_index": (f"null\n{INDEX_MANIFEST}", "not-one-object"),
+            "two_objects": (f"{SINGLE_MANIFEST}\n{SINGLE_MANIFEST}", "not-one-object"),
         }
         for target in TARGETS:
-            for case, manifest in unreadable.items():
+            for case, (manifest, reason) in unreadable.items():
                 with self.subTest(target=target.__name__, case=case):
                     outcome = run_target(target, [manifest] * ROLE_COUNT)
 
-                    self.assert_release_stopped(outcome, ERROR_MESSAGE)
+                    self.assert_release_stopped(outcome, classify_error(reason))
 
     def test_missing_jq_stops_the_release(self) -> None:
         for target in TARGETS:
             with self.subTest(target=target.__name__):
                 outcome = run_target(target, [INDEX_MANIFEST] * ROLE_COUNT, search_path_without_jq)
 
-                self.assert_release_stopped(outcome, ERROR_MESSAGE)
+                self.assert_release_stopped(outcome, classify_error("jq-missing"))
 
     def test_index_without_one_amd64_digest_stops_the_release(self) -> None:
         linux = {"os": "linux", "architecture": "amd64"}
         amd64 = {"digest": INDEX_DIGEST, "platform": linux}
         arm64 = {"digest": OTHER_PLATFORM_DIGEST, "platform": {**linux, "architecture": "arm64"}}
-        unusable: dict[str, object] = {
-            "manifests_string": CANARY,
-            "manifests_null": None,
-            "manifests_object": {"only": amd64},
-            "no_amd64": [arm64],
-            "two_amd64": [amd64, amd64],
+        unusable: dict[str, tuple[object, str]] = {
+            "manifests_string": (CANARY, "manifests-not-list"),
+            "manifests_null": (None, "manifests-not-list"),
+            "manifests_object": ({"only": amd64}, "manifests-not-list"),
+            "no_amd64": ([arm64], "no-amd64"),
+            "two_amd64": ([amd64, amd64], "multiple-amd64"),
+            "entry_not_object": ([CANARY], "invalid-entry"),
         }
         for target in TARGETS:
-            for case, manifests in unusable.items():
+            for case, (manifests, reason) in unusable.items():
                 with self.subTest(target=target.__name__, case=case):
                     manifest = json.dumps({"manifests": manifests})
 
                     outcome = run_target(target, [manifest] * ROLE_COUNT)
 
-                    self.assert_release_stopped(outcome, INDEX_ERROR_MESSAGE)
+                    self.assert_release_stopped(outcome, index_error(reason))
 
 
 if __name__ == "__main__":
