@@ -10,7 +10,7 @@ const MIN_TARGET_PX = 44;
 const EXTRACT_AUDIO = "Extrair o áudio";
 const AUDIO_TRACK = "Faixa de áudio";
 const THUMBNAIL_OPTION = "Nenhuma";
-const NO_FILES_ERROR = "Escolha pelo menos um arquivo.";
+const NO_FILES_ERROR = "Arquivos de entrada: escolha pelo menos um arquivo.";
 const OUTPUT = { name: "clientes.csv", body: Buffer.from("nome\nAna\n") };
 
 async function lookOf(field: Locator): Promise<Record<"background" | "border" | "shadow", string>> {
@@ -98,4 +98,18 @@ test("Execução: o link de download tem a altura do alvo de toque", async ({ pa
   const link = page.getByRole("link", { name: `Baixar ${OUTPUT.name}` });
   await expect(link).toBeVisible();
   expect(await heightOf(link)).toBeGreaterThanOrEqual(MIN_TARGET_PX);
+});
+
+test("Aviso de Privacidade: os links do sumário têm a altura do alvo de toque", async ({
+  page,
+}) => {
+  await page.goto("/privacidade");
+
+  const links = page.getByRole("navigation", { name: "Sumário" }).getByRole("link");
+  await expect(links.first()).toBeVisible();
+  const heights = await Promise.all((await links.all()).map((link) => heightOf(link)));
+  expect(heights.length).toBeGreaterThan(5);
+  for (const height of heights) {
+    expect(height).toBeGreaterThanOrEqual(MIN_TARGET_PX);
+  }
 });

@@ -98,7 +98,11 @@ describe("ImageForgeFields", () => {
     expect(lastDraft()).toEqual({
       ok: false,
       issues: [
-        { fieldId: "image-forge-max_width", message: "Informe um número inteiro de 16 a 4096." },
+        {
+          fieldId: "image-forge-max_width",
+          label: "Largura máxima, em pixels",
+          message: "Informe um número inteiro de 16 a 4096.",
+        },
       ],
     });
   });

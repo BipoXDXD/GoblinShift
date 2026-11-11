@@ -6,6 +6,8 @@ interface FocusHeadingProps {
   readonly focusKey?: string;
   /** `hero` só na abertura da Oficina; as telas de trabalho usam `page`. */
   readonly size?: "page" | "hero";
+  /** `false` quando outro alvo da tela leva o foco ao abrir (a seção de um link com âncora). */
+  readonly takesFocus?: boolean;
 }
 
 // Títulos encolhem mais que o corpo no celular (RUI cap. 3); tracking-tight só de 30 px para cima.
@@ -22,11 +24,14 @@ export function FocusHeading({
   children,
   focusKey,
   size = "page",
+  takesFocus = true,
 }: FocusHeadingProps): ReactElement {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    heading.current?.focus();
-  }, [focusKey]);
+    if (takesFocus) {
+      heading.current?.focus();
+    }
+  }, [focusKey, takesFocus]);
   return (
     <h1
       ref={heading}

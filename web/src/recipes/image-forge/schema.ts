@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { FormIssue } from "../../components/a11y/ErrorSummary";
+import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
 import type { RecipeDraft, RecipeParameters } from "../types";
 
@@ -102,10 +102,9 @@ export function parseImageForge(
   if (!result.success) {
     return {
       ok: false,
-      issues: result.error.issues.map((issue): FormIssue => ({
-        fieldId: imageForgeFieldId(issue.path.map(String)),
-        message: issue.message,
-      })),
+      issues: result.error.issues.map((issue) =>
+        formIssue(imageForgeField(issue.path.map(String)), issue.message),
+      ),
     };
   }
   return {
@@ -115,19 +114,26 @@ export function parseImageForge(
 }
 
 const ID_PREFIX = "image-forge";
-const FIELDS: ReadonlySet<string> = new Set<keyof ImageForgeFormValues>([
-  "max_width",
-  "max_height",
-  "output_format",
-  "jpeg_quality",
-  "jpeg_background",
-  "make_thumbnails",
-]);
+// Os mesmos rótulos do formulário (ImageForgeFields): o resumo de erros cita o campo por eles.
+const LABELS: Readonly<Record<keyof ImageForgeFormValues, string>> = {
+  max_width: TEXT.imageForge.maxWidth,
+  max_height: TEXT.imageForge.maxHeight,
+  output_format: TEXT.imageForge.outputFormat,
+  jpeg_quality: TEXT.imageForge.jpegQuality,
+  jpeg_background: TEXT.imageForge.jpegBackground,
+  make_thumbnails: TEXT.imageForge.makeThumbnails,
+};
 
-/** Id do controle para um caminho de erro relativo a `parameters`; `null` fora do formulário. */
-export function imageForgeFieldId(path: readonly (string | number)[]): string | null {
+/** Controle para um caminho de erro relativo a `parameters`; `null` fora do formulário. */
+export function imageForgeField(path: readonly (string | number)[]): FormField | null {
   const [field] = path.map(String);
-  return field !== undefined && FIELDS.has(field) ? fieldId(field) : null;
+  return field !== undefined && isFormField(field)
+    ? { fieldId: fieldId(field), label: LABELS[field] }
+    : null;
+}
+
+function isFormField(field: string): field is keyof ImageForgeFormValues {
+  return Object.hasOwn(LABELS, field);
 }
 
 export function fieldId(field: string): string {

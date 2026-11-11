@@ -4,7 +4,7 @@ import type { RecipeDraft, RecipeInput, RecipeParameters } from "../types";
 import {
   pageMapPreview,
   parsePdfPress,
-  pdfPressFieldId,
+  pdfPressField,
   type OPERATIONS,
   type PageCard,
   type PdfPressFormValues,
@@ -71,7 +71,11 @@ describe("parsePdfPress", () => {
     );
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-pages_per_document", message: "Informe um número inteiro de 1 a 200." },
+      {
+        fieldId: "pdf-press-pages_per_document",
+        label: "Páginas por parte",
+        message: "Informe um número inteiro de 1 a 200.",
+      },
     ]);
   });
 
@@ -94,7 +98,11 @@ describe("parsePdfPress", () => {
     const draft = parsePdfPress(values({ operation: "select" }), SETTINGS, [A]);
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-select-adicionar", message: "Adicione ao menos uma página." },
+      {
+        fieldId: "pdf-press-select-adicionar",
+        label: "Páginas escolhidas",
+        message: "Adicione ao menos uma página.",
+      },
     ]);
   });
 
@@ -104,7 +112,11 @@ describe("parsePdfPress", () => {
     const draft = parsePdfPress(values({ operation: "select", cards }), SETTINGS, [A]);
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-select-adicionar", message: "Escolha no máximo 3 páginas." },
+      {
+        fieldId: "pdf-press-select-adicionar",
+        label: "Páginas escolhidas",
+        message: "Escolha no máximo 3 páginas.",
+      },
     ]);
   });
 
@@ -114,8 +126,16 @@ describe("parsePdfPress", () => {
     const draft = parsePdfPress(values({ operation: "select", cards }), SETTINGS, [B]);
 
     expect(issuesOf(draft)).toEqual([
-      { fieldId: "pdf-press-select-0-upload_id", message: "Escolha um dos PDFs enviados." },
-      { fieldId: "pdf-press-select-1-upload_id", message: "Escolha um dos PDFs enviados." },
+      {
+        fieldId: "pdf-press-select-0-upload_id",
+        label: "PDF da página 1",
+        message: "Escolha um dos PDFs enviados.",
+      },
+      {
+        fieldId: "pdf-press-select-1-upload_id",
+        label: "PDF da página 2",
+        message: "Escolha um dos PDFs enviados.",
+      },
     ]);
   });
 
@@ -127,6 +147,7 @@ describe("parsePdfPress", () => {
     expect(issuesOf(draft)).toEqual([
       {
         fieldId: "pdf-press-select-0-page_number",
+        label: "Número da página 1 no PDF",
         message: "Informe um número inteiro de 1 a 200.",
       },
     ]);
@@ -139,21 +160,21 @@ describe("parsePdfPress", () => {
   });
 });
 
-describe("pdfPressFieldId", () => {
+describe("pdfPressField", () => {
   it.each([
-    [["operation"], "pdf-press-operation"],
-    [["pages_per_document"], "pdf-press-pages_per_document"],
-    [["select"], "pdf-press-select-adicionar"],
-    [["select", "1", "upload_id"], "pdf-press-select-1-upload_id"],
-    [["select", 2, "page_number"], "pdf-press-select-2-page_number"],
-  ] as const)("traduz %j do servidor", (path, id) => {
-    expect(pdfPressFieldId(path)).toBe(id);
+    [["operation"], "pdf-press-operation", "O que fazer com os PDFs"],
+    [["pages_per_document"], "pdf-press-pages_per_document", "Páginas por parte"],
+    [["select"], "pdf-press-select-adicionar", "Páginas escolhidas"],
+    [["select", "1", "upload_id"], "pdf-press-select-1-upload_id", "PDF da página 2"],
+    [["select", 2, "page_number"], "pdf-press-select-2-page_number", "Número da página 3 no PDF"],
+  ] as const)("traduz %j do servidor", (path, fieldId, label) => {
+    expect(pdfPressField(path)).toEqual({ fieldId, label });
   });
 
   it.each([[["outro"]], [["select", "x", "upload_id"]], [["select", "0", "outro"]], [[]]])(
     "fora do formulário %j → null",
     (path) => {
-      expect(pdfPressFieldId(path)).toBeNull();
+      expect(pdfPressField(path)).toBeNull();
     },
   );
 });
@@ -165,10 +186,31 @@ describe("pageMapPreview", () => {
     ]);
   });
 
-  it("split descreve as partes de cada PDF", () => {
+  it("split descreve as partes de cada PDF, no plural", () => {
     expect(pageMapPreview(values({ operation: "split", pages_per_document: "2" }), [A])).toEqual([
-      { name: "a.pdf", entries: ["partes de 2 página(s), na ordem"] },
+      { name: "a.pdf", entries: ["partes de 2 páginas, na ordem"] },
     ]);
+  });
+
+  it.each(["1", "01"])(
+    "split com %j página por parte usa o singular, sem zero à esquerda",
+    (size) => {
+      expect(pageMapPreview(values({ operation: "split", pages_per_document: size }), [A])).toEqual(
+        [{ name: "a.pdf", entries: ["partes de 1 página, na ordem"] }],
+      );
+    },
+  );
+
+  it("split mostra o tamanho sem zeros à esquerda também no plural", () => {
+    expect(pageMapPreview(values({ operation: "split", pages_per_document: "007" }), [A])).toEqual([
+      { name: "a.pdf", entries: ["partes de 7 páginas, na ordem"] },
+    ]);
+  });
+
+  it("split com tamanho que não é número mostra o que foi digitado", () => {
+    expect(pageMapPreview(values({ operation: "split", pages_per_document: "dois" }), [A])).toEqual(
+      [{ name: "a.pdf", entries: ["partes de dois páginas, na ordem"] }],
+    );
   });
 
   it("select lista os cartões, inclusive o sem PDF", () => {

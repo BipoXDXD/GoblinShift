@@ -21,19 +21,20 @@ from datetime import UTC, datetime
 from functools import partial
 from uuid import UUID
 
-from opentelemetry.trace import NoOpTracer, Status, StatusCode, Tracer
+from opentelemetry.trace import Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.shutdown import ShutdownFlag, shutdown_on_signals
-from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
+from goblinshift.entrypoints.worker import build_runner, process_tracer
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
+from goblinshift.platform.telemetry import UserHasher, configure_logging
 from goblinshift.runs import purge as runs_purge
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.runner import Runner
 
@@ -73,12 +74,15 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     batch_settings = settings.model_copy(
         update={"db_statement_timeout_ms": settings.maintenance_statement_timeout_ms}
     )
-    engine = make_engine(batch_settings)
-    factory = make_session_factory(engine)
-    provider = make_tracer_provider(settings, "goblinshift-maintenance")
-    tracer: Tracer = provider.get_tracer(__name__) if provider is not None else NoOpTracer()
-    try:
-        with run_finished_reporter(settings, factory, "goblinshift-maintenance") as finished:
+    # O tracing fecha por último, depois do pool, e mesmo se o `dispose` falhar: o encerramento
+    # descarta span emitido depois dele, e sem ele sobraria o `atexit` do SDK, que não tem prazo.
+    with process_tracer(settings, "goblinshift-maintenance") as tracer:
+        engine = make_engine(batch_settings)
+        factory = make_session_factory(engine)
+        try:
+            # Um provider por processo: o `maintenance.cycle` e o `run.finished` saem pelo mesmo
+            # lote, e a parada espera um prazo de encerramento só.
+            finished = RunFinishedReporter(factory, UserHasher(settings.user_hash_key()), tracer)
             maintenance = Maintenance(
                 factory,
                 FileStorage(settings.storage_root),
@@ -89,8 +93,13 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")
             cycles: tuple[Cycle, ...] = (
-                # A parada é conferida entre os passos: com o banco fora, cada passo pode levar o
-                # `connect_timeout`, e o SIGTERM viraria SIGKILL no prazo do Docker (10 s).
+                # A parada é conferida entre os passos, e a volta inteira não caberia na carência
+                # do Docker. Ociosa ou com o banco fora (o passo desiste no `connect_timeout`), a
+                # parada mais o prazo do tracing cabe (tests/runs/test_process_tracer_shutdown.py).
+                # Com o banco lento, não: um statement pode levar o `statement_timeout` da
+                # manutenção, e o SIGKILL pode chegar antes do fim dele. Risco aceito: perde os
+                # spans pendentes, não dados, porque o statement roda numa transação aberta, que
+                # o PostgreSQL reverte quando a conexão cai, e o passo se repete no ciclo seguinte.
                 ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
                 ("contas", account_jobs.run_cycle),
             )
@@ -98,10 +107,8 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
                 run_cycles(tracer, cycles, should_stop=shutdown.is_set)
                 shutdown.wait(settings.maintenance_interval_s)
             logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
-    finally:
-        engine.dispose()
-        if provider is not None:
-            provider.shutdown()
+        finally:
+            engine.dispose()
     logger.info("manutenção encerrada")
 
 

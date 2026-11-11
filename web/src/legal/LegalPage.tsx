@@ -1,7 +1,8 @@
-import { useMemo, type ReactElement } from "react";
+import { useEffect, useMemo, type ReactElement } from "react";
+import { useLocation } from "react-router";
 
 import { FocusHeading } from "../components/a11y/FocusHeading";
-import { LegalDocument } from "./LegalDocument";
+import { LegalDocument, sectionsOf } from "./LegalDocument";
 import { parseMarkdown, type Block } from "./markdown";
 
 interface LegalPageProps {
@@ -17,10 +18,21 @@ interface LegalPageProps {
  */
 export function LegalPage({ fallbackTitle, markdown }: LegalPageProps): ReactElement {
   const { title, blocks } = useMemo(() => splitTitle(parseMarkdown(markdown)), [markdown]);
+  const sections = useMemo(() => sectionsOf(blocks), [blocks]);
+  const { hash } = useLocation();
+  // Link de fora para uma seção (#secao-...): o foco e a rolagem vão ao h2 dela, não ao título da
+  // tela. A rota é lazy, então a rolagem nativa do navegador chega antes do texto existir.
+  // Âncora que não existe mais cai no h1, como uma entrada sem âncora.
+  const target = sections.find((section) => `#${section.anchor}` === hash)?.anchor;
+  useEffect(() => {
+    if (target !== undefined) {
+      document.getElementById(target)?.focus();
+    }
+  }, [target]);
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <FocusHeading>{title ?? fallbackTitle}</FocusHeading>
-      <LegalDocument blocks={blocks} />
+      <FocusHeading takesFocus={target === undefined}>{title ?? fallbackTitle}</FocusHeading>
+      <LegalDocument blocks={blocks} sections={sections} />
     </article>
   );
 }

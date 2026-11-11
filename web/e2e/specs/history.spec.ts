@@ -27,7 +27,7 @@ test("a execução criada na Bancada abre pela Oficina e pelo Histórico", async
 
   const historico = new HistoricoPage(page);
   await historico.open();
-  // O link do título leva à execução; o outro da linha é o "Reusar configuração".
+  // O link do título leva à execução; o outro da linha é o "Reutilizar parâmetros".
   await historico
     .rows()
     .first()
@@ -51,6 +51,33 @@ test("Carregar mais traz a página seguinte e anuncia quantas chegaram", async (
     page.getByText(`Mais ${String(total - PAGE_SIZE)} execuções na lista.`),
   ).toBeAttached();
   await expect(page.getByRole("button", { name: "Carregar mais" })).toHaveCount(0);
+});
+
+test("na última página, o foco segue para a primeira linha nova e o fim da lista é anunciado", async ({
+  page,
+  fakeApi,
+}) => {
+  const total = seedRunHistory(fakeApi, PAGE_SIZE);
+  const historico = new HistoricoPage(page);
+  await historico.open();
+  await expect(historico.rows()).toHaveCount(PAGE_SIZE);
+
+  // Pelo teclado, como quem depende do foco: o botão some e o foco não pode cair no <body>.
+  await page.getByRole("button", { name: "Carregar mais" }).focus();
+  await page.keyboard.press("Enter");
+
+  await expect(historico.rows()).toHaveCount(total);
+  await expect(
+    historico
+      .rows()
+      .nth(PAGE_SIZE)
+      .getByRole("link", { name: /, criada em / }),
+  ).toBeFocused();
+  await expect(
+    page.getByRole("status").filter({
+      hasText: `Mais ${String(total - PAGE_SIZE)} execuções na lista. Fim da lista.`,
+    }),
+  ).toHaveCount(1);
 });
 
 test("filtrar por estado vai para a URL, sobrevive ao reload e só lista esse estado", async ({

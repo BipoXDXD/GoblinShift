@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { FormIssue } from "../../components/a11y/ErrorSummary";
+import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
 import type { RecipeDraft, RecipeParameters } from "../types";
 
@@ -110,10 +110,9 @@ export function parseCsvJanitor(
   if (!result.success) {
     return {
       ok: false,
-      issues: result.error.issues.map((issue): FormIssue => ({
-        fieldId: csvJanitorFieldId(issue.path.map(String)),
-        message: issue.message,
-      })),
+      issues: result.error.issues.map((issue) =>
+        formIssue(csvJanitorField(issue.path.map(String)), issue.message),
+      ),
     };
   }
   return {
@@ -123,42 +122,69 @@ export function parseCsvJanitor(
 }
 
 const ID_PREFIX = "csv-janitor";
-const SINGLE_FIELDS: ReadonlySet<string> = new Set([
-  "input_delimiter",
-  "output_delimiter",
-  "trim_columns",
-  "deduplicate_by",
-  "output_columns",
-  "formula_guard",
-]);
-const ROW_FIELDS: Readonly<Record<string, readonly [string, ...string[]]>> = {
-  case_rules: ["column", "mode"],
+const T = TEXT.csvJanitor;
+type SingleField = Exclude<keyof CsvJanitorFormValues, "case_rules" | "filters">;
+type RowPart = "column" | "mode" | "op" | "value";
+
+// Os mesmos rótulos do formulário (CsvJanitorFields): o resumo de erros cita o campo por eles.
+const SINGLE_LABELS: Readonly<Record<SingleField, string>> = {
+  input_delimiter: T.inputDelimiter,
+  output_delimiter: T.outputDelimiter,
+  trim_columns: T.trimColumns,
+  deduplicate_by: T.deduplicateBy,
+  output_columns: T.outputColumns,
+  formula_guard: T.formulaGuard,
+};
+const ROW_PART_LABELS: Readonly<Record<RowPart, (row: number) => string>> = {
+  column: T.column,
+  mode: T.mode,
+  op: T.op,
+  value: T.value,
+};
+
+interface RowList {
+  readonly label: string;
+  /** A primeira parte recebe o erro da linha inteira. */
+  readonly parts: readonly [RowPart, ...RowPart[]];
+}
+
+const ROW_LISTS: Readonly<Record<string, RowList>> = {
+  case_rules: { label: T.caseRules, parts: ["column", "mode"] },
   // Erro da linha inteira (por exemplo, valor incompatível com a condição) vai para a condição.
-  filters: ["op", "column", "value"],
+  filters: { label: T.filters, parts: ["op", "column", "value"] },
 };
 const INDEX = /^\d+$/;
 
 /**
- * Id do controle para um caminho de erro, relativo a `parameters` (do Zod ou do `errors[].field`
- * do servidor); `null` quando o caminho não é de um campo deste formulário.
+ * Controle para um caminho de erro, relativo a `parameters` (do Zod ou do `errors[].field` do
+ * servidor); `null` quando o caminho não é de um campo deste formulário. Nas linhas, o rótulo
+ * leva o nome da lista: "Coluna (linha 1)" existe nas regras de caixa e nos filtros.
  */
-export function csvJanitorFieldId(path: readonly (string | number)[]): string | null {
+export function csvJanitorField(path: readonly (string | number)[]): FormField | null {
   const [field, index, part] = path.map(String);
   if (field === undefined) {
     return null;
   }
-  if (SINGLE_FIELDS.has(field)) {
-    return `${ID_PREFIX}-${field}`;
+  if (isSingleField(field)) {
+    return { fieldId: singleFieldId(field), label: SINGLE_LABELS[field] };
   }
-  const parts = Object.hasOwn(ROW_FIELDS, field) ? ROW_FIELDS[field] : undefined;
-  if (parts === undefined) {
+  const list = Object.hasOwn(ROW_LISTS, field) ? ROW_LISTS[field] : undefined;
+  if (list === undefined) {
     return null;
   }
   if (index === undefined || !INDEX.test(index)) {
-    return addButtonId(field);
+    return { fieldId: addButtonId(field), label: list.label };
   }
-  const target = part !== undefined && parts.includes(part) ? part : parts[0];
-  return rowFieldId(field, Number(index), target);
+  const target = list.parts.find((candidate) => candidate === part) ?? list.parts[0];
+  const row = Number(index);
+  return {
+    fieldId: rowFieldId(field, row, target),
+    label: T.inRow(list.label, ROW_PART_LABELS[target](row + 1)),
+  };
+}
+
+function isSingleField(field: string): field is SingleField {
+  return Object.hasOwn(SINGLE_LABELS, field);
 }
 
 export function addButtonId(listField: string): string {

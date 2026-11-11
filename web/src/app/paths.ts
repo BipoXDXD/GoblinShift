@@ -19,6 +19,26 @@ export const PATHS = {
   accountDeleted: "/conta-excluida",
 } as const;
 
+// Caminho deste site: uma barra e, depois dela, nem outra barra nem contrabarra. `//evil.com` e
+// `/\evil.com` o navegador lê como outro site.
+const LOCAL_PATH = /^\/(?![/\\])/;
+
+/**
+ * O caminho sem a barra final (`/termos/` → `/termos`), ou `null` quando já está sem ela ou quando
+ * o resultado não seria um caminho deste site. O router abre `/termos/` na rota `/termos`, mas o
+ * `pathname` guarda a barra, e toda comparação exata com `PATHS` erraria.
+ */
+export function withoutTrailingSlash(pathname: string): string | null {
+  if (!pathname.endsWith("/") || !LOCAL_PATH.test(pathname)) {
+    return null;
+  }
+  let end = pathname.length;
+  while (end > 1 && pathname.charAt(end - 1) === "/") {
+    end -= 1;
+  }
+  return end === pathname.length ? null : pathname.slice(0, end);
+}
+
 /** Parâmetro com o caminho local para onde voltar (Entrar e aceite dos termos). */
 export const RETURN_PARAM = "volta";
 

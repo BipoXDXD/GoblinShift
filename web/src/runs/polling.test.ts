@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError, type ApiFailure } from "../api/response";
-import { nextPollDelayMs, type PollSnapshot } from "./polling";
+import { isPersistentFailure, nextPollDelayMs, type PollSnapshot } from "./polling";
 import type { RunStatus } from "./api";
 
 const noJitter = () => 0;
@@ -109,5 +109,33 @@ describe("nextPollDelayMs: falha", () => {
     };
 
     expect(nextPollDelayMs(snapshot, noJitter)).toBe(false);
+  });
+});
+
+describe("isPersistentFailure: quando a falha do polling vira aviso", () => {
+  const unavailable = new ApiError(problemFailure(503));
+
+  it("falha transitória isolada é oscilação, não aviso", () => {
+    expect(isPersistentFailure(unavailable, 1)).toBe(false);
+  });
+
+  it("falha transitória repetida vira aviso", () => {
+    expect(isPersistentFailure(unavailable, 2)).toBe(true);
+  });
+
+  it("falha que repetir não resolve vira aviso na primeira vez", () => {
+    expect(isPersistentFailure(new ApiError(problemFailure(404)), 1)).toBe(true);
+  });
+
+  it("timeout vira aviso na primeira vez: cada tentativa já esperou o prazo inteiro", () => {
+    expect(isPersistentFailure(new ApiError({ kind: "timeout" }), 1)).toBe(true);
+  });
+
+  it("falha de rede isolada continua oscilação", () => {
+    expect(isPersistentFailure(new ApiError({ kind: "network" }), 1)).toBe(false);
+  });
+
+  it("defeito da interface vira aviso na primeira vez", () => {
+    expect(isPersistentFailure(new Error("defeito"), 1)).toBe(true);
   });
 });

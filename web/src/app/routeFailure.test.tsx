@@ -4,6 +4,8 @@ import { describe, expect, it, vi, type MockInstance } from "vitest";
 import { appRoutes } from "../test/appRoutes";
 import { fakeApi, jsonResponse } from "../test/fakeApi";
 import { meBody } from "../test/account";
+import { axeViolations } from "../test/axe";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
 
@@ -57,6 +59,38 @@ describe("falha ao abrir uma tela", () => {
       expect(screen.queryByText("Unexpected Application Error!")).not.toBeInTheDocument();
       expect(document.body.textContent).not.toContain(canary);
       expect(document.body.textContent).not.toContain(STACK_FRAME);
+    },
+    10_000,
+  );
+
+  it.each(SCREENS)(
+    "$path tem título com foco, a ação de recarregar e o caminho de volta",
+    async ({ path }) => {
+      setup(path);
+
+      await expectHeadingFocused("Não foi possível abrir esta tela");
+      expect(screen.getByRole("button", { name: "Recarregar a página" })).toHaveAttribute(
+        "type",
+        "button",
+      );
+      expect(screen.getByRole("link", { name: "Voltar à Oficina" })).toHaveAttribute("href", "/");
+      expect(await axeViolations(document.body)).toEqual([]);
+    },
+    10_000,
+  );
+
+  it.each(SCREENS)(
+    "$path troca o título da aba pelo do erro",
+    async ({ path }) => {
+      document.title = "Título anterior";
+      setup(path);
+
+      await screen.findByRole("alert");
+
+      // O título da rota (Histórico, Créditos) diria que a tela abriu.
+      await waitFor(() => {
+        expect(document.title).toBe("Erro ao abrir a tela · GoblinShift");
+      });
     },
     10_000,
   );

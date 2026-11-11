@@ -1,10 +1,12 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { notifyManager, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
+  type FakeApi,
   jsonResponse,
   problemResponse,
   runBody,
@@ -204,6 +206,312 @@ describe("Execução", () => {
     await screen.findByRole("link", { name: "Baixar clientes.csv" });
 
     expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+/** Respostas do GET da execução em sequência; a última se repete. */
+function inSequence(...responses: readonly (() => Response | null)[]): Handler {
+  let served = 0;
+  return () => {
+    const next = responses[Math.min(served, responses.length - 1)];
+    served += 1;
+    return next === undefined ? null : next();
+  };
+}
+
+const running = (): Response => jsonResponse(runBody({ status: "running" }));
+const unavailable = (): Response => problemResponse(503, "SERVICE_UNAVAILABLE");
+const UNAVAILABLE_TEXT = "O serviço está indisponível no momento.";
+const SIGNED_OUT_TEXT = "Sua sessão terminou. Entre de novo para continuar.";
+/** Quantas vezes a tela consultou a execução. */
+function runRequests(requests: readonly Request[]): number {
+  return requests.filter(
+    (request) =>
+      request.method === "GET" && new URL(request.url).pathname === `/api/v1/runs/${RUN_ID}`,
+  ).length;
+}
+
+const FORBIDDEN_TEXT = "Você não tem permissão para esta ação.";
+const NOT_FOUND_TEXT = "Não encontramos o que você pediu.";
+const TIMEOUT_TEXT = "O servidor demorou demais para responder.";
+/** Prazo do cliente da API (client.ts), que o relógio falso atravessa no teste do timeout. */
+const CLIENT_TIMEOUT_MS = 30_000;
+
+type PollFailure = (queryClient: QueryClient, api: FakeApi) => Promise<void>;
+
+/** As próximas `polls` consultas da execução respondem com a falha. */
+function pollFailing(failure: () => Response, polls = 1): PollFailure {
+  return async (queryClient, api) => {
+    for (let poll = 0; poll < polls; poll += 1) {
+      api.fetchMock.mockImplementationOnce(() => Promise.resolve(failure()));
+      await nextPoll(queryClient);
+    }
+  };
+}
+
+/** A próxima consulta não responde até o prazo do cliente, que a aborta como timeout. */
+const pollTimingOut: PollFailure = async (queryClient, api) => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    api.fetchMock.mockImplementationOnce(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Prazo do cliente", "AbortError"));
+          });
+        }),
+    );
+    void queryClient.refetchQueries({ queryKey: ["runs", RUN_ID] });
+    await act(() => vi.advanceTimersByTimeAsync(CLIENT_TIMEOUT_MS));
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+// Pedido que nunca responde: segura a consulta em andamento.
+const hanging = (): null => null;
+
+/** A próxima consulta do polling, sem esperar o intervalo dele. */
+async function nextPoll(queryClient: QueryClient): Promise<void> {
+  await act(() => queryClient.refetchQueries({ queryKey: ["runs", RUN_ID] }));
+}
+
+/**
+ * Conta os `role="alert"` inseridos no DOM: cada inserção é um anúncio assertivo do leitor de
+ * tela. Um alerta que fica montado e só muda de texto não conta.
+ */
+function countInsertedAlerts(): { readonly count: () => number; readonly stop: () => void } {
+  let inserted = 0;
+  const tally = (mutations: readonly MutationRecord[]): void => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node instanceof Element) {
+          inserted += node.matches('[role="alert"]') ? 1 : 0;
+          inserted += node.querySelectorAll('[role="alert"]').length;
+        }
+      }
+    }
+  };
+  const observer = new MutationObserver(tally);
+  observer.observe(document.body, { childList: true, subtree: true });
+  return {
+    count: () => {
+      tally(observer.takeRecords());
+      return inserted;
+    },
+    stop: () => {
+      observer.disconnect();
+    },
+  };
+}
+
+describe("Execução: falha do polling sem anúncio repetido", () => {
+  beforeEach(() => {
+    // O TanStack Query entrega as atualizações num setTimeout(0); entregar na hora faz cada
+    // consulta virar uma renderização, como na tela, onde as consultas têm segundos entre si.
+    notifyManager.setScheduler((callback) => {
+      callback();
+    });
+  });
+
+  afterEach(() => {
+    notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+  });
+
+  it.each([
+    ["403 comum", pollFailing(() => problemResponse(403, "FORBIDDEN")), FORBIDDEN_TEXT],
+    ["404", pollFailing(() => problemResponse(404, "NOT_FOUND")), NOT_FOUND_TEXT],
+    ["5xx persistente", pollFailing(unavailable, 2), UNAVAILABLE_TEXT],
+    ["timeout", pollTimingOut, TIMEOUT_TEXT],
+  ])("falha que vira alerta (%s) mantém o Cancelar na tela", async (_name, fail, text) => {
+    const { queryClient, api } = setup(running);
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+
+    await fail(queryClient, api);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(text);
+    expect(screen.getByRole("button", { name: "Cancelar execução" })).toBeVisible();
+  });
+
+  it("falha intermitente (erro, sucesso, erro) não vira alerta a cada alternância", async () => {
+    const { queryClient } = setup(inSequence(running, unavailable, running, unavailable));
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    alerts.stop();
+  });
+
+  it("falha persistente vira um alerta só, que fica enquanto ela dura", async () => {
+    const { queryClient } = setup(inSequence(running, unavailable));
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
+    // O último estado conhecido continua na tela, abaixo do aviso de que pode estar desatualizado.
+    expect(screen.getByText("Em andamento")).toBeInTheDocument();
+    alerts.stop();
+  });
+
+  it("sessão terminada é anunciada uma vez só, na região de status, sem tirar o foco", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    await expectHeadingFocused("Execução");
+    const alerts = countInsertedAlerts();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+
+    expect(alerts.count()).toBe(0);
+    const status = screen
+      .getAllByRole("status")
+      .filter((region) => region.textContent === SIGNED_OUT_TEXT);
+    expect(status).toHaveLength(1);
+    expect(screen.getAllByText(SIGNED_OUT_TEXT)).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Execução" })).toHaveFocus();
+    alerts.stop();
+  });
+
+  it("o alerta some quando o polling volta a responder", async () => {
+    const { queryClient } = setup(inSequence(running, unavailable, unavailable, running));
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.getByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
+    await nextPoll(queryClient);
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ao voltar à execução, falhas antigas e não seguidas não viram alerta", async () => {
+    const { queryClient, router } = setup(
+      inSequence(running, unavailable, running, unavailable, hanging),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    await nextPoll(queryClient);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(() => router.navigate("/termos"));
+    await act(() => router.navigate(`/execucoes/${RUN_ID}`));
+
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    [403, "FORBIDDEN", "Você não tem permissão para esta ação."],
+    [404, "NOT_FOUND", "Não encontramos o que você pediu"],
+    [410, "GONE", "Isto expirou"],
+  ])(
+    "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",
+    async (status, code, text) => {
+      // Só o intervalo do polling fica no relógio falso: avançá-lo prova que não há próxima consulta.
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const { queryClient, api } = setup(
+          inSequence(running, () => problemResponse(status, code)),
+        );
+        expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+        await nextPoll(queryClient);
+        expect(screen.getByRole("alert")).toHaveTextContent(text);
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
+
+        expect(runRequests(api.requests)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    ["AUTHENTICATION_REQUIRED", "Entre para continuar", ""],
+    ["REAUTH_REQUIRED", "Entre de novo para confirmar", "&reauth=1"],
+  ])(
+    "401 %s no polling mostra o convite para entrar de novo e para o polling",
+    async (code, title, reauthParam) => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const { queryClient, api } = setup(inSequence(running, () => problemResponse(401, code)));
+        expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+        await nextPoll(queryClient);
+        await act(() => vi.advanceTimersByTimeAsync(60_000));
+
+        const prompt = screen.getByRole("region", { name: title });
+        expect(within(prompt).getByRole("heading", { level: 2, name: title })).toBeVisible();
+        expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
+          "href",
+          `/auth/login/google?return_to=%2Fexecucoes%2F${RUN_ID}${reauthParam}`,
+        );
+        expect(screen.queryByRole("alert")).toBeNull();
+        expect(runRequests(api.requests)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("com o convite na tela, o Cancelar some e os dados já carregados ficam", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    expect(await screen.findByRole("button", { name: "Cancelar execução" })).toBeVisible();
+
+    await nextPoll(queryClient);
+
+    expect(screen.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Cancelar execução" })).toBeNull();
+    expect(screen.getByText("Em andamento")).toBeInTheDocument();
+  });
+
+  it("antes do primeiro dado, sessão terminada mostra o convite para entrar, sem alerta", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"));
+
+    expect(await screen.findByRole("region", { name: "Entre para continuar" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("termos novos no polling levam ao aceite, como nas outras telas", async () => {
+    const { queryClient } = setup(
+      inSequence(running, () => problemResponse(403, "TERMS_NOT_ACCEPTED")),
+    );
+    expect(await screen.findByText("Em andamento")).toBeInTheDocument();
+
+    await nextPoll(queryClient);
+
+    expect(screen.getByRole("region", { name: "Aceite os termos para continuar" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getAllByRole("status").some(
+        // Sem distinguir maiúsculas: "termos de uso" vira "Termos de Uso" no #271.
+        (region) =>
+          /^Para continuar, aceite a versão atual dos termos de uso\.$/i.test(region.textContent),
+      ),
+    ).toBe(true);
+  });
+
+  it("falha transitória antes do primeiro dado vira alerta na primeira vez", async () => {
+    setup(unavailable);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(UNAVAILABLE_TEXT);
   });
 });
 
@@ -516,6 +824,25 @@ describe("pré-visualização dos resultados", () => {
     expect(box).toHaveAttribute("tabindex", "0");
     expect(within(box).getByRole("list")).toBeInTheDocument();
     expect(await axeViolations(box)).toEqual([]);
+  });
+
+  it("PDF: a legenda com nome longo quebra linha em qualquer ponto", async () => {
+    // Sem espaço, o nome só cabe a 320 px quebrando dentro da palavra (WCAG 1.4.10). O jsdom
+    // não faz layout, então o teste confere a classe.
+    const longName =
+      "relatorio_clientes_consolidado_2026_novembro_final_revisado_pela_contabilidade.pdf";
+    setupPreview({ fileName: longName, previewName: "selecao.json" }, () =>
+      bytes(
+        JSON.stringify({
+          schema_version: 1,
+          path: longName,
+          pages: [{ input_position: 0, page_number: 1 }],
+        }),
+      ),
+    );
+
+    const caption = await screen.findByText(`Páginas de ${longName}: 1 página`);
+    expect(caption).toHaveClass("wrap-anywhere");
   });
 
   it("PDF: mapa fora do formato mostra a falha", async () => {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { FormIssue } from "../../components/a11y/ErrorSummary";
+import { formIssue, type FormField } from "../../components/a11y/ErrorSummary";
 import { TEXT } from "../../text";
 import type { RecipeDraft, RecipeInput, RecipeParameters } from "../types";
 
@@ -104,10 +104,9 @@ export function parsePdfPress(
   if (!result.success) {
     return {
       ok: false,
-      issues: result.error.issues.map((issue): FormIssue => ({
-        fieldId: formFieldId(issue.path.map(String)),
-        message: issue.message,
-      })),
+      issues: result.error.issues.map((issue) =>
+        formIssue(pdfPressField(issue.path.map(String)), issue.message),
+      ),
     };
   }
   return {
@@ -117,34 +116,48 @@ export function parsePdfPress(
 }
 
 const ID_PREFIX = "pdf-press";
-const CARD_PARTS: Readonly<Record<string, string>> = {
+const T = TEXT.pdfPress;
+type CardPart = "upload_id" | "page_number";
+const CARD_PARTS: Readonly<Record<string, CardPart>> = {
   uploadId: "upload_id",
   pageNumber: "page_number",
   upload_id: "upload_id",
   page_number: "page_number",
 };
+// Os mesmos rótulos do cartão (PdfPressFields), contados a partir de 1.
+const CARD_LABELS: Readonly<Record<CardPart, (position: number) => string>> = {
+  upload_id: T.cardFile,
+  page_number: T.cardPage,
+};
 
-/** Caminho do formulário (`cards`) ou do servidor (`select`) → id do controle. */
-function formFieldId(path: readonly string[]): string | null {
-  const [field, index, part] = path;
-  if (field === "operation" || field === "pages_per_document") {
-    return fieldId(field);
+/**
+ * Controle para um caminho de erro relativo a `parameters`, do formulário (`cards`) ou do
+ * servidor (`select`); `null` fora do formulário.
+ */
+export function pdfPressField(path: readonly (string | number)[]): FormField | null {
+  const [field, index, part] = path.map(String);
+  if (field === "operation") {
+    return { fieldId: fieldId(field), label: T.operation };
+  }
+  if (field === "pages_per_document") {
+    return { fieldId: fieldId(field), label: T.pagesPerDocument };
   }
   if (field !== "cards" && field !== "select") {
     return null;
   }
   if (index === undefined) {
-    return addCardButtonId();
+    return { fieldId: addCardButtonId(), label: T.select };
   }
-  const cardPart = part === undefined ? undefined : CARD_PARTS[part];
-  return cardPart === undefined || !/^\d+$/.test(index)
-    ? null
-    : cardFieldId(Number(index), cardPart);
+  const cardPart = cardPartOf(part);
+  if (cardPart === undefined || !/^\d+$/.test(index)) {
+    return null;
+  }
+  const position = Number(index);
+  return { fieldId: cardFieldId(position, cardPart), label: CARD_LABELS[cardPart](position + 1) };
 }
 
-/** Id do controle para um caminho de erro do servidor, relativo a `parameters`. */
-export function pdfPressFieldId(path: readonly (string | number)[]): string | null {
-  return formFieldId(path.map(String));
+function cardPartOf(part: string | undefined): CardPart | undefined {
+  return part !== undefined && Object.hasOwn(CARD_PARTS, part) ? CARD_PARTS[part] : undefined;
 }
 
 export function fieldId(field: "operation" | "pages_per_document"): string {
@@ -180,11 +193,11 @@ export function pageMapPreview(
       return inputs.length === 0
         ? []
         : [{ name: "merged.pdf", entries: inputs.map((input) => PREVIEW.allPages(input.name)) }];
-    case "split":
-      return inputs.map((input) => ({
-        name: input.name,
-        entries: [PREVIEW.groups(values.pages_per_document.trim())],
-      }));
+    case "split": {
+      const size = withoutLeadingZeros(values.pages_per_document.trim());
+      const pages = PREVIEW.pages[size === "1" ? 0 : 1];
+      return inputs.map((input) => ({ name: input.name, entries: [PREVIEW.groups(size, pages)] }));
+    }
     case "select": {
       const names = new Map(inputs.map((input) => [input.uploadId, input.name]));
       const entries = values.cards.map((card) =>
@@ -193,4 +206,9 @@ export function pageMapPreview(
       return entries.length === 0 ? [] : [{ name: "selection.pdf", entries }];
     }
   }
+}
+
+// A prévia roda antes da validação: só os dígitos viram número; o resto aparece como foi digitado.
+function withoutLeadingZeros(size: string): string {
+  return /^\d+$/.test(size) ? String(Number(size)) : size;
 }
