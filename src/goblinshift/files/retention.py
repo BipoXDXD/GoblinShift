@@ -40,6 +40,7 @@ from goblinshift.files.objects import (
 from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
+from goblinshift.platform.sql import skip_locked_batch
 
 logger = logging.getLogger(__name__)
 
@@ -340,10 +341,11 @@ def next_storage_release_in(session: Session, owner_id: uuid.UUID) -> timedelta 
             artifact.c.owner_id == owner_id, artifact.c.deleted_at.is_(None)
         ),
     ).subquery()
+    # O piso fica aqui e não num GREATEST: no PostgreSQL ele ignora NULL e apagaria o `None`.
     wait: timedelta | None = session.execute(
-        select(func.greatest(func.min(pending.c.expires_at) - func.now(), timedelta(0)))
+        select(func.min(pending.c.expires_at) - func.now())
     ).scalar_one()
-    return wait
+    return None if wait is None else max(wait, timedelta(0))
 
 
 def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileReport:
@@ -379,14 +381,10 @@ def _open_use_of(object_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
 
 
 def _delete_old_ended_uses(session: Session, cutoff: datetime, limit: int) -> None:
-    chosen = (
-        select(object_use.c.id)
-        .where(object_use.c.ended_at <= cutoff)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-        .scalar_subquery()
+    chosen = skip_locked_batch(
+        select(object_use.c.id).where(object_use.c.ended_at <= cutoff), limit
     )
-    session.execute(delete(object_use).where(object_use.c.id.in_(chosen)))
+    session.execute(delete(object_use).where(object_use.c.id.in_(select(chosen.c.id))))
 
 
 def _published_as_artifact() -> ColumnElement[bool]:

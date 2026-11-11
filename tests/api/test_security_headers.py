@@ -4,7 +4,6 @@ A CSP da SPA é do Nginx (fatia 7): a API manda só `default-src 'none'` nas sua
 download mantém a própria CSP com `sandbox`.
 """
 
-import re
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -22,6 +21,7 @@ from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddlewa
 from tests.api.files_support import new_account, publish
 from tests.api.test_api_docs import DOCS_CSP
 from tests.security.authz_matrix import entries
+from tests.security.path_params import fill_path_params
 
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
 HSTS = "max-age=63072000; includeSubDomains"
@@ -151,7 +151,6 @@ async def test_escopo_que_nao_e_http_passa_intacto() -> None:
 
 # --- Aplicação real ---------------------------------------------------------------------------
 
-_PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
 _DOCS = "/docs"
 
 
@@ -167,9 +166,7 @@ def _assert_common(headers: httpx.Headers, *, csp: str | None = API_CSP) -> None
     "path", [path for method, path, _ in entries() if method == "GET"], ids=str
 )
 def test_respostas_da_api_tem_cabecalhos_de_3_6(offline_client: TestClient, path: str) -> None:
-    concrete = _PATH_PARAM.sub(
-        lambda match: "google" if match["name"] == "provider" else str(uuid4()), path
-    )
+    concrete = fill_path_params(path, lambda name: "google" if name == "provider" else str(uuid4()))
 
     response = offline_client.get(concrete)
 
@@ -178,6 +175,36 @@ def test_respostas_da_api_tem_cabecalhos_de_3_6(offline_client: TestClient, path
         _assert_common(response.headers, csp=DOCS_CSP)
     else:
         _assert_common(response.headers)
+
+
+_EVIL_ORIGIN = "https://evil.example"
+_CORS_PATHS = ["/livez", "/api/v1/me", "/api/v1/runs", "/auth/logout"]
+
+
+def _cors_headers(response: httpx.Response) -> list[str]:
+    return [name for name in response.headers if name.lower().startswith("access-control-")]
+
+
+# A SPA e a API têm a mesma origem: nenhum outro site pode ler respostas nem mandar preflight.
+@pytest.mark.parametrize("path", _CORS_PATHS)
+def test_preflight_de_outra_origem_nao_recebe_cors(offline_client: TestClient, path: str) -> None:
+    response = offline_client.options(
+        path,
+        headers={
+            "Origin": _EVIL_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization, content-type, x-csrf-token",
+        },
+    )
+
+    assert _cors_headers(response) == [], response.headers
+
+
+@pytest.mark.parametrize("path", _CORS_PATHS)
+def test_get_de_outra_origem_nao_recebe_cors(offline_client: TestClient, path: str) -> None:
+    response = offline_client.get(path, headers={"Origin": _EVIL_ORIGIN})
+
+    assert _cors_headers(response) == [], response.headers
 
 
 def test_erro_interno_tambem_recebe_os_cabecalhos(offline_client: TestClient) -> None:

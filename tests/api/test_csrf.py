@@ -5,7 +5,6 @@ nova entra sozinha. A mutação legítima de referência é o cancelamento de um
 passar pelo CSRF dá 404, e não 403.
 """
 
-import re
 from uuid import uuid4
 
 import httpx2 as httpx
@@ -20,11 +19,11 @@ from tests.api.session_support import open_session, session_headers
 from tests.api.support import assert_problem
 from tests.identity.support import new_key, new_user
 from tests.security.authz_matrix import entries
+from tests.security.path_params import fill_path_params
 
 pytestmark = pytest.mark.integration
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
-_PATH_PARAM = re.compile(r"\{[a-z_]+\}")
 CANCEL = "/api/v1/runs/{run_id}/cancel"
 MUTATIONS = [
     pytest.param(method, path, id=f"{method} {path}")
@@ -34,7 +33,8 @@ MUTATIONS = [
 
 
 def _send(client: TestClient, method: str, path: str, headers: dict[str, str]) -> httpx.Response:
-    return client.request(method, _PATH_PARAM.sub(str(uuid4()), path), headers=headers)
+    value = str(uuid4())
+    return client.request(method, fill_path_params(path, lambda _name: value), headers=headers)
 
 
 def _csrf_failures(factory: sessionmaker[Session]) -> list[str]:

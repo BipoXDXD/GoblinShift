@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { appRoutes } from "../test/appRoutes";
 import { fakeApi, jsonResponse } from "../test/fakeApi";
 import { meBody } from "../test/account";
+import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
 
@@ -18,6 +19,22 @@ vi.mock("../notice/SiteNoticeBanner", () => ({
 }));
 
 describe("falha na própria moldura", () => {
+  it("tem título com foco, a ação de recarregar e o título da aba do erro", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    document.title = "Título anterior";
+    const api = fakeApi({ "GET /api/v1/me": () => jsonResponse(meBody()) });
+
+    renderRoutes({ routes: appRoutes(api.client), path: "/creditos", client: api.client });
+
+    await expectHeadingFocused("Não foi possível abrir esta tela");
+    expect(screen.getByRole("button", { name: "Recarregar a página" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Voltar à Oficina" })).toHaveAttribute("href", "/");
+    await waitFor(() => {
+      expect(document.title).toBe("Erro ao abrir a tela · GoblinShift");
+    });
+  });
+
   it("mostra só o aviso próprio e registra o erro no console", async () => {
     // O React e o router registram o erro no console; aqui ele é o cenário, não um defeito.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);

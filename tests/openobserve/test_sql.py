@@ -4,7 +4,10 @@ Cada teste escreve spans sintéticos num stream só dele e confere o resultado d
 renderizada pelo catálogo, a mesma que o provisionamento envia.
 """
 
+import time
+
 import pytest
+from opentelemetry.util.types import AttributeValue
 
 from openobserve.catalog import SLOS, alerts, slo_named
 from openobserve.provision import declare_columns
@@ -23,6 +26,8 @@ pytestmark = pytest.mark.openobserve
 
 HOUR_S = 3600
 MINUTE_S = 60
+NS_PER_US = 1_000
+NS_PER_S = 1_000_000_000
 RECENT_S = 5 * MINUTE_S  # nas duas janelas
 OLD_S = 40 * MINUTE_S  # só na janela de 1 h
 
@@ -553,6 +558,68 @@ def test_executor_que_nao_inicia_em_tres_tentativas_dispara(
     declare_columns(telemetry.api, stream)
 
     assert bool(cause_rows(telemetry, "causa-executor-nao-iniciou", stream)) is fires
+
+
+# A API exporta um span `api.saturation` 1 s depois de cada virada de minuto com recusa, e um na
+# parada; o alerta agrupa pelo minuto absoluto. Cada span é (minutos atrás, segundo no minuto),
+# contados a partir do minuto corrente, e começa nesse instante exato, em microssegundos inteiros,
+# sem duração: o teste não depende da fase do relógio.
+# Extremos: dois minutos absolutos, com spans exatamente na virada do primeiro, 10 ms antes da
+# virada seguinte, 5 ms depois dela e 10 ms antes da última. O agrupamento absoluto vê 2 minutos.
+# Uma volta ao agrupamento relativo a `now()` vê 3 fatias em qualquer fase: o `to_unixtime` do
+# DataFusion devolve segundos inteiros, então a fase de `now` é um inteiro de 0 a 59; na fase 0, o
+# span da virada fica a exatamente 120 s e cai numa fatia própria, e nas fases de 1 a 59 o de 5 ms
+# depois da virada já mudou de fatia. Se `now` fosse contínuo, só escaparia uma consulta nos 10 ms
+# antes de uma virada.
+EDGE_SPANS = ((2, 0.0), (2, 59.99), (1, 0.005), (1, 59.99))
+
+
+@pytest.mark.parametrize(
+    ("spans", "fires"),
+    [
+        (((3, 1), (2, 1), (1, 1)), True),  # três minutos com recusa
+        (((2, 1), (1, 1)), False),  # dois minutos: pico absorvido
+        (((2, 1), (2, 1.3), (1, 1)), False),  # duas réplicas na mesma virada
+        (((2, 1), (2, 40), (1, 1)), False),  # parada aos 40 s, no minuto do último relato
+        (EDGE_SPANS, False),  # dois minutos absolutos, três fatias de qualquer grade relativa
+        (((12, 1), (2, 1), (1, 1)), False),  # o terceiro minuto saiu dos 10 min
+    ],
+    ids=[
+        "tres-minutos",
+        "dois-minutos",
+        "duas-replicas",
+        "relato-da-parada",
+        "extremos-do-minuto",
+        "fora-da-janela",
+    ],
+)
+def test_api_saturada_em_tres_minutos_dispara(
+    telemetry: Telemetry, spans: tuple[tuple[int, float], ...], fires: bool
+) -> None:
+    stream = unique_stream("saturada")
+    attribute = "api.saturation.rejected"
+    now_ns = time.time_ns()
+    minute_start_ns = now_ns - now_ns % (MINUTE_S * NS_PER_S)
+    traces = telemetry.traces(stream)
+
+    def at(minutes_ago: int, second: float, attributes: dict[str, AttributeValue]) -> None:
+        offset_us = round(second * US_PER_S) - minutes_ago * MINUTE_S * US_PER_S
+        traces.span_at("api.saturation", minute_start_ns + offset_us * NS_PER_US, attributes, 0)
+
+    for minutes_ago, second in spans:
+        at(minutes_ago, second, {"main": True, attribute: 5})
+    # Sem recusa ou fora do evento amplo, nunca conta.
+    for minutes_ago in (4, 5, 6):
+        at(minutes_ago, 1, {"main": True, attribute: 0})
+        at(minutes_ago, 1, {"main": False, attribute: 5})
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    rows = cause_rows(telemetry, "causa-api-saturada", stream)
+
+    assert bool(rows) is fires
+    if fires:
+        assert int(str(rows[0]["rejected"])) == 15
 
 
 # --- Ausência: a telemetria que deveria chegar e não chegou -------------------------------------

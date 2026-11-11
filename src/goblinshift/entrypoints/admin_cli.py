@@ -33,13 +33,19 @@ e novos dos itens citados. `usage` imprime, separados por tab, o consumo das úl
 (execuções, bytes de entrada e tempo de executor), o armazenamento reservado e cada limite com a
 origem (`conta` ou `padrão`).
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
-segredo obrigatório, com uma linha em stderr que nomeia a variável.
+segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
+`gs-admin: interrompido`. Qualquer outra falha sai com 4
+e uma linha em stderr só com o tipo do erro e, se vier do PostgreSQL, o SQLSTATE: sem stack trace
+nem mensagem, que pode trazer SQL, host ou valores do usuário (3.7). O que já foi gravado antes
+da falha fica gravado; `block` e `request-deletion` completam o que faltou se repetidos.
 """
 
 import argparse
+import logging
 import re
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -47,6 +53,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
+from goblinshift.entrypoints.worker import run_finished_reporter
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
@@ -75,7 +82,14 @@ from goblinshift.identity.accounts import (
 )
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import MissingSecretError, Settings
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import (
+    UserHasher,
+    database_sqlstate,
+    is_database_error,
+    omit_database_error_detail,
+)
+from goblinshift.runs.cancellation import CancelResult
+from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.limits import LIMIT_ITEMS, change_account_limits
 from goblinshift.runs.purge import cancel_active_run
 from goblinshift.runs.quotas import (
@@ -86,10 +100,14 @@ from goblinshift.runs.quotas import (
 )
 from goblinshift.runs.store import db_now
 
+# Nome do serviço nos eventos que a CLI emite (`OTEL_SERVICE_NAME` tem precedência).
+_SERVICE_NAME = "goblinshift-admin"
 EXIT_OK = 0
 EXIT_NOT_FOUND = 1
 EXIT_USAGE = 2
 EXIT_MISSING_SECRET = 3
+EXIT_FAILURE = 4
+EXIT_INTERRUPTED = 130
 # HMAC-SHA256 em hexadecimal, como o `UserHasher` escreve nos eventos.
 _USER_HASH = re.compile(r"[0-9a-f]{64}")
 _FROM_STDIN = "-"
@@ -111,10 +129,44 @@ type Command = Callable[[argparse.Namespace, _Context], int]
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _argument_parser().parse_args(argv)
+    with _stderr_logging():
+        try:
+            return _run_command(args)
+        except MissingSecretError as error:
+            return _fail(EXIT_MISSING_SECRET, str(error))
+        except KeyboardInterrupt:
+            # A cadeia pode trazer um erro de banco ainda propagando, com SQL e parâmetros.
+            return _fail(EXIT_INTERRUPTED, "interrompido")
+        except Exception as error:
+            return _fail(EXIT_FAILURE, _describe_failure(error))
+
+
+@contextmanager
+def _stderr_logging() -> Iterator[None]:
+    """Logs de aviso para cima (o pool do SQLAlchemy, por exemplo) em uma linha no stderr.
+
+    Sem handler, o `logging.lastResort` escreveria o traceback e a mensagem crua do psycopg, com
+    o repr da conexão. O filtro da telemetria tira o repr; o formatador, a exceção. Não usa o
+    JSON de `configure_logging`, que leva os frames e misturaria JSON às linhas do stderr.
+    """
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(_OneLineFormatter())
+    handler.addFilter(omit_database_error_detail)
+    root = logging.getLogger()
+    root.addHandler(handler)
     try:
-        return _run_command(args)
-    except MissingSecretError as error:
-        return _fail(EXIT_MISSING_SECRET, str(error))
+        yield
+    finally:
+        root.removeHandler(handler)
+
+
+class _OneLineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        line = f"gs-admin: {record.levelname.lower()} em {record.name}: {record.getMessage()}"
+        exception = record.exc_info[1] if record.exc_info else None
+        if exception is None:
+            return line
+        return f"{line} ({_type_and_sqlstate(exception)})"
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -241,17 +293,17 @@ def _revoke_key(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _block(args: argparse.Namespace, context: _Context) -> int:
-    now = datetime.now(UTC)
-    with unit_of_work(context.factory) as session:
-        found = block_account(session, args.user, now)
-        if found:
-            _audit(session, AuditEventType.ACCOUNT_BLOCKED, args.user, now)
-    if not found:
-        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-    # Depois do commit: a partir daqui nenhuma credencial da conta autentica, e o cancelamento
-    # abre as próprias transações. Se cair aqui, rodar `block` de novo completa.
-    storage = FileStorage(context.settings.storage_root)
-    canceled = cancel_active_run(context.factory, storage, args.user)
+    with _run_finished_reporter(context) as finished:
+        now = datetime.now(UTC)
+        with unit_of_work(context.factory) as session:
+            found = block_account(session, args.user, now)
+            if found:
+                _audit(session, AuditEventType.ACCOUNT_BLOCKED, args.user, now)
+        if not found:
+            return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+        # Depois do commit: a partir daqui nenhuma credencial da conta autentica, e o
+        # cancelamento abre as próprias transações. Se cair aqui, rodar `block` de novo completa.
+        canceled = _cancel_active_run(context, args.user, finished)
     print(f"conta {args.user} bloqueada", file=sys.stderr)
     if canceled is not None:
         print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
@@ -270,20 +322,37 @@ def _unblock(args: argparse.Namespace, context: _Context) -> int:
 
 
 def _request_deletion(args: argparse.Namespace, context: _Context) -> int:
-    now = datetime.now(UTC)
-    try:
-        with unit_of_work(context.factory) as session:
-            request_account_deletion(session, args.user, now)
-            _audit(session, AuditEventType.ACCOUNT_DELETION_REQUESTED, args.user, now)
-    except UnknownAccountError:
-        return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
-    # Depois do commit, como em `DELETE /me`; se cair aqui, repetir o comando completa.
-    storage = FileStorage(context.settings.storage_root)
-    canceled = cancel_active_run(context.factory, storage, args.user)
+    with _run_finished_reporter(context) as finished:
+        now = datetime.now(UTC)
+        try:
+            with unit_of_work(context.factory) as session:
+                request_account_deletion(session, args.user, now)
+                _audit(session, AuditEventType.ACCOUNT_DELETION_REQUESTED, args.user, now)
+        except UnknownAccountError:
+            return _fail(EXIT_NOT_FOUND, f"conta {args.user} não existe")
+        # Depois do commit, como em `DELETE /me`; se cair aqui, repetir o comando completa.
+        canceled = _cancel_active_run(context, args.user, finished)
     print(f"exclusão da conta {args.user} pedida", file=sys.stderr)
     if canceled is not None:
         print(f"execução {canceled.run_id}: {canceled.status}", file=sys.stderr)
     return EXIT_OK
+
+
+def _run_finished_reporter(context: _Context) -> AbstractContextManager[RunFinishedReporter]:
+    """Emissor do `run.finished` dos comandos que cancelam a execução ativa.
+
+    Aberto antes da primeira escrita: ele lê o segredo do `user.hash`, e sem ele o comando falha
+    sem ter bloqueado nem pedido exclusão com a execução ainda na fila.
+    """
+    return run_finished_reporter(context.settings, context.factory, _SERVICE_NAME)
+
+
+def _cancel_active_run(
+    context: _Context, user_id: UUID, finished: RunFinishedReporter
+) -> CancelResult | None:
+    """Cancela a execução ativa da conta; a que estava na fila emite o `run.finished` (3.7)."""
+    storage = FileStorage(context.settings.storage_root)
+    return cancel_active_run(context.factory, storage, user_id, on_finished=finished.report)
 
 
 def _list_users(args: argparse.Namespace, context: _Context) -> int:
@@ -386,6 +455,19 @@ def _audit(session: Session, event: AuditEventType, user_id: UUID, now: datetime
     record_audit_event(
         session, event=event, user_id=user_id, ip=None, outcome=AuditOutcome.SUCCESS, now=now
     )
+
+
+def _describe_failure(error: Exception) -> str:
+    if not is_database_error(error):
+        return f"falha inesperada ({type(error).__qualname__}); detalhes omitidos"
+    return f"falha no banco de dados ({_type_and_sqlstate(error)})"
+
+
+def _type_and_sqlstate(error: BaseException) -> str:
+    """Só o tipo e o SQLSTATE: a mensagem pode trazer SQL, host ou valores do usuário."""
+    kind = type(error).__qualname__
+    sqlstate = database_sqlstate(error)
+    return kind if sqlstate is None else f"{kind}, SQLSTATE {sqlstate}"
 
 
 def _fail(exit_code: int, message: str) -> int:

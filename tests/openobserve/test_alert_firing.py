@@ -30,6 +30,11 @@ from tests.openobserve.conftest import (
     unique_stream,
     wait_until,
 )
+from tests.openobserve.scheduler_round import (
+    EVALUATION_MINUTES,
+    heartbeat_report,
+    two_rounds_timeout_s,
+)
 
 pytestmark = pytest.mark.openobserve
 
@@ -43,7 +48,9 @@ ABSENCE_CAUSES = ("causa-sem-traces", "causa-manutencao-sem-ciclo")
 
 def fast(catalog: list[Alert]) -> list[Alert]:
     """Avaliação a cada minuto e sem silêncio; consultas e períodos iguais aos de produção."""
-    return [replace(alert, frequency_minutes=1, silence_minutes=0) for alert in catalog]
+    return [
+        replace(alert, frequency_minutes=EVALUATION_MINUTES, silence_minutes=0) for alert in catalog
+    ]
 
 
 @dataclass(frozen=True)
@@ -64,27 +71,9 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     _write_burning_traffic(telemetry, burning)
     _write_normal_traffic(telemetry, normal)
     started = time.monotonic()
-    # O alerta de disco lê as métricas do Collector, que são as mesmas para os dois cenários:
-    # fica só no da queima.
-    normal_catalog = [
-        a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
-    ]
-    # O agendador avalia uma quantidade limitada de alertas por vez: com 49 alertas, cada um volta
-    # a cada 110 s, não a cada minuto, e a espera abaixo fica no limite. O cenário "queima" não tem
-    # span da manutenção, e só o "normal" precisa das causas lidas dele.
-    idle_causes = {
-        f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
-    }
-    burning_catalog = [
-        a for a in alerts(stream=burning, prefix=BURNING) if a.name not in idle_causes
-    ]
-    silent_names = {f"{SILENT}{name}" for name in ABSENCE_CAUSES}
-    silent_catalog = [a for a in alerts(stream=silent, prefix=SILENT) if a.name in silent_names]
-    for prefix, catalog in (
-        (BURNING, burning_catalog),
-        (NORMAL, normal_catalog),
-        (SILENT, silent_catalog),
-    ):
+    catalogs = scenario_catalogs(burning, normal, silent)
+    alert_count = sum(len(catalog) for _, catalog in catalogs)
+    for prefix, catalog in catalogs:
         provision(
             telemetry.api,
             alerts=fast(catalog),
@@ -107,14 +96,52 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
 
     wait_until(burning_notified, "notificações da queima, do disco e da ausência", FIRING_TIMEOUT_S)
     after = time.monotonic()
-    wait_until(
-        lambda: True if len(receiver.at(f"{NORMAL}heartbeat", after)) >= 2 else None,
-        "duas avaliações do cenário normal",
-        FIRING_TIMEOUT_S,
-    )
+    _wait_two_heartbeats(receiver, started, after, alert_count)
     for prefix in (BURNING, NORMAL, SILENT):
         provision(telemetry.api, alerts=[], destinations={}, prefix=prefix)
     return result
+
+
+def scenario_catalogs(
+    burning: str, normal: str, silent: str
+) -> tuple[tuple[str, list[Alert]], ...]:
+    """Os alertas que cada cenário provisiona, por prefixo, lendo os streams dados."""
+    # O alerta de disco lê as métricas do Collector, que são as mesmas para os dois cenários:
+    # fica só no da queima.
+    normal_catalog = [
+        a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
+    ]
+    # O agendador avalia uma quantidade limitada de alertas por vez, e a volta cresce com o número
+    # de alertas (scheduler_round.py). O cenário "queima" não tem span da manutenção, e só o
+    # "normal" precisa das causas lidas dele; menos alertas encurtam a volta.
+    idle_causes = {
+        f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
+    }
+    burning_catalog = [
+        a for a in alerts(stream=burning, prefix=BURNING) if a.name not in idle_causes
+    ]
+    silent_names = {f"{SILENT}{name}" for name in ABSENCE_CAUSES}
+    silent_catalog = [a for a in alerts(stream=silent, prefix=SILENT) if a.name in silent_names]
+    return ((BURNING, burning_catalog), (NORMAL, normal_catalog), (SILENT, silent_catalog))
+
+
+def _wait_two_heartbeats(
+    receiver: WebhookReceiver, started: float, after: float, alert_count: int
+) -> None:
+    heartbeat = f"{NORMAL}{DestinationKey.HEARTBEAT.value}"
+    timeout_s = two_rounds_timeout_s(alert_count)
+    try:
+        wait_until(
+            lambda: True if len(receiver.at(heartbeat, after)) >= 2 else None,
+            "duas avaliações do cenário normal",
+            timeout_s,
+        )
+    except TimeoutError as error:
+        # Sem os instantes, o próximo flake não diz se o agendador ficou lento ou parou.
+        received = [n.received for n in receiver.at(heartbeat, started)]
+        raise TimeoutError(
+            f"{error}: {heartbeat_report(received, after, alert_count, timeout_s)}"
+        ) from error
 
 
 def _write_burning_traffic(telemetry: Telemetry, stream: str) -> None:

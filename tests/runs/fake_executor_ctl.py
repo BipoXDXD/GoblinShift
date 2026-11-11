@@ -8,9 +8,10 @@ Fala HTTP/1.1 com corpo JSON e as operações do serviço (`start`, `status`, `s
 - sem `command`, o "container" é só um estado controlado pelo teste (`containers`).
 
 Os controles simulam falhas do serviço: `docker_down` (503), `response_delay_s` (resposta mais
-lenta que o timeout do cliente), `unstoppable` (o `stop` não consegue parar), `close()` (socket
-fora do ar), `image_route_installed` (`False`: serviço anterior à rota `image`) e
-`image_response` (corpo fora do contrato). `calls` registra a ordem das operações recebidas.
+lenta que o timeout do cliente), `unstoppable` (o `stop` não consegue parar), `after_start_run`
+(algo acontece entre a criação do container e a resposta do `start`), `close()` (socket fora do
+ar), `image_route_installed` (`False`: serviço anterior à rota `image`) e `image_response` (corpo
+fora do contrato). `calls` registra a ordem das operações recebidas.
 """
 
 import contextlib
@@ -80,6 +81,13 @@ class FakeExecutorCtl:
     oom_on_exit: bool = False
     # Chamado com o `attempt_id` no início de cada `stop`, antes de parar.
     on_stop: Callable[[str], None] | None = None
+    # Chamado com o `attempt_id` depois que o `start` criou o "container" e antes da resposta,
+    # fora do lock: a janela do serviço real entre o `docker run` e o `inspect` final.
+    after_start_run: Callable[[str], None] | None = None
+    # Chamado com o `attempt_id` depois de cada `status` calculado e antes da resposta, fora da
+    # trava do falso: o que o gancho fizer (no banco ou no próprio ctl, como outro processo)
+    # acontece entre a resposta que o cliente vai ler e a chamada seguinte dele.
+    on_status: Callable[[str], None] | None = None
     last_start_body: object = None
     # O que o daemon tem, para a rota `image`.
     present_images: Sequence[str] = (IMAGE,)
@@ -131,14 +139,12 @@ class FakeExecutorCtl:
             return 400, _error("invalid_attempt_id")
         if attempt_id != raw_id:
             return 400, _error("invalid_attempt_id")
+        if (method, action) == ("POST", "/start"):
+            return self._start_and_inspect(attempt_id, body)
+        if (method, action) == ("GET", None):
+            return 200, self._status_then_hook(attempt_id)
         with self._lock:
             match method, action:
-                case "POST", "/start":
-                    self.calls.append(("start", attempt_id))
-                    return self._start(attempt_id, body)
-                case "GET", None:
-                    self.calls.append(("status", attempt_id))
-                    return 200, self._status(attempt_id)
                 case "POST", "/stop":
                     self.calls.append(("stop", attempt_id))
                     return self._stop(attempt_id, body)
@@ -161,6 +167,25 @@ class FakeExecutorCtl:
         if self.image_response is not None:
             return 200, self.image_response
         return 200, {"present": ref in self.present_images}
+
+    def _start_and_inspect(self, attempt_id: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
+        """Como o serviço real: cria sob o lock e lê o estado de novo depois de soltá-lo."""
+        with self._lock:
+            self.calls.append(("start", attempt_id))
+            code, document = self._start(attempt_id, body)
+        if code != 200 or self.after_start_run is None:
+            return code, document
+        self.after_start_run(attempt_id)
+        with self._lock:
+            return code, self._status(attempt_id)
+
+    def _status_then_hook(self, attempt_id: str) -> dict[str, object]:
+        with self._lock:
+            self.calls.append(("status", attempt_id))
+            status = self._status(attempt_id)
+        if self.on_status is not None:
+            self.on_status(attempt_id)
+        return status
 
     def _start(self, attempt_id: str, body: bytes) -> tuple[int, dict[str, Any] | None]:
         document = _json_object(body)

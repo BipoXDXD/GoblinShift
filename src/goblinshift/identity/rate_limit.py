@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from goblinshift.identity.tables import request_window
+from goblinshift.platform.sql import skip_locked_batch
 
 WINDOW: Final = timedelta(minutes=1)
 
@@ -88,18 +89,17 @@ def delete_expired_windows(session: Session, now: datetime, limit: int) -> int:
     key = tuple_(
         request_window.c.owner_id, request_window.c.request_class, request_window.c.window_start
     )
-    chosen = (
+    chosen = skip_locked_batch(
         select(
             request_window.c.owner_id,
             request_window.c.request_class,
             request_window.c.window_start,
-        )
-        .where(request_window.c.window_start < previous_window)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
+        ).where(request_window.c.window_start < previous_window),
+        limit,
     )
+    chosen_keys = select(chosen.c.owner_id, chosen.c.request_class, chosen.c.window_start)
     deleted = session.execute(
-        delete(request_window).where(key.in_(chosen)).returning(request_window.c.owner_id)
+        delete(request_window).where(key.in_(chosen_keys)).returning(request_window.c.owner_id)
     )
     return len(deleted.all())
 

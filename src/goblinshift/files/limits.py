@@ -28,6 +28,9 @@ INCOMPLETE_UPLOAD_TTL = timedelta(hours=1)
 READY_UPLOAD_TTL = timedelta(hours=24)
 ARTIFACT_TTL = timedelta(hours=48)
 USED_INPUT_TTL = timedelta(hours=48)
+# Temporário de gravação sem modificação há mais que isto foi abandonado por uma queda. Bem acima da
+# transferência mais longa (10 min), para nunca atingir uma gravação viva.
+STALE_TEMPORARY_TTL = INCOMPLETE_UPLOAD_TTL
 
 # Transferências (1.7), contadas por direção (envio ou download).
 MAX_TRANSFERS_PER_ACCOUNT = 2

@@ -192,18 +192,18 @@ def test_confere_a_cota_e_so_entao_roda_as_duas_receitas() -> None:
 def test_o_ffmpeg_completo_chega_antes_das_fixtures_de_video() -> None:
     install = step_named("Instalar o FFmpeg completo (vídeos sintéticos do Media Mill)")
 
-    assert "apt-get install -yq ffmpeg" in install["run"]
+    assert install["run"].strip() == 'scripts/ci-apt-instalar.sh "$DEBS" ffmpeg'
     assert step_index(install["name"]) < step_index("Media Mill")
 
 
-def test_o_apt_nao_depende_do_espelho_do_azure_nem_consome_o_timeout_do_job() -> None:
+def test_o_apt_troca_de_espelho_lento_sem_cache_nem_consumir_o_timeout_do_job() -> None:
     install = step_named("Instalar o FFmpeg completo (vídeos sintéticos do Media Mill)")
-    run = install["run"]
+    uses = [step.get("uses", "") for step in journey()["steps"]]
 
-    assert run.index("azure.archive.ubuntu.com") < run.index("apt-get update")
-    assert "xargs -0 -r sudo sed -i" in run
-    assert "/archive.ubuntu.com/g" in run
+    assert "apt-get" not in install["run"]
+    assert install["env"] == {"DEBS": "${{ runner.temp }}/apt-debs"}
     assert install["timeout-minutes"] == 10
+    assert not any(u.startswith("actions/cache") for u in uses)
 
 
 def test_o_aviso_roda_mesmo_com_a_jornada_quebrada_ou_estourada() -> None:

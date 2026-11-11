@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { Field } from "../components/a11y/Field";
@@ -27,6 +28,7 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const save = useSave();
 
@@ -45,10 +47,16 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
       return;
     }
     const error = nameErrorOf(name);
-    setNameError(error);
     if (error !== null) {
+      // O foco sai do botão para o campo, que o leitor de tela lê com o erro na descrição; o erro
+      // entra no DOM antes do foco.
+      flushSync(() => {
+        setNameError(error);
+      });
+      nameInput.current?.focus();
       return;
     }
+    setNameError(null);
     save.mutate(
       { name: name.trim(), ...draft.command },
       {
@@ -99,6 +107,7 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
           {(control) => (
             <input
               {...control}
+              ref={nameInput}
               data-initial-focus=""
               autoComplete="off"
               value={name}

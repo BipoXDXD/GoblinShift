@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.identity.tables import api_key, app_user, audit_event, login_state, web_session
+from goblinshift.platform.sql import skip_locked_batch
 
 # Prazo da purga é 24 h (1.8); o alerta da fatia 8 dispara antes, com margem para agir.
 DELETION_OVERDUE_AFTER = timedelta(hours=20)
@@ -100,6 +101,7 @@ def _delete_batch(
     condition: ColumnElement[bool],
     limit: int,
 ) -> int:
-    chosen = select(key).where(condition).limit(limit).with_for_update(skip_locked=True)
-    deleted = session.execute(delete(table).where(key.in_(chosen.scalar_subquery())).returning(key))
+    """Apaga até `limit` linhas que atendem `condition`, pulando as travadas por outra transação."""
+    chosen = skip_locked_batch(select(key).where(condition), limit)
+    deleted = session.execute(delete(table).where(key.in_(select(chosen.c[0]))).returning(key))
     return len(deleted.all())

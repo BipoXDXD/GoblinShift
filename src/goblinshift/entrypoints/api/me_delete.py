@@ -14,7 +14,13 @@ Repetir é seguro: responde 202 de novo, mantém o primeiro pedido e completa o 
 from fastapi import APIRouter, Request, Response
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.api.dependencies import DbSession, Now, RecentSessionPrincipal, Storage
+from goblinshift.entrypoints.api.dependencies import (
+    DbSession,
+    Now,
+    RecentSessionPrincipal,
+    RunFinished,
+    Storage,
+)
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from goblinshift.identity import (
     AuditEventType,
@@ -36,6 +42,7 @@ def delete_me(
     principal: RecentSessionPrincipal,
     session: DbSession,
     storage: Storage,
+    finished: RunFinished,
     now: Now,
     request: Request,
 ) -> Response:
@@ -56,5 +63,5 @@ def delete_me(
         ) from None
     # O cancelamento abre as próprias transações curtas; por isso recebe a fábrica de Sessions.
     factory: sessionmaker[Session] = request.app.state.session_factory
-    cancel_active_run(factory, storage, principal.owner_id)
+    cancel_active_run(factory, storage, principal.owner_id, on_finished=finished.report)
     return Response(status_code=202, headers={"Clear-Site-Data": CLEAR_SITE_DATA})

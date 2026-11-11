@@ -12,6 +12,11 @@ const T = TEXT.credits;
 /** O selo b1, a marca secundária: só aqui no site (e na imagem de compartilhamento). */
 const SEAL_PX = 128;
 const BRAND_HEADING_ID = "creditos-marca";
+/** Mesmo endereço que os Termos citam: o arquivo na `main` do repositório público. */
+const ART_LICENSE_REGISTRY_URL =
+  "https://github.com/BipoXDXD/GoblinShift/blob/main/docs/art/LICENSE-ART.md";
+/** O texto legal da licença, na tradução oficial em português. */
+const CC_BY_4_URL = "https://creativecommons.org/licenses/by/4.0/legalcode.pt";
 
 /**
  * /creditos: de onde vieram as ilustrações e as fontes. Curto e fora dos textos jurídicos de
@@ -24,9 +29,20 @@ export function CreditsPage(): ReactElement {
       <FocusHeading>{T.title}</FocusHeading>
       <section className="flex max-w-prose flex-col gap-3">
         <h2 className="font-display text-xl font-semibold text-fg">{T.artHeading}</h2>
-        {T.art.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
+        <p>
+          {T.art.cast.before}
+          <a href={ART_LICENSE_REGISTRY_URL} rel="noreferrer">
+            {T.art.cast.link}
+          </a>
+          {T.art.cast.after}
+        </p>
+        <p>
+          {T.art.license.before}
+          <a href={CC_BY_4_URL} hrefLang="pt" rel="noreferrer">
+            {T.art.license.link}
+          </a>
+          {T.art.license.after}
+        </p>
       </section>
       <GoblinCast />
       <section

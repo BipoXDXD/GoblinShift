@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CircleCheck, Clock } from "lucide-react";
-import { useId, useState, type ReactElement } from "react";
+import { useId, useRef, useState, type ReactElement, type Ref } from "react";
+import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -30,6 +31,9 @@ const T = TEXT.account.keys;
 /**
  * Chaves de API (5.5): a lista, "Nova chave" secundária e "Revogar" terciária com confirmação em
  * vermelho. O segredo da chave criada fica só no estado desta seção.
+ *
+ * Cada bloco que some leva o foco a um destino fixo (WCAG 2.4.3): fechar o formulário ou a chave
+ * criada volta a "Nova chave"; revogar volta ao título da seção, porque o Revogar some.
  */
 export function ApiKeysSection({ now }: { readonly now: () => number }): ReactElement {
   const headingId = useId();
@@ -40,16 +44,26 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
   });
   const [formOpen, setFormOpen] = useState(false);
   const [created, setCreated] = useState<CreatedApiKey | null>(null);
-  const revoke = useRevoke();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const newKey = useRef<HTMLButtonElement>(null);
+  const focusHeading = (): void => {
+    heading.current?.focus();
+  };
+  const revoke = useRevoke(focusHeading, now);
   const openForm = (): void => {
     setCreated(null);
     setFormOpen(true);
+  };
+  // "Nova chave" volta no mesmo render que tira o bloco; sem a lista (carregando, falha), o título.
+  const closeAndFocusNewKey = (close: () => void): void => {
+    flushSync(close);
+    (newKey.current ?? heading.current)?.focus();
   };
   return (
     <Card as="section" aria-labelledby={headingId}>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h2 id={headingId} className="text-lg font-semibold text-fg">
+          <h2 id={headingId} ref={heading} tabIndex={-1} className="text-lg font-semibold text-fg">
             {T.heading}
           </h2>
           <p className="max-w-prose text-fg-muted">{T.intro}</p>
@@ -63,7 +77,9 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
           <NewKeyReveal
             apiKey={created}
             onDone={() => {
-              setCreated(null);
+              closeAndFocusNewKey(() => {
+                setCreated(null);
+              });
             }}
           />
         )}
@@ -74,7 +90,9 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
               setCreated(key);
             }}
             onCancel={() => {
-              setFormOpen(false);
+              closeAndFocusNewKey(() => {
+                setFormOpen(false);
+              });
             }}
           />
         )}
@@ -83,6 +101,7 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
           error={keys.error}
           nowMs={now()}
           formOpen={formOpen}
+          newKeyRef={newKey}
           onNewKey={openForm}
           onRevoke={revoke.ask}
         />
@@ -110,6 +129,7 @@ interface KeysBodyProps {
   readonly error: Error | null;
   readonly nowMs: number;
   readonly formOpen: boolean;
+  readonly newKeyRef: Ref<HTMLButtonElement>;
   readonly onNewKey: () => void;
   readonly onRevoke: (key: ApiKey) => void;
 }
@@ -119,6 +139,7 @@ function KeysBody({
   error,
   nowMs,
   formOpen,
+  newKeyRef,
   onNewKey,
   onRevoke,
 }: KeysBodyProps): ReactElement | null {
@@ -130,7 +151,7 @@ function KeysBody({
     );
   }
   const newKeyButton = formOpen ? null : (
-    <Button type="button" variant="secondary" onClick={onNewKey}>
+    <Button ref={newKeyRef} type="button" variant="secondary" onClick={onNewKey}>
       {T.newKey}
     </Button>
   );
@@ -235,8 +256,13 @@ interface Revoke {
   readonly confirm: () => void;
 }
 
-/** Revogar com confirmação. A chave que já não existe (404) só some da lista, com um aviso. */
-function useRevoke(): Revoke {
+/**
+ * Revogar com confirmação. A chave que já não existe (404) só some da lista, com um aviso.
+ * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 404 e na falha genérica
+ * (5xx, timeout) que o servidor aplicou mesmo assim, com o Revogar fora da lista. A decisão é
+ * tomada uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2).
+ */
+function useRevoke(onListUpdated: () => void, now: () => number): Revoke {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<ApiKey | null>(null);
@@ -251,9 +277,17 @@ function useRevoke(): Revoke {
         setMessage(T.notFound);
       }
     },
-    onSettled: async () => {
-      setTarget(null);
+    onSettled: async (_result, error, key) => {
+      // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
+      flushSync(() => {
+        setTarget(null);
+      });
       await queryClient.invalidateQueries({ queryKey: API_KEYS_QUERY_KEY });
+      // Pelo dado, não pelo foco: o Revogar só sai do DOM no próximo commit.
+      const relisted = queryClient.getQueryData<readonly ApiKey[]>(API_KEYS_QUERY_KEY);
+      if (error === null || isNotFound(error) || !isRevocable(relisted, key, now())) {
+        onListUpdated();
+      }
     },
   });
   const failure = mutation.error !== null && !isNotFound(mutation.error) ? mutation.error : null;
@@ -280,6 +314,12 @@ function useRevoke(): Revoke {
       }
     },
   };
+}
+
+/** O Revogar desta chave continua na lista: ela está lá e ainda ativa. */
+function isRevocable(keys: readonly ApiKey[] | undefined, key: ApiKey, nowMs: number): boolean {
+  const listed = keys?.find((candidate) => candidate.id === key.id);
+  return listed !== undefined && keyStatus(listed, nowMs) === "active";
 }
 
 function isNotFound(error: Error): boolean {

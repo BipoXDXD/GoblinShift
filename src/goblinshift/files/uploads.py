@@ -23,6 +23,7 @@ from goblinshift.files.errors import (
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
+    UploadObjectNotPendingError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -53,6 +54,18 @@ _FORBIDDEN_NAME_CHAR = re.compile(rf"[{_CONTROL_CHARS}\ud800-\udfff]")
 # lookahead; e os surrogates soltos, cuja faixa num conjunto negado o gerador do Schemathesis
 # 4.31 interpreta errado (gera caracteres que o padrão recusa). Todos seguem recusados aqui.
 UPLOAD_NAME_PATTERN = rf"^[^/\\{_CONTROL_CHARS}]*$"
+
+# Só o que `_view` lê: uma coluna nova na tabela não entra na projeção sem que alguém a use.
+_VIEW_COLUMNS = (
+    upload.c.id,
+    upload.c.original_name,
+    upload.c.expected_size,
+    upload.c.state,
+    upload.c.created_at,
+    upload.c.ready_at,
+    upload.c.expires_at,
+    upload.c.deleted_at,
+)
 
 
 class UploadIntent(NamedTuple):
@@ -102,7 +115,7 @@ def create_intents(
     rows = session.execute(
         insert(upload)
         .values(expires_at=func.now() + INCOMPLETE_UPLOAD_TTL)
-        .returning(*upload.c, sort_by_parameter_order=True),
+        .returning(*_VIEW_COLUMNS, sort_by_parameter_order=True),
         [
             {
                 "owner_id": owner_id,
@@ -166,7 +179,7 @@ def receive_content(
 def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> UploadView:
     row = session.execute(
         select(
-            *upload.c,
+            *_VIEW_COLUMNS,
             stored_object.c.size_bytes,
             stored_object.c.sha256,
             stored_object.c.state.label("object_state"),
@@ -344,13 +357,16 @@ def _complete(
     ).scalar_one_or_none()
     if object_id is None:
         return False
-    session.execute(
+    committed = session.execute(
         update(stored_object)
         .where(stored_object.c.id == object_id, stored_object.c.state == ObjectState.PENDING)
         .values(
             state=ObjectState.COMMITTED, sha256=sha256, size_bytes=size, committed_at=func.now()
         )
-    )
+        .returning(stored_object.c.id)
+    ).scalar_one_or_none()
+    if committed is None:
+        raise UploadObjectNotPendingError(object_id)
     _move_reservation_to_object(session, upload_id, object_id, size)
     return True
 

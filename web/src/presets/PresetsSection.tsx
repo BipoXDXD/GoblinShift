@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { useId, useState, type ReactElement } from "react";
+import { useId, useRef, useState, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 import { Link } from "react-router";
 
 import { useMe } from "../account/useMe";
@@ -22,7 +23,10 @@ const T = TEXT.presets;
 /**
  * Presets na Oficina (2.2): os da conta, cada um abrindo a Bancada pré-preenchida, e Excluir
  * terciária com confirmação em vermelho. Só com a sessão confirmada: o visitante não vê a seção
- * nem gera um 401 a cada visita.
+ * nem gera um 401 a cada visita. Depois de excluir (204), o foco vai para o título da seção,
+ * porque o Excluir que abriu o diálogo saiu da lista. Na revisão vencida (412) o preset continua
+ * listado, mas o foco vai ao mesmo título, para o destino ser um só e o aviso ser lido a partir
+ * dele (WCAG 2.4.3).
  */
 export function PresetsSection(): ReactElement | null {
   const headingId = useId();
@@ -34,13 +38,21 @@ export function PresetsSection(): ReactElement | null {
     queryFn: ({ signal }) => listPresets(client, signal),
     enabled: signedIn,
   });
-  const removal = useRemoval();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const removal = useRemoval(() => {
+    heading.current?.focus();
+  });
   if (!signedIn) {
     return null;
   }
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <h2 id={headingId} className="text-sm font-semibold text-fg-muted">
+      <h2
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="text-sm font-semibold text-fg-muted"
+      >
         {T.heading}
       </h2>
       <PresetsBody presets={presets.data ?? null} error={presets.error} onRemove={removal.ask} />
@@ -146,8 +158,11 @@ interface Removal {
 /**
  * Excluir com confirmação e `If-Match`. Revisão vencida (412: o preset mudou em outro lugar) vira
  * aviso e a lista é relida; o servidor decide, sem tirar o item da lista antes da resposta.
+ * `onListUpdated` recebe a vez depois de a lista ser relida no sucesso, no 412 e na falha genérica
+ * (5xx, timeout) que o servidor aplicou mesmo assim, com o preset fora da lista. A decisão é tomada
+ * uma vez, pela lista relida, e uma releitura posterior não move o foco (WCAG 3.2).
  */
-function useRemoval(): Removal {
+function useRemoval(onListUpdated: () => void): Removal {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<Preset | null>(null);
@@ -162,9 +177,17 @@ function useRemoval(): Removal {
         setMessage(T.changedElsewhere);
       }
     },
-    onSettled: async () => {
-      setTarget(null);
+    onSettled: async (_result, error, preset) => {
+      // Fecha já: o <dialog> devolve o foco a quem abriu ao fechar, e isso não pode vir depois.
+      flushSync(() => {
+        setTarget(null);
+      });
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
+      // Pelo dado, não pelo foco: o Excluir só sai do DOM no próximo commit.
+      const relisted = queryClient.getQueryData<readonly Preset[]>(PRESETS_QUERY_KEY);
+      if (error === null || isStale(error) || !isListed(relisted, preset)) {
+        onListUpdated();
+      }
     },
   });
   const failure = mutation.error !== null && !isStale(mutation.error) ? mutation.error : null;
@@ -191,6 +214,10 @@ function useRemoval(): Removal {
       }
     },
   };
+}
+
+function isListed(presets: readonly Preset[] | undefined, preset: Preset): boolean {
+  return presets?.some((candidate) => candidate.id === preset.id) ?? false;
 }
 
 function isStale(error: Error): boolean {

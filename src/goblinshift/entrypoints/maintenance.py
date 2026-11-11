@@ -9,32 +9,34 @@ registra seu evento de log. A falha de um ciclo é registrada e o seguinte tenta
 usam
 `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
-SIGTERM e SIGINT terminam o ciclo em andamento e saem.
+SIGTERM e SIGINT terminam o ciclo em andamento e saem. O handler só marca uma flag
+(`ShutdownFlag`, entrypoints/shutdown.py), sem trava nem log, e a espera entre as voltas dorme em
+fatias curtas para vê-la.
 """
 
 import logging
-import signal
-import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from types import FrameType
+from functools import partial
 from uuid import UUID
 
-from opentelemetry.trace import NoOpTracer, Status, StatusCode, Tracer
+from opentelemetry.trace import Status, StatusCode, Tracer
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.entrypoints.worker import build_runner, run_finished_reporter
+from goblinshift.entrypoints.shutdown import ShutdownFlag, shutdown_on_signals
+from goblinshift.entrypoints.worker import build_runner, process_tracer
 from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import configure_logging, make_tracer_provider
+from goblinshift.platform.telemetry import UserHasher, configure_logging
 from goblinshift.runs import purge as runs_purge
-from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.finished import RunFinishedReporter
+from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError, ExecutorCtlRunner
 from goblinshift.runs.worker.runner import Runner
 
@@ -61,16 +63,8 @@ def main() -> int:
     except (ExecutorConfigError, MissingSecretError) as error:
         logger.error("manutenção não sobe: %s", error)
         return EXIT_CONFIGURATION
-    shutdown = threading.Event()
-
-    def request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        logger.info("parada pedida", extra={"fields": {"signal": signum}})
-        shutdown.set()
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-    signal.signal(signal.SIGINT, request_shutdown)
     try:
-        serve(settings, runner, shutdown)
+        serve(settings, runner, shutdown_on_signals())
     except Exception:
         # Ver `worker.main`: a mensagem crua do banco não pode ir para o stderr.
         logger.exception("manutenção encerrada por erro")
@@ -78,16 +72,19 @@ def main() -> int:
     return EXIT_OK
 
 
-def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None:
+def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
     batch_settings = settings.model_copy(
         update={"db_statement_timeout_ms": settings.maintenance_statement_timeout_ms}
     )
-    engine = make_engine(batch_settings)
-    factory = make_session_factory(engine)
-    provider = make_tracer_provider(settings, "goblinshift-maintenance")
-    tracer: Tracer = provider.get_tracer(__name__) if provider is not None else NoOpTracer()
-    try:
-        with run_finished_reporter(settings, factory, "goblinshift-maintenance") as finished:
+    # O tracing fecha por último, depois do pool, e mesmo se o `dispose` falhar: o encerramento
+    # descarta span emitido depois dele, e sem ele sobraria o `atexit` do SDK, que não tem prazo.
+    with process_tracer(settings, "goblinshift-maintenance") as tracer:
+        engine = make_engine(batch_settings)
+        factory = make_session_factory(engine)
+        try:
+            # Um provider por processo: o `maintenance.cycle` e o `run.finished` saem pelo mesmo
+            # lote, e a parada espera um prazo de encerramento só.
+            finished = RunFinishedReporter(factory, UserHasher(settings.user_hash_key()), tracer)
             maintenance = Maintenance(
                 factory,
                 FileStorage(settings.storage_root),
@@ -98,17 +95,23 @@ def serve(settings: Settings, runner: Runner, shutdown: threading.Event) -> None
             account_jobs = AccountJobs(factory)
             logger.info("manutenção pronta")
             cycles: tuple[Cycle, ...] = (
-                ("execuções", maintenance.run_cycle),
+                # A parada é conferida entre os passos, e a volta inteira não caberia na carência
+                # do Docker. Ociosa ou com o banco fora (o passo desiste no `connect_timeout`), a
+                # parada mais o prazo do tracing cabe (tests/runs/test_process_tracer_shutdown.py).
+                # Com o banco lento, não: um statement pode levar o `statement_timeout` da
+                # manutenção, e o SIGKILL pode chegar antes do fim dele. Risco aceito: perde os
+                # spans pendentes, não dados, porque o statement roda numa transação aberta, que
+                # o PostgreSQL reverte quando a conexão cai, e o passo se repete no ciclo seguinte.
+                ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
                 ("contas", account_jobs.run_cycle),
                 *executor_image_cycles(settings, runner),
             )
             while not shutdown.is_set():
-                run_cycles(tracer, cycles)
+                run_cycles(tracer, cycles, should_stop=shutdown.is_set)
                 shutdown.wait(settings.maintenance_interval_s)
-    finally:
-        engine.dispose()
-        if provider is not None:
-            provider.shutdown()
+            logger.info("parada pedida", extra={"fields": {"signal": shutdown.signum}})
+        finally:
+            engine.dispose()
     logger.info("manutenção encerrada")
 
 
@@ -120,12 +123,17 @@ def executor_image_cycles(settings: Settings, runner: Runner) -> tuple[Cycle, ..
     return (("imagem do executor", probe.run_cycle),)
 
 
-def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
+def run_cycles(
+    tracer: Tracer, cycles: Sequence[Cycle], should_stop: Callable[[], bool] = lambda: False
+) -> None:
     """Uma volta: roda os ciclos em sequência dentro de um span `maintenance.cycle`.
 
+    Com a parada pedida (`should_stop`), o ciclo seguinte não começa; o span sai com o que rodou.
+
     Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
-    com o prefixo `maintenance.`, e quantos falharam; a mensagem da exceção fica só no log, porque
-    pode trazer valores do banco (3.7).
+    com o prefixo `maintenance.`, e quantos falharam: os que levantaram e os que contaram passos
+    falhos (`steps_failed`); a mensagem da exceção fica só no log, porque pode trazer valores do
+    banco (3.7).
     """
     started = time.monotonic()
     with tracer.start_as_current_span(
@@ -133,6 +141,8 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
     ) as span:
         failed = 0
         for name, cycle in cycles:
+            if should_stop():
+                break
             try:
                 counts = cycle()
             except Exception:
@@ -142,6 +152,10 @@ def run_cycles(tracer: Tracer, cycles: Sequence[Cycle]) -> None:
                 continue
             for key, value in counts.items():
                 span.set_attribute(f"{_ATTRIBUTE_PREFIX}{key}", value)
+            if counts.get(STEPS_FAILED, 0) > 0:
+                # Passo que falhou dentro do ciclo: as contagens dos outros seguem no span, e a
+                # volta entra no mesmo alerta de quem levanta.
+                failed += 1
         span.set_attribute("main", True)
         span.set_attribute(f"{_ATTRIBUTE_PREFIX}failed_cycles", failed)
         span.set_attribute("duration_ms", round((time.monotonic() - started) * 1000))

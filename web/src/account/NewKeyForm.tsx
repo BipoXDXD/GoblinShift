@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type ReactElement, type SubmitEvent } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement, type SubmitEvent } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ErrorSummary, type FormIssue } from "../components/a11y/ErrorSummary";
@@ -25,11 +25,16 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
   const client = useApiClient();
   const queryClient = useQueryClient();
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const ids = { scopes: useId(), days: useId() };
   const [scopes, setScopes] = useState<ReadonlySet<Scope>>(new Set());
   const [days, setDays] = useState(String(KEY_DAYS.initial));
   const [errors, setErrors] = useState<NewKeyErrors>(NO_ERRORS);
   const [attempt, setAttempt] = useState(0);
+  // "Nova chave" some quando o formulário abre: sem isto, o foco cairia no <body>.
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
   const create = useMutation({
     mutationFn: (command: Parameters<typeof createApiKey>[1]) => createApiKey(client, command),
     // O segredo não fica na MutationCache depois que esta tela sai (gcTime 0) nem depois de
@@ -72,8 +77,8 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
   const issues: FormIssue[] = [
     ...(errors.scopes === null
       ? []
-      : [{ fieldId: firstScopeId(ids.scopes), message: errors.scopes }]),
-    ...(errors.days === null ? [] : [{ fieldId: ids.days, message: errors.days }]),
+      : [{ fieldId: firstScopeId(ids.scopes), label: T.scopes, message: errors.scopes }]),
+    ...(errors.days === null ? [] : [{ fieldId: ids.days, label: T.days, message: errors.days }]),
   ];
   return (
     <form
@@ -82,10 +87,10 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       onSubmit={submit}
       className="flex flex-col gap-6 rounded-lg bg-surface-sunken p-6"
     >
-      <h3 id={headingId} className="font-semibold text-fg">
+      <h3 id={headingId} ref={heading} tabIndex={-1} className="font-semibold text-fg">
         {T.formHeading}
       </h3>
-      <ErrorSummary issues={issues} attempt={attempt} />
+      <ErrorSummary issues={issues} attempt={attempt} headingLevel={4} />
       <FieldGroup id={ids.scopes} legend={T.scopes} error={errors.scopes}>
         <div className="flex flex-col gap-1">
           {SCOPES.map((scope, index) => (
@@ -133,7 +138,7 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
       {create.error !== null && (
         <FailureNotice
           error={create.error}
-          headingLevel={3}
+          headingLevel={4}
           messages={{ STATE_CONFLICT: T.tooMany }}
         />
       )}

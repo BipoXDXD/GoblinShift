@@ -233,6 +233,22 @@ describe("useRunPolling", () => {
     expect(requestCount()).toBe(4);
   });
 
+  it("avisa já no primeiro timeout depois de um sucesso e continua consultando", async () => {
+    const { client, requestCount } = fakeClient([
+      (): Outcome => ({ run: run("running"), retryAfterMs: 2_000 }),
+      (): Outcome => ({ failure: { kind: "timeout" } }),
+    ]);
+    const { result } = setup(client);
+    await advance(0);
+    expect(result.current.failure).toBeNull();
+
+    await advance(2_000);
+
+    expect(failureOf(result.current.failure)).toEqual({ kind: "timeout" });
+    await advance(2_000);
+    expect(requestCount()).toBe(3);
+  });
+
   it("para quando a execução não existe", async () => {
     const notFound = {
       type: "https://goblinshift.dev/problems/not-found",

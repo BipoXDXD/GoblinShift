@@ -275,4 +275,6 @@ def test_sigterm_encerra_o_worker_ocioso(
         worker.send_signal(signal.SIGTERM)
 
         assert worker.wait(timeout=WAIT_S) == 0
-    assert "worker encerrado" in log.read_text(encoding="utf-8")
+    output = log.read_text(encoding="utf-8")
+    assert output.count("parada pedida") == 1, output
+    assert "worker encerrado" in output

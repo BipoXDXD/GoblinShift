@@ -12,7 +12,7 @@ import { expect, test, THEMES, useTheme } from "../support/test";
 const MIN_RING_PX = 2;
 const MIN_RING_CONTRAST = 3;
 // Teto de paradas por tela, só para pegar armadilha de foco: a maior é o Histórico com uma página
-// cheia (25 linhas com o link da execução e o "Reusar configuração", mais filtros e moldura).
+// cheia (25 linhas com o link da execução e o "Reutilizar parâmetros", mais filtros e moldura).
 const MAX_TAB_STOPS = 100;
 // O bloco de execuções recentes da Oficina, só presente em conta com execuções.
 const RECENT_RUN_STOP = /, criada em |^Ver o histórico completo$/;

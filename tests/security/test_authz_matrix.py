@@ -4,7 +4,6 @@ Cada teste de acesso confere o status e o código do problem+json, e que o corpo
 da conta.
 """
 
-import re
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -24,11 +23,16 @@ from goblinshift.identity.tables import audit_event
 from goblinshift.platform.settings import Settings
 from tests.api.support import assert_problem
 from tests.identity.support import ALL_SCOPES, new_key, new_user, prepare_database
-from tests.security.authz_matrix import MATRIX, Policy, Rule, entries
+from tests.security.authz_matrix import (
+    MATRIX,
+    Policy,
+    Rule,
+    entries,
+    fill_path,
+)
 
 # HEAD acompanha GET nas rotas do Starlette e não é uma operação à parte.
 _IMPLICIT_METHODS = {"HEAD"}
-_PATH_PARAM = re.compile(r"\{(?P<name>[a-z_]+)\}")
 _ACCOUNT_NAME = "Conta de teste"
 
 
@@ -42,23 +46,9 @@ def _registered_routes(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
-# Parâmetros que não são ids: um valor da allowlist da própria rota.
-# Parâmetros de caminho que não são UUID; os demais recebem um UUID novo.
-_NAMED_VALUES = {
-    "provider": "google",
-    "name": "swagger-init.js",
-    "recipe_id": "csv-janitor",
-    "version": "1",
-}
-
-
 def _concrete(path: str) -> str:
     """Troca cada parâmetro do caminho por um valor que passa na validação do tipo."""
-
-    def value(match: re.Match[str]) -> str:
-        return _NAMED_VALUES.get(match["name"]) or str(uuid4())
-
-    return _PATH_PARAM.sub(value, path)
+    return fill_path(path)
 
 
 def _cases(*policies: Policy) -> list[object]:
@@ -109,12 +99,6 @@ def test_so_o_logout_dispensa_credencial_mas_exige_o_par_csrf() -> None:
     assert [(method, path) for method, path, _ in entries(Policy.CSRF_ONLY)] == [
         ("POST", "/auth/logout")
     ]
-
-
-def test_toda_rota_com_recurso_declara_o_parametro_do_caminho() -> None:
-    for (_, path), rule in MATRIX.items():
-        if rule.resource_param is not None:
-            assert f"{{{rule.resource_param}}}" in path
 
 
 # --- Comportamento (PostgreSQL real) ----------------------------------------------------------

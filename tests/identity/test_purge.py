@@ -270,3 +270,31 @@ def test_retencao_respeita_o_tamanho_do_lote(factory: sessionmaker[Session]) -> 
         assert delete_expired_login_states(session, NOW, 2) == 2
     with unit_of_work(factory) as session:
         assert delete_expired_login_states(session, NOW, 2) == 1
+
+
+def insert_expired_login_states(factory: sessionmaker[Session], count: int) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(login_state),
+            [
+                {"key": f"k{i}", "value": "{}", "expires_at": NOW - timedelta(hours=1)}
+                for i in range(count)
+            ],
+        )
+
+
+def test_lote_pula_linhas_travadas_e_nao_passa_do_teto(factory: sessionmaker[Session]) -> None:
+    insert_expired_login_states(factory, 6)
+
+    with factory() as holder, holder.begin():
+        holder.execute(
+            select(login_state.c.key).where(login_state.c.key.in_(["k0", "k1"])).with_for_update()
+        ).all()
+        with unit_of_work(factory) as session:
+            removed = delete_expired_login_states(session, NOW, 2)
+
+    assert removed == 2
+    with factory() as session:
+        left = set(session.execute(select(login_state.c.key)).scalars())
+    assert len(left) == 4
+    assert {"k0", "k1"} <= left

@@ -1,17 +1,30 @@
 import { useQuery, type Query, type UseQueryResult } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
 import type { ApiResponse } from "../api/response";
 import { announcementFor, type RunProgressSnapshot } from "./announce";
-import { getRun, type RunDetail } from "./api";
-import { nextPollDelayMs, type PollSnapshot } from "./polling";
+import { getRun, type RunDetail, type RunStatus } from "./api";
+import { isPersistentFailure, nextPollDelayMs, type PollSnapshot } from "./polling";
 
 interface RunPolling {
   /** Estado da consulta do TanStack Query; `data` é a execução já validada. */
   readonly query: UseQueryResult<RunDetail>;
   /** Texto da região `aria-live="polite"`; muda só quando status ou fase mudam. */
   readonly announcement: string | null;
+  /**
+   * Avisa que outra região da página já anunciou este status (a resposta do cancelamento); a
+   * próxima mudança para ele não é repetida. Corrida aceita: se o polling ler o status novo antes
+   * de a resposta do pedido chegar, as duas regiões anunciam. Fechá-la exigiria levar a resposta
+   * do POST ao cache do polling, e o CancelRun decidiu não fazer atualização otimista.
+   */
+  readonly acknowledge: (status: RunStatus) => void;
+  /**
+   * Falha a mostrar no FailureNotice, ou `null`: alerta, ou o convite para entrar de novo (401) e
+   * para aceitar os termos. Sem execução na tela, qualquer falha. Com ela, só a persistente
+   * (polling.ts): a oscilação da rede some na próxima consulta e não vira anúncio.
+   */
+  readonly failure: Error | null;
 }
 
 interface RunPollingOptions {
@@ -59,7 +72,37 @@ export function useRunPolling(runId: string, options: RunPollingOptions = {}): R
     },
   });
 
-  return { query, announcement: useAnnouncement(query.data) };
+  const failureStreak = useFailureStreak(query);
+  const failure =
+    query.error !== null &&
+    (query.data === undefined || isPersistentFailure(query.error, failureStreak))
+      ? query.error
+      : null;
+  return { query, failure, ...useAnnouncement(query.data) };
+}
+
+/**
+ * Falhas seguidas, para a renderização; o `consecutiveFailures` do polling é ref, lido só fora
+ * dela. Cada falha nova aumenta `errorUpdateCount`; o sucesso zera o `error` e a contagem.
+ *
+ * Ao voltar à execução, o cache traz o `errorUpdateCount` de todas as falhas que já viu, seguidas ou
+ * não. A contagem parte dele, e o erro ainda no cache conta como uma falha só: é o que se sabe
+ * de seguido.
+ */
+function useFailureStreak(query: UseQueryResult<RunDetail>): number {
+  const [tracked, setTracked] = useState(() => ({
+    errors: query.errorUpdateCount,
+    streak: query.error === null ? 0 : 1,
+  }));
+  const errors = query.errorUpdateCount;
+  const recovered = query.error === null;
+  if (errors !== tracked.errors || (recovered && tracked.streak !== 0)) {
+    // Ajuste de estado durante a renderização, como em useAnnouncement.
+    const streak = recovered ? 0 : tracked.streak + errors - tracked.errors;
+    setTracked({ errors, streak });
+    return streak;
+  }
+  return tracked.streak;
 }
 
 function pollSnapshot(query: RunQuery, consecutiveFailures: number): PollSnapshot | null {
@@ -81,20 +124,31 @@ function lastUpdatedAt(query: RunQuery): number {
   return Math.max(query.state.dataUpdatedAt, query.state.errorUpdatedAt);
 }
 
-function useAnnouncement(run: RunDetail | undefined): string | null {
+function useAnnouncement(run: RunDetail | undefined): {
+  readonly announcement: string | null;
+  readonly acknowledge: (status: RunStatus) => void;
+} {
   const [tracked, setTracked] = useState<{
     snapshot: RunProgressSnapshot | null;
     announcement: string | null;
-  }>({ snapshot: null, announcement: null });
+    acknowledged: RunStatus | null;
+  }>({ snapshot: null, announcement: null, acknowledged: null });
   if (run !== undefined && changed(tracked.snapshot, run)) {
     const next = { status: run.status, phase: run.progress.phase };
     // Ajuste de estado durante a renderização: o padrão do React para estado derivado de dados.
     setTracked({
       snapshot: next,
-      announcement: announcementFor(tracked.snapshot, next) ?? tracked.announcement,
+      announcement:
+        announcementFor(tracked.snapshot, next, tracked.acknowledged) ?? tracked.announcement,
+      // Vale só para uma transição: o status já foi silenciado uma vez e não se repete na
+      // Execução, então a marca não serve para mais nada.
+      acknowledged: next.status === tracked.acknowledged ? null : tracked.acknowledged,
     });
   }
-  return tracked.announcement;
+  const acknowledge = useCallback((status: RunStatus) => {
+    setTracked((current) => ({ ...current, acknowledged: status }));
+  }, []);
+  return { announcement: tracked.announcement, acknowledge };
 }
 
 function changed(previous: RunProgressSnapshot | null, run: RunDetail): boolean {

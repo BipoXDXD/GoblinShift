@@ -30,14 +30,15 @@ const browserStorage = (): Storage => window.localStorage;
 interface Options {
   readonly now?: number;
   readonly storage?: () => Pick<Storage, "getItem" | "setItem">;
+  readonly onDismissed?: () => void;
 }
 
 function banner(
   value: SiteNotice | null,
-  { now = INSIDE, storage = browserStorage }: Options = {},
+  { now = INSIDE, storage = browserStorage, onDismissed = () => undefined }: Options = {},
 ) {
   const element: ReactElement = (
-    <SiteNoticeBanner notice={value} now={() => now} storage={storage} />
+    <SiteNoticeBanner notice={value} now={() => now} storage={storage} onDismissed={onDismissed} />
   );
   const router = createMemoryRouter([{ path: "/", element }]);
   return render(<RouterProvider router={router} />);
@@ -100,24 +101,53 @@ describe("SiteNoticeBanner: quando aparece", () => {
 });
 
 describe("SiteNoticeBanner: Fechar", () => {
-  it.each(["incident", "shutdown"] as const)("%s não tem Fechar", (kind) => {
+  it.each(["incident", "shutdown"] as const)("%s não tem Fechar aviso", (kind) => {
     banner(notice(kind));
 
-    expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Fechar/ })).toBeNull();
   });
 
   it("terms-change fecha e guarda o id", async () => {
     banner(notice("terms-change"));
 
-    await userEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Fechar aviso" }));
 
     expect(screen.queryByRole("region")).toBeNull();
     expect(window.localStorage.getItem("gs-notice-dismissed")).toBe("aviso-terms-change");
   });
 
+  it("o rótulo visível é só Fechar; o nome completo vem do texto para leitor de tela", () => {
+    banner(notice("terms-change"));
+
+    // A 320 px o rótulo longo apertava a coluna do texto da faixa; o nome continua
+    // "Fechar aviso" e contém o rótulo visível (WCAG 2.5.3).
+    const button = screen.getByRole("button", { name: "Fechar aviso" });
+    const hidden = Array.from(button.querySelectorAll(".sr-only"));
+    expect(hidden.map((node) => node.textContent)).toEqual(["aviso"]);
+    const visible = Array.from(button.childNodes)
+      .filter((node) => !(node instanceof Element && node.classList.contains("sr-only")))
+      .map((node) => node.textContent)
+      .join("")
+      .trim();
+    expect(visible).toBe("Fechar");
+  });
+
+  it("depois de fechar, avisa quem leva o foco adiante, uma vez", async () => {
+    let calls = 0;
+    banner(notice("terms-change"), {
+      onDismissed: () => {
+        calls += 1;
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Fechar aviso" }));
+
+    expect(calls).toBe(1);
+  });
+
   it("fechado continua fechado na próxima carga", async () => {
     const first = banner(notice("terms-change"));
-    await userEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Fechar aviso" }));
     first.unmount();
 
     const { container } = banner(notice("terms-change"));
@@ -147,7 +177,7 @@ describe("SiteNoticeBanner: Fechar", () => {
     };
     banner(notice("terms-change"), { storage: blocked });
 
-    await userEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Fechar aviso" }));
 
     expect(screen.queryByRole("region")).toBeNull();
   });

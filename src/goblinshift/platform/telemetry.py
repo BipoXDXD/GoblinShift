@@ -12,11 +12,13 @@ import logging
 import os
 import re
 import sys
+import threading
 import traceback
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import psycopg
@@ -34,7 +36,7 @@ from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import Span, Status, StatusCode, get_current_span
+from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -46,6 +48,9 @@ _DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
 _POOL_LOGGER_PREFIX = "sqlalchemy.pool"
 # O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
 _PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
+# Classe (2) e condição (3) do PostgreSQL; o que não casar não vai para o log nem para a tela.
+_SQLSTATE = re.compile(r"[0-9A-Z]{5}")
+_SQLSTATE_ATTRIBUTE = "sqlstate"
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,9 @@ class JsonFormatter(logging.Formatter):
         fields = getattr(record, "fields", None)
         if isinstance(fields, dict):
             entry.update(fields)
+        sqlstate = getattr(record, _SQLSTATE_ATTRIBUTE, None)
+        if sqlstate is not None:
+            entry[_SQLSTATE_ATTRIBUTE] = sqlstate
         if record.exc_info:
             entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         return json.dumps(entry, ensure_ascii=False)
@@ -72,8 +80,9 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
 
     A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
     do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
-    `exc_info`: o registro continua com a exceção. Qualquer outra exceção sai inteira. As mensagens
-    do pool perdem o repr da conexão.
+    `exc_info`: o registro continua com a exceção. O SQLSTATE do PostgreSQL, que é só um código,
+    fica junto do tipo e no atributo `sqlstate` do registro. Qualquer outra exceção sai inteira. As
+    mensagens do pool perdem o repr da conexão.
     """
     if record.name.startswith(_POOL_LOGGER_PREFIX):
         record.msg = _PSYCOPG_CONNECTION_REPR.sub("<psycopg connection>", record.getMessage())
@@ -81,10 +90,36 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
-    chain = list(_exception_chain(exception))
-    if any(isinstance(item, _DATABASE_ERRORS) for item in chain):
+    if is_database_error(exception):
+        chain = _exception_chain(exception)
         record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
+        sqlstate = database_sqlstate(exception)
+        if sqlstate is not None:
+            setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
     return True
+
+
+def is_database_error(exception: BaseException) -> bool:
+    """Se há erro do SQLAlchemy ou do psycopg na cadeia que o traceback mostraria."""
+    return any(isinstance(item, _DATABASE_ERRORS) for item in _exception_chain(exception))
+
+
+def database_sqlstate(exception: BaseException) -> str | None:
+    """O SQLSTATE do primeiro erro do psycopg na cadeia, ou `None` se não houver um bem formado.
+
+    Só o código sai daqui, nunca a mensagem: ela pode trazer valores do usuário no `DETAIL`.
+    """
+    for item in _exception_chain(exception):
+        if isinstance(item, psycopg.Error):
+            return _well_formed_sqlstate(item)
+    return None
+
+
+def _well_formed_sqlstate(error: psycopg.Error) -> str | None:
+    sqlstate = error.sqlstate
+    if sqlstate is None or not _SQLSTATE.fullmatch(sqlstate):
+        return None
+    return sqlstate
 
 
 def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
@@ -107,7 +142,12 @@ def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
 def _type_and_frames(exception: BaseException) -> str:
     frames = "".join(traceback.format_tb(exception.__traceback__))
     kind = type(exception)
-    return f"Traceback (most recent call last):\n{frames}{kind.__module__}.{kind.__qualname__}"
+    described = f"{kind.__module__}.{kind.__qualname__}"
+    if isinstance(exception, psycopg.Error):
+        sqlstate = _well_formed_sqlstate(exception)
+        if sqlstate is not None:
+            described = f"{described} (SQLSTATE {sqlstate})"
+    return f"Traceback (most recent call last):\n{frames}{described}"
 
 
 class AlertEventCounter(logging.Handler):
@@ -153,6 +193,8 @@ UNKNOWN_ADDRESS = "unknown"
 # o IP do cliente; nomes antigos e novos das convenções semânticas.
 _URL_ATTRIBUTES = ("http.url", "url.full")
 _TARGET_ATTRIBUTES = ("http.target",)
+# Preenchidos com o header `Host`, que o cliente escreve como quiser.
+_SERVER_NAME_ATTRIBUTES = ("http.server_name", "server.address")
 _QUERY_ATTRIBUTES = ("url.query",)
 _CLIENT_ADDRESS_ATTRIBUTES = ("net.peer.ip", "client.address", "http.client_ip")
 _SQLALCHEMY_SCOPE = "opentelemetry.instrumentation.sqlalchemy"
@@ -243,30 +285,38 @@ def _redacted_exception_event(event: SdkEvent) -> SdkEvent:
     )
 
 
-def _start_main_event(span: Span, scope: dict[str, Any]) -> None:
-    # Convenção "main = true": o span da requisição é o evento amplo dela. O resto dele vem do
-    # middleware do evento amplo, no fim da requisição.
-    if not span.is_recording():
-        return
-    span.set_attribute("main", True)
-    _redact_request_attributes(span, scope)
+def _main_event_starter(public_origin: str) -> Callable[[Span, dict[str, Any]], None]:
+    """Hook do span da requisição; a URL dele sai de `public_origin`, nunca do header `Host`."""
+    server_name = urlsplit(public_origin).netloc
+
+    def start_main_event(span: Span, scope: dict[str, Any]) -> None:
+        # Convenção "main = true": o span da requisição é o evento amplo dela. O resto dele vem
+        # do middleware do evento amplo, no fim da requisição.
+        if not span.is_recording():
+            return
+        span.set_attribute("main", True)
+        _redact_request_attributes(span, scope, public_origin, server_name)
+
+    return start_main_event
 
 
-def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
-    """Tira a query string, o IP completo e o User-Agent que a instrumentação ASGI pôs no span.
+def _redact_request_attributes(
+    span: Span, scope: dict[str, Any], public_origin: str, server_name: str
+) -> None:
+    """Tira a query string, o IP completo e os headers que a instrumentação ASGI pôs no span.
 
-    A query carrega filtros e cursores, que são dados do usuário, e o User-Agent é texto livre do
-    cliente (3.7). Só sobrescreve os atributos que já existem, para não inventar nomes de outra
-    versão das convenções.
+    A query carrega filtros e cursores, que são dados do usuário; User-Agent e Host são texto
+    livre do cliente, e nenhum header entra no evento (3.7). Só sobrescreve os atributos que já
+    existem, para não inventar nomes de outra versão das convenções.
     """
     present = getattr(span, "attributes", None) or {}
     path = str(scope.get("path", ""))
-    url_without_query = f"{scope.get('scheme', 'http')}://{_host_of(scope)}{path}"
     client = scope.get("client")
     address = truncate_client_address(str(client[0])) if client else UNKNOWN_ADDRESS
     for names, value in (
-        (_URL_ATTRIBUTES, url_without_query),
+        (_URL_ATTRIBUTES, f"{public_origin}{path}"),
         (_TARGET_ATTRIBUTES, path),
+        (_SERVER_NAME_ATTRIBUTES, server_name),
         (_QUERY_ATTRIBUTES, ""),
         (_CLIENT_ADDRESS_ATTRIBUTES, address),
         (_USER_AGENT_ATTRIBUTES, ""),
@@ -274,14 +324,6 @@ def _redact_request_attributes(span: Span, scope: dict[str, Any]) -> None:
         for name in names:
             if name in present:
                 span.set_attribute(name, value)
-
-
-def _host_of(scope: dict[str, Any]) -> str:
-    for name, value in scope.get("headers", []):
-        if name == b"host":
-            return bytes(value).decode("latin-1")
-    server = scope.get("server")
-    return f"{server[0]}:{server[1]}" if server else ""
 
 
 @dataclass(frozen=True)
@@ -379,26 +421,75 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
     return SdkEvent(event.name, attributes, event.timestamp)
 
 
+# Cabe na carência de cada processo entre o SIGTERM e o SIGKILL da plataforma, somado ao resto da
+# parada. API: a margem do lifespan depois do `--timeout-graceful-shutdown` do uvicorn
+# (docker/app.Dockerfile), em tests/test_api_server_limits.py, conferida por
+# tests/api/test_api_tracer_shutdown.py. Worker e manutenção: o passo em curso mais este prazo,
+# contra o `stop_grace_period` de cada serviço, em tests/runs/test_process_tracer_shutdown.py.
+TRACING_SHUTDOWN_TIMEOUT_S = 1.5
+
+
+@dataclass(frozen=True)
+class ApiTracing:
+    """Tracer dos eventos que a API emite fora da requisição e o provider que a parada encerra."""
+
+    tracer: Tracer
+    provider: TracerProvider | None = None
+
+    def shut_down(self) -> None:
+        """Ver `shut_down_tracer_provider`."""
+        shut_down_tracer_provider(self.provider)
+
+
+def shut_down_tracer_provider(provider: TracerProvider | None) -> None:
+    """Exporta o lote pendente em até `TRACING_SHUTDOWN_TIMEOUT_S`; nunca lança.
+
+    É o último passo da parada: o processador descarta todo span emitido depois dele.
+    `TracerProvider.shutdown()` não aceita prazo e espera até 30 s por um Collector que não
+    responde. Numa thread daemon, a espera para no prazo e o processo sai mesmo assim. O `atexit`
+    do SDK, se ainda registrado, encontra o processador já encerrado e volta na hora.
+    """
+    if provider is None:
+        return
+    worker = threading.Thread(
+        target=_shut_down_provider, args=(provider,), name="tracing-shutdown", daemon=True
+    )
+    worker.start()
+    worker.join(TRACING_SHUTDOWN_TIMEOUT_S)
+    if worker.is_alive():
+        logger.warning("encerramento do tracing passou do prazo: spans da fila podem se perder")
+
+
+def _shut_down_provider(provider: TracerProvider) -> None:
+    try:
+        provider.shutdown()
+    except Exception:
+        # Na parada, uma falha do exportador não pode esconder outro erro do encerramento.
+        logger.exception("encerramento do tracing falhou: spans da fila podem se perder")
+
+
 def configure_tracing(
     app: FastAPI, engine: Engine, settings: Settings, exporter: SpanExporter | None = None
-) -> None:
-    """Liga os traces da API; sem `exporter` e sem endpoint OTLP, não faz nada.
+) -> ApiTracing:
+    """Liga os traces da API e devolve o tracer dos eventos fora da requisição e o encerramento.
 
+    Sem `exporter` e sem endpoint OTLP, não instrumenta nada e devolve um tracer que não grava.
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
     provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
-        return
+        return ApiTracing(NoOpTracer())
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=provider,
         excluded_urls="livez,readyz",
-        server_request_hook=_start_main_event,
+        server_request_hook=_main_event_starter(settings.checked_public_origin()),
         # Um span por pedaço enviado multiplicaria o volume num download por streaming; bytes e
         # tempos do envio já estão no evento amplo.
         exclude_spans=["receive", "send"],
     )
     _instrument_database(engine, provider)
+    return ApiTracing(provider.get_tracer(__name__), provider)
 
 
 def _instrument_database(engine: Engine, provider: TracerProvider) -> None:

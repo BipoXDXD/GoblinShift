@@ -13,8 +13,8 @@ const T = TEXT.history;
 const WITH_RESULTS: ReadonlySet<RunStatus> = new Set(["succeeded", "succeeded_with_warnings"]);
 
 /**
- * O que o Histórico acrescenta a cada linha (2.2): a disponibilidade dos resultados e "Reusar
- * configuração", que abre a Bancada com os parâmetros da execução. O link fica acima do link da
+ * O que o Histórico acrescenta a cada linha (2.2): a disponibilidade dos resultados e "Reutilizar
+ * parâmetros", que abre a Bancada com os parâmetros da execução. O link fica acima do link da
  * linha inteira (`relative`), que cobre o cartão.
  */
 export function RunHistoryExtras({

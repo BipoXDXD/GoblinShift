@@ -45,10 +45,14 @@ test("o aviso não toma o foco ao carregar", async ({ page }) => {
   await expect(notice(page).locator(":focus")).toHaveCount(0);
 });
 
-test("Fechar esconde o aviso, e ele continua fechado depois de recarregar", async ({ page }) => {
+test("Fechar aviso esconde o aviso, e ele continua fechado depois de recarregar", async ({
+  page,
+}) => {
   await page.goto("/historico");
-  await notice(page).getByRole("button", { name: "Fechar" }).click();
+  await notice(page).getByRole("button", { name: "Fechar aviso" }).click();
   await expect(notice(page)).toHaveCount(0);
+  // O botão sumiu com a faixa: o foco vai ao título da tela, não ao <body> (WCAG 2.4.3).
+  await expect(page.getByRole("heading", { level: 1, name: "Histórico" })).toBeFocused();
 
   await page.reload();
 

@@ -1,7 +1,11 @@
 """Storage em filesystem (docs/GoblinShiftPlan.md, 3.2 e 3.6), sem banco."""
 
+import errno
 import hashlib
+import logging
+import os
 import stat
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -13,6 +17,7 @@ from goblinshift.files.storage import (
     InvalidStorageKeyError,
     ObjectAlreadyExistsError,
     ObjectMissingError,
+    TemporarySweep,
 )
 
 MIB = 1024 * 1024
@@ -156,3 +161,291 @@ def test_chave_invalida_e_recusada_antes_de_tocar_o_disco(storage: FileStorage, 
         storage.delete(key)
 
     assert files_under(storage.root) == []
+
+
+CUTOFF = 1_800_000_000.0
+PART_NAME = f"{'a' * 32}.part"
+OTHER_PART_NAME = f"{'b' * 32}.part"
+THIRD_PART_NAME = f"{'c' * 32}.part"
+NO_LIMIT = 500
+NOTHING = TemporarySweep(removed=0, remaining=0, remaining_bytes=0)
+STORAGE_LOGGER = "goblinshift.files.storage"
+REMOVAL_FAILED = "temporário não removido"
+
+
+def plant_temporary(
+    storage: FileStorage, name: str, modified_at: float, content: bytes = b"abc"
+) -> Path:
+    directory = storage.root / ".tmp"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_bytes(content)
+    os.utime(path, (modified_at, modified_at))
+    return path
+
+
+def test_varredura_sem_diretorio_de_temporarios_nao_faz_nada(tmp_path: Path) -> None:
+    assert FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT) == NOTHING
+
+
+def test_varredura_com_diretorio_vazio_nao_faz_nada(tmp_path: Path) -> None:
+    (tmp_path / ".tmp").mkdir()
+
+    assert FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT) == NOTHING
+
+
+@pytest.mark.parametrize(
+    ("modified_at", "removed"),
+    [
+        pytest.param(CUTOFF - 1, True, id="um-segundo-antes-do-corte"),
+        pytest.param(CUTOFF, False, id="exatamente-no-corte"),
+        pytest.param(CUTOFF + 1, False, id="depois-do-corte"),
+    ],
+)
+def test_temporario_so_sai_quando_a_ultima_modificacao_e_anterior_ao_corte(
+    tmp_path: Path, modified_at: float, removed: bool
+) -> None:
+    storage = FileStorage(tmp_path)
+    part = plant_temporary(storage, PART_NAME, modified_at, b"abcd")
+
+    sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    assert part.exists() is not removed
+    assert sweep == (
+        TemporarySweep(removed=1, remaining=0, remaining_bytes=0)
+        if removed
+        else TemporarySweep(removed=0, remaining=1, remaining_bytes=4)
+    )
+
+
+def test_varredura_remove_todos_os_vencidos_e_mantem_e_mede_os_recentes(tmp_path: Path) -> None:
+    storage = FileStorage(tmp_path)
+    stale = [
+        plant_temporary(storage, PART_NAME, CUTOFF - 10),
+        plant_temporary(storage, OTHER_PART_NAME, CUTOFF - 20),
+    ]
+    recent = plant_temporary(storage, THIRD_PART_NAME, CUTOFF + 10, b"12345")
+
+    sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    assert [path.exists() for path in stale] == [False, False]
+    assert recent.exists()
+    assert sweep == TemporarySweep(removed=2, remaining=1, remaining_bytes=5)
+
+
+@pytest.mark.parametrize(
+    ("limit", "removed", "remaining"),
+    [
+        pytest.param(0, 0, 3, id="teto-zero"),
+        pytest.param(2, 2, 1, id="abaixo-do-total"),
+        pytest.param(3, 3, 0, id="igual-ao-total"),
+    ],
+)
+def test_varredura_remove_no_maximo_o_teto_e_conta_o_que_sobrou(
+    tmp_path: Path, limit: int, removed: int, remaining: int
+) -> None:
+    storage = FileStorage(tmp_path)
+    for name in (PART_NAME, OTHER_PART_NAME, THIRD_PART_NAME):
+        plant_temporary(storage, name, CUTOFF - 10, b"ab")
+
+    sweep = storage.sweep_stale_temporaries(CUTOFF, limit)
+
+    left = list((tmp_path / ".tmp").iterdir())
+    assert (sweep.removed, sweep.remaining, sweep.remaining_bytes) == (
+        removed,
+        remaining,
+        remaining * 2,
+    )
+    assert len(left) == remaining
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "abc.part",
+        ".part",
+        f"{'a' * 32}.txt",
+        f"{'A' * 32}.part",
+        f"{'a' * 33}.part",
+        f"{'a' * 32}.part.bak",
+    ],
+)
+def test_varredura_ignora_nome_que_nao_e_de_temporario_do_storage(
+    tmp_path: Path, name: str
+) -> None:
+    storage = FileStorage(tmp_path)
+    other = plant_temporary(storage, name, CUTOFF - 10)
+
+    assert storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT) == NOTHING
+    assert other.exists()
+
+
+def test_varredura_nao_segue_symlink_nem_apaga_o_alvo(tmp_path: Path) -> None:
+    storage = FileStorage(tmp_path / "storage")
+    target = tmp_path / "fora-do-storage"
+    target.write_bytes(b"importante")
+    os.utime(target, (CUTOFF - 10, CUTOFF - 10))
+    directory = storage.root / ".tmp"
+    directory.mkdir(parents=True)
+    link = directory / PART_NAME
+    link.symlink_to(target)
+    os.utime(link, (CUTOFF - 10, CUTOFF - 10), follow_symlinks=False)
+
+    assert storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT) == NOTHING
+    assert link.is_symlink()
+    assert target.read_bytes() == b"importante"
+
+
+def test_varredura_nao_apaga_diretorio_com_nome_de_temporario(tmp_path: Path) -> None:
+    storage = FileStorage(tmp_path)
+    directory = tmp_path / ".tmp" / PART_NAME
+    directory.mkdir(parents=True)
+    os.utime(directory, (CUTOFF - 10, CUTOFF - 10))
+
+    assert storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT) == NOTHING
+    assert directory.is_dir()
+
+
+def test_varredura_nao_atinge_o_temporario_de_uma_gravacao_em_curso(tmp_path: Path) -> None:
+    storage = FileStorage(tmp_path)
+    sweeps: list[TemporarySweep] = []
+
+    def chunks_sweeping_midway() -> Iterator[bytes]:
+        yield b"primeira parte"
+        sweeps.append(storage.sweep_stale_temporaries(time.time() - 3600, NO_LIMIT))
+        yield b"segunda parte"
+
+    storage.create_exclusive("uploads/em-curso", chunks_sweeping_midway(), MAX_FILE_BYTES)
+
+    assert sweeps[0].removed == 0
+    assert sweeps[0].remaining == 1
+    with storage.open("uploads/em-curso") as stored:
+        assert stored.read() == b"primeira partesegunda parte"
+
+
+def fail_unlink(
+    monkeypatch: pytest.MonkeyPatch, times: int, error_code: int = errno.EACCES
+) -> None:
+    """As `times` primeiras remoções falham com `error_code`.
+
+    `OSError` escolhe a subclasse pelo errno: `EACCES` vira `PermissionError`, e `EROFS`, `EBUSY`
+    e `EIO` ficam `OSError` puro.
+    """
+    original = Path.unlink
+    denied = iter(range(times))
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        if next(denied, None) is not None:
+            raise OSError(error_code, "recusado", str(self))
+        original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+
+def plant_stale_parts(storage: FileStorage, content: bytes) -> None:
+    for name in (PART_NAME, OTHER_PART_NAME, THIRD_PART_NAME):
+        plant_temporary(storage, name, CUTOFF - 10, content)
+
+
+def removal_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.getMessage() == REMOVAL_FAILED]
+
+
+def test_falha_ao_apagar_um_temporario_nao_impede_os_demais_e_fica_registrada(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=1)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    [survivor] = list((tmp_path / ".tmp").iterdir())
+    [failure] = removal_failures(caplog)
+    assert sweep == TemporarySweep(removed=2, remaining=1, remaining_bytes=2, failed=1)
+    assert failure.__dict__["fields"] == {"tmp_part": survivor.name}
+    assert failure.exc_info is not None
+    assert failure.exc_info[0] is PermissionError
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [errno.EROFS, errno.EBUSY, errno.EIO],
+    ids=["disco-so-leitura", "arquivo-ocupado", "erro-de-entrada-e-saida"],
+)
+def test_erro_de_disco_ao_apagar_nao_para_a_varredura_e_fica_em_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_code: int,
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=1, error_code=error_code)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    [failure] = removal_failures(caplog)
+    assert sweep == TemporarySweep(removed=2, remaining=1, remaining_bytes=2, failed=1)
+    assert failure.exc_info is not None
+    error = failure.exc_info[1]
+    assert type(error) is OSError
+    assert error.errno == error_code
+
+
+def test_teto_da_varredura_soma_remocoes_e_falhas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=1)
+
+    sweep = storage.sweep_stale_temporaries(CUTOFF, 2)
+
+    assert sweep == TemporarySweep(removed=1, remaining=2, remaining_bytes=4, failed=1)
+    assert len(list((tmp_path / ".tmp").iterdir())) == 2
+
+
+def test_tentativas_que_falham_contam_no_teto_da_varredura(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_stale_parts(storage, b"ab")
+    fail_unlink(monkeypatch, times=3)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, 2)
+
+    assert sweep == TemporarySweep(removed=0, remaining=3, remaining_bytes=6, failed=2)
+    assert len(removal_failures(caplog)) == 2
+    assert len(list((tmp_path / ".tmp").iterdir())) == 3
+
+
+def test_erro_ao_listar_o_diretorio_de_temporarios_continua_subindo(tmp_path: Path) -> None:
+    # `.tmp` como arquivo: `scandir` levanta `NotADirectoryError` de verdade.
+    (tmp_path / ".tmp").write_bytes(b"")
+
+    with pytest.raises(NotADirectoryError):
+        FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+
+def test_temporario_que_some_antes_do_unlink_conta_como_removido_e_nao_como_falha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    storage = FileStorage(tmp_path)
+    plant_temporary(storage, PART_NAME, CUTOFF - 10)
+    original = Path.unlink
+
+    def unlink_after_another_process(self: Path, missing_ok: bool = False) -> None:
+        os.unlink(self)
+        original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink_after_another_process)
+
+    with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
+        sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    assert sweep == TemporarySweep(removed=1, remaining=0, remaining_bytes=0, failed=0)
+    assert removal_failures(caplog) == []

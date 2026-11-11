@@ -53,6 +53,7 @@ from goblinshift.identity import (
     resolve_session,
 )
 from goblinshift.platform.settings import WebIdentityConfig
+from goblinshift.runs.finished import RunFinishedReporter
 
 BEARER_SCHEME = "bearer"
 # Métodos que nunca alteram estado (3.6): dispensam o CSRF.
@@ -106,6 +107,15 @@ def get_storage(request: Request) -> FileStorage:
 
 
 Storage = Annotated[FileStorage, Depends(get_storage)]
+
+
+def get_run_finished(request: Request) -> RunFinishedReporter:
+    """Emissor do `run.finished` (3.7) das Runs que a API termina (cancelamento na fila)."""
+    reporter: RunFinishedReporter = request.app.state.run_finished
+    return reporter
+
+
+RunFinished = Annotated[RunFinishedReporter, Depends(get_run_finished)]
 
 
 def terms_version(request: Request) -> str:
@@ -265,7 +275,7 @@ def _require_current_terms(session: Session, principal: Principal, current_versi
     if account.needs_terms_acceptance(current_version):
         raise ApiProblem(
             ProblemCode.TERMS_NOT_ACCEPTED,
-            f"Aceite a versão {current_version} dos termos de uso e do aviso de privacidade "
+            f"Aceite a versão {current_version} dos Termos de Uso e do Aviso de Privacidade "
             "(POST /api/v1/me/terms:accept) para continuar.",
         )
 

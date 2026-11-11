@@ -1,4 +1,4 @@
-"""As quatro operações do executor-ctl sobre o container de uma tentativa (3.6, "Sandbox")."""
+"""Operações do executor-ctl: quatro sobre o container e a leitura da imagem (3.6, "Sandbox")."""
 
 import logging
 import threading

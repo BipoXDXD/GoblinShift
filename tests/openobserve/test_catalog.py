@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from goblinshift.entrypoints.api.saturation import REJECTED_ATTRIBUTE, SATURATION_SPAN
 from openobserve.catalog import (
     BURN_LEVELS,
     CAUSE_COLUMNS,
@@ -114,6 +115,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-sonda-imagem-falhou",
         "gs-causa-manutencao-sem-ciclo",
         "gs-causa-sem-traces",
+        "gs-causa-api-saturada",
         "gs-heartbeat",
     }
 
@@ -214,6 +216,19 @@ def test_colunas_dos_alertas_da_manutencao_sao_declaradas() -> None:
     assert "maintenance_runs_stuck_stopping" in CAUSE_COLUMNS
 
 
+@pytest.mark.parametrize("log", ["executor não iniciou", "área de trabalho falhou"])
+def test_aviso_do_executor_que_nao_inicia_cita_o_log_de_cada_causa(log: str) -> None:
+    # Start recusado e área de trabalho não criada levam ao mesmo alerta: a notificação diz qual
+    # log procurar, com os nomes do runbook e do log que o coordenador emite.
+    alert = next(
+        a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
+    )
+    emitter = (SRC / "runs" / "worker" / "coordinator.py").read_text(encoding="utf-8")
+
+    assert f"log {log}" in alert.description
+    assert f'"{log}"' in emitter
+
+
 def test_executor_que_nao_inicia_avisa_no_destino_urgente_lendo_o_span_da_tentativa() -> None:
     alert = next(
         a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-executor-nao-iniciou"
@@ -264,16 +279,24 @@ def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
 def test_contadores_lidos_pelas_causas_sao_declarados() -> None:
     # Coluna fora de CAUSE_COLUMNS não existe no stream quando o provisionamento valida a consulta.
     for alert in alerts(stream="s", prefix=PREFIX):
-        for column in re.findall(r"\b(?:maintenance|alert)_\w+", alert.sql):
+        for column in re.findall(r"\b(?:maintenance|alert|api)_\w+", alert.sql):
             assert column in CAUSE_COLUMNS, f"{alert.name}: {column}"
 
 
 def modules_emitting_log_events() -> dict[str, set[str]]:
     modules: dict[str, set[str]] = {}
     for path in SRC.rglob("*.py"):
-        for event in re.findall(r'"alert": "(\w+)"', path.read_text(encoding="utf-8")):
+        for event in _log_events(path.read_text(encoding="utf-8")):
             modules.setdefault(event, set()).add(path.relative_to(SRC).as_posix())
     return modules
+
+
+def _log_events(source: str) -> set[str]:
+    # O evento vem como literal ou como constante do próprio módulo (`"alert": NOME`).
+    constants = dict(re.findall(r'^([A-Z_]+) = "(\w+)"$', source, flags=re.MULTILINE))
+    events = set(re.findall(r'"alert": "(\w+)"', source))
+    events |= {constants[name] for name in re.findall(r'"alert": ([A-Z_]+)\b', source)}
+    return events
 
 
 def test_todo_evento_de_alerta_do_log_tem_um_alerta_no_catalogo() -> None:
@@ -337,3 +360,21 @@ def test_ausencia_le_o_stream_de_traces_e_dispara_sem_nenhuma_linha(name: str) -
     assert "HAVING count(*) = 0" in alert.sql
     # A semente do provisionamento (`main = false`) não pode contar como telemetria viva.
     assert "main = 'true'" in alert.sql
+
+
+def test_api_saturada_le_o_span_da_janela_e_avisa_no_destino_urgente() -> None:
+    alert = next(a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-api-saturada")
+
+    assert alert.destination is DestinationKey.URGENT
+    assert (alert.stream_type, alert.stream_name) == ("traces", "s")
+    assert "operation_name = 'api.saturation'" in alert.sql
+    assert "api_saturation_rejected" in CAUSE_COLUMNS
+    assert (alert.period_minutes, alert.frequency_minutes, alert.silence_minutes) == (10, 5, 60)
+
+
+def test_api_saturada_le_o_atributo_e_o_span_que_a_api_exporta() -> None:
+    # O nome no OpenObserve troca "." por "_": uma mudança só de um lado cala o alerta.
+    alert = next(a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-api-saturada")
+
+    assert f"operation_name = '{SATURATION_SPAN}'" in alert.sql
+    assert REJECTED_ATTRIBUTE.replace(".", "_") in alert.sql

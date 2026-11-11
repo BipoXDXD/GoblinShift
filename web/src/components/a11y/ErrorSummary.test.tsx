@@ -6,9 +6,16 @@ import { axeViolations } from "../../test/axe";
 import { ErrorSummary } from "./ErrorSummary";
 
 const issues = [
-  { fieldId: "arquivos", message: "Escolha pelo menos um arquivo." },
+  { fieldId: "arquivos", label: "Arquivos", message: "Escolha pelo menos um arquivo." },
   { fieldId: null, message: "A versão da receita foi recusada." },
 ];
+
+const SAME_RULE = "Informe um número inteiro de 1 a 8192.";
+const sameRuleIssues = [
+  { fieldId: "largura", label: "Largura máxima, em pixels", message: SAME_RULE },
+  { fieldId: "altura", label: "Altura máxima, em pixels", message: SAME_RULE },
+];
+const acronymIssues = [{ fieldId: "pdf", label: "PDF da página 1", message: "PDF não escolhido." }];
 
 function Form({ attempt }: { readonly attempt: number }) {
   return (
@@ -32,7 +39,7 @@ describe("ErrorSummary", () => {
 
     const summary = screen.getByRole("alert");
     expect(summary).toHaveFocus();
-    expect(summary).toHaveTextContent("Escolha pelo menos um arquivo.");
+    expect(summary).toHaveTextContent("Arquivos: escolha pelo menos um arquivo.");
     expect(summary).toHaveTextContent("A versão da receita foi recusada.");
   });
 
@@ -40,7 +47,9 @@ describe("ErrorSummary", () => {
     const user = userEvent.setup();
     render(<Form attempt={1} />);
 
-    await user.click(screen.getByRole("link", { name: "Escolha pelo menos um arquivo." }));
+    await user.click(
+      screen.getByRole("link", { name: "Arquivos: escolha pelo menos um arquivo." }),
+    );
 
     expect(screen.getByRole("textbox", { name: "Arquivos" })).toHaveFocus();
   });
@@ -48,9 +57,24 @@ describe("ErrorSummary", () => {
   it("o link do erro tem a altura do alvo de toque", () => {
     render(<Form attempt={1} />);
 
-    expect(screen.getByRole("link", { name: "Escolha pelo menos um arquivo." })).toHaveClass(
-      "min-h-11",
-    );
+    expect(
+      screen.getByRole("link", { name: "Arquivos: escolha pelo menos um arquivo." }),
+    ).toHaveClass("min-h-11");
+  });
+
+  it("o link cita o campo: o mesmo erro em dois campos ganha dois nomes", () => {
+    render(<ErrorSummary issues={sameRuleIssues} attempt={1} />);
+
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "Largura máxima, em pixels: informe um número inteiro de 1 a 8192.",
+      "Altura máxima, em pixels: informe um número inteiro de 1 a 8192.",
+    ]);
+  });
+
+  it("mensagem que começa com sigla mantém a sigla depois do nome do campo", () => {
+    render(<ErrorSummary issues={acronymIssues} attempt={1} />);
+
+    expect(screen.getByRole("link")).toHaveTextContent("PDF da página 1: PDF não escolhido.");
   });
 
   it("erro sem campo fica como texto, sem link", () => {
@@ -87,6 +111,29 @@ describe("ErrorSummary", () => {
     rerender(<ErrorSummary issues={issues} attempt={1} />);
 
     expect(screen.getByRole("alert")).toHaveFocus();
+  });
+
+  it("o título é h2 por padrão", () => {
+    render(<ErrorSummary issues={issues} attempt={1} />);
+
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("aceita o nível h4, para formulário sob um h3", () => {
+    render(<ErrorSummary issues={issues} attempt={1} headingLevel={4} />);
+
+    expect(
+      screen.getByRole("heading", {
+        level: 4,
+        name: "Corrija os itens abaixo antes de continuar.",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
   });
 
   it("não tem violações do axe", async () => {

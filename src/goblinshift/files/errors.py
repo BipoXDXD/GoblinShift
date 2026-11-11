@@ -95,3 +95,15 @@ class TransferLimitReachedError(FilesError):
 
     def __init__(self) -> None:
         super().__init__("limite de transferências simultâneas atingido")
+
+
+class UploadObjectNotPendingError(RuntimeError):
+    """O objeto do upload saiu de `pending` antes da conclusão: estado impossível pelo contrato.
+
+    Enquanto o upload está `receiving`, só a conclusão dele muda o objeto; quem o tira de
+    `pending` antes (retenção, exclusão) passa pela trava do upload. Não é `FilesError`: nenhuma
+    rota o traduz, e a transação de quem chama é desfeita.
+    """
+
+    def __init__(self, object_id: object) -> None:
+        super().__init__(f"objeto {object_id} do upload não está pending na conclusão")

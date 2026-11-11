@@ -72,3 +72,7 @@ Reforços deste ADR:
 - `.github/CODEOWNERS` cobre `/deploy/`, `/compose*.yaml` e `/.github/workflows/`.
 - Revisão de código: uma mudança em `tests/compose_host_policy.py` cita este ADR e explica por que a allowlist cresceu.
 - Na VPS, `id goblinshift` mostra os grupos `docker` e `gs-exec`, e nenhum outro usuário além dele está no grupo `docker` (`getent group docker`).
+
+## Atualização de 2026-11-09
+
+O `executor-ctl` ganhou uma quinta operação, só de leitura: `GET /v1/image?ref=...` responde se uma imagem da allowlist está no daemon, para a manutenção notar a falta dela sem tráfego de usuário. A allowlist é conferida antes de chamar o Docker, e o perfil de `docker run` não muda. A decisão acima segue valendo: as quatro operações que agem sobre o container são as mesmas, e o worker e a manutenção continuam sem o socket do Docker.

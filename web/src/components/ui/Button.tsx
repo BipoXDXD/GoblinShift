@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef, MouseEvent, ReactElement } from "react";
+import type { ComponentPropsWithRef, MouseEvent, ReactElement } from "react";
 
 /** Pirâmide de ações (RUI cap. 2): uma primária sólida por tela; destrutiva só na confirmação. */
 export type ButtonVariant = "primary" | "secondary" | "tertiary" | "destructive";
@@ -39,10 +39,8 @@ export function buttonClassName({ variant, size = "md", fullWidth = false }: But
     .join(" ");
 }
 
-type NativeButtonProps = Omit<
-  ComponentPropsWithoutRef<"button">,
-  "className" | "type" | "disabled"
->;
+// Com `ref`: quem chama devolve o foco a um botão que voltou a aparecer (Nova chave).
+type NativeButtonProps = Omit<ComponentPropsWithRef<"button">, "className" | "type" | "disabled">;
 
 interface ButtonProps extends NativeButtonProps, ButtonLook {
   /** Explícito: o padrão do HTML é `submit`, que envia o formulário sem querer. */

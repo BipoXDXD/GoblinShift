@@ -96,7 +96,9 @@ def test_conta_sem_aceite_recebe_403_terms_not_accepted(
     response = client.get(CATALOG, headers=signed_in(app, owner))
 
     body = assert_problem(response, 403, "TERMS_NOT_ACCEPTED")
+    assert body["title"] == "Termos de Uso não aceitos"
     assert CURRENT_TERMS_VERSION in body["detail"]
+    assert "dos Termos de Uso e do Aviso de Privacidade" in body["detail"]
     assert str(owner) not in response.text
     assert ACCOUNT_NAME not in response.text
 

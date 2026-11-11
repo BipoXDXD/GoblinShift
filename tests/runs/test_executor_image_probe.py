@@ -2,7 +2,6 @@
 
 import logging
 import os
-import threading
 from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -19,6 +18,7 @@ from goblinshift.entrypoints.maintenance import (
     run_cycles,
     serve,
 )
+from goblinshift.entrypoints.shutdown import ShutdownFlag
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError, ExecutorCtlRunner
 from goblinshift.runs.worker.runner import LocalRunner
@@ -268,11 +268,11 @@ def test_executor_ctl_sonda_a_imagem_da_configuracao(
     assert ctl.calls == [("image", IMAGE)]
 
 
-class OneTurn(threading.Event):
+class OneTurn(ShutdownFlag):
     """Pede a parada na espera entre as voltas: `serve` roda exatamente uma."""
 
-    def wait(self, timeout: float | None = None) -> bool:
-        self.set()
+    def wait(self, timeout_s: float) -> bool:
+        self.request()
         return True
 
 
@@ -286,5 +286,7 @@ def test_serve_sonda_a_imagem_mesmo_com_o_banco_fora(
         serve(probe_settings(tmp_path), runner, OneTurn())
 
     assert ctl.calls == [("image", IMAGE)]
+    # O ciclo de execuções registra a falha de banco por passo (logger
+    # `goblinshift.runs.maintenance`) e não levanta; só o de contas cai inteiro. A sonda roda igual.
     failed = [r.getMessage() for r in probe_records(caplog)]
-    assert failed == ["ciclo de manutenção falhou", "ciclo de manutenção falhou"]
+    assert failed == ["ciclo de manutenção falhou"]

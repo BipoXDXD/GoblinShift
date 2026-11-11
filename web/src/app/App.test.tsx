@@ -14,7 +14,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Arquivos em lote, limpos pelos goblins da oficina.",
+        name: "Arquivos em lote, limpos pelas goblins da oficina.",
       }),
     ).toBeInTheDocument();
   });
@@ -28,6 +28,20 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "Pular para o conteúdo" })).toHaveAttribute(
       "href",
       `#${screen.getByRole("main").id}`,
+    );
+  });
+
+  // A altura medida de fato fica no e2e (controls.spec.ts); aqui, o aviso rápido de que a classe
+  // do alvo de toque e a centralização vertical não sumiram.
+  it("o atalho para o conteúdo tem o alvo de toque de 44 px", () => {
+    window.history.pushState({}, "", "/rota-que-nao-existe");
+
+    render(<App />);
+
+    expect(screen.getByRole("link", { name: "Pular para o conteúdo" })).toHaveClass(
+      "focus:min-h-11",
+      "focus:inline-flex",
+      "items-center",
     );
   });
 
@@ -70,6 +84,7 @@ describe("App", () => {
     render(<App />);
 
     const prompt = await screen.findByRole("region", { name: "Entre para continuar" });
+    expect(prompt).toHaveTextContent("Entre para enviar arquivos e ver suas execuções.");
     expect(within(prompt).getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(
       "href",
       "/auth/login/google?return_to=%2Fbancada%2Fcsv-janitor",
@@ -87,6 +102,9 @@ describe("App", () => {
 
     expect(
       screen.getByRole("heading", { level: 1, name: "Página não encontrada" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("O endereço pode estar errado, ou a página saiu do ar."),
     ).toBeInTheDocument();
   });
 });

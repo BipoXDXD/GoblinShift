@@ -12,6 +12,11 @@ import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration"
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
+import {
+  FailureNotice,
+  guidanceAnnouncement,
+  isGuidance,
+} from "../components/feedback/FailureNotice";
 import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { buttonClassName } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -61,23 +66,36 @@ export function RunPage(): ReactElement {
  * mudanças anunciadas em `aria-live` e, ao concluir, os downloads.
  */
 function RunView({ runId }: { readonly runId: string }): ReactElement {
-  const { query, announcement } = useRunPolling(runId);
+  const { query, announcement, acknowledge, failure } = useRunPolling(runId);
   const run = query.data;
+  // O convite para entrar (ou aceitar os termos) não é alerta; anunciado aqui, uma vez só.
+  const showsGuidance = failure !== null && isGuidance(failure);
+  const guidanceText = failure === null ? null : guidanceAnnouncement(failure);
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <div className="flex flex-col gap-2">
         {run !== undefined && <BackToWorkbench recipeId={run.recipe_id} />}
         <FocusHeading>{T.title}</FocusHeading>
       </div>
-      <LiveRegion message={announcement} visuallyHidden />
+      <LiveRegion message={guidanceText ?? announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
-      {query.error !== null && <ProblemAlert failure={failureOf(query.error)} />}
+      {failure !== null && <FailureNotice error={failure} />}
       {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
           a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
           do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
       {run !== undefined && (
         <div className="flex flex-col gap-8 max-md:order-1">
-          <RunDetails run={run} />
+          <RunDetails
+            run={run}
+            actions={
+              // Com o convite na tela, o Cancelar só abriria um segundo convite: sem sessão, a
+              // ação some e os dados já carregados ficam. Os resultados só aparecem no estado
+              // terminal, em que o polling já parou e não há 401 dele.
+              showsGuidance ? null : (
+                <CancelRun runId={run.id} status={run.status} onAnnounced={acknowledge} />
+              )
+            }
+          />
           {run.items.length > 0 && <RunItems items={run.items} summary={run.summary} />}
         </div>
       )}
@@ -107,11 +125,17 @@ function BackToWorkbench({ recipeId }: { readonly recipeId: string }): ReactElem
   );
 }
 
+interface RunDetailsProps {
+  readonly run: Run;
+  /** Ações que exigem sessão (o Cancelar), ou `null` quando a tela pede para entrar de novo. */
+  readonly actions: ReactNode;
+}
+
 /**
  * Cartão de estado. Os rótulos que só repetiriam o óbvio ficam para o leitor de tela (`sr-only`):
  * o selo já diz o estado e o texto grande diz a fase (RUI cap. 2, "Labels are a last resort").
  */
-function RunDetails({ run }: { readonly run: Run }): ReactElement {
+function RunDetails({ run, actions }: RunDetailsProps): ReactElement {
   const recipe = findRecipe(run.recipe_id);
   const { phase, processed, total } = run.progress;
   const flavor = flavorOf(run.status);
@@ -160,7 +184,7 @@ function RunDetails({ run }: { readonly run: Run }): ReactElement {
               <span className="tabular-nums">{run.attempt}</span>
             </Detail>
           </dl>
-          <CancelRun runId={run.id} status={run.status} />
+          {actions}
         </div>
         {/* Depois do texto: o leitor de tela ouve o estado antes da goblin, e no celular ela fica
             embaixo, sem empurrar o estado para fora da primeira dobra. */}
@@ -258,7 +282,8 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
             key={artifact.artifact_id}
             href={artifactDownloadPath(artifact.artifact_id)}
             download={artifact.file_name}
-            className={buttonClassName({ variant: "primary", size: "lg" })}
+            // Nome sem espaço quebra em qualquer ponto em vez de empurrar a página (WCAG 1.4.10).
+            className={`${buttonClassName({ variant: "primary", size: "lg" })} wrap-anywhere`}
           >
             <Download aria-hidden="true" className="size-6" />
             {T.results.download(artifact.file_name)}
@@ -288,7 +313,7 @@ function ResultFiles({ results }: { readonly results: RunResultsData }): ReactEl
                         <a
                           href={artifactDownloadPath(artifact.artifact_id)}
                           download={artifact.file_name}
-                          className="inline-flex min-h-11 items-center font-mono text-sm"
+                          className="inline-flex min-h-11 items-center font-mono text-sm wrap-anywhere"
                         >
                           {T.results.download(artifact.file_name)}
                         </a>
@@ -347,7 +372,7 @@ interface UnavailableFileProps {
 function UnavailableFile({ reference, reason }: UnavailableFileProps): ReactElement {
   return (
     <>
-      <span className="font-mono text-sm text-fg-muted">{reference.file_name}</span>{" "}
+      <span className="font-mono text-sm wrap-anywhere text-fg-muted">{reference.file_name}</span>{" "}
       <span className="text-sm text-fg-muted">
         ({T.results.roles[reference.role]}): {reason}.
       </span>
