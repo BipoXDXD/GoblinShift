@@ -276,6 +276,9 @@ export const TEXT = {
   run: {
     title: "Execução",
     loading: "Carregando a execução.",
+    // A tela da execução não tem lista, e atualizar traz o mesmo 404: o caminho é o Histórico.
+    notFound:
+      "Não encontramos esta execução. Ela pode ter sido removida ou ter expirado. Procure as suas execuções no Histórico.",
     recipe: "Receita",
     status: "Estado",
     phase: "Fase",
