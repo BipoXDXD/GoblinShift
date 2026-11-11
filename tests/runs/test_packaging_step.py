@@ -11,7 +11,7 @@ candidatos no storage, fora do `supervise`. Duas garantias:
 import errno
 import time
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from goblinshift.runs.worker.collection import Collected
 from tests.runs.worker_support import (
     LEASE,
     VALID,
+    SlowStorage,
     attempts,
     claim,
     coordinator,
@@ -64,54 +65,6 @@ class FailingStorage(FileStorage):
         if self._armed:
             raise self._error
         return super().create_exclusive(key, chunks, max_bytes)
-
-
-class SlowStorage(FileStorage):
-    """Storage lento: depois de `slow_down`, pausa a cada bloco e anota a folga do lease."""
-
-    def __init__(self, root: Path, factory: sessionmaker[Session]) -> None:
-        super().__init__(root)
-        self._factory = factory
-        self._pauses = 0
-        self._pause_s = 0.0
-        self._attempt_id: uuid.UUID | None = None
-        self._on_pause: Callable[[], None] = lambda: None
-        self.lease_margins: list[float] = []
-
-    def slow_down(
-        self,
-        attempt_id: uuid.UUID,
-        pauses: int,
-        pause: timedelta,
-        on_pause: Callable[[], None] = lambda: None,
-    ) -> None:
-        self._attempt_id = attempt_id
-        self._pauses = pauses
-        self._pause_s = pause.total_seconds()
-        self._on_pause = on_pause
-
-    def create_exclusive(
-        self, key: str, chunks: Iterable[bytes], max_bytes: int
-    ) -> tuple[bytes, int]:
-        return super().create_exclusive(key, self._slowly(chunks), max_bytes)
-
-    def _slowly(self, chunks: Iterable[bytes]) -> Iterator[bytes]:
-        for chunk in chunks:
-            yield chunk
-            if self._pauses > 0:
-                self._pauses -= 1
-                self._on_pause()
-                time.sleep(self._pause_s)
-                self.lease_margins.append(self._lease_margin())
-
-    def _lease_margin(self) -> float:
-        with self._factory() as session:
-            margin: timedelta = session.execute(
-                select(attempt.c.lease_expires_at - func.now()).where(
-                    attempt.c.id == self._attempt_id
-                )
-            ).scalar_one()
-        return margin.total_seconds()
 
 
 @pytest.mark.parametrize(

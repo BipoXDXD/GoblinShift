@@ -1,10 +1,11 @@
 """Pausa dos claims depois de falha de banco que pode deixar tentativa órfã (3.4).
 
 A supervisão absorve a falha transitória do banco na renovação do lease, mas os passos fora dela
-(`record_start`, a renovação no empacotamento e o desfecho) deixam a exceção subir até a volta do
-worker. A Attempt fica viva, com executor e área de trabalho, até a manutenção encerrá-la pelo
-lease vencido. Nesse intervalo o `executor-ctl` recusa outro `start` (`work_area_dirty`), e a Run
-seguinte gastaria claims por um defeito que não é dela, podendo chegar a `INFRA_POISON`.
+(`record_start`, a renovação na cópia da entrada e no empacotamento, e o desfecho) deixam a exceção
+subir até a volta do worker. A Attempt fica viva, com executor e área de trabalho, até a manutenção
+encerrá-la pelo lease vencido. Nesse intervalo o `executor-ctl` recusa outro `start`
+(`work_area_dirty`), e a Run seguinte gastaria claims por um defeito que não é dela, podendo chegar
+a `INFRA_POISON`.
 
 O worker então não reivindica por uma janela que cobre o pior caso dessa limpeza: o lease da órfã
 vence no máximo um lease depois da falha, a manutenção a encontra até um intervalo de ciclo depois
