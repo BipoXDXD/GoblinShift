@@ -38,10 +38,10 @@ storage e lista, uma linha por arquivo e separados por tab (chave, bytes, modifi
 categoria), o que nenhuma linha viva de `stored_object` referencia: `sem-linha` (órfão puro) e
 `marcado-removido-mas-presente` (linha `deleted` ou `missing` cujo arquivo ainda existe; em
 `missing` talvez convenha restaurar a linha em vez de apagar o arquivo). Arquivo modificado há
-menos de `--min-age-hours` (padrão 6) fica de fora, porque pode ser gravação em curso; a lista
-vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam tudo. Sem a
-sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com órfãos:
-decidir o que fazer com eles é do administrador.
+menos de `--min-age-hours` (padrão 6, aceita decimal) fica de fora, porque pode ser gravação em
+curso; a lista vai até `--limit` linhas (padrão 200) e os totais por categoria, em stderr, contam
+tudo. Sem a sentinela de montagem o storage não é verificado e a saída é 4. Sai com 0 mesmo com
+órfãos: decidir o que fazer com eles é do administrador.
 Sai com 0 em sucesso, 1 se a conta ou a chave não existir, 2 em erro de uso e 3 se faltar um
 segredo obrigatório, com uma linha em stderr que nomeia a variável; Ctrl-C sai com 130 e a linha
 `gs-admin: interrompido`. Qualquer outra falha sai com 4
@@ -52,6 +52,7 @@ da falha fica gravado; `block` e `request-deletion` completam o que faltou se re
 
 import argparse
 import logging
+import math
 import re
 import sys
 import time
@@ -276,9 +277,9 @@ def _argument_parser() -> argparse.ArgumentParser:
     )
     orphans.add_argument(
         "--min-age-hours",
-        type=_positive_int,
+        type=_positive_hours,
         default=DEFAULT_MIN_AGE_HOURS,
-        help=f"ignora arquivo modificado há menos de H horas (padrão: {DEFAULT_MIN_AGE_HOURS})",
+        help=f"ignora arquivo com menos de H horas, decimal (padrão {DEFAULT_MIN_AGE_HOURS})",
     )
     orphans.add_argument(
         "--limit",
@@ -479,6 +480,16 @@ def _positive_int(text: str) -> int:
         raise argparse.ArgumentTypeError("use um inteiro positivo") from None
     if value <= 0:
         raise argparse.ArgumentTypeError("o valor precisa ser positivo")
+    return value
+
+
+def _positive_hours(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("use um número positivo de horas") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("o valor precisa ser positivo e finito")
     return value
 
 

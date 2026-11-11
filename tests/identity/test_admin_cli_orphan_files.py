@@ -138,6 +138,19 @@ def test_min_age_hours_muda_o_corte(
     assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/de_5h"]
 
 
+def test_min_age_hours_aceita_decimal_e_respeita_a_fronteira(
+    capsys: pytest.CaptureFixture[str], storage: FileStorage
+) -> None:
+    now = time.time()
+    put(storage, "uploads/de_40min", b"a", mtime=now - 40 * 60)
+    put(storage, "uploads/de_20min", b"a", mtime=now - 20 * 60)
+
+    exit_code, out, _ = run(capsys, "--min-age-hours", "0.5")
+
+    assert exit_code == EXIT_OK
+    assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/de_40min"]
+
+
 def test_limit_trunca_a_listagem_e_avisa_sem_perder_o_total(
     capsys: pytest.CaptureFixture[str], storage: FileStorage
 ) -> None:
@@ -184,7 +197,7 @@ def test_storage_desmontado_sai_com_4_e_mensagem(
     assert err == "gs-admin: storage não montado; nada foi verificado\n"
 
 
-@pytest.mark.parametrize("value", ["0", "-1", "abc", "1.5"])
+@pytest.mark.parametrize("value", ["0", "0.0", "-1", "-0.5", "abc", "nan", "inf", "1e999"])
 def test_min_age_hours_invalido_e_erro_de_uso(value: str) -> None:
     with pytest.raises(SystemExit) as usage_error:
         main(["orphan-files", "--min-age-hours", value])

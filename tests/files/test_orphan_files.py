@@ -3,6 +3,7 @@
 import os
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ from goblinshift.files.orphans import (
     find_orphan_files,
 )
 from goblinshift.files.states import ObjectState
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, StoredFile
 from goblinshift.files.tables import stored_object, upload
 from goblinshift.platform.db import unit_of_work
 from tests.files.support import create_intent, create_user, mark_mounted, ready_upload
@@ -270,15 +271,27 @@ def _row_summary(factory: sessionmaker[Session]) -> tuple[int, str | None]:
 
 
 def test_nao_segura_transacao_aberta_enquanto_percorre_o_disco(
-    factory: sessionmaker[Session], storage: FileStorage
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """O banco derruba transação ociosa (30 s); cada lote é uma transação curta."""
+    """O banco derruba transação ociosa (30 s): entre um lote e o próximo não há transação."""
     for index in range(3):
         put(storage, f"uploads/o{index}")
+    in_transaction_when_disk_is_read: list[bool] = []
 
     with factory() as session:
-        find_orphan_files(
+        real_walk = storage.walk_objects
+
+        def watched_walk() -> Iterator[StoredFile]:
+            for found in real_walk():
+                in_transaction_when_disk_is_read.append(session.in_transaction())
+                yield found
+
+        monkeypatch.setattr(storage, "walk_objects", watched_walk)
+
+        report = find_orphan_files(
             session, storage, modified_before=future_cutoff(), list_limit=1, batch_size=1
         )
 
+        assert report.orphan_count == 3
+        assert in_transaction_when_disk_is_read == [False, False, False]
         assert not session.in_transaction()
