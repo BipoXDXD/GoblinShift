@@ -23,6 +23,10 @@ const WCAG_TEXT_SPACING = `
 `;
 /** Folga para o arredondamento de subpixel entre `scrollHeight` e `clientHeight`. */
 const ROUNDING_PX = 1;
+/** Teto para as transições assentarem, bem abaixo dos 20 s do teste: estourar é erro descritivo. */
+const TRANSITION_BUDGET_MS = 5000;
+/** Quantos rótulos distintos o erro de teto lista; o resto vira contagem. */
+const MAX_LISTED_ANIMATIONS = 8;
 interface Clip {
   readonly description: string;
 }
@@ -58,14 +62,12 @@ test("a folha só é dada como aplicada depois das transições em curso", async
 
   await applyTextSpacing(page);
 
-  const inFlight = await page.evaluate(
-    () =>
-      document.getAnimations().filter((animation) => {
-        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
-        return animation.playState !== "finished" && target?.checkVisibility() === true;
-      }).length,
-  );
-  expect(inFlight, "transições visíveis ainda em curso depois de aplicar a folha").toBe(0);
+  const running = await page.evaluateHandle(visibleRunningAnimations);
+  expect(
+    await running.evaluate(describeAnimations),
+    "transições visíveis ainda em curso depois de aplicar a folha",
+  ).toEqual([]);
+  await running.dispose();
   // 16px de fonte do body × 0,16em, calculado à mão.
   expect(await page.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("2.56px");
 });
@@ -83,34 +85,76 @@ test("a folha só é dada como aplicada depois das transições em curso", async
  * final. Dois quadros fixos são, então, o mínimo exato, sem folga para um quadro atrasado na CI.
  */
 async function applyTextSpacing(page: Page): Promise<string> {
-  return page.evaluate(async (css) => {
-    const nextFrame = (): Promise<void> =>
-      new Promise((resolve) => {
-        requestAnimationFrame(() => {
-          resolve();
-        });
-      });
+  await page.evaluate((css) => {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(css);
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-    // `getAnimations()` já resolve o estilo pendente, então enxerga as transições recém-criadas.
-    // Um quadro entre as rodadas deixa ResizeObserver e afins reagirem, e o que eles mudarem
-    // entra na rodada seguinte; só sai quando um quadro inteiro passa sem transição em curso.
-    for (;;) {
-      await nextFrame();
-      // Só o que está desenhado: o conteúdo de um `<details>` fechado ganha a transição, mas ela
-      // nunca anda (não há quadro para ele), e a medição de corte também o ignora.
-      const running = document.getAnimations().filter((a) => {
-        const target = a.effect instanceof KeyframeEffect ? a.effect.target : null;
-        return a.playState !== "finished" && target?.checkVisibility() === true;
-      });
-      if (running.length === 0) {
-        break;
-      }
-      await Promise.allSettled(running.map((animation) => animation.finished));
-    }
-    return getComputedStyle(document.body).wordSpacing;
   }, WCAG_TEXT_SPACING);
+  const deadline = Date.now() + TRANSITION_BUDGET_MS;
+  // Um quadro entre as rodadas deixa ResizeObserver e afins reagirem, e o que eles mudarem entra na
+  // rodada seguinte; só sai quando um quadro inteiro passa sem transição em curso.
+  for (;;) {
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        }),
+    );
+    const running = await page.evaluateHandle(visibleRunningAnimations);
+    const pending = await running.evaluate(describeAnimations);
+    if (pending.length === 0) {
+      await running.dispose();
+      break;
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      await running.dispose();
+      const labels = [...new Set(pending)];
+      const listed = labels.slice(0, MAX_LISTED_ANIMATIONS).join(", ");
+      const rest = labels.length - MAX_LISTED_ANIMATIONS;
+      throw new Error(
+        `As transições não assentaram em ${String(TRANSITION_BUDGET_MS)} ms depois de aplicar a ` +
+          `folha de espaçamento; ${String(pending.length)} em curso: ${listed}` +
+          (rest > 0 ? ` e mais ${String(rest)} tipos` : ""),
+      );
+    }
+    // `finished` de uma animação infinita ou pausada nunca resolve: a corrida contra o tempo
+    // devolve a vez ao laço, que então estoura o teto com a lista do que sobrou.
+    await running.evaluate(
+      (animations, timeoutMs) =>
+        Promise.race([
+          Promise.allSettled(animations.map((animation) => animation.finished)),
+          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+        ]),
+      remainingMs,
+    );
+    await running.dispose();
+  }
+  return page.evaluate(() => getComputedStyle(document.body).wordSpacing);
+}
+
+/**
+ * Transições e animações em curso e desenhadas. Roda na página (`evaluateHandle`), então não pode
+ * usar nada do escopo do módulo. Só o que está desenhado: o conteúdo de um `<details>` fechado
+ * ganha a transição, mas ela nunca anda (não há quadro para ele), e a medição de corte também o
+ * ignora. `getAnimations()` já resolve o estilo pendente, então enxerga as recém-criadas.
+ */
+function visibleRunningAnimations(): Animation[] {
+  return document.getAnimations().filter((animation) => {
+    const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+    return animation.playState !== "finished" && target?.checkVisibility() === true;
+  });
+}
+
+/** Rótulo legível de cada animação, para a mensagem de erro (também roda na página). */
+function describeAnimations(animations: Animation[]): string[] {
+  return animations.map((animation) => {
+    const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+    const name = animation instanceof CSSTransition ? animation.transitionProperty : "animation";
+    return `${target?.tagName.toLowerCase() ?? "?"}:${name}`;
+  });
 }
 
 /** Contêineres visíveis, com texto, que escondem o que passa da borda num eixo e transbordam nele. */
