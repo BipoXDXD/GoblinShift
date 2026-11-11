@@ -9,11 +9,13 @@ Sem dependência do Schemathesis, para ser testado na suíte comum; o adaptador 
 `scripts/contract_hooks.py`.
 """
 
+import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from goblinshift.entrypoints.api.json_command import MAX_COMMAND_BYTES
 from goblinshift.files.limits import max_file_bytes_for
 
 _OK = 200
@@ -32,6 +34,7 @@ _PRESET_WITH_IF_MATCH = frozenset(
 )
 _ITEM_NAME_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.name")
 _ITEM_SIZE_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.size")
+_SELECT_UPLOAD_FIELD = re.compile(r"body\.parameters\.select\.\d+\.upload_id")
 
 
 @dataclass(frozen=True)
@@ -138,12 +141,35 @@ def _only_preset_domain_errors(rejection: Rejection) -> bool:
     )
 
 
+def _exceeds_command_limit(body: Any) -> bool:
+    """Corpo JSON que passa dos `MAX_COMMAND_BYTES` (o que não é JSON tem outro limite)."""
+    return isinstance(body, dict | list) and len(json.dumps(body).encode()) > MAX_COMMAND_BYTES
+
+
+def _only_preset_run_domain_errors(rejection: Rejection) -> bool:
+    """Só uploads fora do lote: o `input_upload_ids` ou o `select` que o preset guardou."""
+    errors = rejection.field_errors()
+    return bool(errors) and all(
+        code == _DOMAIN_ERROR
+        and (field == "body.input_upload_ids" or _SELECT_UPLOAD_FIELD.fullmatch(field) is not None)
+        for field, code in errors
+    )
+
+
 _ANY_OPERATION = "*"
 
 _RULES = (
     # O PostgreSQL não guarda NUL em text nem em jsonb, e o JSON Schema não tem como proibi-lo em
     # todo texto; o decodificador dos comandos o recusa com 400 (`json_command`).
     _Rule(_ANY_OPERATION, _BAD_REQUEST, "JSON_INVALID", lambda rejection: _has_nul(rejection.body)),
+    # O teto do corpo em bytes (`json_command`) é do envelope, não de um campo: o JSON Schema não
+    # tem como limitar o tamanho serializado, e as listas de nomes de coluna não têm `maxLength`.
+    _Rule(
+        _ANY_OPERATION,
+        _CONTENT_TOO_LARGE,
+        "BODY_TOO_LARGE",
+        lambda rejection: _exceeds_command_limit(rejection.body),
+    ),
     _Rule("POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_dot_names),
     _Rule(
         "POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_oversized_common_files
@@ -218,7 +244,7 @@ _RULES = (
         "POST /api/v1/presets/{preset_id}/runs",
         _UNPROCESSABLE,
         "VALIDATION_FAILED",
-        _only_errors(("body.input_upload_ids", _DOMAIN_ERROR)),
+        _only_preset_run_domain_errors,
     ),
     _Rule(
         "POST /api/v1/presets/{preset_id}/runs",
@@ -254,6 +280,23 @@ def is_expected_missing_header(
         and status == _PRECONDITION_REQUIRED
         and problem is not None
         and problem.get("code") == "PRECONDITION_REQUIRED"
+    )
+
+
+def is_expected_oversized_command(
+    status: int, problem: Mapping[str, Any] | None, body: Any
+) -> bool:
+    """Comando acima do teto de bytes é recusado com 413 antes da validação do schema.
+
+    Vale também para o check `negative_data_rejection`, que só espera 4xx de validação: o coverage
+    do Schemathesis manda lista acima do `maxItems` com textos longos, o corpo passa dos 64 KiB e
+    a resposta é o 413 que a spec publica. Só vale se o corpo enviado realmente passa do teto.
+    """
+    return (
+        status == _CONTENT_TOO_LARGE
+        and problem is not None
+        and problem.get("code") == "BODY_TOO_LARGE"
+        and _exceeds_command_limit(body)
     )
 
 
