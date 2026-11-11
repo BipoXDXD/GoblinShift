@@ -83,6 +83,18 @@ describe("sumário", () => {
   });
 });
 
+describe("quebra de linha", () => {
+  // A coluna usa wrap-anywhere para a URL longa não estourar o celular (WCAG 1.4.10). Herdado
+  // pela tabela, ele reduziria o min-content da célula a um caractere e esmagaria as colunas.
+  it("a caixa rolável da tabela volta ao wrap-normal: rola em vez de esmagar colunas", () => {
+    renderDocument("## 5. Prazos\n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |");
+
+    const scrollBox = screen.getByRole("table").parentElement;
+    expect(scrollBox).toHaveClass("overflow-x-auto");
+    expect(scrollBox).toHaveClass("wrap-normal");
+  });
+});
+
 describe("e-mails no texto", () => {
   it("endereço completo vira mailto e o ponto final fica fora do link", () => {
     renderDocument("Escreva para privacidade@goblinshift.dev.");
