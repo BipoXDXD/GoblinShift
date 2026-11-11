@@ -12,6 +12,7 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy import insert, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.retention import FILE_ROWS_AFTER, delete_old_file_rows
@@ -93,7 +94,7 @@ def test_predicado_do_historico_so_marca_o_upload_referenciado(
     with factory() as session:
         marked = set(
             session.execute(
-                select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.id))
+                select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.owner_id, upload.c.id))
             ).scalars()
         )
 
@@ -106,7 +107,7 @@ def test_predicado_do_historico_usa_o_indice_de_dono_e_upload(
     with factory() as session:
         now = db_now(session)
     old_deleted_upload(factory, storage, now, in_history=True)
-    statement = select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.id))
+    statement = select(upload.c.id).where(HISTORY_REFERENCES.upload(upload.c.owner_id, upload.c.id))
 
     with factory() as session:
         sql = str(statement.compile(session.get_bind()))
@@ -119,3 +120,25 @@ def test_predicado_do_historico_usa_o_indice_de_dono_e_upload(
     # nome do índice não basta: o dono precisa estar na condição de junção/pesquisa.
     assert OWNER_UPLOAD_INDEX in plan, plan
     assert OWNER_CONDITION.search(plan), plan
+
+
+def test_banco_recusa_entrada_de_outro_dono_no_historico(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    """A FK composta é o que sustenta a correlação do dono no predicado: sem ela, o `run_input`
+    de um dono poderia apontar para o upload de outro e a limpeza apagaria um upload em uso."""
+    now = datetime.now().astimezone()
+    upload_owner = new_owner(factory)
+    upload_id = ready_upload(factory, storage, upload_owner).id
+    other_owner = new_owner(factory)
+    run_id = insert_finished_run(factory, other_owner, now)
+
+    with (
+        pytest.raises(IntegrityError, match="run_input_owner_id_upload_id_fkey"),
+        unit_of_work(factory) as session,
+    ):
+        session.execute(
+            insert(run_input).values(
+                run_id=run_id, position=0, owner_id=other_owner, upload_id=upload_id, outcome="ok"
+            )
+        )

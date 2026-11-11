@@ -303,17 +303,12 @@ describe("Layout: aviso global", () => {
       id: "termos-2026-11",
       kind: "terms-change",
     });
-    // O FocusHeading leva o foco ao título num efeito que pode rodar depois do findBy: sem esperar,
-    // ele tira o foco do botão e o Enter cai no título.
-    await expectHeadingFocused("Histórico");
-    const title = screen.getByRole("heading", { level: 1, name: "Histórico" });
-    const close = screen.getByRole("button", { name: "Fechar aviso" });
     // O h1 aparece no DOM antes do efeito de montagem do FocusHeading, que é quem lhe dá o foco.
     // Sem esperar por ele, o efeito pode rodar depois do close.focus() abaixo (CPU disputada),
     // o Enter cairia no título e o aviso não fecharia (#310).
-    await waitFor(() => {
-      expect(title).toHaveFocus();
-    });
+    await expectHeadingFocused("Histórico");
+    const title = screen.getByRole("heading", { level: 1, name: "Histórico" });
+    const close = screen.getByRole("button", { name: "Fechar aviso" });
     close.focus();
     expect(close).toHaveFocus();
 
