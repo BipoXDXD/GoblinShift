@@ -11,6 +11,7 @@ publicação só move saldo entre reservas, sem travar pool depois da Run.
 """
 
 import logging
+import random
 import time
 import uuid
 from collections.abc import Callable, Collection, Mapping
@@ -50,7 +51,10 @@ logger = logging.getLogger(__name__)
 # Deadlock e falha de serialização repetem a transação inteira, com teto (3.4).
 RETRYABLE_SQLSTATES = frozenset({"40P01", "40001"})
 MAX_TRANSACTION_ATTEMPTS = 3
-_RETRY_PAUSE_S = 0.05
+# Backoff linear com "equal jitter": a pausa cai em [teto/2, teto], onde teto = base * tentativa.
+# Sem o sorteio, workers que colidem juntos dormem o mesmo tempo e colidem de novo (auditoria L3).
+RETRY_BASE_PAUSE_S = 0.05
+MIN_PAUSE_FRACTION = 0.5
 
 ACTIVE_STATUSES = frozenset({Status.RUNNING, Status.STOPPING})
 
@@ -113,10 +117,28 @@ class Applied:
     discarded_keys: tuple[str, ...]
 
 
-def run_transaction[T](factory: sessionmaker[Session], work: Callable[[Session], T]) -> T:
+def retry_pause_s(attempt_number: int, *, draw: Callable[[], float] = random.random) -> float:
+    """Pausa antes da próxima retentativa: backoff linear com jitter, sempre dentro do teto.
+
+    `draw` devolve um número em [0, 1); injetável para o teste fixar o sorteio.
+    """
+    ceiling_s = RETRY_BASE_PAUSE_S * attempt_number
+    floor_s = ceiling_s * MIN_PAUSE_FRACTION
+    return floor_s + (ceiling_s - floor_s) * draw()
+
+
+def run_transaction[T](
+    factory: sessionmaker[Session],
+    work: Callable[[Session], T],
+    *,
+    draw: Callable[[], float] = random.random,
+    sleep: Callable[[float], None] = time.sleep,
+) -> T:
     """Roda `work` numa transação; deadlock ou serialização repetem tudo, até o teto.
 
     `work` precisa ser repetível: lê de novo o que decide, nunca reaproveita leitura anterior.
+    A pausa entre tentativas tem jitter (`retry_pause_s`) para workers concorrentes não
+    voltarem a colidir em sincronia.
     """
     for attempt_number in range(1, MAX_TRANSACTION_ATTEMPTS + 1):
         try:
@@ -130,7 +152,7 @@ def run_transaction[T](factory: sessionmaker[Session], work: Callable[[Session],
                 "transação repetida",
                 extra={"fields": {"sqlstate": sqlstate, "attempt": attempt_number}},
             )
-            time.sleep(_RETRY_PAUSE_S * attempt_number)
+            sleep(retry_pause_s(attempt_number, draw=draw))
     raise RuntimeError("laço de retentativa terminou sem resultado")  # inalcançável
 
 
