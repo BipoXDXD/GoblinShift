@@ -23,10 +23,11 @@ Passos:
    estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
    `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
    afetar a linha, o motivo é relido e os candidatos são descartados. Coleta e gravação dos
-   candidatos renovam o lease como o `supervise` (`_LeaseKeeper`), como a cópia da entrada em
-   `prepare`, e erro de E/S nelas (disco do
+   candidatos renovam o lease como o `supervise` (`_LeaseKeeper`), e erro de E/S nelas (disco do
    storage cheio, área ilegível) é infraestrutura: falha transitória na hora, sem esperar o lease
-   vencer. Disco cheio aqui não é o limite de recurso de 1.6, que é o do sandbox do executor.
+   vencer. A cópia da entrada em `prepare` renova o lease do mesmo modo, com um keeper só para
+   todas as entradas. Disco cheio aqui não é o limite de recurso de 1.6, que é o do sandbox do
+   executor.
 5. `remove`: só depois de o desfecho estar no banco. Se o Runner falhar aqui, a área fica para a
    limpeza da manutenção.
 """
