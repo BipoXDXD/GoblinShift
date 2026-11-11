@@ -166,7 +166,11 @@ services:
     depends_on:
       openobserve:
         condition: service_started
-    networks: [internal]
+    # IP fixo (ADR 051, C1): o Nginx manda o access log por syslog para um IP, sem DNS. Igual
+    # ao de deploy/coolify/infra.json e fora da faixa que a alocação sequencial usa.
+    networks:
+      internal:
+        ipv4_address: 172.30.0.250
     restart: unless-stopped
     logging: *logging
 
