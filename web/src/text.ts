@@ -66,8 +66,9 @@ export const TEXT = {
       PRECONDITION_FAILED: "Isto foi alterado em outro lugar. Atualize a página e tente de novo.",
       BODY_TOO_LARGE:
         "O arquivo ou o pedido passa do tamanho permitido. Confira os limites da receita e envie arquivos menores.",
+      // O 415 vem do Content-Type do pedido, nunca do formato do arquivo escolhido.
       UNSUPPORTED_MEDIA_TYPE:
-        "Este tipo de arquivo não é aceito aqui. Escolha um dos formatos da receita.",
+        "O pedido foi enviado num formato que o servidor não aceita. Recarregue a página e tente de novo.",
       VALIDATION_FAILED: "Alguns valores foram recusados. Confira os erros indicados.",
       IDEMPOTENCY_KEY_REUSED:
         "Este envio conflita com um pedido anterior. Recarregue a página e tente de novo.",
