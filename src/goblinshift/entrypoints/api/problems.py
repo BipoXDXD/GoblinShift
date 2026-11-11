@@ -116,7 +116,7 @@ PROBLEMS: Mapping[ProblemCode, ProblemSpec] = {
     ProblemCode.INSUFFICIENT_SCOPE: ProblemSpec(403, "Escopo insuficiente"),
     ProblemCode.FORBIDDEN: ProblemSpec(403, "Acesso negado"),
     ProblemCode.CSRF_FAILED: ProblemSpec(403, "Verificação de CSRF recusada"),
-    ProblemCode.TERMS_NOT_ACCEPTED: ProblemSpec(403, "Termos de uso não aceitos"),
+    ProblemCode.TERMS_NOT_ACCEPTED: ProblemSpec(403, "Termos de Uso não aceitos"),
     ProblemCode.NOT_FOUND: ProblemSpec(404, "Recurso não encontrado"),
     ProblemCode.METHOD_NOT_ALLOWED: ProblemSpec(405, "Método não permitido"),
     ProblemCode.REQUEST_TIMEOUT: ProblemSpec(408, "Transferência interrompida por tempo"),
