@@ -279,6 +279,9 @@ class Coordinator:
                 fields["alert"] = error.alert
             logger.warning("área de trabalho falhou", extra={"fields": fields})
             return self.fail_transiently(claimed)
+        except _StopRequested:
+            # Cancelamento ou prazo percebido na renovação da cópia: o executor nunca iniciou.
+            return self.conclude_stop(claimed)
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
         try:

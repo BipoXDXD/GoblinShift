@@ -5,21 +5,31 @@ ela renova o lease entre blocos, como a coleta e a gravação dos candidatos, e 
 cancelamento ou a perda do fencing é percebido.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.runs.cancellation import cancel_run
+from goblinshift.runs.lifecycle import MIN_RETRY_JITTER
+from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
 from goblinshift.runs.worker import coordinator as coordinator_module
+from goblinshift.runs.worker.claim import claim_next
 from tests.runs.worker_support import (
     LEASE,
     SlowStorage,
+    attempts,
     claim,
     coordinator,
     create_user,
+    expire_lease,
     local_runner,
+    make_eligible_now,
+    open_run_uses,
     queue_run,
     run_row,
+    snapshot,
 )
 
 pytestmark = pytest.mark.integration
@@ -54,3 +64,90 @@ def test_lease_segue_renovado_durante_a_copia_da_entrada(
     # As pausas somam dois leases: sem renovar entre blocos o lease venceria no meio da cópia.
     assert PAUSES * PAUSE > LEASE
     assert min(storage.lease_margins) > 0
+
+
+def test_cancelamento_durante_a_copia_conclui_pela_parada_sem_iniciar_o_executor(
+    factory: sessionmaker[Session],
+    tmp_path: Path,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(coordinator_module, "COPY_CHUNK_BYTES", 4)
+    storage = SlowStorage(tmp_path / "storage", factory)
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner, [("a.csv", FIRST), ("b.csv", SECOND)])
+    claimed = claim(factory, storage)
+    runner = local_runner(work_root)
+    canceled: list[bool] = []
+
+    def cancel_once() -> None:
+        if not canceled:
+            canceled.append(True)
+            cancel_run(factory, storage, owner, run_id)
+
+    storage.slow_reads(claimed.attempt_id, pauses=PAUSES, pause=PAUSE, on_pause=cancel_once)
+
+    applied = coordinator(factory, storage, runner).run(claimed)
+
+    assert applied is not None
+    # A cópia parou na renovação seguinte ao cancelamento, sem esperar o fim das entradas.
+    assert len(storage.lease_margins) < PAUSES
+    row = run_row(factory, run_id)
+    assert (row["status"], row["error_code"], row["stop_reason"]) == (
+        "canceled",
+        "CANCELED",
+        "CANCELED",
+    )
+    [only] = attempts(factory, run_id)
+    assert only["ended_at"] is not None
+    assert only["executor_started_at"] is None
+    assert open_run_uses(factory, run_id) == 0
+    assert not runner.work_dir(claimed.attempt_id).exists()
+
+
+def test_lease_tomado_durante_a_copia_abandona_sem_escrever(
+    factory: sessionmaker[Session],
+    tmp_path: Path,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(coordinator_module, "COPY_CHUNK_BYTES", 4)
+    storage = SlowStorage(tmp_path / "storage", factory)
+    run_id = queue_run(
+        factory, storage, create_user(factory), [("a.csv", FIRST), ("b.csv", SECOND)]
+    )
+    claimed = claim(factory, storage)
+    runner = local_runner(work_root)
+    taken: list[object] = []
+
+    def other_worker_takes_over() -> None:
+        if taken:
+            return
+        expire_lease(factory, run_id)
+        janitor = Maintenance(
+            factory,
+            storage,
+            runner,
+            MaintenanceConfig(stop_grace=timedelta(seconds=2), jitter=lambda: MIN_RETRY_JITTER),
+        )
+        janitor.reconcile_expired_leases()
+        make_eligible_now(factory, run_id)
+        taken.append(claim_next(factory, storage, LEASE))
+        taken.append(snapshot(factory))
+
+    storage.slow_reads(
+        claimed.attempt_id, pauses=PAUSES, pause=PAUSE, on_pause=other_worker_takes_over
+    )
+
+    applied = coordinator(factory, storage, runner).run(claimed)
+
+    assert applied is None
+    new_claim, written_by_other = taken
+    assert new_claim is not None
+    # O worker A parou na renovação seguinte, sem esperar o fim das entradas.
+    assert len(storage.lease_margins) < PAUSES
+    # Depois da tomada, A não escreveu nada no banco: a tentativa nova segue intacta.
+    assert snapshot(factory) == written_by_other
+    row = run_row(factory, run_id)
+    assert (row["status"], row["generation"]) == ("running", 2)
+    assert [item["ended_at"] is None for item in attempts(factory, run_id)] == [False, True]
