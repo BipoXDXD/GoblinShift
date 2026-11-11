@@ -30,6 +30,8 @@ LOG_EVENT_ALERTS = {
     "account_deletion_overdue": "gs-causa-exclusao-de-conta-atrasada",
     "capacity_divergence": "gs-causa-capacidade-divergente",
     "capacity_over_max": "gs-causa-capacidade-divergente",
+    "executor_image_missing": "gs-causa-imagem-executor-ausente",
+    "executor_image_probe_failed": "gs-causa-sonda-imagem-falhou",
     "executor_start_failed": "gs-causa-executor-nao-iniciou",
     "missing_governor": "gs-causa-limitador-de-ausentes",
     "missing_sweep_failed": "gs-causa-varredura-falhou",
@@ -45,6 +47,8 @@ LOG_EVENT_ALERTS = {
 # quem é emitido dentro da manutenção: fora dela, a contagem do ciclo não enxerga o evento.
 CYCLE_COUNTERS = {
     "account_deletion_overdue": "maintenance_accounts_deletion_overdue",
+    "executor_image_missing": "maintenance_executor_image_missing",
+    "executor_image_probe_failed": "maintenance_executor_image_probe_failed",
     "missing_governor": "maintenance_missing_governor_tripped",
     "missing_sweep_failed": "maintenance_missing_sweep_failed",
     "objects_missing": "maintenance_objects_marked_missing",
@@ -107,6 +111,8 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-capacidade-divergente",
         "gs-causa-sem-reserva",
         "gs-causa-executor-nao-iniciou",
+        "gs-causa-imagem-executor-ausente",
+        "gs-causa-sonda-imagem-falhou",
         "gs-causa-manutencao-sem-ciclo",
         "gs-causa-sem-traces",
         "gs-causa-api-saturada",
@@ -192,6 +198,8 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
         "gs-causa-arquivos-nao-removidos",
         "gs-causa-varredura-falhou",
         "gs-causa-ciclos-falhando",
+        "gs-causa-imagem-executor-ausente",
+        "gs-causa-sonda-imagem-falhou",
         "gs-causa-manutencao-sem-ciclo",
     }
     chosen = [a for a in alerts(stream="s", prefix=PREFIX) if a.name in names]
@@ -231,6 +239,27 @@ def test_executor_que_nao_inicia_avisa_no_destino_urgente_lendo_o_span_da_tentat
     assert "alert_executor_start_failed" in CAUSE_COLUMNS
     assert "operation_name = 'attempt'" in alert.sql
     assert (alert.period_minutes, alert.frequency_minutes, alert.silence_minutes) == (10, 5, 60)
+
+
+def test_imagem_ausente_acorda_e_sonda_falhando_so_avisa() -> None:
+    by_name = {alert.name: alert for alert in alerts(stream="s", prefix=PREFIX)}
+
+    missing = by_name["gs-causa-imagem-executor-ausente"]
+    assert missing.destination is DestinationKey.URGENT
+    assert (missing.period_minutes, missing.frequency_minutes, missing.silence_minutes) == (
+        10,
+        5,
+        60,
+    )
+    assert "HAVING count(*) > 0" in missing.sql
+    failing = by_name["gs-causa-sonda-imagem-falhou"]
+    assert failing.destination is DestinationKey.WARNING
+    assert (failing.period_minutes, failing.frequency_minutes, failing.silence_minutes) == (
+        10,
+        5,
+        180,
+    )
+    assert "HAVING count(*) >= 10" in failing.sql
 
 
 def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:

@@ -1,11 +1,12 @@
 """Processo `gs-maintenance`: reconciliação e retenção em ciclos (docs/GoblinShiftPlan.md, 3.4).
 
-Um ciclo a cada `GS_MAINTENANCE_INTERVAL_S` (30 s): o de execuções e arquivos (`Maintenance`) e o
+Um ciclo a cada `GS_MAINTENANCE_INTERVAL_S` (30 s): o de execuções e arquivos (`Maintenance`), o
 de contas (`AccountJobs`: purga das contas em exclusão, retenção da identidade, 1.8, e limpeza das
-janelas do limite de requisições, ADR 028). Cada volta é um span `maintenance.cycle` com
-`main = true` (3.7), com as contagens dos dois ciclos, que os alertas de causa de
-`deploy/openobserve` leem; cada ciclo também registra seu evento de log. A falha de um ciclo é
-registrada e o seguinte tenta de novo. Os lotes usam
+janelas do limite de requisições, ADR 028) e, com o `executor_ctl`, a sonda da imagem do executor
+(`ExecutorImageProbe`). Cada volta é um span `maintenance.cycle` com `main = true` (3.7), com as
+contagens dos ciclos, que os alertas de causa de `deploy/openobserve` leem; cada ciclo também
+registra seu evento de log. A falha de um ciclo é registrada e o seguinte tenta de novo. Os lotes
+usam
 `statement_timeout` de `GS_MAINTENANCE_STATEMENT_TIMEOUT_MS` (30 s, 3.2).
 
 SIGTERM e SIGINT terminam o ciclo em andamento e saem. O handler só marca uma flag
@@ -36,6 +37,7 @@ from goblinshift.platform.telemetry import UserHasher, configure_logging
 from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
+from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError, ExecutorCtlRunner
 from goblinshift.runs.worker.runner import Runner
 
 logger = logging.getLogger("goblinshift.maintenance")
@@ -102,6 +104,7 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
                 # o PostgreSQL reverte quando a conexão cai, e o passo se repete no ciclo seguinte.
                 ("execuções", partial(maintenance.run_cycle, should_stop=shutdown.is_set)),
                 ("contas", account_jobs.run_cycle),
+                *executor_image_cycles(settings, runner),
             )
             while not shutdown.is_set():
                 run_cycles(tracer, cycles, should_stop=shutdown.is_set)
@@ -110,6 +113,14 @@ def serve(settings: Settings, runner: Runner, shutdown: ShutdownFlag) -> None:
         finally:
             engine.dispose()
     logger.info("manutenção encerrada")
+
+
+def executor_image_cycles(settings: Settings, runner: Runner) -> tuple[Cycle, ...]:
+    """A sonda da imagem, só com o `executor_ctl`: o Runner local não usa daemon nem imagem."""
+    if not isinstance(runner, ExecutorCtlRunner):
+        return ()
+    probe = ExecutorImageProbe(runner.image_present, settings.executor_image_for_runs())
+    return (("imagem do executor", probe.run_cycle),)
 
 
 def run_cycles(
@@ -241,6 +252,48 @@ class AccountJobs:
     def _in_transaction[T](self, work: Callable[[Session], T]) -> T:
         with unit_of_work(self._factory) as session:
             return work(session)
+
+
+class ExecutorImageProbe:
+    """Confere a cada volta se o daemon ainda tem a imagem do executor deste deploy.
+
+    Sem a imagem, o `docker run --pull=never` falha e isso só apareceria quando uma Run tentasse
+    iniciar. Ciclo próprio e sem banco: a resposta não depende dos outros. Não lança: uma exceção
+    cairia em `causa-ciclos-falhando`, com o diagnóstico errado para Docker ou `executor-ctl` fora.
+    """
+
+    def __init__(self, is_present: Callable[[str], bool], image: str) -> None:
+        self._is_present = is_present
+        self._image = image
+
+    def run_cycle(self) -> dict[str, int]:
+        try:
+            present = self._is_present(self._image)
+        except ExecutorCtlError as error:
+            # Docker ou serviço fora, ou recusa: o código diz qual, sem um traceback a cada 30 s.
+            logger.warning(
+                _PROBE_FAILED_MESSAGE,
+                extra={"fields": {**_PROBE_FAILED_EVENT, "error": error.code}},
+            )
+            return _image_counts(probe_failed=1)
+        except Exception:
+            # Defeito da própria sonda: mesma contagem, e o traceback para achar a causa.
+            logger.exception(_PROBE_FAILED_MESSAGE, extra={"fields": _PROBE_FAILED_EVENT})
+            return _image_counts(probe_failed=1)
+        if not present:
+            logger.error(
+                "imagem do executor ausente do daemon",
+                extra={"fields": {"alert": "executor_image_missing", "image": self._image}},
+            )
+        return _image_counts(missing=0 if present else 1)
+
+
+_PROBE_FAILED_MESSAGE = "sonda da imagem do executor falhou"
+_PROBE_FAILED_EVENT = {"alert": "executor_image_probe_failed"}
+
+
+def _image_counts(*, missing: int = 0, probe_failed: int = 0) -> dict[str, int]:
+    return {"executor_image_missing": missing, "executor_image_probe_failed": probe_failed}
 
 
 if __name__ == "__main__":

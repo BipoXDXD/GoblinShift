@@ -139,6 +139,15 @@ class ExecutorCtlRunner:
     def remove(self, attempt_id: uuid.UUID) -> None:
         self._request("DELETE", _path(attempt_id), None, self._remove_timeout)
 
+    def image_present(self, image: str) -> bool:
+        """Se o daemon tem a imagem; qualquer outra resposta é erro, nunca "ausente"."""
+        document = self._request("GET", f"/v1/image?ref={image}", None, self._call_timeout)
+        match document:
+            case {"present": bool(present), **others} if not others:
+                return present
+            case _:
+                raise ExecutorCtlError(INVALID_RESPONSE, f"image fora do contrato: {document!r}")
+
     def _status_call(
         self, method: str, path: str, body: dict[str, object] | None, timeout: timedelta
     ) -> ExecutorStatus:

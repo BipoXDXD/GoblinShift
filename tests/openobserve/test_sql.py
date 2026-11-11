@@ -421,6 +421,8 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
                 "maintenance.candidates_left_on_disk": 1,
                 "maintenance.missing_sweep_failed": 1,
                 "maintenance.failed_cycles": 1,
+                "maintenance.executor_image_missing": 1,
+                "maintenance.executor_image_probe_failed": 1,
                 "alert.executor_start_failed": 1,
             },
             1.0,
@@ -440,8 +442,56 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-varredura-falhou",
         "causa-ciclos-falhando",
         "causa-executor-nao-iniciou",
+        "causa-imagem-executor-ausente",
+        "causa-sonda-imagem-falhou",
     ):
         assert not cause_rows(telemetry, name, stream), name
+
+
+@pytest.mark.parametrize(("value", "fires"), [(0, False), (1, True)])
+def test_imagem_do_executor_ausente_dispara_com_uma_volta(
+    telemetry: Telemetry, value: int, fires: bool
+) -> None:
+    stream = unique_stream("imagem")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(executor_image_missing=value, executor_image_probe_failed=0)
+    traces.maintenance_cycle(
+        executor_image_missing=0, executor_image_probe_failed=0, age_s=2 * MINUTE_S
+    )
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-imagem-executor-ausente", stream)) is fires
+
+
+# Voltas de 30 s: dez falhas são 5 min, e o restart do `executor-ctl` não chega perto.
+@pytest.mark.parametrize(("failing", "fires"), [(9, False), (10, True)])
+def test_sonda_da_imagem_falhando_dispara_a_partir_de_dez_voltas(
+    telemetry: Telemetry, failing: int, fires: bool
+) -> None:
+    stream = unique_stream("sonda")
+    traces = telemetry.traces(stream)
+    for turn in range(failing):
+        traces.maintenance_cycle(
+            executor_image_missing=0,
+            executor_image_probe_failed=1,
+            age_s=(turn + 1) * MINUTE_S / 2,
+        )
+    traces.maintenance_cycle(executor_image_missing=0, executor_image_probe_failed=0, age_s=30.0)
+    traces.flush()
+
+    assert bool(cause_rows(telemetry, "causa-sonda-imagem-falhou", stream)) is fires
+
+
+def test_volta_sem_as_contagens_da_sonda_nao_dispara(telemetry: Telemetry) -> None:
+    # Runner local, ou versão anterior da manutenção: o span chega sem as colunas.
+    stream = unique_stream("sem_sonda")
+    traces = telemetry.traces(stream)
+    traces.maintenance_cycle(runs_deleted=1)
+    traces.flush()
+    declare_columns(telemetry.api, stream)
+
+    assert not cause_rows(telemetry, "causa-imagem-executor-ausente", stream)
+    assert not cause_rows(telemetry, "causa-sonda-imagem-falhou", stream)
 
 
 # Três voltas: uma falha isolada se resolve na volta seguinte (30 s).
