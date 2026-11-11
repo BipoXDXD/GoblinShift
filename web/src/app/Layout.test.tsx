@@ -9,6 +9,7 @@ import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, TEST_CSRF_TOKEN } from "../test/fakeApi";
+import { expectHeadingFocused } from "../test/focus";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
 type MeHandler = () => Response | null;
@@ -302,9 +303,13 @@ describe("Layout: aviso global", () => {
       id: "termos-2026-11",
       kind: "terms-change",
     });
-    const title = await screen.findByRole("heading", { level: 1, name: "Histórico" });
+    // O FocusHeading leva o foco ao título num efeito que pode rodar depois do findBy: sem esperar,
+    // ele tira o foco do botão e o Enter cai no título.
+    await expectHeadingFocused("Histórico");
+    const title = screen.getByRole("heading", { level: 1, name: "Histórico" });
     const close = screen.getByRole("button", { name: "Fechar aviso" });
     close.focus();
+    expect(close).toHaveFocus();
 
     await userEvent.keyboard("{Enter}");
 
