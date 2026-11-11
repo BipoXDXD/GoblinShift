@@ -299,13 +299,16 @@ def test_worker_pausado_na_preparacao_alem_do_lease_nao_escreve_ao_voltar(
         wait_until(lambda: lease_expired(factory))
         counts = janitor(factory, storage, work_root).run_cycle()
         after_takeover = snapshot(factory)
+        # Antes do SIGCONT, para ser a manutenção quem removeu, não o `_abandon` do worker.
+        removed_by_maintenance = not work_dir.exists()
 
         resume_after_takeover(worker, log, factory, after_takeover)
 
         assert counts["leases_reconciled"] == 1
     assert existed_when_paused, "a pausa cai depois de criar a área, como no worker real"
+    assert removed_by_maintenance, "a manutenção remove a área ao reconciliar o lease"
     assert paused["executor_started_at"] is None
-    assert not work_dir.exists()
+    assert not work_dir.exists(), "o worker retomado não recria a área"
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"], row["generation"]) == ("running", "retry_wait", 1)
     [ended] = attempts(factory, run_id)

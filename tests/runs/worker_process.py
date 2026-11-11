@@ -82,15 +82,27 @@ class PausingRunner:
 
 
 def parse_pause(argv: list[str]) -> tuple[str | None, list[str]]:
-    """Separa a opção de pausa (ponto, ou `None`) do modo do executor de teste."""
+    """Separa a opção de pausa (ponto, ou `None`) do modo do executor de teste.
+
+    Só valem as formas `--pause-while-supervising` e `--pause-at preparing`, no começo do argv.
+    Qualquer outro argumento `--pause*` (`--pause-at=preparing`, as duas opções juntas, ponto
+    desconhecido) falha alto: sem isso viraria modo do executor e o teste não pausaria nunca.
+    """
     if argv[:1] == [PAUSE_WHILE_SUPERVISING]:
-        return PAUSE_SUPERVISING, argv[1:]
-    if argv[:1] == [PAUSE_AT]:
-        point = argv[1:2]
-        if point != [PAUSE_PREPARING]:
-            raise SystemExit(f"{PAUSE_AT}: ponto desconhecido {point}; use {PAUSE_PREPARING}")
-        return PAUSE_PREPARING, argv[2:]
-    return None, argv
+        pause, mode = PAUSE_SUPERVISING, argv[1:]
+    elif argv[:2] == [PAUSE_AT, PAUSE_PREPARING]:
+        pause, mode = PAUSE_PREPARING, argv[2:]
+    else:
+        pause, mode = None, argv
+    unsupported = [arg for arg in mode if arg.startswith("--pause")]
+    if pause is None and mode[:1] and mode[0].startswith("--"):
+        unsupported.insert(0, mode[0])
+    if unsupported:
+        raise SystemExit(
+            f"opção de pausa não suportada: {unsupported}; use {PAUSE_WHILE_SUPERVISING}"
+            f" ou {PAUSE_AT} {PAUSE_PREPARING}, uma só, antes do modo"
+        )
+    return pause, mode
 
 
 def main(argv: list[str]) -> None:
