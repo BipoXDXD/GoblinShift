@@ -168,6 +168,39 @@ class PreparationError(Exception):
         self.alert = alert
 
 
+class _AreaFile:
+    """Arquivo novo da área de trabalho: toda `OSError` local (criar, gravar, fechar) vira alerta.
+
+    Disco cheio ou `EIO` na escrita é persistente e perde Runs em `INFRA_POISON` como a área não
+    criada: conta no mesmo alerta. A `OSError` da leitura do storage não passa por aqui.
+    """
+
+    def __init__(self, path: Path) -> None:
+        try:
+            self._file = _create_for_executor(path)
+        except OSError as error:
+            raise _area_write_failed(error) from error
+
+    def __enter__(self) -> _AreaFile:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        try:
+            self._file.close()
+        except OSError as error:
+            raise _area_write_failed(error) from error
+
+    def write(self, data: bytes) -> None:
+        try:
+            self._file.write(data)
+        except OSError as error:
+            raise _area_write_failed(error) from error
+
+
+def _area_write_failed(error: OSError) -> PreparationError:
+    return PreparationError(f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED)
+
+
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
     """A Run foi para `stopping` no meio de um trabalho longo: conclui pela parada."""
 
@@ -317,9 +350,8 @@ class Coordinator:
         try:
             self._fill_work_area(work_dir, claimed, contents, self._lease_keeper(claimed))
         except OSError as error:
-            # Sem alerta: aqui a `OSError` mistura a leitura do storage com a escrita na área.
-            # Lacuna conhecida: disco cheio ou E/S na escrita depois do `create_work_dir` perde a
-            # Run em `INFRA_POISON` sem nenhum alerta (runbook em deploy/openobserve/README.md).
+            # Só chega aqui a `OSError` da leitura do storage, que não é a área do host e fica sem
+            # alerta: a escrita local vira `PreparationError` com alerta em `_AreaFile`.
             raise PreparationError(f"área de trabalho: {error}") from error
 
     def _fill_work_area(
@@ -340,7 +372,7 @@ class Coordinator:
             "parameters": claimed.parameters,
             "inputs": entries,
         }
-        with _create_for_executor(work_dir / "job.json") as target:
+        with _AreaFile(work_dir / "job.json") as target:
             target.write(json.dumps(job, ensure_ascii=False).encode("utf-8"))
         # Num arquivo à parte, o executor anterior à fatia 5, que recusa chaves desconhecidas no
         # job.json, continua aceitando o job (ADR 021). Os uploads, na ordem das posições, são
@@ -349,7 +381,7 @@ class Coordinator:
             "executor_image": claimed.executor_image,
             "input_upload_ids": [str(upload_id) for upload_id in claimed.input_upload_ids],
         }
-        with _create_for_executor(work_dir / "context.json") as target:
+        with _AreaFile(work_dir / "context.json") as target:
             target.write(json.dumps(context, ensure_ascii=False).encode("utf-8"))
 
     def _copy_input(
@@ -361,7 +393,7 @@ class Coordinator:
         try:
             with (
                 self._storage.open(content.storage_key) as source,
-                _create_for_executor(inputs_dir / name) as target,
+                _AreaFile(inputs_dir / name) as target,
             ):
                 for chunk in keeper.beating(_chunks(source)):
                     digest.update(chunk)
