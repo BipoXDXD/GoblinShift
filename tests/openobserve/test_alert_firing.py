@@ -71,23 +71,7 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     _write_burning_traffic(telemetry, burning)
     _write_normal_traffic(telemetry, normal)
     started = time.monotonic()
-    # O alerta de disco lê as métricas do Collector, que são as mesmas para os dois cenários:
-    # fica só no da queima.
-    normal_catalog = [
-        a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
-    ]
-    # O agendador avalia uma quantidade limitada de alertas por vez, e a volta cresce com o número
-    # de alertas (scheduler_round.py). O cenário "queima" não tem span da manutenção, e só o
-    # "normal" precisa das causas lidas dele; menos alertas encurtam a volta.
-    idle_causes = {
-        f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
-    }
-    burning_catalog = [
-        a for a in alerts(stream=burning, prefix=BURNING) if a.name not in idle_causes
-    ]
-    silent_names = {f"{SILENT}{name}" for name in ABSENCE_CAUSES}
-    silent_catalog = [a for a in alerts(stream=silent, prefix=SILENT) if a.name in silent_names]
-    catalogs = ((BURNING, burning_catalog), (NORMAL, normal_catalog), (SILENT, silent_catalog))
+    catalogs = scenario_catalogs(burning, normal, silent)
     alert_count = sum(len(catalog) for _, catalog in catalogs)
     for prefix, catalog in catalogs:
         provision(
@@ -116,6 +100,29 @@ def scenario(telemetry: Telemetry, receiver: WebhookReceiver) -> Scenario:
     for prefix in (BURNING, NORMAL, SILENT):
         provision(telemetry.api, alerts=[], destinations={}, prefix=prefix)
     return result
+
+
+def scenario_catalogs(
+    burning: str, normal: str, silent: str
+) -> tuple[tuple[str, list[Alert]], ...]:
+    """Os alertas que cada cenário provisiona, por prefixo, lendo os streams dados."""
+    # O alerta de disco lê as métricas do Collector, que são as mesmas para os dois cenários:
+    # fica só no da queima.
+    normal_catalog = [
+        a for a in alerts(stream=normal, prefix=NORMAL) if a.name != f"{NORMAL}causa-disco"
+    ]
+    # O agendador avalia uma quantidade limitada de alertas por vez, e a volta cresce com o número
+    # de alertas (scheduler_round.py). O cenário "queima" não tem span da manutenção, e só o
+    # "normal" precisa das causas lidas dele; menos alertas encurtam a volta.
+    idle_causes = {
+        f"{BURNING}{cause.name}" for cause in SPAN_CAUSES if cause.name not in ABSENCE_CAUSES
+    }
+    burning_catalog = [
+        a for a in alerts(stream=burning, prefix=BURNING) if a.name not in idle_causes
+    ]
+    silent_names = {f"{SILENT}{name}" for name in ABSENCE_CAUSES}
+    silent_catalog = [a for a in alerts(stream=silent, prefix=SILENT) if a.name in silent_names]
+    return ((BURNING, burning_catalog), (NORMAL, normal_catalog), (SILENT, silent_catalog))
 
 
 def _wait_two_heartbeats(

@@ -21,6 +21,10 @@ SECONDS_PER_ALERT = REFERENCE_ROUND_S / REFERENCE_ALERTS
 # acabado de passar. A folga de 50% cobre a variação da vazão entre runners.
 ROUNDS = 2
 SAFETY_FACTOR = 1.5
+# O job do CI (`openobserve` em .github/workflows/ci.yml) gasta, além das duas esperas, o setup
+# (checkout, uv sync, subir OpenObserve e Collector) e os outros testes do marker: cerca de 1 min
+# no pior caso medido na revisão do PR #296. Reserva-se o dobro, pela variação entre runners.
+JOB_OVERHEAD_S = 120.0
 
 
 def scheduler_round_s(alert_count: int) -> float:

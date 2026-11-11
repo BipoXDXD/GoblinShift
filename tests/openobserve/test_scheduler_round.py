@@ -1,12 +1,19 @@
 """Prazo das duas voltas do agendador e o diagnóstico do estouro (sem Docker)."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from tests.openobserve.scheduler_round import (
+    JOB_OVERHEAD_S,
     heartbeat_report,
     scheduler_round_s,
     two_rounds_timeout_s,
 )
+from tests.openobserve.test_alert_firing import FIRING_TIMEOUT_S, scenario_catalogs
+
+CI_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
 
 
 @pytest.mark.parametrize(
@@ -62,3 +69,22 @@ def test_relatorio_sem_heartbeat_diz_nenhum() -> None:
     assert "0 heartbeat(s) depois do marco" in report
     assert "relativos ao marco: nenhum" in report
     assert "intervalo entre heartbeats): nenhum" in report
+
+
+def test_esperas_do_cenario_cabem_no_teto_do_job_do_ci() -> None:
+    # Sem esta conta, um catálogo maior faz o Actions matar o job por timeout, sem o relatório
+    # dos heartbeats. A contagem é a mesma que o cenário provisiona.
+    timeout_minutes = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["openobserve"][
+        "timeout-minutes"
+    ]
+    job_ceiling_s = timeout_minutes * 60.0
+    alert_count = sum(len(catalog) for _, catalog in scenario_catalogs("q", "n", "s"))
+    worst_waits_s = FIRING_TIMEOUT_S + two_rounds_timeout_s(alert_count)
+
+    assert worst_waits_s + JOB_OVERHEAD_S <= job_ceiling_s, (
+        f"{alert_count} alertas: as esperas somam até {worst_waits_s:.0f} s"
+        f" ({FIRING_TIMEOUT_S:.0f} s da queima + {two_rounds_timeout_s(alert_count):.0f} s das"
+        f" duas voltas), mais {JOB_OVERHEAD_S:.0f} s de setup e outros testes, passam do teto de"
+        f" {job_ceiling_s:.0f} s (timeout-minutes: {timeout_minutes}) do job openobserve;"
+        " suba timeout-minutes no ci.yml ou reduza o catálogo do cenário"
+    )
