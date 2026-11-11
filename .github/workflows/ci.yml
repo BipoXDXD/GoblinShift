@@ -268,11 +268,15 @@ jobs:
           # Histórico inteiro: um segredo apagado num commit posterior continua público.
           fetch-depth: 0
           persist-credentials: false
-      - name: gitleaks no histórico
+      # `--log-opts=--full-history HEAD`: o histórico de HEAD, que é main mais os commits do PR
+      # (no PR, HEAD é o merge commit sintético). Sem a flag, o gitleaks roda `git log --all` e
+      # julga o PR por qualquer branch do remoto, porque o checkout com fetch-depth 0 traz todas.
+      # Uma regra nova no .gitleaks.toml reavalia o histórico inteiro de main no PR que a adiciona.
+      - name: gitleaks no histórico de HEAD
         run: >-
           docker run --rm -v "$PWD:/repo:ro"
           ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
-          git /repo --config /repo/.gitleaks.toml --redact --no-banner
+          git /repo --config /repo/.gitleaks.toml --redact --no-banner "--log-opts=--full-history HEAD"
 
   gvisor:
     name: Executor sob gVisor
