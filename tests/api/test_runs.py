@@ -909,6 +909,20 @@ def test_data_sem_fuso_no_filtro_responde_422(
     assert_problem(response, 422, "VALIDATION_FAILED")
 
 
+@pytest.mark.parametrize("field", ["created_from", "created_to"])
+@pytest.mark.parametrize("value", ["0.5", "0", "1780000000", "20261001"])
+def test_filtro_de_data_so_aceita_instante_rfc3339_nao_timestamp_unix(
+    client: TestClient, factory: sessionmaker[Session], field: str, value: str
+) -> None:
+    """O Pydantic em modo lax lê número como timestamp Unix, mas a spec publica `date-time`
+    (string RFC 3339). Aceitar `?created_to=0.5` é aceitar o que o contrato proíbe."""
+    account = Account(factory)
+
+    response = client.get(f"{RUNS}?{field}={value}", headers=account.headers)
+
+    assert_problem(response, 422, "VALIDATION_FAILED")
+
+
 # GET /runs/{id}/results
 
 
