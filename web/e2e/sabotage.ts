@@ -18,6 +18,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { selectCases } from "./support/selectCases.ts";
+
 interface Case {
   readonly name: string;
   /** Argumentos do `playwright test`: arquivo da spec e, se preciso, `-g`. */
@@ -287,6 +289,22 @@ const CASES: readonly Case[] = [
       replace: "style-src 'self' 'unsafe-inline'",
     },
   },
+  ...(["desktop", "mobile"] as const).map((project): Case => ({
+    name: `textos legais: título da seção rente ao topo depois do sumário (${project})`,
+    spec: ["legal.spec.ts", "-g", "folga acima do título"],
+    project,
+    plant: (dist) => {
+      addStylesheet(dist, '[id^="secao-"] { scroll-margin-top: 0 !important; }');
+    },
+  })),
+  {
+    name: "textos legais: URL longa estoura a largura do celular",
+    spec: ["legal.spec.ts", "-g", "/termos cabe na largura"],
+    project: "mobile",
+    plant: (dist) => {
+      addStylesheet(dist, ".wrap-anywhere { overflow-wrap: normal !important; }");
+    },
+  },
   {
     name: "jornadas: botões de reordenar sumiram (só sobra o arrasto)",
     spec: ["journeys.spec.ts"],
@@ -501,7 +519,12 @@ function runCase(sabotage: Case, port: number): boolean {
 
 // Um argumento filtra os casos pelo nome: `npm run e2e:sabotage -- CLS`.
 const filter = process.argv[2] ?? "";
-const selected = CASES.filter((sabotage) => sabotage.name.includes(filter));
+const selection = selectCases(CASES, filter);
+if (!selection.found) {
+  console.error(selection.message);
+  process.exit(1);
+}
+const selected = selection.cases;
 const escaped = selected.filter((sabotage, index) => !runCase(sabotage, FIRST_PORT + index));
 if (escaped.length > 0) {
   console.error(`\n${String(escaped.length)} defeito(s) passaram pela suíte.`);
