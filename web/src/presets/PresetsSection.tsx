@@ -58,7 +58,7 @@ export function PresetsSection(): ReactElement | null {
       <ConfirmDialog
         open={removal.target !== null}
         title={T.removeTitle(removal.target?.name ?? "")}
-        confirmLabel={T.removeConfirm}
+        confirmLabel={removal.pending ? T.removing : T.removeConfirm}
         cancelLabel={T.cancel}
         confirmBlocked={removal.pending}
         busy={removal.pending}

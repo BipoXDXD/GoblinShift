@@ -108,7 +108,7 @@ export function ApiKeysSection({ now }: { readonly now: () => number }): ReactEl
       <ConfirmDialog
         open={revoke.target !== null}
         title={T.revokeTitle(revoke.target?.public_id ?? "")}
-        confirmLabel={T.revokeConfirm}
+        confirmLabel={revoke.pending ? T.revoking : T.revokeConfirm}
         cancelLabel={T.cancel}
         confirmBlocked={revoke.pending}
         busy={revoke.pending}

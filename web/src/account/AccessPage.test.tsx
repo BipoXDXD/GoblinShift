@@ -551,6 +551,36 @@ describe("Acesso: chaves de API", () => {
     });
   });
 
+  // O diálogo só fecha com a lista relida, que decide o destino do foco; até lá, o botão diz que
+  // a revogação segue em curso, para o diálogo não parecer travado.
+  it("revogada (204) com a lista ainda sendo relida: o diálogo diz que está revogando", async () => {
+    const relist = heldResponse();
+    let revoked = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        revoked ? relist.handler() : jsonResponse({ data: [apiKeyBody()] }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        revoked = true;
+        return NO_CONTENT();
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    const dialog = screen.getByRole("dialog", { name: "Revogar a chave gsk_7Hq2?" });
+    await user.click(within(dialog).getByRole("button", { name: "Revogar chave" }));
+
+    expect(await within(dialog).findByRole("button", { name: "Revogando chave…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    relist.answer(jsonResponse({ data: [apiKeyBody({ revoked_at: "2026-10-14T12:00:00Z" })] }));
+
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
     const held = heldResponse();
     const { api, user } = setup({
