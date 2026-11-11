@@ -45,7 +45,8 @@ def _upload_in_history(
 ) -> ColumnElement[bool]:
     # O dono também entra na correlação: `run_input.owner_id` é sempre o do upload (FK composta
     # `(owner_id, upload_id)`), e só com ele o índice `(owner_id, upload_id)` é pesquisado por chave
-    # em vez de varrido inteiro.
+    # em vez de varrido inteiro. Medido no PostgreSQL 18, que com só o upload correlacionado varre o
+    # índice todo; o plano depende da versão, e `test_history_upload_owner` falha se ele mudar.
     return exists().where(run_input.c.upload_id == upload_id, run_input.c.owner_id == owner_id)
 
 
