@@ -122,8 +122,8 @@ WORKER_FILE_MODE = 0o640
 DEFAULT_ATTEMPT_TIMEOUT = timedelta(minutes=10)
 # Erro gravado na Attempt que termina por infraestrutura (catálogo de 1.6).
 TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
-# Evento `alert=` do executor que não chega a iniciar: start recusado ou área de trabalho não
-# criada. `gs-causa-executor-nao-iniciou` o lê no span `attempt`.
+# Evento `alert=` do executor que não chega a iniciar: start recusado, área de trabalho não criada
+# ou falha de escrita nela. `gs-causa-executor-nao-iniciou` o lê no span `attempt`.
 EXECUTOR_START_FAILED = "executor_start_failed"
 # Erros que não encerram a supervisão. Conexão caída, `lock_timeout`, `statement_timeout` e pool
 # esgotado passam sozinhos. `OperationalError` também traz os que pedem ação de fora: senha recusada
@@ -172,7 +172,8 @@ class _AreaFile:
     """Arquivo novo da área de trabalho: toda `OSError` local (criar, gravar, fechar) vira alerta.
 
     Disco cheio ou `EIO` na escrita é persistente e perde Runs em `INFRA_POISON` como a área não
-    criada: conta no mesmo alerta. A `OSError` da leitura do storage não passa por aqui.
+    criada: conta no mesmo alerta. A `OSError` da leitura do storage não passa por aqui, e o
+    fechamento que falha com outra exceção em curso só é registrado, sem substituí-la.
     """
 
     def __init__(self, path: Path) -> None:
@@ -184,10 +185,17 @@ class _AreaFile:
     def __enter__(self) -> _AreaFile:
         return self
 
-    def __exit__(self, *_exc: object) -> None:
+    def __exit__(self, exc_type: object, *_exc: object) -> None:
         try:
             self._file.close()
         except OSError as error:
+            if exc_type is not None:
+                # O corpo já levantou (parada pedida, fencing perdido, leitura do storage): essa é a
+                # exceção que decide o desfecho da Run, e o fechamento falho não a substitui.
+                logger.warning(
+                    "fechamento da área de trabalho falhou", extra={"fields": {"error": str(error)}}
+                )
+                return
             raise _area_write_failed(error) from error
 
     def write(self, data: bytes) -> None:

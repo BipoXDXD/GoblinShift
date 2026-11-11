@@ -5,8 +5,12 @@ ela renova o lease entre blocos, como a coleta e a gravação dos candidatos, e 
 cancelamento ou a perda do fencing é percebido.
 """
 
+import errno
+import io
+import logging
 from datetime import timedelta
 from pathlib import Path
+from typing import BinaryIO, cast
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
@@ -102,6 +106,62 @@ def test_cancelamento_durante_a_copia_conclui_pela_parada_sem_iniciar_o_executor
     assert only["ended_at"] is not None
     assert only["executor_started_at"] is None
     assert open_run_uses(factory, run_id) == 0
+    assert not runner.work_dir(claimed.attempt_id).exists()
+
+
+class _NoSpaceOnClose(io.BytesIO):
+    """O buffer só chega ao disco no fechamento, e é nele que o disco cheio aparece."""
+
+    def close(self) -> None:
+        super().close()
+        raise OSError(errno.ENOSPC, "sem espaço no dispositivo")
+
+
+def test_cancelamento_durante_a_copia_prevalece_sobre_falha_no_fechamento(
+    factory: sessionmaker[Session],
+    tmp_path: Path,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(coordinator_module, "COPY_CHUNK_BYTES", 4)
+    real_create = coordinator_module._create_for_executor
+
+    def create(path: Path) -> BinaryIO:
+        if path.name == "0000.bin":
+            return cast(BinaryIO, _NoSpaceOnClose())
+        return real_create(path)
+
+    monkeypatch.setattr(coordinator_module, "_create_for_executor", create)
+    storage = SlowStorage(tmp_path / "storage", factory)
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner, [("a.csv", FIRST), ("b.csv", SECOND)])
+    claimed = claim(factory, storage)
+    runner = local_runner(work_root)
+    canceled: list[bool] = []
+
+    def cancel_once() -> None:
+        if not canceled:
+            canceled.append(True)
+            cancel_run(factory, storage, owner, run_id)
+
+    storage.slow_reads(claimed.attempt_id, pauses=PAUSES, pause=PAUSE, on_pause=cancel_once)
+
+    with caplog.at_level(logging.WARNING):
+        applied = coordinator(factory, storage, runner).run(claimed)
+
+    assert applied is not None
+    # O fechamento falho não troca o cancelamento por falha de preparação nem por alerta falso
+    # de `executor_start_failed`: a parada é a exceção original e conclui a Run.
+    assert [r for r in caplog.records if r.getMessage() == "área de trabalho falhou"] == []
+    row = run_row(factory, run_id)
+    assert (row["status"], row["error_code"], row["stop_reason"]) == (
+        "canceled",
+        "CANCELED",
+        "CANCELED",
+    )
+    [only] = attempts(factory, run_id)
+    assert only["executor_started_at"] is None
     assert not runner.work_dir(claimed.attempt_id).exists()
 
 
