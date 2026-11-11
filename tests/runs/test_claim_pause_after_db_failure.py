@@ -157,9 +157,22 @@ def fail_in_record_start(
 
 def fail_in_lease_keeper(worker: Coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
     # A supervisão absorve a falha da renovação (#217); o `_LeaseKeeper` do empacotamento não.
-    def renew(_claimed: ClaimedAttempt) -> Status:
-        raise lock_not_available()
+    # Falha só depois do `record_start`: a cópia da entrada também renova o lease, e falhar já
+    # nela pararia a tentativa antes do executor, sem chegar ao empacotamento que este ponto mira.
+    started: set[uuid.UUID] = set()
+    record_start = worker.record_start
+    renew_lease = worker.renew_lease
 
+    def record_start_and_mark(claimed: ClaimedAttempt) -> None:
+        record_start(claimed)
+        started.add(claimed.attempt_id)
+
+    def renew(claimed: ClaimedAttempt) -> Status:
+        if claimed.attempt_id in started:
+            raise lock_not_available()
+        return renew_lease(claimed)
+
+    monkeypatch.setattr(worker, "record_start", record_start_and_mark)
     monkeypatch.setattr(worker, "renew_lease", renew)
 
 
