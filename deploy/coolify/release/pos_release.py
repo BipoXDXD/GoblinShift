@@ -20,9 +20,9 @@ PROJECT = "goblinshift"
 PROTOCOL_VERSION = "2"
 ROLES = ("app", "web", "executor")
 IMAGE_PATTERNS = {
-    "app": r"ghcr\.io/bipoxdxd/goblinshift@(sha256:[0-9a-f]{64})",
-    "web": r"ghcr\.io/bipoxdxd/goblinshift-web@(sha256:[0-9a-f]{64})",
-    "executor": r"ghcr\.io/bipoxdxd/goblinshift-executor@(sha256:[0-9a-f]{64})",
+    "app": r"(ghcr\.io/bipoxdxd/goblinshift)@(sha256:[0-9a-f]{64})",
+    "web": r"(ghcr\.io/bipoxdxd/goblinshift-web)@(sha256:[0-9a-f]{64})",
+    "executor": r"(ghcr\.io/bipoxdxd/goblinshift-executor)@(sha256:[0-9a-f]{64})",
 }
 SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
@@ -30,8 +30,11 @@ ALLOWLIST_PATH = "/var/lib/coolify-release/goblinshift/executor-images.json"
 ALLOWLIST_OWNER = "root:root"
 ALLOWLIST_MODE = "600"
 ALLOWLIST_MAX_BYTES = 64 * 1024
+# receiver.py names the history entry with int(time.time()) taken after writing current.json,
+# so the suffix can trail finished_at and the mtime of current.json by a slow write.
 HISTORY_EPOCH_SLACK_S = 5
 READY_STATUS = "200"
+RUN_COMPLETED = "completed"
 REPEATABLE_KEYS = frozenset({"CONTAINER"})
 
 
@@ -139,22 +142,29 @@ def _run(rule: Rule, commit: str, facts: Facts) -> list[Check]:
         for item, passed, detail in rule(commit, facts):
             results.append(Check(item, Outcome.OK if passed else Outcome.FALHA, detail))
     except MissingFactError as missing:
-        results.append(
-            Check(rule.__name__.removeprefix("rule_"), Outcome.DESCONHECIDO, str(missing))
-        )
+        results.append(Check(_item_of(rule), Outcome.DESCONHECIDO, str(missing)))
     return results
 
 
-def _release_digests(facts: Facts) -> dict[str, str]:
+def _item_of(rule: Rule) -> str:
+    return rule.__name__.removeprefix("rule_").replace("_", "-")
+
+
+def _release_images(facts: Facts) -> dict[str, tuple[str, str]]:
+    """Role → (repository, digest) for every well-formed immutable reference in current.json."""
     images = facts.json("IMAGES")
     if not isinstance(images, dict):
         return {}
-    digests = {}
+    references = {}
     for role, pattern in IMAGE_PATTERNS.items():
         match = re.fullmatch(pattern, str(images.get(role, "")))
         if match:
-            digests[role] = match.group(1)
-    return digests
+            references[role] = (match.group(1), match.group(2))
+    return references
+
+
+def _release_digests(facts: Facts) -> dict[str, str]:
+    return {role: digest for role, (_repo, digest) in _release_images(facts).items()}
 
 
 def rule_1_2(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
@@ -315,20 +325,30 @@ def _allowlist_meta(facts: Facts) -> tuple[str, str, int, int]:
 
 def rule_20(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
     allow_mtime, current_mtime = _allowlist_meta(facts)[3], facts.integer("CUR_MTIME")
+    epoch = _history_epoch(commit, facts.one("HIST_TOPO"))
+    lag = None if epoch is None else epoch - current_mtime
+    history_matches = lag is not None and 0 <= lag <= HISTORY_EPOCH_SLACK_S
     yield (
         "20",
-        allow_mtime <= current_mtime,
-        f"executor-images={allow_mtime} current={current_mtime}",
+        allow_mtime <= current_mtime and history_matches,
+        f"executor-images={allow_mtime} current={current_mtime} history={epoch}",
     )
 
 
 def rule_21(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
+    """The VPS uses the containerd image store, where the Id of the image is its manifest digest.
+
+    A config ID (classic store) is not accepted: proving it would need the config of the
+    manifest, and on this host it would mean the storage changed, which deserves a look.
+    """
+    digests = _release_digests(facts)
     for role in ROLES:
         image_id = facts.one(f"IMPORT_{role.upper()}")
+        want = digests.get(role)
         yield (
             f"21 {role}",
-            image_id != "",
-            f"release-{commit[:12]}@digest → {image_id or 'ausente'}",
+            want is not None and image_id == want,
+            f"release-{commit[:12]}@digest → {image_id or 'ausente'} (quer {want})",
         )
 
 
@@ -336,16 +356,21 @@ def rule_22(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
     containers = facts.all("CONTAINER")
     if not containers:
         raise MissingFactError("nenhum container lido")
-    uuid, digests = facts.one("UUID"), _release_digests(facts)
+    uuid, references = facts.one("UUID"), _release_images(facts)
     for line in containers:
         parts = line.split("|")
-        if len(parts) != 6:
+        if len(parts) != 7:
             raise MissingFactError("CONTAINER malformado")
-        name, role, state, health, image, label = parts
-        want = digests.get(role)
+        name, role, state, health, image, label, config_image = parts
+        repo, digest = references.get(role, ("", ""))
+        tagged = f"{repo}:release-{commit}@{digest}"
         healthy = (state, health) == ("running", "healthy")
-        right = want is not None and image == want and label == uuid
-        yield f"22 {name}", healthy and right, f"{state} {health} {image} (quer {want})"
+        right = digest != "" and image == digest and label == uuid and config_image == tagged
+        yield (
+            f"22 {name}",
+            healthy and right,
+            f"{state} {health} {image} {config_image} (quer {digest} {tagged})",
+        )
 
 
 def rule_23(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
@@ -361,7 +386,9 @@ def rule_24(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
 def rule_25(commit: str, facts: Facts) -> Iterator[tuple[str, bool, str]]:
     head = facts.one("MAIN_HEAD")
     run = (facts.one("RUN_STATUS"), facts.one("RUN_CONCLUSAO"))
-    passed = head == commit and run == ("completed", "success")
+    if head == commit and run[0] != RUN_COMPLETED:
+        raise MissingFactError(f"run de {commit[:12]} ainda {run[0]}; repita depois")
+    passed = head == commit and run == (RUN_COMPLETED, "success")
     yield "25", passed, f"main={head} run={run[0]}/{run[1] or '-'} (superado? veja o item 7)"
 
 

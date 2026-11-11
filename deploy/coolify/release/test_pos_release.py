@@ -29,6 +29,10 @@ EXECUTOR = (
     "ghcr.io/bipoxdxd/goblinshift-executor@"
     "sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c"
 )
+OTHER_DIGEST = "sha256:" + "f" * 64
+ALLOWLIST = "/var/lib/coolify-release/goblinshift/executor-images.json"
+API = "goblinshift-" + "api-1"  # partido: o gitleaks o lia como chave
+NGINX = "goblinshift-nginx-1"
 OUTSIDE_KEYS = ("RECV_REPO", "MANIFEST_", "TAG_DIGEST_", "RUN_", "MAIN_HEAD")
 UNUSED_FOR_INDEX = ("TAG_DIGEST_APP", "TAG_DIGEST_WEB", "TAG_DIGEST_EXECUTOR")
 SCRIPT_TIMEOUT_S = 30
@@ -52,6 +56,37 @@ def with_value(key: str, value: str) -> str:
 
 def without(key: str) -> str:
     return as_text([(k, v) for k, v in fixture_lines() if k != key])
+
+
+def with_container(name: str, field: int, value: str) -> str:
+    """Changes one `|` field (0 = name) of the CONTAINER line of one container."""
+    lines = []
+    for key, line in fixture_lines():
+        parts = line.split("|")
+        if key == "CONTAINER" and parts[0] == name:
+            parts[field] = value
+        lines.append((key, "|".join(parts)))
+    return as_text(lines)
+
+
+def with_image(role: str, reference: str | None) -> str:
+    images = json.loads(dict(fixture_lines())["IMAGES"])
+    if reference is None:
+        del images[role]
+    else:
+        images[role] = reference
+    return with_value("IMAGES", json.dumps(images))
+
+
+def with_amd64(role: str, digest: str) -> str:
+    key = f"MANIFEST_{role.upper()}"
+    manifest = json.loads(dict(fixture_lines())[key])
+    manifest["manifests"][0]["digest"] = digest
+    return with_value(key, json.dumps(manifest))
+
+
+def with_values(changes: dict[str, str]) -> str:
+    return as_text([(k, changes.get(k, v)) for k, v in fixture_lines()])
 
 
 def decide(text: str, commit: str = COMMIT) -> p.Verdict:
@@ -133,6 +168,136 @@ class IncoherentReleaseTests(unittest.TestCase):
     def test_failure_wins_over_unknown(self) -> None:
         text = with_value("READYZ", "503").replace("LOCK_HOST\tlivre\n", "")
         self.assertEqual(decide(text).status, p.Status.INCOERENTE)
+
+
+FALHA = p.Outcome.FALHA
+DESCONHECIDO = p.Outcome.DESCONHECIDO
+HISTORY = f"{COMMIT}-1794355749.json"
+
+# (case, collected facts, item, expected outcome of the item, other items also not OK).
+# One wrong value per case; every item of the checklist has at least one.
+ITEM_FAILURES: list[tuple[str, str, str, p.Outcome, frozenset[str]]] = [
+    ("pending não confirmado", without("PENDING_LIDO"), "1-2", DESCONHECIDO, frozenset()),
+    ("pending de outro projeto",
+     with_value("OUTROS_PENDING", "/var/lib/coolify-release/duora/pending.json"),
+     "3", FALHA, frozenset()),
+    ("incoming órfão", with_value("INCOMING", "/var/lib/coolify-release/goblinshift/incoming-x"),
+     "4", FALHA, frozenset()),
+    ("host.lock preso", with_value("LOCK_HOST", "preso"), "5", FALHA, frozenset()),
+    ("release.lock preso", with_value("LOCK_PROJETO", "preso"), "5", FALHA, frozenset()),
+    ("estado de lock estranho", with_value("LOCK_HOST", "talvez"), "5", DESCONHECIDO, frozenset()),
+    ("receptor ativo",
+     with_value("RECEPTOR_ATIVO", "4242 python3 /opt/coolify-release/receiver.py goblinshift"),
+     "6", FALHA, frozenset()),
+    ("current de outro commit", with_value("COMMIT", OTHER_COMMIT), "7", FALHA, frozenset()),
+    ("current sem commit", with_value("COMMIT", "null"), "7", FALHA, frozenset()),
+    ("outro projeto", with_value("PROJETO", "duora"), "8", FALHA, frozenset()),
+    ("outro protocolo", with_value("VERSAO", "1"), "8", FALHA, frozenset()),
+    ("hash do recibo", with_value("RECV_SHA", "f" * 64), "9", FALHA, frozenset()),
+    ("hash instalado", with_value("RECV_INST", "f" * 64), "9", FALHA, frozenset()),
+    ("hash do repo", with_value("RECV_REPO", "f" * 64), "9", FALHA, frozenset()),
+    ("hashes iguais e inválidos",
+     with_values({"RECV_SHA": "null", "RECV_INST": "null", "RECV_REPO": "null"}),
+     "9", FALHA, frozenset()),
+    ("papel a mais", with_image("extra", "ghcr.io/bipoxdxd/goblinshift@" + OTHER_DIGEST),
+     "10", FALHA, frozenset()),
+    ("papel por tag", with_image("web", "ghcr.io/bipoxdxd/goblinshift-web:latest"), "10", FALHA,
+     frozenset({"11 web", "21 web", "22 " + NGINX})),
+    ("app amd64 publicado diferente", with_amd64("app", OTHER_DIGEST), "11 app", FALHA,
+     frozenset()),
+    ("web amd64 publicado diferente", with_amd64("web", OTHER_DIGEST), "11 web", FALHA,
+     frozenset()),
+    ("executor amd64 publicado diferente", with_amd64("executor", OTHER_DIGEST), "11 executor",
+     FALHA, frozenset()),
+    ("deployment_uuid vazio", with_value("DEPLOY_UUID", ""), "12", FALHA, frozenset()),
+    ("deployment_uuid null", with_value("DEPLOY_UUID", "null"), "12", FALHA, frozenset()),
+    ("finished_at igual ao run", with_value("RUN_CRIADO", "1794355749"), "13", FALHA,
+     frozenset()),
+    ("history com duas entradas do commit", with_value("HIST_N_COMMIT", "2"), "14", FALHA,
+     frozenset()),
+    ("history sem entradas do commit", with_value("HIST_N_COMMIT", "0"), "14", FALHA,
+     frozenset()),
+    ("history difere do current", with_value("HIST_IGUAL", "false"), "15", FALHA, frozenset()),
+    ("epoch do history antes do finished_at", with_value("FINISHED", "1794355750"), "16", FALHA,
+     frozenset()),
+    ("epoch do history 6 s depois", with_value("FINISHED", "1794355743"), "16", FALHA,
+     frozenset()),
+    ("executor fora do topo", with_value("ALLOWED", json.dumps(
+        ["ghcr.io/bipoxdxd/goblinshift-executor@" + OTHER_DIGEST, EXECUTOR])),
+     "17", FALHA, frozenset()),
+    ("allowlist sem o executor anterior",
+     with_value("EXEC_ANTERIOR", "ghcr.io/bipoxdxd/goblinshift-executor@" + OTHER_DIGEST),
+     "18", FALHA, frozenset()),
+    ("allowlist com duplicata", with_value("ALLOWED", json.dumps([EXECUTOR, EXECUTOR])), "18",
+     FALHA, frozenset()),
+    ("dono da allowlist", with_value("ALLOW_META", "runner:root 600 910 1794355711"), "19",
+     FALHA, frozenset()),
+    ("modo da allowlist", with_value("ALLOW_META", "root:root 644 910 1794355711"), "19",
+     FALHA, frozenset()),
+    ("allowlist acima de 64 KiB", with_value("ALLOW_META", "root:root 600 65537 1794355711"),
+     "19", FALHA, frozenset()),
+    ("images_file de outro caminho",
+     with_value("EXEC_CFG", "/var/lib/coolify-release/duora/executor-images.json"),
+     "19", FALHA, frozenset()),
+    ("allowlist escrita depois do current",
+     with_value("ALLOW_META", "root:root 600 910 1794355750"), "20", FALHA, frozenset()),
+    ("current escrito depois do history", with_value("CUR_MTIME", "1794355750"), "20", FALHA,
+     frozenset()),
+    ("history 6 s depois do current", with_value("CUR_MTIME", "1794355743"), "20", FALHA,
+     frozenset()),
+    ("app não importada", with_value("IMPORT_APP", ""), "21 app", FALHA, frozenset()),
+    ("Id do app diferente do digest", with_value("IMPORT_APP", OTHER_DIGEST), "21 app", FALHA,
+     frozenset()),
+    ("Id do web diferente do digest", with_value("IMPORT_WEB", OTHER_DIGEST), "21 web", FALHA,
+     frozenset()),
+    ("Id do executor diferente do digest", with_value("IMPORT_EXECUTOR", OTHER_DIGEST),
+     "21 executor", FALHA, frozenset()),
+    ("container parado", with_container(API, 2, "exited"), "22 " + API, FALHA, frozenset()),
+    ("container sem healthcheck", with_container(API, 3, "nohealth"), "22 " + API, FALHA,
+     frozenset()),
+    ("container com outra imagem", with_container(NGINX, 4, OTHER_DIGEST), "22 " + NGINX, FALHA,
+     frozenset()),
+    ("container fora do recurso Coolify", with_container(API, 5, "outro-uuid"), "22 " + API,
+     FALHA, frozenset()),
+    ("Config.Image de outro commit",
+     with_container(API, 6, f"ghcr.io/bipoxdxd/goblinshift:release-{OTHER_COMMIT}@"
+                    + APP_AMD64_DIGEST), "22 " + API, FALHA, frozenset()),
+    ("Config.Image sem digest", with_container(NGINX, 6, "ghcr.io/bipoxdxd/goblinshift-web:latest"),
+     "22 " + NGINX, FALHA, frozenset()),
+    ("container ausente", with_container(API, 2, "ausente"), "22 " + API, FALHA, frozenset()),
+    ("readyz 503", with_value("READYZ", "503"), "23", FALHA, frozenset()),
+    ("readyz sem resposta", with_value("READYZ", "000"), "23", FALHA, frozenset()),
+    ("log de erros escrito no run", with_value("ERRLOG_MTIME", "1794355555"), "24", FALHA,
+     frozenset()),
+    ("main em outro commit", with_value("MAIN_HEAD", OTHER_COMMIT), "25", FALHA, frozenset()),
+    ("run falhou", with_value("RUN_CONCLUSAO", "failure"), "25", FALHA, frozenset()),
+    ("run ainda rodando", with_values({"RUN_STATUS": "in_progress", "RUN_CONCLUSAO": ""}), "25",
+     DESCONHECIDO, frozenset()),
+]  # fmt: skip
+
+CHECKLIST_ITEMS = {"1-2", *(str(number) for number in range(3, 26))}
+
+
+class ItemFailureTests(unittest.TestCase):
+    """Each invariant, violated alone, is not OK; the rest of the release stays as it was."""
+
+    def test_each_wrong_value_fails_its_item(self) -> None:
+        for case, text, item, expected, also in ITEM_FAILURES:
+            with self.subTest(case=case, item=item):
+                verdict = decide(text)
+                self.assertEqual(outcome(verdict, item), expected)
+                not_ok = {c.item for c in verdict.checks if c.outcome is not p.Outcome.OK}
+                self.assertEqual(not_ok, {item} | also)
+                want = p.Status.INCOERENTE if expected is FALHA else p.Status.DESCONHECIDO
+                self.assertEqual(verdict.status, want)
+
+    def test_every_checklist_item_has_a_failure_case(self) -> None:
+        covered = {item.split()[0] for _, _, item, _, _ in ITEM_FAILURES}
+        self.assertEqual(covered, CHECKLIST_ITEMS)
+
+    def test_run_still_running_for_a_superseded_commit_is_a_failure(self) -> None:
+        text = with_values({"MAIN_HEAD": OTHER_COMMIT, "RUN_STATUS": "in_progress"})
+        self.assertEqual(outcome(decide(text), "25"), p.Outcome.FALHA)
 
 
 class UnknownTests(unittest.TestCase):

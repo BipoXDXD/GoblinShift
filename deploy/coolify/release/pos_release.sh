@@ -72,8 +72,8 @@ if [[ -n ${cur:-} ]] && $S docker version >/dev/null 2>&1 \
   done
   for c in $(jq -r '.image_roles | keys[]' <<<"$cfg"); do
     role=$(jq -r --arg c "$c" '.image_roles[$c]' <<<"$cfg")
-    x=$($S docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}nohealth{{end}}|{{.Image}}|{{index .Config.Labels "coolify.applicationUuid"}}' "$c" 2>/dev/null) \
-      || x="ausente|-|-|-"
+    x=$($S docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}nohealth{{end}}|{{.Image}}|{{index .Config.Labels "coolify.applicationUuid"}}|{{.Config.Image}}' "$c" 2>/dev/null) \
+      || x="ausente|-|-|-|-"
     emit CONTAINER "$c|$role|$x"
   done
   ip=$($S docker inspect --format '{{(index .NetworkSettings.Networks "goblinshift_internal").IPAddress}}' goblinshift-api-1 2>/dev/null)
