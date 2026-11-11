@@ -76,8 +76,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(running: FastAPI) -> AsyncGenerator[None]:
-        # A parada roda também quando a API cai: o uvicorn lança a falha no `yield`, e ela
-        # segue propagando depois dos passos abaixo.
+        # A parada roda também quando a tarefa do lifespan é cancelada ou interrompida: o
+        # cancelamento chega no `yield` e segue propagando depois dos passos abaixo.
         try:
             async with saturation_reporting(running.state.tracing.tracer):
                 yield
