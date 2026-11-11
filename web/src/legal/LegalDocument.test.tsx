@@ -89,7 +89,7 @@ describe("quebra de linha", () => {
   it("a caixa rolável da tabela volta ao wrap-normal: rola em vez de esmagar colunas", () => {
     renderDocument("## 5. Prazos\n\n| Dado | Prazo |\n| --- | --- |\n| e-mail | 1 ano |");
 
-    const scrollBox = screen.getByRole("table").parentElement;
+    const scrollBox = screen.getByRole("region", { name: "5. Prazos" });
     expect(scrollBox).toHaveClass("overflow-x-auto");
     expect(scrollBox).toHaveClass("wrap-normal");
   });
