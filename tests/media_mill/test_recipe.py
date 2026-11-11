@@ -109,6 +109,16 @@ def test_mono_continua_mono_sem_reamostragem(workspace: Workspace, clips: ClipLi
 # enquanto um corte (`-t 1` num áudio de 2 s) erra em 1 s.
 AUDIO_DURATION_TOLERANCE_S = 0.02
 
+# Fontes cujo áudio é AAC. Um quadro AAC-LC tem 1024 amostras. O ffmpeg 6.x (CI) não apara o
+# padding do último quadro ao extrair para WAV: sobra até um quadro inteiro além da faixa
+# (2,020136 s = 87 x 1024 amostras para 2 s a 44,1 kHz). O 9.0.2 devolve exatamente a faixa.
+AAC_SOURCE_CLIPS = frozenset({"mp4", "mp4_mono_and_stereo"})
+AAC_FRAME_SAMPLES = 1024
+
+
+def aac_frame_s(sample_rate: int) -> float:
+    return AAC_FRAME_SAMPLES / sample_rate
+
 
 @pytest.mark.parametrize(
     ("clip", "name", "params", "expected_s"),
@@ -163,7 +173,14 @@ def test_audio_extraido_dura_o_mesmo_que_a_faixa_de_origem_e_so_tem_audio(
     (audio_output,) = item.outputs
     extracted = workspace.path(audio_output)
     assert stream_kinds(extracted) == ["audio"]
-    assert duration_s(extracted) == pytest.approx(expected_s, abs=AUDIO_DURATION_TOLERANCE_S)
+    measured_s = duration_s(extracted)
+    if clip in AAC_SOURCE_CLIPS:
+        # Só para cima e só até um quadro: nunca mais curto que a faixa (corte) nem mais de um
+        # quadro além dela. O WAV sai na taxa da faixa de origem (sem resample).
+        frame_s = aac_frame_s(int(probe(extracted)["sample_rate"]))
+        assert expected_s <= measured_s < expected_s + frame_s
+    else:
+        assert measured_s == pytest.approx(expected_s, abs=AUDIO_DURATION_TOLERANCE_S)
 
 
 @pytest.mark.parametrize(
