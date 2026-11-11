@@ -5,11 +5,13 @@ deixaria: `queued`, entradas vinculadas e usos registrados com `hold`.
 """
 
 import sys
+import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, BinaryIO, Self, cast
 
 from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -34,6 +36,105 @@ VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
 LEASE = timedelta(seconds=2)
 FAKE_EXECUTOR = str(Path(__file__).with_name("fake_executor.py"))
+
+
+class _SlowReader:
+    """Leitura do storage que pausa depois de cada bloco não vazio (via `SlowStorage`)."""
+
+    def __init__(self, source: BinaryIO, pause: Callable[[], None]) -> None:
+        self._source = source
+        self._pause = pause
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        error_type: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._source.close()
+
+    def read(self, size: int = -1, /) -> bytes:
+        chunk = self._source.read(size)
+        if chunk:
+            self._pause()
+        return chunk
+
+
+class SlowStorage(FileStorage):
+    """Storage lento: pausa a cada bloco e anota a folga do lease.
+
+    `slow_down` vale para a gravação (`create_exclusive`); `slow_reads`, para a leitura (`open`).
+    Os dois contam pausas no mesmo orçamento e registram a folga em `lease_margins`.
+    """
+
+    def __init__(self, root: Path, factory: sessionmaker[Session]) -> None:
+        super().__init__(root)
+        self._factory = factory
+        self._pauses = 0
+        self._pause_s = 0.0
+        self._attempt_id: uuid.UUID | None = None
+        self._on_pause: Callable[[], None] = lambda: None
+        self._slow_reads = False
+        self.lease_margins: list[float] = []
+
+    def slow_down(
+        self,
+        attempt_id: uuid.UUID,
+        pauses: int,
+        pause: timedelta,
+        on_pause: Callable[[], None] = lambda: None,
+    ) -> None:
+        self._attempt_id = attempt_id
+        self._pauses = pauses
+        self._pause_s = pause.total_seconds()
+        self._on_pause = on_pause
+
+    def slow_reads(
+        self,
+        attempt_id: uuid.UUID,
+        *,
+        pauses: int,
+        pause: timedelta,
+        on_pause: Callable[[], None] = lambda: None,
+    ) -> None:
+        """Pausa `pause` a cada bloco lido por `open`, até `pauses` vezes."""
+        self.slow_down(attempt_id, pauses, pause, on_pause)
+        self._slow_reads = True
+
+    def open(self, key: str) -> BinaryIO:
+        source = super().open(key)
+        if not self._slow_reads:
+            return source
+        return cast(BinaryIO, _SlowReader(source, self._pause_once))
+
+    def create_exclusive(
+        self, key: str, chunks: Iterable[bytes], max_bytes: int
+    ) -> tuple[bytes, int]:
+        return super().create_exclusive(key, self._slowly(chunks), max_bytes)
+
+    def _slowly(self, chunks: Iterable[bytes]) -> Iterator[bytes]:
+        for chunk in chunks:
+            yield chunk
+            self._pause_once()
+
+    def _pause_once(self) -> None:
+        if self._pauses > 0:
+            self._pauses -= 1
+            self._on_pause()
+            time.sleep(self._pause_s)
+            self.lease_margins.append(self._lease_margin())
+
+    def _lease_margin(self) -> float:
+        with self._factory() as session:
+            margin: timedelta = session.execute(
+                select(attempt.c.lease_expires_at - func.now()).where(
+                    attempt.c.id == self._attempt_id
+                )
+            ).scalar_one()
+        return margin.total_seconds()
 
 
 def create_user(factory: sessionmaker[Session], subject: str = "ana") -> uuid.UUID:
