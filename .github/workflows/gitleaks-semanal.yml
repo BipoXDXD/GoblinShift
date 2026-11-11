@@ -10,6 +10,13 @@ on:
   schedule:
     - cron: "47 12 * * 1"
   workflow_dispatch:
+    inputs:
+      simular_falha:
+        # Testa o job `alerta` sem plantar segredo: o scan falha antes de rodar e a issue sai
+        # com título próprio, para não se misturar a um alerta real.
+        description: "Falhar de propósito para testar a issue de alerta"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +31,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Falha simulada (teste do alerta)
+        if: inputs.simular_falha
+        run: echo "Falha simulada a pedido (simular_falha=true); o scan não rodou." && exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # 0 busca todas as branches e tags para refs/remotes/origin/* e refs/tags/*.
@@ -50,7 +60,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       EXECUCAO: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      TITULO: "gitleaks semanal: falha na varredura de todas as refs"
+      TITULO: "${{ inputs.simular_falha && 'gitleaks semanal: teste do alerta (falha simulada)' || 'gitleaks semanal: falha na varredura de todas as refs' }}"
     steps:
       - name: Abrir issue ou comentar na aberta
         run: |
