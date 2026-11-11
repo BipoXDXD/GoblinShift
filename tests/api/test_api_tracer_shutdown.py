@@ -4,15 +4,19 @@ Sem banco: a API sobe com o `BatchSpanProcessor` de produção, com o exportador
 em memória, e um atraso de lote longo o bastante para o span ficar na fila até a parada.
 """
 
+import asyncio
 import time
 from collections.abc import Iterator
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import Tracer
 
+from goblinshift.entrypoints.api import saturation
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.platform import telemetry
 from goblinshift.platform.settings import Settings
@@ -119,3 +123,149 @@ def test_falha_ao_encerrar_o_tracing_nao_derruba_a_parada(
     assert f"GET {TRACED_PATH}" in _span_names(exporter)
     # `configure_logging` escreve JSON no stderr, sem propagar para o `caplog`.
     assert "encerramento do tracing falhou" in capsys.readouterr().err
+
+
+class _ApiRunningError(Exception):
+    """Falha da API em execução, lançada pelo uvicorn no `yield` do lifespan."""
+
+
+def _record_shutdown_steps(monkeypatch: pytest.MonkeyPatch, app: FastAPI) -> list[str]:
+    steps: list[str] = []
+    dispose = app.state.engine.dispose
+    shut_down = telemetry.ApiTracing.shut_down
+
+    def recording_dispose() -> None:
+        steps.append("dispose")
+        dispose()
+
+    def recording_shut_down(tracing: telemetry.ApiTracing) -> None:
+        steps.append("shut_down")
+        shut_down(tracing)
+
+    monkeypatch.setattr(app.state.engine, "dispose", recording_dispose)
+    monkeypatch.setattr(telemetry.ApiTracing, "shut_down", recording_shut_down)
+    return steps
+
+
+def _run_lifespan_failing_with(app: FastAPI, failure: BaseException) -> None:
+    async def run() -> None:
+        async with app.router.lifespan_context(app):
+            raise failure
+
+    asyncio.run(run())
+
+
+def test_falha_da_api_em_execucao_ainda_libera_o_banco_e_encerra_o_tracing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+
+    with pytest.raises(_ApiRunningError, match="API caiu"):
+        _run_lifespan_failing_with(app, _ApiRunningError("API caiu"))
+
+    assert steps == ["dispose", "shut_down"]
+
+
+def _break_dispose(monkeypatch: pytest.MonkeyPatch, app: FastAPI, steps: list[str]) -> None:
+    def broken_dispose() -> None:
+        steps.append("dispose")
+        raise RuntimeError("dispose falhou")
+
+    monkeypatch.setattr(app.state.engine, "dispose", broken_dispose)
+
+
+def test_falha_ao_liberar_o_banco_e_registrada_e_ainda_encerra_o_tracing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _break_dispose(monkeypatch, app, steps)
+
+    async def run() -> None:
+        async with app.router.lifespan_context(app):
+            pass
+
+    asyncio.run(run())
+
+    assert steps == ["dispose", "shut_down"]
+    # `configure_logging` escreve JSON no stderr, sem propagar para o `caplog`.
+    log = capsys.readouterr().err
+    assert "liberação do banco falhou" in log
+    assert "dispose falhou" in log
+
+
+def test_falha_da_api_e_do_dispose_propaga_a_falha_da_api_na_ordem_da_parada(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _break_dispose(monkeypatch, app, steps)
+
+    with pytest.raises(_ApiRunningError, match="API caiu"):
+        _run_lifespan_failing_with(app, _ApiRunningError("API caiu"))
+
+    assert steps == ["dispose", "shut_down"]
+    log = capsys.readouterr().err
+    assert "liberação do banco falhou" in log
+    assert "dispose falhou" in log
+
+
+def _record_final_window(monkeypatch: pytest.MonkeyPatch, steps: list[str]) -> None:
+    report_window = saturation.report_window
+
+    def recording_report_window(
+        tracer: Tracer, counter: saturation.ConcurrencyLimitCounter
+    ) -> None:
+        steps.append("janela")
+        report_window(tracer, counter)
+
+    monkeypatch.setattr(saturation, "report_window", recording_report_window)
+
+
+def test_falha_da_api_relata_a_janela_final_de_saturacao_antes_de_liberar_o_banco(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _record_final_window(monkeypatch, steps)
+
+    with pytest.raises(_ApiRunningError, match="API caiu"):
+        _run_lifespan_failing_with(app, _ApiRunningError("API caiu"))
+
+    assert steps == ["janela", "dispose", "shut_down"]
+
+
+def test_falha_da_api_e_do_dispose_relata_a_janela_e_registra_a_falha_do_dispose(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _record_final_window(monkeypatch, steps)
+    _break_dispose(monkeypatch, app, steps)
+
+    with pytest.raises(_ApiRunningError, match="API caiu"):
+        _run_lifespan_failing_with(app, _ApiRunningError("API caiu"))
+
+    assert steps == ["janela", "dispose", "shut_down"]
+    log = capsys.readouterr().err
+    assert "liberação do banco falhou" in log
+    assert "dispose falhou" in log
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [asyncio.CancelledError(), KeyboardInterrupt()],
+    ids=["cancelamento", "ctrl-c"],
+)
+def test_interrupcao_da_api_cumpre_a_parada_e_continua_propagando(
+    monkeypatch: pytest.MonkeyPatch, interruption: BaseException
+) -> None:
+    app = create_app(Settings(environment="test", db_port=1, db_connect_timeout_s=1))
+    steps = _record_shutdown_steps(monkeypatch, app)
+    _record_final_window(monkeypatch, steps)
+
+    with pytest.raises(type(interruption)):
+        _run_lifespan_failing_with(app, interruption)
+
+    assert steps == ["janela", "dispose", "shut_down"]
