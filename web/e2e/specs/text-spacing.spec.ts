@@ -7,7 +7,7 @@
 // - corte por `clip-path` ou `contain: paint` sem `overflow` hidden, e o valor de `<input>` e
 //   `<textarea>` (sem `innerText`), passam; `overflow: auto` fica de fora porque ainda rola;
 // - não roda no build com aviso global (`NOTICE_SPECS`), então a faixa do aviso não é medida.
-import type { Page } from "@playwright/test";
+import type { JSHandle, Page } from "@playwright/test";
 
 import { SCREENS } from "../support/screens";
 import { expect, test } from "../support/test";
@@ -62,12 +62,10 @@ test("a folha só é dada como aplicada depois das transições em curso", async
 
   await applyTextSpacing(page);
 
-  const running = await page.evaluateHandle(visibleRunningAnimations);
-  expect(
-    await running.evaluate(describeAnimations),
-    "transições visíveis ainda em curso depois de aplicar a folha",
-  ).toEqual([]);
-  await running.dispose();
+  const stillRunning = await withRunningAnimations(page, (running) =>
+    running.evaluate(describeAnimations),
+  );
+  expect(stillRunning, "transições visíveis ainda em curso depois de aplicar a folha").toEqual([]);
   // 16px de fonte do body × 0,16em, calculado à mão.
   expect(await page.evaluate(() => getComputedStyle(document.body).wordSpacing)).toBe("2.56px");
 });
@@ -102,15 +100,27 @@ async function applyTextSpacing(page: Page): Promise<string> {
           });
         }),
     );
-    const running = await page.evaluateHandle(visibleRunningAnimations);
-    const pending = await running.evaluate(describeAnimations);
+    const { pending, remainingMs } = await withRunningAnimations(page, async (running) => {
+      const labels = await running.evaluate(describeAnimations);
+      const left = deadline - Date.now();
+      if (labels.length > 0 && left > 0) {
+        // `finished` de uma animação infinita ou pausada nunca resolve: a corrida contra o tempo
+        // devolve a vez ao laço, que então estoura o teto com a lista do que sobrou.
+        await running.evaluate(
+          (animations, timeoutMs) =>
+            Promise.race([
+              Promise.allSettled(animations.map((animation) => animation.finished)),
+              new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+            ]),
+          left,
+        );
+      }
+      return { pending: labels, remainingMs: left };
+    });
     if (pending.length === 0) {
-      await running.dispose();
       break;
     }
-    const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      await running.dispose();
       const labels = [...new Set(pending)];
       const listed = labels.slice(0, MAX_LISTED_ANIMATIONS).join(", ");
       const rest = labels.length - MAX_LISTED_ANIMATIONS;
@@ -120,19 +130,24 @@ async function applyTextSpacing(page: Page): Promise<string> {
           (rest > 0 ? ` e mais ${String(rest)} tipos` : ""),
       );
     }
-    // `finished` de uma animação infinita ou pausada nunca resolve: a corrida contra o tempo
-    // devolve a vez ao laço, que então estoura o teto com a lista do que sobrou.
-    await running.evaluate(
-      (animations, timeoutMs) =>
-        Promise.race([
-          Promise.allSettled(animations.map((animation) => animation.finished)),
-          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
-        ]),
-      remainingMs,
-    );
-    await running.dispose();
   }
   return page.evaluate(() => getComputedStyle(document.body).wordSpacing);
+}
+
+/**
+ * Entrega ao `use` o handle das animações visíveis em curso e o libera sempre, mesmo se o `use`
+ * lançar (um `expect` que falha, um `evaluate` que cai com a página fechada).
+ */
+async function withRunningAnimations<T>(
+  page: Page,
+  use: (running: JSHandle<Animation[]>) => Promise<T>,
+): Promise<T> {
+  const running = await page.evaluateHandle(visibleRunningAnimations);
+  try {
+    return await use(running);
+  } finally {
+    await running.dispose();
+  }
 }
 
 /**
