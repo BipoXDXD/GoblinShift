@@ -1,4 +1,4 @@
-"""Disco cheio, cota ou erro de E/S ao gravar o upload responde 503 com `Retry-After`.
+"""Disco cheio, cota ou erro de E/S no storage responde 503 com `Retry-After`; symlink, 410.
 
 Plano (docs/GoblinShiftPlan.md, 1.6 e 3.2): dependência indisponível é 503, nunca 500. O storage
 falso levanta o `OSError` que o disco levanta de verdade; o nome do arquivo no erro leva um canário
@@ -8,19 +8,25 @@ o estado do upload e a reserva depois da falha; os offline, só a tradução do 
 
 import errno
 import logging
+import os
+import uuid
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.tables import artifact, stored_object
 from tests.api.files_support import (
     OCTET_STREAM,
     UPLOADS,
     create_upload,
     new_account,
+    publish,
     slot_count,
     storage_of,
 )
@@ -141,3 +147,80 @@ def test_put_do_conteudo_com_oserror_de_outro_errno_continua_500(
     assert_problem(response, 500, "INTERNAL_ERROR")
     assert CANARY not in response.text
     assert client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"] == "failed"
+
+
+# --- Leitura: download e preview (com banco) ---------------------------------------------------
+
+ARTIFACTS = "/api/v1/artifacts"
+
+
+def _storage_key_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> str:
+    with factory() as session:
+        key: str = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == artifact_id)
+        ).scalar_one()
+    return key
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("route", "code", "status", "problem_code", "retry_after"),
+    [
+        pytest.param(
+            "download", errno.ENOSPC, 503, "SERVICE_UNAVAILABLE", "60", id="download-ENOSPC"
+        ),
+        pytest.param("download", errno.EIO, 503, "SERVICE_UNAVAILABLE", "60", id="download-EIO"),
+        pytest.param("download", errno.ELOOP, 410, "GONE", None, id="download-ELOOP-symlink"),
+        pytest.param(
+            "preview", errno.ENOSPC, 503, "SERVICE_UNAVAILABLE", "60", id="preview-ENOSPC"
+        ),
+        pytest.param("preview", errno.EIO, 503, "SERVICE_UNAVAILABLE", "60", id="preview-EIO"),
+        pytest.param("preview", errno.ELOOP, 410, "GONE", None, id="preview-ELOOP-symlink"),
+    ],
+)
+def test_leitura_com_falha_de_es_do_storage_responde_503_ou_410_sem_vazar(
+    client: TestClient,
+    app: FastAPI,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    route: str,
+    code: int,
+    status: int,
+    problem_code: str,
+    retry_after: str | None,
+) -> None:
+    # ENOSPC e EIO vêm do `open` do storage; ELOOP é o symlink de verdade, que o `O_NOFOLLOW`
+    # vira `ObjectTamperedError`. O preview de uma saída lê o objeto do artefato de preview.
+    owner, auth = new_account(factory)
+    source = publish(app, owner, b"conteudo", "images/foto.png")
+    preview = publish(app, owner, b"jpeg", "previews/foto.jpg", preview_of=source)
+    key = _storage_key_of(factory, source if route == "download" else preview)
+    storage = storage_of(app)
+    if code == errno.ELOOP:
+        target = tmp_path / CANARY
+        target.write_bytes(b"segredo")
+        storage.delete(key)
+        (storage.root / key).symlink_to(target)
+    else:
+
+        def failing_open(requested: str) -> Any:
+            raise _disk_error(code)
+
+        monkeypatch.setattr(storage, "open", failing_open)
+
+    with caplog.at_level(logging.INFO):
+        response = client.get(f"{ARTIFACTS}/{source}/{route}", headers=auth)
+
+    assert_problem(response, status, problem_code)
+    if retry_after is None:
+        assert "retry-after" not in response.headers
+    else:
+        assert response.headers["retry-after"] == retry_after
+        assert response.headers["retry-after"].isdecimal()
+    _assert_no_leak(response.text, caplog)
+    for leaked in (key, str(storage.root), "erro de disco", os.strerror(code)):
+        assert leaked not in response.text
