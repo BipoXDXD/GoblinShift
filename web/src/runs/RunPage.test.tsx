@@ -15,6 +15,10 @@ import {
 } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+// A rota carrega a tela por `lazy`. Sem este import, o primeiro teste do arquivo buscava o
+// módulo no processo principal do Vitest, disputado por todos os workers na suíte completa, e
+// estourava os 5 s. Importada aqui, a tela entra na coleta e o `import()` da rota sai do cache.
+import "./RunPage";
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
 
