@@ -148,6 +148,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "alert_upload_without_reservation",
     "alert_run_without_reservation",
     "alert_executor_start_failed",
+    "alert_input_tampered",
     "api_saturation_rejected",
 )
 
@@ -290,6 +291,16 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         "docker_unavailable. Ou a área de trabalho da tentativa não foi criada antes do start (log "
         "área de trabalho falhou): confira a montagem de /srv/goblinshift/exec-work, não a imagem. "
         "Veja o runbook em deploy/openobserve/README.md.",
+        period_minutes=10,
+        silence_minutes=60,
+        destination=DestinationKey.URGENT,
+    ),
+    _SpanCause(
+        "causa-entrada-adulterada",
+        "O storage devolveu uma entrada adulterada (symlink no lugar do objeto): incidente de "
+        "integridade. A Run terminou INPUT_TAMPERED na primeira tentativa e fica fora do SLO. O "
+        "log do worker traz run_id e a posição da entrada; veja o runbook em "
+        "deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,

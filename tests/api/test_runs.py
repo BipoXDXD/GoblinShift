@@ -661,6 +661,23 @@ def test_execucao_terminal_nao_tem_retry_after_e_traz_o_erro(
     assert response.json()["error"]["code"] == "QUEUE_EXPIRED"
 
 
+def test_execucao_com_entrada_adulterada_traz_o_codigo_e_texto_sem_detalhe_do_storage(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(
+        factory, account.id, BASE_TIME, status=Status.FAILED, error_code="INPUT_TAMPERED"
+    )
+
+    response = client.get(f"{RUNS}/{run_id}", headers=account.headers)
+
+    assert response.status_code == 200
+    error = response.json()["error"]
+    assert error["code"] == "INPUT_TAMPERED"
+    assert error["message"] != "A execução falhou."
+    assert "storage" not in error["message"].lower()
+
+
 def test_queue_ahead_conta_as_aceitas_antes_que_nao_comecaram(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
