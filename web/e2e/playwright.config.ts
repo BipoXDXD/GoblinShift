@@ -61,6 +61,12 @@ const LOCAL_PROJECTS = [
   },
 ];
 
+// Fail-closed: a chave canário do modo local é gerada pela própria suíte. Qualquer chave posta no
+// ambiente é tratada como de verdade, mesmo sem E2E_BASE_URL, e desliga o trace.
+const KEY_IN_ENV = ["GS_E2E_API_KEY", "GS_E2E_API_KEYS"].some(
+  (name) => (process.env[name] ?? "") !== "",
+);
+
 function specSelection() {
   if (E2E.vps) {
     return { testMatch: VPS_SPEC };
@@ -108,11 +114,12 @@ export default defineConfig({
     baseURL: E2E.baseUrl,
     locale: "pt-BR",
     timezoneId: "America/Sao_Paulo",
-    // Contra a API real (VPS ou pilha do Compose, inclusive o job sob gVisor), nada que guarde a
-    // chave da conta de teste: sem trace, vídeo nem screenshot. O trace grava os parâmetros de cada
-    // chamada, e apiKey.ts passa a chave em `route.fallback({ headers })`; ela viraria credencial no
-    // artefato da CI. No modo local, a chave é um canário e o trace ajuda a depurar.
-    trace: E2E.remote ? "off" : "retain-on-failure",
+    // Contra a API real (VPS ou pilha do Compose, inclusive o job sob gVisor) ou com qualquer chave
+    // no ambiente, nada que guarde a chave da conta de teste: sem trace, vídeo nem screenshot. O
+    // trace grava os parâmetros de cada chamada, e apiKey.ts passa a chave em
+    // `route.fallback({ headers })`; ela viraria credencial no artefato da CI. No modo local, a
+    // chave é um canário e o trace ajuda a depurar.
+    trace: E2E.remote || KEY_IN_ENV ? "off" : "retain-on-failure",
     video: "off",
     screenshot: "off",
     actionTimeout: 5_000,

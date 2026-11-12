@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // O Playwright grava no trace os parâmetros de cada chamada, e a chave da conta entra por
 // `route.fallback({ headers })` (apiKey.ts): trace com chave real vira credencial em artefato.
-// Só o modo local, com a chave canário da API falsa, pode gravar trace.
+// Só o modo local, com a chave canário gerada pela própria suíte, pode gravar trace: qualquer chave
+// no ambiente (GS_E2E_API_KEY ou GS_E2E_API_KEYS), com ou sem E2E_BASE_URL, desliga (fail-closed).
+const SCOPED_VARIABLES = ["E2E_BASE_URL", "E2E_VPS", "GS_E2E_API_KEY", "GS_E2E_API_KEYS"];
 const REMOTE_ENV = { E2E_BASE_URL: "http://127.0.0.1:18080", CI: "1" };
 
 async function loadTraceMode(env: Readonly<Record<string, string>>): Promise<unknown> {
@@ -15,6 +17,13 @@ async function loadTraceMode(env: Readonly<Record<string, string>>): Promise<unk
 }
 
 describe("trace do Playwright", () => {
+  beforeEach(() => {
+    // O ambiente de quem roda o teste (uma chave de verdade, por exemplo) não entra na conta.
+    for (const name of SCOPED_VARIABLES) {
+      vi.stubEnv(name, undefined);
+    }
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -36,8 +45,16 @@ describe("trace do Playwright", () => {
   });
 
   it("segue gravando a falha no modo local, com a API falsa e a chave canário", async () => {
-    vi.stubEnv("E2E_BASE_URL", "");
-
     expect(await loadTraceMode({ CI: "1" })).toBe("retain-on-failure");
+  });
+
+  it("fica desligado no modo local se há chave única no ambiente", async () => {
+    expect(await loadTraceMode({ CI: "1", GS_E2E_API_KEY: "gs_chave-de-teste" })).toBe("off");
+  });
+
+  it("fica desligado no modo local se há chaves por spec no ambiente", async () => {
+    const keys = JSON.stringify({ "journeys.spec.ts": "gs_chave-de-teste" });
+
+    expect(await loadTraceMode({ CI: "1", GS_E2E_API_KEYS: keys })).toBe("off");
   });
 });
