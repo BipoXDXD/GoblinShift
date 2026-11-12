@@ -18,7 +18,7 @@ O worker não tem o que decidir diferente na segunda vez: a entrada continua adu
 |-------------|------|---------|
 | **A. Manter o retry** (comportamento anterior) | Nenhuma mudança | Gasta até 4 claims por Run; termina em `INFRA_POISON`, que esconde a causa; nenhum alerta; a pessoa usuária vê "falhas repetidas de infraestrutura" por algo que é de segurança |
 | **B. Terminal, sem alerta** | Para o desperdício; código próprio diz a causa na API | A adulteração só aparece a quem procurar o código no banco; sem sinal, ninguém age |
-| **C. Terminal, com código próprio e `alert=`** (escolhida) | Para o desperdício; o código aparece na API; o evento `alert=input_tampered` chega ao span da tentativa e pode alimentar um alerta; o log não leva caminho do disco | Um código novo no catálogo; o alerta do OpenObserve precisa ser criado à parte |
+| **C. Terminal, com código próprio e `alert=`** (escolhida) | Para o desperdício; o código aparece na API; o evento `alert=input_tampered` chega ao span da tentativa e alimenta um alerta; o log não leva caminho do disco | Um código novo no catálogo; o alerta precisa ser aplicado na instância pelo dono |
 
 ## Decisão
 
@@ -35,13 +35,15 @@ Por quê: o custo de errar para o lado terminal é uma Run que a pessoa reenvia;
 ## Consequências
 
 - A Run com entrada adulterada termina em segundos, não depois de quatro claims e das esperas de retentativa.
-- `INPUT_TAMPERED` é de classe determinística no catálogo (1.6): como `NO_VALID_OUTPUTS`, não conta contra o SLO de execução, porque a consulta do SLO só lista `EXECUTOR_UNAVAILABLE`, `INFRA_POISON`, `DEADLINE_EXCEEDED` e `QUEUE_EXPIRED` como ruins. Antes, a mesma Run terminava em `INFRA_POISON` e contava como ruim. Se a decisão for contá-la como falha de serviço, basta acrescentar o código à lista de `deploy/openobserve/sql/execucao.eventos.sql` e ao teste do SLI.
-- O alerta no OpenObserve não faz parte deste ADR: o atributo `alert.input_tampered` já sai no span `attempt` (`AlertEventCounter`), e a regra que o lê, com a política de aviso, é decisão à parte.
+- `INPUT_TAMPERED` fica **fora do SLO de execução**: nem evento bom nem ruim, nem no numerador nem no denominador. A consulta (`deploy/openobserve/sql/execucao.eventos.sql`) exclui o código. O SLO mede a confiabilidade da plataforma, e a adulteração é entrada maliciosa, como um 4xx. Contada como ruim, quem planta o symlink gastaria o error budget de propósito; contada como boa, maquiaria o SLO. Antes desta mudança a mesma Run terminava em `INFRA_POISON` e contava como ruim: a contabilidade muda de propósito. O sinal de segurança é o alerta abaixo, à parte. Teste: `tests/openobserve/test_sql.py::test_run_com_entrada_adulterada_fica_fora_do_sli_de_execucao`.
+- O alerta `gs-causa-entrada-adulterada` (severidade alta, destino `gs-urgente`, um evento no período basta) lê `alert.input_tampered` no span `attempt` (`AlertEventCounter`). Ele existe no catálogo do repositório (`deploy/openobserve/catalog.py` e `sql/causa-entrada-adulterada.sql`), e `tests/openobserve/test_catalog.py` exige um alerta para todo evento `alert=` do log. **Pendente com o dono:** aplicar o catálogo na instância (`openobserve provision`) é passo do dono; este ADR e o PR não o executam, e até lá o alerta não existe fora do repositório.
 - Adulteração por divergência de hash ou tamanho (`PreparationError("... diverge do hash ou tamanho ...")`) continua transitória. Ela também é evidência de adulteração, mas a causa pode ser uma gravação interrompida; tratá-la como terminal é uma segunda decisão, fora do escopo.
 - Os testes do PR #343 que fixam o comportamento anterior (reagenda, log sem alerta) passam a descrever o contrário e precisam ser trocados por estes.
 
 ## Compliance
 
+- `tests/openobserve/test_catalog.py` e `tests/openobserve/test_sql.py`: o alerta existe no catálogo, lê o próprio evento e dispara só com `alert.input_tampered > 0` em span `main`; a Run adulterada não muda o numerador nem o denominador do SLI de execução.
+- `tests/runs/test_attempt_span.py::test_entrada_adulterada_conta_no_span_sem_virar_start_recusado`: o span `attempt` leva `alert.input_tampered` e não `alert.executor_start_failed`.
 - `tests/runs/test_input_tampered.py`, com Postgres real: falha terminal na primeira tentativa sem `retry_wait`; nenhuma tentativa física nem segundo claim; código `INPUT_TAMPERED` na Run e na Attempt; log com `alert=input_tampered`, sem caminho do disco e sem o log `área de trabalho falhou`; área de trabalho limpa; entrada ausente e `OSError` genérica continuam reagendadas e sem alerta.
 - `tests/runs/test_lifecycle.py::test_entrada_adulterada_termina_failed_sem_gastar_tentativa_fisica`: a máquina de estados aceita o código e não gasta tentativa.
 - `tests/runs/test_failure_code.py::test_executor_nao_declara_entrada_adulterada`: o executor não consegue declarar o código.
