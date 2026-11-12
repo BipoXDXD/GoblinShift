@@ -420,6 +420,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
                 "maintenance.purge_files_not_removed": 1,
                 "maintenance.candidates_left_on_disk": 1,
                 "maintenance.missing_sweep_failed": 1,
+                "maintenance.tmp_parts_sweep_failed": 1,
                 "maintenance.failed_cycles": 1,
                 "maintenance.executor_image_missing": 1,
                 "maintenance.executor_image_probe_failed": 1,
@@ -440,6 +441,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-objetos-ilegiveis",
         "causa-arquivos-nao-removidos",
         "causa-varredura-falhou",
+        "causa-temporarios-no-storage",
         "causa-ciclos-falhando",
         "causa-executor-nao-iniciou",
         "causa-imagem-executor-ausente",
@@ -500,6 +502,7 @@ def test_volta_sem_as_contagens_da_sonda_nao_dispara(telemetry: Telemetry) -> No
     [
         ("causa-ciclos-falhando", "failed_cycles"),
         ("causa-varredura-falhou", "missing_sweep_failed"),
+        ("causa-temporarios-no-storage", "tmp_parts_sweep_failed"),
     ],
 )
 @pytest.mark.parametrize(("failing", "fires"), [(2, False), (3, True)])
