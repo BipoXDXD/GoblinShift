@@ -2,10 +2,12 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { fakeApi, jsonResponse, runBody } from "../test/fakeApi";
 import { renderRoutes } from "../test/renderRoutes";
 import type { Run } from "../runs/api";
+
+await preloadRoutes("/historico");
 
 // Linhas sem link: o foco não acha a linha nova pelo `href`, como num `basename` futuro.
 vi.mock("./RunList", () => ({

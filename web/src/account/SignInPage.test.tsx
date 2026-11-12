@@ -2,11 +2,13 @@ import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { meBody } from "../test/account";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/entrar", "/acesso", "/termos", "/privacidade");
 
 function setup(
   path: string,
