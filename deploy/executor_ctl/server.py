@@ -191,12 +191,29 @@ def _invalid(detail: str) -> RequestError:
     return RequestError(HTTPStatus.BAD_REQUEST, "invalid_request", detail)
 
 
+def _body_too_large() -> RequestError:
+    return RequestError(
+        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        "body_too_large",
+        f"corpo acima de {MAX_BODY_BYTES} bytes",
+    )
+
+
 def _is_decimal_length(value: str) -> bool:
-    """Só dígitos ASCII, no máximo `_MAX_LENGTH_DIGITS` deles.
+    """Não vazio e só dígitos ASCII (RFC 9110: `1*DIGIT`, zeros à esquerda valem).
 
     `str.isdigit()` aceita o "²" e outros dígitos que o `int()` recusa.
     """
-    return len(value) <= _MAX_LENGTH_DIGITS and value.isascii() and value.isdigit()
+    return value.isascii() and value.isdigit()
+
+
+def _exceeds_length_digits(value: str) -> bool:
+    """Valor decimal com mais dígitos significativos que o maior limite.
+
+    É necessariamente maior que qualquer limite, e a conferência evita passar ao `int()` uma
+    string que ele recusa (acima de 4300 dígitos) ou que custa converter.
+    """
+    return len(value.lstrip("0")) > _MAX_LENGTH_DIGITS
 
 
 def _method_not_allowed() -> RequestError:
@@ -320,13 +337,11 @@ class ControlHandler(BaseHTTPRequestHandler):
             )
         if not _is_decimal_length(length_header):
             raise _invalid("Content-Length inválido")
+        if _exceeds_length_digits(length_header):
+            raise _body_too_large()
         length = int(length_header)
         if length > MAX_BODY_BYTES:
-            raise RequestError(
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                "body_too_large",
-                f"corpo acima de {MAX_BODY_BYTES} bytes",
-            )
+            raise _body_too_large()
         try:
             body = self.rfile.read(length)
         except TimeoutError as error:
@@ -349,7 +364,7 @@ class ControlHandler(BaseHTTPRequestHandler):
         self._body_consumed = True
         length = headers.get("Content-Length", "")
         if _is_decimal_length(length):
-            if int(length) <= DISCARD_LIMIT_BYTES:
+            if not _exceeds_length_digits(length) and int(length) <= DISCARD_LIMIT_BYTES:
                 with suppress(TimeoutError):
                     self.rfile.read(int(length))
             return

@@ -182,8 +182,8 @@ TOO_MANY_DIGITS = b"9" * 5000
         b"-1",
         b"+5",
         b"1_0",
-        pytest.param(b"1" + b"0" * 5, id="6-digitos"),
-        pytest.param(TOO_MANY_DIGITS, id="5000-digitos"),
+        b"",
+        b"1 0",
     ],
 )
 def test_content_length_que_nao_e_so_digito_ascii_da_400_no_start(
@@ -203,14 +203,47 @@ def test_content_length_que_nao_e_so_digito_ascii_da_400_no_start(
     assert b'"invalid_request"' in answer
 
 
-def test_content_length_com_o_maximo_de_digitos_acima_do_limite_da_413(ctl_socket: Path) -> None:
+@pytest.mark.parametrize(
+    "length",
+    [
+        pytest.param(b"99999", id="maximo-de-digitos"),
+        pytest.param(b"1" + b"0" * 5, id="6-digitos"),
+        pytest.param(TOO_MANY_DIGITS, id="5000-digitos"),
+    ],
+)
+def test_content_length_bem_formado_acima_do_limite_da_413_no_start(
+    ctl_socket: Path, length: bytes
+) -> None:
+    # Só dígitos ASCII e, sem zeros à esquerda, mais dígitos que o teto: é necessariamente
+    # maior que o limite, e o `int()` nunca recebe a string (acima de 4300 dígitos ele lança).
     request = (
-        f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: 99999\r\n\r\n"
-    ).encode()
+        f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+        + length
+        + b"\r\n\r\n"
+    )
 
     answer = raw_answer(ctl_socket, request)
 
     assert answer.startswith(b"HTTP/1.1 413")
+    assert b'"body_too_large"' in answer
+
+
+def test_content_length_com_zeros_a_esquerda_e_aceito(ctl_socket: Path) -> None:
+    # RFC 9110 8.6: `Content-Length = 1*DIGIT`, então "000001" vale 1. O corpo de 1 byte segue
+    # o mesmo fluxo que com "1": passa do cabeçalho e é recusado só como JSON que não é objeto.
+    def start_with(length: bytes) -> bytes:
+        request = (
+            f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+            + length
+            + b"\r\n\r\n1"
+        )
+        return raw_answer(ctl_socket, request)
+
+    answer = start_with(b"000001")
+
+    assert answer == start_with(b"1")
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b"Content-Length" not in answer.partition(b"\r\n\r\n")[2]
 
 
 def test_content_length_nao_ascii_em_rota_que_nao_le_corpo_nao_derruba_a_resposta(
@@ -230,9 +263,15 @@ def test_content_length_com_digitos_demais_em_rota_que_nao_le_corpo_nao_derruba_
 ) -> None:
     request = f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
 
+    # O GET não lê corpo: um valor bem formado acima do teto de dígitos cai no descarte, que
+    # desiste sem drenar, e a rota responde como responderia sem o cabeçalho.
     answer = raw_answer(ctl_socket, request + TOO_MANY_DIGITS + b"\r\n\r\n")
+    plain = raw_answer(
+        ctl_socket, f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    )
 
-    assert answer.startswith(b"HTTP/1.1 ")
+    assert answer.split(b"\r\n", 1)[0] == plain.split(b"\r\n", 1)[0]
+    assert answer.partition(b"\r\n\r\n")[2] == plain.partition(b"\r\n\r\n")[2]
 
 
 def test_imagem_fora_da_allowlist_da_403(ctl_socket: Path) -> None:
