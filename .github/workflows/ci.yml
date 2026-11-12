@@ -385,7 +385,7 @@ jobs:
       - name: Logs da pilha e do executor-ctl
         if: failure()
         run: scripts/e2e-gvisor.sh logs "$RUNNER_TEMP/e2e-gvisor-logs"
-      - name: Relatório, traces e logs da falha
+      - name: Relatório e logs da falha (sem traces)
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

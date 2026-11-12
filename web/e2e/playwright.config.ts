@@ -108,9 +108,11 @@ export default defineConfig({
     baseURL: E2E.baseUrl,
     locale: "pt-BR",
     timezoneId: "America/Sao_Paulo",
-    // Contra a VPS, nada que guarde os cabeçalhos (a chave da conta de teste): sem trace, vídeo
-    // nem screenshot. No local, a chave é um canário e o trace ajuda a depurar.
-    trace: E2E.vps ? "off" : "retain-on-failure",
+    // Contra a API real (VPS ou pilha do Compose, inclusive o job sob gVisor), nada que guarde a
+    // chave da conta de teste: sem trace, vídeo nem screenshot. O trace grava os parâmetros de cada
+    // chamada, e apiKey.ts passa a chave em `route.fallback({ headers })`; ela viraria credencial no
+    // artefato da CI. No modo local, a chave é um canário e o trace ajuda a depurar.
+    trace: E2E.remote ? "off" : "retain-on-failure",
     video: "off",
     screenshot: "off",
     actionTimeout: 5_000,
