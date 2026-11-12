@@ -239,6 +239,26 @@ describe("OficinaHero", () => {
     ]);
   });
 
+  it("o grupo Girar e inclinar tira o nome do rótulo visível, sem uma segunda cópia do texto", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    const group = screen.getByRole("group", { name: "Girar e inclinar" });
+    const label = within(group).getByText("Girar e inclinar");
+    expect(label.id).not.toBe("");
+    expect(group).toHaveAttribute("aria-labelledby", label.id);
+    expect(group).not.toHaveAttribute("aria-label");
+  });
+
+  it("o rótulo visível do grupo Girar e inclinar fica fora da leitura linear, para não ser lido duas vezes", async () => {
+    const scene = fakeScene();
+    await renderReady(scene);
+
+    const group = screen.getByRole("group", { name: "Girar e inclinar" });
+    const label = within(group).getByText("Girar e inclinar");
+    expect(label).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("trocar de goblin carrega só o modelo dela, com a imagem dela enquanto carrega", async () => {
     const scene = fakeScene();
     const { container } = await renderReady(scene);

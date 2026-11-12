@@ -313,6 +313,17 @@ const CASES: readonly Case[] = [
     },
   },
   {
+    // O jsdom não faz layout: o alvo de 44 px dos botões de passo só o E2E prova.
+    name: "palco 3D: botões de passo sem o alvo mínimo de 44 px (min-h-11 e min-w-11)",
+    spec: ["oficina-3d.spec.ts", "-g", "a 360 px"],
+    plant: (dist) => {
+      addStylesheet(
+        dist,
+        'button[aria-label^="Girar para"], button[aria-label^="Inclinar para"] { min-width: 0 !important; min-height: 0 !important; }',
+      );
+    },
+  },
+  {
     name: "chave de API: o convite para entrar vira alerta",
     spec: ["api-key.spec.ts", "-g", "convida a entrar"],
     plant: (dist) => {
