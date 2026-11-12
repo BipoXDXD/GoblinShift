@@ -1,6 +1,6 @@
 # ADR 046. Exceção do `minimatch` vulnerável nas ferramentas do front
 
-- **Estado:** aceito
+- **Estado:** substituído pelo [ADR 052](052-minimatch-fora-das-faixas-vulneraveis.md) (2026-11-12). O texto abaixo fica como registro; o `tests/test_minimatch_exception.py` que ele descreve foi trocado por `tests/test_minimatch_fora_da_faixa.py`.
 - **Plano:** [3.6](../GoblinShiftPlan.md#s3-6)
 - **Relacionado:** [ADR 042](042-auditoria-de-dependencias-e-codeql-fora-do-gate.md) (CVE que não se aplica vira exceção escrita em ADR), [ADR 044](044-auditoria-e-codeql-obrigatorios-no-merge.md)
 

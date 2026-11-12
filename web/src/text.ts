@@ -66,8 +66,9 @@ export const TEXT = {
       PRECONDITION_FAILED: "Isto foi alterado em outro lugar. Atualize a página e tente de novo.",
       BODY_TOO_LARGE:
         "O arquivo ou o pedido passa do tamanho permitido. Confira os limites da receita e envie arquivos menores.",
+      // O 415 vem do Content-Type do pedido, nunca do formato do arquivo escolhido.
       UNSUPPORTED_MEDIA_TYPE:
-        "Este tipo de arquivo não é aceito aqui. Escolha um dos formatos da receita.",
+        "O pedido foi enviado num formato que o servidor não aceita. Recarregue a página e tente de novo.",
       VALIDATION_FAILED: "Alguns valores foram recusados. Confira os erros indicados.",
       IDEMPOTENCY_KEY_REUSED:
         "Este envio conflita com um pedido anterior. Recarregue a página e tente de novo.",
@@ -275,6 +276,9 @@ export const TEXT = {
   run: {
     title: "Execução",
     loading: "Carregando a execução.",
+    // A tela da execução não tem lista, e atualizar traz o mesmo 404: o caminho é o Histórico.
+    notFound:
+      "Não encontramos esta execução. Ela pode ter sido removida ou ter expirado. Procure as suas execuções no Histórico.",
     recipe: "Receita",
     status: "Estado",
     phase: "Fase",
@@ -812,6 +816,7 @@ export const TEXT = {
       revokeTitle: (publicId: string) => `Revogar a chave ${publicId}?`,
       revokeBody: "Scripts que usam esta chave param de funcionar na hora. Não dá para desfazer.",
       revokeConfirm: "Revogar chave",
+      revoking: "Revogando chave…",
       revoked: (publicId: string) => `Chave ${publicId} revogada.`,
       notFound: "Chave não encontrada. Ela pode já ter sido revogada; a lista foi atualizada.",
     },
@@ -846,6 +851,7 @@ export const TEXT = {
     removeTitle: (name: string) => `Excluir o preset ${name}?`,
     removeBody: "As execuções feitas com ele não mudam. Não dá para desfazer.",
     removeConfirm: "Excluir preset",
+    removing: "Excluindo preset…",
     cancel: "Cancelar",
     removed: (name: string) => `Preset ${name} excluído.`,
     changedElsewhere:
