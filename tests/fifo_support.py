@@ -6,6 +6,7 @@ e, ao sair, falha o teste: sem ele, um `open` que bloqueia travaria a suíte int
 reprovar um teste.
 """
 
+import contextlib
 import os
 import threading
 from collections.abc import Iterator
@@ -21,11 +22,10 @@ def make_fifo(path: Path) -> None:
 
 
 def _unblock_reader(path: Path) -> None:
-    try:
-        # O_RDWR não bloqueia e conta como escritor: o `open(O_RDONLY)` preso retorna.
+    # O_RDWR não bloqueia e conta como escritor: o `open(O_RDONLY)` preso retorna. Se o FIFO já
+    # não existe, não há o que destravar.
+    with contextlib.suppress(OSError):
         os.close(os.open(path, os.O_RDWR | os.O_NONBLOCK))
-    except OSError:
-        pass  # O FIFO já não existe: nada a destravar.
 
 
 def _watch(path: Path, seconds: float, stop: threading.Event, fired: threading.Event) -> None:
