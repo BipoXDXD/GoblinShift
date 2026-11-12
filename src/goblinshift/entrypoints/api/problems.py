@@ -201,6 +201,10 @@ class ProblemDetails(BaseModel):
 # storage, fila cheia). O 503 `text/plain` do teto de concorrência do uvicorn sai antes do ASGI,
 # sem o header, e não faz parte do contrato.
 _RETRY_AFTER_STATUSES = frozenset({429, 503})
+_RETRY_AFTER_HEADER = "Retry-After"
+# Só o 503 é imposto na construção: cada causa tem o próprio prazo (banco, storage, ambiente,
+# fila), então não há default, e um 503 sem o header é erro de programação de quem o emite.
+_RETRY_AFTER_REQUIRED_STATUS = 503
 
 
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
@@ -237,6 +241,7 @@ class ApiProblem(Exception):  # noqa: N818
         errors: Sequence[Mapping[str, str]] | None = None,
     ) -> None:
         super().__init__(f"{code}: {detail}")
+        _require_retry_after(code, headers)
         self.code = code
         self.detail = detail
         self.headers: Mapping[str, str] = dict(headers or {})
@@ -246,6 +251,17 @@ class ApiProblem(Exception):  # noqa: N818
     @property
     def status(self) -> int:
         return PROBLEMS[self.code].status
+
+
+def _require_retry_after(code: ProblemCode, headers: Mapping[str, str] | None) -> None:
+    if PROBLEMS[code].status != _RETRY_AFTER_REQUIRED_STATUS:
+        return
+    if any(name.lower() == _RETRY_AFTER_HEADER.lower() for name in headers or ()):
+        return
+    raise ValueError(
+        f"o problema {code} é um 503 e exige o header {_RETRY_AFTER_HEADER} "
+        "(contrato de 1.6 e 2.3); cada causa informa o próprio prazo, sem default"
+    )
 
 
 def install_problem_handlers(app: FastAPI) -> None:
@@ -264,6 +280,8 @@ def problem_response(
     headers: Mapping[str, str] | None = None,
     errors: Sequence[Mapping[str, str]] | None = None,
 ) -> JSONResponse:
+    # Também cobre o 503 do framework (`HTTPException`), que não passa por `ApiProblem`.
+    _require_retry_after(code, headers)
     spec = PROBLEMS[code]
     record_error(code.value)
     body: dict[str, Any] = {

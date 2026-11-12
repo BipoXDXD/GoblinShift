@@ -10,6 +10,7 @@ from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
     code_for_http_status,
+    problem_response,
 )
 from tests.api.support import StreamInterruptedError, assert_problem
 
@@ -24,7 +25,40 @@ def test_titulo_do_aceite_pendente_escreve_termos_de_uso_como_nome_de_documento(
 
 def test_status_do_problema_vem_do_catalogo_pelo_codigo() -> None:
     assert ApiProblem(ProblemCode.BODY_TOO_LARGE, "x").status == 413
-    assert ApiProblem(ProblemCode.QUEUE_FULL, "x").status == 503
+    assert ApiProblem(ProblemCode.QUEUE_FULL, "x", headers={"Retry-After": "60"}).status == 503
+
+
+SERVICE_UNAVAILABLE_CODES = [code for code, spec in PROBLEMS.items() if spec.status == 503]
+
+
+@pytest.mark.parametrize("code", SERVICE_UNAVAILABLE_CODES)
+def test_problema_503_sem_retry_after_falha_na_criacao(code: ProblemCode) -> None:
+    # Cada causa tem o próprio prazo (banco 5 s, storage 60 s...): não há default que sirva.
+    with pytest.raises(ValueError, match="Retry-After"):
+        ApiProblem(code, "x")
+
+
+@pytest.mark.parametrize("code", SERVICE_UNAVAILABLE_CODES)
+@pytest.mark.parametrize("name", ["Retry-After", "retry-after"])
+def test_problema_503_com_retry_after_e_criado(code: ProblemCode, name: str) -> None:
+    assert ApiProblem(code, "x", headers={name: "5"}).headers == {name: "5"}
+
+
+@pytest.mark.parametrize("code", SERVICE_UNAVAILABLE_CODES)
+def test_resposta_503_sem_retry_after_nao_e_montada(code: ProblemCode) -> None:
+    # O 503 do framework (`HTTPException`) não passa por `ApiProblem`: a montagem da resposta
+    # é o ponto único que o pega.
+    with pytest.raises(ValueError, match="Retry-After"):
+        problem_response(code=code, detail="x", instance="/x", request_id="r")
+
+
+def test_resposta_de_status_diferente_de_503_nao_exige_retry_after() -> None:
+    response = problem_response(
+        code=ProblemCode.NOT_FOUND, detail="x", instance="/x", request_id="r"
+    )
+
+    assert response.status_code == 404
+    assert "retry-after" not in response.headers
 
 
 def test_tipo_e_uri_estavel_em_kebab_case() -> None:
