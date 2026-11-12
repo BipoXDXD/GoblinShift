@@ -197,14 +197,20 @@ class ProblemDetails(BaseModel):
     errors: list[FieldError] | None = None
 
 
+# Todo 429 e todo 503 que a API emite carrega `Retry-After` (capacity_problems, rate limit, banco,
+# storage, fila cheia). O 503 `text/plain` do teto de concorrência do uvicorn sai antes do ASGI,
+# sem o header, e não faz parte do contrato.
+_RETRY_AFTER_STATUSES = frozenset({429, 503})
+
+
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
     """Respostas problem+json para o OpenAPI da rota (2.3)."""
     responses: dict[int | str, dict[str, Any]] = {
         status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
         for status in statuses
     }
-    if 429 in responses:
-        responses[429]["headers"] = {
+    for status in _RETRY_AFTER_STATUSES & responses.keys():
+        responses[status]["headers"] = {
             "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
                 "required": True,
