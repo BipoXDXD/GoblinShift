@@ -32,6 +32,7 @@ import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES, REPORT_SCHEMA_VERSION
 from goblinshift.processing.names import has_unsafe_char
@@ -56,6 +57,7 @@ from goblinshift.processing.recipe import (
     ItemWarningCode,
     OutputGroup,
 )
+from goblinshift.processing.regular_file import NotRegularFileError, open_regular
 from goblinshift.runs.formula_cells import FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.package_check import (
@@ -321,8 +323,7 @@ def _digested(found: _Found, heartbeat: Callable[[], None]) -> OutputFile:
     """Lê o arquivo sem seguir symlink, calculando o SHA-256; nunca além do tamanho do `lstat`."""
     digest = hashlib.sha256()
     size = 0
-    fd = os.open(found.path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd, "rb") as source:
+    with _open_output(found.path) as source:
         while size <= found.size and (chunk := source.read(READ_CHUNK_BYTES)):
             heartbeat()
             size += len(chunk)
@@ -468,9 +469,20 @@ def _require_output_name(component: str, name: str) -> None:
         raise CollectionError(f"out/ contém nome com caractere de controle ou formato: {name!r}")
 
 
+def _open_output(path: Path) -> BinaryIO:
+    """Abre o arquivo que o `lstat` da varredura viu como regular, sem seguir link nem bloquear.
+
+    O sandbox pode trocá-lo por um FIFO entre o `lstat` e este `open`; isso é recusado como
+    qualquer outro desvio de out/, não prende a thread do worker.
+    """
+    try:
+        return open_regular(path)
+    except NotRegularFileError:
+        raise CollectionError(f"out/ mudou durante a coleta: {path.name!r} não é regular") from None
+
+
 def _read_no_follow(path: Path, max_bytes: int) -> bytes:
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd, "rb") as source:
+    with _open_output(path) as source:
         data = source.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise OutputLimitError(

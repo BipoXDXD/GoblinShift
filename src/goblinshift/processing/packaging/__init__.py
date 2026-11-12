@@ -33,10 +33,10 @@ from goblinshift.processing.packaging.zip_writer import (
     COPY_CHUNK_BYTES,
     ZipSource,
     compression_for,
-    open_regular,
     write_zip,
 )
 from goblinshift.processing.recipe import FailureCode, ItemOk, RecipeFailure, Report
+from goblinshift.processing.regular_file import open_regular
 
 __all__ = [
     "DEFAULT_LIMITS",

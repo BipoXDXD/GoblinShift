@@ -22,6 +22,7 @@ from goblinshift.files.artifacts import commit_candidate, create_candidate_objec
 from goblinshift.files.candidates import held_input_contents
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
+from goblinshift.processing.regular_file import open_regular
 from goblinshift.runs.store import run_transaction
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import Collected, OutputFile
@@ -75,7 +76,7 @@ class CandidateWriter:
         reserved = run_transaction(self._factory, reserve)
         written = []
         for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
-            with output.path.open("rb") as source:
+            with open_regular(output.path) as source:
                 chunks = beating(_chunks(source))
                 written.append(self._storage.create_exclusive(key, chunks, output.size))
 
