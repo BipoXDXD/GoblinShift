@@ -165,7 +165,6 @@ export function Workbench({
 
   return (
     <div className="flex flex-col gap-8">
-      <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
       {notice}
       <form noValidate onSubmit={onSubmit} className="flex flex-col gap-8">
         <ErrorSummary issues={issues} attempt={attempt} />
@@ -287,7 +286,7 @@ export function Workbench({
 /** Rótulo de seção: pequeno e rebaixado; a hierarquia visual não precisa seguir a do HTML. */
 const SECTION_LABEL = "text-sm font-semibold text-fg-muted";
 
-/** Volta à Oficina e o título da Bancada; também usado enquanto o catálogo carrega. */
+/** Volta à Oficina e o título da Bancada; fica no CatalogGate, estável da espera à Bancada. */
 export function WorkbenchHeader({ title }: { readonly title: string }): ReactElement {
   return (
     <div className="flex flex-col gap-2">
