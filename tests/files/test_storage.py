@@ -221,6 +221,15 @@ def test_abrir_chave_adulterada_nao_vaza_descritor(
     assert _open_fd_count() == before
 
 
+def test_abrir_arquivo_comum_devolve_o_descritor_em_modo_bloqueante(storage: FileStorage) -> None:
+    # O `open` usa O_NONBLOCK só para não prender num FIFO; quem lê o arquivo (stream do download,
+    # cópia da entrada) recebe o descritor como sempre foi, sem o flag.
+    storage.create_exclusive("uploads/x", [b"abc"], MAX_FILE_BYTES)
+
+    with storage.open("uploads/x") as stream:
+        assert os.get_blocking(stream.fileno())
+
+
 def test_abrir_arquivo_comum_devolve_o_conteudo_e_nao_deixa_descritor_extra(
     storage: FileStorage,
 ) -> None:
