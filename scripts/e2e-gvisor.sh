@@ -6,7 +6,9 @@
 #   scripts/e2e-gvisor.sh journeys           cria uma conta e chave por arquivo de spec, roda as specs,
 #                                            confere que nenhuma resposta foi 429 e o runtime
 #   scripts/e2e-gvisor.sh verify <arquivo>   confere o runtime gravado contra o banco
-#   scripts/e2e-gvisor.sh rate-limits <arquivo>  falha se o log do Nginx tiver resposta 429
+#   scripts/e2e-gvisor.sh rate-limits <arquivo>  falha se o log do Nginx tiver resposta 429, ou
+#                                            se não tiver nenhuma linha de acesso
+#   scripts/e2e-gvisor.sh check-rate-limits <desde>  lê o log do Nginx desde o instante e confere
 #   scripts/e2e-gvisor.sh logs <diretório>   guarda os logs da pilha e do executor-ctl
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -140,7 +142,7 @@ issue_spec_keys() {
 
 journeys() {
   require_ephemeral_runner
-  local runtimes nginx_log started_at status=0 events_pid recorder_pid
+  local runtimes started_at status=0 events_pid recorder_pid
   issue_spec_keys
 
   runtimes="$(mktemp)"
@@ -158,19 +160,45 @@ journeys() {
   kill "$events_pid" 2>/dev/null || true
   wait "$recorder_pid"
   # Antes do status das specs: com 429 no log, a causa aparece junto da falha, e não só o timeout.
-  nginx_log="$(mktemp)"
-  compose logs --no-color --since "$started_at" nginx >"$nginx_log" 2>&1 || true
-  rate_limits "$nginx_log" || [[ $status -ne 0 ]] || status=1
+  check_rate_limits "$started_at" || [[ $status -ne 0 ]] || status=1
   [[ $status -eq 0 ]] || exit "$status"
   verify "$runtimes"
+}
+
+# Lê o log do Nginx desde `since` e confere os 429. Falhar em ler o log, ou ler um log sem nenhuma
+# linha de acesso (serviço com outro nome, log rodado, formato mudado), reprova: o detector cego
+# deixaria o 429 voltar a parecer timeout.
+check_rate_limits() {
+  local since="$1" log
+  log="$(mktemp)"
+  if ! compose logs --no-color --since "$since" nginx >"$log" 2>&1; then
+    echo "::error::não consegui ler o log do Nginx para conferir os 429 (compose logs falhou)." >&2
+    head -5 "$log" >&2
+    return 1
+  fi
+  rate_limits "$log"
 }
 
 # O Nginx registra todo 429, o dele (`limit_req`) e o da API (limite por conta). A SPA não repete
 # 4xx, então o 429 aparece como elemento que não veio, e o teste morre num timeout de 5 s. Qualquer
 # 429 nas specs é falha com a causa escrita.
 rate_limits() {
-  local log="$1" total
-  total="$(grep -c '"status":429' "$log" || true)"
+  local log="$1" accesses total rc=0
+  accesses="$(grep -c '"status":[0-9]' "$log")" || rc=$?
+  if [[ $rc -gt 1 ]]; then
+    echo "::error::não consegui ler o log do Nginx ($log)." >&2
+    return 1
+  fi
+  if [[ "$accesses" -eq 0 ]]; then
+    echo "::error::o log do Nginx não tem nenhuma linha de acesso: sem ela não há como conferir os 429." >&2
+    return 1
+  fi
+  rc=0
+  total="$(grep -c '"status":429' "$log")" || rc=$?
+  if [[ $rc -gt 1 ]]; then
+    echo "::error::não consegui ler o log do Nginx ($log)." >&2
+    return 1
+  fi
   if [[ "$total" -eq 0 ]]; then
     return 0
   fi
@@ -209,6 +237,7 @@ case "${1:-}" in
   journeys) journeys ;;
   verify) verify "${2:?informe o arquivo com os runtimes}" ;;
   rate-limits) rate_limits "${2:?informe o arquivo com o log do Nginx}" ;;
+  check-rate-limits) check_rate_limits "${2:?informe o instante inicial (RFC 3339)}" ;;
   logs) logs "${2:?informe o diretório de saída}" ;;
-  *) fail "uso: $0 up|journeys|verify <arquivo>|rate-limits <arquivo>|logs <diretório>" ;;
+  *) fail "uso: $0 up|journeys|verify <arquivo>|rate-limits <arquivo>|check-rate-limits <desde>|logs <diretório>" ;;
 esac

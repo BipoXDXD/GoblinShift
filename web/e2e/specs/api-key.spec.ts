@@ -47,11 +47,12 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
 
 test("sem a chave do processo de teste, a API recusa e a Bancada convida a entrar", async ({
   browser,
+  apiKey,
 }) => {
   test.skip(E2E.artifactsDir === null, "a API falsa só existe no modo local");
   // Contexto sem o fixture `api`: só a API falsa, que exige a chave, e nenhuma injeção.
   const context = await browser.newContext();
-  await installFakeApi(context, E2E.apiKey, E2E.artifactsDir ?? "");
+  await installFakeApi(context, apiKey, E2E.artifactsDir ?? "");
   const page = await context.newPage();
   const catalogStatuses: number[] = [];
   page.on("response", (response) => {
