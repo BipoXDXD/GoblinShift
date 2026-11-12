@@ -248,8 +248,14 @@ jobs:
         env:
           E2E_PHASE: notice
         run: npm run e2e:notice
+      # O relatório e os traces ficam fora do artefato se a chave da conta de teste (formato
+      # gsk_...) aparecer em qualquer arquivo ou dentro de um .zip: o repositório é público.
+      - name: Canário (chave de API nos artefatos)
+        id: canario
+        if: always()
+        run: python3 ../scripts/verificar_artefatos_sem_chave.py playwright-report test-results
       - name: Relatório e traces da falha
-        if: failure()
+        if: failure() && steps.canario.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
@@ -385,8 +391,17 @@ jobs:
       - name: Logs da pilha e do executor-ctl
         if: failure()
         run: scripts/e2e-gvisor.sh logs "$RUNNER_TEMP/e2e-gvisor-logs"
-      - name: Relatório, traces e logs da falha
-        if: failure()
+      # Sem trace nesta suíte (web/e2e/playwright.config.ts): o trace guarda a chave `gsk_...` do
+      # header Authorization e o Playwright não tem opção para mascará-la. O canário confere o que
+      # sobra (relatório, test-results e logs) antes do upload.
+      - name: Canário (chave de API nos artefatos)
+        id: canario
+        if: always()
+        run: >-
+          python3 scripts/verificar_artefatos_sem_chave.py
+          web/playwright-report web/test-results "$RUNNER_TEMP/e2e-gvisor-logs"
+      - name: Relatório e logs da falha (sem traces)
+        if: failure() && steps.canario.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-gvisor
