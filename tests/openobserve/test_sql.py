@@ -116,6 +116,22 @@ def test_sli_de_execucao(telemetry: Telemetry) -> None:
     assert sli(telemetry, "execucao", stream) == (8, 3)
 
 
+def test_run_com_entrada_adulterada_fica_fora_do_sli_de_execucao(telemetry: Telemetry) -> None:
+    # Entrada adulterada é entrada maliciosa, como um 4xx (ADR 054): nem bom nem ruim, nem no
+    # numerador nem no denominador. Contada como ruim, quem a planta gastaria o orçamento de erro;
+    # contada como boa, maquiaria o SLO.
+    stream = unique_stream("execucao_adulterada")
+    traces = telemetry.traces(stream)
+    traces.run_finished(run_duration_ms=1000)  # boa
+    traces.run_finished(error_code="INFRA_POISON")  # ruim
+    traces.run_finished(error_code="INPUT_TAMPERED", run_duration_ms=1000)  # fora
+    traces.run_finished(error_code="INPUT_TAMPERED", run_duration_ms=None)  # fora
+    traces.run_finished(error_code="INPUT_TAMPERED", run_duration_ms=300_001)  # fora
+    traces.flush()
+
+    assert sli(telemetry, "execucao", stream) == (2, 1)
+
+
 def test_sli_sem_eventos_elegiveis_e_zero_de_zero(telemetry: Telemetry) -> None:
     stream = unique_stream("vazio")
     traces = telemetry.traces(stream)
@@ -446,6 +462,7 @@ def test_span_que_nao_e_da_manutencao_nao_dispara_as_causas_dela(telemetry: Tele
         "causa-executor-nao-iniciou",
         "causa-imagem-executor-ausente",
         "causa-sonda-imagem-falhou",
+        "causa-entrada-adulterada",
     ):
         assert not cause_rows(telemetry, name, stream), name
 
@@ -527,6 +544,7 @@ def test_falha_repetida_da_manutencao_dispara(
         ("causa-sem-reserva", "alert.upload_without_reservation"),
         ("causa-sem-reserva", "alert.run_without_reservation"),
         ("causa-arquivos-nao-removidos", "alert.purge_file_not_removed"),
+        ("causa-entrada-adulterada", "alert.input_tampered"),
     ],
 )
 @pytest.mark.parametrize(("value", "fires"), [(0, False), (1, True)])

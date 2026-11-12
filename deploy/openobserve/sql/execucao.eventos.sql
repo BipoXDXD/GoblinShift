@@ -4,6 +4,9 @@
 -- Run é elegível: até 10 arquivos e 50 MiB de entrada, e não cancelada pela pessoa usuária.
 -- Bom: sem falha de infraestrutura nem de parada e em até 5 min desde o início da primeira
 -- tentativa. Rejeições de conteúdo (NO_VALID_OUTPUTS, limites da receita) não gastam orçamento.
+-- INPUT_TAMPERED fica fora: entrada adulterada é entrada maliciosa, como um 4xx (ADR 054), e o SLO
+-- mede a confiabilidade da plataforma. Como ruim, quem planta o symlink gastaria o orçamento de
+-- erro; como boa, maquiaria o SLO. O sinal dela é o alerta `gs-causa-entrada-adulterada`.
 -- Uma Run que nunca começou não tem duração e conta como ruim; ela só termina assim por
 -- QUEUE_EXPIRED ou DEADLINE_EXCEEDED, que já são falhas.
 -- Os atributos dos spans chegam ao OpenObserve como texto, com "_" no lugar de "."; o TRY_CAST
@@ -22,3 +25,4 @@ FROM "${stream}"
 WHERE main = 'true'
   AND operation_name = 'run.finished'
   AND slo_execution_eligible = 'true'
+  AND COALESCE(error_code, '') <> 'INPUT_TAMPERED'
