@@ -5,8 +5,14 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { injectApiKey } from "./apiKey";
 import { E2E } from "./env";
 import { installFakeApi, type FakeApi } from "./fakeApi";
+import { pickApiKey, specKeyId } from "./specKeys";
 
 interface Fixtures {
+  /**
+   * A chave desta spec: a conta própria do arquivo da spec quando há GS_E2E_API_KEYS, senão
+   * a única do processo (specKeys.ts).
+   */
+  apiKey: string;
   /** API falsa do modo local; a spec que a usa é pulada no modo remoto. */
   fakeApi: FakeApi;
   /** Liga a API (falsa ou real) e a chave em todo contexto, sem a spec pedir. */
@@ -23,14 +29,16 @@ interface Options {
 
 export const test = base.extend<Fixtures & Options>({
   auth: ["api-key", { option: true }],
+  // eslint-disable-next-line no-empty-pattern -- o Playwright exige a desestruturação, mesmo vazia.
+  apiKey: async ({}, use, testInfo) => {
+    await use(pickApiKey(E2E.specKeys, E2E.apiKey, specKeyId(testInfo.file)));
+  },
   api: [
-    async ({ context, auth }, use) => {
+    async ({ context, auth, apiKey }, use) => {
       const fake =
-        E2E.artifactsDir === null
-          ? null
-          : await installFakeApi(context, E2E.apiKey, E2E.artifactsDir);
+        E2E.artifactsDir === null ? null : await installFakeApi(context, apiKey, E2E.artifactsDir);
       if (auth === "api-key" && E2E.hasAccount) {
-        await injectApiKey(context, E2E.apiKey, E2E.baseUrl);
+        await injectApiKey(context, apiKey, E2E.baseUrl);
       }
       await use(fake);
       // Pedido que a API falsa não conhece é rota nova na interface sem cobertura aqui.

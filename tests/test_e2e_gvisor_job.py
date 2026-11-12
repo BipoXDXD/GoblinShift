@@ -8,6 +8,7 @@ condições e o vínculo entre o workflow e o gate da publicação, que recusa j
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -226,6 +227,207 @@ def test_verify_recusa_contagem_diferente_do_banco(
     fake_docker: Path, tmp_path: Path, recorded: str, attempts: str
 ) -> None:
     assert verify(fake_docker, tmp_path, recorded, attempts) != 0
+
+
+NGINX_200 = (
+    'nginx-1  | {"time":"2026-11-12T01:00:00+00:00","client":"172.18.0.0","method":"GET",'
+    '"path":"/api/v1/me","status":200,"bytes_sent":429,"request_time":0.004,'
+    '"upstream_status":"200","upstream_response_time":"0.004","upstream_connect_time":"0.000"}\n'
+)
+NGINX_429_DA_API = NGINX_200.replace('"status":200', '"status":429').replace(
+    '"upstream_status":"200"', '"upstream_status":"429"'
+)
+NGINX_429_DO_LIMIT_REQ = NGINX_200.replace('"status":200', '"status":429').replace(
+    '"upstream_status":"200"', '"upstream_status":""'
+)
+
+
+def rate_limits(tmp_path: Path, log: str) -> subprocess.CompletedProcess[str]:
+    log_file = tmp_path / "nginx.log"
+    log_file.write_text(log)
+    return subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "rate-limits", str(log_file)],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+def test_rate_limits_aceita_log_sem_429(tmp_path: Path) -> None:
+    # O 429 do bytes_sent não conta: só o status da resposta.
+    assert rate_limits(tmp_path, NGINX_200 * 3).returncode == 0
+
+
+@pytest.mark.parametrize("line", [NGINX_429_DA_API, NGINX_429_DO_LIMIT_REQ])
+def test_rate_limits_recusa_429_com_a_causa_escrita(tmp_path: Path, line: str) -> None:
+    # Sem esta recusa, o 429 reaparece como timeout de 5 s numa spec (issue #338).
+    completed = rate_limits(tmp_path, NGINX_200 + line * 2)
+
+    assert completed.returncode != 0
+    assert "2 resposta(s) 429" in completed.stderr
+    assert "/api/v1/me" in completed.stderr
+
+
+@pytest.fixture
+def fake_compose_logs(tmp_path: Path) -> Path:
+    """`docker` falso: `compose logs` imprime $FAKE_LOG e sai com $FAKE_EXIT."""
+    bin_dir = tmp_path / "bin-logs"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text('#!/bin/sh\ncat "$FAKE_LOG"\nexit "$FAKE_EXIT"\n')
+    docker.chmod(0o755)
+    return bin_dir
+
+
+def check_rate_limits(
+    fake_compose_logs: Path, tmp_path: Path, log: str, exit_code: int
+) -> subprocess.CompletedProcess[str]:
+    log_file = tmp_path / "compose-logs.txt"
+    log_file.write_text(log)
+    return subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "check-rate-limits", "2026-11-12T01:00:00Z"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+        env={
+            **os.environ,
+            "PATH": f"{fake_compose_logs}:{os.environ['PATH']}",
+            "FAKE_LOG": str(log_file),
+            "FAKE_EXIT": str(exit_code),
+        },
+    )
+
+
+def test_check_rate_limits_aceita_log_com_acesso_e_sem_429(
+    fake_compose_logs: Path, tmp_path: Path
+) -> None:
+    assert check_rate_limits(fake_compose_logs, tmp_path, NGINX_200, 0).returncode == 0
+
+
+def test_check_rate_limits_recusa_log_vazio(fake_compose_logs: Path, tmp_path: Path) -> None:
+    # Log vazio não prova ausência de 429: o serviço pode ter outro nome ou o log ter rodado.
+    completed = check_rate_limits(fake_compose_logs, tmp_path, "", 0)
+
+    assert completed.returncode != 0
+    assert "nenhuma linha de acesso" in completed.stderr
+
+
+def test_check_rate_limits_recusa_log_sem_linha_de_acesso(
+    fake_compose_logs: Path, tmp_path: Path
+) -> None:
+    completed = check_rate_limits(fake_compose_logs, tmp_path, "nginx-1  | start worker\n", 0)
+
+    assert completed.returncode != 0
+    assert "nenhuma linha de acesso" in completed.stderr
+
+
+def test_check_rate_limits_recusa_falha_do_compose(fake_compose_logs: Path, tmp_path: Path) -> None:
+    # Serviço inexistente: o compose sai com erro e o log traz só a mensagem dele.
+    completed = check_rate_limits(fake_compose_logs, tmp_path, "no such service: nginx\n", 1)
+
+    assert completed.returncode != 0
+    assert "não consegui ler o log do Nginx" in completed.stderr
+
+
+def test_journeys_confere_os_429_depois_das_specs_mesmo_quando_elas_falham() -> None:
+    # Sem esta chamada o detector some e o 429 volta a parecer timeout (issue #338). O
+    # `|| status=$?` mantém o fluxo vivo quando as specs falham, e a saída só vem depois dela.
+    body = SCRIPT.read_text().split("\njourneys() {", 1)[1].split("\n}\n", 1)[0]
+
+    specs = body.index("npm run e2e")
+    check = body.index('check_rate_limits "$started_at"')
+    leave = body.index('exit "$status"')
+    assert specs < check < leave
+    assert "|| status=$?" in body[specs:check]
+
+
+def test_rate_limits_recusa_log_ilegivel(tmp_path: Path) -> None:
+    # `grep` sai com 2 quando não lê o arquivo: não pode virar "zero 429".
+    completed = subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "rate-limits", str(tmp_path / "nao-existe.log")],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert completed.returncode != 0
+    assert "não consegui ler o log do Nginx" in completed.stderr
+
+
+def run_journeys(tmp_path: Path, nginx_log: str) -> subprocess.CompletedProcess[str]:
+    """Roda o `journeys` de verdade, com specs que passam e um `docker` que devolve `nginx_log`."""
+    bin_dir = tmp_path / "bin-journeys"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    psql) mode=psql ;;
+    xargs) mode=xargs ;;
+    logs) mode=logs ;;
+    events) mode=events ;;
+    inspect) mode=inspect ;;
+  esac
+done
+case "$mode" in
+  psql) echo 1 ;;
+  xargs) while read -r spec; do echo "$spec chave-$spec"; done ;;
+  logs) cat "$FAKE_LOG" ;;
+  events) echo container-1 ;;
+  inspect) echo runsc ;;
+esac
+"""
+    )
+    docker.chmod(0o755)
+    npm = bin_dir / "npm"
+    npm.write_text("#!/bin/sh\nexit 0\n")  # as specs passam
+    npm.chmod(0o755)
+    log_file = tmp_path / "nginx-journeys.log"
+    log_file.write_text(nginx_log)
+    return subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "journeys"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+        env={
+            **os.environ,
+            "CI": "true",
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "FAKE_LOG": str(log_file),
+        },
+    )
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="o script usa o jq do runner")
+def test_journeys_com_specs_verdes_e_sem_429_passa(tmp_path: Path) -> None:
+    # Controle: prova que o cenário do teste abaixo só falha por causa do 429.
+    completed = run_journeys(tmp_path, NGINX_200)
+
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="o script usa o jq do runner")
+def test_journeys_falha_com_429_mesmo_com_as_specs_verdes(tmp_path: Path) -> None:
+    # Issue #338: o 429 com as specs verdes passaria sem a chamada do detector, ou com ela
+    # neutralizada por `|| true`.
+    completed = run_journeys(tmp_path, NGINX_200 + NGINX_429_DA_API)
+
+    assert completed.returncode != 0
+    assert "1 resposta(s) 429" in completed.stderr
+
+
+def test_cada_arquivo_de_spec_tem_a_conta_propria() -> None:
+    # A suíte numa conta só estourou o limite de 120 leituras por minuto (issue #338).
+    script = SCRIPT.read_text()
+
+    assert "GS_E2E_API_KEYS=" in script
+    assert "GS_E2E_API_KEY=" not in script
+    assert '"$SPEC_DIR"/*.spec.ts' in script
 
 
 @pytest.mark.parametrize("command", ["up", "journeys"])
