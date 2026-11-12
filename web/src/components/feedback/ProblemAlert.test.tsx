@@ -41,7 +41,7 @@ describe("describeFailure", () => {
     [
       "UNSUPPORTED_MEDIA_TYPE",
       415,
-      "Este tipo de arquivo não é aceito aqui. Escolha um dos formatos da receita.",
+      "O pedido foi enviado num formato que o servidor não aceita. Recarregue a página e tente de novo.",
     ],
     [
       "INSUFFICIENT_SCOPE",

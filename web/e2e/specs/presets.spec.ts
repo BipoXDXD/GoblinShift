@@ -89,8 +89,11 @@ test("Esc com a exclusão em voo não fecha; a falha aparece na Oficina e o diá
   const confirm = dialog.getByRole("button", { name: "Excluir preset" });
   await confirm.click();
   const deletion = await held;
-  // O Esc só depois de a tela mostrar o pedido em voo.
-  await expect(confirm).toHaveAttribute("aria-disabled", "true");
+  // O Esc só depois de a tela mostrar o pedido em voo: o botão troca de rótulo e trava.
+  await expect(dialog.getByRole("button", { name: "Excluindo preset…" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   await page.keyboard.press("Escape");
   await expect(dialog).toBeVisible();
   await fulfillProblem(deletion, { code: "SERVICE_UNAVAILABLE", status: 503 });

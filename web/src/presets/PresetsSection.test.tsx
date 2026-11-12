@@ -280,6 +280,37 @@ describe("Oficina: presets", () => {
     expect(within(section).getByRole("heading", { name: "Clientes do mês" })).toBeVisible();
   });
 
+  // O diálogo só fecha com a lista relida, que decide o destino do foco; até lá, o botão diz que
+  // a exclusão segue em curso, para o diálogo não parecer travado.
+  it("excluído (204) com a lista ainda sendo relida: o diálogo diz que está excluindo", async () => {
+    const relist = heldResponse();
+    let deleted = false;
+    const { user } = setup({
+      "GET /api/v1/presets": () =>
+        deleted ? relist.handler() : jsonResponse({ data: [presetBody()] }),
+      [DELETE_ROUTE]: () => {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      },
+    });
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Excluir o preset Clientes do mês?" });
+    await user.click(within(dialog).getByRole("button", { name: "Excluir preset" }));
+
+    expect(
+      await within(dialog).findByRole("button", { name: "Excluindo preset…" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    relist.answer(jsonResponse({ data: [] }));
+
+    await waitFor(() => {
+      expect(within(section).getByRole("heading", { level: 2, name: "Presets" })).toHaveFocus();
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("com a exclusão em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
     const held = heldResponse();
     const { api, user } = setup({ [DELETE_ROUTE]: held.handler });

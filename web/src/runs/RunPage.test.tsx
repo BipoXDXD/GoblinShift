@@ -156,8 +156,11 @@ describe("Execução", () => {
   it("execução alheia ou inexistente mostra o 404 com texto próprio", async () => {
     setup(() => problemResponse(404, "NOT_FOUND"));
 
+    // A tela da execução não tem lista, e atualizar traz o mesmo 404: o caminho é o Histórico.
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Não encontramos este item.");
+    expect(alert).toHaveTextContent(
+      "Não encontramos esta execução. Ela pode ter sido removida ou ter expirado. Procure as suas execuções no Histórico.",
+    );
     expect(alert).not.toHaveTextContent("Detail from server");
   });
 
@@ -232,7 +235,7 @@ function runRequests(requests: readonly Request[]): number {
 }
 
 const FORBIDDEN_TEXT = "Você não tem permissão para esta ação.";
-const NOT_FOUND_TEXT = "Não encontramos este item.";
+const NOT_FOUND_TEXT = "Não encontramos esta execução.";
 const TIMEOUT_TEXT = "O servidor demorou demais para responder.";
 /** Prazo do cliente da API (client.ts), que o relógio falso atravessa no teste do timeout. */
 const CLIENT_TIMEOUT_MS = 30_000;
@@ -417,7 +420,7 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
 
   it.each([
     [403, "FORBIDDEN", "Você não tem permissão para esta ação."],
-    [404, "NOT_FOUND", "Não encontramos este item"],
+    [404, "NOT_FOUND", "Não encontramos esta execução"],
     [410, "GONE", "Isto expirou"],
   ])(
     "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",

@@ -79,7 +79,7 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       </div>
       <LiveRegion message={guidanceText ?? announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
-      {failure !== null && <FailureNotice error={failure} />}
+      {failure !== null && <FailureNotice error={failure} messages={{ NOT_FOUND: T.notFound }} />}
       {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
           a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
           do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
