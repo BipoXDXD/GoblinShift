@@ -60,7 +60,9 @@ class ObjectMissingError(StorageError):
 
 
 class ObjectTamperedError(StorageError):
-    """A chave existe, mas não é um arquivo comum que o storage poderia ter criado (symlink).
+    """A chave existe, mas não é um arquivo comum que o storage poderia ter criado.
+
+    Symlink ou diretório no lugar do objeto.
 
     Evidência de adulteração, não de perda: não é `ObjectMissingError`, para nenhuma varredura
     tratá-la como ausente. A mensagem leva só a chave lógica, nunca o caminho no disco.
@@ -141,7 +143,15 @@ class FileStorage:
             if error.errno == errno.ELOOP:
                 raise ObjectTamperedError(key) from None
             raise
-        return os.fdopen(fd, "rb")
+        try:
+            # O_NOFOLLOW só barra symlink: um diretório abre sem erro e o `fdopen` falharia com
+            # `IsADirectoryError`, cru e deixando o descritor aberto. Confere o tipo no próprio fd.
+            if not S_ISREG(os.fstat(fd).st_mode):
+                raise ObjectTamperedError(key)
+            return os.fdopen(fd, "rb")
+        except BaseException:
+            os.close(fd)
+            raise
 
     def stat(self, key: str) -> ObjectStat:
         """Tamanho do objeto; o que não é arquivo comum é adulteração, como em `open`.
