@@ -158,7 +158,11 @@ async function tabUntilFocusLeavesPage(page: Page, onStop: () => Promise<void>):
 }
 
 async function readStop(page: Page): Promise<FocusStop> {
-  const stop = await page.evaluate(readFocusStop);
+  const device = page.viewportSize();
+  if (device === null) {
+    throw new Error("a spec não tem viewport para servir de régua");
+  }
+  const stop = await page.evaluate(readFocusStop, device.width);
   if (stop === null) {
     throw new Error("o foco saiu da página no meio da leitura");
   }
@@ -192,8 +196,13 @@ function ringProblems(stop: FocusStop): string[] {
 /**
  * Roda no navegador, depois de qualquer transição do elemento terminar. O anel pode estar no próprio elemento ou num pseudo-elemento: o cartão da
  * Oficina desenha o anel no ::after do link, que cobre o cartão (base.css, .card-link).
+ *
+ * `deviceWidth` é a largura do aparelho, não o `innerWidth`: com `isMobile`, o Chromium alarga
+ * o layout viewport até o conteúdo que estoura, e um foco além da largura do aparelho contaria
+ * como à vista (a mesma régua do support/reflow.ts). Só faz diferença quando o foco roda com
+ * `isMobile`, e hoje o projeto `mobile` não roda este spec (`grepInvert: /@keyboard/`).
  */
-async function readFocusStop(): Promise<FocusStop | null> {
+async function readFocusStop(deviceWidth: number): Promise<FocusStop | null> {
   const focused = document.activeElement;
   if (!(focused instanceof HTMLElement) || focused === document.body) {
     return null;
@@ -235,7 +244,7 @@ async function readFocusStop(): Promise<FocusStop | null> {
     top: Math.max(rect.top, 0),
     bottom: Math.min(rect.bottom, window.innerHeight),
     left: Math.max(rect.left, 0),
-    right: Math.min(rect.right, window.innerWidth),
+    right: Math.min(rect.right, deviceWidth),
   };
   const inViewport = visible.bottom > visible.top && visible.right > visible.left;
   const hit = document.elementFromPoint(
