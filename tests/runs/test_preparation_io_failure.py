@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import timedelta
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO, NoReturn, cast
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
@@ -72,6 +72,18 @@ def fail_storage_read_mid_copy(storage: FileStorage, monkeypatch: pytest.MonkeyP
             return cast(BinaryIO, _ReadFailsMidCopy(source.read()))
 
     monkeypatch.setattr(storage, "open", open_then_fail)
+
+
+def fail_open_with_disk_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`FileStorage.open` falha com um erro de disco genérico (EIO), que não é adulteração.
+
+    Um diretório no lugar do objeto não serve de gatilho: é adulteração (`INPUT_TAMPERED`).
+    """
+
+    def failing_open(self: FileStorage, key: str) -> NoReturn:
+        raise OSError(errno.EIO, "erro de E/S")
+
+    monkeypatch.setattr(FileStorage, "open", failing_open)
 
 
 def work_area_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -184,14 +196,14 @@ def test_falha_ao_criar_arquivo_na_area_alerta_executor_start_failed(
 
 
 def test_erro_de_leitura_do_storage_reagenda_na_hora(
-    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_id = queue_run(factory, storage, create_user(factory))
     runner = local_runner(work_root)
-    [stored] = [path for path in storage.root.rglob("*") if path.is_file()]
-    stored.unlink()
-    # `open` num diretório levanta `IsADirectoryError` de verdade, mesmo rodando como root.
-    stored.mkdir()
+    fail_open_with_disk_error(monkeypatch)
     claimed = claim(factory, storage)
 
     applied = coordinator(factory, storage, runner).run(claimed)
@@ -204,12 +216,11 @@ def test_erro_de_leitura_do_storage_falha_sem_alerta(
     factory: sessionmaker[Session],
     storage: FileStorage,
     work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     queue_run(factory, storage, create_user(factory))
-    [stored] = [path for path in storage.root.rglob("*") if path.is_file()]
-    stored.unlink()
-    stored.mkdir()
+    fail_open_with_disk_error(monkeypatch)
     claimed = claim(factory, storage)
 
     with caplog.at_level(logging.WARNING):
