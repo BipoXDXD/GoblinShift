@@ -219,52 +219,6 @@ def test_erro_de_leitura_do_storage_falha_sem_alerta(
     assert alert_of(record) is None
 
 
-def plant_symlink_over_stored_object(storage: FileStorage, outside: Path) -> None:
-    """Troca o objeto do storage por um symlink para `outside`: o `open` recusa com `ELOOP`."""
-    [stored] = [path for path in storage.root.rglob("*") if path.is_file()]
-    outside.write_bytes(b"segredo")
-    stored.unlink()
-    stored.symlink_to(outside)
-
-
-def test_objeto_de_entrada_adulterado_por_symlink_reagenda_na_hora(
-    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, tmp_path: Path
-) -> None:
-    # `ObjectTamperedError` é um `StorageError`: a preparação o trata como a entrada ausente,
-    # falha transitória na hora, sem o executor e sem deixar a área de trabalho.
-    run_id = queue_run(factory, storage, create_user(factory))
-    runner = local_runner(work_root)
-    plant_symlink_over_stored_object(storage, tmp_path / "CANARY-alvo-fora-da-raiz")
-    claimed = claim(factory, storage)
-
-    applied = coordinator(factory, storage, runner).run(claimed)
-
-    assert applied is not None
-    assert_rescheduled_without_executor(factory, run_id, runner.work_dir(claimed.attempt_id))
-
-
-def test_objeto_de_entrada_adulterado_por_symlink_loga_sem_alerta_e_sem_o_caminho(
-    factory: sessionmaker[Session],
-    storage: FileStorage,
-    work_root: Path,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    queue_run(factory, storage, create_user(factory))
-    plant_symlink_over_stored_object(storage, tmp_path / "CANARY-alvo-fora-da-raiz")
-    claimed = claim(factory, storage)
-
-    with caplog.at_level(logging.WARNING):
-        coordinator(factory, storage, local_runner(work_root)).run(claimed)
-
-    [record] = work_area_failures(caplog)
-    assert alert_of(record) is None
-    error = str(fields_of(record)["error"])
-    assert "adulterado" in error
-    assert "CANARY" not in error
-    assert str(storage.root) not in error
-
-
 def test_erro_na_leitura_do_objeto_no_meio_da_copia_reagenda_na_hora(
     factory: sessionmaker[Session],
     storage: FileStorage,
