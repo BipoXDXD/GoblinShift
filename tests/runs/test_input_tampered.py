@@ -141,13 +141,13 @@ def test_entrada_adulterada_nao_gera_o_alerta_do_executor_que_nao_iniciou(
     with caplog.at_level(logging.WARNING):
         coordinator(factory, storage, local_runner(work_root)).run(claimed)
 
-    alerts = [fields_of(record).get("alert") for record in caplog.records if hasattr(record, "fields")]
+    alerts = [
+        fields_of(record).get("alert") for record in caplog.records if hasattr(record, "fields")
+    ]
     assert "executor_start_failed" not in alerts
 
 
-def assert_still_retried(
-    factory: sessionmaker[Session], run_id: uuid.UUID, work_dir: Path
-) -> None:
+def assert_still_retried(factory: sessionmaker[Session], run_id: uuid.UUID, work_dir: Path) -> None:
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"]) == ("running", "retry_wait")
     assert row["error_code"] is None

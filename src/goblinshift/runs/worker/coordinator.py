@@ -57,7 +57,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
-from goblinshift.files.storage import FileStorage, StorageError
+from goblinshift.files.storage import FileStorage, ObjectTamperedError, StorageError
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
@@ -125,6 +125,9 @@ TRANSIENT_ATTEMPT_ERROR = ErrorCode.EXECUTOR_UNAVAILABLE
 # Evento `alert=` do executor que não chega a iniciar: start recusado, área de trabalho não criada
 # ou falha de escrita nela. `gs-causa-executor-nao-iniciou` o lê no span `attempt`.
 EXECUTOR_START_FAILED = "executor_start_failed"
+# Evento `alert=` da entrada que o storage devolve adulterada (symlink no lugar do objeto): sinal
+# de segurança, não de infraestrutura, então fica fora do alerta do executor que não iniciou.
+INPUT_TAMPERED_ALERT = "input_tampered"
 # Erros que não encerram a supervisão. Conexão caída, `lock_timeout`, `statement_timeout` e pool
 # esgotado passam sozinhos. `OperationalError` também traz os que pedem ação de fora: senha recusada
 # (28P01), disco cheio (53100), E/S (58030), limite do servidor (54000). A lista os inclui de
@@ -166,6 +169,18 @@ class PreparationError(Exception):
     def __init__(self, message: str, *, alert: str | None = None) -> None:
         super().__init__(message)
         self.alert = alert
+
+
+class InputTamperedError(Exception):
+    """O storage devolveu uma entrada adulterada: a Run termina `INPUT_TAMPERED`, sem retentativa.
+
+    Não é `PreparationError`: aquela é infraestrutura e reagenda. Guarda só a posição da entrada,
+    nunca a mensagem do storage, para o log não depender do texto do erro de origem.
+    """
+
+    def __init__(self, position: int) -> None:
+        super().__init__(f"entrada {position} adulterada")
+        self.position = position
 
 
 class _AreaFile:
@@ -315,6 +330,18 @@ class Coordinator:
     def _drive(self, claimed: ClaimedAttempt) -> Applied:
         try:
             self.prepare(claimed)
+        except InputTamperedError as error:
+            logger.warning(
+                "entrada adulterada no storage",
+                extra={
+                    "fields": {
+                        **_ids(claimed),
+                        "position": error.position,
+                        "alert": INPUT_TAMPERED_ALERT,
+                    }
+                },
+            )
+            return self.fail_input_tampered(claimed)
         except PreparationError as error:
             fields = _ids(claimed, error)
             if error.alert is not None:
@@ -407,6 +434,8 @@ class Coordinator:
                     digest.update(chunk)
                     size += len(chunk)
                     target.write(chunk)
+        except ObjectTamperedError:
+            raise InputTamperedError(position) from None
         except StorageError as error:
             raise PreparationError(f"entrada {position}: {error}") from error
         if digest.digest() != content.sha256 or size != content.size_bytes:
@@ -716,6 +745,13 @@ class Coordinator:
             claimed,
             lambda loaded: TransientFailure(claimed.generation, loaded.now, self._config.jitter()),
             attempt_error=TRANSIENT_ATTEMPT_ERROR,
+        )
+
+    def fail_input_tampered(self, claimed: ClaimedAttempt) -> Applied:
+        return self._conclude(
+            claimed,
+            lambda _loaded: DeterministicFailure(claimed.generation, ErrorCode.INPUT_TAMPERED),
+            attempt_error=ErrorCode.INPUT_TAMPERED,
         )
 
     def conclude_stop(self, claimed: ClaimedAttempt) -> Applied:

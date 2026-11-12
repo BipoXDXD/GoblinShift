@@ -118,6 +118,7 @@ _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.QUEUE_EXPIRED: "A execução não começou dentro do prazo da fila.",
     ErrorCode.DEADLINE_EXCEEDED: "A execução passou do prazo total.",
     ErrorCode.INFRA_POISON: "A execução foi interrompida por falhas repetidas de infraestrutura.",
+    ErrorCode.INPUT_TAMPERED: "Um arquivo de entrada não passou na verificação de integridade.",
     ErrorCode.CANCELED: "A execução foi cancelada.",
 }
 _GENERIC_ERROR_MESSAGE = "A execução falhou."

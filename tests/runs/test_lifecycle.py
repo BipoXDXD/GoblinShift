@@ -235,7 +235,8 @@ def test_falha_deterministica_termina_failed_com_o_codigo_e_descarta_candidatos(
 
 def test_entrada_adulterada_termina_failed_sem_gastar_tentativa_fisica() -> None:
     event = DeterministicFailure(generation=1, code=ErrorCode.INPUT_TAMPERED)
-    result = accepted(running(), event)
+    # Na preparação o executor ainda não iniciou: a tentativa não entrou na conta física.
+    result = accepted(running(attempts=0, claims=1, started=False), event)
 
     assert (result.run.status, result.run.error_code) == (Status.FAILED, ErrorCode.INPUT_TAMPERED)
     assert result.run.physical_attempts == 0
