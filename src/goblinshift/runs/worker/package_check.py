@@ -42,6 +42,7 @@ from typing import BinaryIO, Protocol
 
 from goblinshift.processing.output_dir import MAX_PATH_BYTES
 from goblinshift.processing.packaging import MANIFEST_SCHEMA_VERSION, compression_for
+from goblinshift.processing.regular_file import NotRegularFileError, open_regular
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 READ_CHUNK_BYTES = 1024 * 1024
@@ -171,8 +172,12 @@ def verify_zip(path: Path, expected: Sequence[DigestedFile], heartbeat: Callable
 
     `heartbeat` é chamado a cada bloco lido, para quem chama renovar o lease.
     """
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd, "rb") as source:
+    try:
+        source = open_regular(path)
+    except NotRegularFileError:
+        # O sandbox trocou o pacote por outra coisa depois do `lstat` da coleta.
+        raise PackageError("pacote não é arquivo regular") from None
+    with source:
         _require_canonical_layout(source, expected)
         try:
             with zipfile.ZipFile(source) as archive:

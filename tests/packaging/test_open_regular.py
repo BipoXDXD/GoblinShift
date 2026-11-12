@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from goblinshift.processing.packaging.zip_writer import ZipSource, open_regular, write_zip
+from goblinshift.processing.packaging.zip_writer import ZipSource, write_zip
+from goblinshift.processing.regular_file import open_regular
 from tests.fifo_support import fail_if_blocked, make_fifo
 
 MIB = 1024 * 1024
