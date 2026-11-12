@@ -28,6 +28,7 @@ from functools import partial
 
 from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
@@ -189,10 +190,14 @@ def _log_items_left(step: str, items_left: int) -> None:
 def _is_connection_error(error: Exception) -> bool:
     """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
 
-    Conexão que o pool invalidou, ou `OperationalError` sem SQLSTATE (o `connect` recusado ou
-    sem resposta) ou com SQLSTATE de conexão ou de servidor parando. `statement_timeout` (57014)
+    Conexão que o pool invalidou, pool esgotado (`TimeoutError` do SQLAlchemy, que não é
+    `DBAPIError`: o pool desiste antes de pedir conexão, e o passo seguinte esperaria o
+    `pool_timeout` de novo), ou `OperationalError` sem SQLSTATE (o `connect` recusado ou sem
+    resposta) ou com SQLSTATE de conexão ou de servidor parando. `statement_timeout` (57014)
     também chega como `OperationalError`, mas o banco respondeu: os outros passos seguem.
     """
+    if isinstance(error, PoolTimeoutError):
+        return True
     if isinstance(error, DBAPIError) and error.connection_invalidated:
         return True
     if not isinstance(error, OperationalError):
@@ -382,7 +387,9 @@ class Maintenance:
 
         O erro fica no log com tipo e SQLSTATE (a mensagem do banco traz host e valores, 3.7) e
         o lote segue para a próxima tentativa. Erro de conexão sobe: o passo falha e o ciclo pula
-        os passos de banco restantes, que só esperariam o `connect_timeout` de novo.
+        os passos de banco restantes, que só esperariam o `connect_timeout` de novo. O
+        `TimeoutError` do pool não é `DBAPIError`, então o `except` abaixo nem o vê e ele sobe do
+        mesmo jeito, que é o que `_is_connection_error` pede: não há o que isolar sem conexão.
         """
         try:
             return self._lease_still_expired(expired)
