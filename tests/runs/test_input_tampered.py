@@ -5,10 +5,11 @@ a desfaz e só gasta claims até `INFRA_POISON`, sem sinal algum. Entrada ausent
 `OSError` genérica continua transitória.
 """
 
+import errno
 import logging
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
@@ -188,15 +189,24 @@ def test_entrada_ausente_continua_sem_alerta(
     assert "alert" not in fields_of(record)
 
 
+def fail_open_with_disk_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`FileStorage.open` falha com um erro de disco que não é adulteração (EIO)."""
+
+    def failing_open(self: FileStorage, key: str) -> NoReturn:
+        raise OSError(errno.EIO, "erro de entrada e saída")
+
+    monkeypatch.setattr(FileStorage, "open", failing_open)
+
+
 def test_oserror_generica_na_leitura_continua_reagendada(
-    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_id = queue_run(factory, storage, create_user(factory))
     runner = local_runner(work_root)
-    stored = stored_object(storage)
-    stored.unlink()
-    # `open` num diretório levanta `IsADirectoryError` de verdade, mesmo rodando como root.
-    stored.mkdir()
+    fail_open_with_disk_error(monkeypatch)
     claimed = claim(factory, storage)
 
     applied = coordinator(factory, storage, runner).run(claimed)
@@ -210,11 +220,10 @@ def test_oserror_generica_na_leitura_continua_sem_alerta(
     storage: FileStorage,
     work_root: Path,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     queue_run(factory, storage, create_user(factory))
-    stored = stored_object(storage)
-    stored.unlink()
-    stored.mkdir()
+    fail_open_with_disk_error(monkeypatch)
     claimed = claim(factory, storage)
 
     with caplog.at_level(logging.WARNING):
