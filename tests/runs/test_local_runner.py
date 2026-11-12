@@ -1,5 +1,6 @@
 """Runner local: start idempotente pelo nome, status entre processos, parada do grupo e teto."""
 
+import ast
 import os
 import subprocess
 import sys
@@ -25,6 +26,9 @@ WAIT_TIMEOUT_S = 15.0
 REAP_AFTER_S = 1.0
 # Bem abaixo do tempo de subida de um interpretador Python: o lançador nunca termina a tempo.
 UNREACHABLE_LAUNCH_TIMEOUT_S = 0.001
+SUBPROCESS_TIMEOUT_S = 60.0
+WORKER_SRC = Path(runner_module.__file__).parent
+META_FILE_NAMES = {"PGID_FILE", "EXIT_FILE"}
 
 
 def fake_runner(
@@ -197,3 +201,33 @@ def test_remove_recusa_executor_vivo_e_apaga_a_area_depois_de_parado(tmp_path: P
 
     assert list(tmp_path.iterdir()) == []
     assert runner.status(attempt_id).phase is ExecutorPhase.ABSENT
+
+
+def test_lancador_nao_importa_o_sqlalchemy() -> None:
+    # A partida do lançador cabe no LAUNCH_TIMEOUT_S só se ele não arrastar runs.store (#377).
+    code = (
+        "import sys, goblinshift.runs.worker.local_supervisor\n"
+        "print(sorted(m for m in ('sqlalchemy', 'goblinshift.runs.store') if m in sys.modules))"
+    )
+
+    result = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT_S,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "[]"
+
+
+def test_nomes_dos_arquivos_de_meta_tem_uma_fonte_so() -> None:
+    definers = {
+        path.name
+        for path in WORKER_SRC.glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id in META_FILE_NAMES for t in node.targets)
+    }
+
+    assert definers == {"meta_files.py"}
