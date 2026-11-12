@@ -42,7 +42,7 @@ def index_error(reason: str) -> str:
     return rf"^{prefix} for role {FIRST_ROLE} \({reason}\)$"
 
 
-TOOLS_BESIDES_JQ = ("bash", "cat", "dirname", "find", "mkdir", "mktemp", "rm", "tar")
+TOOLS_BESIDES_JQ = ("bash", "cat", "dirname", "find", "mkdir", "rm", "tar")
 
 INDEX_MANIFEST = json.dumps(
     {
@@ -88,6 +88,15 @@ case "$1" in
     exit 64
     ;;
 esac
+"""
+# GNU `mktemp -d` honours TMPDIR, BSD (macOS) ignores it and picks a directory outside the
+# sandbox, where the crane stub cannot delete the manifest. This shim gives BSD the GNU behaviour
+# so the "absent file" case means the same on every OS; it forwards every other call untouched.
+MKTEMP_SHIM = """#!/bin/bash
+if [ "$*" = "-d" ]; then
+  exec {real_mktemp} -d "$TMPDIR/tmp.XXXXXXXXXX"
+fi
+exec {real_mktemp} "$@"
 """
 DOCKER_STUB = """#!/bin/bash
 printf 'docker %s\\n' "$*" >> "$STUB_DIR/calls.log"
@@ -159,6 +168,13 @@ def write_manifests(manifests_dir: Path, manifests: list[str | None]) -> None:
             (manifests_dir / str(call)).write_text(manifest)
 
 
+def install_mktemp_shim(bin_dir: Path) -> None:
+    real_mktemp = shutil.which("mktemp")
+    if real_mktemp is None:
+        raise FileNotFoundError("mktemp")
+    install_stub(bin_dir, "mktemp", MKTEMP_SHIM.format(real_mktemp=real_mktemp))
+
+
 def search_path_with_jq(bin_dir: Path) -> str:
     return f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
 
@@ -192,6 +208,7 @@ def run_target(
         install_stub(bin_dir, "docker", DOCKER_STUB)
         install_stub(bin_dir, "ssh", SSH_STUB)
         install_stub(bin_dir, "python3", PYTHON_STUB)
+        install_mktemp_shim(bin_dir)
         write_manifests(stub_dir / "manifests", manifests)
         (stub_dir / "manifest-calls").write_text("0")
         (stub_dir / "requested.tsv").write_text(REQUESTED_ROLES)
