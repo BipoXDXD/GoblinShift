@@ -152,6 +152,57 @@ def test_abrir_chave_que_e_symlink_falha_como_adulteracao_sem_expor_o_caminho(
     assert link.is_symlink()
 
 
+def test_abrir_chave_que_e_diretorio_falha_como_adulteracao_sem_expor_o_caminho(
+    storage: FileStorage,
+) -> None:
+    # O `os.open` abre um diretório sem erro; sem checar o tipo, o `fdopen` falhava com
+    # `IsADirectoryError` (cru, com o caminho no texto) e deixava o descritor aberto.
+    directory = storage.root / "uploads" / "alvo"
+    directory.mkdir(parents=True)
+
+    with pytest.raises(ObjectTamperedError) as raised:
+        storage.open("uploads/alvo")
+
+    assert not isinstance(raised.value, ObjectMissingError)
+    assert str(storage.root) not in str(raised.value)
+    assert directory.is_dir()
+
+
+def _open_fd_count() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+@pytest.mark.parametrize("planted", ["diretorio", "symlink"])
+def test_abrir_chave_adulterada_nao_vaza_descritor(
+    storage: FileStorage, tmp_path: Path, planted: str
+) -> None:
+    tampered = storage.root / "uploads" / "alvo"
+    tampered.parent.mkdir(parents=True)
+    if planted == "diretorio":
+        tampered.mkdir()
+    else:
+        tampered.symlink_to(tmp_path)
+    before = _open_fd_count()
+
+    for _ in range(10):
+        with pytest.raises(ObjectTamperedError):
+            storage.open("uploads/alvo")
+
+    assert _open_fd_count() == before
+
+
+def test_abrir_arquivo_comum_devolve_o_conteudo_e_nao_deixa_descritor_extra(
+    storage: FileStorage,
+) -> None:
+    storage.create_exclusive("uploads/a", [b"abcd"], max_bytes=10)
+    before = _open_fd_count()
+
+    with storage.open("uploads/a") as file:
+        assert file.read() == b"abcd"
+
+    assert _open_fd_count() == before
+
+
 def test_consultar_arquivo_comum_devolve_o_tamanho(storage: FileStorage) -> None:
     storage.create_exclusive("uploads/a", [b"abcd"], max_bytes=10)
 

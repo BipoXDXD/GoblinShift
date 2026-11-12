@@ -47,6 +47,13 @@ def plant_symlink_over_stored_object(storage: FileStorage, outside: Path) -> Non
     stored.symlink_to(outside)
 
 
+def plant_directory_over_stored_object(storage: FileStorage) -> None:
+    """Troca o objeto do storage por um diretório: o `open` recusa como adulteração."""
+    stored = stored_object(storage)
+    stored.unlink()
+    stored.mkdir()
+
+
 def fields_of(record: logging.LogRecord) -> dict[str, Any]:
     return getattr(record, "fields")  # type: ignore[no-any-return]  # noqa: B009 - campo do `extra`
 
@@ -232,3 +239,41 @@ def test_oserror_generica_na_leitura_continua_sem_alerta(
     assert records_named(caplog, TAMPERED_LOG) == []
     [record] = records_named(caplog, WORK_AREA_FAILED)
     assert "alert" not in fields_of(record)
+
+
+def test_entrada_trocada_por_diretorio_termina_falha_sem_retry(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root)
+    plant_directory_over_stored_object(storage)
+    claimed = claim(factory, storage)
+
+    applied = coordinator(factory, storage, runner).run(claimed)
+
+    assert applied is not None
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"], row["error_code"]) == ("failed", None, INPUT_TAMPERED)
+    assert row["claim_count"] == 1
+    [only] = attempts(factory, run_id)
+    assert only["error_code"] == INPUT_TAMPERED
+    assert not runner.work_dir(claimed.attempt_id).exists()
+
+
+def test_entrada_trocada_por_diretorio_loga_alerta_sem_o_caminho_do_disco(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    plant_directory_over_stored_object(storage)
+    claimed = claim(factory, storage)
+
+    with caplog.at_level(logging.WARNING):
+        coordinator(factory, storage, local_runner(work_root)).run(claimed)
+
+    [record] = records_named(caplog, TAMPERED_LOG)
+    assert fields_of(record)["alert"] == INPUT_TAMPERED_ALERT
+    assert str(storage.root) not in repr(fields_of(record)) + record.getMessage()
+    assert records_named(caplog, WORK_AREA_FAILED) == []
