@@ -24,8 +24,14 @@ KEY_PATTERN = re.compile(rb"gsk_[0-9a-f]{16}_[A-Za-z0-9_-]{43}")
 # Maior chave possível: o que sobra entre dois blocos para a chave que cruza a emenda.
 KEY_MAX_LENGTH = 64
 CHUNK_SIZE = 1024 * 1024
-# trace.zip dentro de zip é raro; o teto evita laço em zip bomba.
+# trace.zip dentro de zip é raro; o teto evita laço em zip bomba. Zip mais fundo que isso reprova:
+# o que não dá para conferir não sobe.
 MAX_ZIP_DEPTH = 3
+# Teto por membro, já descomprimido: o zip aninhado é lido inteiro em memória e um membro enorme
+# faz a varredura durar demais. Acima disso reprova, pelo mesmo motivo.
+MAX_MEMBER_BYTES = 512 * 1024 * 1024
+# Assinaturas do zip: arquivo local (PK\x03\x04) e fim de diretório, o único que o zip vazio tem.
+ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06")
 EXIT_FOUND = 1
 EXIT_USAGE = 2
 
@@ -41,6 +47,10 @@ def count_in_stream(stream: IO[bytes]) -> int:
     return total
 
 
+def looks_like_zip(head: bytes) -> bool:
+    return head.startswith(ZIP_SIGNATURES)
+
+
 def findings_in_zip(label: str, source: Path | io.BytesIO, depth: int) -> Iterator[tuple[str, int]]:
     try:
         archive = zipfile.ZipFile(source)
@@ -52,7 +62,15 @@ def findings_in_zip(label: str, source: Path | io.BytesIO, depth: int) -> Iterat
             if member.is_dir():
                 continue
             member_label = f"{label}!{member.filename}"
-            if member.filename.lower().endswith(".zip") and depth < MAX_ZIP_DEPTH:
+            if member.file_size > MAX_MEMBER_BYTES:
+                yield f"{member_label}: membro acima do teto de tamanho, não dá para conferir", -1
+                continue
+            with archive.open(member) as stream:
+                head = stream.read(len(ZIP_SIGNATURES[0]))
+            if member.filename.lower().endswith(".zip") or looks_like_zip(head):
+                if depth >= MAX_ZIP_DEPTH:
+                    yield f"{member_label}: zip aninhado além do limite, não dá para conferir", -1
+                    continue
                 nested = io.BytesIO(archive.read(member))
                 yield from findings_in_zip(member_label, nested, depth + 1)
                 continue
@@ -63,7 +81,9 @@ def findings_in_zip(label: str, source: Path | io.BytesIO, depth: int) -> Iterat
 
 
 def findings_in_file(path: Path) -> Iterator[tuple[str, int]]:
-    if path.suffix.lower() == ".zip":
+    with path.open("rb") as stream:
+        head = stream.read(len(ZIP_SIGNATURES[0]))
+    if path.suffix.lower() == ".zip" or looks_like_zip(head):
         yield from findings_in_zip(str(path), path, depth=1)
         return
     with path.open("rb") as stream:

@@ -5,11 +5,13 @@ iriam para o artefato, inclusive o conteúdo dos .zip, e reprova se achar o form
 do CI é público: a saída traz só o caminho e a contagem, nunca o trecho que bateu.
 """
 
+import importlib.util
 import io
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -31,6 +33,16 @@ def varrer(*caminhos: Path) -> subprocess.CompletedProcess[str]:
         check=False,
         timeout=SCRIPT_TIMEOUT_S,
     )
+
+
+def carregar_canario() -> ModuleType:
+    """O script em processo, para os testes trocarem os tetos por valores pequenos."""
+    spec = importlib.util.spec_from_file_location("verificar_artefatos_sem_chave", SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
 
 
 def saida_inteira(resultado: subprocess.CompletedProcess[str]) -> str:
@@ -153,6 +165,87 @@ def test_zip_corrompido_reprova_porque_nao_da_para_conferir(relatorio: Path) -> 
     resultado = varrer(relatorio)
 
     assert resultado.returncode != 0
+
+
+def test_zip_com_extensao_diferente_e_conferido_pelos_magic_bytes(relatorio: Path) -> None:
+    (relatorio / "trace.bin").write_bytes(zip_com({"0-trace.network": CHAVE}))
+
+    resultado = varrer(relatorio)
+
+    saida = saida_inteira(resultado)
+    assert resultado.returncode != 0
+    assert str(relatorio / "trace.bin") in saida
+    for pedaco in PEDACOS_DA_CHAVE:
+        assert pedaco not in saida
+
+
+def test_zip_vazio_com_extensao_diferente_passa(relatorio: Path) -> None:
+    (relatorio / "vazio.bin").write_bytes(zip_com({}))
+
+    resultado = varrer(relatorio)
+
+    assert resultado.returncode == 0
+
+
+def test_zip_interno_com_extensao_diferente_e_conferido_pelos_magic_bytes(relatorio: Path) -> None:
+    interno = zip_com({"rede.json": CHAVE})
+    (relatorio / "pacote.zip").write_bytes(zip_com({"interno.bin": interno}))
+
+    resultado = varrer(relatorio)
+
+    assert resultado.returncode != 0
+
+
+def test_zip_aninhado_alem_do_limite_reprova_sem_imprimir_a_chave(
+    relatorio: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canario = carregar_canario()
+    conteudo = zip_com({"rede.json": CHAVE})
+    for nivel in range(canario.MAX_ZIP_DEPTH):  # o zip mais fundo fica em MAX_ZIP_DEPTH + 1
+        conteudo = zip_com({f"nivel{nivel}.zip": conteudo})
+    fundo = relatorio / "fundo.zip"
+    fundo.write_bytes(conteudo)
+
+    codigo = canario.main([str(relatorio)])
+
+    saida = capsys.readouterr().err
+    assert codigo != 0
+    assert str(fundo) in saida
+    for pedaco in PEDACOS_DA_CHAVE:
+        assert pedaco not in saida
+
+
+def test_zip_aninhado_no_limite_ainda_e_varrido(relatorio: Path) -> None:
+    canario = carregar_canario()
+    conteudo = zip_com({"rede.json": CHAVE})
+    for nivel in range(canario.MAX_ZIP_DEPTH - 1):
+        conteudo = zip_com({f"nivel{nivel}.zip": conteudo})
+    (relatorio / "no_limite.zip").write_bytes(conteudo)
+
+    assert canario.main([str(relatorio)]) != 0
+
+
+def test_membro_acima_do_teto_de_tamanho_reprova(
+    relatorio: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    canario = carregar_canario()
+    monkeypatch.setattr(canario, "MAX_MEMBER_BYTES", 100)
+    grande = relatorio / "grande.zip"
+    grande.write_bytes(zip_com({"0-trace.network": b"a" * 101}))
+
+    codigo = canario.main([str(relatorio)])
+
+    saida = capsys.readouterr().err
+    assert codigo != 0
+    assert str(grande) in saida
+
+
+def test_membro_no_teto_de_tamanho_passa(relatorio: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    canario = carregar_canario()
+    monkeypatch.setattr(canario, "MAX_MEMBER_BYTES", 100)
+    (relatorio / "no_teto.zip").write_bytes(zip_com({"0-trace.network": b"a" * 100}))
+
+    assert canario.main([str(relatorio)]) == 0
 
 
 def test_sem_argumentos_e_erro_de_uso() -> None:
