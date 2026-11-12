@@ -30,8 +30,10 @@ from tests.media_mill.media import (
     FFCONCAT,
     HLS_PLAYLIST,
     corrupted,
+    duration_s,
     probe,
     rotated,
+    stream_kinds,
     truncated,
 )
 
@@ -100,6 +102,85 @@ def test_mono_continua_mono_sem_reamostragem(workspace: Workspace, clips: ClipLi
     wav = probe(workspace.path("audio/clip.wav"))
     assert (wav["sample_rate"], wav["channels"]) == ("32000", "1")
     assert item.details["audio_channels"] == 1
+
+
+# Os encoders de áudio sem perda (PCM, FLAC) saem com a duração exata da faixa; o Vorbis do WebM
+# acrescenta ~1,3 ms de preenchimento. 20 ms cobre isso e fica abaixo de um quadro a 30 fps (33 ms),
+# enquanto um corte (`-t 1` num áudio de 2 s) erra em 1 s.
+AUDIO_DURATION_TOLERANCE_S = 0.02
+
+# Fontes cujo áudio é AAC. Um quadro AAC-LC tem 1024 amostras. O ffmpeg 6.x (CI) não apara o
+# padding do último quadro ao extrair para WAV: sobra até um quadro inteiro além da faixa
+# (2,020136 s = 87 x 1024 amostras para 2 s a 44,1 kHz). O 9.0.2 devolve exatamente a faixa.
+AAC_SOURCE_CLIPS = frozenset({"mp4", "mp4_mono_and_stereo"})
+AAC_FRAME_SAMPLES = 1024
+
+
+def aac_frame_s(sample_rate: int) -> float:
+    return AAC_FRAME_SAMPLES / sample_rate
+
+
+@pytest.mark.parametrize(
+    ("clip", "name", "params", "expected_s"),
+    [
+        # Esperado = duração da faixa de áudio da fonte sintética (media.py), escrita à mão.
+        pytest.param("mp4", "clip.mp4", Params(thumbnail_count=0), 2.0, id="mp4-aac-2s-para-wav"),
+        pytest.param(
+            "mov_pcm24",
+            "clip.mov",
+            Params(audio_format=AudioFormat.FLAC, thumbnail_count=0),
+            2.0,
+            id="mov-pcm24-2s-para-flac",
+        ),
+        pytest.param(
+            "mov_pcm16_mono", "clip.mov", Params(thumbnail_count=0), 2.0, id="mov-mono-2s"
+        ),
+        pytest.param(
+            "webm_vp9_opus", "clip.webm", Params(thumbnail_count=0), 2.0, id="webm-opus-2s"
+        ),
+        pytest.param(
+            "webm_vp8_vorbis", "clip.webm", Params(thumbnail_count=0), 2.0, id="webm-vorbis-2s"
+        ),
+        pytest.param(
+            "mp4_mono_and_stereo",
+            "clip.mp4",
+            Params(audio_stream_index=1, thumbnail_count=0),
+            2.0,
+            id="mp4-segunda-faixa-2s",
+        ),
+        # Áudio de 3 s com vídeo de 1 s: a saída segue a faixa de áudio, não o vídeo.
+        pytest.param(
+            "webm_short_video",
+            "clip.webm",
+            Params(thumbnail_count=0),
+            3.0,
+            id="webm-audio-mais-longo-3s",
+        ),
+    ],
+)
+def test_audio_extraido_dura_o_mesmo_que_a_faixa_de_origem_e_so_tem_audio(
+    workspace: Workspace,
+    clips: ClipLibrary,
+    clip: str,
+    name: str,
+    params: Params,
+    expected_s: float,
+) -> None:
+    workspace.add(name, clips.bytes(clip))
+
+    item = ok_item(workspace, params)
+
+    (audio_output,) = item.outputs
+    extracted = workspace.path(audio_output)
+    assert stream_kinds(extracted) == ["audio"]
+    measured_s = duration_s(extracted)
+    if clip in AAC_SOURCE_CLIPS:
+        # Só para cima e só até um quadro: nunca mais curto que a faixa (corte) nem mais de um
+        # quadro além dela. O WAV sai na taxa da faixa de origem (sem resample).
+        frame_s = aac_frame_s(int(probe(extracted)["sample_rate"]))
+        assert expected_s <= measured_s < expected_s + frame_s
+    else:
+        assert measured_s == pytest.approx(expected_s, abs=AUDIO_DURATION_TOLERANCE_S)
 
 
 @pytest.mark.parametrize(

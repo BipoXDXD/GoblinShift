@@ -236,5 +236,36 @@ def probe(path: Path) -> dict[str, str]:
     return dict(pairs)
 
 
+def duration_s(path: Path) -> float:
+    """Duração do arquivo em segundos, pelo contêiner, medida pelo ffprobe do ambiente."""
+    return float(_show_entries(path, "format=duration").splitlines()[0].split("=", 1)[1])
+
+
+def stream_kinds(path: Path) -> list[str]:
+    """Tipo (`audio`, `video`...) de cada faixa de `path`, na ordem do arquivo."""
+    lines = _show_entries(path, "stream=codec_type").splitlines()
+    return [line.split("=", 1)[1] for line in lines if line.startswith("codec_type=")]
+
+
+def _show_entries(path: Path, entries: str) -> str:
+    _, ffprobe = require_ffmpeg()
+    completed = subprocess.run(  # noqa: S603 - argv do próprio teste
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            entries,
+            "-of",
+            "default=noprint_wrappers=1",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout
+
+
 HLS_PLAYLIST = b"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.0,\n/etc/passwd\n"
 FFCONCAT = b"ffconcat version 1.0\nfile '/etc/passwd'\n"
