@@ -97,6 +97,7 @@ export function OficinaHero({
 }: OficinaHeroProps): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const hintId = useId();
+  const turnLabelId = useId();
   const [mount, setMount] = useState<MountState>("imagem");
   const [handle, setHandle] = useState<SceneHandle | null>(null);
   const [selected, setSelected] = useState<CastId>(FIRST_ON_STAGE);
@@ -266,13 +267,16 @@ export function OficinaHero({
           {/* Alternativa de ponteiro único ao arrasto (WCAG 2.5.7): cada toque dá o passo de uma
               seta, sem animação, então vale também com movimento reduzido. Abaixo do `sm`, os
               quatro ficam em grade 2×2 por agrupamento, não por falta de espaço: girar em cima,
-              inclinar embaixo. */}
+              inclinar embaixo. O rótulo visível dá o nome ao grupo; fica fora da leitura linear
+              para não ser lido duas vezes, e o aria-labelledby vale mesmo assim. */}
           <div
             role="group"
-            aria-label={T.turnLabel}
+            aria-labelledby={turnLabelId}
             className="flex flex-col items-center gap-1 text-sm text-fg-muted"
           >
-            <span aria-hidden="true">{T.turnLabel}</span>
+            <span id={turnLabelId} aria-hidden="true">
+              {T.turnLabel}
+            </span>
             <div className="grid grid-cols-2 gap-1 sm:flex">
               {STEP_BUTTONS.map(({ key, label, Icon }) => (
                 <StepButton

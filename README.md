@@ -91,7 +91,9 @@ E2E_VPS=1 E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   
 
 No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado, o CLS da Execução e a jornada do Media Mill, cujos MP4 de fixture são falsos) são puladas, e a suíte roda com um worker: a conta tem uma execução ativa por vez. Contra o Compose, a conta sai do `gs-admin` com `create-user` e `issue-key`, com todos os escopos (`--scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write`). Cada rodada consome 12 das 30 execuções diárias da conta; para repetir mais vezes na mesma conta local, use `gs-admin set-limits --user <id> --runs-per-24h <n>`.
 
-Esse modo foi exercitado em 2026-11-05 contra o Compose local em um Mac: 116 testes passaram e 418 foram pulados, em desktop e celular, com envio, fila, receita e download pela API real, numa conta nova. O Compose usa o Runner local, um subprocesso do worker: o caminho navegador → API real com gVisor continua sem rodada. A chave entra por rota do Playwright, e o Chromium baixa `a[download]` por fora dela, então só nesse modo a spec tira o atributo antes do clique.
+Esse modo foi exercitado em 2026-11-05 contra o Compose local em um Mac: 116 testes passaram e 418 foram pulados, em desktop e celular, com envio, fila, receita e download pela API real, numa conta nova. O Compose usa o Runner local, um subprocesso do worker. A chave entra por rota do Playwright, e o Chromium baixa `a[download]` por fora dela, então só nesse modo a spec tira o atributo antes do clique.
+
+O caminho navegador → API real com gVisor roda em todo PR e em todo push na `main`, no job "Jornadas reais sob gVisor (Playwright)". O `scripts/e2e-gvisor.sh` constrói a imagem do executor, grava a allowlist e a configuração nos caminhos de produção, roda o `deploy/executor-ctl/install.sh` e sobe `compose.yaml` com `compose.e2e-gvisor.yaml`, tudo no runner efêmero e sem segredo. Depois das specs, o job compara o runtime de cada container de tentativa com as linhas da tabela `attempt` e falha se alguma não tiver rodado sob `runsc`. Na primeira rodada, em 2026-11-06: 116 testes passaram e 418 foram pulados, e as 12 tentativas do banco rodaram sob `runsc`. O job roda em paralelo, fora do orçamento do commit stage, e o gate da publicação (`deploy/coolify/release/gate.py`) o exige. A rodada não cobre o que o modo remoto pula, como o Media Mill, nem o Firefox e o login pelo provedor.
 
 Segredos nunca entram no repositório: os de desenvolvimento ficam em `.secrets/` e `.env` (ignorados), os de produção só na VPS. O hook de pre-commit (`.githooks/pre-commit`) roda o gitleaks nas mudanças preparadas, com a mesma imagem e configuração da CI, e recusa o commit antes que um segredo saia da máquina. A CI repete a varredura no histórico inteiro antes de publicar a imagem, e o GitHub tem secret scanning e push protection ligados.
 
@@ -148,12 +150,21 @@ uv run gs-admin revoke-key --key <public_id>
 uv run gs-admin block --user <id>                          # roteiro: docs/runbooks/abuso.md
 uv run gs-admin request-deletion --user <id>               # como DELETE /me, também para conta bloqueada
 uv run gs-admin find-user --user-hash <hash>               # user.hash da telemetria → id da conta (- lê da entrada)
+uv run gs-admin orphan-files                               # arquivos do storage sem linha viva; só leitura
 curl -H "Authorization: Bearer $(cat chave.txt)" https://…/api/v1/me
 ```
 
 Com a pilha no Compose, a CLI roda no container da API: `docker compose exec api gs-admin …` localmente. Na VPS, o comando vai direto ao container em execução ([veja abaixo](#comandos-manuais-na-vps)): `sudo docker exec -i goblinshift-api-1 gs-admin …`.
 
 A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais públicos, que localizam a chave, e 256 bits aleatórios em base64url. O segredo aparece uma única vez na saída padrão (o identificador e a expiração vão para stderr); o banco guarda só o SHA-256. Validade padrão de 30 dias, máxima de 90. Contas criadas pelo `gs-admin` são do operador e não passam pelo aceite dos termos; as do login web recebem `403 TERMS_NOT_ACCEPTED` até aceitar a versão vigente pela sessão (`POST /api/v1/me/terms:accept`; [ADR 029](docs/adr/029-aceite-versionado-dos-termos.md)). Erros da API saem em `application/problem+json` (RFC 9457), com `type` em `https://goblinshift.dev/problems/<código-em-kebab>` e o `request_id` também no header `X-Request-ID`.
+
+### Arquivos órfãos no storage
+
+`gs-admin orphan-files` compara o disco do storage com `stored_object` e **só lê**: não apaga nem altera nada. Imprime uma linha por arquivo (chave, bytes, modificação em UTC e categoria, separados por tab) e os totais por categoria em stderr: `sem-linha` (nenhuma linha referencia o arquivo) e `marcado-removido-mas-presente` (linha `deleted` ou `missing` com o arquivo ainda no disco). Arquivo modificado há menos de `--min-age-hours` (padrão 6) fica de fora, por poder ser gravação em curso, e `--limit` (padrão 200) limita só as linhas listadas. Sem a sentinela de montagem o storage não é verificado (saída 4). Na VPS, direto no container em execução:
+
+```bash
+sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 > orfaos.tsv
+```
 
 ## Publicação em produção
 

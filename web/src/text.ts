@@ -31,6 +31,13 @@ export const TEXT = {
     unexpected: "O servidor respondeu de um jeito inesperado. Tente de novo em instantes.",
     internal: "Houve um erro na interface. Recarregue a página e tente de novo.",
     requestId: (id: string) => `Código do pedido para suporte: ${id}`,
+    // Contato geral dos Termos de Uso (item 1), o mesmo canal que o runbook de abuso responde.
+    support: {
+      address: "contato@goblinshift.dev",
+      link: "Escrever para o suporte por e-mail",
+      subject: (id: string) => `Suporte GoblinShift: pedido ${id}`,
+      body: (id: string) => `Código do pedido: ${id}`,
+    },
     problems: {
       BAD_REQUEST:
         "O pedido foi recusado por estar malformado. Recarregue a página e tente de novo.",
@@ -39,23 +46,28 @@ export const TEXT = {
       IDEMPOTENCY_KEY_INVALID: "O pedido foi recusado. Recarregue a página e tente de novo.",
       AUTHENTICATION_REQUIRED: "Sua sessão terminou. Entre de novo para continuar.",
       REAUTH_REQUIRED: "Por segurança, entre de novo para continuar.",
-      INSUFFICIENT_SCOPE: "Sua credencial não tem permissão para esta ação.",
-      FORBIDDEN: "Você não tem permissão para esta ação.",
+      INSUFFICIENT_SCOPE:
+        "A chave usada não tem permissão para esta ação. Crie uma chave com o escopo necessário no Acesso.",
+      // Sem "suporte": o envio de arquivos e a lista de exclusões mostram esta frase sem o link.
+      FORBIDDEN: "Você não tem permissão para esta ação. Confira se entrou com a conta certa.",
       CSRF_FAILED:
         "A verificação de segurança da sessão falhou. Recarregue a página e tente de novo.",
       TERMS_NOT_ACCEPTED: "Para continuar, aceite a versão atual dos Termos de Uso.",
-      NOT_FOUND: "Não encontramos o que você pediu. Ele pode ter sido removido.",
-      METHOD_NOT_ALLOWED: "Esta ação não é aceita aqui.",
+      NOT_FOUND:
+        "Não encontramos este item. Ele pode ter sido removido ou ter expirado. Atualize a página e confira a lista.",
+      METHOD_NOT_ALLOWED: "Esta ação não é aceita aqui. Recarregue a página e tente de novo.",
       REQUEST_TIMEOUT: "O envio demorou demais e foi interrompido. Tente de novo.",
       STATE_CONFLICT: "O estado mudou enquanto você agia. Atualize a página e tente de novo.",
       IDEMPOTENCY_IN_PROGRESS:
         "O pedido anterior ainda está sendo processado. Aguarde e tente de novo.",
       ACTIVE_RUN_LIMIT:
         "Você já tem uma execução em andamento. Espere ela terminar para começar outra.",
-      GONE: "Isto expirou e não está mais disponível.",
+      GONE: "Isto expirou e não está mais disponível. Comece de novo pela Oficina.",
       PRECONDITION_FAILED: "Isto foi alterado em outro lugar. Atualize a página e tente de novo.",
-      BODY_TOO_LARGE: "O arquivo ou o pedido passa do tamanho permitido.",
-      UNSUPPORTED_MEDIA_TYPE: "O tipo de conteúdo enviado não é aceito.",
+      BODY_TOO_LARGE:
+        "O arquivo ou o pedido passa do tamanho permitido. Confira os limites da receita e envie arquivos menores.",
+      UNSUPPORTED_MEDIA_TYPE:
+        "Este tipo de arquivo não é aceito aqui. Escolha um dos formatos da receita.",
       VALIDATION_FAILED: "Alguns valores foram recusados. Confira os erros indicados.",
       IDEMPOTENCY_KEY_REUSED:
         "Este envio conflita com um pedido anterior. Recarregue a página e tente de novo.",
@@ -247,7 +259,7 @@ export const TEXT = {
       enum: "Escolha uma das opções.",
       literal_error: "Escolha uma das opções.",
       extra_forbidden: "Este campo não é aceito.",
-      fallback: "O servidor recusou este valor.",
+      fallback: "O servidor recusou este valor. Confira o formato pedido na descrição do campo.",
     },
     errors: {
       noFiles: "Escolha pelo menos um arquivo.",

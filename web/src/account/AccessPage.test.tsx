@@ -402,6 +402,37 @@ describe("Acesso: chaves de API", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // O destino da revogação anterior não vale para o próximo diálogo (WCAG 2.4.3).
+  it("depois de revogar uma chave, cancelar a revogação de outra devolve o foco ao Revogar dela", async () => {
+    let revoked = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [
+            apiKeyBody(revoked ? { revoked_at: "2026-10-14T12:00:00Z" } : {}),
+            apiKeyBody({ id: SECOND_KEY_ID, public_id: "gsk_outra" }),
+          ],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        revoked = true;
+        return NO_CONTENT();
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+    await user.click(screen.getByRole("button", { name: "Revogar chave" }));
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
+    const other = within(keys).getByRole("button", { name: "Revogar a chave gsk_outra" });
+
+    await user.click(other);
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(other).toHaveFocus();
+  });
+
   // Falha genérica (5xx, timeout) com a mudança aplicada no servidor: o Revogar some na releitura e
   // o foco cairia no <body> (WCAG 2.4.3).
   it("500 com a lista já sem a chave: o foco vai para o título e a falha aparece", async () => {
@@ -485,6 +516,39 @@ describe("Acesso: chaves de API", () => {
 
     expect(await within(keys).findByText(/Último uso em/)).toBeVisible();
     expect(document.body).toHaveFocus();
+  });
+
+  // O navegador fechou o diálogo e devolveu o foco ao Revogar; o 204 tira o Revogar da lista, e o
+  // destino que chega depois leva o foco ao título em vez do <body> (WCAG 2.4.3).
+  it("fechado pelo navegador com a revogação em voo, sem reabrir: o 204 leva o foco ao título", async () => {
+    const held = heldResponse();
+    let settled = false;
+    const { user } = setup({
+      "GET /api/v1/api-keys": () =>
+        jsonResponse({
+          data: [apiKeyBody(settled ? { revoked_at: "2026-10-14T12:00:00Z" } : {})],
+        }),
+      [`DELETE /api/v1/api-keys/${KEY_ID}`]: () => {
+        settled = true;
+        return held.handler();
+      },
+    });
+    const revoke = await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" });
+    await user.click(revoke);
+    const dialog = screen.getByRole("dialog", { name: "Revogar a chave gsk_7Hq2?" });
+    await user.click(within(dialog).getByRole("button", { name: "Revogar chave" }));
+    await waitFor(() => {
+      expect(settled).toBe(true);
+    });
+    forceClose(dialog);
+    expect(revoke).toHaveFocus();
+
+    held.answer(NO_CONTENT());
+
+    const keys = await section("Chaves de API");
+    await waitFor(() => {
+      expect(within(keys).getByRole("heading", { level: 2, name: "Chaves de API" })).toHaveFocus();
+    });
   });
 
   it("com a revogação em voo, o Esc não fecha; fechado pelo navegador, reabre e a falha aparece", async () => {
@@ -800,6 +864,18 @@ describe("Acesso: excluir conta", () => {
       "Erro: A frase não confere. Digite “excluir minha conta” para confirmar.",
     );
     expect(sent(api.requests, "DELETE /api/v1/me")).toEqual([]);
+  });
+
+  it("Cancelar devolve o foco a Excluir conta…", async () => {
+    const { user } = setup();
+    const dialog = await openDialog(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      within(await section("Excluir conta")).getByRole("button", { name: "Excluir conta…" }),
+    ).toHaveFocus();
   });
 
   it("o erro da frase some ao cancelar e reabrir o diálogo", async () => {

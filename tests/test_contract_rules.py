@@ -10,9 +10,11 @@ from typing import Any
 
 import pytest
 
+from goblinshift.entrypoints.api.json_command import MAX_COMMAND_BYTES
 from scripts.contract_rules import (
     Rejection,
     is_expected_missing_header,
+    is_expected_oversized_command,
     is_expected_read_after_delete,
     is_expected_rejection,
     normalize_integral_floats,
@@ -313,3 +315,101 @@ def test_header_ausente_fora_da_regra_continua_falha(
     problem = None if code is None else {"code": code}
 
     assert not is_expected_missing_header(operation, header, status, problem)
+
+
+def _body_with_columns_of(total_chars: int) -> dict[str, Any]:
+    """Comando com `output_columns` a mais, como o coverage do Schemathesis gera (maxItems + 1)."""
+    return {"name": "x", "parameters": {"output_columns": ["c" * total_chars] * 2}}
+
+
+def test_comando_que_passa_do_teto_de_bytes_e_recusado_com_413_por_contrato() -> None:
+    """O teste negativo gera lista acima do `maxItems` com textos longos: o comando passa dos
+    64 KiB e o corpo grande demais (413, publicado na spec) vem antes da validação do schema."""
+    body = _body_with_columns_of(MAX_COMMAND_BYTES)
+
+    assert is_expected_oversized_command(413, _problem("BODY_TOO_LARGE"), body)
+
+
+@pytest.mark.parametrize(
+    ("status", "problem", "body"),
+    [
+        (413, _problem("BODY_TOO_LARGE"), _body_with_columns_of(10)),
+        (200, None, _body_with_columns_of(MAX_COMMAND_BYTES)),
+        (422, _problem("VALIDATION_FAILED"), _body_with_columns_of(MAX_COMMAND_BYTES)),
+        (413, _problem("SOMETHING_ELSE"), _body_with_columns_of(MAX_COMMAND_BYTES)),
+        (413, None, _body_with_columns_of(MAX_COMMAND_BYTES)),
+        (413, _problem("BODY_TOO_LARGE"), None),
+        (413, _problem("BODY_TOO_LARGE"), b"x" * (MAX_COMMAND_BYTES + 1)),
+    ],
+    ids=[
+        "corpo-pequeno",
+        "aceito-200",
+        "validacao-422",
+        "outro-codigo",
+        "sem-problema",
+        "sem-corpo-json",
+        "corpo-binario",
+    ],
+)
+def test_413_sem_corpo_realmente_grande_continua_falha(
+    status: int, problem: dict[str, Any] | None, body: Any
+) -> None:
+    assert not is_expected_oversized_command(status, problem, body)
+
+
+@pytest.mark.parametrize("operation", [CREATE_PRESET, REPLACE_PRESET, CREATE_RUN, RUN_PRESET])
+def test_aceita_413_de_comando_acima_do_teto_na_recusa_de_dado_valido(operation: str) -> None:
+    """Sem `maxLength` nos nomes de coluna, a spec permite um comando maior que o teto de bytes."""
+    rejection = _rejection(
+        operation,
+        413,
+        _problem("BODY_TOO_LARGE"),
+        body=_body_with_columns_of(MAX_COMMAND_BYTES),
+    )
+
+    assert is_expected_rejection(rejection)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [_body_with_columns_of(10), None, b"x" * (MAX_COMMAND_BYTES + 1)],
+    ids=["pequeno", "nenhum", "binario"],
+)
+def test_413_de_comando_sem_corpo_grande_continua_falha_na_recusa_de_dado_valido(
+    body: Any,
+) -> None:
+    assert not is_expected_rejection(
+        _rejection(CREATE_PRESET, 413, _problem("BODY_TOO_LARGE"), body=body)
+    )
+
+
+def test_aceita_upload_do_select_do_preset_fora_das_entradas_da_execucao() -> None:
+    """O `select` do preset cita uploads que a execução precisa trazer; o schema não relaciona os
+    dois (`_check_upload_references`)."""
+    rejection = _rejection(
+        RUN_PRESET,
+        422,
+        _problem(
+            "VALIDATION_FAILED",
+            ("body.parameters.select.0.upload_id", "value_error"),
+            ("body.parameters.select.1.upload_id", "value_error"),
+        ),
+    )
+
+    assert is_expected_rejection(rejection)
+
+
+@pytest.mark.parametrize(
+    "errors",
+    [
+        [("body.parameters.select.0.upload_id", "invalid")],
+        [("body.parameters.select.0.name", "value_error")],
+        [("body.parameters.filters", "value_error")],
+        [("body.parameters.select.0.upload_id", "value_error"), ("body.other", "value_error")],
+    ],
+    ids=["outro-codigo", "outro-campo-do-select", "outro-parametro", "mistura-com-fora-da-regra"],
+)
+def test_recusa_do_preset_fora_do_select_continua_falha(errors: list[tuple[str, str]]) -> None:
+    rejection = _rejection(RUN_PRESET, 422, _problem("VALIDATION_FAILED", *errors))
+
+    assert not is_expected_rejection(rejection)

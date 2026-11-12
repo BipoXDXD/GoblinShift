@@ -6,8 +6,12 @@ from typing import Any
 import pytest
 import yaml
 
-CI = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "ci.yml"
+ROOT = Path(__file__).resolve().parent.parent
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+RUNSC_SCRIPT = "scripts/ci-install-runsc.sh"
 GVISOR_JOB = "gvisor"
+E2E_GVISOR_JOB = "e2e-gvisor"
+JOBS_WITH_RUNSC_STEP = (GVISOR_JOB, E2E_GVISOR_JOB)
 RUNSC_STEP_PREFIX = "Instalar o runsc"
 RUNSC_STEP_LIMIT_RANGE = (2, 5)
 APT_TIMEOUT_OPTIONS = (
@@ -44,9 +48,15 @@ def _runnable_jobs() -> list[str]:
     ]
 
 
-def _runsc_step() -> dict[str, Any]:
-    steps = _jobs()[GVISOR_JOB]["steps"]
+def _runsc_step(job_id: str = GVISOR_JOB) -> dict[str, Any]:
+    steps = _jobs()[job_id]["steps"]
     return next(step for step in steps if step.get("name", "").startswith(RUNSC_STEP_PREFIX))
+
+
+def _runsc_commands() -> str:
+    """O apt do runsc mora no script que o passo chama (os jobs com gVisor o compartilham)."""
+    assert _runsc_step()["run"].strip() == RUNSC_SCRIPT
+    return (ROOT / RUNSC_SCRIPT).read_text()
 
 
 def test_o_job_do_gvisor_esta_entre_os_verificados() -> None:
@@ -74,14 +84,15 @@ def test_teto_de_passo_nunca_passa_do_teto_do_job(job_id: str) -> None:
         assert step.get("timeout-minutes", 0) <= job.get("timeout-minutes", 0)
 
 
-def test_passo_do_runsc_tem_limite_curto() -> None:
+@pytest.mark.parametrize("job_id", JOBS_WITH_RUNSC_STEP)
+def test_passo_do_runsc_tem_limite_curto(job_id: str) -> None:
     lowest, highest = RUNSC_STEP_LIMIT_RANGE
 
-    assert lowest <= _runsc_step().get("timeout-minutes", 0) <= highest
+    assert lowest <= _runsc_step(job_id).get("timeout-minutes", 0) <= highest
 
 
 def test_download_da_chave_do_gvisor_tem_timeout_e_retry() -> None:
-    download = next(line for line in _runsc_step()["run"].splitlines() if "curl " in line)
+    download = next(line for line in _runsc_commands().splitlines() if "curl " in line)
 
     assert "--max-time" in download
     assert "--retry" in download
@@ -89,11 +100,11 @@ def test_download_da_chave_do_gvisor_tem_timeout_e_retry() -> None:
 
 @pytest.mark.parametrize("option", APT_TIMEOUT_OPTIONS)
 def test_opcoes_do_apt_do_runsc_definem_timeout_e_retry(option: str) -> None:
-    assert option in _runsc_step()["run"]
+    assert option in _runsc_commands()
 
 
 @pytest.mark.parametrize("command", APT_COMMANDS)
 def test_comandos_apt_do_runsc_usam_as_opcoes(command: str) -> None:
-    line = next(line for line in _runsc_step()["run"].splitlines() if command in line)
+    line = next(line for line in _runsc_commands().splitlines() if command in line)
 
     assert APT_OPTIONS_EXPANSION in line

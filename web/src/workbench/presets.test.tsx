@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
 import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
@@ -47,6 +47,14 @@ async function openSaveDialog(user: ReturnType<typeof userEvent.setup>): Promise
   return screen.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
 }
 
+// A Bancada é rota lazy: a primeira renderização do arquivo pagaria a transformação do módulo da tela
+// dentro do primeiro teste, cujo orçamento é o testTimeout de 5 s. Com a máquina carregada esse custo
+// a frio se soma ao do teste mais pesado. Aqui ele cai no gancho, que tem orçamento próprio, e cada
+// teste paga só o próprio comportamento.
+beforeAll(async () => {
+  await import("./WorkbenchPage");
+});
+
 describe("Bancada: Salvar preset", () => {
   it("abre o diálogo com o foco no nome e salva nome, receita e parâmetros do formulário", async () => {
     const { api, user } = setup();
@@ -54,7 +62,6 @@ describe("Bancada: Salvar preset", () => {
     const dialog = await openSaveDialog(user);
     const name = within(dialog).getByLabelText("Nome do preset");
     expect(name).toHaveFocus();
-    expect(await axeViolations(document.body)).toEqual([]);
     await user.type(name, "Clientes do mês");
     await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
 
@@ -72,6 +79,14 @@ describe("Bancada: Salvar preset", () => {
       recipe_version: 1,
       parameters: expect.objectContaining({ input_delimiter: "," }) as unknown,
     });
+  });
+
+  it("aberto, o diálogo não tem violações do axe", async () => {
+    const { user } = setup();
+
+    await openSaveDialog(user);
+
+    expect(await axeViolations(document.body)).toEqual([]);
   });
 
   it("nome vazio mostra o erro no campo e não chama a API", async () => {
@@ -166,6 +181,26 @@ describe("Bancada: Salvar preset", () => {
 
     expect(within(dialog).getByText(/Use até 100 caracteres\./)).toBeVisible();
     expect(sent(api.requests, "POST /api/v1/presets")).toEqual([]);
+  });
+
+  it("Cancelar devolve o foco a Salvar preset", async () => {
+    const { user } = setup();
+    const dialog = await openSaveDialog(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Salvar preset" })).toHaveFocus();
+  });
+
+  it("fechado pelo navegador (Esc), devolve o foco a Salvar preset", async () => {
+    const { user } = setup();
+    const dialog = await openSaveDialog(user);
+
+    forceClose(dialog);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Salvar preset" })).toHaveFocus();
   });
 
   it("fechado pelo navegador com o pedido em voo, reabre e mostra o 409 que chegou depois", async () => {

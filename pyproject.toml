@@ -48,7 +48,7 @@ executor = ["pikepdf==10.16.0", "pillow==13.0.0"]
 # Teste de contrato (scripts/contract-test.sh, job "Contrato" do CI). Fora do `dev` para não
 # pesar na sincronização dos outros jobs; versão exata porque cada release muda as heurísticas e
 # um CI vermelho tem de vir de mudança na API, não do fuzzer.
-contract = ["schemathesis==4.31.0"]
+contract = ["schemathesis==4.33.1"]
 dev = [
     "hypothesis>=6.169.0",
     "import-linter>=2.15",

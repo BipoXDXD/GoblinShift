@@ -285,10 +285,6 @@ jobs:
     timeout-minutes: 20
     env:
       APT_PACOTES: ffmpeg
-      # Mesma versão da VPS (docs/adr/004-container-gvisor-por-tentativa.md). O repositório do
-      # gVisor publica cada release como uma suíte própria, então a versão fica fixada aqui.
-      GVISOR_SUITE: "20261005"
-      GVISOR_VERSION: "20261005.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -301,29 +297,11 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - name: Instalar o runsc (repositório oficial do gVisor, a mesma origem de deploy/gvisor.sh)
+      - name: Instalar o runsc e registrá-lo no Docker do runner
         # Leva cerca de 20 s. O `update` lê só a fonte do gVisor: os espelhos do Ubuntu, que já
-        # prenderam este passo por 50 min, ficam de fora, e as listas da imagem seguem valendo.
+        # prenderam este passo por 50 min, ficam de fora (scripts/ci-install-runsc.sh).
         timeout-minutes: 5
-        run: |
-          keyring=/usr/share/keyrings/gvisor-archive-keyring.gpg
-          curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 https://gvisor.dev/archive.key | sudo gpg --dearmor -o "$keyring"
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=${keyring}] https://storage.googleapis.com/gvisor/releases ${GVISOR_SUITE} main" \
-            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
-          apt_rede=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
-          sudo apt-get update -q "${apt_rede[@]}" -o Dir::Etc::sourcelist=sources.list.d/gvisor.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
-          sudo apt-get install -yq "${apt_rede[@]}" "runsc=${GVISOR_VERSION}"
-          runsc --version | head -n 1
-      - name: Registrar o runtime runsc no Docker do runner
-        # O runner é efêmero e só roda este job, então reiniciar o Docker aqui não derruba nada.
-        # Na VPS isso nunca se faz: lá o Docker é só recarregado (deploy/gvisor.sh), porque o host
-        # é compartilhado com outro projeto.
-        run: |
-          if ! docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'; then
-            sudo runsc install
-          fi
-          sudo systemctl restart docker
-          docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+        run: scripts/ci-install-runsc.sh
       - name: Chave do cache do apt (pacotes pedidos e pacotes já instalados na imagem)
         id: apt-chave
         run: echo "valor=apt-$({ echo "$APT_PACOTES"; dpkg-query -W; } | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
@@ -352,6 +330,71 @@ jobs:
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito: os testes
         # executor_image sempre existem, então zero testes indica um seletor quebrado.
         run: uv run pytest -m "executor_ctl or executor_image" -q
+
+  e2e-gvisor:
+    name: Jornadas reais sob gVisor (Playwright)
+    # O caminho navegador, Nginx, API, worker, executor-ctl do host e container gVisor. O job
+    # e2e usa API falsa, e o Compose local, o Runner sem sandbox. Em paralelo, como o OpenObserve:
+    # fora do orçamento de 5 min do commit stage. Nenhum segredo: conta e chave nascem e morrem
+    # na pilha descartável do runner.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Instalar o runsc e registrá-lo no Docker do runner
+        # Mesmo teto do job gvisor: o script leva cerca de 20 s e não pode prender o runner.
+        timeout-minutes: 5
+        run: scripts/ci-install-runsc.sh
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Versão do Playwright (chave do cache do navegador)
+        id: playwright
+        working-directory: web
+        run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      - name: Chromium headless e dependências do sistema
+        # Como no job e2e: o `--with-deps` roda o apt sem teto, então o que falta vem do script com
+        # teto por tentativa e troca de espelho, e o navegador entra depois.
+        working-directory: web
+        timeout-minutes: 6
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
+          CI_APT_TENTATIVA_S: "90"
+        run: |
+          lista=$(../scripts/ci-playwright-pacotes.sh chromium)
+          if [[ -n $lista ]]; then
+            mapfile -t pacotes <<<"$lista"
+            ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+          fi
+          npx playwright install --only-shell chromium
+      - name: Pilha com o executor-ctl do host sob gVisor
+        run: scripts/e2e-gvisor.sh up
+      - name: Specs contra a API real (desktop e celular, só Chromium)
+        # Falha também se alguma tentativa do banco não tiver rodado sob runsc.
+        run: scripts/e2e-gvisor.sh journeys
+      - name: Logs da pilha e do executor-ctl
+        if: failure()
+        run: scripts/e2e-gvisor.sh logs "$RUNNER_TEMP/e2e-gvisor-logs"
+      - name: Relatório, traces e logs da falha
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-gvisor
+          path: |
+            web/playwright-report/
+            web/test-results/
+            ${{ runner.temp }}/e2e-gvisor-logs/
+          retention-days: 7
 
   image:
     name: Imagem

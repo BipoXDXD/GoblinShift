@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from opentelemetry import propagate
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
@@ -78,6 +78,20 @@ from goblinshift.runs.queries import (
 )
 
 router = APIRouter(tags=["runs"])
+
+
+def _reject_unix_timestamp(value: object) -> object:
+    """O Pydantic em modo lax lê `"0.5"` como timestamp Unix; a spec publica RFC 3339."""
+    if isinstance(value, str):
+        try:
+            float(value)
+        except ValueError:
+            return value
+        raise ValueError("Use um instante RFC 3339 com fuso, como 2026-10-01T12:00:00Z.")
+    return value
+
+
+PeriodBound = Annotated[AwareDatetime, BeforeValidator(_reject_unix_timestamp)]
 
 RUNS_PATH = "/runs"
 # Intervalo de polling esperado enquanto a execução não termina (1.6, "Acompanhamento").
@@ -454,8 +468,8 @@ def list_runs_route(
         str | None, Query(max_length=MAX_RECIPE_ID_CHARS, pattern=RECIPE_ID_PATTERN)
     ] = None,
     status: Status | None = None,
-    created_from: AwareDatetime | None = None,
-    created_to: AwareDatetime | None = None,
+    created_from: PeriodBound | None = None,
+    created_to: PeriodBound | None = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_CHARS)] = None,
 ) -> RunListResponse:

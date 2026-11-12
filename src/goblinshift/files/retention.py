@@ -7,7 +7,8 @@ manutenção.
 Ordem entre banco e disco: o estado é confirmado no banco primeiro e o arquivo é apagado depois
 do commit. Se o processo cair no meio, sobra um arquivo órfão, que só ocupa espaço; a ordem
 inversa poderia deixar uma linha apontando para um arquivo que já não existe caso o commit
-falhasse, e quem confiasse na linha leria um objeto sumido. As falhas de remoção vão para o
+falhasse, e quem confiasse na linha leria um objeto sumido. `gs-admin orphan-files` lista esses
+arquivos (files/orphans.py), só para leitura. As falhas de remoção vão para o
 relatório e para o log, com a chave, e não interrompem o lote.
 """
 
