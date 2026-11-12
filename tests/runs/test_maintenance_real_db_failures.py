@@ -160,29 +160,47 @@ def _terminate_and_wait(admin: Engine, only_pid: int | None = None) -> None:
             threading.Event().wait(POLL_S)
 
 
+def _update_index(commands: list[str], table: str) -> int:
+    """Posição do primeiro `UPDATE <table>` entre os comandos vistos; falha se não houve."""
+    update_of_table = re.compile(rf"\s*UPDATE\s+{table}\b")
+    found = [i for i, command in enumerate(commands) if update_of_table.match(command)]
+    assert found, f"nenhum UPDATE {table} entre os comandos vistos"
+    return found[0]
+
+
 @contextmanager
 def _backend_killed_before_statement(
-    engine: Engine, admin: Engine, *, table: str | None = None, nth: int = 0
+    engine: Engine,
+    admin: Engine,
+    *,
+    table: str | None = None,
+    nth: int = 0,
+    seen: list[str] | None = None,
 ) -> Iterator[None]:
     """Encerra o backend da conexão em uso antes do `nth` comando (0 = o primeiro) do passo.
 
     Sem `table`, conta todos os comandos, e 0 é antes de qualquer resposta do banco. Com `table`,
     conta só os comandos que a tocam (`FROM`, `UPDATE`, `INTO` ou `JOIN`): o ponto de morte segue
     a tabela e não o número de comandos que o passo emite antes dela.
+
+    `seen`, se dado, recebe todo comando que chega ao driver, na ordem, inclusive o que foi
+    interrompido: o teste afirma o que já tinha rodado antes da morte, em vez de supor.
     """
     touches = re.compile(rf"\b(?:FROM|UPDATE|INTO|JOIN)\s+{table}\b") if table else None
-    seen = 0
+    touching = 0
 
     def kill(
         conn: Connection, cursor: Any, statement: str, parameters: Any, context: Any, many: bool
     ) -> None:
-        nonlocal seen
+        nonlocal touching
+        if seen is not None:
+            seen.append(statement)
         if touches and not touches.search(statement):
             return
-        if seen == nth:
+        if touching == nth:
             pid = cast(Any, conn.connection.driver_connection).info.backend_pid
             _terminate_and_wait(admin, only_pid=pid)
-        seen += 1
+        touching += 1
 
     event.listen(engine, "before_cursor_execute", kill)
     try:
@@ -343,11 +361,14 @@ def test_backend_encerrado_no_meio_de_passo_que_escreve_desfaz_tudo_e_o_ciclo_se
     before = (snapshot(factory), _input_expiries(admin_engine))
     assert _input_expiries(admin_engine).extended_to_used_input_ttl == 0
     janitor = _janitor(factory, storage, work_root)
+    commands: list[str] = []
     _around_step(
         janitor,
         monkeypatch,
         "release_orphan_holds",
-        lambda: _backend_killed_before_statement(engine, admin_engine, table="upload"),
+        lambda: _backend_killed_before_statement(
+            engine, admin_engine, table="upload", seen=commands
+        ),
     )
     caplog.clear()
 
@@ -361,6 +382,10 @@ def test_backend_encerrado_no_meio_de_passo_que_escreve_desfaz_tudo_e_o_ciclo_se
         "sqlstate": ADMIN_SHUTDOWN,
     }
     assert "holds_released" not in failed
+    # A escrita parcial existiu: o `UPDATE object_use` rodou antes de o backend morrer no `UPDATE
+    # upload`. Sem isto, reordenar o passo deixaria de provar o rollback sem avisar.
+    assert _update_index(commands, "object_use") < _update_index(commands, "upload")
+    assert _update_index(commands, "upload") == len(commands) - 1
     # Sem efeito parcial: nenhuma linha mudou, nem `object_use` (o `UPDATE` que já tinha rodado),
     # nem `upload` (o que a morte interrompeu).
     assert (snapshot(factory), _input_expiries(admin_engine)) == before
