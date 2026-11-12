@@ -71,6 +71,7 @@ class ErrorCode(StrEnum):
     QUEUE_EXPIRED = "QUEUE_EXPIRED"
     DEADLINE_EXCEEDED = "DEADLINE_EXCEEDED"
     INFRA_POISON = "INFRA_POISON"
+    INPUT_TAMPERED = "INPUT_TAMPERED"
     CANCELED = "CANCELED"
 
 
@@ -87,6 +88,13 @@ DETERMINISTIC_CODES = frozenset(
         ErrorCode.PDF_PAGE_NOT_FOUND,
     }
 )
+
+
+# Falha que só o worker constata, lendo o storage; o executor, que roda a receita no sandbox, não a
+# declara (`read_failure_code` só aceita `DETERMINISTIC_CODES`). Repetir não desfaz a adulteração.
+WORKER_DETECTED_CODES = frozenset({ErrorCode.INPUT_TAMPERED})
+# Tudo o que `DeterministicFailure` pode carregar: termina `failed` na hora, sem retentativa.
+TERMINAL_FAILURE_CODES = DETERMINISTIC_CODES | WORKER_DETECTED_CODES
 
 
 class PublishOutcome(StrEnum):
@@ -242,7 +250,7 @@ class DeterministicFailure:
     code: ErrorCode
 
     def __post_init__(self) -> None:
-        if self.code not in DETERMINISTIC_CODES:
+        if self.code not in TERMINAL_FAILURE_CODES:
             raise ValueError(f"{self.code} não é falha determinística do executor")
 
 

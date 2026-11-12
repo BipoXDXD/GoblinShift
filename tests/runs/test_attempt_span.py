@@ -30,6 +30,7 @@ from goblinshift.runs.worker.coordinator import Coordinator
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from goblinshift.runs.worker.runner import LocalRunner, Runner
 from tests.runs.fake_executor_ctl import IMAGE, FakeExecutorCtl
+from tests.runs.test_input_tampered import plant_symlink_over_stored_object
 from tests.runs.worker_support import (
     INVALID,
     LEASE,
@@ -383,6 +384,27 @@ class _WorkAreaRefused(LocalRunner):
 
     def create_work_dir(self, attempt_id: uuid.UUID) -> Path:
         raise PermissionError(errno.EACCES, "sem permissão", str(self.work_dir(attempt_id)))
+
+
+@pytest.mark.usefixtures("counting_alert_events")
+def test_entrada_adulterada_conta_no_span_sem_virar_start_recusado(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    tmp_path: Path,
+    exporter: InMemorySpanExporter,
+) -> None:
+    # `gs-causa-entrada-adulterada` lê `alert.input_tampered` no span da tentativa, e
+    # `gs-causa-executor-nao-iniciou` não pode contar a mesma Run.
+    queue_run(factory, storage, create_user(factory))
+    plant_symlink_over_stored_object(storage, tmp_path / "alvo-fora-da-raiz")
+    claimed = claim(factory, storage)
+
+    traced_coordinator(factory, storage, local_runner(work_root), exporter).run(claimed)
+
+    attributes = dict(only_attempt_span(exporter).attributes or {})
+    assert attributes["alert.input_tampered"] == 1
+    assert "alert.executor_start_failed" not in attributes
 
 
 @pytest.mark.usefixtures("counting_alert_events")
