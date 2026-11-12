@@ -43,6 +43,7 @@ REQUIRED = {
         "Interface no navegador (Playwright)",
         "Contrato (Schemathesis)",
         "Executor sob gVisor",
+        "Jornadas reais sob gVisor (Playwright)",
         "SLOs e alertas (OpenObserve)",
         "Imagem",
         "Imagem do executor",

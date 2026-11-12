@@ -1,9 +1,10 @@
 """Nenhum passo de apt dos workflows fica preso num espelho lento do Ubuntu.
 
 Pacote do Ubuntu entra só por scripts/ci-apt-instalar.sh (teto por tentativa e troca de espelho);
-`apt-get` direto só sobre uma fonte própria (o runsc). O Playwright nunca chama o apt: as
-dependências dele vêm do mesmo script (scripts/ci-playwright-pacotes.sh lista quais) e o navegador
-entra sem `--with-deps`. Jobs sem segredo e com lista fixa de pacotes guardam os .deb no cache.
+`apt-get` direto só sobre uma fonte própria (o runsc, em scripts/ci-install-runsc.sh, que os jobs
+com gVisor chamam). O Playwright nunca chama o apt: as dependências dele vêm do mesmo script
+(scripts/ci-playwright-pacotes.sh lista quais) e o navegador entra sem `--with-deps`. Jobs sem
+segredo e com lista fixa de pacotes guardam os .deb no cache.
 """
 
 import os
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 WORKFLOWS = sorted(path.name for path in WORKFLOWS_DIR.glob("*.yml"))
 INSTALL_SCRIPT = "scripts/ci-apt-instalar.sh"
+RUNSC_SCRIPT = "scripts/ci-install-runsc.sh"
 MIRROR_SCRIPT = "scripts/ci-apt-sem-azure.sh"
 PLAYWRIGHT_PACKAGES_SCRIPT = "scripts/ci-playwright-pacotes.sh"
 PLAYWRIGHT_INSTALL = "npx playwright install "
@@ -88,12 +90,19 @@ def test_workflow_instala_pacotes_do_ubuntu_pelo_script(workflow: str) -> None:
 
 
 def _raw_apt_lines(command: str) -> list[tuple[str, str]]:
-    return [
+    # Os passos dos workflows e o instalador do runsc, onde o apt direto foi parar.
+    in_workflows = [
         (where, line)
         for where, step in _all_steps()
         for line in step.get("run", "").splitlines()
         if command in line
     ]
+    in_runsc_script = [
+        (RUNSC_SCRIPT, line)
+        for line in (ROOT / RUNSC_SCRIPT).read_text().splitlines()
+        if command in line
+    ]
+    return in_workflows + in_runsc_script
 
 
 def test_apt_get_update_direto_so_atualiza_fonte_propria() -> None:
@@ -193,7 +202,7 @@ def _run_playwright_step(step: Step, tmp_path: Path, lista: str) -> list[str]:
     return log.read_text().splitlines()
 
 
-@pytest.mark.parametrize("index", [0, 1])
+@pytest.mark.parametrize("index", [0, 1, 2])
 def test_passo_do_playwright_sem_falta_nao_chama_o_apt(index: int, tmp_path: Path) -> None:
     _, step = _playwright_steps()[index]
 
@@ -203,7 +212,7 @@ def test_passo_do_playwright_sem_falta_nao_chama_o_apt(index: int, tmp_path: Pat
     assert calls[-1].startswith("npx playwright install ")
 
 
-@pytest.mark.parametrize("index", [0, 1])
+@pytest.mark.parametrize("index", [0, 1, 2])
 def test_passo_do_playwright_instala_exatamente_o_que_falta(index: int, tmp_path: Path) -> None:
     _, step = _playwright_steps()[index]
 
@@ -213,8 +222,9 @@ def test_passo_do_playwright_instala_exatamente_o_que_falta(index: int, tmp_path
     assert calls[-1].startswith("npx playwright install ")
 
 
-def test_os_dois_passos_do_playwright_estao_cobertos() -> None:
-    assert len(_playwright_steps()) == 2
+def test_os_tres_passos_do_playwright_estao_cobertos() -> None:
+    # Dois no ci.yml (job e2e e job e2e-gvisor) e um no e2e-vps.yml.
+    assert len(_playwright_steps()) == 3
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), _install_jobs())
@@ -281,6 +291,10 @@ def test_script_de_espelho_e_executavel_e_nao_falha_sem_o_espelho() -> None:
 
 def test_script_de_instalacao_e_executavel() -> None:
     assert (ROOT / INSTALL_SCRIPT).stat().st_mode & 0o111
+
+
+def test_script_do_runsc_e_executavel() -> None:
+    assert (ROOT / RUNSC_SCRIPT).stat().st_mode & 0o111
 
 
 def test_script_de_pacotes_do_playwright_e_executavel() -> None:
