@@ -1,6 +1,6 @@
 # ADR 054. Entrada adulterada no storage é falha terminal, com código próprio e alerta
 
-- **Estado:** proposto (2026-11-12 UTC)
+- **Estado:** aceito (coordenação, 12/11, por delegação do dono)
 - **Plano:** [3.4](../GoblinShiftPlan.md#s3-4) (trabalho durável), [3.5](../GoblinShiftPlan.md#s3-5) (estados e recuperação, com a linha nova da tabela de transições), [3.6](../GoblinShiftPlan.md#s3-6) (arquivos e isolamento) e [3.7](../GoblinShiftPlan.md#s3-7) (sinais e alertas); catálogo de códigos em [1.6](../GoblinShiftPlan.md#s1-6)
 - **Relacionado:** item 9 do backlog, PR #343 (testes que fixam o comportamento anterior), [ADR 047](047-pausa-de-claims-apos-falha-de-banco.md), modelo de ameaças ([T do storage](../seguranca/modelo-de-ameacas.md))
 
