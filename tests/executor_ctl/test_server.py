@@ -156,6 +156,44 @@ def test_corpo_sem_content_length_da_411(ctl_socket: Path) -> None:
     assert body["error"] == "length_required"
 
 
+def raw_answer(socket: Path, request: bytes) -> bytes:
+    with socketlib.socket(socketlib.AF_UNIX) as raw:
+        raw.settimeout(5)
+        raw.connect(str(socket))
+        raw.sendall(request)
+        return raw.recv(4096)
+
+
+@pytest.mark.parametrize("length", [b"\xb2", b"\xb9", b"1\xb2", b"-1", b"+5", b"1_0"])
+def test_content_length_que_nao_e_so_digito_ascii_da_400_no_start(
+    ctl_socket: Path, length: bytes
+) -> None:
+    # `str.isdigit()` aceita o "²" (U+00B2) que o `http.server` decodifica de um byte 0xB2, mas
+    # `int()` o recusa: sem a conferência de ASCII, a recusa virava 500 `internal_error`.
+    request = (
+        f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+        + length
+        + b"\r\n\r\n{}"
+    )
+
+    answer = raw_answer(ctl_socket, request)
+
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b'"invalid_request"' in answer
+
+
+def test_content_length_nao_ascii_em_rota_que_nao_le_corpo_nao_derruba_a_resposta(
+    ctl_socket: Path,
+) -> None:
+    # O descarte do corpo não lido também usa o `Content-Length`: a resposta de erro da rota
+    # precisa chegar ao cliente em vez de a conexão cair no `ValueError` do `int()`.
+    request = f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+
+    answer = raw_answer(ctl_socket, request + b"\xb2\r\n\r\n")
+
+    assert answer.startswith(b"HTTP/1.1 ")
+
+
 def test_imagem_fora_da_allowlist_da_403(ctl_socket: Path) -> None:
     response = call(ctl_socket, "POST", f"/v1/attempts/{ATTEMPT}/start", {"image": OTHER_IMAGE})
 

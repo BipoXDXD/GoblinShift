@@ -188,6 +188,11 @@ def _invalid(detail: str) -> RequestError:
     return RequestError(HTTPStatus.BAD_REQUEST, "invalid_request", detail)
 
 
+def _is_decimal_length(value: str) -> bool:
+    """Só dígitos ASCII: `str.isdigit()` aceita o "²" e outros dígitos que o `int()` recusa."""
+    return value.isascii() and value.isdigit()
+
+
 def _method_not_allowed() -> RequestError:
     return RequestError(
         HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "método não aceito aqui"
@@ -307,7 +312,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise RequestError(
                 HTTPStatus.LENGTH_REQUIRED, "length_required", "Content-Length obrigatório"
             )
-        if not length_header.isdigit():
+        if not _is_decimal_length(length_header):
             raise _invalid("Content-Length inválido")
         length = int(length_header)
         if length > MAX_BODY_BYTES:
@@ -337,7 +342,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             return
         self._body_consumed = True
         length = headers.get("Content-Length", "")
-        if length.isdigit():
+        if _is_decimal_length(length):
             if int(length) <= DISCARD_LIMIT_BYTES:
                 with suppress(TimeoutError):
                     self.rfile.read(int(length))
