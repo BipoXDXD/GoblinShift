@@ -41,8 +41,9 @@ from .workarea import WorkAreaDirtyError, WorkDirMissingError
 MAX_BODY_BYTES = 1024
 # Corpo não usado (413, 404, 405...) até este tamanho é lido e descartado antes da resposta.
 DISCARD_LIMIT_BYTES = 64 * 1024
-# Nenhum tamanho aceito passa do maior limite acima; um valor mais longo é recusado antes do
-# `int()`, que estoura com mais de 4300 dígitos (`sys.int_max_str_digits`).
+# Nenhum tamanho aceito passa do maior limite acima. Um valor com mais dígitos significativos
+# satura num teto fixo sem passar pelo `int()`, que estoura com mais de 4300 dígitos
+# (`sys.int_max_str_digits`): vira 413 `body_too_large`, e o caminho de descarte não o lê.
 _MAX_LENGTH_DIGITS = len(str(max(MAX_BODY_BYTES, DISCARD_LIMIT_BYTES)))
 # Menor valor com um dígito a mais que o teto: representa qualquer tamanho acima dele.
 _LENGTH_ABOVE_LIMITS: int = 10**_MAX_LENGTH_DIGITS
@@ -201,14 +202,6 @@ def _body_too_large() -> RequestError:
     )
 
 
-def _is_decimal_length(value: str) -> bool:
-    """Não vazio e só dígitos ASCII (RFC 9110: `1*DIGIT`, zeros à esquerda valem).
-
-    `str.isdigit()` aceita o "²" e outros dígitos que o `int()` recusa.
-    """
-    return value.isascii() and value.isdigit()
-
-
 def _parse_length(value: str) -> int | None:
     """Content-Length como inteiro, saturado em `_LENGTH_ABOVE_LIMITS`; `None` se mal formado.
 
@@ -216,7 +209,9 @@ def _parse_length(value: str) -> int | None:
     zeros também. Mais dígitos significativos que o maior limite é necessariamente maior que
     qualquer limite, e vira o valor saturado sem conversão.
     """
-    if not _is_decimal_length(value):
+    # RFC 9110: `1*DIGIT`, zeros à esquerda valem. Sem o `isascii()`, o `isdigit()` aceitaria
+    # o "²" e outros dígitos que o `int()` recusa.
+    if not (value.isascii() and value.isdigit()):
         return None
     significant = value.lstrip("0") or "0"
     if len(significant) > _MAX_LENGTH_DIGITS:
