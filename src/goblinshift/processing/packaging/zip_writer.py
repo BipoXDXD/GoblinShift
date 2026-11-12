@@ -17,9 +17,9 @@ import zipfile
 from collections.abc import Buffer, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO
 
 from goblinshift.processing.recipe import FailureCode, RecipeFailure
+from goblinshift.processing.regular_file import open_regular
 
 MIB = 1024 * 1024
 FIXED_DATE_TIME = (1980, 1, 1, 0, 0, 0)  # a menor data que o formato ZIP representa
@@ -53,16 +53,6 @@ def write_zip(target: Path, sources: Sequence[ZipSource], max_bytes: int) -> Non
     with _CappedWriter(target, max_bytes) as raw, zipfile.ZipFile(raw, "w") as archive:
         for source in sources:
             _add(archive, source)
-
-
-def open_regular(path: Path) -> BinaryIO:
-    """Abre uma saída para leitura sem seguir symlink; o que não for arquivo regular é recusado."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    source = os.fdopen(fd, "rb")
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
-        source.close()
-        raise OSError(f"saída não é arquivo regular: {path.name!r}")
-    return source
 
 
 def _add(archive: zipfile.ZipFile, source: ZipSource) -> None:

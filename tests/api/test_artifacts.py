@@ -1,6 +1,7 @@
 """Rotas de artefato: metadados e download protegido (1.6, 1.7 e 3.6)."""
 
 import hashlib
+import stat
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ from tests.api.files_support import (
     without_request_identity,
 )
 from tests.api.support import assert_problem
+from tests.fifo_support import fail_if_blocked, make_fifo
 
 pytestmark = pytest.mark.integration
 
@@ -316,6 +318,29 @@ def test_objeto_trocado_por_diretorio_responde_410_sem_expor_nada_e_sem_gravar_m
         assert leaked not in response.text
     assert object_state_of(factory, artifact_id) == "committed"
     assert (storage.root / key).is_dir()
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
+
+
+def test_objeto_trocado_por_fifo_responde_410_sem_bloquear_e_sem_gravar_missing(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # FIFO no lugar do arquivo: o `open(O_RDONLY)` bloqueava a thread do endpoint antes do `fstat`.
+    # É adulteração como o symlink e o diretório: 410, sem caminho e sem marcar `missing`.
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    key = storage_key_of(factory, artifact_id)
+    storage = storage_of(app)
+    storage.delete(key)
+    make_fifo(storage.root / key)
+
+    with fail_if_blocked(storage.root / key):
+        response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "Traceback"):
+        assert leaked not in response.text
+    assert object_state_of(factory, artifact_id) == "committed"
+    assert stat.S_ISFIFO((storage.root / key).lstat().st_mode)
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 

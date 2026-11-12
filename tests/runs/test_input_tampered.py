@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
+from tests.fifo_support import fail_if_blocked, make_fifo
 from tests.runs.worker_support import (
     attempts,
     claim,
@@ -52,6 +53,14 @@ def plant_directory_over_stored_object(storage: FileStorage) -> None:
     stored = stored_object(storage)
     stored.unlink()
     stored.mkdir()
+
+
+def plant_fifo_over_stored_object(storage: FileStorage) -> Path:
+    """Troca o objeto do storage por um FIFO: o `open(O_RDONLY)` bloquearia sem escritor."""
+    stored = stored_object(storage)
+    stored.unlink()
+    make_fifo(stored)
+    return stored
 
 
 def fields_of(record: logging.LogRecord) -> dict[str, Any]:
@@ -271,6 +280,45 @@ def test_entrada_trocada_por_diretorio_loga_alerta_sem_o_caminho_do_disco(
     claimed = claim(factory, storage)
 
     with caplog.at_level(logging.WARNING):
+        coordinator(factory, storage, local_runner(work_root)).run(claimed)
+
+    [record] = records_named(caplog, TAMPERED_LOG)
+    assert fields_of(record)["alert"] == INPUT_TAMPERED_ALERT
+    assert str(storage.root) not in repr(fields_of(record)) + record.getMessage()
+    assert records_named(caplog, WORK_AREA_FAILED) == []
+
+
+def test_entrada_trocada_por_fifo_termina_falha_sem_retry_e_sem_bloquear(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    runner = local_runner(work_root)
+    fifo = plant_fifo_over_stored_object(storage)
+    claimed = claim(factory, storage)
+
+    with fail_if_blocked(fifo):
+        applied = coordinator(factory, storage, runner).run(claimed)
+
+    assert applied is not None
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"], row["error_code"]) == ("failed", None, INPUT_TAMPERED)
+    assert row["claim_count"] == 1
+    [only] = attempts(factory, run_id)
+    assert only["error_code"] == INPUT_TAMPERED
+    assert not runner.work_dir(claimed.attempt_id).exists()
+
+
+def test_entrada_trocada_por_fifo_loga_alerta_sem_o_caminho_do_disco(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    queue_run(factory, storage, create_user(factory))
+    fifo = plant_fifo_over_stored_object(storage)
+    claimed = claim(factory, storage)
+
+    with fail_if_blocked(fifo), caplog.at_level(logging.WARNING):
         coordinator(factory, storage, local_runner(work_root)).run(claimed)
 
     [record] = records_named(caplog, TAMPERED_LOG)

@@ -125,6 +125,7 @@ const switcher = (page: Page) => page.locator("details").filter({ hasText: "Tema
 
 test("Esc fecha o seletor e devolve o foco ao resumo @keyboard", async ({ page }) => {
   await page.goto("/bancada/csv-janitor");
+  await expect(page.getByRole("heading", { name: "Parâmetros" })).toBeVisible();
   const summary = page.getByText("Tema", { exact: true });
   await summary.click();
   await page.getByRole("radio", { name: "Sistema", exact: true }).focus();
@@ -140,6 +141,7 @@ test("no celular, sair do seletor com Tab fecha o painel e o foco não fica cobe
 }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto("/bancada/csv-janitor");
+  await expect(page.getByRole("heading", { name: "Parâmetros" })).toBeVisible();
   await page.getByText("Tema", { exact: true }).click();
   await page.getByRole("radio", { name: "Sistema", exact: true }).focus();
 
