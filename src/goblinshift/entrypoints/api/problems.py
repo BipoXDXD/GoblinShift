@@ -15,6 +15,7 @@ validação, `errors` (lista de `{field, code, message}`).
   identificadores forjados.
 """
 
+import errno
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -48,6 +49,9 @@ _UNAVAILABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 # Da classe 08, mas é parâmetro errado no SQL (`bind message supplies...`), não falha de conexão.
 _PROTOCOL_VIOLATION_SQLSTATE = "08P01"
 _SQLSTATE_CLASS_LENGTH = 2
+# Disco cheio, cota estourada e erro de E/S na gravação: o storage está indisponível agora, e a
+# requisição pode dar certo depois. Os outros errnos (permissão, caminho) são defeito nosso: 500.
+_STORAGE_UNAVAILABLE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EIO})
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
@@ -317,6 +321,8 @@ def _unhandled_error_response(exc: Exception, instance: str, request_id: str) ->
     """
     if _is_database_unavailable(exc):
         return _database_unavailable_response(exc, instance, request_id)
+    if _is_storage_unavailable(exc):
+        return _storage_unavailable_response(exc, instance, request_id)
     if isinstance(exc, OperationalError):
         logger.error(
             "erro inesperado na requisição %s",
@@ -380,12 +386,35 @@ def _sqlstate_of(exc: Exception) -> str | None:
     return getattr(getattr(exc, "orig", None), "sqlstate", None)
 
 
+def _is_storage_unavailable(exc: Exception) -> bool:
+    return isinstance(exc, OSError) and exc.errno in _STORAGE_UNAVAILABLE_ERRNOS
+
+
 def _database_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
     logger.error(
         "banco indisponível na requisição %s",
         request_id,
         extra={"fields": _database_error_fields(exc)},
     )
+    return _service_unavailable_response(instance, request_id)
+
+
+def _storage_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
+    # Só tipo e errno: a mensagem do `OSError` traz o caminho do arquivo no storage.
+    logger.error(
+        "storage indisponível na requisição %s",
+        request_id,
+        extra={
+            "fields": {
+                "error.type": type(exc).__name__,
+                "errno": errno.errorcode.get(getattr(exc, "errno", 0)),
+            }
+        },
+    )
+    return _service_unavailable_response(instance, request_id)
+
+
+def _service_unavailable_response(instance: str, request_id: str) -> JSONResponse:
     return problem_response(
         code=ProblemCode.SERVICE_UNAVAILABLE,
         detail="O serviço está temporariamente indisponível; tente de novo depois do Retry-After.",
