@@ -439,3 +439,64 @@ def test_sonda_so_aceita_get(ctl_socket: Path, method: str) -> None:
 
     assert response.status == 405
     assert response.body["error"] == "method_not_allowed"
+
+
+# Zeros à esquerda não mudam o valor, mas contam para o limite de dígitos do `int()`.
+LEADING_ZEROS = b"0" * 5000
+
+
+def status_and_body(answer: bytes) -> tuple[bytes, bytes]:
+    head, _, body = answer.partition(b"\r\n\r\n")
+    return head.split(b"\r\n", 1)[0], body
+
+
+@pytest.mark.parametrize(
+    ("length", "same_as", "body"),
+    [
+        pytest.param(b"0", b"0", b"", id="zero"),
+        pytest.param(b"00000", b"0", b"", id="zeros"),
+        pytest.param(LEADING_ZEROS, b"0", b"", id="5000-zeros"),
+        pytest.param(LEADING_ZEROS + b"1", b"1", b"1", id="5000-zeros-e-1"),
+    ],
+)
+def test_content_length_so_com_zeros_a_esquerda_vale_o_numero_no_start(
+    ctl_socket: Path, length: bytes, same_as: bytes, body: bytes
+) -> None:
+    def start_with(value: bytes) -> bytes:
+        request = (
+            f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+            + value
+            + b"\r\n\r\n"
+            + body
+        )
+        return raw_answer(ctl_socket, request)
+
+    answer = start_with(length)
+
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b'"invalid_request"' in answer
+    assert status_and_body(answer) == status_and_body(start_with(same_as))
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        pytest.param(b"0", id="zero"),
+        pytest.param(b"00000", id="zeros"),
+        pytest.param(LEADING_ZEROS, id="5000-zeros"),
+        pytest.param(LEADING_ZEROS + b"1", id="5000-zeros-e-1"),
+    ],
+)
+def test_content_length_com_zeros_a_esquerda_em_rota_que_nao_le_corpo_responde_igual(
+    ctl_socket: Path, length: bytes
+) -> None:
+    request = f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+    tail = b"1" if length.endswith(b"1") else b""
+
+    answer = raw_answer(ctl_socket, request + length + b"\r\n\r\n" + tail)
+    plain = raw_answer(
+        ctl_socket, f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    )
+
+    assert answer.startswith(b"HTTP/1.1 ")
+    assert status_and_body(answer) == status_and_body(plain)

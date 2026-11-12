@@ -44,6 +44,8 @@ DISCARD_LIMIT_BYTES = 64 * 1024
 # Nenhum tamanho aceito passa do maior limite acima; um valor mais longo é recusado antes do
 # `int()`, que estoura com mais de 4300 dígitos (`sys.int_max_str_digits`).
 _MAX_LENGTH_DIGITS = len(str(max(MAX_BODY_BYTES, DISCARD_LIMIT_BYTES)))
+# Menor valor com um dígito a mais que o teto: representa qualquer tamanho acima dele.
+_LENGTH_ABOVE_LIMITS: int = 10**_MAX_LENGTH_DIGITS
 # Sem Content-Length, quanto esperar pelo que o cliente já mandou antes de responder.
 _DRAIN_WAIT_S = 0.05
 READ_TIMEOUT_S = 5.0
@@ -207,13 +209,19 @@ def _is_decimal_length(value: str) -> bool:
     return value.isascii() and value.isdigit()
 
 
-def _exceeds_length_digits(value: str) -> bool:
-    """Valor decimal com mais dígitos significativos que o maior limite.
+def _parse_length(value: str) -> int | None:
+    """Content-Length como inteiro, saturado em `_LENGTH_ABOVE_LIMITS`; `None` se mal formado.
 
-    É necessariamente maior que qualquer limite, e a conferência evita passar ao `int()` uma
-    string que ele recusa (acima de 4300 dígitos) ou que custa converter.
+    O `int()` só recebe a forma sem zeros à esquerda: o limite de 4300 dígitos dele conta os
+    zeros também. Mais dígitos significativos que o maior limite é necessariamente maior que
+    qualquer limite, e vira o valor saturado sem conversão.
     """
-    return len(value.lstrip("0")) > _MAX_LENGTH_DIGITS
+    if not _is_decimal_length(value):
+        return None
+    significant = value.lstrip("0") or "0"
+    if len(significant) > _MAX_LENGTH_DIGITS:
+        return _LENGTH_ABOVE_LIMITS
+    return int(significant)
 
 
 def _method_not_allowed() -> RequestError:
@@ -335,11 +343,9 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise RequestError(
                 HTTPStatus.LENGTH_REQUIRED, "length_required", "Content-Length obrigatório"
             )
-        if not _is_decimal_length(length_header):
+        length = _parse_length(length_header)
+        if length is None:
             raise _invalid("Content-Length inválido")
-        if _exceeds_length_digits(length_header):
-            raise _body_too_large()
-        length = int(length_header)
         if length > MAX_BODY_BYTES:
             raise _body_too_large()
         try:
@@ -362,11 +368,11 @@ class ControlHandler(BaseHTTPRequestHandler):
         if self._body_consumed or headers is None:
             return
         self._body_consumed = True
-        length = headers.get("Content-Length", "")
-        if _is_decimal_length(length):
-            if not _exceeds_length_digits(length) and int(length) <= DISCARD_LIMIT_BYTES:
+        length = _parse_length(headers.get("Content-Length", ""))
+        if length is not None:
+            if length <= DISCARD_LIMIT_BYTES:
                 with suppress(TimeoutError):
-                    self.rfile.read(int(length))
+                    self.rfile.read(length)
             return
         self.connection.settimeout(_DRAIN_WAIT_S)
         with suppress(TimeoutError):
