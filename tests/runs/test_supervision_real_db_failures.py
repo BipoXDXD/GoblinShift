@@ -28,6 +28,8 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import Connection, Engine, event, select, text
+from sqlalchemy.engine.interfaces import ExceptionContext
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
@@ -108,6 +110,7 @@ class _Supervised:
     lease_recovered: datetime
     attempt_ended_during_failure: bool
     stops: int
+    engine_errors: list[str]
 
 
 @dataclass
@@ -121,6 +124,8 @@ class _Scenario:
     settings: Settings
     caplog: pytest.LogCaptureFixture
     finished: dict[str, Any] = field(default_factory=dict)
+    # Mensagens dos erros que o engine do worker levantou de fato (e a do pool, reproduzida).
+    engine_errors: list[str] = field(default_factory=list)
 
 
 @pytest.fixture
@@ -177,7 +182,20 @@ def _scenario(
     worker.prepare(claimed)
     runner.start(claimed.attempt_id, claimed.executor_image)
     worker.record_start(claimed)
-    return _Scenario(worker, runner, claimed, run_id, factory, admin, settings, caplog)
+    scenario = _Scenario(worker, runner, claimed, run_id, factory, admin, settings, caplog)
+    _record_engine_errors(engine, scenario.engine_errors)
+    return scenario
+
+
+def _record_engine_errors(engine: Engine, into: list[str]) -> None:
+    """Guarda a mensagem de cada erro do banco que o engine levanta, antes de o código tratá-lo."""
+
+    def record(context: ExceptionContext) -> None:
+        into.append(str(context.original_exception))
+        if context.sqlalchemy_exception is not None:
+            into.append(str(context.sqlalchemy_exception))
+
+    event.listen(engine, "handle_error", record)
 
 
 def _lease(scenario: _Scenario) -> datetime:
@@ -254,6 +272,7 @@ def _supervise_through(
         lease_recovered=lease_recovered,
         attempt_ended_during_failure=ended_during_failure,
         stops=scenario.runner.stops,
+        engine_errors=list(scenario.engine_errors),
     )
 
 
@@ -275,7 +294,7 @@ def _assert_failure_fields(
 ) -> None:
     """Só o tipo e o SQLSTATE vão ao log, junto das identidades da Attempt."""
     assert outcome.failures
-    _assert_log_has_no_connection_data(scenario, outcome.failures)
+    _assert_log_has_no_connection_data(scenario, outcome)
     expected = {
         "run_id": str(scenario.claimed.run_id),
         "attempt_id": str(scenario.claimed.attempt_id),
@@ -287,15 +306,20 @@ def _assert_failure_fields(
     assert [_fields(record) for record in outcome.failures] == [expected] * len(outcome.failures)
 
 
-def _assert_log_has_no_connection_data(
-    scenario: _Scenario, failures: list[logging.LogRecord]
-) -> None:
-    """Sem traceback e sem canário da conexão (host, porta, usuário, banco, senha) no log.
+def _assert_log_has_no_connection_data(scenario: _Scenario, outcome: _Supervised) -> None:
+    """Sem traceback, sem canário da conexão e sem a mensagem do erro real no log.
 
-    A mensagem do `OperationalError` traz host, porta e usuário; por isso o coordinator só loga o
-    tipo e o SQLSTATE e não usa `exc_info`. Os canários vêm da URL de teste (`db_settings`).
+    Os canários (host, porta, usuário, banco, senha) vêm da URL de teste (`db_settings`). As
+    mensagens que estes SQLSTATEs trazem de fato são o SQL e o motivo, sem host nem porta; só um
+    erro de conexão recusada os carrega, e o arquivo não o cobre. Por isso o teste também exige
+    que a mensagem do erro real (`outcome.engine_errors`) não apareça em `caplog.text`: o
+    coordinator loga só o tipo e o SQLSTATE e não usa `exc_info`.
     """
+    failures = outcome.failures
     assert all(record.exc_info is None and record.exc_text is None for record in failures)
+    assert all(record.exc_info is None for record in scenario.caplog.records)
+    assert outcome.engine_errors, "nenhum erro real capturado: o canário da mensagem seria vazio"
+    assert [error for error in outcome.engine_errors if error in scenario.caplog.text] == []
     settings = scenario.settings
     canaries = [
         settings.db_host,
@@ -458,10 +482,17 @@ def test_statement_timeout_na_espera_da_trava_nao_abandona_o_executor_e_a_run_pu
 
 
 @contextmanager
-def _pool_held(engine: Engine) -> Iterator[None]:
-    """A única conexão do pool do worker, ocupada por outra sessão."""
+def _pool_held(engine: Engine, errors: list[str]) -> Iterator[None]:
+    """A única conexão do pool do worker, ocupada por outra sessão.
+
+    O erro do pool não passa por `handle_error` (não é do driver); o teste pede uma conexão
+    enquanto o pool está ocupado e guarda a mensagem real do `TimeoutError` que o pool levanta.
+    """
     with Session(engine) as holder:
         holder.connection()
+        with pytest.raises(PoolTimeout) as pool_error:
+            engine.connect()
+        errors.append(str(pool_error.value))
         yield
 
 
@@ -478,7 +509,9 @@ def test_pool_esgotado_na_renovacao_nao_abandona_o_executor_e_a_run_publica(
         single_connection_engine, factory, admin_engine, db_settings, storage, work_root, caplog
     )
 
-    outcome = _supervise_through(scenario, lambda: _pool_held(single_connection_engine))
+    outcome = _supervise_through(
+        scenario, lambda: _pool_held(single_connection_engine, scenario.engine_errors)
+    )
 
     # Não é erro do banco: o pool desiste antes de pedir conexão, e não há SQLSTATE.
     _assert_lease_not_half_renewed(outcome.state_before, outcome.state_during_failure)
