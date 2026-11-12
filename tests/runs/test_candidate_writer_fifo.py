@@ -8,6 +8,8 @@ de travar a suíte. O erro segue o de qualquer falha ao ler a saída: transitór
 
 import os
 import stat
+from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -38,9 +40,13 @@ NEEDS_WRITE = UTF8_BOM + VALID
 
 
 def _swap_first_output_for_fifo_after_collect(
-    monkeypatch: pytest.MonkeyPatch, planted: list[Path]
+    monkeypatch: pytest.MonkeyPatch, planted: list[Path], on_plant: Callable[[Path], None]
 ) -> None:
-    """Depois que a coleta devolveu `Collected`, o sandbox troca a primeira saída por um FIFO."""
+    """Depois que a coleta devolveu `Collected`, o sandbox troca a primeira saída por um FIFO.
+
+    `on_plant` roda logo depois da troca: é onde o teste liga o vigia, para que o prazo dele
+    meça só o trecho que pode travar no FIFO, não o lançamento do executor antes da coleta.
+    """
 
     def collect_then_swap(*args: Any, **kwargs: Any) -> Collected:
         collected = collection.collect_outputs(*args, **kwargs)
@@ -48,6 +54,7 @@ def _swap_first_output_for_fifo_after_collect(
         path.unlink()
         make_fifo(path)
         planted.append(path)
+        on_plant(path)
         return collected
 
     monkeypatch.setattr(f"{coordinator_module.__name__}.collect_outputs", collect_then_swap)
@@ -91,9 +98,11 @@ def test_saida_trocada_por_fifo_antes_da_copia_e_falha_transitoria_sem_bloquear(
     out_file = runner.work_dir(claimed.attempt_id) / "out" / "a.csv"
     opened = _record_opened_fds(monkeypatch, out_file)
     planted: list[Path] = []
-    _swap_first_output_for_fifo_after_collect(monkeypatch, planted)
 
-    with fail_if_blocked(out_file):
+    with ExitStack() as watchdog:
+        _swap_first_output_for_fifo_after_collect(
+            monkeypatch, planted, lambda fifo: watchdog.enter_context(fail_if_blocked(fifo))
+        )
         applied = coordinator(factory, storage, runner).run(claimed)
 
     assert applied is not None
