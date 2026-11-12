@@ -1,6 +1,7 @@
 """Runner local: start idempotente pelo nome, status entre processos, parada do grupo e teto."""
 
 import ast
+import json
 import os
 import subprocess
 import sys
@@ -27,7 +28,9 @@ REAP_AFTER_S = 1.0
 # Bem abaixo do tempo de subida de um interpretador Python: o lançador nunca termina a tempo.
 UNREACHABLE_LAUNCH_TIMEOUT_S = 0.001
 SUBPROCESS_TIMEOUT_S = 60.0
-WORKER_SRC = Path(runner_module.__file__).parent
+# Derivados deste arquivo, não do pacote importado: o editable da .venv pode ser outro checkout.
+REPO_SRC = Path(__file__).resolve().parents[2] / "src"
+WORKER_SRC = REPO_SRC / "goblinshift" / "runs" / "worker"
 META_FILE_NAMES = {"PGID_FILE", "EXIT_FILE"}
 
 
@@ -206,8 +209,9 @@ def test_remove_recusa_executor_vivo_e_apaga_a_area_depois_de_parado(tmp_path: P
 def test_lancador_nao_importa_o_sqlalchemy() -> None:
     # A partida do lançador cabe no LAUNCH_TIMEOUT_S só se ele não arrastar runs.store (#377).
     code = (
-        "import sys, goblinshift.runs.worker.local_supervisor\n"
-        "print(sorted(m for m in ('sqlalchemy', 'goblinshift.runs.store') if m in sys.modules))"
+        "import json, sys, goblinshift.runs.worker.local_supervisor as launcher\n"
+        "heavy = sorted(m for m in ('sqlalchemy', 'goblinshift.runs.store') if m in sys.modules)\n"
+        "print(json.dumps({'file': launcher.__file__, 'heavy': heavy}))"
     )
 
     result = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
@@ -216,9 +220,22 @@ def test_lancador_nao_importa_o_sqlalchemy() -> None:
         text=True,
         timeout=SUBPROCESS_TIMEOUT_S,
         check=True,
+        env={**os.environ, "PYTHONPATH": str(REPO_SRC)},
     )
 
-    assert result.stdout.strip() == "[]"
+    report = json.loads(result.stdout)
+    assert Path(report["file"]).resolve().is_relative_to(WORKER_SRC)
+    assert report["heavy"] == []
+
+
+def assigned_names(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+    else:
+        return set()
+    return {t.id for t in targets if isinstance(t, ast.Name)}
 
 
 def test_nomes_dos_arquivos_de_meta_tem_uma_fonte_so() -> None:
@@ -226,8 +243,7 @@ def test_nomes_dos_arquivos_de_meta_tem_uma_fonte_so() -> None:
         path.name
         for path in WORKER_SRC.glob("*.py")
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id in META_FILE_NAMES for t in node.targets)
+        if assigned_names(node) & META_FILE_NAMES
     }
 
     assert definers == {"meta_files.py"}
