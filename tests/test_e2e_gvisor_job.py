@@ -8,6 +8,7 @@ condições e o vínculo entre o workflow e o gate da publicação, que recusa j
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -340,6 +341,84 @@ def test_journeys_confere_os_429_depois_das_specs_mesmo_quando_elas_falham() -> 
     leave = body.index('exit "$status"')
     assert specs < check < leave
     assert "|| status=$?" in body[specs:check]
+
+
+def test_rate_limits_recusa_log_ilegivel(tmp_path: Path) -> None:
+    # `grep` sai com 2 quando não lê o arquivo: não pode virar "zero 429".
+    completed = subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "rate-limits", str(tmp_path / "nao-existe.log")],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert completed.returncode != 0
+    assert "não consegui ler o log do Nginx" in completed.stderr
+
+
+def run_journeys(tmp_path: Path, nginx_log: str) -> subprocess.CompletedProcess[str]:
+    """Roda o `journeys` de verdade, com specs que passam e um `docker` que devolve `nginx_log`."""
+    bin_dir = tmp_path / "bin-journeys"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        """#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    psql) mode=psql ;;
+    xargs) mode=xargs ;;
+    logs) mode=logs ;;
+    events) mode=events ;;
+    inspect) mode=inspect ;;
+  esac
+done
+case "$mode" in
+  psql) echo 1 ;;
+  xargs) while read -r spec; do echo "$spec chave-$spec"; done ;;
+  logs) cat "$FAKE_LOG" ;;
+  events) echo container-1 ;;
+  inspect) echo runsc ;;
+esac
+"""
+    )
+    docker.chmod(0o755)
+    npm = bin_dir / "npm"
+    npm.write_text("#!/bin/sh\nexit 0\n")  # as specs passam
+    npm.chmod(0o755)
+    log_file = tmp_path / "nginx-journeys.log"
+    log_file.write_text(nginx_log)
+    return subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "journeys"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+        env={
+            **os.environ,
+            "CI": "true",
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "FAKE_LOG": str(log_file),
+        },
+    )
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="o script usa o jq do runner")
+def test_journeys_com_specs_verdes_e_sem_429_passa(tmp_path: Path) -> None:
+    # Controle: prova que o cenário do teste abaixo só falha por causa do 429.
+    completed = run_journeys(tmp_path, NGINX_200)
+
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="o script usa o jq do runner")
+def test_journeys_falha_com_429_mesmo_com_as_specs_verdes(tmp_path: Path) -> None:
+    # Issue #338: o 429 com as specs verdes passaria sem a chamada do detector, ou com ela
+    # neutralizada por `|| true`.
+    completed = run_journeys(tmp_path, NGINX_200 + NGINX_429_DA_API)
+
+    assert completed.returncode != 0
+    assert "1 resposta(s) 429" in completed.stderr
 
 
 def test_cada_arquivo_de_spec_tem_a_conta_propria() -> None:
