@@ -233,6 +233,15 @@ def test_falha_deterministica_termina_failed_com_o_codigo_e_descarta_candidatos(
     assert result.effects == (EndAttempt(1), DiscardCandidates(1), ReleaseReservations())
 
 
+def test_entrada_adulterada_termina_failed_sem_gastar_tentativa_fisica() -> None:
+    event = DeterministicFailure(generation=1, code=ErrorCode.INPUT_TAMPERED)
+    result = accepted(running(), event)
+
+    assert (result.run.status, result.run.error_code) == (Status.FAILED, ErrorCode.INPUT_TAMPERED)
+    assert result.run.physical_attempts == 0
+    assert result.effects == (EndAttempt(1), DiscardCandidates(1), ReleaseReservations())
+
+
 def test_falha_deterministica_de_geracao_vencida_e_recusada() -> None:
     event = DeterministicFailure(generation=1, code=ErrorCode.OUTPUT_LIMIT_EXCEEDED)
     assert refusal(running(attempts=2), event) is RefusalReason.STALE_GENERATION

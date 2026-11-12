@@ -33,6 +33,13 @@ def test_arquivo_no_teto_e_lido(tmp_path: Path) -> None:
     assert read_failure_code(path) is ErrorCode.OUTPUT_LIMIT_EXCEEDED
 
 
+def test_executor_nao_declara_entrada_adulterada(tmp_path: Path) -> None:
+    # Só o worker, que lê o storage, constata a adulteração; o executor é sandbox da receita.
+    path = write(tmp_path, {"code": "INPUT_TAMPERED"})
+
+    assert read_failure_code(path) is None
+
+
 def test_arquivo_ausente_nao_tem_codigo(tmp_path: Path) -> None:
     assert read_failure_code(tmp_path / "failure.json") is None
 
