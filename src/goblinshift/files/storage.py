@@ -144,10 +144,17 @@ class FileStorage:
         return os.fdopen(fd, "rb")
 
     def stat(self, key: str) -> ObjectStat:
+        """Tamanho do objeto; o que não é arquivo comum é adulteração, como em `open`.
+
+        `lstat` não segue o link, e por isso enxerga um symlink (com ou sem alvo) ou um diretório
+        como existentes: sem a checagem de tipo, eles passariam por objeto presente.
+        """
         try:
             info = self._path_for(key).stat(follow_symlinks=False)
         except FileNotFoundError:
             raise ObjectMissingError(key) from None
+        if not S_ISREG(info.st_mode):
+            raise ObjectTamperedError(key)
         return ObjectStat(size_bytes=info.st_size)
 
     def is_mounted(self) -> bool:

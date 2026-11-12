@@ -92,8 +92,8 @@ from goblinshift.runs.worker.runner import STOP_GRACE, ExecutorStatus, Runner, R
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 50
-# Quantos objetos ilegíveis vão nomeados no log do lote: com o disco inteiro devolvendo erro, a
-# contagem por errno diz o resto sem uma linha por objeto a cada ciclo.
+# Quantos objetos ilegíveis (ou adulterados) vão nomeados no log do lote: com o disco inteiro
+# devolvendo erro, a contagem por errno diz o resto sem uma linha por objeto a cada ciclo.
 UNREADABLE_LOG_SAMPLE = 5
 # Alerta de causa (3.7): Run em `stopping` há mais que isto sem confirmar a parada.
 STUCK_STOPPING_AFTER = timedelta(minutes=10)
@@ -665,6 +665,14 @@ class Maintenance:
                 "objetos ilegíveis no storage",
                 extra={"fields": _unreadable_fields(sweep)},
             )
+        if sweep.tampered:
+            # Symlink ou diretório no lugar do objeto (ADR 054): o mesmo sinal da entrada
+            # adulterada do worker, então o mesmo evento e o mesmo alerta. Nada é marcado nem
+            # tocado; só a chave lógica sai, nunca o caminho no disco nem o alvo do link.
+            logger.warning(
+                "objetos adulterados no storage",
+                extra={"fields": _tampered_fields(sweep)},
+            )
         if sweep.storage_unreachable:
             # Sem a sentinela de montagem: filesystem do storage desmontado ou trocado.
             logger.warning(
@@ -846,12 +854,22 @@ def _unreadable_fields(sweep: MissingSweep) -> dict[str, object]:
     }
 
 
+def _tampered_fields(sweep: MissingSweep) -> dict[str, object]:
+    """Campos do alerta do lote: uma linha só, com a amostra de chaves limitada."""
+    return {
+        "alert": "input_tampered",
+        "tampered": sweep.tampered,
+        "sample": [{"storage_key": key} for key in sweep.tampered_keys[:UNREADABLE_LOG_SAMPLE]],
+    }
+
+
 def _sweep_counts(sweep: MissingSweep) -> dict[str, int]:
     """As contagens da varredura no evento do ciclo."""
     return {
         "objects_missing_checked": sweep.checked,
         "objects_missing_absent": sweep.absent,
         "objects_missing_unreadable": sweep.unreadable,
+        "objects_missing_tampered": sweep.tampered,
         "objects_marked_missing": sweep.marked,
         "missing_sweep_skipped": int(sweep.storage_unreachable),
         "missing_governor_tripped": int(sweep.governor_tripped),

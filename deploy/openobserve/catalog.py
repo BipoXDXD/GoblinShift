@@ -297,10 +297,10 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
     ),
     _SpanCause(
         "causa-entrada-adulterada",
-        "O storage devolveu uma entrada adulterada (symlink no lugar do objeto): incidente de "
-        "integridade. A Run terminou INPUT_TAMPERED na primeira tentativa e fica fora do SLO. O "
-        "log do worker traz run_id e a posição da entrada; veja o runbook em "
-        "deploy/openobserve/README.md.",
+        "O storage tem um objeto adulterado (symlink ou diretório no lugar do arquivo): incidente "
+        "de integridade. Se a Run o usou, terminou INPUT_TAMPERED e fica fora do SLO. O log do "
+        "worker traz run_id e a posição da entrada, e o da manutenção traz as chaves; veja o "
+        "runbook em deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
