@@ -1,8 +1,11 @@
 """Construtores de dados dos testes das rotas de arquivos, pela API ou pelo serviço `files`."""
 
+import errno
+import os
 import uuid
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
@@ -18,6 +21,34 @@ from tests.identity.support import new_key, new_user
 
 UPLOADS = "/api/v1/uploads"
 OCTET_STREAM = {"Content-Type": "application/octet-stream"}
+
+
+# Falhas do `os.open` do objeto no download e no preview: o disco indisponível vira 503 com
+# `Retry-After` de 60 s; o symlink (ELOOP, do `O_NOFOLLOW`) é adulteração e vira 410.
+OPEN_FAILURES = [
+    pytest.param(errno.ENOSPC, 503, "SERVICE_UNAVAILABLE", id="enospc"),
+    pytest.param(errno.EDQUOT, 503, "SERVICE_UNAVAILABLE", id="edquot"),
+    pytest.param(errno.EIO, 503, "SERVICE_UNAVAILABLE", id="eio"),
+    pytest.param(errno.ELOOP, 410, "GONE", id="eloop"),
+]
+STORAGE_RETRY_AFTER = "60"
+
+
+def fail_object_open(monkeypatch: pytest.MonkeyPatch, storage: FileStorage, code: int) -> None:
+    """Faz o `os.open` de objetos sob a raiz do storage levantar `OSError(code)`.
+
+    Só a abertura de leitura com `O_NOFOLLOW` que `FileStorage.open` faz é afetada: o resto do
+    processo (driver do banco, gravação, fsync de diretório) segue com o `os.open` real.
+    """
+    real_open = os.open
+    root = str(storage.root)
+
+    def open_with_failure(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if str(path).startswith(root) and flags & os.O_NOFOLLOW and not flags & os.O_WRONLY:
+            raise OSError(code, os.strerror(code), str(path))
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_with_failure)
 
 
 def bearer(token: str) -> dict[str, str]:

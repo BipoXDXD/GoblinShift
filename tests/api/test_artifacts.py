@@ -17,6 +17,9 @@ from goblinshift.files.states import TransferDirection
 from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
 from tests.api.files_support import (
+    OPEN_FAILURES,
+    STORAGE_RETRY_AFTER,
+    fail_object_open,
     new_account,
     occupy_slots,
     open_uses,
@@ -265,6 +268,32 @@ def test_objeto_trocado_por_symlink_responde_410_sem_expor_nada_e_sem_gravar_mis
         assert leaked not in response.text
     assert object_state_of(factory, artifact_id) == "committed"
     assert (storage.root / key).is_symlink()
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
+
+
+@pytest.mark.parametrize(("code", "status", "problem"), OPEN_FAILURES)
+def test_erro_ao_abrir_o_objeto_no_download_responde_503_ou_410_e_libera_tudo(
+    app: FastAPI,
+    client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    code: int,
+    status: int,
+    problem: str,
+) -> None:
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    storage = storage_of(app)
+    fail_object_open(monkeypatch, storage, code)
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert_problem(response, status, problem)
+    if status == 503:
+        assert response.headers["retry-after"] == STORAGE_RETRY_AFTER
+    else:
+        assert "retry-after" not in response.headers
+    assert str(storage.root) not in response.text
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 
