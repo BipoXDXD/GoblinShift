@@ -73,7 +73,8 @@ STEP_COUNTS: dict[str, str] = {
     "measure": "runs_stuck_stopping",
 }
 STORAGE_ONLY_STEP = "sweep_temporary_parts"
-# Captura a própria exceção e a conta em `missing_sweep_failed`, sem passar por `steps_failed`.
+# Captura a própria exceção e a conta em `missing_sweep_failed`; só a perda de conexão também vira
+# passo falho (`steps_failed`), para o ciclo pular os passos de banco restantes.
 SELF_ISOLATED_STEP = "mark_missing_objects"
 # Sem área de trabalho no disco (o caso destes testes), devolve 0 sem abrir conexão.
 NO_WORK_AREAS_STEP = "sweep_work_areas"
@@ -466,13 +467,19 @@ def test_statement_timeout_numa_espera_de_trava_falha_so_o_passo_e_nao_pula_os_o
 # Pool esgotado ----------------------------------------------------------------------------
 
 
-def test_pool_esgotado_durante_um_passo_falha_so_esse_passo(
+def test_pool_esgotado_durante_um_passo_conta_falha_e_pula_so_os_passos_de_banco_seguintes(
     single_connection_factory: sessionmaker[Session],
     storage: FileStorage,
     work_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """`TimeoutError` do pool é perda de conexão: o passo falha e os de banco seguintes são pulados.
+
+    Sem isso, cada passo seguinte esperaria o `pool_timeout` de novo. O storage não usa o banco e
+    roda mesmo assim, como na perda de conexão que o pool invalida.
+    """
+    failing = "apply_deadlines"
     janitor = _janitor(single_connection_factory, storage, work_root)
     baseline = janitor.run_cycle()
 
@@ -482,37 +489,41 @@ def test_pool_esgotado_durante_um_passo_falha_so_esse_passo(
             holder.connection()  # a única conexão do pool, ocupada por outra sessão
             yield
 
-    _around_step(janitor, monkeypatch, "apply_deadlines", pool_held)
+    _around_step(janitor, monkeypatch, failing, pool_held)
     caplog.clear()
 
     with caplog.at_level(logging.INFO, logger=MAINTENANCE_LOGGER):
         counts = janitor.run_cycle()
 
-    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (1, 0)
-    assert _steps_that_ran(counts) == [n for n in STEP_COUNTS if n != "apply_deadlines"]
+    skipped = DATABASE_STEPS[DATABASE_STEPS.index(failing) + 1 :]
+    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (1, len(skipped))
+    failing_index = list(STEP_COUNTS).index(failing)
+    assert _steps_that_ran(counts) == [
+        name for i, name in enumerate(STEP_COUNTS) if i < failing_index or name == STORAGE_ONLY_STEP
+    ]
     [failure] = _step_failures(caplog)
     # Não é erro do banco: o pool desiste antes de pedir conexão, e não há SQLSTATE.
     assert _fields(failure) == {
-        "step": "apply_deadlines",
+        "step": failing,
         "error_type": "TimeoutError",
         "sqlstate": None,
     }
+    [notice] = [r for r in caplog.records if r.getMessage() == SKIPPED_AFTER_CONNECTION_MESSAGE]
+    assert _fields(notice) == {"failed_step": failing, "skipped": skipped}
     monkeypatch.undo()
     _assert_healthy_cycle(janitor, baseline)
 
 
-def test_pool_esgotado_o_ciclo_todo_hoje_nao_pula_passos_e_cada_um_espera_o_pool_timeout(
+def test_pool_esgotado_o_ciclo_todo_espera_o_pool_timeout_uma_vez_e_pula_os_passos_de_banco(
     single_connection_factory: sessionmaker[Session],
     storage: FileStorage,
     work_root: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Caracteriza o comportamento atual: `TimeoutError` do pool não é "conexão perdida".
+    """Pool todo ocupado: o primeiro passo espera o `pool_timeout`, e os de banco restantes não.
 
-    O ciclo não levanta e o storage roda, mas cada passo de banco espera `pool_timeout` de novo
-    (`_is_connection_error` só reconhece `DBAPIError`). O custo é limitado: passos x timeout.
-    A varredura de ausentes se isola sozinha: a falha dela vai a `missing_sweep_failed`, não a
-    `steps_failed`; e a limpeza de áreas de trabalho nem abre conexão com o disco vazio.
+    Os passos pulados não abrem conexão, então não há `missing_sweep_failed` (o passo da varredura
+    de ausentes não chega a rodar) e só um passo conta em `steps_failed`.
     """
     janitor = _janitor(single_connection_factory, storage, work_root)
     baseline = janitor.run_cycle()
@@ -525,20 +536,18 @@ def test_pool_esgotado_o_ciclo_todo_hoje_nao_pula_passos_e_cada_um_espera_o_pool
         holder.connection()
         counts = janitor.run_cycle()
 
-    raising = [
-        name for name in DATABASE_STEPS if name not in {SELF_ISOLATED_STEP, NO_WORK_AREAS_STEP}
-    ]
-    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (len(raising), 0)
-    assert counts["missing_sweep_failed"] == 1
-    assert _steps_that_ran(counts) == [NO_WORK_AREAS_STEP, STORAGE_ONLY_STEP, SELF_ISOLATED_STEP]
-    failures = [_fields(r) for r in _step_failures(caplog)]
-    assert [f["step"] for f in failures] == raising
-    assert {(f["error_type"], f["sqlstate"]) for f in failures} == {("TimeoutError", None)}
-    assert SKIPPED_AFTER_CONNECTION_MESSAGE not in caplog.text
+    first, *skipped = DATABASE_STEPS
+    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (1, len(skipped))
+    assert "missing_sweep_failed" not in counts
+    assert _steps_that_ran(counts) == [STORAGE_ONLY_STEP]
+    [failure] = _step_failures(caplog)
+    assert _fields(failure) == {"step": first, "error_type": "TimeoutError", "sqlstate": None}
+    [notice] = [r for r in caplog.records if r.getMessage() == SKIPPED_AFTER_CONNECTION_MESSAGE]
+    assert _fields(notice) == {"failed_step": first, "skipped": skipped}
     _assert_healthy_cycle(janitor, baseline)
 
 
-def test_backend_encerrado_na_varredura_de_ausentes_e_isolado_nela_e_o_ciclo_segue(
+def test_backend_encerrado_na_varredura_de_ausentes_conta_varredura_falha_e_passo_falho(
     factory: sessionmaker[Session],
     engine: Engine,
     admin_engine: Engine,
@@ -547,11 +556,11 @@ def test_backend_encerrado_na_varredura_de_ausentes_e_isolado_nela_e_o_ciclo_seg
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A varredura captura o erro de conexão sozinha: o ciclo não o vê como perda de conexão.
+    """A varredura registra a falha e as contagens, e o ciclo a vê como perda de conexão.
 
-    Hoje isso é inofensivo (o único passo depois dela, `measure`, abre uma conexão nova), mas a
-    perda de conexão não chega a `_CycleOutcome`: com o banco fora de verdade, `measure` esperaria
-    o `connect_timeout` uma vez a mais.
+    O alerta `missing_sweep_failed` segue (log e contagem), e o passo também conta em
+    `steps_failed`: `measure`, o passo de banco depois dela, é pulado em vez de esperar o
+    `connect_timeout` de novo.
     """
     janitor = _janitor(factory, storage, work_root)
     baseline = janitor.run_cycle()
@@ -566,16 +575,27 @@ def test_backend_encerrado_na_varredura_de_ausentes_e_isolado_nela_e_o_ciclo_seg
     with caplog.at_level(logging.INFO, logger=MAINTENANCE_LOGGER):
         counts = janitor.run_cycle()
 
-    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (0, 0)
+    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (1, 1)
     assert counts["missing_sweep_failed"] == 1
-    assert "runs_stuck_stopping" in counts
-    [failure] = [r for r in caplog.records if r.getMessage() == "varredura de ausentes falhou"]
-    assert _fields(failure) == {"alert": "missing_sweep_failed"}
-    error = cast(DBAPIError, failure.exc_info[1] if failure.exc_info else None)
+    assert STEP_COUNTS[SELF_ISOLATED_STEP] in counts
+    assert STEP_COUNTS["measure"] not in counts
+    [swept] = [r for r in caplog.records if r.getMessage() == "varredura de ausentes falhou"]
+    assert _fields(swept) == {"alert": "missing_sweep_failed"}
+    error = cast(DBAPIError, swept.exc_info[1] if swept.exc_info else None)
     assert (error.connection_invalidated, getattr(error.orig, "sqlstate", None)) == (
         True,
         ADMIN_SHUTDOWN,
     )
-    assert not _step_failures(caplog)
+    [failure] = _step_failures(caplog)
+    assert _fields(failure) == {
+        "step": SELF_ISOLATED_STEP,
+        "error_type": "OperationalError",
+        "sqlstate": ADMIN_SHUTDOWN,
+    }
+    [notice] = [r for r in caplog.records if r.getMessage() == SKIPPED_AFTER_CONNECTION_MESSAGE]
+    assert _fields(notice) == {"failed_step": SELF_ISOLATED_STEP, "skipped": ["measure"]}
+    event_fields = _cycle_event(caplog)
+    assert (event_fields["steps_failed"], event_fields["steps_skipped"]) == (1, 1)
+    assert event_fields["missing_sweep_failed"] == 1
     monkeypatch.undo()
     _assert_healthy_cycle(janitor, baseline)
