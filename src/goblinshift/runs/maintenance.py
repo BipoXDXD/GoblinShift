@@ -138,6 +138,20 @@ class _Step:
     uses_database: bool = True
 
 
+class _ConnectionLostWithCountsError(Exception):
+    """Passo que isola a própria falha, mas perdeu a conexão: o ciclo precisa saber.
+
+    Leva as contagens que o passo devolveria (com a falha dele, para o medidor do alerta) e o
+    erro de conexão. `_CycleOutcome.run` aplica as contagens e trata o passo como falho, igual a
+    qualquer passo que levanta erro de conexão.
+    """
+
+    def __init__(self, error: Exception, counts: Mapping[str, int]) -> None:
+        super().__init__(type(error).__name__)
+        self.error = error
+        self.counts = counts
+
+
 @dataclass
 class _CycleOutcome:
     """O que a volta acumulou: contagens dos passos que rodaram, falhas e passos pulados."""
@@ -151,12 +165,18 @@ class _CycleOutcome:
     def run(self, step: _Step) -> None:
         try:
             self.counts.update(step.run())
+        except _ConnectionLostWithCountsError as lost:
+            self.counts.update(lost.counts)
+            self._record_failure(step, lost.error)
         except Exception as error:
             # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
-            _log_step_failure(step.name, error)
-            self.failed += 1
-            if self.connection_lost_in is None and _is_connection_error(error):
-                self.connection_lost_in = step.name
+            self._record_failure(step, error)
+
+    def _record_failure(self, step: _Step, error: Exception) -> None:
+        _log_step_failure(step.name, error)
+        self.failed += 1
+        if self.connection_lost_in is None and _is_connection_error(error):
+            self.connection_lost_in = step.name
 
     def finish(self) -> dict[str, int]:
         """As contagens da volta, com falhas e pulos; os pulos vão ao log, uma linha por motivo."""
@@ -611,7 +631,10 @@ class Maintenance:
 
         Isolada do resto do ciclo: uma falha dela (disco, banco) fica no log e na contagem
         `missing_sweep_failed`, e a retenção e os medidores seguem. A reconciliação de capacidade
-        do ciclo seguinte já vê as reservas liberadas aqui.
+        do ciclo seguinte já vê as reservas liberadas aqui. Perda de conexão tem o mesmo log e a
+        mesma contagem, e além disso sobe como `_ConnectionLostWithCountsError`: o ciclo conta o
+        passo em `steps_failed` e pula os passos de banco restantes, que só esperariam o timeout de
+        novo. Chamada fora do ciclo, ela levanta nesse caso.
         """
         try:
             sweep = sweep_missing_objects(
@@ -621,13 +644,16 @@ class Maintenance:
                 limit=self._config.missing_sweep_batch_size,
                 max_absent_ratio=self._config.missing_max_absent_ratio,
             )
-        except Exception:
+        except Exception as error:
             # Não engole: registra com o traceback e conta; o cursor fica, e o lote volta.
             logger.exception(
                 "varredura de ausentes falhou",
                 extra={"fields": {"alert": "missing_sweep_failed"}},
             )
-            return {**_sweep_counts(MissingSweep.idle()), "missing_sweep_failed": 1}
+            failed = {**_sweep_counts(MissingSweep.idle()), "missing_sweep_failed": 1}
+            if _is_connection_error(error):
+                raise _ConnectionLostWithCountsError(error, failed) from error
+            return failed
         self._missing_resume_after = sweep.resume_after
         self._report_sweep(sweep)
         return {**_sweep_counts(sweep), "missing_sweep_failed": 0}
