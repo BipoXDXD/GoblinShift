@@ -561,6 +561,9 @@ def test_falha_da_varredura_nao_leva_as_outras_etapas(
         counts = cycles.run_cycle()
 
     assert counts["missing_sweep_failed"] == 1
+    # Erro que não é de conexão fica isolado no passo: o ciclo não o conta como falho nem pula nada.
+    assert counts["steps_failed"] == 0
+    assert counts["steps_skipped"] == 0
     # Sentinela ilegível não é objeto ilegível: `causa-objetos-ilegiveis` não a vê.
     assert counts["objects_missing_unreadable"] == 0
     assert {"objects_purged", "capacity_pools_corrected", "runs_deleted"} <= counts.keys()

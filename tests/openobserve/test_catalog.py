@@ -107,6 +107,7 @@ def test_catalogo_tem_queima_por_slo_e_nivel_causas_e_heartbeat() -> None:
         "gs-causa-objetos-ilegiveis",
         "gs-causa-arquivos-nao-removidos",
         "gs-causa-varredura-falhou",
+        "gs-causa-temporarios-no-storage",
         "gs-causa-ciclos-falhando",
         "gs-causa-capacidade-divergente",
         "gs-causa-sem-reserva",
@@ -197,6 +198,7 @@ def test_alertas_da_manutencao_leem_o_span_do_ciclo_no_stream_de_traces() -> Non
         "gs-causa-objetos-ilegiveis",
         "gs-causa-arquivos-nao-removidos",
         "gs-causa-varredura-falhou",
+        "gs-causa-temporarios-no-storage",
         "gs-causa-ciclos-falhando",
         "gs-causa-imagem-executor-ausente",
         "gs-causa-sonda-imagem-falhou",
@@ -272,8 +274,26 @@ def test_causas_da_varredura_de_ausentes_vao_ao_destino_de_aviso() -> None:
         "gs-causa-objetos-ilegiveis",
         "gs-causa-arquivos-nao-removidos",
         "gs-causa-varredura-falhou",
+        "gs-causa-temporarios-no-storage",
     ):
         assert by_name[name].destination is DestinationKey.WARNING, name
+
+
+def test_falha_da_limpeza_de_temporarios_e_lida_por_um_alerta() -> None:
+    # A contagem `tmp_parts_sweep_failed` da manutenção só ia ao log: sem alerta, o storage
+    # enchendo de `.part` ficava invisível fora da VPS. `tmp_parts_bytes` fica sem limiar, porque
+    # inclui upload em curso.
+    emitter = (SRC / "runs" / "maintenance.py").read_text(encoding="utf-8")
+    alert = next(
+        a for a in alerts(stream="s", prefix=PREFIX) if a.name == "gs-causa-temporarios-no-storage"
+    )
+
+    assert '"tmp_parts_sweep_failed"' in emitter
+    assert "maintenance_tmp_parts_sweep_failed" in CAUSE_COLUMNS
+    assert "maintenance_tmp_parts_sweep_failed" in alert.sql
+    assert "tmp_parts_bytes" not in alert.sql
+    assert (alert.period_minutes, alert.frequency_minutes, alert.silence_minutes) == (10, 5, 180)
+    assert "HAVING count(*) >= 3" in alert.sql
 
 
 def test_contadores_lidos_pelas_causas_sao_declarados() -> None:

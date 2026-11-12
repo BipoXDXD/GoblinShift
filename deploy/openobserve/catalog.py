@@ -138,6 +138,7 @@ CAUSE_COLUMNS: tuple[str, ...] = (
     "maintenance_purge_files_not_removed",
     "maintenance_candidates_left_on_disk",
     "maintenance_missing_sweep_failed",
+    "maintenance_tmp_parts_sweep_failed",
     "maintenance_failed_cycles",
     "maintenance_executor_image_missing",
     "maintenance_executor_image_probe_failed",
@@ -243,6 +244,15 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         "causa-varredura-falhou",
         "Varredura de objetos ausentes falhando em três voltas ou mais nos últimos 10 min. O "
         "traceback está no log da manutenção; veja o runbook.",
+        period_minutes=10,
+        silence_minutes=180,
+        destination=DestinationKey.WARNING,
+    ),
+    _SpanCause(
+        "causa-temporarios-no-storage",
+        "Limpeza dos temporários .part do storage falhando em três voltas ou mais nos últimos 10 "
+        "min: o que uma queda deixou no disco não é apagado. O traceback está no log da "
+        "manutenção; veja o runbook.",
         period_minutes=10,
         silence_minutes=180,
         destination=DestinationKey.WARNING,
