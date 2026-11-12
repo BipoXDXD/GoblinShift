@@ -16,6 +16,11 @@ de montagem presente (`FileStorage.is_mounted`) e com no máximo `max_absent_rat
 ausente (num lote pequeno, sem todos ausentes): muito arquivo sumido de uma vez indica storage
 errado, não arquivo perdido, e quem decide é o administrador. Erro de disco que não seja ausência
 deixa o objeto como está, e o relatório guarda a chave e o errno para quem investiga.
+
+Arquivo que não é comum no lugar do objeto (symlink, com ou sem alvo, ou diretório) não é presente
+nem ausente: é adulteração (ADR 054; `FileStorage.stat` levanta `ObjectTamperedError`, como
+`open`). A varredura só relata a chave: o objeto não é marcado `missing` (o disco não perdeu
+nada, e marcar mudaria o código de download de quem foi adulterado) e nada no disco é tocado.
 """
 
 import errno
@@ -29,7 +34,7 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.files.states import ObjectState
-from goblinshift.files.storage import FileStorage, ObjectMissingError
+from goblinshift.files.storage import FileStorage, ObjectMissingError, ObjectTamperedError
 from goblinshift.files.tables import stored_object
 
 # Mais da metade do lote ausente de uma vez: storage errado, até o administrador dizer o contrário.
@@ -66,10 +71,17 @@ class MissingSweep:
     storage_unreachable: bool
     # Ausentes demais no lote: nada foi marcado, e o mesmo lote volta no ciclo seguinte.
     governor_tripped: bool
+    # Chaves lógicas cujo arquivo no disco não é comum (symlink, diretório): adulteração, nem
+    # ausente nem marcado; o próximo ciclo que passar por elas relata de novo.
+    tampered_keys: tuple[str, ...] = ()
 
     @property
     def unreadable(self) -> int:
         return len(self.unreadable_objects)
+
+    @property
+    def tampered(self) -> int:
+        return len(self.tampered_keys)
 
     @classmethod
     def idle(
@@ -144,6 +156,7 @@ def sweep_missing_objects(
     presence = {row.id: _presence(storage, row.storage_key) for row in rows}
     absent = [object_id for object_id, found in presence.items() if found is _Presence.ABSENT]
     unreadable = tuple(found for found in presence.values() if isinstance(found, UnreadableObject))
+    tampered = tuple(row.storage_key for row in rows if presence[row.id] is _Presence.TAMPERED)
     if _too_many_absent(len(absent), len(unreadable), len(rows), max_absent_ratio):
         return MissingSweep(
             checked=len(rows),
@@ -153,6 +166,7 @@ def sweep_missing_objects(
             resume_after=after,
             storage_unreachable=False,
             governor_tripped=True,
+            tampered_keys=tampered,
         )
     marked = 0
     if absent:
@@ -166,6 +180,7 @@ def sweep_missing_objects(
         resume_after=rows[-1].id if len(rows) == limit else None,
         storage_unreachable=False,
         governor_tripped=False,
+        tampered_keys=tampered,
     )
 
 
@@ -193,6 +208,7 @@ def _too_many_absent(absent: int, unreadable: int, checked: int, max_absent_rati
 class _Presence(Enum):
     PRESENT = auto()
     ABSENT = auto()
+    TAMPERED = auto()
 
 
 def _presence(storage: FileStorage, key: str) -> _Presence | UnreadableObject:
@@ -200,6 +216,8 @@ def _presence(storage: FileStorage, key: str) -> _Presence | UnreadableObject:
         storage.stat(key)
     except ObjectMissingError:
         return _Presence.ABSENT
+    except ObjectTamperedError:
+        return _Presence.TAMPERED
     except OSError as error:
         # Erro de disco não prova ausência: o objeto fica como está, e a varredura segue.
         return UnreadableObject(key, errno.errorcode.get(error.errno or 0, _UNKNOWN_ERRNO))

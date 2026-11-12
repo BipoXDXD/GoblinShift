@@ -245,3 +245,26 @@ def test_preview_trocado_por_symlink_responde_410_sem_expor_nada(
     for leaked in (key, str(storage.root), "CANARY", "Traceback"):
         assert leaked not in response.text
     assert open_uses(factory) == 0
+
+
+def test_preview_trocado_por_diretorio_responde_410_sem_expor_nada(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with factory() as session:
+        key = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == preview)
+        ).scalar_one()
+    storage = storage_of(app)
+    storage.delete(key)
+    (storage.root / key).mkdir()
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "IsADirectoryError", "Traceback"):
+        assert leaked not in response.text
+    assert open_uses(factory) == 0

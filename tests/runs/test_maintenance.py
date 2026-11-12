@@ -528,6 +528,38 @@ def test_lote_so_com_ilegiveis_alerta_com_errno_e_chave(
     ]
 
 
+def test_symlink_no_lugar_do_objeto_alerta_input_tampered_sem_caminho_nem_alvo(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ready_upload(factory, storage, create_user(factory, "conta"), b"abc")
+    [key] = storage_keys(factory)
+    link = storage.root.joinpath(*key.split("/"))
+    link.unlink()
+    link.symlink_to(tmp_path / "CANARY-alvo-fora-da-raiz")
+    mark_mounted(storage)
+    cycles = maintenance(factory, storage, local_runner(work_root))
+
+    with caplog.at_level(logging.WARNING, logger="goblinshift.runs.maintenance"):
+        counts = cycles.run_cycle()
+
+    # Adulterado não é ausente nem ilegível: nenhum dos dois alertas dispara por ele.
+    assert (counts["objects_missing_absent"], counts["objects_missing_unreadable"]) == (0, 0)
+    assert (counts["objects_missing_tampered"], counts["objects_marked_missing"]) == (1, 0)
+    assert alert_fields(caplog, "input_tampered") == [
+        {"alert": "input_tampered", "tampered": 1, "sample": [{"storage_key": key}]}
+    ]
+    assert alert_fields(caplog, "objects_unreadable") == []
+    assert alert_fields(caplog, "objects_missing") == []
+    logged = " ".join(f"{r.getMessage()} {getattr(r, 'fields', {})}" for r in caplog.records)
+    assert str(storage.root) not in logged
+    assert "CANARY" not in logged
+    assert link.is_symlink()
+
+
 def test_disco_inteiro_ilegivel_gera_uma_linha_de_log_com_amostra_limitada(
     factory: sessionmaker[Session],
     storage: FileStorage,

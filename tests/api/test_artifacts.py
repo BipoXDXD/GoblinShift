@@ -297,6 +297,28 @@ def test_erro_ao_abrir_o_objeto_no_download_responde_503_ou_410_e_libera_tudo(
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 
+def test_objeto_trocado_por_diretorio_responde_410_sem_expor_nada_e_sem_gravar_missing(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Diretório no lugar do arquivo é adulteração como o symlink: não vira 500 (o `fdopen` falhava
+    # com `IsADirectoryError` e o fd ficava aberto), não vaza caminho e não é marcado `missing`.
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    key = storage_key_of(factory, artifact_id)
+    storage = storage_of(app)
+    storage.delete(key)
+    (storage.root / key).mkdir()
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "IsADirectoryError", "Traceback"):
+        assert leaked not in response.text
+    assert object_state_of(factory, artifact_id) == "committed"
+    assert (storage.root / key).is_dir()
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
+
+
 def test_artefato_marcado_missing_aparece_missing_e_o_download_responde_410(
     app: FastAPI, client: TestClient, factory: sessionmaker[Session]
 ) -> None:
