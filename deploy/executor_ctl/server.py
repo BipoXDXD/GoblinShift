@@ -41,6 +41,9 @@ from .workarea import WorkAreaDirtyError, WorkDirMissingError
 MAX_BODY_BYTES = 1024
 # Corpo não usado (413, 404, 405...) até este tamanho é lido e descartado antes da resposta.
 DISCARD_LIMIT_BYTES = 64 * 1024
+# Nenhum tamanho aceito passa do maior limite acima; um valor mais longo é recusado antes do
+# `int()`, que estoura com mais de 4300 dígitos (`sys.int_max_str_digits`).
+_MAX_LENGTH_DIGITS = len(str(max(MAX_BODY_BYTES, DISCARD_LIMIT_BYTES)))
 # Sem Content-Length, quanto esperar pelo que o cliente já mandou antes de responder.
 _DRAIN_WAIT_S = 0.05
 READ_TIMEOUT_S = 5.0
@@ -189,8 +192,11 @@ def _invalid(detail: str) -> RequestError:
 
 
 def _is_decimal_length(value: str) -> bool:
-    """Só dígitos ASCII: `str.isdigit()` aceita o "²" e outros dígitos que o `int()` recusa."""
-    return value.isascii() and value.isdigit()
+    """Só dígitos ASCII, no máximo `_MAX_LENGTH_DIGITS` deles.
+
+    `str.isdigit()` aceita o "²" e outros dígitos que o `int()` recusa.
+    """
+    return len(value) <= _MAX_LENGTH_DIGITS and value.isascii() and value.isdigit()
 
 
 def _method_not_allowed() -> RequestError:
