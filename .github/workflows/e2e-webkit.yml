@@ -47,8 +47,12 @@ jobs:
       - run: npm run build
       - name: Palco e contratos móveis (um worker, até quatro minutos)
         run: npm run e2e:webkit
-      - name: Relatório, capacidade WebGL e traces de falhas
+      - name: Canário (chave de API nos artefatos)
+        id: canario
         if: always()
+        run: python3 ../scripts/verificar_artefatos_sem_chave.py playwright-report-webkit test-results-webkit
+      - name: Relatório, capacidade WebGL e traces de falhas
+        if: always() && steps.canario.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-webkit-stage
