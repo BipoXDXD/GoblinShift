@@ -3,6 +3,7 @@
 import hashlib
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -241,6 +242,30 @@ def test_arquivo_sumido_no_download_nao_grava_missing_pela_requisicao(
     assert client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth).json()["availability"] == (
         "available"
     )
+
+
+def test_objeto_trocado_por_symlink_responde_410_sem_expor_nada_e_sem_gravar_missing(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    # Symlink sob a raiz é adulteração: não vira 500, não vaza caminho e não é marcado `missing`
+    # (isso apagaria a evidência e liberaria a reserva); fica `committed` para a investigação.
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"x")
+    key = storage_key_of(factory, artifact_id)
+    storage = storage_of(app)
+    target = tmp_path / "CANARY-alvo-do-symlink"
+    target.write_bytes(b"segredo")
+    storage.delete(key)
+    (storage.root / key).symlink_to(target)
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "CANARY", "Traceback"):
+        assert leaked not in response.text
+    assert object_state_of(factory, artifact_id) == "committed"
+    assert (storage.root / key).is_symlink()
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 
 def test_artefato_marcado_missing_aparece_missing_e_o_download_responde_410(

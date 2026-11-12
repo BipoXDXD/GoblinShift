@@ -13,6 +13,7 @@ Queda do processo no meio da gravação deixa o temporário para trás: o `final
 SIGKILL. `sweep_stale_temporaries` é a limpeza que a manutenção faz deles.
 """
 
+import errno
 import hashlib
 import logging
 import os
@@ -56,6 +57,17 @@ class ObjectAlreadyExistsError(StorageError):
 class ObjectMissingError(StorageError):
     def __init__(self, key: str) -> None:
         super().__init__(f"objeto ausente na chave {key!r}")
+
+
+class ObjectTamperedError(StorageError):
+    """A chave existe, mas não é um arquivo comum que o storage poderia ter criado (symlink).
+
+    Evidência de adulteração, não de perda: não é `ObjectMissingError`, para nenhuma varredura
+    tratá-la como ausente. A mensagem leva só a chave lógica, nunca o caminho no disco.
+    """
+
+    def __init__(self, key: str) -> None:
+        super().__init__(f"objeto adulterado na chave {key!r}: não é um arquivo comum")
 
 
 class ContentTooLargeError(StorageError):
@@ -125,6 +137,10 @@ class FileStorage:
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         except FileNotFoundError:
             raise ObjectMissingError(key) from None
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise ObjectTamperedError(key) from None
+            raise
         return os.fdopen(fd, "rb")
 
     def stat(self, key: str) -> ObjectStat:

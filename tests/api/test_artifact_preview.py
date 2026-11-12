@@ -1,6 +1,7 @@
 """`GET /artifacts/{id}/preview`: só o derivado do serviço, com os cabeçalhos de 3.6 (1.6, 2.2)."""
 
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -184,4 +185,29 @@ def test_preview_sumido_do_disco_responde_410_sem_gravar_nada(
     for artifact_id in (preview, source):
         details = client.get(f"{ARTIFACTS}/{artifact_id}", headers=auth).json()
         assert details["availability"] == "available"
+    assert open_uses(factory) == 0
+
+
+def test_preview_trocado_por_symlink_responde_410_sem_expor_nada(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with factory() as session:
+        key = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == preview)
+        ).scalar_one()
+    storage = storage_of(app)
+    target = tmp_path / "CANARY-alvo-do-symlink"
+    target.write_bytes(JPEG)
+    storage.delete(key)
+    (storage.root / key).symlink_to(target)
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "CANARY", "Traceback"):
+        assert leaked not in response.text
     assert open_uses(factory) == 0

@@ -19,6 +19,7 @@ from goblinshift.files.storage import (
     InvalidStorageKeyError,
     ObjectAlreadyExistsError,
     ObjectMissingError,
+    ObjectTamperedError,
     StoredFile,
     TemporarySweep,
 )
@@ -129,6 +130,26 @@ def test_abrir_ou_consultar_chave_inexistente_falha(storage: FileStorage) -> Non
         storage.open("uploads/x")
     with pytest.raises(ObjectMissingError):
         storage.stat("uploads/x")
+
+
+def test_abrir_chave_que_e_symlink_falha_como_adulteracao_sem_expor_o_caminho(
+    storage: FileStorage, tmp_path: Path
+) -> None:
+    # O_NOFOLLOW recusa o symlink com ELOOP; para quem chama isso é adulteração do storage, não
+    # um OSError cru (o `str` dele traz o caminho no disco) nem ausência (o objeto existe).
+    outside = tmp_path / "CANARY-alvo-fora-da-raiz"
+    outside.write_bytes(b"segredo")
+    link = storage.root / "uploads" / "alvo"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+
+    with pytest.raises(ObjectTamperedError) as raised:
+        storage.open("uploads/alvo")
+
+    assert not isinstance(raised.value, ObjectMissingError)
+    assert str(storage.root) not in str(raised.value)
+    assert "CANARY" not in str(raised.value)
+    assert link.is_symlink()
 
 
 def test_diretorios_e_arquivos_sao_privados_do_dono(storage: FileStorage) -> None:
