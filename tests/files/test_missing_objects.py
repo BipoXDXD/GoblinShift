@@ -2,6 +2,7 @@
 
 import errno
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import insert, select
@@ -156,6 +157,98 @@ def test_varredura_marca_so_o_objeto_sem_arquivo(
     assert state_of(factory, lost_object) == ObjectState.MISSING
     assert state_of(factory, object_of(factory, kept.id)[0]) == ObjectState.COMMITTED
     assert account_reserved(factory, owner) == 2
+
+
+def replace_with_symlink(storage: FileStorage, key: str, target: Path) -> Path:
+    """Troca o arquivo do objeto por um symlink para `target`, como faria quem adultera o disco."""
+    path = storage.root.joinpath(*key.split("/"))
+    path.unlink()
+    path.symlink_to(target)
+    return path
+
+
+def replace_with_directory(storage: FileStorage, key: str) -> Path:
+    path = storage.root.joinpath(*key.split("/"))
+    path.unlink()
+    path.mkdir()
+    return path
+
+
+@pytest.mark.parametrize("target_exists", [True, False], ids=["alvo-existe", "link-sem-alvo"])
+def test_symlink_no_lugar_do_objeto_e_adulteracao_e_nao_presenca_nem_ausencia(
+    factory: sessionmaker[Session], storage: FileStorage, tmp_path: Path, target_exists: bool
+) -> None:
+    owner = create_user(factory, "a")
+    view = ready_upload(factory, storage, owner, b"abcd")
+    object_id, key = object_of(factory, view.id)
+    outside = tmp_path / "CANARY-alvo-fora-da-raiz"
+    if target_exists:
+        outside.write_bytes(b"segredo")
+    link = replace_with_symlink(storage, key, outside)
+    mark_mounted(storage)
+
+    report = sweep(factory, storage)
+
+    assert (report.checked, report.absent, report.unreadable, report.marked) == (1, 0, 0, 0)
+    assert report.tampered == 1
+    assert report.tampered_keys == (key,)
+    assert not report.governor_tripped
+    # Nada destrutivo: o objeto segue confirmado e com reserva, e o link e o alvo ficam como estão.
+    assert state_of(factory, object_id) == ObjectState.COMMITTED
+    assert account_reserved(factory, owner) == 4
+    assert link.is_symlink()
+    assert outside.exists() == target_exists
+
+
+def test_diretorio_no_lugar_do_objeto_tambem_e_adulteracao(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    view = ready_upload(factory, storage, create_user(factory, "a"), b"abcd")
+    object_id, key = object_of(factory, view.id)
+    directory = replace_with_directory(storage, key)
+    mark_mounted(storage)
+
+    report = sweep(factory, storage)
+
+    assert (report.checked, report.absent, report.marked, report.tampered) == (1, 0, 0, 1)
+    assert state_of(factory, object_id) == ObjectState.COMMITTED
+    assert directory.is_dir()
+
+
+def test_adulterado_ao_lado_de_presente_e_ausente_marca_so_o_ausente(
+    factory: sessionmaker[Session], storage: FileStorage, tmp_path: Path
+) -> None:
+    objects = sorted_objects(factory, storage, 3)
+    (_, present_key), (absent_id, absent_key), (tampered_id, tampered_key) = objects
+    storage.delete(absent_key)
+    replace_with_symlink(storage, tampered_key, tmp_path / "alvo")
+    mark_mounted(storage)
+
+    report = sweep(factory, storage)
+
+    assert (report.checked, report.absent, report.tampered, report.marked) == (3, 1, 1, 1)
+    assert report.tampered_keys == (tampered_key,)
+    assert state_of(factory, absent_id) == ObjectState.MISSING
+    assert state_of(factory, tampered_id) == ObjectState.COMMITTED
+    assert storage.stat(present_key).size_bytes == 1
+
+
+def test_lote_so_com_adulterados_nao_aciona_o_limitador_de_ausentes(
+    factory: sessionmaker[Session], storage: FileStorage, tmp_path: Path
+) -> None:
+    objects = sorted_objects(factory, storage, 2)
+    for _, key in objects:
+        replace_with_symlink(storage, key, tmp_path / "alvo")
+    mark_mounted(storage)
+
+    report = sweep(factory, storage)
+
+    assert (report.tampered, report.absent, report.marked, report.governor_tripped) == (
+        2,
+        0,
+        0,
+        False,
+    )
 
 
 def sorted_objects(

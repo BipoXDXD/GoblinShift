@@ -14,6 +14,7 @@ SIGKILL. `sweep_stale_temporaries` é a limpeza que a manutenção faz deles.
 """
 
 import errno
+import fcntl
 import hashlib
 import logging
 import os
@@ -60,7 +61,9 @@ class ObjectMissingError(StorageError):
 
 
 class ObjectTamperedError(StorageError):
-    """A chave existe, mas não é um arquivo comum que o storage poderia ter criado (symlink).
+    """A chave existe, mas não é um arquivo comum que o storage poderia ter criado.
+
+    Symlink, diretório ou FIFO no lugar do objeto.
 
     Evidência de adulteração, não de perda: não é `ObjectMissingError`, para nenhuma varredura
     tratá-la como ausente. A mensagem leva só a chave lógica, nunca o caminho no disco.
@@ -134,20 +137,39 @@ class FileStorage:
         path = self._path_for(key)
         try:
             # O_NOFOLLOW: um symlink plantado sob a raiz não desvia a leitura para fora dela.
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            # O_NONBLOCK: um FIFO plantado no lugar do arquivo bloquearia o `open` até aparecer
+            # um escritor, antes de qualquer checagem de tipo, e prenderia a thread de quem chama.
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except FileNotFoundError:
             raise ObjectMissingError(key) from None
         except OSError as error:
             if error.errno == errno.ELOOP:
                 raise ObjectTamperedError(key) from None
             raise
-        return os.fdopen(fd, "rb")
+        try:
+            # O_NOFOLLOW só barra symlink: diretório e FIFO abrem sem erro (o `fdopen` falharia
+            # com `IsADirectoryError`, cru e com o descritor aberto). Confere o tipo no próprio fd.
+            if not S_ISREG(os.fstat(fd).st_mode):
+                raise ObjectTamperedError(key)
+            # Só arquivo comum chega aqui: devolve o descritor ao modo bloqueante de sempre.
+            fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) & ~os.O_NONBLOCK)
+            return os.fdopen(fd, "rb")
+        except BaseException:
+            os.close(fd)
+            raise
 
     def stat(self, key: str) -> ObjectStat:
+        """Tamanho do objeto; o que não é arquivo comum é adulteração, como em `open`.
+
+        `lstat` não segue o link, e por isso enxerga um symlink (com ou sem alvo) ou um diretório
+        como existentes: sem a checagem de tipo, eles passariam por objeto presente.
+        """
         try:
             info = self._path_for(key).stat(follow_symlinks=False)
         except FileNotFoundError:
             raise ObjectMissingError(key) from None
+        if not S_ISREG(info.st_mode):
+            raise ObjectTamperedError(key)
         return ObjectStat(size_bytes=info.st_size)
 
     def is_mounted(self) -> bool:

@@ -1,5 +1,6 @@
 """`GET /artifacts/{id}/preview`: só o derivado do serviço, com os cabeçalhos de 3.6 (1.6, 2.2)."""
 
+import stat
 import uuid
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from goblinshift.files.tables import artifact, stored_object
 from goblinshift.platform.db import unit_of_work
 from tests.api.files_support import new_account, open_uses, publish, storage_of
 from tests.api.support import assert_problem
+from tests.fifo_support import fail_if_blocked, make_fifo
 
 pytestmark = pytest.mark.integration
 
@@ -210,4 +212,52 @@ def test_preview_trocado_por_symlink_responde_410_sem_expor_nada(
     assert_problem(response, 410, "GONE")
     for leaked in (key, str(storage.root), "CANARY", "Traceback"):
         assert leaked not in response.text
+    assert open_uses(factory) == 0
+
+
+def test_preview_trocado_por_diretorio_responde_410_sem_expor_nada(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with factory() as session:
+        key = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == preview)
+        ).scalar_one()
+    storage = storage_of(app)
+    storage.delete(key)
+    (storage.root / key).mkdir()
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "IsADirectoryError", "Traceback"):
+        assert leaked not in response.text
+    assert open_uses(factory) == 0
+
+
+def test_preview_trocado_por_fifo_responde_410_sem_bloquear_e_sem_expor_nada(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with factory() as session:
+        key = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == preview)
+        ).scalar_one()
+    storage = storage_of(app)
+    storage.delete(key)
+    make_fifo(storage.root / key)
+
+    with fail_if_blocked(storage.root / key):
+        response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "Traceback"):
+        assert leaked not in response.text
+    assert stat.S_ISFIFO((storage.root / key).lstat().st_mode)
     assert open_uses(factory) == 0

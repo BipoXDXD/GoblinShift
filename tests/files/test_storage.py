@@ -23,6 +23,7 @@ from goblinshift.files.storage import (
     StoredFile,
     TemporarySweep,
 )
+from tests.fifo_support import fail_if_blocked, make_fifo
 
 MIB = 1024 * 1024
 MAX_FILE_BYTES = 32 * MIB
@@ -150,6 +151,131 @@ def test_abrir_chave_que_e_symlink_falha_como_adulteracao_sem_expor_o_caminho(
     assert str(storage.root) not in str(raised.value)
     assert "CANARY" not in str(raised.value)
     assert link.is_symlink()
+
+
+def test_abrir_chave_que_e_diretorio_falha_como_adulteracao_sem_expor_o_caminho(
+    storage: FileStorage,
+) -> None:
+    # O `os.open` abre um diretório sem erro; sem checar o tipo, o `fdopen` falhava com
+    # `IsADirectoryError` (cru, com o caminho no texto) e deixava o descritor aberto.
+    directory = storage.root / "uploads" / "alvo"
+    directory.mkdir(parents=True)
+
+    with pytest.raises(ObjectTamperedError) as raised:
+        storage.open("uploads/alvo")
+
+    assert not isinstance(raised.value, ObjectMissingError)
+    assert str(storage.root) not in str(raised.value)
+    assert directory.is_dir()
+
+
+def test_abrir_chave_que_e_fifo_falha_como_adulteracao_sem_bloquear(storage: FileStorage) -> None:
+    # `open(O_RDONLY)` num FIFO sem escritor bloqueia antes do `fstat`: a thread do chamador
+    # ficava presa. É o mesmo caso do symlink e do diretório: adulteração, sem expor o caminho.
+    fifo = storage.root / "uploads" / "alvo"
+    fifo.parent.mkdir(parents=True)
+    make_fifo(fifo)
+
+    with fail_if_blocked(fifo), pytest.raises(ObjectTamperedError) as raised:
+        storage.open("uploads/alvo")
+
+    assert not isinstance(raised.value, ObjectMissingError)
+    assert str(storage.root) not in str(raised.value)
+    assert stat.S_ISFIFO(fifo.lstat().st_mode)
+
+
+def test_abrir_fifo_nao_vaza_descritor(storage: FileStorage) -> None:
+    fifo = storage.root / "uploads" / "alvo"
+    fifo.parent.mkdir(parents=True)
+    make_fifo(fifo)
+    before = _open_fd_count()
+
+    with fail_if_blocked(fifo):
+        for _ in range(10):
+            with pytest.raises(ObjectTamperedError):
+                storage.open("uploads/alvo")
+
+    assert _open_fd_count() == before
+
+
+def _open_fd_count() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+@pytest.mark.parametrize("planted", ["diretorio", "symlink"])
+def test_abrir_chave_adulterada_nao_vaza_descritor(
+    storage: FileStorage, tmp_path: Path, planted: str
+) -> None:
+    tampered = storage.root / "uploads" / "alvo"
+    tampered.parent.mkdir(parents=True)
+    if planted == "diretorio":
+        tampered.mkdir()
+    else:
+        tampered.symlink_to(tmp_path)
+    before = _open_fd_count()
+
+    for _ in range(10):
+        with pytest.raises(ObjectTamperedError):
+            storage.open("uploads/alvo")
+
+    assert _open_fd_count() == before
+
+
+def test_abrir_arquivo_comum_devolve_o_descritor_em_modo_bloqueante(storage: FileStorage) -> None:
+    # O `open` usa O_NONBLOCK só para não prender num FIFO; quem lê o arquivo (stream do download,
+    # cópia da entrada) recebe o descritor como sempre foi, sem o flag.
+    storage.create_exclusive("uploads/x", [b"abc"], MAX_FILE_BYTES)
+
+    with storage.open("uploads/x") as stream:
+        assert os.get_blocking(stream.fileno())
+
+
+def test_abrir_arquivo_comum_devolve_o_conteudo_e_nao_deixa_descritor_extra(
+    storage: FileStorage,
+) -> None:
+    storage.create_exclusive("uploads/a", [b"abcd"], max_bytes=10)
+    before = _open_fd_count()
+
+    with storage.open("uploads/a") as file:
+        assert file.read() == b"abcd"
+
+    assert _open_fd_count() == before
+
+
+def test_consultar_arquivo_comum_devolve_o_tamanho(storage: FileStorage) -> None:
+    storage.create_exclusive("uploads/a", [b"abcd"], max_bytes=10)
+
+    assert storage.stat("uploads/a").size_bytes == 4
+
+
+@pytest.mark.parametrize("target", ["arquivo", "pendente"])
+def test_consultar_chave_que_e_symlink_falha_como_adulteracao_sem_expor_o_caminho(
+    storage: FileStorage, tmp_path: Path, target: str
+) -> None:
+    # Como `open`: o symlink no lugar do objeto é adulteração, nunca um arquivo presente. Vale
+    # também para o link sem alvo, que o `lstat` enxerga como existente.
+    outside = tmp_path / "CANARY-alvo-fora-da-raiz"
+    if target == "arquivo":
+        outside.write_bytes(b"segredo")
+    link = storage.root / "uploads" / "alvo"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+
+    with pytest.raises(ObjectTamperedError) as raised:
+        storage.stat("uploads/alvo")
+
+    assert not isinstance(raised.value, ObjectMissingError)
+    assert str(storage.root) not in str(raised.value)
+    assert "CANARY" not in str(raised.value)
+    assert link.is_symlink()
+    assert outside.exists() == (target == "arquivo")
+
+
+def test_consultar_chave_que_e_diretorio_falha_como_adulteracao(storage: FileStorage) -> None:
+    (storage.root / "uploads" / "alvo").mkdir(parents=True)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.stat("uploads/alvo")
 
 
 def test_diretorios_e_arquivos_sao_privados_do_dono(storage: FileStorage) -> None:
