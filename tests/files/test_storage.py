@@ -23,6 +23,7 @@ from goblinshift.files.storage import (
     StoredFile,
     TemporarySweep,
 )
+from tests.fifo_support import fail_if_blocked, make_fifo
 
 MIB = 1024 * 1024
 MAX_FILE_BYTES = 32 * MIB
@@ -168,6 +169,35 @@ def test_abrir_chave_que_e_diretorio_falha_como_adulteracao_sem_expor_o_caminho(
     assert directory.is_dir()
 
 
+def test_abrir_chave_que_e_fifo_falha_como_adulteracao_sem_bloquear(storage: FileStorage) -> None:
+    # `open(O_RDONLY)` num FIFO sem escritor bloqueia antes do `fstat`: a thread do chamador
+    # ficava presa. É o mesmo caso do symlink e do diretório: adulteração, sem expor o caminho.
+    fifo = storage.root / "uploads" / "alvo"
+    fifo.parent.mkdir(parents=True)
+    make_fifo(fifo)
+
+    with fail_if_blocked(fifo), pytest.raises(ObjectTamperedError) as raised:
+        storage.open("uploads/alvo")
+
+    assert not isinstance(raised.value, ObjectMissingError)
+    assert str(storage.root) not in str(raised.value)
+    assert stat.S_ISFIFO(fifo.lstat().st_mode)
+
+
+def test_abrir_fifo_nao_vaza_descritor(storage: FileStorage) -> None:
+    fifo = storage.root / "uploads" / "alvo"
+    fifo.parent.mkdir(parents=True)
+    make_fifo(fifo)
+    before = _open_fd_count()
+
+    with fail_if_blocked(fifo):
+        for _ in range(10):
+            with pytest.raises(ObjectTamperedError):
+                storage.open("uploads/alvo")
+
+    assert _open_fd_count() == before
+
+
 def _open_fd_count() -> int:
     return len(os.listdir("/dev/fd"))
 
@@ -189,6 +219,15 @@ def test_abrir_chave_adulterada_nao_vaza_descritor(
             storage.open("uploads/alvo")
 
     assert _open_fd_count() == before
+
+
+def test_abrir_arquivo_comum_devolve_o_descritor_em_modo_bloqueante(storage: FileStorage) -> None:
+    # O `open` usa O_NONBLOCK só para não prender num FIFO; quem lê o arquivo (stream do download,
+    # cópia da entrada) recebe o descritor como sempre foi, sem o flag.
+    storage.create_exclusive("uploads/x", [b"abc"], MAX_FILE_BYTES)
+
+    with storage.open("uploads/x") as stream:
+        assert os.get_blocking(stream.fileno())
 
 
 def test_abrir_arquivo_comum_devolve_o_conteudo_e_nao_deixa_descritor_extra(
