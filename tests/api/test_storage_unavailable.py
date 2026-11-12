@@ -73,7 +73,7 @@ def test_oserror_de_disco_indisponivel_responde_503_com_retry_after(
 
     body = assert_problem(response, 503, "SERVICE_UNAVAILABLE")
     assert body["instance"] == f"/_disk/{code}"
-    assert response.headers["retry-after"] == "5"
+    assert response.headers["retry-after"] == "60"
     _assert_no_leak(response.text, caplog)
     assert [r.levelno for r in caplog.records if r.name == LOGGER] == [logging.ERROR]
 
@@ -116,7 +116,7 @@ def test_put_do_conteudo_com_disco_indisponivel_responde_503_e_falha_o_upload(
 
     body = assert_problem(response, 503, "SERVICE_UNAVAILABLE")
     assert body["instance"] == item["content"]["url"]
-    assert response.headers["retry-after"] == "5"
+    assert response.headers["retry-after"] == "60"
     _assert_no_leak(response.text, caplog)
     details: dict[str, Any] = client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()
     assert details["state"] == "failed"

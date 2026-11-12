@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 # Espera sugerida quando o banco ou o pool não atende: da ordem do `pool_timeout` de 5 s.
 DATABASE_RETRY_AFTER_SECONDS = 5
+# Disco cheio ou erro de E/S não se resolve em segundos: um prazo curto convidaria a martelar.
+# Mesmo valor do piso de `capacity_problems.STORAGE_MIN_RETRY_AFTER`, que tem outro significado
+# (espera até a cota liberar) e por isso não é reaproveitado.
+STORAGE_RETRY_AFTER_SECONDS = 60
 # O psycopg põe em `OperationalError` também erros de programação (55000, 3B001, 2F005, 54000...);
 # só estes SQLSTATEs dizem que repetir a requisição pode dar certo. 40001 e 40P01 desfazem a
 # transação inteira, e é a contenção que os causa: chegam aqui ao esgotar as tentativas de
@@ -396,7 +400,7 @@ def _database_unavailable_response(exc: Exception, instance: str, request_id: st
         request_id,
         extra={"fields": _database_error_fields(exc)},
     )
-    return _service_unavailable_response(instance, request_id)
+    return _service_unavailable_response(instance, request_id, DATABASE_RETRY_AFTER_SECONDS)
 
 
 def _storage_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
@@ -411,16 +415,18 @@ def _storage_unavailable_response(exc: Exception, instance: str, request_id: str
             }
         },
     )
-    return _service_unavailable_response(instance, request_id)
+    return _service_unavailable_response(instance, request_id, STORAGE_RETRY_AFTER_SECONDS)
 
 
-def _service_unavailable_response(instance: str, request_id: str) -> JSONResponse:
+def _service_unavailable_response(
+    instance: str, request_id: str, retry_after_seconds: int
+) -> JSONResponse:
     return problem_response(
         code=ProblemCode.SERVICE_UNAVAILABLE,
         detail="O serviço está temporariamente indisponível; tente de novo depois do Retry-After.",
         instance=instance,
         request_id=request_id,
-        headers={"Retry-After": str(DATABASE_RETRY_AFTER_SECONDS)},
+        headers={"Retry-After": str(retry_after_seconds)},
     )
 
 
