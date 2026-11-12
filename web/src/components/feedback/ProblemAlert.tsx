@@ -66,12 +66,21 @@ function withRetryAfter(message: string, retryAfterMs: number | null): string {
   return `${message} ${wait}`;
 }
 
+/** `mailto:` do suporte com o código do pedido no assunto e no corpo, codificado (RFC 6068). */
+function supportMailto(requestId: string): string {
+  const { address, subject, body } = TEXT.failure.support;
+  return `mailto:${address}?subject=${encodeURIComponent(subject(requestId))}&body=${encodeURIComponent(body(requestId))}`;
+}
+
 interface ProblemAlertProps {
   readonly failure: DisplayableFailure;
   readonly messages?: ProblemMessages;
 }
 
-/** Falha mostrada à pessoa, em `role="alert"`, com o código do pedido quando há um. */
+/**
+ * Falha mostrada à pessoa, em `role="alert"`. Com código do pedido, mostra o código e o link para
+ * escrever ao suporte (só aqui, não no rodapé: o código é o que liga a mensagem ao pedido).
+ */
 export function ProblemAlert({ failure, messages }: ProblemAlertProps): ReactElement {
   const { message, requestId } = describeFailure(failure, messages);
   return (
@@ -83,7 +92,17 @@ export function ProblemAlert({ failure, messages }: ProblemAlertProps): ReactEle
       <div className="flex flex-col gap-1">
         <p className="font-semibold">{message}</p>
         {requestId !== null && (
-          <p className="font-mono text-sm">{TEXT.failure.requestId(requestId)}</p>
+          <>
+            <p className="font-mono text-sm">{TEXT.failure.requestId(requestId)}</p>
+            <p className="text-sm">
+              <a
+                href={supportMailto(requestId)}
+                className="font-semibold underline underline-offset-2"
+              >
+                {TEXT.failure.support.link}
+              </a>
+            </p>
+          </>
         )}
       </div>
     </div>

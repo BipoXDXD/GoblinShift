@@ -157,7 +157,7 @@ describe("Execução", () => {
     setup(() => problemResponse(404, "NOT_FOUND"));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Não encontramos o que você pediu.");
+    expect(alert).toHaveTextContent("Não encontramos este item.");
     expect(alert).not.toHaveTextContent("Detail from server");
   });
 
@@ -232,7 +232,7 @@ function runRequests(requests: readonly Request[]): number {
 }
 
 const FORBIDDEN_TEXT = "Você não tem permissão para esta ação.";
-const NOT_FOUND_TEXT = "Não encontramos o que você pediu.";
+const NOT_FOUND_TEXT = "Não encontramos este item.";
 const TIMEOUT_TEXT = "O servidor demorou demais para responder.";
 /** Prazo do cliente da API (client.ts), que o relógio falso atravessa no teste do timeout. */
 const CLIENT_TIMEOUT_MS = 30_000;
@@ -417,7 +417,7 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
 
   it.each([
     [403, "FORBIDDEN", "Você não tem permissão para esta ação."],
-    [404, "NOT_FOUND", "Não encontramos o que você pediu"],
+    [404, "NOT_FOUND", "Não encontramos este item"],
     [410, "GONE", "Isto expirou"],
   ])(
     "falha %i, que o polling não resolve sozinho, vira alerta na primeira vez e para o polling",

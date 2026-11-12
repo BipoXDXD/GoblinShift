@@ -371,6 +371,36 @@ describe("Bancada", () => {
     expect(summary).not.toHaveTextContent("Value error");
   });
 
+  it("erro por campo com código sem texto próprio mostra a frase padrão, no resumo e no campo", async () => {
+    const { user } = await setup({
+      runs: () =>
+        problemResponse(422, "VALIDATION_FAILED", {
+          errors: [
+            {
+              field: "body.parameters.output_columns",
+              code: "codigo_que_a_interface_nao_conhece",
+              message: "raw message from server",
+            },
+          ],
+        }),
+    });
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    const summary = await screen.findByRole("alert");
+    expect(summary).toHaveTextContent(
+      /O servidor recusou este valor\. Confira o formato pedido na descrição do campo\./i,
+    );
+    expect(summary).not.toHaveTextContent("raw message from server");
+    expect(
+      screen.getByRole("textbox", { name: "Colunas finais, na ordem" }),
+    ).toHaveAccessibleDescription(
+      /Erro: O servidor recusou este valor\. Confira o formato pedido na descrição do campo\.$/,
+    );
+  });
+
   it("recusa do servidor aparece com texto próprio, nunca o problem+json", async () => {
     const { user } = await setup({ runs: () => problemResponse(409, "ACTIVE_RUN_LIMIT") });
     await chooseFiles(user, ["a.csv"]);

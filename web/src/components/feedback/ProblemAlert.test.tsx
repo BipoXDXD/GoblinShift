@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { PROBLEM_CODES, type ApiProblem } from "../../api/problem";
 import { axeViolations } from "../../test/axe";
+import { TEXT } from "../../text";
 import { describeFailure, ProblemAlert } from "./ProblemAlert";
 
 const problem = (code: ApiProblem["code"], status: number): ApiProblem => ({
@@ -27,6 +28,70 @@ describe("describeFailure", () => {
     expect(description.message).not.toBe("");
     expect(description.message).not.toContain("detail from server");
     expect(description.message).not.toContain("Title from server");
+  });
+
+  // Frases literais (M3 da auditoria 5e): cada uma diz o que aconteceu e o que a pessoa pode fazer.
+  // Escritas à mão, nunca lidas do text.ts, para o teste falhar se uma frase perder a ação.
+  it.each([
+    [
+      "BODY_TOO_LARGE",
+      413,
+      "O arquivo ou o pedido passa do tamanho permitido. Confira os limites da receita e envie arquivos menores.",
+    ],
+    [
+      "UNSUPPORTED_MEDIA_TYPE",
+      415,
+      "Este tipo de arquivo não é aceito aqui. Escolha um dos formatos da receita.",
+    ],
+    [
+      "INSUFFICIENT_SCOPE",
+      403,
+      "A chave usada não tem permissão para esta ação. Crie uma chave com o escopo necessário no Acesso.",
+    ],
+    [
+      "FORBIDDEN",
+      403,
+      "Você não tem permissão para esta ação. Confira se entrou com a conta certa.",
+    ],
+    [
+      "NOT_FOUND",
+      404,
+      "Não encontramos este item. Ele pode ter sido removido ou ter expirado. Atualize a página e confira a lista.",
+    ],
+    ["GONE", 410, "Isto expirou e não está mais disponível. Comece de novo pela Oficina."],
+    [
+      "METHOD_NOT_ALLOWED",
+      405,
+      "Esta ação não é aceita aqui. Recarregue a página e tente de novo.",
+    ],
+  ] as const)("%s diz o que houve e o que fazer", (code, status, expected) => {
+    const description = describeFailure({
+      kind: "problem",
+      status,
+      problem: problem(code, status),
+      retryAfterMs: null,
+    });
+
+    expect(description.message).toBe(expected);
+  });
+
+  // O envio de arquivos e a lista de exclusões mostram só a frase, sem o código nem o link: uma frase
+  // que mandasse escrever ao suporte apontaria para um canal que essas telas não oferecem.
+  it.each(PROBLEM_CODES)("a frase de %s não depende do link do suporte", (code) => {
+    const description = describeFailure({
+      kind: "problem",
+      status: 400,
+      problem: problem(code, 400),
+      retryAfterMs: null,
+    });
+
+    expect(description.message).not.toMatch(/suporte/i);
+  });
+
+  it("erro de campo sem texto próprio diz onde conferir o formato", () => {
+    expect(TEXT.workbench.serverFieldErrors.fallback).toBe(
+      "O servidor recusou este valor. Confira o formato pedido na descrição do campo.",
+    );
   });
 
   it("erro da própria interface diz de onde veio e pede para recarregar", () => {
@@ -126,6 +191,49 @@ describe("ProblemAlert", () => {
     expect(alert).toHaveTextContent("req-123");
     expect(alert).not.toHaveTextContent("{");
     expect(alert).not.toHaveTextContent("detail from server");
+  });
+
+  it("com código do pedido, oferece escrever para o suporte com o código no assunto e no corpo", () => {
+    const requestId = "req 1&x=2?y#z";
+    render(
+      <ProblemAlert
+        failure={{
+          kind: "problem",
+          status: 500,
+          problem: { ...problem("INTERNAL_ERROR", 500), request_id: requestId },
+          retryAfterMs: null,
+        }}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "Escrever para o suporte por e-mail" });
+    expect(link).toHaveAttribute(
+      "href",
+      "mailto:contato@goblinshift.dev" +
+        "?subject=Suporte%20GoblinShift%3A%20pedido%20req%201%26x%3D2%3Fy%23z" +
+        "&body=C%C3%B3digo%20do%20pedido%3A%20req%201%26x%3D2%3Fy%23z",
+    );
+  });
+
+  it("sem código do pedido, não oferece o link do suporte", () => {
+    render(<ProblemAlert failure={{ kind: "network" }} />);
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("com o link do suporte, não tem violações do axe", async () => {
+    const { container } = render(
+      <ProblemAlert
+        failure={{
+          kind: "problem",
+          status: 403,
+          problem: problem("FORBIDDEN", 403),
+          retryAfterMs: null,
+        }}
+      />,
+    );
+
+    expect(await axeViolations(container)).toEqual([]);
   });
 
   it("não tem violações do axe", async () => {
