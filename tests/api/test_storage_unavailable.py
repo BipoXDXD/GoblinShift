@@ -164,20 +164,54 @@ def _storage_key_of(factory: sessionmaker[Session], artifact_id: uuid.UUID) -> s
     return key
 
 
+class _FailingReadFile:
+    """Arquivo que abre, mas falha na leitura: o disco que dá EIO depois do `open`."""
+
+    def __init__(self, code: int) -> None:
+        self._code = code
+
+    def __enter__(self) -> _FailingReadFile:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        raise _disk_error(self._code)
+
+
+# `at` diz onde o erro acontece: no `open` do storage, ou no `read` do preview, que lê o arquivo
+# inteiro antes de responder. O download não entra no `read`: o corpo é transmitido depois que os
+# cabeçalhos saem, e o status já não muda.
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("route", "code", "status", "problem_code", "retry_after"),
+    ("route", "code", "at", "status", "problem_code", "retry_after"),
     [
         pytest.param(
-            "download", errno.ENOSPC, 503, "SERVICE_UNAVAILABLE", "60", id="download-ENOSPC"
+            "download", errno.ENOSPC, "open", 503, "SERVICE_UNAVAILABLE", "60", id="download-ENOSPC"
         ),
-        pytest.param("download", errno.EIO, 503, "SERVICE_UNAVAILABLE", "60", id="download-EIO"),
-        pytest.param("download", errno.ELOOP, 410, "GONE", None, id="download-ELOOP-symlink"),
         pytest.param(
-            "preview", errno.ENOSPC, 503, "SERVICE_UNAVAILABLE", "60", id="preview-ENOSPC"
+            "download", errno.EIO, "open", 503, "SERVICE_UNAVAILABLE", "60", id="download-EIO"
         ),
-        pytest.param("preview", errno.EIO, 503, "SERVICE_UNAVAILABLE", "60", id="preview-EIO"),
-        pytest.param("preview", errno.ELOOP, 410, "GONE", None, id="preview-ELOOP-symlink"),
+        pytest.param(
+            "download", errno.ELOOP, "open", 410, "GONE", None, id="download-ELOOP-symlink"
+        ),
+        pytest.param(
+            "preview", errno.ENOSPC, "open", 503, "SERVICE_UNAVAILABLE", "60", id="preview-ENOSPC"
+        ),
+        pytest.param(
+            "preview", errno.EIO, "open", 503, "SERVICE_UNAVAILABLE", "60", id="preview-EIO"
+        ),
+        pytest.param(
+            "preview",
+            errno.EIO,
+            "read",
+            503,
+            "SERVICE_UNAVAILABLE",
+            "60",
+            id="preview-EIO-na-leitura",
+        ),
+        pytest.param("preview", errno.ELOOP, "open", 410, "GONE", None, id="preview-ELOOP-symlink"),
     ],
 )
 def test_leitura_com_falha_de_es_do_storage_responde_503_ou_410_sem_vazar(
@@ -189,12 +223,14 @@ def test_leitura_com_falha_de_es_do_storage_responde_503_ou_410_sem_vazar(
     tmp_path: Path,
     route: str,
     code: int,
+    at: str,
     status: int,
     problem_code: str,
     retry_after: str | None,
 ) -> None:
-    # ENOSPC e EIO vêm do `open` do storage; ELOOP é o symlink de verdade, que o `O_NOFOLLOW`
-    # vira `ObjectTamperedError`. O preview de uma saída lê o objeto do artefato de preview.
+    # ENOSPC e EIO vêm do `open` (ou do `read`) do storage; ELOOP é o symlink de verdade, que o
+    # `O_NOFOLLOW` vira `ObjectTamperedError`. O preview de uma saída lê o objeto do artefato de
+    # preview.
     owner, auth = new_account(factory)
     source = publish(app, owner, b"conteudo", "images/foto.png")
     preview = publish(app, owner, b"jpeg", "previews/foto.jpg", preview_of=source)
@@ -205,6 +241,8 @@ def test_leitura_com_falha_de_es_do_storage_responde_503_ou_410_sem_vazar(
         target.write_bytes(b"segredo")
         storage.delete(key)
         (storage.root / key).symlink_to(target)
+    elif at == "read":
+        monkeypatch.setattr(storage, "open", lambda requested: _FailingReadFile(code))
     else:
 
         def failing_open(requested: str) -> Any:
@@ -224,3 +262,4 @@ def test_leitura_com_falha_de_es_do_storage_responde_503_ou_410_sem_vazar(
     _assert_no_leak(response.text, caplog)
     for leaked in (key, str(storage.root), "erro de disco", os.strerror(code)):
         assert leaked not in response.text
+        assert leaked not in caplog.text
