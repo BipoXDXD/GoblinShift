@@ -10,6 +10,7 @@ import { expect, test } from "../support/test";
 test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", async ({
   page,
   context,
+  apiKey,
 }) => {
   const bodies: Promise<string>[] = [];
   const credentialsFromPage: string[] = [];
@@ -32,15 +33,15 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
 
   const served = await Promise.all(bodies);
   expect(served.length, "HTML, theme-init.js, JS e CSS lidos").toBeGreaterThanOrEqual(4);
-  expect(served.filter((body) => body.includes(E2E.apiKey))).toEqual([]);
+  expect(served.filter((body) => body.includes(apiKey))).toEqual([]);
   const storage = await page.evaluate(() =>
     JSON.stringify({
       local: Object.entries(localStorage),
       session: Object.entries(sessionStorage),
     }),
   );
-  expect(storage).not.toContain(E2E.apiKey);
-  expect(JSON.stringify(await context.cookies())).not.toContain(E2E.apiKey);
+  expect(storage).not.toContain(apiKey);
+  expect(JSON.stringify(await context.cookies())).not.toContain(apiKey);
   expect(credentialsFromPage, "pedidos com Authorization montado pelo bundle").toEqual([]);
 });
 

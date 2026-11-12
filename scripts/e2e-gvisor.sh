@@ -3,8 +3,10 @@
 # Roda só no runner efêmero da CI: grava em /etc, /var/lib e /srv e instala um serviço systemd.
 #
 #   scripts/e2e-gvisor.sh up                 sobe executor-ctl e pilha (exige runsc no Docker)
-#   scripts/e2e-gvisor.sh journeys           cria conta e chave, roda as specs e confere o runtime
+#   scripts/e2e-gvisor.sh journeys           cria uma conta e chave por arquivo de spec, roda as specs,
+#                                            confere que nenhuma resposta foi 429 e o runtime
 #   scripts/e2e-gvisor.sh verify <arquivo>   confere o runtime gravado contra o banco
+#   scripts/e2e-gvisor.sh rate-limits <arquivo>  falha se o log do Nginx tiver resposta 429
 #   scripts/e2e-gvisor.sh logs <diretório>   guarda os logs da pilha e do executor-ctl
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,6 +21,8 @@ REGISTRY_ADDRESS=127.0.0.1:5000
 EXECUTOR_REPOSITORY="$REGISTRY_ADDRESS/goblinshift-executor"
 READY_ATTEMPTS=90
 RUNSC=runsc
+SPEC_DIR="$ROOT/web/e2e/specs"
+E2E_KEY_SCOPES=files:read,files:write,runs:read,runs:write,presets:read,presets:write
 
 compose() {
   docker compose -f "$ROOT/compose.yaml" -f "$ROOT/compose.e2e-gvisor.yaml" "$@"
@@ -101,13 +105,43 @@ record_runtimes() {
   done
 }
 
+# O limite de leituras (120 por minuto) vale por conta. Com uma conta só para a suíte inteira, o
+# run 43143543196 fez 133 GETs em 60 s e o 429 chegou como timeout do `expect` (issue #338). Cada
+# arquivo de spec ganha a conta própria, para desktop e celular: medido no Compose local, o maior
+# consumo de um arquivo foi 51 leituras por minuto (journeys e theme), contra 120 da conta única.
+# O resultado é o objeto JSON de GS_E2E_API_KEYS, com a chave de cada arquivo (variável SPEC_KEYS,
+# não saída, para o `::add-mask::` chegar ao log do job). Uma ida só ao container, sem o custo de
+# um `docker compose exec` por chave.
+# Recebe o arquivo da spec ($1) e os escopos ($2); imprime "<arquivo> <chave>".
+# shellcheck disable=SC2016 # expande no sh do container, não aqui
+ISSUE_ACCOUNT='
+user_id="$(gs-admin create-user --display-name "E2E $1")" || exit 255
+key="$(gs-admin issue-key --user "$user_id" --days 1 --scopes "$2")" || exit 255
+printf "%s %s\n" "$1" "$key"
+'
+SPEC_KEYS='{}'
+issue_spec_keys() {
+  local ids=() spec
+  for spec in "$SPEC_DIR"/*.spec.ts; do
+    ids+=("$(basename "$spec")")
+  done
+  local lines
+  # Quatro em paralelo: cada `gs-admin` sobe um Python, e em série as contas levavam 1 min. Cada
+  # linha sai de um único printf, curta o bastante para não se misturar com as dos vizinhos.
+  lines="$(printf '%s\n' "${ids[@]}" |
+    compose exec -T api xargs -P 4 -I{} sh -c "$ISSUE_ACCOUNT" _ {} "$E2E_KEY_SCOPES")"
+  local id key
+  while read -r id key; do
+    echo "::add-mask::$key"
+    SPEC_KEYS="$(jq --compact-output --arg id "$id" --arg key "$key" '. + {($id): $key}' <<<"$SPEC_KEYS")"
+  done <<<"$lines"
+  [[ "$(jq length <<<"$SPEC_KEYS")" -eq "${#ids[@]}" ]] || fail "faltou conta para alguma spec"
+}
+
 journeys() {
   require_ephemeral_runner
-  local user_id key runtimes status=0 events_pid recorder_pid
-  user_id="$(compose exec -T api gs-admin create-user --display-name "E2E gVisor")"
-  key="$(compose exec -T api gs-admin issue-key --user "$user_id" --days 1 \
-    --scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write)"
-  echo "::add-mask::$key"
+  local runtimes nginx_log started_at status=0 events_pid recorder_pid
+  issue_spec_keys
 
   runtimes="$(mktemp)"
   exec 3< <(docker events --filter type=container --filter event=start \
@@ -117,13 +151,35 @@ journeys() {
   recorder_pid=$!
   exec 3<&-
 
-  (cd "$ROOT/web" && E2E_BASE_URL="$BASE_URL" GS_E2E_API_KEY="$key" npm run e2e) || status=$?
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  (cd "$ROOT/web" && E2E_BASE_URL="$BASE_URL" GS_E2E_API_KEYS="$SPEC_KEYS" npm run e2e) || status=$?
 
   # O `docker events` caído antes da hora não mascara o resultado: o verify acusa a falta.
   kill "$events_pid" 2>/dev/null || true
   wait "$recorder_pid"
+  # Antes do status das specs: com 429 no log, a causa aparece junto da falha, e não só o timeout.
+  nginx_log="$(mktemp)"
+  compose logs --no-color --since "$started_at" nginx >"$nginx_log" 2>&1 || true
+  rate_limits "$nginx_log" || [[ $status -ne 0 ]] || status=1
   [[ $status -eq 0 ]] || exit "$status"
   verify "$runtimes"
+}
+
+# O Nginx registra todo 429, o dele (`limit_req`) e o da API (limite por conta). A SPA não repete
+# 4xx, então o 429 aparece como elemento que não veio, e o teste morre num timeout de 5 s. Qualquer
+# 429 nas specs é falha com a causa escrita.
+rate_limits() {
+  local log="$1" total
+  total="$(grep -c '"status":429' "$log" || true)"
+  if [[ "$total" -eq 0 ]]; then
+    return 0
+  fi
+  echo "::error::$total resposta(s) 429 durante as specs: alguma conta passou do limite por minuto." >&2
+  echo "Os timeouts das specs são só o sintoma. Caminhos e origem (upstream vazio: limit_req do Nginx):" >&2
+  grep '"status":429' "$log" |
+    sed -E 's/.*"path":"([^"]*)".*"upstream_status":"([^"]*)".*/\1 upstream=\2/' |
+    sort | uniq -c | sort -rn | head -20 >&2
+  return 1
 }
 
 attempts_in_database() {
@@ -152,6 +208,7 @@ case "${1:-}" in
   up) up ;;
   journeys) journeys ;;
   verify) verify "${2:?informe o arquivo com os runtimes}" ;;
+  rate-limits) rate_limits "${2:?informe o arquivo com o log do Nginx}" ;;
   logs) logs "${2:?informe o diretório de saída}" ;;
-  *) fail "uso: $0 up|journeys|verify <arquivo>|logs <diretório>" ;;
+  *) fail "uso: $0 up|journeys|verify <arquivo>|rate-limits <arquivo>|logs <diretório>" ;;
 esac

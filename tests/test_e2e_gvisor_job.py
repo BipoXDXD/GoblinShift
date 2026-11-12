@@ -228,6 +228,55 @@ def test_verify_recusa_contagem_diferente_do_banco(
     assert verify(fake_docker, tmp_path, recorded, attempts) != 0
 
 
+NGINX_200 = (
+    'nginx-1  | {"time":"2026-11-12T01:00:00+00:00","client":"172.18.0.0","method":"GET",'
+    '"path":"/api/v1/me","status":200,"bytes_sent":429,"request_time":0.004,'
+    '"upstream_status":"200","upstream_response_time":"0.004","upstream_connect_time":"0.000"}\n'
+)
+NGINX_429_DA_API = NGINX_200.replace('"status":200', '"status":429').replace(
+    '"upstream_status":"200"', '"upstream_status":"429"'
+)
+NGINX_429_DO_LIMIT_REQ = NGINX_200.replace('"status":200', '"status":429').replace(
+    '"upstream_status":"200"', '"upstream_status":""'
+)
+
+
+def rate_limits(tmp_path: Path, log: str) -> subprocess.CompletedProcess[str]:
+    log_file = tmp_path / "nginx.log"
+    log_file.write_text(log)
+    return subprocess.run(  # noqa: S603 - argv fixo
+        ["bash", str(SCRIPT), "rate-limits", str(log_file)],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+
+def test_rate_limits_aceita_log_sem_429(tmp_path: Path) -> None:
+    # O 429 do bytes_sent não conta: só o status da resposta.
+    assert rate_limits(tmp_path, NGINX_200 * 3).returncode == 0
+
+
+@pytest.mark.parametrize("line", [NGINX_429_DA_API, NGINX_429_DO_LIMIT_REQ])
+def test_rate_limits_recusa_429_com_a_causa_escrita(tmp_path: Path, line: str) -> None:
+    # Sem esta recusa, o 429 reaparece como timeout de 5 s numa spec (issue #338).
+    completed = rate_limits(tmp_path, NGINX_200 + line * 2)
+
+    assert completed.returncode != 0
+    assert "2 resposta(s) 429" in completed.stderr
+    assert "/api/v1/me" in completed.stderr
+
+
+def test_cada_arquivo_de_spec_tem_a_conta_propria() -> None:
+    # A suíte numa conta só estourou o limite de 120 leituras por minuto (issue #338).
+    script = SCRIPT.read_text()
+
+    assert "GS_E2E_API_KEYS=" in script
+    assert "GS_E2E_API_KEY=" not in script
+    assert '"$SPEC_DIR"/*.spec.ts' in script
+
+
 @pytest.mark.parametrize("command", ["up", "journeys"])
 def test_o_script_recusa_rodar_fora_do_runner_efemero(command: str, tmp_path: Path) -> None:
     # Ele escreve em /etc, /var/lib e /srv e instala um serviço: na VPS seria um desastre.

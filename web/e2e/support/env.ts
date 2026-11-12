@@ -3,7 +3,10 @@
 // - Local (padrão, o do CI): o build de dist/ servido por e2e/server/serve-dist.ts e a API falsa
 //   no processo do Playwright. A chave é um canário gerado a cada execução.
 // - Remoto (E2E_BASE_URL definido): a SPA e a API reais do Compose local, com escrita. A chave vem de
-//   GS_E2E_API_KEY, que só este processo lê (decisão U2 do plano de fechamento da fatia 7).
+//   GS_E2E_API_KEY, que só este processo lê (decisão U2 do plano de fechamento da fatia 7). Com
+//   GS_E2E_API_KEYS (objeto JSON), cada spec e projeto usa a sua conta: o limite de leituras por
+//   minuto vale por conta (issue #338, specKeys.ts), e a chave única vira só o recurso de quem roda
+//   à mão.
 // - VPS (E2E_VPS=1, com E2E_BASE_URL): só specs/vps.spec.ts, as jornadas de leitura, no Chromium e
 //   no Firefox. A chave é opcional: sem ela, as jornadas que exigem conta são puladas com o motivo.
 import { randomUUID } from "node:crypto";
@@ -11,6 +14,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { parseSpecKeys } from "./specKeys.ts";
 import { assertLocalWriteTarget } from "./writeTarget.ts";
 
 const PRODUCTION_ORIGIN = "https://goblinshift.dev";
@@ -27,6 +31,8 @@ interface E2EEnv {
   readonly apiKey: string;
   /** Há uma conta (a chave) para as jornadas que a exigem. */
   readonly hasAccount: boolean;
+  /** Uma chave por arquivo de spec; vazio, vale `apiKey` para todas (specKeys.ts). */
+  readonly specKeys: ReadonlyMap<string, string>;
   /** Onde a API falsa grava os artefatos que o servidor local entrega (modo local). */
   readonly artifactsDir: string | null;
 }
@@ -43,14 +49,18 @@ function readEnv(): E2EEnv {
       remote: false,
       vps: false,
       hasAccount: true,
+      specKeys: new Map(),
       // Fixa por variável só para o sabotage.ts plantar a mesma chave no bundle.
       apiKey: process.env["GS_E2E_API_KEY"] ?? `CANARY-${randomUUID()}`,
       artifactsDir: sharedArtifactsDir(),
     };
   }
   const apiKey = process.env["GS_E2E_API_KEY"] ?? "";
-  if (apiKey === "" && !vps) {
-    throw new Error("E2E_BASE_URL exige GS_E2E_API_KEY com a chave da conta de teste.");
+  const specKeys = vps ? new Map<string, string>() : parseSpecKeys(process.env["GS_E2E_API_KEYS"]);
+  if (apiKey === "" && specKeys.size === 0 && !vps) {
+    throw new Error(
+      "E2E_BASE_URL exige GS_E2E_API_KEY (ou GS_E2E_API_KEYS) com a chave da conta de teste.",
+    );
   }
   if (!vps) {
     assertLocalWriteTarget(remoteUrl);
@@ -64,7 +74,8 @@ function readEnv(): E2EEnv {
     remote: true,
     vps,
     apiKey,
-    hasAccount: apiKey !== "",
+    hasAccount: apiKey !== "" || specKeys.size > 0,
+    specKeys,
     artifactsDir: null,
   };
 }
