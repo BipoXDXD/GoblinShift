@@ -1166,6 +1166,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1268,6 +1270,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1350,6 +1354,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1432,6 +1438,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1561,6 +1569,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1643,6 +1653,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1777,6 +1789,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1869,6 +1883,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -1996,6 +2012,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2144,6 +2162,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2238,6 +2258,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2330,6 +2352,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2424,6 +2448,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2528,6 +2554,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2633,6 +2661,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -2715,6 +2745,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3011,6 +3043,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3107,6 +3141,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3438,6 +3474,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3563,6 +3601,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3662,6 +3702,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3971,6 +4013,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4114,6 +4158,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4208,6 +4254,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4302,6 +4350,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4405,6 +4455,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -4507,6 +4559,8 @@ export interface operations {
             /** @description Service Unavailable */
             503: {
                 headers: {
+                    /** @description Segundos até poder repetir a requisição. */
+                    "Retry-After": string;
                     [name: string]: unknown;
                 };
                 content: {
