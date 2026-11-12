@@ -40,7 +40,7 @@ from goblinshift.files.errors import (
     TransferLimitReachedError,
 )
 from goblinshift.files.states import ArtifactRole, Availability, TransferDirection
-from goblinshift.files.storage import ObjectMissingError
+from goblinshift.files.storage import ObjectMissingError, ObjectTamperedError
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
 from goblinshift.platform.db import unit_of_work
 
@@ -122,6 +122,11 @@ def download_artifact(
         logger.error("download: objeto do artefato %s ausente do storage", artifact_id)
         finish()
         raise _artifact_problem(ArtifactGoneError()) from None
+    except ObjectTamperedError:
+        # Mesma resposta, sem gravar `missing`: o objeto existe e não pode ser dado como perdido.
+        logger.error("download: objeto do artefato %s adulterado no storage", artifact_id)
+        finish()
+        raise _artifact_problem(ArtifactGoneError()) from None
     except BaseException:
         finish()
         raise
@@ -175,6 +180,9 @@ def get_artifact_preview(
             content = file.read(PREVIEW_READ_MAX_BYTES + 1)
     except ObjectMissingError:
         logger.error("preview: objeto do artefato %s ausente do storage", ticket.artifact_id)
+        raise _artifact_problem(ArtifactGoneError()) from None
+    except ObjectTamperedError:
+        logger.error("preview: objeto do artefato %s adulterado no storage", ticket.artifact_id)
         raise _artifact_problem(ArtifactGoneError()) from None
     finally:
         with unit_of_work(factory) as finishing:

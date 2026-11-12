@@ -15,6 +15,7 @@ validação, `errors` (lista de `{field, code, message}`).
   identificadores forjados.
 """
 
+import errno
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -39,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 # Espera sugerida quando o banco ou o pool não atende: da ordem do `pool_timeout` de 5 s.
 DATABASE_RETRY_AFTER_SECONDS = 5
+# Disco cheio ou erro de E/S não se resolve em segundos: um prazo curto convidaria a martelar.
+# Mesmo valor do piso de `capacity_problems.STORAGE_MIN_RETRY_AFTER`, que tem outro significado
+# (espera até a cota liberar) e por isso não é reaproveitado.
+STORAGE_RETRY_AFTER_SECONDS = 60
 # O psycopg põe em `OperationalError` também erros de programação (55000, 3B001, 2F005, 54000...);
 # só estes SQLSTATEs dizem que repetir a requisição pode dar certo. 40001 e 40P01 desfazem a
 # transação inteira, e é a contenção que os causa: chegam aqui ao esgotar as tentativas de
@@ -48,6 +53,9 @@ _UNAVAILABLE_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 # Da classe 08, mas é parâmetro errado no SQL (`bind message supplies...`), não falha de conexão.
 _PROTOCOL_VIOLATION_SQLSTATE = "08P01"
 _SQLSTATE_CLASS_LENGTH = 2
+# Disco cheio, cota estourada e erro de E/S na gravação: o storage está indisponível agora, e a
+# requisição pode dar certo depois. Os outros errnos (permissão, caminho) são defeito nosso: 500.
+_STORAGE_UNAVAILABLE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EIO})
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
@@ -189,14 +197,20 @@ class ProblemDetails(BaseModel):
     errors: list[FieldError] | None = None
 
 
+# Todo 429 e todo 503 que a API emite carrega `Retry-After` (capacity_problems, rate limit, banco,
+# storage, fila cheia). O 503 `text/plain` do teto de concorrência do uvicorn sai antes do ASGI,
+# sem o header, e não faz parte do contrato.
+_RETRY_AFTER_STATUSES = frozenset({429, 503})
+
+
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
     """Respostas problem+json para o OpenAPI da rota (2.3)."""
     responses: dict[int | str, dict[str, Any]] = {
         status: {"model": ProblemDetails, "content": {PROBLEM_MEDIA_TYPE: {}}}
         for status in statuses
     }
-    if 429 in responses:
-        responses[429]["headers"] = {
+    for status in _RETRY_AFTER_STATUSES & responses.keys():
+        responses[status]["headers"] = {
             "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
                 "required": True,
@@ -317,6 +331,8 @@ def _unhandled_error_response(exc: Exception, instance: str, request_id: str) ->
     """
     if _is_database_unavailable(exc):
         return _database_unavailable_response(exc, instance, request_id)
+    if _is_storage_unavailable(exc):
+        return _storage_unavailable_response(exc, instance, request_id)
     if isinstance(exc, OperationalError):
         logger.error(
             "erro inesperado na requisição %s",
@@ -380,18 +396,43 @@ def _sqlstate_of(exc: Exception) -> str | None:
     return getattr(getattr(exc, "orig", None), "sqlstate", None)
 
 
+def _is_storage_unavailable(exc: Exception) -> bool:
+    return isinstance(exc, OSError) and exc.errno in _STORAGE_UNAVAILABLE_ERRNOS
+
+
 def _database_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
     logger.error(
         "banco indisponível na requisição %s",
         request_id,
         extra={"fields": _database_error_fields(exc)},
     )
+    return _service_unavailable_response(instance, request_id, DATABASE_RETRY_AFTER_SECONDS)
+
+
+def _storage_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:
+    # Só tipo e errno: a mensagem do `OSError` traz o caminho do arquivo no storage.
+    logger.error(
+        "storage indisponível na requisição %s",
+        request_id,
+        extra={
+            "fields": {
+                "error.type": type(exc).__name__,
+                "errno": errno.errorcode.get(getattr(exc, "errno", 0)),
+            }
+        },
+    )
+    return _service_unavailable_response(instance, request_id, STORAGE_RETRY_AFTER_SECONDS)
+
+
+def _service_unavailable_response(
+    instance: str, request_id: str, retry_after_seconds: int
+) -> JSONResponse:
     return problem_response(
         code=ProblemCode.SERVICE_UNAVAILABLE,
         detail="O serviço está temporariamente indisponível; tente de novo depois do Retry-After.",
         instance=instance,
         request_id=request_id,
-        headers={"Retry-After": str(DATABASE_RETRY_AFTER_SECONDS)},
+        headers={"Retry-After": str(retry_after_seconds)},
     )
 
 
