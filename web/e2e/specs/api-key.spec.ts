@@ -33,15 +33,23 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
 
   const served = await Promise.all(bodies);
   expect(served.length, "HTML, theme-init.js, JS e CSS lidos").toBeGreaterThanOrEqual(4);
-  expect(served.filter((body) => body.includes(apiKey))).toEqual([]);
+  // Booleanos: uma falha imprimiria o valor comparado (corpo, storage, cookies) no relatório HTML,
+  // e a chave nunca pode ir parar lá.
+  expect(
+    served.some((body) => body.includes(apiKey)),
+    "algum corpo servido contém a chave",
+  ).toBe(false);
   const storage = await page.evaluate(() =>
     JSON.stringify({
       local: Object.entries(localStorage),
       session: Object.entries(sessionStorage),
     }),
   );
-  expect(storage).not.toContain(apiKey);
-  expect(JSON.stringify(await context.cookies())).not.toContain(apiKey);
+  expect(storage.includes(apiKey), "o storage contém a chave").toBe(false);
+  expect(
+    JSON.stringify(await context.cookies()).includes(apiKey),
+    "algum cookie contém a chave",
+  ).toBe(false);
   expect(credentialsFromPage, "pedidos com Authorization montado pelo bundle").toEqual([]);
 });
 
