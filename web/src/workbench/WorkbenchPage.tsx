@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 
@@ -7,6 +7,7 @@ import {
   CATALOG_QUERY_KEY,
   findCatalogVersion,
   getCatalog,
+  type Catalog,
   type CatalogVersion,
 } from "../catalog/api";
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
@@ -61,6 +62,10 @@ interface CatalogGateProps {
 /**
  * Defaults e limites da receita vêm de GET /catalog (2.2): a Bancada só abre com a versão do
  * formulário presente no catálogo e no formato que ele conhece.
+ *
+ * O título fica aqui, acima do que muda entre o "carregando", a falha e a Bancada: se cada etapa
+ * tivesse o seu, o `h1` remontaria quando o catálogo chega e o FocusHeading tomaria o foco de quem
+ * já estivesse usando a página (o seletor de tema, por exemplo).
  */
 function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): ReactElement {
   const client = useApiClient();
@@ -71,39 +76,55 @@ function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): Reac
     // Muda só com um deploy; o navegador revalida pelo ETag a cada carga da página.
     staleTime: Infinity,
   });
+  const { announcement, body } = gateBody({ recipe, source, uploadServices, catalog, loaded });
+  return (
+    <SourceAnnouncer source={source} message={announcement}>
+      <div className="flex flex-col gap-8">
+        <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
+        {body}
+      </div>
+    </SourceAnnouncer>
+  );
+}
+
+interface GateBodyInput extends CatalogGateProps {
+  readonly catalog: UseQueryResult<Catalog>;
+  readonly loaded: UseQueryResult<ParameterSource>;
+}
+
+/** O que vai abaixo do título: carregando, falha da receita ou a Bancada, e o aviso a anunciar. */
+function gateBody({ recipe, source, uploadServices, catalog, loaded }: GateBodyInput): {
+  readonly announcement: string | null;
+  readonly body: ReactNode;
+} {
   const sourcePending = source !== null && loaded.isPending;
   if (catalog.data === undefined || sourcePending) {
-    return (
-      <SourceAnnouncer source={source} message={null}>
-        <div className="flex flex-col gap-8">
-          <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
-          {catalog.data === undefined ? (
-            <CatalogPending error={catalog.error} />
-          ) : (
-            <p className="text-fg-muted">
-              {source?.kind === "run" ? TEXT.history.loadingRun : TEXT.presets.loadingPreset}
-            </p>
-          )}
-        </div>
-      </SourceAnnouncer>
-    );
+    return {
+      announcement: null,
+      body:
+        catalog.data === undefined ? (
+          <CatalogPending error={catalog.error} />
+        ) : (
+          <p className="text-fg-muted">
+            {source?.kind === "run" ? TEXT.history.loadingRun : TEXT.presets.loadingPreset}
+          </p>
+        ),
+    };
   }
   const version = findCatalogVersion(catalog.data, recipe.id, recipe.version);
   const form = version === null ? null : recipe.formFor(version);
   if (form === null) {
-    return (
-      <SourceAnnouncer source={source} message={null}>
-        <div className="flex flex-col gap-8">
-          <WorkbenchHeader title={TEXT.workbench.title(recipe.title)} />
-          <p
-            role="alert"
-            className="rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 font-semibold text-danger-fg"
-          >
-            {TEXT.workbench.recipeUnavailable}
-          </p>
-        </div>
-      </SourceAnnouncer>
-    );
+    return {
+      announcement: null,
+      body: (
+        <p
+          role="alert"
+          className="rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 font-semibold text-danger-fg"
+        >
+          {TEXT.workbench.recipeUnavailable}
+        </p>
+      ),
+    };
   }
   const prefilled =
     source === null || version === null
@@ -115,16 +136,17 @@ function CatalogGate({ recipe, source, uploadServices }: CatalogGateProps): Reac
           source: loaded.data ?? null,
           error: loaded.error,
         });
-  return (
-    <SourceAnnouncer source={source} message={prefilled.announcement}>
+  return {
+    announcement: prefilled.announcement,
+    body: (
       <Workbench
         recipe={recipe}
         form={prefilled.form}
         notice={prefilled.notice}
         uploadServices={uploadServices}
       />
-    </SourceAnnouncer>
-  );
+    ),
+  };
 }
 
 interface SourceAnnouncerProps {
