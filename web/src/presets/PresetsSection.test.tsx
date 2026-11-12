@@ -14,6 +14,7 @@ type Handler = (request: Request) => Response | Promise<Response> | null;
 
 const CSRF = "csrf-da-sessao";
 const DELETE_ROUTE = `DELETE /api/v1/presets/${PRESET_ID}`;
+const SECOND_PRESET_ID = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d";
 
 function setup(handlers: Readonly<Record<string, Handler>> = {}) {
   const api = fakeApi(
@@ -200,6 +201,35 @@ describe("Oficina: presets", () => {
       expect(within(section).getByText(/Atualizado em/).textContent).not.toBe(before);
     });
     expect(document.body).toHaveFocus();
+  });
+
+  // O destino da exclusão anterior não vale para o próximo diálogo (WCAG 2.4.3).
+  it("depois de excluir um preset, cancelar a exclusão de outro devolve o foco ao Excluir dele", async () => {
+    let deleted = false;
+    const other = presetBody({ id: SECOND_PRESET_ID, name: "Fornecedores" });
+    const { user } = setup({
+      "GET /api/v1/presets": () =>
+        jsonResponse({ data: deleted ? [other] : [presetBody(), other] }),
+      [DELETE_ROUTE]: () => {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      },
+    });
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Excluir preset" }));
+    await waitFor(() => {
+      expect(within(section).getByRole("heading", { level: 2, name: "Presets" })).toHaveFocus();
+    });
+    const remove = within(section).getByRole("button", { name: "Excluir o preset Fornecedores" });
+
+    await user.click(remove);
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(remove).toHaveFocus();
   });
 
   it("cancelar a exclusão não chama a API", async () => {
