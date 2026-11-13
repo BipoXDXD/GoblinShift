@@ -1,12 +1,14 @@
 import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { fakeApi, jsonResponse } from "../test/fakeApi";
 import { meBody } from "../test/account";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
+
+await preloadRoutes("/creditos");
 
 const { CANARY } = vi.hoisted(() => ({ CANARY: "CANARY-defeito-da-moldura" }));
 const STACK_FRAME = "rootFailure.test";

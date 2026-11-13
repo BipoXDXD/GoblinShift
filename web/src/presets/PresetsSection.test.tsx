@@ -2,13 +2,15 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
 import { PRESETS_QUERY_KEY } from "./api";
+
+await preloadRoutes("/", "/bancada/csv-janitor");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
