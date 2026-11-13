@@ -130,6 +130,17 @@ def aac_frame_s(sample_rate: int) -> float:
     return AAC_FRAME_SAMPLES / sample_rate
 
 
+# Durações das duas faixas de mp4_mono_and_stereo (media.py): o que distingue uma da outra.
+FIRST_TRACK_S = 1.0
+SECOND_TRACK_S = 2.0
+
+
+def assert_aac_track_duration(extracted: Path, expected_s: float) -> None:
+    """Nunca mais curto que a faixa (corte) nem mais de um quadro AAC além dela."""
+    frame_s = aac_frame_s(int(probe(extracted)["sample_rate"]))
+    assert expected_s <= duration_s(extracted) < expected_s + frame_s
+
+
 @pytest.mark.parametrize(
     ("clip", "name", "params", "expected_s", "track"),
     [
@@ -169,12 +180,12 @@ def aac_frame_s(sample_rate: int) -> float:
             ("2", "44100"),
             id="webm-vorbis-2s",
         ),
-        # A primeira faixa é mono a 22,05 kHz; a segunda, estéreo a 48 kHz.
+        # A primeira faixa é mono a 22,05 kHz com 1 s; a segunda, estéreo a 48 kHz com 2 s.
         pytest.param(
             "mp4_mono_and_stereo",
             "clip.mp4",
             Params(audio_stream_index=1, thumbnail_count=0),
-            2.0,
+            SECOND_TRACK_S,
             ("2", "48000"),
             id="mp4-segunda-faixa-2s",
         ),
@@ -207,14 +218,11 @@ def test_audio_extraido_dura_o_mesmo_que_a_faixa_de_origem_e_so_tem_audio(
     assert stream_kinds(extracted) == ["audio"]
     audio = probe(extracted)
     assert (audio["channels"], audio["sample_rate"]) == track
-    measured_s = duration_s(extracted)
     if clip in AAC_SOURCE_CLIPS:
-        # Só para cima e só até um quadro: nunca mais curto que a faixa (corte) nem mais de um
-        # quadro além dela. O WAV sai na taxa da faixa de origem (sem resample).
-        frame_s = aac_frame_s(int(audio["sample_rate"]))
-        assert expected_s <= measured_s < expected_s + frame_s
+        # O WAV sai na taxa da faixa de origem (sem resample), que dá o tamanho do quadro AAC.
+        assert_aac_track_duration(extracted, expected_s)
     else:
-        assert measured_s == pytest.approx(expected_s, abs=AUDIO_DURATION_TOLERANCE_S)
+        assert duration_s(extracted) == pytest.approx(expected_s, abs=AUDIO_DURATION_TOLERANCE_S)
 
 
 @pytest.mark.parametrize(
@@ -380,7 +388,9 @@ def test_sem_indice_usa_a_primeira_faixa_e_registra_o_indice_efetivo(
     item = ok_item(workspace, Params(thumbnail_count=0))
 
     assert item.details["audio_stream_index"] == 0
-    assert probe(workspace.path("audio/duas.wav"))["channels"] == "1"
+    wav = workspace.path("audio/duas.wav")
+    assert probe(wav)["channels"] == "1"
+    assert_aac_track_duration(wav, FIRST_TRACK_S)
 
 
 def test_indice_escolhe_a_faixa_entre_as_de_audio(workspace: Workspace, clips: ClipLibrary) -> None:
@@ -389,8 +399,9 @@ def test_indice_escolhe_a_faixa_entre_as_de_audio(workspace: Workspace, clips: C
     item = ok_item(workspace, Params(audio_stream_index=1, thumbnail_count=0))
 
     assert item.details["audio_stream_index"] == 1
-    wav = probe(workspace.path("audio/duas.wav"))
-    assert (wav["channels"], wav["sample_rate"]) == ("2", "48000")
+    wav = workspace.path("audio/duas.wav")
+    assert (probe(wav)["channels"], probe(wav)["sample_rate"]) == ("2", "48000")
+    assert_aac_track_duration(wav, SECOND_TRACK_S)
 
 
 def test_video_sem_audio_com_extracao_e_recusado(workspace: Workspace, clips: ClipLibrary) -> None:
