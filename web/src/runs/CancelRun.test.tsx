@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
@@ -15,6 +15,8 @@ import {
 } from "../test/fakeApi";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/execucoes/id");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
