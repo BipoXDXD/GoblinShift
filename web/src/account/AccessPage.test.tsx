@@ -3,13 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 import { API_KEYS_QUERY_KEY } from "./api";
+
+await preloadRoutes(
+  "/acesso",
+  "/acesso/guia-da-api",
+  "/conta-excluida",
+  "/historico",
+  "/execucoes/id",
+);
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
