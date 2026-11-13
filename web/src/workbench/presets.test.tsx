@@ -1,10 +1,10 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
 import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
@@ -12,6 +12,8 @@ import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
 import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/bancada/csv-janitor");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -46,14 +48,6 @@ async function openSaveDialog(user: ReturnType<typeof userEvent.setup>): Promise
   await user.click(await screen.findByRole("button", { name: "Salvar preset" }));
   return screen.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
 }
-
-// A Bancada é rota lazy: a primeira renderização do arquivo pagaria a transformação do módulo da tela
-// dentro do primeiro teste, cujo orçamento é o testTimeout de 5 s. Com a máquina carregada esse custo
-// a frio se soma ao do teste mais pesado. Aqui ele cai no gancho, que tem orçamento próprio, e cada
-// teste paga só o próprio comportamento.
-beforeAll(async () => {
-  await import("./WorkbenchPage");
-});
 
 describe("Bancada: Salvar preset", () => {
   it("abre o diálogo com o foco no nome e salva nome, receita e parâmetros do formulário", async () => {
@@ -120,7 +114,11 @@ describe("Bancada: Salvar preset", () => {
     const { api, user } = setup();
 
     const dialog = await openSaveDialog(user);
-    await user.type(within(dialog).getByLabelText("Nome do preset"), "x".repeat(101));
+    const name = within(dialog).getByLabelText("Nome do preset");
+    // Colar até a borda e digitar além dela: o mesmo nome de 101 caracteres, sem 101 teclas.
+    await user.click(name);
+    await user.paste("x".repeat(99));
+    await user.type(name, "xx");
     await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
 
     expect(within(dialog).getByText(/Use até 100 caracteres\./)).toBeVisible();

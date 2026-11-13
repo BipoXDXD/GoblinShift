@@ -4,11 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
 import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/historico", "/execucoes/id");
 
 const RUN_A = "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a";
 const RUN_B = "1c8d4e2f-0000-4000-8000-0000000000bb";
