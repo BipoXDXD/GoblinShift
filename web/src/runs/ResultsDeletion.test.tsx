@@ -13,6 +13,7 @@ import {
   RUN_ID,
   screenRequests,
 } from "../test/fakeApi";
+import { heldResponse } from "../test/dialog";
 import { renderRoutes } from "../test/renderRoutes";
 
 await preloadRoutes("/execucoes/id");
@@ -261,21 +262,29 @@ describe("Resultados: excluir", () => {
     });
   });
 
-  it("com o pedido em voo, Excluir fica bloqueado com o progresso e não sai outro DELETE", async () => {
-    // null: o DELETE fica em voo até o fim do teste.
-    const { api, user } = setup({ [DELETE_ROUTE]: () => null });
+  it("com o pedido em voo, a confirmação mostra o progresso, fica aria-disabled e não sai outro DELETE", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({ [DELETE_ROUTE]: held.handler });
 
     const region = await resultsRegion();
     await user.click(await within(region).findByRole("button", { name: OPEN_BUTTON }));
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Excluir resultados" }),
-    );
-    const busy = await within(region).findByRole("button", { name: "Excluindo resultados…" });
-    expect(busy).toHaveAttribute("aria-disabled", "true");
-    await user.click(busy);
+    const dialog = screen.getByRole("dialog", { name: "Excluir os resultados desta execução?" });
+    await user.click(within(dialog).getByRole("button", { name: "Excluir resultados" }));
+    await waitFor(() => {
+      expect(sent(api.requests, DELETE_ROUTE)).toHaveLength(1);
+    });
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    const confirm = within(dialog).getByRole("button", { name: "Excluindo resultados…" });
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).queryByRole("button", { name: "Excluir resultados" })).toBeNull();
+    await user.click(confirm);
     expect(sent(api.requests, DELETE_ROUTE)).toHaveLength(1);
+    held.answer(problemResponse(409, "STATE_CONFLICT"));
+
+    expect(await within(region).findByRole("alert")).toBeVisible();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const open = within(region).getByRole("button", { name: OPEN_BUTTON });
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("o 202 basta: some com os links e anuncia, mesmo que a releitura ainda diga disponível", async () => {
