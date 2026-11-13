@@ -173,9 +173,9 @@ class _CycleOutcome:
             self._record_failure(step, error)
 
     def _record_failure(self, step: _Step, error: Exception) -> None:
-        _log_step_failure(step.name, error)
+        log_step_failure(step.name, error)
         self.failed += 1
-        if self.connection_lost_in is None and _is_connection_error(error):
+        if self.connection_lost_in is None and is_connection_error(error):
             self.connection_lost_in = step.name
 
     def finish(self) -> dict[str, int]:
@@ -207,7 +207,7 @@ def _log_items_left(step: str, items_left: int) -> None:
     )
 
 
-def _is_connection_error(error: Exception) -> bool:
+def is_connection_error(error: Exception) -> bool:
     """Erro de conexão: repetir o banco noutro passo só esperaria o `connect_timeout` de novo.
 
     Conexão que o pool invalidou, pool esgotado (`TimeoutError` do SQLAlchemy, que não é
@@ -411,12 +411,12 @@ class Maintenance:
         o lote segue para a próxima tentativa. Erro de conexão sobe: o passo falha e o ciclo pula
         os passos de banco restantes, que só esperariam o `connect_timeout` de novo. O
         `TimeoutError` do pool não é `DBAPIError`, então o `except` abaixo nem o vê e ele sobe do
-        mesmo jeito, que é o que `_is_connection_error` pede: não há o que isolar sem conexão.
+        mesmo jeito, que é o que `is_connection_error` pede: não há o que isolar sem conexão.
         """
         try:
             return self._lease_still_expired(expired)
         except DBAPIError as error:
-            if _is_connection_error(error):
+            if is_connection_error(error):
                 raise
             fields = {
                 "attempt_id": str(expired.attempt_id),
@@ -653,7 +653,7 @@ class Maintenance:
                 extra={"fields": {"alert": "missing_sweep_failed"}},
             )
             failed = {**_sweep_counts(MissingSweep.idle()), "missing_sweep_failed": 1}
-            if _is_connection_error(error):
+            if is_connection_error(error):
                 raise _ConnectionLostWithCountsError(error, failed) from error
             return failed
         self._missing_resume_after = sweep.resume_after
@@ -831,7 +831,7 @@ def _lease_expired() -> ColumnElement[bool]:
     )
 
 
-def _log_step_failure(step: str, error: Exception) -> None:
+def log_step_failure(step: str, error: Exception) -> None:
     """Registra o passo que falhou com o tipo e o SQLSTATE nos campos.
 
     A mensagem do banco traz host, porta, usuário e valores (3.7): não entra nos campos, e o

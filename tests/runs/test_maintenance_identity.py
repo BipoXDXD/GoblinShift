@@ -12,8 +12,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import psycopg
 import pytest
+from psycopg import errors as psycopg_errors
 from sqlalchemy import Table, func, insert, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.maintenance import (
@@ -26,6 +29,7 @@ from goblinshift.files import purge as files_purge
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, stored_object, transfer_slot, upload
 from goblinshift.identity import IssuedKey, Scope, issue_key, request_account_deletion
+from goblinshift.identity import purge as identity_purge
 from goblinshift.identity.rate_limit import RequestClass, count_request
 from goblinshift.identity.tables import (
     api_key,
@@ -37,6 +41,7 @@ from goblinshift.identity.tables import (
 )
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
+from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.purge import cancel_active_run
@@ -47,6 +52,8 @@ from tests.runs.worker_support import claim, coordinator, create_user, local_run
 pytestmark = pytest.mark.integration
 
 MAX_CYCLES = 10
+# `statement_timeout`: o banco respondeu, então só o passo que o levou falha.
+QUERY_CANCELED = "57014"
 
 OWNED_TABLES: dict[str, tuple[Table, str]] = {
     "app_user": (app_user, "id"),
@@ -217,8 +224,8 @@ def test_purga_interrompida_no_meio_e_retomada_termina(
     maintenance.run_cycle()
     jobs.run_cycle()
     maintenance.run_cycle()
-    with pytest.raises(ConnectionError):
-        jobs.run_cycle()
+    counts = jobs.run_cycle()
+    assert counts["accounts_purge_failed"] == 1
     assert count_owned(factory, owner)["app_user"] == 1
 
     monkeypatch.setattr(files_purge, "purge_owner_batch", real_batch)
@@ -372,3 +379,118 @@ def test_serve_roda_o_ciclo_de_contas_mesmo_se_o_de_execucoes_falhar(
     )
 
     assert account_cycles == [True]
+
+
+# --- Falhas isoladas no ciclo de contas ---------------------------------------------------------
+
+
+def statement_timeout() -> Exception:
+    driver_error = psycopg_errors.lookup(QUERY_CANCELED)("canceling statement due to timeout")
+    return DBAPIError.instance("SELECT 1", {}, driver_error, psycopg.Error)
+
+
+def connection_refused() -> Exception:
+    """Como o SQLAlchemy entrega o `connect` recusado: `OperationalError` sem SQLSTATE."""
+    driver_error = psycopg.OperationalError("connection refused")
+    return DBAPIError.instance(None, None, driver_error, psycopg.Error)
+
+
+def stale_identity_rows(factory: sessionmaker[Session], now: datetime) -> uuid.UUID:
+    """Estado vencido de login e janela antiga, mais uma conta com exclusão atrasada."""
+    owner = create_user(factory, "ana")
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(login_state).values(key="k", value="{}", expires_at=now - timedelta(minutes=1))
+        )
+        count_request(session, owner, RequestClass.READ, now - timedelta(minutes=3))
+        request_account_deletion(session, owner, now - timedelta(hours=21))
+    return owner
+
+
+def test_falha_na_purga_nao_impede_limpezas_nem_alerta(
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    stale_identity_rows(factory, now)
+
+    def timing_out(_session: Session, _limit: int) -> list[uuid.UUID]:
+        raise statement_timeout()
+
+    monkeypatch.setattr(identity_purge, "accounts_pending_purge", timing_out)
+
+    with caplog.at_level(logging.WARNING):
+        counts = AccountJobs(factory, clock=lambda: now).run_cycle()
+
+    assert counts["login_states_removed"] == 1
+    assert counts["request_windows_removed"] == 1
+    assert counts["accounts_deletion_overdue"] == 1
+    assert counts["account_steps_failed"] == 1
+    assert "accounts_purged" not in counts
+    alerts = [r.fields["alert"] for r in caplog.records if "alert" in getattr(r, "fields", {})]  # type: ignore[attr-defined]
+    assert alerts == ["account_deletion_overdue"]
+    [failure] = [r for r in caplog.records if r.getMessage() == "passo da manutenção falhou"]
+    assert failure.fields == {  # type: ignore[attr-defined]
+        "step": "accounts_purged",
+        "error_type": "OperationalError",
+        "sqlstate": QUERY_CANCELED,
+    }
+
+
+def test_falha_na_purga_de_uma_conta_nao_impede_as_outras(
+    factory: sessionmaker[Session],
+    maintenance: Maintenance,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    now = datetime.now(UTC)
+    stuck = create_user(factory, "ana")
+    other = create_user(factory, "bia")
+    with unit_of_work(factory) as session:
+        # A conta com defeito é a mais antiga: a primeira que a purga tenta.
+        request_account_deletion(session, stuck, now - timedelta(hours=2))
+        request_account_deletion(session, other, now - timedelta(hours=1))
+    real_batch = runs_purge.purge_owner_batch
+
+    def failing_for_stuck(session: Session, owner_id: uuid.UUID, limit: int) -> bool:
+        if owner_id == stuck:
+            raise statement_timeout()
+        return real_batch(session, owner_id, limit)
+
+    monkeypatch.setattr(runs_purge, "purge_owner_batch", failing_for_stuck)
+
+    maintenance.run_cycle()
+    with caplog.at_level(logging.ERROR, logger="goblinshift.maintenance"):
+        counts = AccountJobs(factory).run_cycle()
+
+    assert count_owned(factory, other)["app_user"] == 0
+    assert count_owned(factory, stuck)["app_user"] == 1
+    assert (counts["accounts_purged"], counts["accounts_purge_failed"]) == (1, 1)
+    assert counts["account_steps_failed"] == 1
+    [failure] = [r for r in caplog.records if r.getMessage() == "purga da conta falhou"]
+    assert failure.fields == {  # type: ignore[attr-defined]
+        "user_id": str(stuck),
+        "error_type": "OperationalError",
+        "sqlstate": QUERY_CANCELED,
+    }
+
+
+def test_ciclo_de_contas_sem_falha_conta_zero_passos_falhos(factory: sessionmaker[Session]) -> None:
+    counts = AccountJobs(factory).run_cycle()
+
+    assert (counts["account_steps_failed"], counts["accounts_purge_failed"]) == (0, 0)
+
+
+def test_banco_inalcancavel_ainda_derruba_o_ciclo_de_contas(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sem conexão, cada passo seguinte só esperaria o `connect_timeout`: o ciclo cai inteiro."""
+
+    def refused(_session: Session, _limit: int) -> list[uuid.UUID]:
+        raise connection_refused()
+
+    monkeypatch.setattr(identity_purge, "accounts_pending_purge", refused)
+
+    with pytest.raises(DBAPIError):
+        AccountJobs(factory).run_cycle()
