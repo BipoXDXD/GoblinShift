@@ -278,11 +278,13 @@ jobs:
       # (no PR, HEAD é o merge commit sintético). Sem a flag, o gitleaks roda `git log --all` e
       # julga o PR por qualquer branch do remoto, porque o checkout com fetch-depth 0 traz todas.
       # Uma regra nova no .gitleaks.toml reavalia o histórico inteiro de main no PR que a adiciona.
+      # `--diff-merges=first-parent`: sem ela o git log não mostra o diff de merge commits, e um
+      # segredo introduzido só na resolução de um merge (evil merge) passaria (issue #406).
       - name: gitleaks no histórico de HEAD
         run: >-
           docker run --rm -v "$PWD:/repo:ro"
           ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
-          git /repo --config /repo/.gitleaks.toml --redact --no-banner "--log-opts=--full-history HEAD"
+          git /repo --config /repo/.gitleaks.toml --redact --no-banner "--log-opts=--full-history --diff-merges=first-parent HEAD"
 
   gvisor:
     name: Executor sob gVisor
