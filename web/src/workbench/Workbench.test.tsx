@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler, catalogVersion, withVersion } from "../test/catalog";
 import {
@@ -18,6 +18,8 @@ import {
 import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/bancada/csv-janitor");
 
 const csv = (name: string) => new File(["a,b\n1,2\n"], name, { type: "text/csv" });
 

@@ -165,6 +165,26 @@ describe("Cancelar execução: confirmação", () => {
     expect(sentCancels(api.requests)).toHaveLength(1);
   });
 
+  it("cancelando: o botão de confirmar mostra o rótulo em voo e fica aria-disabled", async () => {
+    const held = heldResponse();
+    const { api, user } = setup({
+      [`GET /api/v1/runs/${RUN_ID}`]: runWith("running"),
+      [CANCEL_ROUTE]: held.handler,
+    });
+    await user.click(await screen.findByRole("button", { name: OPEN_BUTTON }));
+    const dialog = screen.getByRole("dialog", { name: "Cancelar esta execução?" });
+    await user.click(within(dialog).getByRole("button", { name: OPEN_BUTTON }));
+    await waitFor(() => {
+      expect(sentCancels(api.requests)).toHaveLength(1);
+    });
+
+    const confirm = within(dialog).getByRole("button", { name: "Cancelando…" });
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).queryByRole("button", { name: OPEN_BUTTON })).toBeNull();
+    held.answer(problemResponse(500, "INTERNAL_ERROR"));
+    expect(await screen.findByRole("alert")).toBeVisible();
+  });
+
   it("com o pedido em voo, o Esc não fecha; fechado pelo navegador, a falha aparece e reabre", async () => {
     const held = heldResponse();
     const { api, user } = setup({

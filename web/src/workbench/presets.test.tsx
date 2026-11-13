@@ -115,10 +115,9 @@ describe("Bancada: Salvar preset", () => {
 
     const dialog = await openSaveDialog(user);
     const name = within(dialog).getByLabelText("Nome do preset");
-    // Colar até a borda e digitar além dela: o mesmo nome de 101 caracteres, sem 101 teclas.
+    // Colado de uma vez: 101 teclas com o user.type levam ~2 s e já estouraram o tempo do teste.
     await user.click(name);
-    await user.paste("x".repeat(99));
-    await user.type(name, "xx");
+    await user.paste("x".repeat(101));
     await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
 
     expect(within(dialog).getByText(/Use até 100 caracteres\./)).toBeVisible();

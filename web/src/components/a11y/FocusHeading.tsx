@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
 
+import { isInitialFocusHeld } from "./initialFocus";
+
 interface FocusHeadingProps {
   readonly children: ReactNode;
   /** Muda quando a etapa muda sem desmontar o título; cada valor novo devolve o foco a ele. */
@@ -18,7 +20,8 @@ const SIZES = {
 
 /**
  * Título da etapa (`h1`) que recebe o foco ao aparecer: numa SPA a troca de tela não move o foco
- * sozinha, e quem usa teclado ou leitor de tela ficaria no botão da etapa anterior.
+ * sozinha, e quem usa teclado ou leitor de tela ficaria no botão da etapa anterior. Não toma o foco
+ * que a moldura já deu a um alerta (`HOLDS_INITIAL_FOCUS`).
  */
 export function FocusHeading({
   children,
@@ -28,7 +31,7 @@ export function FocusHeading({
 }: FocusHeadingProps): ReactElement {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    if (takesFocus) {
+    if (takesFocus && !isInitialFocusHeld()) {
       heading.current?.focus();
     }
   }, [focusKey, takesFocus]);

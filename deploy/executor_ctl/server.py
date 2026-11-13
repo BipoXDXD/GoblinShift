@@ -41,6 +41,12 @@ from .workarea import WorkAreaDirtyError, WorkDirMissingError
 MAX_BODY_BYTES = 1024
 # Corpo não usado (413, 404, 405...) até este tamanho é lido e descartado antes da resposta.
 DISCARD_LIMIT_BYTES = 64 * 1024
+# Nenhum tamanho aceito passa do maior limite acima. Um valor com mais dígitos significativos
+# satura num teto fixo sem passar pelo `int()`, que estoura com mais de 4300 dígitos
+# (`sys.int_max_str_digits`): vira 413 `body_too_large`, e o caminho de descarte não o lê.
+_MAX_LENGTH_DIGITS = len(str(max(MAX_BODY_BYTES, DISCARD_LIMIT_BYTES)))
+# Menor valor com um dígito a mais que o teto: representa qualquer tamanho acima dele.
+_LENGTH_ABOVE_LIMITS: int = 10**_MAX_LENGTH_DIGITS
 # Sem Content-Length, quanto esperar pelo que o cliente já mandou antes de responder.
 _DRAIN_WAIT_S = 0.05
 READ_TIMEOUT_S = 5.0
@@ -188,6 +194,31 @@ def _invalid(detail: str) -> RequestError:
     return RequestError(HTTPStatus.BAD_REQUEST, "invalid_request", detail)
 
 
+def _body_too_large() -> RequestError:
+    return RequestError(
+        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        "body_too_large",
+        f"corpo acima de {MAX_BODY_BYTES} bytes",
+    )
+
+
+def _parse_length(value: str) -> int | None:
+    """Content-Length como inteiro, saturado em `_LENGTH_ABOVE_LIMITS`; `None` se mal formado.
+
+    O `int()` só recebe a forma sem zeros à esquerda: o limite de 4300 dígitos dele conta os
+    zeros também. Mais dígitos significativos que o maior limite é necessariamente maior que
+    qualquer limite, e vira o valor saturado sem conversão.
+    """
+    # RFC 9110: `1*DIGIT`, zeros à esquerda valem. Sem o `isascii()`, o `isdigit()` aceitaria
+    # o "²" e outros dígitos que o `int()` recusa.
+    if not (value.isascii() and value.isdigit()):
+        return None
+    significant = value.lstrip("0") or "0"
+    if len(significant) > _MAX_LENGTH_DIGITS:
+        return _LENGTH_ABOVE_LIMITS
+    return int(significant)
+
+
 def _method_not_allowed() -> RequestError:
     return RequestError(
         HTTPStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "método não aceito aqui"
@@ -307,15 +338,11 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise RequestError(
                 HTTPStatus.LENGTH_REQUIRED, "length_required", "Content-Length obrigatório"
             )
-        if not length_header.isdigit():
+        length = _parse_length(length_header)
+        if length is None:
             raise _invalid("Content-Length inválido")
-        length = int(length_header)
         if length > MAX_BODY_BYTES:
-            raise RequestError(
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-                "body_too_large",
-                f"corpo acima de {MAX_BODY_BYTES} bytes",
-            )
+            raise _body_too_large()
         try:
             body = self.rfile.read(length)
         except TimeoutError as error:
@@ -336,11 +363,11 @@ class ControlHandler(BaseHTTPRequestHandler):
         if self._body_consumed or headers is None:
             return
         self._body_consumed = True
-        length = headers.get("Content-Length", "")
-        if length.isdigit():
-            if int(length) <= DISCARD_LIMIT_BYTES:
+        length = _parse_length(headers.get("Content-Length", ""))
+        if length is not None:
+            if length <= DISCARD_LIMIT_BYTES:
                 with suppress(TimeoutError):
-                    self.rfile.read(int(length))
+                    self.rfile.read(length)
             return
         self.connection.settimeout(_DRAIN_WAIT_S)
         with suppress(TimeoutError):
