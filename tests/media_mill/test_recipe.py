@@ -400,7 +400,8 @@ def test_indice_escolhe_a_faixa_entre_as_de_audio(workspace: Workspace, clips: C
 
     assert item.details["audio_stream_index"] == 1
     wav = workspace.path("audio/duas.wav")
-    assert (probe(wav)["channels"], probe(wav)["sample_rate"]) == ("2", "48000")
+    audio = probe(wav)
+    assert (audio["channels"], audio["sample_rate"]) == ("2", "48000")
     assert_aac_track_duration(wav, SECOND_TRACK_S)
 
 

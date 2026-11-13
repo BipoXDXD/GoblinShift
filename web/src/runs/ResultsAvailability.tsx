@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import { useApiClient } from "../api/ApiClientContext";
 import { ApiError } from "../api/response";
@@ -41,12 +41,15 @@ export function ResultsAvailability({
   // O 202 do DELETE já deixa os resultados indisponíveis (1.6); a tela segue a resposta do
   // comando, não a releitura, que pode falhar ou chegar antes.
   const [deletedHere, setDeletedHere] = useState(false);
+  // A confirmação fica aberta com o pedido em voo (o rótulo diz o progresso) e fecha na resposta.
+  const [asking, setAsking] = useState(false);
+  const focusAfterDeletion = useRef(false);
   const removal = useMutation({
     mutationFn: () => deleteRunArtifacts(client, runId),
     onSuccess: () => {
       setDeletedHere(true);
       setMessage(T.removed);
-      onDeleted();
+      focusAfterDeletion.current = true;
       void queryClient.invalidateQueries({ queryKey: ["runs", runId] });
     },
     onError: (error) => {
@@ -55,7 +58,18 @@ export function ResultsAvailability({
         void queryClient.invalidateQueries({ queryKey: ["runs", runId] });
       }
     },
+    onSettled: () => {
+      setAsking(false);
+    },
   });
+  // Depois do commit, quando o diálogo modal já saiu do DOM: antes disso o resto da página está
+  // inerte e o foco no título seria ignorado pelo navegador.
+  useEffect(() => {
+    if (deletedHere && focusAfterDeletion.current) {
+      focusAfterDeletion.current = false;
+      onDeleted();
+    }
+  }, [deletedHere, onDeleted]);
   if (!results.published || results.artifacts.length === 0) {
     return <>{children}</>;
   }
@@ -66,11 +80,20 @@ export function ResultsAvailability({
         <>
           {children}
           <DeleteResults
+            asking={asking}
             pending={removal.isPending}
             error={removal.error}
-            onAsk={removal.reset}
+            onAsk={() => {
+              removal.reset();
+              setAsking(true);
+            }}
+            onCancel={() => {
+              setAsking(false);
+            }}
             onConfirm={() => {
-              removal.mutate();
+              if (!removal.isPending) {
+                removal.mutate();
+              }
             }}
           />
         </>
@@ -145,14 +168,22 @@ function Unavailable({ reason, expiresAt }: UnavailableProps): ReactElement {
 }
 
 interface DeleteResultsProps {
+  readonly asking: boolean;
   readonly pending: boolean;
   readonly error: Error | null;
   readonly onAsk: () => void;
+  readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }
 
-function DeleteResults({ pending, error, onAsk, onConfirm }: DeleteResultsProps): ReactElement {
-  const [asking, setAsking] = useState(false);
+function DeleteResults({
+  asking,
+  pending,
+  error,
+  onAsk,
+  onCancel,
+  onConfirm,
+}: DeleteResultsProps): ReactElement {
   return (
     <div className="flex flex-col gap-3">
       {error !== null && (
@@ -165,31 +196,20 @@ function DeleteResults({ pending, error, onAsk, onConfirm }: DeleteResultsProps)
       <div className="self-start">
         {/* Bloqueado com o pedido em voo: o reset do onAsk zeraria o isPending e liberaria um
             segundo DELETE antes da resposta do primeiro. */}
-        <Button
-          type="button"
-          variant="tertiary"
-          aria-disabled={pending}
-          onClick={() => {
-            onAsk();
-            setAsking(true);
-          }}
-        >
-          {pending ? T.removing : T.remove}
+        <Button type="button" variant="tertiary" aria-disabled={pending} onClick={onAsk}>
+          {T.remove}
         </Button>
       </div>
       <ConfirmDialog
         open={asking}
         title={T.removeTitle}
-        confirmLabel={T.removeConfirm}
+        confirmLabel={pending ? T.removing : T.removeConfirm}
         cancelLabel={T.removeCancel}
         confirmBlocked={pending}
-        onCancel={() => {
-          setAsking(false);
-        }}
-        onConfirm={() => {
-          setAsking(false);
-          onConfirm();
-        }}
+        busy={pending}
+        // Fecha sempre: o <dialog> pode já ter fechado, e o estado não pode divergir dele.
+        onCancel={onCancel}
+        onConfirm={onConfirm}
       >
         <p>{T.removeBody}</p>
       </ConfirmDialog>
