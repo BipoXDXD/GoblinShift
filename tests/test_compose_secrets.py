@@ -217,3 +217,22 @@ def test_desenvolvimento_sobe_sem_a_configuracao_do_login() -> None:
     api = json.loads(result.stdout)["services"]["api"]
     assert not set(api["environment"]) & WEB_VARS
     assert set(secret_targets(api)) == {"db_password"}
+
+
+def test_producao_sem_ambiente_declarado_nao_interpola(secrets_dir: Path) -> None:
+    # Sem GS_ENVIRONMENT, a aplicação cairia no padrão `development` e pularia as validações de
+    # produção (origem https, segredos, executor-ctl).
+    env = {**PROD_ENV, "GS_SECRETS_DIR": str(secrets_dir)}
+    del env["GS_ENVIRONMENT"]
+
+    result = compose_config(PROD_FILES, env)
+
+    assert result.returncode != 0
+    assert "GS_ENVIRONMENT" in result.stderr
+
+
+@pytest.mark.parametrize("service", ["api", "maintenance", "migrate", "worker"])
+def test_servico_que_le_a_configuracao_recebe_o_ambiente_da_producao(
+    production: dict[str, Any], service: str
+) -> None:
+    assert production["services"][service]["environment"]["GS_ENVIRONMENT"] == "production"
