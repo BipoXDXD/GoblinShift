@@ -1,4 +1,4 @@
-import { notifyManager, type QueryClient } from "@tanstack/react-query";
+import { defaultScheduler, notifyManager, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -318,7 +318,7 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
   });
 
   afterEach(() => {
-    notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+    notifyManager.setScheduler(defaultScheduler);
   });
 
   it.each([

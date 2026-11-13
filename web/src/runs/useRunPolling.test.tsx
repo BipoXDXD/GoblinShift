@@ -1,4 +1,5 @@
 import {
+  defaultScheduler,
   focusManager,
   notifyManager,
   QueryClient,
@@ -104,7 +105,7 @@ beforeEach(() => {
 
 afterEach(() => {
   focusManager.setFocused(undefined);
-  notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+  notifyManager.setScheduler(defaultScheduler);
   vi.useRealTimers();
 });
 
