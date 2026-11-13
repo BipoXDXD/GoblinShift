@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { formatDateTime } from "../format";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
@@ -14,6 +14,8 @@ import {
   screenRequests,
 } from "../test/fakeApi";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/execucoes/id");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
