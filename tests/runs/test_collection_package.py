@@ -848,3 +848,35 @@ def test_pacote_bate_o_heartbeat_no_hash_e_em_cada_entrada_do_zip(tmp_path: Path
     hashed = sum(_chunks(len(data)) for data in FILES.values())
     package = _chunks((out / PACKAGE).stat().st_size)
     assert len(beats) == hashed + package + sum(_chunks(len(data)) for data in zipped)
+
+
+# --- out/ alterado durante a coleta ---------------------------------------------------------------
+
+
+def test_saida_truncada_durante_o_hash_vira_erro_de_coleta(tmp_path: Path) -> None:
+    # Maior que um bloco de leitura: o truncamento no primeiro heartbeat cai antes do fim.
+    data = b"x" * (2 * collection.READ_CHUNK_BYTES + 1)
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": data})
+    target = out / "a.csv"
+
+    def truncate_once() -> None:
+        if target.stat().st_size == len(data):
+            target.write_bytes(b"nome")
+
+    with pytest.raises(CollectionError, match=r"mudou durante a coleta: 'a\.csv'"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1, heartbeat=truncate_once)
+
+
+@pytest.mark.usefixtures("small_chunks")
+def test_saida_que_cresce_durante_o_hash_vira_erro_de_coleta(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, *NAMES)], FILES)
+    target = out / "a.csv"
+
+    def append() -> None:
+        with target.open("ab") as handle:
+            handle.write(b"x")
+
+    with pytest.raises(CollectionError, match=r"mudou durante a coleta: 'a\.csv'"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1, heartbeat=append)
