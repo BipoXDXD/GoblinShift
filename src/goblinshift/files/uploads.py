@@ -49,8 +49,11 @@ _NAME_SEPARATORS = frozenset("/\\")
 # em faixas escritas à mão porque o JSON Schema (ECMA-262) não tem `\p{...}`; um teste confere que
 # elas cobrem exatamente essas categorias.
 _CONTROL_CHARS = r"\x00-\x1f\x7f-\x9f\u2028\u2029"
+# Fora ficam ZWNJ (U+200C, escrita persa) e ZWJ (U+200D, emoji composto): são Cf, mas legítimos
+# num nome de arquivo e não reordenam nem escondem o texto.
+_ALLOWED_FORMAT_CHARS = {0x200C: None, 0x200D: None}
 _BMP_FORMAT_CHARS = (
-    r"\xad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b-\u200f\u202a-\u202e"
+    r"\xad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u202a-\u202e"
     r"\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb"
 )
 # Mais os surrogates soltos (Cs), que o PostgreSQL nem aceitaria em UTF-8.
@@ -312,7 +315,7 @@ def _name_problem(name: str) -> str | None:
     if any(char in _NAME_SEPARATORS for char in name):
         return "não pode conter separadores de caminho"
     # Formato invisível (Cf) reordena ou esconde parte do nome exibido, como no nome do preset.
-    if _FORBIDDEN_NAME_CHAR.search(name) or has_unsafe_char(name):
+    if _FORBIDDEN_NAME_CHAR.search(name) or has_unsafe_char(name.translate(_ALLOWED_FORMAT_CHARS)):
         return "não pode conter caracteres de controle nem de formato invisível"
     return None
 

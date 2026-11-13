@@ -189,7 +189,19 @@ def test_acima_do_teto_do_tipo_pelo_nome_e_recusado(
     assert error.value.field == "items[0].expected_size"
 
 
-@pytest.mark.parametrize("name", ["a", "x" * 255, "relatório final (1).CSV", "..oculto", "a.b."])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a",
+        "x" * 255,
+        "relatório final (1).CSV",
+        "..oculto",
+        "a.b.",
+        # ZWNJ (escrita persa) e ZWJ (emoji composto) são Cf, mas legítimos em nome de arquivo.
+        "a\u200cb.pdf",
+        "foto \U0001f468\u200d\U0001f469\u200d\U0001f467.jpg",
+    ],
+)
 def test_nome_valido_e_guardado_como_recebido(factory: sessionmaker[Session], name: str) -> None:
     view = create_intent(factory, create_user(factory, "a"), name=name)
 
