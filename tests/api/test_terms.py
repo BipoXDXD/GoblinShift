@@ -22,8 +22,9 @@ from goblinshift.identity.tables import app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.files_support import bearer
 from tests.api.session_support import open_session, session_headers
+from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
-from tests.identity.support import new_key, new_user
+from tests.identity.support import new_key, new_user, purge_account
 from tests.security.authz_matrix import Policy, entries
 
 pytestmark = pytest.mark.integration
@@ -276,6 +277,22 @@ def test_corpo_invalido_4xx_e_nada_gravado(
 
     assert response.status_code in {400, 422}, response.text
     assert stored_terms(factory, owner) == (None, None)
+
+
+def test_aceite_de_conta_purgada_depois_do_login_401_e_nada_auditado(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # A sessão já foi aceita quando a purga apaga a conta: a corrida entre a autenticação e a rota.
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    owner = external_account(factory)
+    SimulatedSessions(app, now).sign_in(owner)
+    purge_account(factory, owner, now)
+
+    response = accept(client, {})
+
+    body = assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert body["detail"] == "A sessão não vale mais para esta conta."
+    assert terms_events(factory, owner) == []
 
 
 # --- Um usuário não aceita pelo outro ---------------------------------------------------------

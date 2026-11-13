@@ -282,6 +282,8 @@ export const SCREENS: readonly Screen[] = [
       await api.signIn();
       await new AcessoPage(page).open();
       await expect(new AcessoPage(page).keyItems()).toHaveCount(3);
+      // Só a ativa oferece Revogar: sem isto, a chave padrão vencida passava calada na matriz.
+      await expect(page.getByRole("button", { name: /^Revogar a chave gsk_/ })).toHaveCount(1);
     },
   },
   {
