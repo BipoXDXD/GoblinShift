@@ -26,7 +26,11 @@ from goblinshift.identity import Scope
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, Settings
 from goblinshift.runs import acceptance
-from goblinshift.runs.acceptance import MAX_QUEUED_RUNS
+from goblinshift.runs.acceptance import (
+    ADVISORY_CLASS_IDEMPOTENCY,
+    CREATE_RUN_OPERATION,
+    MAX_QUEUED_RUNS,
+)
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run, run_input, run_output
 from tests.api.files_support import create_upload, send_content
@@ -412,6 +416,38 @@ def test_fila_cheia_responde_503_com_retry_after(
 
     assert_problem(response, 503, "QUEUE_FULL")
     assert int(response.headers["retry-after"]) > 0
+
+
+def test_chave_em_andamento_responde_409_com_retry_after_sem_criar_nem_consumir_a_chave(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    payload = body(ready_inputs(factory, storage, account.id))
+    key = str(uuid.uuid4())
+
+    # A requisição original segura a trava consultiva da chave até concluir; aqui é outra conexão.
+    with app.state.engine.connect() as original:
+        original.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    ADVISORY_CLASS_IDEMPOTENCY,
+                    func.hashtext(f"{account.id}:{CREATE_RUN_OPERATION}:{key}"),
+                )
+            )
+        )
+
+        response = post_run(client, account, payload, key)
+
+        assert_problem(response, 409, "IDEMPOTENCY_IN_PROGRESS")
+        assert int(response.headers["retry-after"]) > 0
+        assert count_rows(factory)["run"] == 0
+        original.rollback()
+
+    retried = post_run(client, account, payload, key)
+
+    assert retried.status_code == 202, retried.text
+    assert "idempotency-replayed" not in retried.headers
+    assert count_rows(factory)["run"] == 1
 
 
 def test_validate_only_resolve_os_parametros_sem_criar_nem_consumir_a_chave(
