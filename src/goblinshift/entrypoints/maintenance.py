@@ -36,7 +36,13 @@ from goblinshift.platform.settings import ExecutorConfigError, MissingSecretErro
 from goblinshift.platform.telemetry import UserHasher, configure_logging
 from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.finished import RunFinishedReporter
-from goblinshift.runs.maintenance import STEPS_FAILED, Maintenance, MaintenanceConfig
+from goblinshift.runs.maintenance import (
+    STEPS_FAILED,
+    Maintenance,
+    MaintenanceConfig,
+    is_connection_error,
+    log_step_failure,
+)
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError, ExecutorCtlRunner
 from goblinshift.runs.worker.runner import Runner
 
@@ -51,6 +57,12 @@ type Cycle = tuple[str, Callable[[], Mapping[str, int]]]
 
 CYCLE_SPAN = "maintenance.cycle"
 _ATTRIBUTE_PREFIX = "maintenance."
+# Contagens do ciclo de contas. Nome próprio, e não `steps_failed`: o span junta as contagens de
+# todos os ciclos, e o ciclo de contas sobrescreveria a do ciclo de execuções.
+ACCOUNT_STEPS_FAILED = "account_steps_failed"
+ACCOUNTS_PURGE_FAILED = "accounts_purge_failed"
+# Contagens de passo falho que fazem a volta contar em `failed_cycles`.
+_FAILED_STEP_COUNTS = (STEPS_FAILED, ACCOUNT_STEPS_FAILED)
 
 
 def main() -> int:
@@ -132,8 +144,8 @@ def run_cycles(
 
     Ciclos independentes: a falha de um não impede o outro. O span leva as contagens de todos,
     com o prefixo `maintenance.`, e quantos falharam: os que levantaram e os que contaram passos
-    falhos (`steps_failed`); a mensagem da exceção fica só no log, porque pode trazer valores do
-    banco (3.7).
+    falhos (`steps_failed`, `account_steps_failed`); a mensagem da exceção fica só no log, porque
+    pode trazer valores do banco (3.7).
     """
     started = time.monotonic()
     with tracer.start_as_current_span(
@@ -152,7 +164,7 @@ def run_cycles(
                 continue
             for key, value in counts.items():
                 span.set_attribute(f"{_ATTRIBUTE_PREFIX}{key}", value)
-            if counts.get(STEPS_FAILED, 0) > 0:
+            if any(counts.get(key, 0) > 0 for key in _FAILED_STEP_COUNTS):
                 # Passo que falhou dentro do ciclo: as contagens dos outros seguem no span, e a
                 # volta entra no mesmo alerta de quem levanta.
                 failed += 1
@@ -180,6 +192,12 @@ class AccountJobs:
     `identity` (chaves, sessões, capacidade e a conta). Cada lote é uma transação; uma etapa que
     ainda não terminou adia as seguintes para o próximo ciclo, e a purga interrompida retoma do
     banco. Conta com Run não terminal espera: `runs` não apaga a Run e não termina.
+
+    Passos independentes, como no ciclo de execuções: a exceção de um fica no log e em
+    `account_steps_failed`, e os outros seguem, inclusive o alerta da exclusão atrasada; as
+    contagens do passo que falhou ficam fora do evento. Na purga, a falha de uma conta conta em
+    `accounts_purge_failed` e não impede as seguintes. Perda de conexão derruba o ciclo inteiro,
+    como antes: com o banco fora, cada passo seguinte só esperaria o `connect_timeout` de novo.
     """
 
     def __init__(
@@ -194,50 +212,85 @@ class AccountJobs:
 
     def run_cycle(self) -> dict[str, int]:
         started = time.monotonic()
-        now = self._clock()
-        batch = self._config.batch_size
-        counts = {
-            "accounts_purged": self.purge_accounts(),
-            "login_states_removed": self._in_transaction(
-                lambda s: identity_purge.delete_expired_login_states(s, now, batch)
-            ),
-            "web_sessions_removed": self._in_transaction(
-                lambda s: identity_purge.delete_ended_web_sessions(s, now, batch)
-            ),
-            "audit_events_removed": self._in_transaction(
-                lambda s: identity_purge.delete_old_audit_events(s, now, batch)
-            ),
-            "accounts_deletion_overdue": self._in_transaction(
-                lambda s: identity_purge.count_overdue_deletions(s, now)
-            ),
-            "request_windows_removed": self._in_transaction(
-                lambda s: rate_limit.delete_expired_windows(s, now, batch)
-            ),
-            # Tamanho da tabela do limite de requisições depois da limpeza (ADR 028).
-            "request_windows": self._in_transaction(rate_limit.count_windows),
-        }
-        if counts["accounts_deletion_overdue"]:
+        counts: dict[str, int] = {}
+        failed = 0
+        for name, step in self._cycle_steps():
+            try:
+                counts.update(step())
+            except Exception as error:
+                if is_connection_error(error):
+                    raise
+                # Fronteira do passo: o seguinte recomeça do banco, sem estado em memória.
+                log_step_failure(name, error)
+                failed += 1
+        # A purga que falhou numa conta também põe a volta no alerta, mesmo com as outras purgadas.
+        counts[ACCOUNT_STEPS_FAILED] = failed + int(counts.get(ACCOUNTS_PURGE_FAILED, 0) > 0)
+        overdue = counts.get("accounts_deletion_overdue", 0)
+        if overdue:
             # Alerta de causa: o prazo de 24 h da exclusão (1.8) está perto de vencer.
             logger.warning(
                 "exclusão de conta atrasada",
-                extra={
-                    "fields": {
-                        "alert": "account_deletion_overdue",
-                        "accounts": counts["accounts_deletion_overdue"],
-                    }
-                },
+                extra={"fields": {"alert": "account_deletion_overdue", "accounts": overdue}},
             )
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de contas", extra={"fields": fields})
         return counts
 
-    def purge_accounts(self) -> int:
-        """Avança a purga das contas em exclusão; devolve quantas terminaram neste ciclo."""
+    def _cycle_steps(self) -> tuple[Cycle, ...]:
+        """Os passos, na ordem: purga, retenção da identidade, alerta e limite de requisições.
+
+        Cada passo tem o nome da contagem que devolve, e é esse nome que vai ao log da falha.
+        """
+        now = self._clock()
+        batch = self._config.batch_size
+        counted = self._counted_step
+        return (
+            ("accounts_purged", self.purge_accounts),
+            counted(
+                "login_states_removed",
+                lambda s: identity_purge.delete_expired_login_states(s, now, batch),
+            ),
+            counted(
+                "web_sessions_removed",
+                lambda s: identity_purge.delete_ended_web_sessions(s, now, batch),
+            ),
+            counted(
+                "audit_events_removed",
+                lambda s: identity_purge.delete_old_audit_events(s, now, batch),
+            ),
+            counted(
+                "accounts_deletion_overdue",
+                lambda s: identity_purge.count_overdue_deletions(s, now),
+            ),
+            counted(
+                "request_windows_removed",
+                lambda s: rate_limit.delete_expired_windows(s, now, batch),
+            ),
+            # Tamanho da tabela do limite de requisições depois da limpeza (ADR 028).
+            counted("request_windows", rate_limit.count_windows),
+        )
+
+    def _counted_step(self, key: str, work: Callable[[Session], int]) -> Cycle:
+        return key, lambda: {key: self._in_transaction(work)}
+
+    def purge_accounts(self) -> dict[str, int]:
+        """Avança a purga das contas em exclusão: quantas terminaram e quantas falharam no ciclo."""
         owners = self._in_transaction(
             lambda s: identity_purge.accounts_pending_purge(s, self._config.accounts_per_cycle)
         )
-        return sum(self._purge_account(owner_id) for owner_id in owners)
+        purged = 0
+        failed = 0
+        for owner_id in owners:
+            try:
+                purged += self._purge_account(owner_id)
+            except Exception as error:
+                if is_connection_error(error):
+                    raise
+                # Uma conta com defeito volta no próximo ciclo; as seguintes não esperam por ela.
+                _log_purge_failure(owner_id, error)
+                failed += 1
+        return {"accounts_purged": purged, ACCOUNTS_PURGE_FAILED: failed}
 
     def _purge_account(self, owner_id: UUID) -> bool:
         batch = self._config.batch_size
@@ -252,6 +305,17 @@ class AccountJobs:
     def _in_transaction[T](self, work: Callable[[Session], T]) -> T:
         with unit_of_work(self._factory) as session:
             return work(session)
+
+
+def _log_purge_failure(owner_id: UUID, error: Exception) -> None:
+    """Como `log_step_failure`: tipo e SQLSTATE nos campos, sem a mensagem do banco (3.7)."""
+    driver_error = getattr(error, "orig", error)
+    fields = {
+        "user_id": str(owner_id),
+        "error_type": type(error).__name__,
+        "sqlstate": getattr(driver_error, "sqlstate", None),
+    }
+    logger.exception("purga da conta falhou", extra={"fields": fields})
 
 
 class ExecutorImageProbe:
