@@ -62,11 +62,26 @@ TMPFS_KIB = 1024
 FILL_KIB = 900
 
 
+def _compose_service(service: str) -> dict[str, Any]:
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    config: dict[str, Any] = compose["services"][service]
+    return config
+
+
 def compose_image(service: str) -> str:
     """A imagem do serviço no compose.yaml: o teste usa a mesma versão da produção."""
-    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
-    image: str = compose["services"][service]["image"]
+    image: str = _compose_service(service)["image"]
     return image
+
+
+def compose_privileges(service: str) -> dict[str, list[str]]:
+    """`cap_drop` e `security_opt` do serviço no compose.yaml, como argumentos do docker-py.
+
+    O OpenObserve e o Collector sobem com as mesmas restrições da produção (issue #366): se um deles
+    precisar de uma capability que o Compose larga, ele não fica pronto aqui.
+    """
+    config = _compose_service(service)
+    return {"cap_drop": config["cap_drop"], "security_opt": config["security_opt"]}
 
 
 def wait_until[T](probe: Callable[[], T | None], what: str, timeout_s: float = 60.0) -> T:
@@ -210,7 +225,11 @@ def _openobserve(network: Network) -> DockerContainer:
         .with_exposed_ports(O2_PORT)
         .with_network(network)
         .with_network_aliases("openobserve")
-        .with_kwargs(extra_hosts={"host.docker.internal": "host-gateway"}, mem_limit=memory_limit)
+        .with_kwargs(
+            extra_hosts={"host.docker.internal": "host-gateway"},
+            mem_limit=memory_limit,
+            **compose_privileges("openobserve"),
+        )
     )
 
 
@@ -262,6 +281,7 @@ def _collector(network: Network, volumes: dict[str, str]) -> DockerContainer:
         .with_env("GS_HOSTMETRICS_INTERVAL", "5s")
         .with_volume_mapping(str(COLLECTOR_CONFIG), "/etc/otelcol/config.yaml", "ro")
         .with_network(network)
+        .with_kwargs(**compose_privileges("otel-collector"))
     )
     for mount, volume in volumes.items():
         container = container.with_volume_mapping(volume, mount, "ro")

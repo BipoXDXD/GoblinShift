@@ -34,9 +34,11 @@ x-app: &app
   networks: [internal]
   logging: *logging
 
-# Menor privilégio (issue #366) nos serviços que rodam como UID 10001: um processo sem root já não
-# tem capability efetiva; sem nenhuma no conjunto limite e com no-new-privileges, nem um binário
-# setuid as devolve. Fora do x-app: storage-init e storage-mark rodam como root e precisam de CHOWN.
+# Menor privilégio (issue #366) nos serviços que não precisam de capability nenhuma: os que rodam
+# como UID 10001 (um processo sem root já não tem capability efetiva; sem nenhuma no conjunto limite
+# e com no-new-privileges, nem um binário setuid as devolve) e o OpenObserve, root que só escreve no
+# próprio volume. Os que sobem como root e precisam de alguma largam uma lista explícita, com só as
+# medidas (tests/test_container_hardening.py): a política do host (ADR 034) reprova cap_add.
 x-least-privilege: &least-privilege
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
@@ -56,6 +58,22 @@ services:
     secrets: [db_password]
     volumes:
       - ${GS_PG_DATA:-pgdata}:/var/lib/postgresql
+    # O entrypoint sobe como root: entrega o PGDATA ao `postgres` (CHOWN), no reinício percorre o
+    # PGDATA de modo 700 do `postgres` (DAC_OVERRIDE; sem ela o `find` falha e o container sai) e
+    # troca de usuário pelo gosu (SETUID e SETGID). O FOWNER só serve a um chmod cuja falha o
+    # entrypoint ignora.
+    cap_drop:
+      - AUDIT_WRITE
+      - FOWNER
+      - FSETID
+      - KILL
+      - MKNOD
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - SETFCAP
+      - SETPCAP
+      - SYS_CHROOT
+    security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U goblinshift -d goblinshift"]
       interval: 5s
@@ -66,7 +84,7 @@ services:
     logging: *logging
 
   migrate:
-    <<: *app
+    <<: [*app, *least-privilege]
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -79,6 +97,22 @@ services:
     <<: *app
     user: "0"
     command: ["install", "-d", "-o", "app", "-g", "app", "-m", "700", "/var/lib/goblinshift/storage/objects"]
+    # CHOWN para entregar a pasta ao `app` e DAC_OVERRIDE para criá-la: no volume nomeado (local e
+    # CI) a raiz vem da imagem, de modo 700 do `app`; na VPS ela é do root, e só o CHOWN bastaria.
+    cap_drop:
+      - AUDIT_WRITE
+      - FOWNER
+      - FSETID
+      - KILL
+      - MKNOD
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - SETFCAP
+      - SETGID
+      - SETPCAP
+      - SETUID
+      - SYS_CHROOT
+    security_opt: [no-new-privileges:true]
     volumes: [*storage]
     restart: "no"
 
@@ -91,6 +125,22 @@ services:
     user: "0"
     profiles: [storage-mark]
     command: ["install", "-m", "644", "/dev/null", "/var/lib/goblinshift/storage/objects/.goblinshift-storage"]
+    # Só o DAC_OVERRIDE, para o root criar a sentinela dentro da pasta de modo 700 do `app`.
+    cap_drop:
+      - AUDIT_WRITE
+      - CHOWN
+      - FOWNER
+      - FSETID
+      - KILL
+      - MKNOD
+      - NET_BIND_SERVICE
+      - NET_RAW
+      - SETFCAP
+      - SETGID
+      - SETPCAP
+      - SETUID
+      - SYS_CHROOT
+    security_opt: [no-new-privileges:true]
     volumes: [*storage]
     restart: "no"
 
@@ -184,6 +234,7 @@ services:
     logging: *logging
 
   otel-collector:
+    <<: *least-privilege
     image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
@@ -204,6 +255,7 @@ services:
     logging: *logging
 
   openobserve:
+    <<: *least-privilege
     image: openobserve/openobserve:v1.1.2@sha256:4a154849432f75c4fb024de32fe34163c02406c905dab22bf8d213d2e3386392
     environment:
       ZO_LOCAL_MODE: "true"

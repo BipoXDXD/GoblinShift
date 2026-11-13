@@ -1,13 +1,24 @@
-"""Menor privilégio nos containers da aplicação (issue #366).
+"""Menor privilégio em todos os containers do projeto (issue #366).
 
-`api`, `worker` e `maintenance` rodam como UID 10001: sem nenhuma capability e com
-`no-new-privileges`, nem um binário setuid devolve privilégio a um processo comprometido. O Nginx
-da imagem oficial sobe como root e precisa de quatro capabilities, medidas com a imagem real: sem
-CHOWN o mestre não cria `/var/cache/nginx/*_temp` com o dono `nginx` e não sobe; sem SETUID e
-SETGID não troca de usuário nos workers. NET_BIND_SERVICE fica porque a porta 80 só abre sem ela
-se o daemon do host baixar `ip_unprivileged_port_start`, o que depende da versão do Docker da VPS.
+`api`, `worker`, `maintenance` e `migrate` rodam como UID 10001, e o Collector como o 10001 da
+própria imagem: sem nenhuma capability e com `no-new-privileges`, nem um binário setuid devolve
+privilégio a um processo comprometido. O OpenObserve roda como root, mas só escreve no próprio
+volume, do root: também sobe sem nenhuma.
 
-O Nginx larga uma lista explícita, e não `ALL` mais `cap_add`, porque a política do host (ADR 034)
+Quem sobe como root e precisa de capability fica só com as medidas com a imagem real, cada uma
+derrubando o serviço quando falta:
+
+- Nginx: sem CHOWN o mestre não cria `/var/cache/nginx/*_temp` com o dono `nginx`; sem SETUID e
+  SETGID não troca de usuário nos workers. NET_BIND_SERVICE fica porque a porta 80 só abre sem ela
+  se o daemon do host baixar `ip_unprivileged_port_start`, o que depende da versão do Docker da VPS.
+- Postgres: o entrypoint, como root, entrega o PGDATA ao `postgres` (CHOWN) e, no reinício,
+  percorre o PGDATA de modo 700 do `postgres` (DAC_OVERRIDE) antes de trocar de usuário pelo
+  `gosu` (SETUID e SETGID).
+- `storage-init`: cria a pasta dos objetos (DAC_OVERRIDE: no volume nomeado, local e da CI, a raiz
+  vem da imagem, de modo 700 do `app`) e a entrega ao `app` (CHOWN).
+- `storage-mark`: cria a sentinela dentro da pasta de modo 700 do `app` (DAC_OVERRIDE).
+
+Eles largam uma lista explícita, e não `ALL` mais `cap_add`, porque a política do host (ADR 034)
 reprova qualquer `cap_add`.
 
 Os destinos conferidos são os que sobem de verdade: o Compose local, o da aceitação sob gVisor e o
@@ -25,7 +36,14 @@ from tests.test_compose_host_policy import (
     production_environment,
 )
 
-HARDENED_APP_SERVICES = ("api", "worker", "maintenance")
+CAPABILITY_FREE_SERVICES = (
+    "api",
+    "worker",
+    "maintenance",
+    "migrate",
+    "otel-collector",
+    "openobserve",
+)
 NO_NEW_PRIVILEGES = "no-new-privileges:true"
 # Capabilities que o Docker concede por padrão (moby, oci/caps/defaults.go).
 DOCKER_DEFAULT_CAPS = frozenset(
@@ -47,6 +65,15 @@ DOCKER_DEFAULT_CAPS = frozenset(
     }
 )
 NGINX_CAPS = frozenset({"CHOWN", "SETGID", "SETUID", "NET_BIND_SERVICE"})
+# Serviços que sobem como root, com as capabilities medidas que ficam.
+ROOT_SERVICE_CAPS = {
+    "nginx": NGINX_CAPS,
+    "postgres": frozenset({"CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"}),
+    "storage-init": frozenset({"CHOWN", "DAC_OVERRIDE"}),
+    "storage-mark": frozenset({"DAC_OVERRIDE"}),
+}
+# O Coolify não publica a sentinela: ela só roda pelo deploy/storage-mark.sh, com o Compose.
+COMPOSE_ONLY_SERVICES = frozenset({"storage-mark"})
 
 COMPOSE_DESTINATIONS = {
     "local": ("compose.yaml", "compose.override.yaml"),
@@ -56,7 +83,11 @@ COMPOSE_DESTINATIONS = {
 
 
 def _compose_services(files: tuple[str, ...]) -> dict[str, Any]:
-    environment = production_environment() | {"GS_EXECUTOR_IMAGE": "placeholder"}
+    # O perfil põe a sentinela (`storage-mark`), fora do `up`, na configuração conferida.
+    environment = production_environment() | {
+        "GS_EXECUTOR_IMAGE": "placeholder",
+        "COMPOSE_PROFILES": "storage-mark",
+    }
     config = compose_config([str(ROOT / name) for name in files], environment)
     services: dict[str, Any] = config["services"]
     return services
@@ -65,7 +96,9 @@ def _compose_services(files: tuple[str, ...]) -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def destinations() -> dict[str, dict[str, Any]]:
     configs = {name: _compose_services(files) for name, files in COMPOSE_DESTINATIONS.items()}
-    configs["coolify"] = coolify_document("app.json")["services"]
+    configs["coolify"] = (
+        coolify_document("app.json")["services"] | coolify_document("infra.json")["services"]
+    )
     return configs
 
 
@@ -74,8 +107,8 @@ def _caps(values: list[str] | None) -> set[str]:
 
 
 @pytest.mark.parametrize("destination", [*COMPOSE_DESTINATIONS, "coolify"])
-@pytest.mark.parametrize("service", HARDENED_APP_SERVICES)
-def test_servico_da_aplicacao_sem_capabilities_e_sem_novos_privilegios(
+@pytest.mark.parametrize("service", CAPABILITY_FREE_SERVICES)
+def test_servico_sem_capabilities_e_sem_novos_privilegios(
     destinations: dict[str, dict[str, Any]], destination: str, service: str
 ) -> None:
     config = destinations[destination][service]
@@ -85,13 +118,21 @@ def test_servico_da_aplicacao_sem_capabilities_e_sem_novos_privilegios(
     assert NO_NEW_PRIVILEGES in config.get("security_opt", [])
 
 
-@pytest.mark.parametrize("destination", [*COMPOSE_DESTINATIONS, "coolify"])
-def test_nginx_fica_so_com_as_capabilities_medidas(
-    destinations: dict[str, dict[str, Any]], destination: str
+@pytest.mark.parametrize(
+    ("destination", "service"),
+    [
+        (destination, service)
+        for service in ROOT_SERVICE_CAPS
+        for destination in [*COMPOSE_DESTINATIONS, "coolify"]
+        if destination != "coolify" or service not in COMPOSE_ONLY_SERVICES
+    ],
+)
+def test_servico_root_fica_so_com_as_capabilities_medidas(
+    destinations: dict[str, dict[str, Any]], destination: str, service: str
 ) -> None:
-    config = destinations[destination]["nginx"]
+    config = destinations[destination][service]
 
-    assert _caps(config.get("cap_drop")) == DOCKER_DEFAULT_CAPS - NGINX_CAPS
+    assert _caps(config.get("cap_drop")) == DOCKER_DEFAULT_CAPS - ROOT_SERVICE_CAPS[service]
     assert not config.get("cap_add")
     assert NO_NEW_PRIVILEGES in config.get("security_opt", [])
 
@@ -104,5 +145,5 @@ def test_nginx_mantem_o_net_raw_fora_na_borda(destinations: dict[str, dict[str, 
 
 def test_storage_init_mantem_o_chown(destinations: dict[str, dict[str, Any]]) -> None:
     # Roda como root para criar a pasta dos objetos com o dono `app`: precisa de CHOWN.
-    assert "cap_drop" not in destinations["producao"]["storage-init"]
-    assert "cap_drop" not in destinations["coolify"]["storage-init"]
+    assert "CHOWN" not in _caps(destinations["producao"]["storage-init"].get("cap_drop"))
+    assert "CHOWN" not in _caps(destinations["coolify"]["storage-init"].get("cap_drop"))
