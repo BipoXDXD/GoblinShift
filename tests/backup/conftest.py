@@ -50,6 +50,11 @@ OBJECT_LOCK_30_DAYS = (
     "<DefaultRetention><Mode>COMPLIANCE</Mode><Days>30</Days></DefaultRetention>"
     "</Rule></ObjectLockConfiguration>"
 )
+# O `weed server` aceita 8 volumes por padrão e cria 7 de uma vez na primeira escrita de cada
+# bucket (uma coleção por bucket). Com o padrão, o segundo bucket fica com a última vaga, e um
+# volume a mais em qualquer coleção deixa a escrita nele sem vaga, que o gateway devolve como
+# HTTP 500. Os volumes não são pré-alocados, então a folga não custa disco.
+S3_MAX_VOLUMES = 64
 S3_READY_TIMEOUT_S = 60.0
 S3_READY_POLL_S = 0.5
 HTTP_OK = 200
@@ -137,7 +142,8 @@ def s3() -> Iterator[S3]:
     # pastas compartilhadas do Docker Desktop.
     command = (
         f"printf '%s' '{json.dumps(identities)}' > /tmp/s3.json && "
-        f"exec weed server -s3 -s3.port={S3_PORT} -s3.config=/tmp/s3.json -dir=/data"
+        f"exec weed server -volume.max={S3_MAX_VOLUMES} -s3 -s3.port={S3_PORT} "
+        "-s3.config=/tmp/s3.json -dir=/data"
     )
     container = (
         DockerContainer(SEAWEEDFS_IMAGE)
