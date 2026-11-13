@@ -220,6 +220,12 @@
       }
     },
     "migrate": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
       "command": [
         "alembic",
         "upgrade",
@@ -339,6 +345,23 @@
       }
     },
     "storage-init": {
+      "cap_drop": [
+        "AUDIT_WRITE",
+        "FOWNER",
+        "FSETID",
+        "KILL",
+        "MKNOD",
+        "NET_BIND_SERVICE",
+        "NET_RAW",
+        "SETFCAP",
+        "SETGID",
+        "SETPCAP",
+        "SETUID",
+        "SYS_CHROOT"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
       "command": [
         "install",
         "-d",
