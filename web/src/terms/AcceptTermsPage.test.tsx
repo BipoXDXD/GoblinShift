@@ -3,11 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { meBody, TERMS_PENDING } from "../test/account";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/termos/aceitar", "/acesso", "/historico", "/termos", "/privacidade");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 

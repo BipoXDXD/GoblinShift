@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import privacy from "../../../docs/legal/aviso-de-privacidade.md?raw";
 import terms from "../../../docs/legal/termos-de-uso.md?raw";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, problemResponse } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/termos", "/privacidade");
 
 // Material interno da revisão (pendências, ids do levantamento, notas ao revisor, fontes e as
 // instruções de convenção) mora em docs/legal/notas-internas.md, que nada importa.

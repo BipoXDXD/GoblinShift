@@ -6,11 +6,21 @@ import { describe, expect, it } from "vitest";
 import { ME_QUERY_KEY } from "../account/api";
 import type { SiteNotice } from "../notice/notice";
 import { meBody, TERMS_PENDING } from "../test/account";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, TEST_CSRF_TOKEN } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes(
+  "/termos",
+  "/privacidade",
+  "/creditos",
+  "/historico",
+  "/entrar",
+  "/acesso",
+  "/termos/aceitar",
+);
 
 type MeHandler = () => Response | null;
 
