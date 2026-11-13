@@ -44,6 +44,29 @@ def test_problema_429_e_503_com_retry_after_e_criado(code: ProblemCode, name: st
     assert ApiProblem(code, "x", headers={name: "5"}).headers == {name: "5"}
 
 
+# A spec publica `^[0-9]+$` (segundos): vazio, texto, negativo, data HTTP e dígito não ASCII
+# quebrariam o cliente que segue o contrato.
+INVALID_RETRY_AFTER = ["", "x", "-1", " 5", "5 ", "1.5", "Wed, 21 Oct 2026 07:28:00 GMT", "\u0665"]
+
+
+@pytest.mark.parametrize("value", INVALID_RETRY_AFTER)
+def test_problema_503_com_retry_after_invalido_levanta(value: str) -> None:
+    with pytest.raises(ValueError, match="Retry-After"):
+        ApiProblem(ProblemCode.QUEUE_FULL, "x", headers={"Retry-After": value})
+
+
+@pytest.mark.parametrize("value", INVALID_RETRY_AFTER)
+def test_resposta_429_com_retry_after_invalido_nao_e_montada(value: str) -> None:
+    with pytest.raises(ValueError, match="Retry-After"):
+        problem_response(
+            code=ProblemCode.RATE_LIMITED,
+            detail="x",
+            instance="/x",
+            request_id="r",
+            headers={"retry-after": value},
+        )
+
+
 @pytest.mark.parametrize("code", RETRY_AFTER_CODES)
 def test_resposta_429_e_503_sem_retry_after_nao_e_montada(code: ProblemCode) -> None:
     # O 503 do framework (`HTTPException`) não passa por `ApiProblem`: a montagem da resposta
