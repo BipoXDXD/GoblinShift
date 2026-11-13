@@ -75,6 +75,16 @@ def test_mp4_vira_wav_16_bits_na_taxa_e_canais_de_origem_e_uma_miniatura(
     assert (wav["codec_name"], wav["sample_rate"], wav["channels"]) == ("pcm_s16le", "44100", "2")
 
 
+def test_relatorio_traz_duration_ms_da_fonte(workspace: Workspace, clips: ClipLibrary) -> None:
+    # Fonte sintética de 2 s em vídeo e em áudio (media.py). Áudio PCM, sem o padding de quadro do
+    # AAC, que alguns ffmpeg somam à duração do contêiner.
+    workspace.add("clip.mov", clips.bytes("mov_pcm16_mono"))
+
+    item = ok_item(workspace, Params(thumbnail_count=0))
+
+    assert milliseconds(item, "duration_ms") == 2000
+
+
 def test_flac_sai_com_amostras_de_16_bits(workspace: Workspace, clips: ClipLibrary) -> None:
     workspace.add("clip.mov", clips.bytes("mov_pcm24"))
 
