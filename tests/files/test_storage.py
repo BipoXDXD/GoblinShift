@@ -6,7 +6,7 @@ import logging
 import os
 import stat
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -697,16 +697,76 @@ def test_walk_objects_tolera_diretorio_que_some_no_meio(
 ) -> None:
     storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
     storage.create_exclusive("runs/b", [b"abc"], max_bytes=100)
-    real_scandir = os.scandir
+    real_open = os.open
 
-    def scandir(path: str | os.PathLike[str]) -> object:
-        if Path(path).name == "runs":
+    def open_vanishing(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        if path == "runs":
             raise FileNotFoundError(path)
-        return real_scandir(path)
+        return real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(os, "scandir", scandir)
+    monkeypatch.setattr(os, "open", open_vanishing)
 
     assert [f.key for f in storage.walk_objects()] == ["uploads/a"]
+
+
+def test_walk_objects_nao_segue_diretorio_trocado_por_symlink(
+    storage: FileStorage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Entre o `lstat` da entrada e a abertura do diretório, ele vira symlink para fora da raiz."""
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    storage.create_exclusive("runs/b", [b"abc"], max_bytes=100)
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    (outside / "alheio").write_bytes(b"x")
+    real_classify = FileStorage._classify
+
+    def classify_then_swap(entry: os.DirEntry[str], prefix: str) -> StoredFile | str | None:
+        found = real_classify(entry, prefix)
+        if found == "runs/":
+            runs = storage.root / "runs"
+            (runs / "b").unlink()
+            runs.rmdir()
+            runs.symlink_to(outside, target_is_directory=True)
+        return found
+
+    monkeypatch.setattr(FileStorage, "_classify", staticmethod(classify_then_swap))
+
+    assert [f.key for f in storage.walk_objects()] == ["uploads/a"]
+
+
+def test_walk_objects_ignora_diretorio_trocado_por_arquivo(
+    storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    storage.create_exclusive("runs/b", [b"abc"], max_bytes=100)
+    real_classify = FileStorage._classify
+
+    def classify_then_swap(entry: os.DirEntry[str], prefix: str) -> StoredFile | str | None:
+        found = real_classify(entry, prefix)
+        if found == "runs/":
+            runs = storage.root / "runs"
+            (runs / "b").unlink()
+            runs.rmdir()
+            runs.write_bytes(b"x")
+        return found
+
+    monkeypatch.setattr(FileStorage, "_classify", staticmethod(classify_then_swap))
+
+    assert [f.key for f in storage.walk_objects()] == ["uploads/a"]
+
+
+def test_walk_objects_nao_vaza_descritor_nem_quando_interrompido(storage: FileStorage) -> None:
+    storage.create_exclusive("uploads/a", [b"abc"], max_bytes=100)
+    storage.create_exclusive("runs/r1/g1/b", [b"abc"], max_bytes=100)
+    before = _open_fd_count()
+
+    list(storage.walk_objects())
+    walk = storage.walk_objects()
+    assert isinstance(walk, Generator)
+    next(walk)
+    walk.close()
+
+    assert _open_fd_count() == before
 
 
 def test_walk_objects_sobe_erro_de_disco_que_nao_e_ausencia(

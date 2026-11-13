@@ -39,6 +39,7 @@ _TMP_PART_NAME = re.compile(r"[0-9a-f]{32}\.part")
 MOUNT_MARKER = ".goblinshift-storage"
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY
 
 
 class StorageError(Exception):
@@ -200,19 +201,31 @@ class FileStorage:
         ou diretório que some durante o percurso (o expurgo roda em paralelo) é ignorado; outro
         erro de disco sobe.
         """
-        pending = [(self.root, "")]
-        while pending:
-            directory, prefix = pending.pop()
-            try:
-                with os.scandir(directory) as scan:
-                    for entry in scan:
-                        found = self._classify(entry, prefix)
-                        if isinstance(found, StoredFile):
-                            yield found
-                        elif found is not None:
-                            pending.append((Path(entry.path), found))
-            except FileNotFoundError:
-                continue
+        try:
+            root_fd = os.open(self.root, _DIRECTORY_FLAGS)
+        except FileNotFoundError:
+            return
+        yield from self._walk_directory(root_fd, "")
+
+    def _walk_directory(self, directory_fd: int, prefix: str) -> Iterator[StoredFile]:
+        """Percorre o diretório já aberto e fecha o descritor ao terminar.
+
+        Cada subdiretório é aberto pelo nome, relativo ao descritor do pai e com `O_NOFOLLOW`:
+        se ele virar symlink entre o `lstat` da entrada e a abertura, a abertura falha em vez de
+        seguir para fora da raiz. O percurso pelo caminho teria essa corrida.
+        """
+        try:
+            with os.scandir(directory_fd) as scan:
+                for entry in scan:
+                    found = self._classify(entry, prefix)
+                    if isinstance(found, StoredFile):
+                        yield found
+                    elif found is not None:
+                        child_fd = _open_subdirectory(entry.name, directory_fd)
+                        if child_fd is not None:
+                            yield from self._walk_directory(child_fd, found)
+        finally:
+            os.close(directory_fd)
 
     @staticmethod
     def _classify(entry: os.DirEntry[str], prefix: str) -> StoredFile | str | None:
@@ -282,6 +295,19 @@ class FileStorage:
         missing = [d for d in [directory, *directory.parents] if not d.exists()]
         for path in reversed(missing):
             path.mkdir(mode=_DIR_MODE, exist_ok=True)
+
+
+def _open_subdirectory(name: str, parent_fd: int) -> int | None:
+    """Descritor do subdiretório, ou `None` se ele sumiu ou deixou de ser diretório comum."""
+    try:
+        return os.open(name, _DIRECTORY_FLAGS | os.O_NOFOLLOW, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        # ELOOP: virou symlink; ENOTDIR: virou arquivo. Os dois ficam fora, como no `_classify`.
+        if error.errno in (errno.ELOOP, errno.ENOTDIR):
+            return None
+        raise
 
 
 def _unlink_temporary(entry: os.DirEntry[str]) -> bool:
