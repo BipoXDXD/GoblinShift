@@ -6,6 +6,7 @@ com um `docker` falso no PATH que morre com o sinal, como o CLI real, e o sinal 
 Nada aqui usa Docker.
 """
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -50,6 +51,13 @@ def wait_for_stop():
 
 if command == "stop" and not is_probe and not stopping.exists():
     stopping.write_text(str(time.time() + float(os.environ.get("FAKE_STOP_S", "0"))))
+# Só o primeiro `start` é lento, e a marca vem antes do registro da chamada: o teste sinaliza o
+# grupo assim que a vê, e o sinal entre o registro e a marca deixava o `start` repetido dormir o
+# FAKE_START_S inteiro (30 s, além do TIMEOUT_S).
+slow_start = fake / "slow-start-done"
+slow = command == "start" and bool(os.environ.get("FAKE_START_S")) and not slow_start.exists()
+if slow:
+    slow_start.touch()
 with (fake / "calls").open("a") as calls:
     calls.write(command + "\\n")
 
@@ -69,9 +77,7 @@ elif command == "rm" and probe_alive.exists():
     print("Error: cannot remove container: container is running: stop it first", file=sys.stderr)
     sys.exit(1)
 elif command == "start":
-    slow_start = fake / "slow-start-done"
-    if os.environ.get("FAKE_START_S") and not slow_start.exists():
-        slow_start.touch()
+    if slow:
         time.sleep(float(os.environ["FAKE_START_S"]))
     if stopping.exists() and time.time() >= float(stopping.read_text()):
         stopping.unlink()
@@ -132,6 +138,18 @@ from acceptance import run
 run.run_with_maintenance_suspended(lambda: [run.Outcome("sonda", True, "ok")])
 """
 
+# Um cenário preso: ignora o SIGTERM e não sai sozinho. O `docker` falso morre com o sinal se ainda
+# estiver rodando, e o resultado dele não importa aqui (sem `check`).
+IGNORES_SIGTERM_SCRIPT = """
+import signal
+import subprocess
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+subprocess.run(["docker", "ps"], check=False, capture_output=True)
+time.sleep(60)
+"""
+
 
 class Fakes:
     def __init__(self, root: Path) -> None:
@@ -145,6 +163,29 @@ class Fakes:
         docker.chmod(0o755)
         (root / "docker.py").write_text(FAKE_DOCKER)
         self.path = f"{bin_dir}:{os.environ['PATH']}"
+        self.process: subprocess.Popen[str] | None = None
+
+    def _env(self, **env: str) -> dict[str, str]:
+        return {
+            **os.environ,
+            "PATH": self.path,
+            "FAKE_DIR": str(self.root),
+            "FAKE_PYTHON": sys.executable,
+            "FAKE_MAINTENANCE": env.pop("FAKE_MAINTENANCE", "m4nt"),
+            **env,
+        }
+
+    def docker(self, *args: str, **env: str) -> None:
+        """Uma chamada avulsa ao `docker` falso, sem cenário em volta."""
+        subprocess.run(  # noqa: S603 - o falso deste arquivo
+            [str(self.root / "bin" / "docker"), *args],
+            env=self._env(**env),
+            capture_output=True,
+            check=False,
+        )
+
+    def slow_start_claimed(self) -> bool:
+        return (self.root / "slow-start-done").exists()
 
     def maintenance_stopped(self) -> bool:
         return (self.root / "maintenance-stopping").exists()
@@ -153,31 +194,39 @@ class Fakes:
         calls = self.root / "calls"
         return calls.read_text().split() if calls.exists() else []
 
-    def interrupt_at(self, script: str, position: int, **env: str) -> tuple[int, list[str], str]:
+    def interrupt_at(
+        self, script: str, position: int, timeout_s: float = TIMEOUT_S, **env: str
+    ) -> tuple[int, list[str], str]:
         """Roda `script` e sinaliza o grupo na `position`-ésima chamada do `docker`."""
         process = subprocess.Popen(  # noqa: S603 - script fixo deste arquivo
             [sys.executable, "-B", "-c", script, str(self.area)],
             cwd=DEPLOY_DIR,
-            env={
-                **os.environ,
-                "PATH": self.path,
-                "FAKE_DIR": str(self.root),
-                "FAKE_PYTHON": sys.executable,
-                "FAKE_MAINTENANCE": env.pop("FAKE_MAINTENANCE", "m4nt"),
-                **env,
-            },
+            env=self._env(**env),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True,
         )
-        deadline = time.monotonic() + TIMEOUT_S
-        while len(self.calls()) < position:
-            assert time.monotonic() < deadline, f"só chegou a {self.calls()}"
-            time.sleep(0.01)
-        os.killpg(process.pid, signal.SIGTERM)
-        _, stderr = process.communicate(timeout=TIMEOUT_S)
+        self.process = process
+        try:
+            deadline = time.monotonic() + timeout_s
+            while len(self.calls()) < position:
+                assert time.monotonic() < deadline, f"só chegou a {self.calls()}"
+                time.sleep(0.01)
+            os.killpg(process.pid, signal.SIGTERM)
+            _, stderr = process.communicate(timeout=timeout_s)
+        except BaseException:
+            # O cenário vivo depois da falha vazava como ResourceWarning no teste seguinte.
+            _kill_and_reap(process)
+            raise
         return process.returncode, self.calls(), stderr
+
+
+def _kill_and_reap(process: subprocess.Popen[str]) -> None:
+    """SIGKILL no grupo do cenário (o script e o `docker` falso em curso) e colheita do líder."""
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    process.communicate()
 
 
 @pytest.fixture
@@ -232,3 +281,25 @@ def test_cliente_morto_no_start_religa_de_novo_e_rele_o_estado(fakes: Fakes) -> 
     assert code == SIGTERM_EXIT, stderr
     assert calls == ["ps", "stop", "start", "start", "inspect"]
     assert not fakes.maintenance_stopped()
+
+
+def test_start_lento_fica_marcado_antes_de_a_chamada_aparecer(fakes: Fakes) -> None:
+    # O teste sinaliza o grupo assim que vê a chamada: se a marca do start lento viesse depois do
+    # registro, o sinal podia cair entre os dois e o start repetido dormiria os 30 s inteiros.
+    # Sem onde registrar a chamada (`calls` é pasta), só a ordem decide se a marca já existe.
+    (fakes.root / "calls").mkdir()
+
+    fakes.docker("start", FAKE_START_S="30")
+
+    assert fakes.slow_start_claimed()
+
+
+def test_cenario_que_estoura_o_prazo_mata_e_colhe_o_grupo(fakes: Fakes) -> None:
+    with pytest.raises(subprocess.TimeoutExpired):
+        fakes.interrupt_at(IGNORES_SIGTERM_SCRIPT, position=1, timeout_s=0.5)
+
+    assert fakes.process is not None
+    assert fakes.process.returncode is not None
+    assert fakes.process.stderr is not None and fakes.process.stderr.closed
+    with pytest.raises(ProcessLookupError):
+        os.killpg(fakes.process.pid, 0)
