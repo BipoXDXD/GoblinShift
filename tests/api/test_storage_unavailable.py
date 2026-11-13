@@ -36,7 +36,8 @@ from tests.capacity.support import account_reserved, global_reserved
 CANARY = "CANARY-caminho-do-storage"
 LOGGER = "goblinshift.entrypoints.api.problems"
 UNAVAILABLE_ERRNOS = [errno.ENOSPC, errno.EDQUOT, errno.EIO]
-OTHER_ERRNOS = [errno.EACCES, errno.EROFS, errno.ENOENT]
+# Rede (ECONNRESET) e permissão/caminho não são "disco indisponível": viram 500, sem Retry-After.
+OTHER_ERRNOS = [errno.EACCES, errno.EROFS, errno.ENOENT, errno.ECONNRESET]
 
 
 def _disk_error(code: int) -> OSError:
@@ -66,6 +67,10 @@ def disk_client(offline_client: TestClient) -> TestClient:
     def disk_error(code: int) -> None:
         raise _disk_error(code)
 
+    def error_without_errno() -> None:
+        raise OSError(f"falha sem errno em /srv/storage/{CANARY}")
+
+    app.add_api_route("/_disk/sem-errno", error_without_errno)
     app.add_api_route("/_disk/{code}", disk_error)
     return offline_client
 
@@ -90,6 +95,18 @@ def test_oserror_de_outro_errno_continua_500(
 ) -> None:
     with caplog.at_level(logging.INFO, logger=LOGGER):
         response = disk_client.get(f"/_disk/{code}")
+
+    assert_problem(response, 500, "INTERNAL_ERROR")
+    assert "retry-after" not in response.headers
+    assert CANARY not in response.text
+    assert "Traceback" not in response.text
+
+
+def test_oserror_sem_errno_continua_500(
+    disk_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO, logger=LOGGER):
+        response = disk_client.get("/_disk/sem-errno")
 
     assert_problem(response, 500, "INTERNAL_ERROR")
     assert "retry-after" not in response.headers

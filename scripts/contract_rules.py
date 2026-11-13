@@ -11,6 +11,7 @@ Sem dependência do Schemathesis, para ser testado na suíte comum; o adaptador 
 
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -33,6 +34,7 @@ _PRESET_WITH_IF_MATCH = frozenset(
     {"PUT /api/v1/presets/{preset_id}", "DELETE /api/v1/presets/{preset_id}"}
 )
 _ITEM_NAME_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.name")
+_LAST_BMP_CODEPOINT = 0xFFFF
 _ITEM_SIZE_FIELD = re.compile(r"body\.items\.(?P<index>\d+)\.size")
 _SELECT_UPLOAD_FIELD = re.compile(r"body\.parameters\.select\.\d+\.upload_id")
 
@@ -82,21 +84,32 @@ def _has_nul(value: Any) -> bool:
     return False
 
 
-def _only_dot_names(rejection: Rejection) -> bool:
-    """Todo erro aponta um `items[i].name` "." ou "..", fora do padrão por exigir lookahead."""
+def _only_unpublished_names(rejection: Rejection) -> bool:
+    """Todo erro aponta um `items[i].name` que o padrão publicado não consegue recusar.
+
+    São "." e "..", que exigiriam lookahead, e os nomes com formato invisível (Cf) fora do plano
+    básico, que o ECMA-262 sem a flag `u` só escreve como par de surrogates.
+    """
     errors = rejection.field_errors()
     items = rejection.body.get("items") if isinstance(rejection.body, dict) else None
     if not errors or not isinstance(items, list):
         return False
-    return all(code == "invalid" and _is_dot_name(items, field) for field, code in errors)
+    return all(code == "invalid" and _is_unpublished_name(items, field) for field, code in errors)
 
 
-def _is_dot_name(items: list[Any], field: str) -> bool:
+def _is_unpublished_name(items: list[Any], field: str) -> bool:
     match = _ITEM_NAME_FIELD.fullmatch(field)
     if match is None or int(match["index"]) >= len(items):
         return False
     item = items[int(match["index"])]
-    return isinstance(item, dict) and item.get("name") in {".", ".."}
+    name = item.get("name") if isinstance(item, dict) else None
+    if not isinstance(name, str):
+        return False
+    return name in {".", ".."} or any(_is_astral_format(char) for char in name)
+
+
+def _is_astral_format(char: str) -> bool:
+    return ord(char) > _LAST_BMP_CODEPOINT and unicodedata.category(char) == "Cf"
 
 
 def _only_oversized_common_files(rejection: Rejection) -> bool:
@@ -170,7 +183,7 @@ _RULES = (
         "BODY_TOO_LARGE",
         lambda rejection: _exceeds_command_limit(rejection.body),
     ),
-    _Rule("POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_dot_names),
+    _Rule("POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_unpublished_names),
     _Rule(
         "POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_oversized_common_files
     ),

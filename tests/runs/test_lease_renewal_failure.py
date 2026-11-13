@@ -34,7 +34,13 @@ from goblinshift.runs.store import LostFencing
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
-from goblinshift.runs.worker.runner import ExecutorPhase, ExecutorStatus, LocalRunner, Runner
+from goblinshift.runs.worker.runner import (
+    ExecutorPhase,
+    ExecutorStatus,
+    LocalRunner,
+    Runner,
+    RunnerError,
+)
 from tests.runs.worker_support import (
     attempts,
     claim,
@@ -310,3 +316,107 @@ def test_erro_que_nao_e_falha_transitoria_do_banco_interrompe_a_supervisao(
 
     with pytest.raises(type(error)):
         worker.supervise(attempt_without_database())
+
+
+# --- `stop` que falha durante a supervisão ------------------------------------------------------
+
+STOP_FAILED = "executor não parou"
+# 128 + SIGTERM: o código de quem parou pelo `stop`.
+STOPPED_EXIT_CODE = 143
+
+
+class _StopFailsOnce:
+    """Executor que só termina pelo `stop`; o primeiro `stop` falha com `RunnerError`.
+
+    `events` grava renovações e paradas na ordem: o lease tem de seguir renovado entre o `stop`
+    que falhou e o que funcionou, senão outra tentativa assumiria um executor ainda vivo.
+    """
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.stops = 0
+        self._stopped = False
+        self._deadline = time.monotonic() + SUPERVISION_LIMIT_S
+
+    def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+        del attempt_id
+        if time.monotonic() >= self._deadline:
+            pytest.fail("a supervisão não terminou dentro do limite do teste")
+        if self._stopped:
+            return ExecutorStatus(ExecutorPhase.EXITED, exit_code=STOPPED_EXIT_CODE)
+        return ExecutorStatus(ExecutorPhase.RUNNING)
+
+    def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+        self.stops += 1
+        if self.stops == 1:
+            self.events.append("stop falhou")
+            raise RunnerError("executor-ctl fora do ar")
+        self.events.append("stop")
+        self._stopped = True
+        return self.status(attempt_id)
+
+
+def _stop_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == COORDINATOR_LOGGER and r.msg == STOP_FAILED]
+
+
+def test_stop_que_falha_mantem_lease_e_tenta_de_novo(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A Run pediu parada (cancelamento): cada renovação devolve STOPPING e pede `stop`.
+    events: list[str] = []
+    runner = _StopFailsOnce(events)
+    worker = worker_without_database(runner)
+
+    def renew(_claimed: ClaimedAttempt) -> Status:
+        events.append("lease")
+        return Status.STOPPING
+
+    monkeypatch.setattr(worker, "renew_lease", renew)
+    claimed = attempt_without_database()
+
+    with caplog.at_level(logging.WARNING, logger=COORDINATOR_LOGGER):
+        status = worker.supervise(claimed)
+
+    assert status == ExecutorStatus(ExecutorPhase.EXITED, exit_code=STOPPED_EXIT_CODE)
+    assert runner.stops == 2
+    # Sem desfecho depois do `stop` que falhou: a supervisão renovou o lease e só então repetiu.
+    assert events == ["lease", "stop falhou", "lease", "stop"]
+    [record] = _stop_failures(caplog)
+    fields = cast(dict[str, object], record.__dict__["fields"])
+    assert fields["attempt_id"] == str(claimed.attempt_id)
+    assert fields["error"] == "executor-ctl fora do ar"
+
+
+def test_stop_do_teto_da_tentativa_que_falha_tenta_de_novo_e_marca_o_estouro(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    events: list[str] = []
+    runner = _StopFailsOnce(events)
+    worker = Coordinator(
+        cast(sessionmaker[Session], None),
+        cast(FileStorage, None),
+        cast(Runner, runner),
+        CoordinatorConfig(
+            lease=timedelta(seconds=30),
+            status_poll=timedelta(seconds=0.001),
+            attempt_timeout=timedelta(0),
+            jitter=lambda: MIN_RETRY_JITTER,
+        ),
+    )
+
+    def renew(_claimed: ClaimedAttempt) -> Status:
+        events.append("lease")
+        return Status.RUNNING
+
+    monkeypatch.setattr(worker, "renew_lease", renew)
+
+    with caplog.at_level(logging.WARNING, logger=COORDINATOR_LOGGER):
+        status = worker.supervise(attempt_without_database())
+
+    # O `stop` que falhou não vira desfecho; o seguinte confirma o término e marca o teto.
+    assert status.timed_out
+    assert status.phase is ExecutorPhase.EXITED
+    assert runner.stops == 2
+    assert events == ["lease", "stop falhou", "stop"]
+    assert len(_stop_failures(caplog)) == 1

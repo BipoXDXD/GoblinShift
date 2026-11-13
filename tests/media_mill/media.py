@@ -216,23 +216,8 @@ def corrupted(data: bytes) -> bytes:
 
 def probe(path: Path) -> dict[str, str]:
     """Primeira faixa de `path` (áudio ou imagem) pelo ffprobe do ambiente, em `chave=valor`."""
-    _, ffprobe = require_ffmpeg()
-    completed = subprocess.run(  # noqa: S603 - argv do próprio teste
-        [
-            ffprobe,
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=codec_name,sample_rate,channels,sample_fmt,width,height",
-            "-of",
-            "default=noprint_wrappers=1",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    pairs = (line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line)
+    output = _show_entries(path, "stream=codec_name,sample_rate,channels,sample_fmt,width,height")
+    pairs = (line.split("=", 1) for line in output.splitlines() if "=" in line)
     return dict(pairs)
 
 
@@ -248,18 +233,14 @@ def stream_kinds(path: Path) -> list[str]:
 
 
 def _show_entries(path: Path, entries: str) -> str:
+    return run_ffprobe(path, "-show_entries", entries, "-of", "default=noprint_wrappers=1")
+
+
+def run_ffprobe(path: Path, *options: str) -> str:
+    """Saída do ffprobe do ambiente para `path`, com `options` e só os erros no stderr."""
     _, ffprobe = require_ffmpeg()
-    completed = subprocess.run(  # noqa: S603 - argv do próprio teste
-        [
-            ffprobe,
-            "-v",
-            "error",
-            "-show_entries",
-            entries,
-            "-of",
-            "default=noprint_wrappers=1",
-            str(path),
-        ],
+    completed = subprocess.run(  # noqa: S603 - argv do próprio teste, sem shell
+        [ffprobe, "-v", "error", *options, str(path)],
         check=True,
         capture_output=True,
         text=True,

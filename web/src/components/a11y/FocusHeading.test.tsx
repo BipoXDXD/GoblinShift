@@ -24,4 +24,18 @@ describe("FocusHeading", () => {
 
     expect(screen.getByRole("heading", { name: "Resultado" })).toHaveFocus();
   });
+
+  it("não tira o foco de um alerta que a moldura marcou como dono do foco inicial", () => {
+    render(
+      <div role="alert" tabIndex={-1} data-holds-initial-focus="">
+        Não foi possível entrar.
+      </div>,
+    );
+    screen.getByRole("alert").focus();
+
+    // A tela chega depois, num chunk lazy, ao lado do alerta que já está na página.
+    render(<FocusHeading>Oficina</FocusHeading>);
+
+    expect(screen.getByRole("alert")).toHaveFocus();
+  });
 });
