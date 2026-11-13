@@ -46,6 +46,12 @@ export default tseslint.config(
         "error",
         { selector: "TSEnumDeclaration", message: "Use união de literais ou objeto `as const`." },
         { selector: "TSModuleDeclaration[kind='namespace']", message: "Sem namespace." },
+        {
+          // Uma cópia do padrão do TanStack Query diverge dele em silêncio quando a lib mudar.
+          selector:
+            "CallExpression[callee.property.name='setScheduler'] CallExpression[callee.name='setTimeout']",
+          message: "Restaure o padrão com notifyManager.setScheduler(defaultScheduler).",
+        },
       ],
       "no-restricted-properties": [
         "error",

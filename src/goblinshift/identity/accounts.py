@@ -10,7 +10,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from uuid import UUID, uuid7
 
-from sqlalchemy import Select, Text, bindparam, exists, func, insert, or_, select, update
+from sqlalchemy import (
+    Select,
+    Text,
+    and_,
+    bindparam,
+    case,
+    exists,
+    func,
+    insert,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
@@ -228,7 +240,8 @@ def _known_scopes(stored: Iterable[str]) -> frozenset[Scope]:
 
 # Teto de chaves ativas por conta, garantido com a linha da conta travada (`FOR UPDATE`).
 MAX_ACTIVE_KEYS = 5
-# Revogadas e vencidas também aparecem em `GET /api-keys`; o teto mantém a consulta limitada.
+# Revogadas e vencidas também aparecem em `GET /api-keys`, depois das ativas; o teto mantém a
+# consulta limitada.
 MAX_LISTED_KEYS = 100
 MAX_LISTED_ACCOUNTS = 1000
 
@@ -330,8 +343,16 @@ def issue_key_for_session(
     return issue_key(session, owner_id=owner_id, scopes=scopes, now=now, days=days)
 
 
-def list_keys(session: Session, owner_id: UUID) -> list[KeySummary]:
-    """Chaves da conta, das mais novas às mais antigas, até `MAX_LISTED_KEYS`."""
+def list_keys(session: Session, owner_id: UUID, now: datetime) -> list[KeySummary]:
+    """Chaves da conta até `MAX_LISTED_KEYS`: ativas primeiro, depois das mais novas às antigas.
+
+    Revogadas e vencidas nunca saem da tabela; sem priorizar as ativas (no máximo
+    `MAX_ACTIVE_KEYS`, que sempre cabem), chaves mais novas tirariam da lista uma chave que ainda
+    autentica, e o dono ficaria sem o id para revogá-la.
+    """
+    is_inactive = case(
+        (and_(api_key.c.revoked_at.is_(None), api_key.c.expires_at > now), False), else_=True
+    )
     rows = session.execute(
         select(
             api_key.c.id,
@@ -343,7 +364,7 @@ def list_keys(session: Session, owner_id: UUID) -> list[KeySummary]:
             api_key.c.revoked_at,
         )
         .where(api_key.c.owner_id == owner_id)
-        .order_by(api_key.c.created_at.desc(), api_key.c.id.desc())
+        .order_by(is_inactive, api_key.c.created_at.desc(), api_key.c.id.desc())
         .limit(MAX_LISTED_KEYS)
     ).all()
     return [

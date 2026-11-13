@@ -296,6 +296,19 @@ def test_count_mentiroso_falha(tmp_path: Path, declared: int) -> None:
     assert "/Count" in failure.detail
 
 
+def test_arvore_aninhada_no_teto_de_paginas_e_aceita(tmp_path: Path) -> None:
+    with inspected(tmp_path, samples.page_tree_with_pending_sibling(), page_budget=3) as document:
+        assert document.page_count == 3
+
+
+def test_folhas_somadas_entre_irmaos_acima_do_teto_falham(tmp_path: Path) -> None:
+    # Cada /Kids cabe no que resta do teto quando é lido; a terceira folha contada é que passa.
+    failure = refusal(tmp_path, samples.page_tree_with_pending_sibling(), page_budget=2)
+
+    assert failure.code is FailureCode.INPUT_LIMIT_EXCEEDED
+    assert "páginas" in failure.detail
+
+
 def test_milhoes_de_filhos_falham_antes_de_percorrer_a_lista(tmp_path: Path) -> None:
     failure = refusal(tmp_path, samples.page_tree_with_many_kids(2_000_000))
 

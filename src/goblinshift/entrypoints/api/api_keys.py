@@ -76,9 +76,9 @@ class ApiKeyList(BaseModel):
 
 
 @router.get("/api-keys", operation_id="listApiKeys")
-def list_api_keys(principal: SessionPrincipal, session: DbSession) -> ApiKeyList:
+def list_api_keys(principal: SessionPrincipal, session: DbSession, now: Now) -> ApiKeyList:
     with session.begin():
-        keys = list_keys(session, principal.owner_id)
+        keys = list_keys(session, principal.owner_id, now)
     return ApiKeyList(data=[_key_response(key) for key in keys])
 
 

@@ -179,6 +179,38 @@ def test_pacote_adulterado_pelo_executor_vira_retentativa_sem_publicar_nada(
         )
 
 
+def test_relatorio_acima_do_teto_falha_de_vez_sem_publicar_nada(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    # O teto estourado vem do que o executor escreveu: repetir a tentativa daria o mesmo, então
+    # a Run termina `failed` na primeira tentativa em vez de passar por retentativa.
+    run_id = queue_run(factory, storage, create_user(factory), [("a.csv", VALID)])
+    claimed = claim(factory, storage)
+
+    coordinator(factory, storage, local_runner(work_root, "oversize-report")).run(claimed)
+
+    row = run_row(factory, run_id)
+    assert (row["status"], row["phase"], row["error_code"]) == (
+        "failed",
+        None,
+        "REPORT_LIMIT_EXCEEDED",
+    )
+    assert row["finished_at"] is not None
+    [only] = attempts(factory, run_id)
+    assert only["error_code"] == "REPORT_LIMIT_EXCEEDED"
+    assert row["claim_count"] == 1
+    with factory() as session:
+        outputs = session.execute(
+            select(func.count()).select_from(run_output).where(run_output.c.run_id == run_id)
+        ).scalar_one()
+        written = session.execute(
+            select(func.count())
+            .select_from(stored_object)
+            .where(stored_object.c.attempt_id == claimed.attempt_id)
+        ).scalar_one()
+    assert (outputs, written) == (0, 0)
+
+
 def test_lease_segue_renovado_durante_a_coleta(
     factory: sessionmaker[Session],
     storage: FileStorage,

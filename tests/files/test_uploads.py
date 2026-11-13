@@ -189,7 +189,19 @@ def test_acima_do_teto_do_tipo_pelo_nome_e_recusado(
     assert error.value.field == "items[0].expected_size"
 
 
-@pytest.mark.parametrize("name", ["a", "x" * 255, "relatório final (1).CSV", "..oculto", "a.b."])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a",
+        "x" * 255,
+        "relatório final (1).CSV",
+        "..oculto",
+        "a.b.",
+        # ZWNJ (escrita persa) e ZWJ (emoji composto) são Cf, mas legítimos em nome de arquivo.
+        "a\u200cb.pdf",
+        "foto \U0001f468\u200d\U0001f469\u200d\U0001f467.jpg",
+    ],
+)
 def test_nome_valido_e_guardado_como_recebido(factory: sessionmaker[Session], name: str) -> None:
     view = create_intent(factory, create_user(factory, "a"), name=name)
 
@@ -220,6 +232,33 @@ def test_nome_invalido_e_recusado(factory: sessionmaker[Session], name: str) -> 
         create_intents(session, owner, [UploadIntent(name, 1)])
 
     assert error.value.field == "items[0].name"
+    assert count_rows(factory) == (0, 0)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "fatura\u202efdp.exe",
+        "a\u200bb.pdf",
+        "a\u2066b.pdf",
+        "a\ufeffb.pdf",
+        "a\u00adb.pdf",
+        "a\U000e0001b.pdf",
+    ],
+    ids=["RLO", "ZWSP", "LRI", "BOM", "SHY", "TAG"],
+)
+def test_nome_com_caractere_de_formato_e_recusado(
+    factory: sessionmaker[Session], name: str
+) -> None:
+    # Formato invisível (Cf) reordena ou esconde parte do nome exibido: `fatura<RLO>fdp.exe`
+    # aparece como `faturaexe.pdf`. O U+E0001 fica fora do padrão publicado, mas é recusado aqui.
+    owner = create_user(factory, "a")
+
+    with pytest.raises(InvalidUploadRequestError) as error, unit_of_work(factory) as session:
+        create_intents(session, owner, [UploadIntent(name, 1)])
+
+    assert error.value.field == "items[0].name"
+    assert "formato invisível" in error.value.reason
     assert count_rows(factory) == (0, 0)
 
 
