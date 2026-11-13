@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Protocol
 
 from goblinshift.runs.store import container_name
+from goblinshift.runs.worker.meta_files import EXIT_FILE, PGID_FILE
 
 # Teto da carência de `stop` (3.5: "concede até 10 segundos e força o encerramento").
 MAX_STOP_GRACE = timedelta(seconds=10)
@@ -64,8 +65,6 @@ _UUID_CHARS = len(str(uuid.UUID(int=0)))
 EXECUTOR_MODULE = "goblinshift.processing.executor"
 SUPERVISOR_MODULE = "goblinshift.runs.worker.local_supervisor"
 STARTED_MARKER = "started"
-PGID_FILE = "pgid"
-EXIT_FILE = "exit.json"
 LOG_FILE = "executor.log"
 
 

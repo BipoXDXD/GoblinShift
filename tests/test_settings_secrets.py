@@ -28,6 +28,7 @@ EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 ORIGIN = "https://goblinshift.dev"
 BOOT_TIMEOUT_SECONDS = 60
 ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
 PASSWORD_CANARY = "CANARY-senha-do-banco-na-variavel"  # noqa: S105 (valor de teste)
 PASSWORD_IN_FILE = "senha-do-arquivo"  # noqa: S105 (valor de teste)
 DEV_PASSWORD = "goblinshift"  # noqa: S105 (padrão da pilha local, não é segredo)
@@ -96,12 +97,18 @@ def _production_env(settings: Settings) -> dict[str, str]:
     }
 
 
+def _checkout_pythonpath() -> str:
+    """O src deste checkout à frente: o editable da .venv pode apontar para outro clone."""
+    inherited = os.environ.get("PYTHONPATH")
+    return os.pathsep.join([str(SRC), inherited]) if inherited else str(SRC)
+
+
 def _run_process(command: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - comando fixo do próprio teste, sem shell
         command,
         capture_output=True,
         text=True,
-        env=env,
+        env={**env, "PYTHONPATH": _checkout_pythonpath()},
         check=False,
         timeout=BOOT_TIMEOUT_SECONDS,
         cwd=ROOT,
