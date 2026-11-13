@@ -27,7 +27,7 @@ MEASURED_MAX_MINUTES = {
     "checks": 13.8,
     "openobserve": 6.0,
     "web": 3.2,
-    "secrets": 0.3,
+    "secrets": 0.55,
     "e2e": 11.1,
     GVISOR_JOB: 5.7,
     "image": 3.0,
