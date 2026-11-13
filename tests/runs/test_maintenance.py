@@ -39,6 +39,7 @@ from tests.runs.worker_support import (
     open_run_uses,
     queue_run,
     run_row,
+    wait_until_executor_sleeps,
 )
 
 pytestmark = pytest.mark.integration
@@ -161,6 +162,10 @@ def test_stopping_com_lease_vencido_para_o_executor_e_confirma(
     claimed = claim(factory, storage)
     worker.prepare(claimed)
     runner.start(claimed.attempt_id, claimed.executor_image)
+    # Sem esperar, o `stop` da manutenção caía sempre na partida do supervisor e do executor, e o
+    # caminho seguido (grupo morto antes do executor nascer, ou executor nascido depois do sinal e
+    # só parado pelo SIGKILL) dependia do escalonamento.
+    wait_until_executor_sleeps(work_root, claimed.attempt_id)
     worker.record_start(claimed)
     # O worker sumiu aqui: ninguém renova o lease nem atende ao cancelamento.
     cancel_run(factory, storage, owner, run_id)
