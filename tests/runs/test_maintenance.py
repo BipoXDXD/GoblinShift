@@ -166,13 +166,21 @@ def test_stopping_com_lease_vencido_para_o_executor_e_confirma(
     cancel_run(factory, storage, owner, run_id)
     expire_lease(factory, run_id)
 
-    maintenance(factory, storage, runner).run_cycle()
+    counts = maintenance(factory, storage, runner).run_cycle()
 
     row = run_row(factory, run_id)
-    assert (row["status"], row["error_code"]) == ("canceled", "CANCELED")
-    assert not runner.status(claimed.attempt_id).is_running
-    assert attempts(factory, run_id)[0]["error_code"] == "CANCELED"
-    assert open_run_uses(factory, run_id) == 0
+    attempt_rows = attempts(factory, run_id)
+    # Falhou uma vez sob carga sem reproduzir (#391): a mensagem diz qual passo ou estado caiu.
+    diagnostic = (
+        f"counts={counts} run=({row['status']}, {row['error_code']}) "
+        f"attempts={[(a['error_code'], a['ended_at']) for a in attempt_rows]}"
+    )
+    assert counts["steps_failed"] == 0, diagnostic
+    assert counts.get("leases_reconciled") == 1, diagnostic
+    assert (row["status"], row["error_code"]) == ("canceled", "CANCELED"), diagnostic
+    assert not runner.status(claimed.attempt_id).is_running, diagnostic
+    assert attempt_rows[0]["error_code"] == "CANCELED", diagnostic
+    assert open_run_uses(factory, run_id) == 0, diagnostic
 
 
 def test_falha_ao_apagar_um_candidato_nao_perde_os_demais(

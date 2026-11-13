@@ -4,11 +4,26 @@ import { describe, expect, it } from "vitest";
 
 import { RECIPE_LIST } from "../recipes/registry";
 import type { RecipeId } from "../recipes/types";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { catalogHandler } from "../test/catalog";
 import { fakeApi } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes(
+  "/",
+  "/bancada/csv-janitor",
+  "/execucoes/id",
+  "/historico",
+  "/entrar",
+  "/acesso",
+  "/acesso/guia-da-api",
+  "/conta-excluida",
+  "/termos/aceitar",
+  "/termos",
+  "/privacidade",
+  "/creditos",
+);
 
 function renderAt(path: string) {
   const api = fakeApi({ "GET /api/v1/catalog": catalogHandler() });
