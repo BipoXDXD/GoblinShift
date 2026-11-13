@@ -23,7 +23,12 @@ from testcontainers.community.postgres import PostgresContainer
 
 from goblinshift.entrypoints.maintenance import AccountJobs
 from goblinshift.files.storage import FileStorage
-from goblinshift.identity import AuditEventType, AuditOutcome, record_audit_event
+from goblinshift.identity import (
+    AuditEventType,
+    AuditOutcome,
+    record_audit_event,
+    request_account_deletion,
+)
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.maintenance import Maintenance
@@ -244,6 +249,25 @@ def test_script_retira_update_de_coluna_dado_antes_no_audit_event(
 
 
 @pytest.mark.integration
+def test_script_retira_privilegio_legado_fora_do_estado_pretendido(
+    roles_postgres: PostgresContainer, owner: Engine
+) -> None:
+    with owner.begin() as connection:
+        for role in RUNTIME_ROLES:
+            connection.exec_driver_sql(f"GRANT TRUNCATE ON ALL TABLES IN SCHEMA public TO {role}")
+
+    _apply_script(_settings(roles_postgres, roles_postgres.username, roles_postgres.password))
+
+    truncatable = {
+        (role, table)
+        for role in RUNTIME_ROLES
+        for table in _tables(owner)
+        if "TRUNCATE" in _privileges(owner, role, table)
+    }
+    assert truncatable == set()
+
+
+@pytest.mark.integration
 def test_tabela_nova_de_migration_futura_ja_nasce_acessivel(owner: Engine) -> None:
     with owner.begin() as connection:
         connection.exec_driver_sql(
@@ -276,17 +300,21 @@ def test_worker_e_manutencao_rodam_o_ciclo_de_uma_run_com_os_papeis_novos(
 
 
 @pytest.mark.integration
-def test_manutencao_apaga_o_audit_event_vencido(
+def test_manutencao_apaga_o_audit_event_vencido_e_a_conta_pedida(
     runtime_factory: Callable[[str], sessionmaker[Session]],
 ) -> None:
     app = runtime_factory("gs_app")
     user_id = create_user(app, "auditoria-vencida")
     _audit(app, user_id)
+    # A API marca a exclusão como `gs_app`; a purga da conta é da manutenção.
+    with unit_of_work(app) as session:
+        request_account_deletion(session, user_id, datetime.now(UTC))
     later = datetime.now(UTC) + AFTER_AUDIT_RETENTION
 
     counts = AccountJobs(runtime_factory("gs_maintenance"), clock=lambda: later).run_cycle()
 
     assert counts["audit_events_removed"] >= 1
+    assert counts["accounts_purged"] == 1
 
 
 def _audit(factory: sessionmaker[Session], user_id: UUID) -> None:

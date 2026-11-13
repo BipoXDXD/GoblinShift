@@ -49,6 +49,11 @@ ALTER ROLE gs_app LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATIO
 ALTER ROLE gs_maintenance LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
   NOBYPASSRLS;
 GRANT gs_runtime TO gs_app, gs_maintenance;
+-- Parte do zero: um privilégio dado antes (versão anterior do script ou à mão) não sobrevive;
+-- os GRANTs abaixo reconstroem o estado pretendido.
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM gs_runtime, gs_app, gs_maintenance;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM gs_runtime, gs_app, gs_maintenance;
+REVOKE CREATE ON SCHEMA public FROM gs_runtime, gs_app, gs_maintenance;
 
 DO $$
 BEGIN
