@@ -26,7 +26,7 @@ MIRROR_SCRIPT = "scripts/ci-apt-sem-azure.sh"
 PLAYWRIGHT_PACKAGES_SCRIPT = "scripts/ci-playwright-pacotes.sh"
 PLAYWRIGHT_INSTALL = "npx playwright install "
 PLAYWRIGHT_APT = ("--with-deps", "install-deps")
-PLAYWRIGHT_WORKFLOWS = ("ci.yml", "e2e-vps.yml")
+PLAYWRIGHT_WORKFLOWS = ("ci.yml", "e2e-vps.yml", "e2e-webkit.yml")
 SINGLE_SOURCE = "Dir::Etc::sourceparts=-"
 WORKFLOWS_WITH_UBUNTU_PACKAGES = ("ci.yml", "restore-check.yml", "e2e-producao.yml")
 CACHE_RESTORE = "actions/cache/restore@"
@@ -202,7 +202,7 @@ def _run_playwright_step(step: Step, tmp_path: Path, lista: str) -> list[str]:
     return log.read_text().splitlines()
 
 
-@pytest.mark.parametrize("index", [0, 1, 2])
+@pytest.mark.parametrize("index", [0, 1, 2, 3])
 def test_passo_do_playwright_sem_falta_nao_chama_o_apt(index: int, tmp_path: Path) -> None:
     _, step = _playwright_steps()[index]
 
@@ -212,7 +212,7 @@ def test_passo_do_playwright_sem_falta_nao_chama_o_apt(index: int, tmp_path: Pat
     assert calls[-1].startswith("npx playwright install ")
 
 
-@pytest.mark.parametrize("index", [0, 1, 2])
+@pytest.mark.parametrize("index", [0, 1, 2, 3])
 def test_passo_do_playwright_instala_exatamente_o_que_falta(index: int, tmp_path: Path) -> None:
     _, step = _playwright_steps()[index]
 
@@ -222,9 +222,10 @@ def test_passo_do_playwright_instala_exatamente_o_que_falta(index: int, tmp_path
     assert calls[-1].startswith("npx playwright install ")
 
 
-def test_os_tres_passos_do_playwright_estao_cobertos() -> None:
-    # Dois no ci.yml (job e2e e job e2e-gvisor) e um no e2e-vps.yml.
-    assert len(_playwright_steps()) == 3
+def test_os_quatro_passos_do_playwright_estao_cobertos() -> None:
+    # Dois no ci.yml (job e2e e job e2e-gvisor), um no e2e-vps.yml e um no e2e-webkit.yml (job
+    # sabotagem; o do WebKit roda no macOS, sem apt).
+    assert len(_playwright_steps()) == 4
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), _install_jobs())
