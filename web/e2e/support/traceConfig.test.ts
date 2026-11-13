@@ -16,12 +16,24 @@ async function loadTraceMode(env: Readonly<Record<string, string>>): Promise<unk
   return config.use?.trace;
 }
 
+// O ambiente de quem roda o teste (uma chave de verdade, por exemplo) não entra na conta.
+function clearScopedEnv(): void {
+  for (const name of SCOPED_VARIABLES) {
+    vi.stubEnv(name, undefined);
+  }
+}
+
+// A 1ª carga do config paga o @playwright/test a frio (~1 s; externo ao Vite, sobrevive ao
+// vi.resetModules()) e a transformação dos .ts pelo processo principal, que na suíte completa todos
+// os workers disputam. Sob carga isso passa dos 5 s do teste e dos 10 s de um beforeAll; feita na
+// coleta, que não tem timeout, deixa a cada teste só a reavaliação do config com o próprio ambiente.
+clearScopedEnv();
+await loadTraceMode({});
+vi.unstubAllEnvs();
+
 describe("trace do Playwright", () => {
   beforeEach(() => {
-    // O ambiente de quem roda o teste (uma chave de verdade, por exemplo) não entra na conta.
-    for (const name of SCOPED_VARIABLES) {
-      vi.stubEnv(name, undefined);
-    }
+    clearScopedEnv();
   });
 
   afterEach(() => {
