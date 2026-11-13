@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from goblinshift.platform.settings import Settings
 
@@ -217,3 +218,27 @@ def test_desenvolvimento_sobe_sem_a_configuracao_do_login() -> None:
     api = json.loads(result.stdout)["services"]["api"]
     assert not set(api["environment"]) & WEB_VARS
     assert set(secret_targets(api)) == {"db_password"}
+
+
+def test_producao_sem_ambiente_declarado_nao_interpola(secrets_dir: Path) -> None:
+    # Sem GS_ENVIRONMENT, a aplicação cairia no padrão `development` e pularia as validações de
+    # produção (origem https, segredos, executor-ctl).
+    env = {**PROD_ENV, "GS_SECRETS_DIR": str(secrets_dir)}
+    del env["GS_ENVIRONMENT"]
+
+    result = compose_config(PROD_FILES, env)
+
+    assert result.returncode != 0
+    assert "GS_ENVIRONMENT" in result.stderr
+
+
+@pytest.mark.parametrize("service", ["api", "maintenance", "worker"])
+def test_servico_continuo_da_producao_exige_o_ambiente(service: str) -> None:
+    # No YAML cru, e não no renderizado: com a variável definida, `:-development` e `:?` renderizam
+    # igual. A migração herda o `:-development` da base, mas o Compose recusa o arquivo inteiro
+    # quando falta uma variável obrigatória de qualquer serviço.
+    production_file = yaml.safe_load((ROOT / "compose.prod.yaml").read_text(encoding="utf-8"))
+
+    declared = production_file["services"][service]["environment"]["GS_ENVIRONMENT"]
+
+    assert declared.startswith("${GS_ENVIRONMENT:?")
