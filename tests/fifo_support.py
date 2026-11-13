@@ -52,6 +52,10 @@ class BlockWatchdog:
         self._watcher: threading.Thread | None = None
 
     def start(self) -> None:
+        # Um segundo vigia escaparia do `halt` e dividiria o `_fired`: ligar duas vezes é defeito
+        # do teste, não algo a tolerar em silêncio.
+        if self._watcher is not None:
+            raise RuntimeError("o vigia já foi ligado; cada BlockWatchdog liga uma vez só")
         self._watcher = threading.Thread(
             target=_watch, args=(self._path, self._seconds, self._stop, self._fired), daemon=True
         )
