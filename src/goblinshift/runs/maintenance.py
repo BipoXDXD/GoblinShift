@@ -264,8 +264,10 @@ class Maintenance:
 
         Passos independentes: a exceção de um fica no log e em `steps_failed`, e o ciclo segue
         para prazo, retenção, expurgo e medidores; as contagens do passo que falhou ficam fora do
-        evento. Falha de conexão (banco inalcançável) pula os passos de banco restantes da volta,
-        que só esperariam o `connect_timeout` de novo; `should_stop` (a parada pedida por sinal) é
+        evento, exceto as da varredura de ausentes, que as mantém mesmo na perda de conexão
+        (`_ConnectionLostWithCountsError`). Falha de conexão (banco inalcançável) pula os passos de
+        banco restantes da volta, que só esperariam o `connect_timeout` de novo, mas não a limpeza
+        de temporários, que só usa o storage; `should_stop` (a parada pedida por sinal) é
         conferido antes de cada passo. Os dois contam em `steps_skipped`. Os passos que chamam o
         Runner item a item também conferem a parada entre os itens: o item em curso termina, e o
         seguinte fica para o próximo processo. Esse item em curso pode, sozinho, passar da carência
