@@ -223,6 +223,33 @@ def test_nome_invalido_e_recusado(factory: sessionmaker[Session], name: str) -> 
     assert count_rows(factory) == (0, 0)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "fatura\u202efdp.exe",
+        "a\u200bb.pdf",
+        "a\u2066b.pdf",
+        "a\ufeffb.pdf",
+        "a\u00adb.pdf",
+        "a\U000e0001b.pdf",
+    ],
+    ids=["RLO", "ZWSP", "LRI", "BOM", "SHY", "TAG"],
+)
+def test_nome_com_caractere_de_formato_e_recusado(
+    factory: sessionmaker[Session], name: str
+) -> None:
+    # Formato invisível (Cf) reordena ou esconde parte do nome exibido: `fatura<RLO>fdp.exe`
+    # aparece como `faturaexe.pdf`. O U+E0001 fica fora do padrão publicado, mas é recusado aqui.
+    owner = create_user(factory, "a")
+
+    with pytest.raises(InvalidUploadRequestError) as error, unit_of_work(factory) as session:
+        create_intents(session, owner, [UploadIntent(name, 1)])
+
+    assert error.value.field == "items[0].name"
+    assert "formato invisível" in error.value.reason
+    assert count_rows(factory) == (0, 0)
+
+
 # --- Recebimento de conteúdo ------------------------------------------------------------------
 
 

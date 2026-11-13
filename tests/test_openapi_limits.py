@@ -16,8 +16,11 @@ from goblinshift.files.uploads import UPLOAD_NAME_PATTERN
 
 SPEC: dict[str, Any] = json.loads(render_openapi())
 # Caracteres que o domínio recusa no nome de um upload (files.uploads, 3.6). Os surrogates soltos
-# (Cs) também são recusados, mas ficam fora do padrão publicado (ver UPLOAD_NAME_PATTERN).
+# (Cs) e o formato invisível fora do plano básico também são recusados, mas ficam fora do padrão
+# publicado (ver UPLOAD_NAME_PATTERN).
 FORBIDDEN_CATEGORIES = {"Cc", "Zl", "Zp"}
+BMP_FORMAT_CATEGORY = "Cf"
+LAST_BMP_CODEPOINT = 0xFFFF
 SURROGATES = range(0xD800, 0xE000)
 SEPARATORS = {"/", "\\"}
 
@@ -56,7 +59,7 @@ def test_tamanho_do_upload_publica_de_0_ao_teto_do_video() -> None:
     assert "32 MiB" in size["description"]
 
 
-def test_padrao_do_nome_recusa_exatamente_separadores_e_controles() -> None:
+def test_padrao_do_nome_recusa_exatamente_separadores_controles_e_formato() -> None:
     pattern = re.compile(UPLOAD_NAME_PATTERN)
     disagreements = [
         f"U+{codepoint:04X}"
@@ -69,7 +72,9 @@ def test_padrao_do_nome_recusa_exatamente_separadores_e_controles() -> None:
 
 
 def _is_forbidden(char: str) -> bool:
-    return char in SEPARATORS or unicodedata.category(char) in FORBIDDEN_CATEGORIES
+    category = unicodedata.category(char)
+    is_bmp_format = category == BMP_FORMAT_CATEGORY and ord(char) <= LAST_BMP_CODEPOINT
+    return char in SEPARATORS or category in FORBIDDEN_CATEGORIES or is_bmp_format
 
 
 def test_idempotency_key_publica_o_formato_aceito_sem_null() -> None:
