@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, onTestFinished } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { catalogHandler } from "../test/catalog";
 import {
   fakeApi,
@@ -14,6 +14,8 @@ import {
 } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/bancada/csv-janitor", "/historico");
 
 const PARAMETERS = {
   input_delimiter: ",",
