@@ -2,7 +2,7 @@ import { defaultScheduler, notifyManager, type QueryClient } from "@tanstack/rea
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
@@ -15,6 +15,8 @@ import {
 } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes(`/execucoes/${RUN_ID}`, "/termos");
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
 

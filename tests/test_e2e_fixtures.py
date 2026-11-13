@@ -192,16 +192,10 @@ def mill(tmp_path: Path) -> Callable[[str], bytes]:
 
 def streams_of(data: bytes, tmp_path: Path) -> list[dict[str, Any]]:
     """Faixas pelo ffprobe completo do ambiente (o mesmo que gerou os vídeos)."""
-    _, ffprobe = media.require_ffmpeg()
     source = tmp_path / "probe.bin"
     source.write_bytes(data)
-    completed = subprocess.run(  # noqa: S603 - argv montado aqui, sem shell
-        [ffprobe, "-v", "error", "-show_streams", "-of", "json", str(source)],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    streams: list[dict[str, Any]] = json.loads(completed.stdout)["streams"]
+    output = media.run_ffprobe(source, "-show_streams", "-of", "json")
+    streams: list[dict[str, Any]] = json.loads(output)["streams"]
     return streams
 
 

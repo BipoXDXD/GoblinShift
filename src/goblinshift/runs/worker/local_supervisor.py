@@ -17,7 +17,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from goblinshift.runs.worker.runner import EXIT_FILE, PGID_FILE
+from goblinshift.runs.worker.meta_files import EXIT_FILE, PGID_FILE
 
 _MIN_ARGS = 4
 EXIT_USAGE = 2
