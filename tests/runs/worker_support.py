@@ -28,16 +28,19 @@ from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, QUEUE_WINDOW
-from goblinshift.runs.store import Applied
+from goblinshift.runs.store import Applied, container_name
 from goblinshift.runs.tables import attempt, run, run_input
 from goblinshift.runs.worker.claim import ClaimedAttempt, claim_next
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
-from goblinshift.runs.worker.runner import ExecutorStatus, LocalRunner, Runner
+from goblinshift.runs.worker.runner import LOG_FILE, ExecutorStatus, LocalRunner, Runner
+from tests.runs.fake_executor import SLEEPING
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
 LEASE = timedelta(seconds=2)
 FAKE_EXECUTOR = str(Path(__file__).with_name("fake_executor.py"))
+# Partida do supervisor e do executor falso (dois interpretadores Python), com folga para a carga.
+EXECUTOR_START_TIMEOUT_S = 30.0
 
 
 class _SlowReader:
@@ -207,6 +210,15 @@ def local_runner(work_root: Path, *mode: str) -> LocalRunner:
         attempt_timeout=timedelta(seconds=30),
         command=(sys.executable, FAKE_EXECUTOR, *mode),
     )
+
+
+def wait_until_executor_sleeps(work_root: Path, attempt_id: uuid.UUID) -> None:
+    """Espera o executor `sleep` de pé: antes disso, o `stop` disputa com a partida dele."""
+    log = work_root / f"{container_name(attempt_id)}.runner" / LOG_FILE
+    deadline = time.monotonic() + EXECUTOR_START_TIMEOUT_S
+    while SLEEPING not in log.read_text(encoding="utf-8"):
+        assert time.monotonic() < deadline, "o executor não chegou a dormir"
+        time.sleep(0.01)
 
 
 def coordinator(

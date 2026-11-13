@@ -90,9 +90,12 @@ CLIPS: dict[str, Clip] = {
         inputs=(video_source(size="1920x1080", duration=0.5), tone(duration=0.5)),
         output=(*H264, *AAC, "-shortest", *MP4),
     ),
+    # Faixas com durações diferentes (1 s e 2 s): taxa e canais da saída vêm do probe da faixa
+    # escolhida, então só a duração prova qual faixa o `-map 0:a:N` extraiu. Sem `-shortest`, que
+    # cortaria tudo em 1 s.
     "mp4_mono_and_stereo": Clip(
-        inputs=(video_source(), tone(rate=22050, layout="mono"), tone(rate=48000)),
-        output=(*H264, "-map", "0:v", "-map", "1:a", "-map", "2:a", *AAC, "-shortest", *MP4),
+        inputs=(video_source(), tone(rate=22050, duration=1.0, layout="mono"), tone(rate=48000)),
+        output=(*H264, "-map", "0:v", "-map", "1:a", "-map", "2:a", *AAC, *MP4),
     ),
     "mp4_no_audio": Clip(inputs=(video_source(),), output=(*H264, *MP4)),
     # `moov` no início: o arquivo cortado ainda abre, e o dano só aparece ao decodificar.

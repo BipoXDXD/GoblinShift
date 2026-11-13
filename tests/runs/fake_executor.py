@@ -2,7 +2,8 @@
 
     python tests/runs/fake_executor.py <modo> [argumento] <work_dir>
 
-- `sleep <s>`: dorme e então roda o executor real (janela para cancelar, pausar ou matar).
+- `sleep <s>`: avisa na saída (`SLEEPING`), dorme e então roda o executor real (janela para
+  cancelar, pausar ou matar).
 - `fail-once <marcador>`: na primeira vez cria o marcador e sai com 4 (infraestrutura); depois
   roda o executor real.
 - `exit <código>`: sai com o código, sem tocar no diretório.
@@ -29,6 +30,9 @@ from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES
 # Linha que o modo `ignore-term` escreve depois de instalar o SIG_IGN: daí em diante o SIGTERM
 # não o derruba.
 IGNORING_TERM = "SIGTERM ignorado"
+# Linha que o modo `sleep` escreve antes de dormir: daí em diante o executor está de pé, e um
+# sinal não disputa mais com a partida do supervisor e do interpretador.
+SLEEPING = "dormindo"
 
 
 def run(argv: list[str]) -> int:
@@ -36,6 +40,7 @@ def run(argv: list[str]) -> int:
     work_dir = rest[-1]
     match mode:
         case "sleep":
+            print(SLEEPING, flush=True)
             time.sleep(float(rest[0]))
             return real_executor([work_dir])
         case "fail-once":
