@@ -72,10 +72,6 @@ BATCHES: dict[str, tuple[Callable[[Session], object], str]] = {
         lambda s: delete_ended_web_sessions(s, NOW, LIMIT),
         "DELETE FROM web_session",
     ),
-    "identity.audit_event": (
-        lambda s: delete_old_audit_events(s, NOW, LIMIT),
-        "DELETE FROM audit_event",
-    ),
     "identity.login_state.purge_expired_states": (
         lambda s: purge_expired_states(s, NOW, limit=LIMIT),
         "DELETE FROM login_state",
@@ -117,3 +113,17 @@ def test_skip_locked_batch_aplica_teto_trava_e_materializa() -> None:
 
     assert sql.startswith("WITH chosen AS MATERIALIZED")
     assert "ORDER BY login_state.key \n LIMIT 3 FOR UPDATE SKIP LOCKED" in sql
+
+
+def test_retencao_do_audit_event_escolhe_o_lote_sem_travar_linhas() -> None:
+    # O papel da manutenção não tem UPDATE no audit_event (ADR 055), e `FOR UPDATE` exige UPDATE.
+    # O lote continua numa CTE materializada, para o teto valer.
+    recorder = RecordingSession()
+
+    delete_old_audit_events(recorder.as_session(), NOW, LIMIT)
+
+    [sql] = [sql for sql in recorder.postgresql_sql() if "DELETE FROM audit_event" in sql]
+    cte, _, _ = sql.partition("DELETE FROM audit_event")
+    assert cte.startswith("WITH chosen AS MATERIALIZED")
+    assert "LIMIT" in cte
+    assert "FOR UPDATE" not in sql

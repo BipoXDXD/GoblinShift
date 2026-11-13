@@ -10,7 +10,7 @@ Hoje `migrate`, `api`, `worker` e `maintenance` conectam como o mesmo papel, `go
 
 A aplicação, em runtime, só faz DML: `SELECT`, `INSERT`, `UPDATE` e `DELETE` nas próprias tabelas, mais advisory locks e `LISTEN/NOTIFY`, que não pedem privilégio. DDL só acontece no `migrate`.
 
-O `audit_event` tem um detalhe: a manutenção apaga os eventos depois da retenção de 90 dias ([1.7](../GoblinShiftPlan.md#s1-7); `identity_purge.delete_old_audit_events`), escolhendo o lote com `SELECT ... FOR UPDATE SKIP LOCKED`. O PostgreSQL só aceita `FOR UPDATE` de quem tem UPDATE em pelo menos uma coluna da tabela.
+O `audit_event` tem um detalhe: a manutenção apaga os eventos depois da retenção de 90 dias ([1.7](../GoblinShiftPlan.md#s1-7); `identity_purge.delete_old_audit_events`), e escolhia o lote com `SELECT ... FOR UPDATE SKIP LOCKED`, como os outros lotes de manutenção. O PostgreSQL só aceita `FOR UPDATE` de quem tem UPDATE em pelo menos uma coluna da tabela, e um UPDATE de coluna, mesmo só no `id`, deixa trocar o `id` de um evento com `SET id = DEFAULT`.
 
 ## Alternativas
 
@@ -18,7 +18,7 @@ O `audit_event` tem um detalhe: a manutenção apaga os eventos depois da reten�
 |-------------|------|---------|
 | **A. Papel único** (status quo) | Nada a fazer | SUPERUSER exposto à API; `COPY ... PROGRAM` vira execução de comando; o `audit_event` pode ser reescrito ou apagado por quem invadir a API |
 | **B. Um papel de runtime para os três serviços, com DELETE no `audit_event`** | Um segredo novo só | A API e o worker também apagariam a trilha de auditoria; a issue pede o contrário |
-| **C. Grupo `gs_runtime` sem atributo especial; login `gs_app` (api, worker) sem UPDATE/DELETE no `audit_event`; login `gs_maintenance` com DELETE e UPDATE só na coluna `id`** (escolhida) | Nenhum serviço de runtime tem DDL nem atributo especial; a API e o worker só inserem e leem auditoria; só a manutenção apaga, e ninguém altera o conteúdo de um evento; o código não muda | Dois segredos novos; o script precisa rodar de novo se uma migration recriar o `audit_event` |
+| **C. Grupo `gs_runtime` sem atributo especial; login `gs_app` (api, worker) sem UPDATE/DELETE no `audit_event`; login `gs_maintenance` só com DELETE; retenção sem trava de linha** (escolhida) | Nenhum serviço de runtime tem DDL nem atributo especial; a API e o worker só inserem e leem auditoria; só a manutenção apaga, e nenhum papel de runtime tem UPDATE em coluna alguma do `audit_event` | Uma mudança pequena no lote da retenção; dois segredos novos; o script precisa rodar de novo se uma migration recriar o `audit_event` |
 | **D. Função `SECURITY DEFINER` de expurgo, com piso de 90 dias, e nenhum DELETE para o runtime** | Nem a manutenção apaga um evento recente | Exige migration e mudança de código; a função vira código privilegiado a revisar. Fica como evolução se a C se mostrar insuficiente |
 | **E. Dono do esquema também sem SUPERUSER** (`REASSIGN OWNED` para um papel dono comum) | Tira o SUPERUSER até do `migrate` | Mexe na posse de todos os objetos de uma vez e no papel que a imagem cria; risco maior num único passo. Fica para uma segunda fase |
 
@@ -29,7 +29,7 @@ Opção C, em duas fases. Esta decisão cobre a primeira.
 - **Dono.** `goblinshift` continua dono do esquema e só o `migrate` conecta com ele. A posse e o SUPERUSER dele saem numa fase futura (alternativa E), com ADR próprio.
 - **Runtime.** `deploy/db-roles.sql` cria `gs_runtime` (NOLOGIN) e os logins `gs_app` e `gs_maintenance`, que herdam dele. Os três ficam com NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION e NOBYPASSRLS. Recebem CONNECT e TEMPORARY no banco, USAGE no esquema `public`, DML nas tabelas e USAGE/SELECT nas sequências. Nada de CREATE no esquema, de TRUNCATE nem de posse de objeto.
 - **Versão do esquema.** `alembic_version` é só leitura para o runtime.
-- **Auditoria.** `gs_runtime` lê e insere no `audit_event`, sem UPDATE, DELETE ou TRUNCATE. `gs_maintenance` recebe DELETE e `UPDATE (id)`: o `id` é `GENERATED ALWAYS AS IDENTITY`, e o PostgreSQL recusa atribuir outro valor a ele, então o único efeito do privilégio é permitir o `FOR UPDATE` do lote da retenção. Nenhuma coluna com conteúdo do evento é alterável.
+- **Auditoria.** `gs_runtime` lê e insere no `audit_event`, sem UPDATE, DELETE ou TRUNCATE. `gs_maintenance` recebe só DELETE, e nenhum papel de runtime tem UPDATE em coluna alguma da tabela. Para isso, `delete_old_audit_events` escolhe o lote numa CTE materializada com `LIMIT`, sem `FOR UPDATE`: ninguém altera um evento, então não há trava a pular, e duas manutenções simultâneas só disputam o mesmo `DELETE`, que a segunda encontra já feito. Essa mudança de código vale também com o papel único e entra antes da troca de papéis. Uma função `SECURITY DEFINER` (alternativa D) foi descartada por exigir migration e mais código para o mesmo efeito.
 - **Migrations futuras.** `ALTER DEFAULT PRIVILEGES` do dono faz tabelas e sequências novas já nascerem com DML para `gs_runtime`. Uma migration que recriar o `audit_event` ou o `alembic_version` volta a dar DML neles: o script precisa rodar de novo depois dela, e a migration deve dizer isso.
 - **Execução.** O script é idempotente, roda numa transação e só como o dono do esquema (recusa outro papel). Não tem senha: o dono define com `\password`, que manda só o hash. **Nada no repositório o executa** (workflow, Compose, JSON do Coolify, entrypoint, script de deploy ou migration), e `tests/test_db_roles.py` falha se algum passar a chamá-lo.
 - **Troca no deploy.** Num PR seguinte, depois que o dono criar os segredos e rodar o script: `api` e `worker` com `GS_DB_USER=gs_app` e o segredo `db_password_app`, `maintenance` com `GS_DB_USER=gs_maintenance` e `db_password_maintenance`, e o `migrate` como está. Os passos manuais estão na issue #366.
@@ -43,5 +43,5 @@ Opção C, em duas fases. Esta decisão cobre a primeira.
 
 ## Compliance
 
-- `tests/test_db_roles.py`: nenhum arquivo de automação cita o script; o script não traz senha e é uma transação só; atributos, matriz de privilégios por tabela, privilégio por coluna no `audit_event`, fluxo real da aplicação e recusas, contra PostgreSQL real.
+- `tests/test_db_roles.py`: nenhum arquivo de automação cita o script; o script não traz senha e é uma transação só; atributos, matriz de privilégios por tabela, nenhum UPDATE por coluna no `audit_event` (inclusive `SET id = DEFAULT` e `FOR UPDATE` recusados), fluxo real da aplicação e recusas, contra PostgreSQL real.
 - Quando o PR da troca entrar, o teste de destinos do Compose deve exigir `GS_DB_USER` de runtime nos três serviços e o papel dono só no `migrate`.

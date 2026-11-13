@@ -205,9 +205,9 @@ def test_so_a_manutencao_apaga_do_audit_event(owner: Engine) -> None:
 
 
 @pytest.mark.integration
-def test_manutencao_so_trava_o_audit_event_pela_coluna_id(owner: Engine) -> None:
-    # O `FOR UPDATE` do lote da retenção exige UPDATE em alguma coluna; só o `id`, que é
-    # identidade GENERATED ALWAYS, e nenhuma coluna com o conteúdo do evento.
+def test_nenhum_papel_de_runtime_tem_update_em_coluna_do_audit_event(owner: Engine) -> None:
+    # UPDATE por coluna escapa do `has_table_privilege`: até `UPDATE (id)` deixaria trocar o
+    # `id` de um evento com `SET id = DEFAULT`.
     query = text(
         "SELECT attname FROM pg_attribute WHERE attrelid = 'audit_event'::regclass "
         "AND attnum > 0 AND NOT attisdropped "
@@ -219,7 +219,7 @@ def test_manutencao_so_trava_o_audit_event_pela_coluna_id(owner: Engine) -> None
             for role in RUNTIME_LOGINS
         }
 
-    assert updatable == {"gs_app": set(), "gs_maintenance": {"id"}}
+    assert updatable == {"gs_app": set(), "gs_maintenance": set()}
 
 
 @pytest.mark.integration
@@ -289,6 +289,9 @@ def _audit(factory: sessionmaker[Session], user_id: UUID) -> None:
         ("gs_app", "TRUNCATE audit_event"),
         ("gs_maintenance", "UPDATE audit_event SET outcome = outcome"),
         ("gs_maintenance", "UPDATE audit_event SET user_id = NULL, details = NULL"),
+        ("gs_app", "UPDATE audit_event SET id = DEFAULT"),
+        ("gs_maintenance", "UPDATE audit_event SET id = DEFAULT"),
+        ("gs_maintenance", "SELECT id FROM audit_event FOR UPDATE"),
         ("gs_app", "UPDATE alembic_version SET version_num = version_num"),
         ("gs_app", "CREATE TABLE intrusa (id int)"),
         ("gs_maintenance", "CREATE TABLE intrusa (id int)"),

@@ -60,11 +60,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO gs_runtim
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO gs_runtime;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON alembic_version FROM gs_runtime;
 REVOKE UPDATE, DELETE, TRUNCATE ON audit_event FROM gs_runtime;
--- Retenção de 90 dias (1.7): só a manutenção apaga. O lote escolhe as linhas com
--- `FOR UPDATE SKIP LOCKED`, que o PostgreSQL só aceita com UPDATE em alguma coluna: a manutenção
--- recebe só o do `id` (identidade GENERATED ALWAYS, que só aceita DEFAULT), e nenhum papel de
--- runtime altera o conteúdo de um evento.
-GRANT DELETE, UPDATE (id) ON audit_event TO gs_maintenance;
+-- Retenção de 90 dias (1.7): só a manutenção apaga, e nenhum papel de runtime tem UPDATE em
+-- coluna alguma do audit_event. Por isso o lote da retenção escolhe as linhas sem
+-- `FOR UPDATE` (identity/purge.py), que exigiria UPDATE.
+GRANT DELETE ON audit_event TO gs_maintenance;
 
 -- Tabelas e sequências que as próximas migrations criarem com este papel já nascem acessíveis.
 -- Uma migration que recriar o audit_event volta a dar UPDATE e DELETE: rode este script de novo.
