@@ -34,6 +34,13 @@ x-app: &app
   networks: [internal]
   logging: *logging
 
+# Menor privilégio (issue #366) nos serviços que rodam como UID 10001: um processo sem root já não
+# tem capability efetiva; sem nenhuma no conjunto limite e com no-new-privileges, nem um binário
+# setuid as devolve. Fora do x-app: storage-init e storage-mark rodam como root e precisam de CHOWN.
+x-least-privilege: &least-privilege
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
 # Storage privado (docs/GoblinShiftPlan.md, 3.6): local num volume; na VPS, o filesystem de
 # tamanho fixo /srv/goblinshift/storage.
 x-storage: &storage
@@ -88,7 +95,7 @@ services:
     restart: "no"
 
   api:
-    <<: *app
+    <<: [*app, *least-privilege]
     environment:
       <<: *app-env
       GS_STORAGE_ROOT: /var/lib/goblinshift/storage/objects
@@ -111,7 +118,7 @@ services:
   # o local (subprocesso, só desenvolvimento) em compose.override.yaml; o executor-ctl
   # (container gVisor por tentativa, criado pelo serviço do host) em compose.prod.yaml.
   worker:
-    <<: *app
+    <<: [*app, *least-privilege]
     command: ["gs-worker"]
     environment: &worker-env
       <<: *app-env
@@ -129,7 +136,7 @@ services:
     restart: unless-stopped
 
   maintenance:
-    <<: *app
+    <<: [*app, *least-privilege]
     command: ["gs-maintenance"]
     environment:
       <<: *worker-env
@@ -149,6 +156,23 @@ services:
       dockerfile: docker/web.Dockerfile
     environment:
       GS_DOMAIN: ${GS_DOMAIN:-_}
+    # A imagem oficial sobe o mestre como root. Ficam só as capabilities medidas com ela
+    # (tests/test_container_hardening.py): CHOWN para as pastas temporárias do usuário `nginx`,
+    # SETUID e SETGID para os workers trocarem de usuário e NET_BIND_SERVICE para a porta 80,
+    # que só abre sem ela se o daemon do host baixar `ip_unprivileged_port_start`. Lista
+    # explícita, e não ALL mais cap_add: a política do host (ADR 034) reprova cap_add.
+    cap_drop:
+      - AUDIT_WRITE
+      - DAC_OVERRIDE
+      - FOWNER
+      - FSETID
+      - KILL
+      - MKNOD
+      - NET_RAW
+      - SETFCAP
+      - SETPCAP
+      - SYS_CHROOT
+    security_opt: [no-new-privileges:true]
     depends_on:
       api:
         condition: service_healthy

@@ -39,6 +39,9 @@ EDGE_SUBNET = "172.31.0.0/24"
 # Faixa dinâmica fora dos IPs fixos, como na rede edge (deploy/edge/compose.yaml).
 EDGE_DYNAMIC_RANGE = "172.31.0.128/25"
 NGINX_IP = "172.31.0.4"
+# CHOWN (bit 0), SETGID (6), SETUID (7) e NET_BIND_SERVICE (10): o que sobra ao Nginx em
+# compose.yaml depois do `cap_drop` (tests/test_container_hardening.py).
+NGINX_CAPABILITY_MASK = (1 << 0) | (1 << 6) | (1 << 7) | (1 << 10)
 BUILD_TIMEOUT_SECONDS = 900
 RUN_TIMEOUT_SECONDS = 60
 READY_TIMEOUT_SECONDS = 30
@@ -254,7 +257,7 @@ def stack() -> Iterator[Stack]:
         docker_ok(*common, api, "--network", network, "--network-alias", "api",
                   PYTHON_IMAGE, "python", "-c", FAKE_API)  # fmt: skip
         docker_ok(*common, nginx, "--network", network, "--ip", NGINX_IP,
-                  "--publish", "127.0.0.1::80", IMAGE)  # fmt: skip
+                  "--publish", "127.0.0.1::80", *_compose_privileges("nginx"), IMAGE)  # fmt: skip
         port = docker_ok("port", nginx, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
         current = Stack(f"http://127.0.0.1:{port}", nginx)
         _wait_until_ready(current)
@@ -262,6 +265,17 @@ def stack() -> Iterator[Stack]:
     finally:
         docker("rm", "--force", *names)
         docker("network", "rm", network)
+
+
+def _compose_privileges(service: str) -> list[str]:
+    """`cap_drop` e `security_opt` do serviço em compose.yaml, como opções do `docker run`.
+
+    Os testes de integração sobem a imagem com as mesmas restrições da produção (issue #366): se
+    o Nginx precisar de uma capability que o Compose larga, ele não fica pronto aqui.
+    """
+    config = _yaml(ROOT / "compose.yaml")["services"][service]
+    drops = [f"--cap-drop={cap}" for cap in config.get("cap_drop", [])]
+    return drops + [f"--security-opt={option}" for option in config.get("security_opt", [])]
 
 
 def _wait_until_ready(stack: Stack) -> None:
@@ -302,6 +316,15 @@ def _assert_spa_security_headers(response: Response) -> None:
 
 class TestSpa:
     pytestmark = pytestmark_integration
+
+    def test_nginx_sobe_so_com_as_capabilities_do_compose(self, stack: Stack) -> None:
+        # Conjunto limite de CHOWN (0), SETGID (6), SETUID (7) e NET_BIND_SERVICE (10), e
+        # no-new-privileges ligado: as restrições do Compose chegaram ao container que serve.
+        status = docker_ok("exec", stack.nginx_container, "cat", "/proc/1/status")
+        fields = dict(line.split(":\t", 1) for line in status.splitlines() if ":\t" in line)
+
+        assert int(fields["CapBnd"], 16) == NGINX_CAPABILITY_MASK
+        assert fields["NoNewPrivs"].strip() == "1"
 
     def test_raiz_serve_o_index_sem_cache_e_com_os_cabecalhos_de_seguranca(
         self, stack: Stack
