@@ -494,3 +494,34 @@ def test_banco_inalcancavel_ainda_derruba_o_ciclo_de_contas(
 
     with pytest.raises(DBAPIError):
         AccountJobs(factory).run_cycle()
+
+
+def test_banco_inalcancavel_na_purga_de_uma_conta_derruba_o_ciclo(
+    factory: sessionmaker[Session],
+    maintenance: Maintenance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A conexão caiu no meio da purga: as contas seguintes não são tentadas, e o ciclo cai."""
+    now = datetime.now(UTC)
+    first = create_user(factory, "ana")
+    second = create_user(factory, "bia")
+    with unit_of_work(factory) as session:
+        request_account_deletion(session, first, now - timedelta(hours=2))
+        request_account_deletion(session, second, now - timedelta(hours=1))
+    real_batch = runs_purge.purge_owner_batch
+    attempted: list[uuid.UUID] = []
+
+    def refused_for_first(session: Session, owner_id: uuid.UUID, limit: int) -> bool:
+        attempted.append(owner_id)
+        if owner_id == first:
+            raise connection_refused()
+        return real_batch(session, owner_id, limit)
+
+    monkeypatch.setattr(runs_purge, "purge_owner_batch", refused_for_first)
+    maintenance.run_cycle()
+
+    with pytest.raises(DBAPIError):
+        AccountJobs(factory).run_cycle()
+
+    assert attempted == [first]
+    assert count_owned(factory, second)["app_user"] == 1
