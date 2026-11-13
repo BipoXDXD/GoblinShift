@@ -13,6 +13,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, BinaryIO, Self, cast
 
+import pytest
 from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -27,10 +28,11 @@ from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, QUEUE_WINDOW
+from goblinshift.runs.store import Applied
 from goblinshift.runs.tables import attempt, run, run_input
 from goblinshift.runs.worker.claim import ClaimedAttempt, claim_next
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
-from goblinshift.runs.worker.runner import LocalRunner, Runner
+from goblinshift.runs.worker.runner import ExecutorStatus, LocalRunner, Runner
 
 VALID = b"nome,cidade\r\nAna,Recife\r\n"
 INVALID = b'nome,cidade\r\n"Ana,Recife\r\n'
@@ -224,6 +226,35 @@ def coordinator_config(attempt_timeout: timedelta = timedelta(minutes=10)) -> Co
         stop_grace=timedelta(seconds=2),
         attempt_timeout=attempt_timeout,
         jitter=lambda: MIN_RETRY_JITTER,
+    )
+
+
+def record_finish(monkeypatch: pytest.MonkeyPatch, worker: Coordinator) -> list[ExecutorStatus]:
+    """Estados do executor que chegaram ao desfecho (`finish`), na ordem em que chegaram."""
+    finished: list[ExecutorStatus] = []
+    real_finish = worker.finish
+
+    def recording_finish(claimed: ClaimedAttempt, status: ExecutorStatus) -> Applied:
+        finished.append(status)
+        return real_finish(claimed, status)
+
+    monkeypatch.setattr(worker, "finish", recording_finish)
+    return finished
+
+
+def why_not_collected(
+    factory: sessionmaker[Session], run_id: uuid.UUID, finished: Sequence[ExecutorStatus]
+) -> str:
+    """Motivo de `run()` ter terminado sem coletar: o executor no desfecho e o que o banco gravou.
+
+    `timed_out=True` é o teto da tentativa; sem estado nenhum, o executor nem chegou ao desfecho.
+    """
+    row = run_row(factory, run_id)
+    tries = [(a["number"], a["error_code"]) for a in attempts(factory, run_id)]
+    executor = list(finished) or "nenhum (run() parou antes do desfecho do executor)"
+    return (
+        f"run() terminou sem chegar à coleta; executor: {executor}; run: "
+        f"{row['status']}/{row['phase']} ({row['error_code']}); tentativas: {tries}"
     )
 
 
