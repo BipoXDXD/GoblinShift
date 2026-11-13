@@ -1,5 +1,6 @@
 """Cliente do `executor-ctl` contra o serviço falso fiel ao contrato da fatia 4."""
 
+import json
 import os
 import stat
 import sys
@@ -301,6 +302,103 @@ def test_ctl_que_nao_responde_a_tempo_vira_indisponivel(
 
     assert error.value.code == "unavailable"
     assert time.monotonic() - started < ctl.response_delay_s
+
+
+# ctl fora do contrato ---------------------------------------------------------------------
+
+
+def answer_always(
+    ctl: FakeExecutorCtl,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    document: dict[str, object] | None,
+) -> None:
+    """O falso responde `status` e `document` a qualquer chamada, sem passar pelo contrato."""
+    monkeypatch.setattr(ctl, "handle", lambda _method, _path, _body: (status, document))
+
+
+def padded_to(size: int, document: dict[str, object]) -> dict[str, object]:
+    """`document` com um campo extra que leva o JSON serializado a exatamente `size` bytes."""
+    padded = {**document, "pad": ""}
+    missing = size - len(json.dumps(padded).encode())
+    return {**document, "pad": "x" * missing}
+
+
+@pytest.mark.parametrize("operation", ["start", "status", "stop", "remove"])
+@pytest.mark.parametrize(
+    ("status", "document"),
+    [(500, None), (503, {"detail": "sem código"}), (502, {"error": 7})],
+)
+def test_erro_5xx_sem_codigo_do_ctl_vira_indisponivel(
+    runner: ExecutorCtlRunner,
+    ctl: FakeExecutorCtl,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    status: int,
+    document: dict[str, object] | None,
+) -> None:
+    attempt_id = prepared(runner)
+    answer_always(ctl, monkeypatch, status, document)
+
+    with pytest.raises(ExecutorCtlError) as error:
+        _call(runner, operation, attempt_id)
+
+    assert error.value.code == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("status", "document"),
+    [(409, None), (400, {"detail": "sem código"}), (404, {"error": 7}), (302, None)],
+)
+def test_resposta_fora_de_5xx_sem_codigo_do_ctl_vira_resposta_invalida(
+    runner: ExecutorCtlRunner,
+    ctl: FakeExecutorCtl,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    document: dict[str, object] | None,
+) -> None:
+    answer_always(ctl, monkeypatch, status, document)
+
+    with pytest.raises(ExecutorCtlError) as error:
+        runner.status(uuid.uuid7())
+
+    assert error.value.code == "invalid_response"
+
+
+def test_status_sem_corpo_vira_resposta_invalida(
+    runner: ExecutorCtlRunner, ctl: FakeExecutorCtl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # O 204 é o sucesso sem corpo do `remove`; no `status` o estado é obrigatório.
+    answer_always(ctl, monkeypatch, 204, None)
+
+    with pytest.raises(ExecutorCtlError) as error:
+        runner.status(uuid.uuid7())
+
+    assert error.value.code == "invalid_response"
+
+
+def test_resposta_no_teto_de_tamanho_e_lida(
+    runner: ExecutorCtlRunner, ctl: FakeExecutorCtl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document: dict[str, object] = {"state": "running", "exit_code": None, "oom_killed": False}
+    answer_always(
+        ctl, monkeypatch, 200, padded_to(executor_ctl_runner.MAX_RESPONSE_BYTES, document)
+    )
+
+    assert runner.status(uuid.uuid7()).is_running
+
+
+def test_resposta_acima_do_teto_vira_resposta_invalida_mesmo_com_codigo_de_erro(
+    runner: ExecutorCtlRunner, ctl: FakeExecutorCtl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Com o código lido, o 503 viraria `busy`; truncado, viraria `unavailable`. Vale o teto.
+    document = padded_to(executor_ctl_runner.MAX_RESPONSE_BYTES + 1, {"error": "busy"})
+    answer_always(ctl, monkeypatch, 503, document)
+
+    with pytest.raises(ExecutorCtlError) as error:
+        runner.status(uuid.uuid7())
+
+    assert error.value.code == "invalid_response"
 
 
 def test_start_aceita_ctl_mais_lento_que_o_prazo_antigo_dentro_do_teto(

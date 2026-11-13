@@ -1,10 +1,12 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, runBody, screenRequests } from "../test/fakeApi";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/", "/historico");
 
 type Handler = () => Response | null;
 
