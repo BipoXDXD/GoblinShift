@@ -11,6 +11,8 @@ segundos sob carga, e esse custo não diz nada sobre bloquear no FIFO.
 
 import os
 import stat
+import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +23,10 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.runs.worker import collection
 from goblinshift.runs.worker import coordinator as coordinator_module
 from goblinshift.runs.worker.collection import Collected
+from goblinshift.runs.worker.runner import LocalRunner
 from tests.fifo_support import BlockWatchdog, make_fifo
 from tests.runs.worker_support import (
+    FAKE_EXECUTOR,
     VALID,
     attempts,
     claim,
@@ -30,7 +34,9 @@ from tests.runs.worker_support import (
     create_user,
     local_runner,
     queue_run,
+    record_finish,
     run_row,
+    why_not_collected,
 )
 
 pytestmark = pytest.mark.integration
@@ -101,17 +107,46 @@ def test_saida_trocada_por_fifo_antes_da_copia_e_falha_transitoria_sem_bloquear(
     watchdog = BlockWatchdog(out_file)
     _swap_first_output_for_fifo_after_collect(monkeypatch, planted, watchdog)
 
+    worker = coordinator(factory, storage, runner)
+    finished = record_finish(monkeypatch, worker)
+
     try:
-        applied = coordinator(factory, storage, runner).run(claimed)
+        applied = worker.run(claimed)
     finally:
         watchdog.halt()
     watchdog.check()
 
     assert applied is not None
-    assert planted == [out_file]
+    # Sob load alto o executor real pode estourar o teto da tentativa antes da coleta: a falha
+    # diz isso, em vez de só comparar listas.
+    assert planted == [out_file], why_not_collected(factory, run_id, finished)
     row = run_row(factory, run_id)
     assert (row["status"], row["phase"]) == ("running", "retry_wait")
     [only] = attempts(factory, run_id)
     assert only["error_code"] == "EXECUTOR_UNAVAILABLE"
     assert opened
     assert _still_open_fifos(opened) == []
+
+
+def test_coleta_que_nao_acontece_cita_o_motivo_do_termino(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O executor dorme além do teto da tentativa: o mesmo término do flake sob load alto.
+    run_id = queue_run(factory, storage, create_user(factory))
+    claimed = claim(factory, storage)
+    runner = LocalRunner(
+        work_root,
+        attempt_timeout=timedelta(seconds=0.5),
+        command=(sys.executable, FAKE_EXECUTOR, "sleep", "30"),
+    )
+    worker = coordinator(factory, storage, runner)
+    finished = record_finish(monkeypatch, worker)
+
+    worker.run(claimed)
+    reason = why_not_collected(factory, run_id, finished)
+
+    assert "timed_out=True" in reason
+    assert "RESOURCE_LIMIT_EXCEEDED" in reason

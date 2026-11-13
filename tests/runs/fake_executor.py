@@ -12,6 +12,8 @@
   depois da carência).
 - `tamper-package`: roda o executor real e acrescenta ao ZIP de out/ uma entrada que o
   empacotador nunca gravaria (executor comprometido).
+- `oversize-report`: roda o executor real e troca o `report.json` de out/ por um arquivo um byte
+  acima do teto do relatório (executor comprometido ou defeituoso).
 """
 
 import json
@@ -22,6 +24,7 @@ import zipfile
 from pathlib import Path
 
 from goblinshift.processing.executor.execution import main as real_executor
+from goblinshift.processing.executor.report_file import REPORT_MAX_BYTES
 
 # Linha que o modo `ignore-term` escreve depois de instalar o SIG_IGN: daí em diante o SIGTERM
 # não o derruba.
@@ -55,6 +58,10 @@ def run(argv: list[str]) -> int:
             [package] = Path(work_dir, "out").glob("*.zip")
             with zipfile.ZipFile(package, "a") as archive:
                 archive.writestr("../../etc/cron.d/x", b"* * * * * root id\n")
+            return code
+        case "oversize-report":
+            code = real_executor([work_dir])
+            Path(work_dir, "out", "report.json").write_bytes(b" " * (REPORT_MAX_BYTES + 1))
             return code
         case "ignore-term":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)

@@ -1,8 +1,8 @@
-import { notifyManager, type QueryClient } from "@tanstack/react-query";
+import { defaultScheduler, notifyManager, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import {
   fakeApi,
@@ -15,6 +15,8 @@ import {
 } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes(`/execucoes/${RUN_ID}`, "/termos");
 
 const ARTIFACT_ID = "7d3c2a1e-0000-4000-8000-0000000000aa";
 
@@ -173,6 +175,17 @@ describe("Execução", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Isto expirou");
   });
 
+  it("404 nos resultados mostra o texto da execução, não o genérico", async () => {
+    setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () => problemResponse(404, "NOT_FOUND"),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(NOT_FOUND_TEXT);
+    expect(alert).not.toHaveTextContent("Não encontramos este item");
+  });
+
   it("oferece uma nova execução na mesma receita", async () => {
     setup(() => jsonResponse(runBody({ status: "succeeded" })));
 
@@ -318,7 +331,7 @@ describe("Execução: falha do polling sem anúncio repetido", () => {
   });
 
   afterEach(() => {
-    notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+    notifyManager.setScheduler(defaultScheduler);
   });
 
   it.each([

@@ -1,6 +1,8 @@
 name: Palco 3D (WebKit móvel)
 
-# Só o palco, fora do job Chromium/notice de 12 min. Sem secrets, VPS ou deploy.
+# Fora do job Chromium/notice de 12 min do ci.yml, nos PRs que mexem na web: o palco em WebKit
+# móvel e os defeitos plantados do e2e (web/e2e/sabotage.ts, issue #426), que levam de 7 a 15 min
+# e dobrariam o job do ci.yml exigido pelo gate da release. Sem secrets, VPS ou deploy.
 on:
   pull_request:
     paths:
@@ -61,3 +63,49 @@ jobs:
             web/test-results-webkit/
           if-no-files-found: warn
           retention-days: 7
+
+  sabotagem:
+    name: Defeitos plantados derrubam as specs (Chromium)
+    # Um `playwright test` por caso: 7 min num Mac local. O teto cobre runner lento e o pior caso
+    # do apt (3 tentativas de 90 s).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Versão do Playwright (chave do cache do navegador)
+        id: playwright
+        run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      - name: Chromium headless e dependências do sistema
+        timeout-minutes: 6
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
+          CI_APT_TENTATIVA_S: "90"
+        run: |
+          lista=$(../scripts/ci-playwright-pacotes.sh chromium)
+          if [[ -n $lista ]]; then
+            mapfile -t pacotes <<<"$lista"
+            ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+          fi
+          npx playwright install --only-shell chromium
+      # O sabotage.ts copia os dois builds; sem eles, ele falha pedindo o build.
+      - name: Build
+        run: npm run build
+      - name: Build com o aviso global
+        run: npm run build:notice-e2e
+      - name: Cada defeito plantado derruba a spec que o vigia
+        run: npm run e2e:sabotage

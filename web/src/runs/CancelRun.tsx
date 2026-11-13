@@ -72,7 +72,7 @@ export function CancelRun({ runId, status, onAnnounced }: CancelRunProps): React
       <ConfirmDialog
         open={asking}
         title={T.title}
-        confirmLabel={T.confirm}
+        confirmLabel={mutation.isPending ? T.canceling : T.confirm}
         cancelLabel={T.keepGoing}
         confirmBlocked={mutation.isPending}
         busy={mutation.isPending}

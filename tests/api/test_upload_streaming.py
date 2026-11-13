@@ -5,9 +5,11 @@ conforme o gerador do cliente avança; o `TestClient` lê o corpo inteiro antes 
 """
 
 import hashlib
+import json
 from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 import anyio
 import httpx2 as httpx
@@ -15,6 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.types import Message, Scope
 
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
 from tests.api.files_support import (
@@ -173,3 +176,45 @@ async def test_envio_que_passa_do_prazo_total_falha_mesmo_com_progresso(
 
     assert_problem(response, 408, "REQUEST_TIMEOUT")
     assert sync_client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"] == "failed"
+
+
+async def test_cliente_que_desconecta_no_meio_do_envio_recebe_400_e_o_upload_falha(
+    app: FastAPI, sync_client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Chamada ASGI direta: só assim o servidor recebe `http.disconnect` no meio do corpo.
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=6)
+    path = urlsplit(item["content"]["url"]).path
+    headers = {**auth, **OCTET_STREAM, "Content-Length": "6"}
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "PUT",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(name.lower().encode(), value.encode()) for name, value in headers.items()],
+        "client": ("127.0.0.1", 1),
+        "server": ("testserver", 80),
+    }
+    incoming = iter([{"type": "http.request", "body": b"abc", "more_body": True}])
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return next(incoming, {"type": "http.disconnect"})
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    with anyio.fail_after(WAIT_LIMIT_S):
+        await app(scope, receive, send)
+
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    body = json.loads(b"".join(message.get("body", b"") for message in sent))
+    assert start["status"] == 400
+    assert (body["code"], body["detail"]) == ("BAD_REQUEST", "O envio foi interrompido.")
+    assert sync_client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"] == "failed"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0

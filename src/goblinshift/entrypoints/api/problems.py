@@ -17,6 +17,7 @@ validação, `errors` (lista de `{field, code, message}`).
 
 import errno
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -204,6 +205,8 @@ class ProblemDetails(BaseModel):
 # default, e um 429 ou 503 sem ele é erro de programação de quem o emite.
 _RETRY_AFTER_STATUSES = frozenset({429, 503})
 _RETRY_AFTER_HEADER = "Retry-After"
+# O mesmo padrão publicado no OpenAPI; `[0-9]` e não `\d`, que aceitaria dígitos não ASCII.
+_RETRY_AFTER_VALUE = re.compile(r"[0-9]+")
 
 
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
@@ -217,7 +220,7 @@ def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
             "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
                 "required": True,
-                "schema": {"type": "string", "pattern": "^[0-9]+$"},
+                "schema": {"type": "string", "pattern": f"^{_RETRY_AFTER_VALUE.pattern}$"},
             }
         }
     return responses
@@ -255,13 +258,23 @@ class ApiProblem(Exception):  # noqa: N818
 def _require_retry_after(code: ProblemCode, headers: Mapping[str, str] | None) -> None:
     if PROBLEMS[code].status not in _RETRY_AFTER_STATUSES:
         return
-    if any(name.lower() == _RETRY_AFTER_HEADER.lower() for name in headers or ()):
-        return
-    raise ValueError(
-        f"o problema {code} é um {PROBLEMS[code].status} e exige o header "
-        f"{_RETRY_AFTER_HEADER} (contrato de 1.6 e 2.3); cada causa informa o próprio prazo, "
-        "sem default"
-    )
+    values = [
+        value
+        for name, value in (headers or {}).items()
+        if name.lower() == _RETRY_AFTER_HEADER.lower()
+    ]
+    if not values:
+        raise ValueError(
+            f"o problema {code} é um {PROBLEMS[code].status} e exige o header "
+            f"{_RETRY_AFTER_HEADER} (contrato de 1.6 e 2.3); cada causa informa o próprio prazo, "
+            "sem default"
+        )
+    for value in values:
+        if _RETRY_AFTER_VALUE.fullmatch(value) is None:
+            raise ValueError(
+                f"o header {_RETRY_AFTER_HEADER} do problema {code} veio como {value!r}; o "
+                f"contrato de 2.3 exige segundos inteiros ({_RETRY_AFTER_VALUE.pattern})"
+            )
 
 
 def install_problem_handlers(app: FastAPI) -> None:

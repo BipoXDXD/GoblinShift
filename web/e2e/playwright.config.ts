@@ -128,6 +128,8 @@ export default defineConfig({
   ...(E2E.remote
     ? {}
     : {
+        // Apaga a pasta de artefatos da API falsa que esta execução criou (issue #420).
+        globalTeardown: "./globalTeardown.ts",
         webServer: {
           command: `node e2e/server/serve-dist.ts --port ${String(LOCAL_PORT)} --dist ${process.env["E2E_DIST_DIR"] ?? "dist"} --artifacts ${E2E.artifactsDir ?? ""}`,
           cwd: "..",

@@ -43,7 +43,10 @@ while IFS=$'\t' read -r role reference; do
       exit 1
       ;;
   esac
-  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
+  if ! [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    printf 'Refusing digest for role %s (invalid-digest)\n' "$role" >&2
+    exit 1
+  fi
   repository=${reference%@*}
   repository=${repository%:*}
   resolved="$repository@$digest"

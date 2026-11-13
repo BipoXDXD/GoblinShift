@@ -241,7 +241,10 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
       {/* Reserva a altura do Baixar com a data: no celular este cartão fica acima do de estado, e
           crescer depois empurraria tudo o que vem embaixo (CLS). */}
       {results.isPending && <p className="min-h-24 text-fg-muted">{T.results.loading}</p>}
-      {results.error !== null && <ProblemAlert failure={failureOf(results.error)} />}
+      {results.error !== null && (
+        // 404 aqui é a execução que sumiu: o texto geral manda conferir uma lista que a tela não tem.
+        <ProblemAlert failure={failureOf(results.error)} messages={{ NOT_FOUND: T.notFound }} />
+      )}
       {results.data !== undefined && (
         <ResultsAvailability
           runId={runId}

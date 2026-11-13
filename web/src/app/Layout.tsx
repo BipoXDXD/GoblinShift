@@ -1,5 +1,5 @@
 import { CircleAlert } from "lucide-react";
-import { useLayoutEffect, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactElement } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useMatches, useSearchParams } from "react-router";
 
 import { LOGIN_ERROR_PARAM, loginRefFrom, safeReturnTo } from "../account/signIn";
@@ -192,17 +192,33 @@ function TermsGate(): ReactElement {
 /**
  * O servidor volta para `/?login_error=failed#ref=<request_id>` em toda recusa, sem dizer o motivo
  * (auth_login.py). O código serve para a pessoa citar no pedido de suporte ou no recurso.
+ *
+ * O alerta fica antes do `h1` da tela e toma o foco inicial, como o resumo de erros: com o foco no
+ * título, a leitura seguiria para baixo sem passar pela mensagem, e a mudança de foco pode cortar o
+ * anúncio do `role="alert"`. O `h1` respeita a marca e não o rouba depois.
  */
 function LoginFailedAlert(): ReactElement | null {
   const [params] = useSearchParams();
-  const { hash } = useLocation();
   if (params.get(LOGIN_ERROR_PARAM) !== LOGIN_FAILED) {
     return null;
   }
+  return <LoginFailedMessage />;
+}
+
+function LoginFailedMessage(): ReactElement {
+  const { hash } = useLocation();
+  const alert = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    alert.current?.focus();
+  }, []);
   const ref = loginRefFrom(hash);
   return (
     <div
+      ref={alert}
       role="alert"
+      tabIndex={-1}
+      // HOLDS_INITIAL_FOCUS (components/a11y/initialFocus.ts): o h1 da tela não tira o foco daqui.
+      data-holds-initial-focus=""
       className="mb-8 flex gap-3 rounded-lg border-l-4 border-danger-accent bg-danger-bg p-4 text-danger-fg"
     >
       <CircleAlert aria-hidden="true" className="mt-1 size-4 flex-none" />
