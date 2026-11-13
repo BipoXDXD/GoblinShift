@@ -62,8 +62,11 @@ test("Esc com o pedido em voo não fecha; a falha aparece e o diálogo reabre", 
   const confirm = dialog.getByRole("button", { name: "Cancelar execução" });
   await confirm.click();
   const cancel = await held;
-  // O Esc só depois de a tela mostrar o pedido em voo.
-  await expect(confirm).toHaveAttribute("aria-disabled", "true");
+  // O Esc só depois de a tela mostrar o pedido em voo, com o rótulo em voo no botão.
+  await expect(dialog.getByRole("button", { name: "Cancelando…" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   await page.keyboard.press("Escape");
   await expect(dialog).toBeVisible();
   await fulfillProblem(cancel, { code: "SERVICE_UNAVAILABLE", status: 503 });
