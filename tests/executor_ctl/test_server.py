@@ -156,6 +156,124 @@ def test_corpo_sem_content_length_da_411(ctl_socket: Path) -> None:
     assert body["error"] == "length_required"
 
 
+def raw_answer(socket: Path, request: bytes) -> bytes:
+    with socketlib.socket(socketlib.AF_UNIX) as raw:
+        raw.settimeout(5)
+        raw.connect(str(socket))
+        raw.sendall(request)
+        # A resposta traz `Connection: close`, e o servidor escreve cabeçalhos e corpo em
+        # chamadas separadas: um `recv` só pode voltar sem o corpo. Lê até o EOF.
+        chunks = []
+        while chunk := raw.recv(4096):
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
+# Mais dígitos que o limite de conversão do `int()` (4300) também derrubava a conexão.
+TOO_MANY_DIGITS = b"9" * 5000
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        b"\xb2",
+        b"\xb9",
+        b"1\xb2",
+        b"-1",
+        b"+5",
+        b"1_0",
+        b"",
+        b"1 0",
+    ],
+)
+def test_content_length_que_nao_e_so_digito_ascii_da_400_no_start(
+    ctl_socket: Path, length: bytes
+) -> None:
+    # `str.isdigit()` aceita o "²" (U+00B2) que o `http.server` decodifica de um byte 0xB2, mas
+    # `int()` o recusa: sem a conferência de ASCII, a recusa virava 500 `internal_error`.
+    request = (
+        f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+        + length
+        + b"\r\n\r\n{}"
+    )
+
+    answer = raw_answer(ctl_socket, request)
+
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b'"invalid_request"' in answer
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        pytest.param(b"99999", id="maximo-de-digitos"),
+        pytest.param(b"1" + b"0" * 5, id="6-digitos"),
+        pytest.param(TOO_MANY_DIGITS, id="5000-digitos"),
+    ],
+)
+def test_content_length_bem_formado_acima_do_limite_da_413_no_start(
+    ctl_socket: Path, length: bytes
+) -> None:
+    # Só dígitos ASCII e, sem zeros à esquerda, mais dígitos que o teto: é necessariamente
+    # maior que o limite, e o `int()` nunca recebe a string (acima de 4300 dígitos ele lança).
+    request = (
+        f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+        + length
+        + b"\r\n\r\n"
+    )
+
+    answer = raw_answer(ctl_socket, request)
+
+    assert answer.startswith(b"HTTP/1.1 413")
+    assert b'"body_too_large"' in answer
+
+
+def test_content_length_com_zeros_a_esquerda_e_aceito(ctl_socket: Path) -> None:
+    # RFC 9110 8.6: `Content-Length = 1*DIGIT`, então "000001" vale 1. O corpo de 1 byte segue
+    # o mesmo fluxo que com "1": passa do cabeçalho e é recusado só como JSON que não é objeto.
+    def start_with(length: bytes) -> bytes:
+        request = (
+            f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+            + length
+            + b"\r\n\r\n1"
+        )
+        return raw_answer(ctl_socket, request)
+
+    answer = start_with(b"000001")
+
+    assert answer == start_with(b"1")
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b"Content-Length" not in answer.partition(b"\r\n\r\n")[2]
+
+
+def test_content_length_nao_ascii_em_rota_que_nao_le_corpo_nao_derruba_a_resposta(
+    ctl_socket: Path,
+) -> None:
+    # O descarte do corpo não lido também usa o `Content-Length`: a resposta de erro da rota
+    # precisa chegar ao cliente em vez de a conexão cair no `ValueError` do `int()`.
+    request = f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+
+    answer = raw_answer(ctl_socket, request + b"\xb2\r\n\r\n")
+
+    assert answer.startswith(b"HTTP/1.1 ")
+
+
+def test_content_length_com_digitos_demais_em_rota_que_nao_le_corpo_nao_derruba_a_resposta(
+    ctl_socket: Path,
+) -> None:
+    request = f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+
+    # O GET não lê corpo: um valor bem formado acima do teto de dígitos cai no descarte, que
+    # desiste sem drenar, e a rota responde como responderia sem o cabeçalho.
+    answer = raw_answer(ctl_socket, request + TOO_MANY_DIGITS + b"\r\n\r\n")
+    plain = raw_answer(
+        ctl_socket, f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    )
+
+    assert answer.split(b"\r\n", 1)[0] == plain.split(b"\r\n", 1)[0]
+    assert answer.partition(b"\r\n\r\n")[2] == plain.partition(b"\r\n\r\n")[2]
+
+
 def test_imagem_fora_da_allowlist_da_403(ctl_socket: Path) -> None:
     response = call(ctl_socket, "POST", f"/v1/attempts/{ATTEMPT}/start", {"image": OTHER_IMAGE})
 
@@ -321,3 +439,64 @@ def test_sonda_so_aceita_get(ctl_socket: Path, method: str) -> None:
 
     assert response.status == 405
     assert response.body["error"] == "method_not_allowed"
+
+
+# Zeros à esquerda não mudam o valor, mas contam para o limite de dígitos do `int()`.
+LEADING_ZEROS = b"0" * 5000
+
+
+def status_and_body(answer: bytes) -> tuple[bytes, bytes]:
+    head, _, body = answer.partition(b"\r\n\r\n")
+    return head.split(b"\r\n", 1)[0], body
+
+
+@pytest.mark.parametrize(
+    ("length", "same_as", "body"),
+    [
+        pytest.param(b"0", b"0", b"", id="zero"),
+        pytest.param(b"00000", b"0", b"", id="zeros"),
+        pytest.param(LEADING_ZEROS, b"0", b"", id="5000-zeros"),
+        pytest.param(LEADING_ZEROS + b"1", b"1", b"1", id="5000-zeros-e-1"),
+    ],
+)
+def test_content_length_so_com_zeros_a_esquerda_vale_o_numero_no_start(
+    ctl_socket: Path, length: bytes, same_as: bytes, body: bytes
+) -> None:
+    def start_with(value: bytes) -> bytes:
+        request = (
+            f"POST /v1/attempts/{ATTEMPT}/start HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+            + value
+            + b"\r\n\r\n"
+            + body
+        )
+        return raw_answer(ctl_socket, request)
+
+    answer = start_with(length)
+
+    assert answer.startswith(b"HTTP/1.1 400")
+    assert b'"invalid_request"' in answer
+    assert status_and_body(answer) == status_and_body(start_with(same_as))
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        pytest.param(b"0", id="zero"),
+        pytest.param(b"00000", id="zeros"),
+        pytest.param(LEADING_ZEROS, id="5000-zeros"),
+        pytest.param(LEADING_ZEROS + b"1", id="5000-zeros-e-1"),
+    ],
+)
+def test_content_length_com_zeros_a_esquerda_em_rota_que_nao_le_corpo_responde_igual(
+    ctl_socket: Path, length: bytes
+) -> None:
+    request = f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\nContent-Length: ".encode()
+    tail = b"1" if length.endswith(b"1") else b""
+
+    answer = raw_answer(ctl_socket, request + length + b"\r\n\r\n" + tail)
+    plain = raw_answer(
+        ctl_socket, f"GET /v1/attempts/{ATTEMPT} HTTP/1.1\r\nHost: x\r\n\r\n".encode()
+    )
+
+    assert answer.startswith(b"HTTP/1.1 ")
+    assert status_and_body(answer) == status_and_body(plain)

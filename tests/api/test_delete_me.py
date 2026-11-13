@@ -17,7 +17,7 @@ from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
-from tests.identity.support import new_key, new_user
+from tests.identity.support import new_key, new_user, purge_account
 from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import queue_run
 
@@ -119,6 +119,22 @@ def test_repetir_delete_me_202_mantem_o_primeiro_pedido(
 
     assert response.status_code == 202, response.text
     assert deletion_requested_at(factory, owner) == NOW
+
+
+def test_delete_me_de_conta_purgada_depois_do_login_401_sem_limpar_o_navegador(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions
+) -> None:
+    # A sessão já foi aceita quando a purga apaga a conta: a corrida entre a autenticação e a rota.
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+    purge_account(factory, owner, NOW)
+
+    response = client.delete(ME)
+
+    body = assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+    assert body["detail"] == "A sessão não vale mais para esta conta."
+    assert "Clear-Site-Data" not in response.headers
+    assert "ACCOUNT_DELETION_REQUESTED" not in events_of(factory, owner)
 
 
 def test_delete_me_com_login_de_11_min_401_reauth_required(
