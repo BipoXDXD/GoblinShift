@@ -20,6 +20,8 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const TERMS_VERSION = "v5";
 const MAX_ACTIVE_KEYS = 5;
 const NOW = "2026-10-14T12:00:00Z";
+const DAY_MS = 86_400_000;
+const SEED_KEY_DAYS = 30;
 // Os mesmos de auth_login.py: só caminho local, até 512 caracteres.
 const RETURN_TO_PATTERN = /^\/(?!\/)[A-Za-z0-9/_\-.?=&%]*$/;
 const MAX_RETURN_TO_CHARS = 512;
@@ -115,7 +117,8 @@ export class FakeAccount {
       public_id: `gsk_${id.slice(0, 8)}`,
       scopes: ["runs:read", "runs:write"],
       created_at: "2026-10-01T12:00:00Z",
-      expires_at: "2026-10-31T12:00:00Z",
+      // Ativa pelo relógio real do navegador, que é o que a interface usa para o estado.
+      expires_at: new Date(Date.now() + SEED_KEY_DAYS * DAY_MS).toISOString(),
       last_used_at: null,
       revoked_at: null,
       ...overrides,
@@ -371,14 +374,17 @@ export class FakeAccount {
     const id = randomUUID();
     const publicId = `gsk_${id.slice(0, 8)}`;
     const token = `${publicId}.CANARY-${randomUUID()}`;
-    const expiresAt = new Date(Date.parse(NOW) + body.data.days * 86_400_000).toISOString();
+    // A interface decide se a chave expirou pelo relógio real do navegador; contar o prazo a
+    // partir do NOW fixo fazia a chave recém-criada nascer expirada depois de NOW + dias.
+    const issuedAt = Date.now();
+    const expiresAt = new Date(issuedAt + body.data.days * DAY_MS).toISOString();
     this.issuedTokens.push(token);
     this.keys.set(id, {
       key: {
         id,
         public_id: publicId,
         scopes: body.data.scopes,
-        created_at: NOW,
+        created_at: new Date(issuedAt).toISOString(),
         expires_at: expiresAt,
         last_used_at: null,
         revoked_at: null,
