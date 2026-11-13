@@ -282,6 +282,24 @@ def page_tree_with_count(declared: int, pages: int = 1) -> bytes:
     return raw_pdf(objects)
 
 
+def page_tree_with_pending_sibling() -> bytes:
+    """Três páginas: uma direto na raiz e duas num nó /Pages irmão dela.
+
+    Cada lista /Kids cabe sozinha no teto de 2 páginas: a raiz tem 2 filhos e o nó irmão, visitado
+    antes da página da raiz, também. Só a soma das folhas passa do teto.
+    """
+    return raw_pdf(
+        {
+            1: _catalog(),
+            2: b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 3 >>",
+            3: _PAGE,
+            4: b"<< /Type /Pages /Parent 2 0 R /Kids [5 0 R 6 0 R] /Count 2 >>",
+            5: _page(4),
+            6: _page(4),
+        }
+    )
+
+
 def page_tree_with_many_kids(count: int) -> bytes:
     """Um nó /Pages com `count` filhos, todos apontando para a mesma página."""
     kids = b"3 0 R " * count
