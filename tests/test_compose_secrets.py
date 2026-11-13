@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from goblinshift.platform.settings import Settings
 
@@ -231,8 +232,13 @@ def test_producao_sem_ambiente_declarado_nao_interpola(secrets_dir: Path) -> Non
     assert "GS_ENVIRONMENT" in result.stderr
 
 
-@pytest.mark.parametrize("service", ["api", "maintenance", "migrate", "worker"])
-def test_servico_que_le_a_configuracao_recebe_o_ambiente_da_producao(
-    production: dict[str, Any], service: str
-) -> None:
-    assert production["services"][service]["environment"]["GS_ENVIRONMENT"] == "production"
+@pytest.mark.parametrize("service", ["api", "maintenance", "worker"])
+def test_servico_continuo_da_producao_exige_o_ambiente(service: str) -> None:
+    # No YAML cru, e não no renderizado: com a variável definida, `:-development` e `:?` renderizam
+    # igual. A migração herda o `:-development` da base, mas o Compose recusa o arquivo inteiro
+    # quando falta uma variável obrigatória de qualquer serviço.
+    production_file = yaml.safe_load((ROOT / "compose.prod.yaml").read_text(encoding="utf-8"))
+
+    declared = production_file["services"][service]["environment"]["GS_ENVIRONMENT"]
+
+    assert declared.startswith("${GS_ENVIRONMENT:?")

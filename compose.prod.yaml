@@ -55,10 +55,6 @@ services:
       - github_client_secret
       - csrf_secret
       - login_cookie_secret
-  # A migração lê a mesma configuração (migrations/env.py).
-  migrate:
-    environment:
-      <<: *production-env
   # O evento de término da Run (3.7) sai do worker e da manutenção com o mesmo `user.hash` da API.
   worker:
     <<: *executor-client
