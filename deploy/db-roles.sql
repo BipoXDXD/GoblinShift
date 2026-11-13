@@ -59,7 +59,9 @@ GRANT USAGE ON SCHEMA public TO gs_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO gs_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO gs_runtime;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON alembic_version FROM gs_runtime;
-REVOKE UPDATE, DELETE, TRUNCATE ON audit_event FROM gs_runtime;
+-- Também dos logins, direto: um UPDATE de coluna dado por uma versão anterior do script, ou à
+-- mão, sobreviveria ao REVOKE só no grupo. O REVOKE na tabela leva junto os de coluna.
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_event FROM gs_runtime, gs_app, gs_maintenance;
 -- Retenção de 90 dias (1.7): só a manutenção apaga, e nenhum papel de runtime tem UPDATE em
 -- coluna alguma do audit_event. Por isso o lote da retenção escolhe as linhas sem
 -- `FOR UPDATE` (identity/purge.py), que exigiria UPDATE.

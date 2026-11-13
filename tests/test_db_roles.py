@@ -223,6 +223,27 @@ def test_nenhum_papel_de_runtime_tem_update_em_coluna_do_audit_event(owner: Engi
 
 
 @pytest.mark.integration
+def test_script_retira_update_de_coluna_dado_antes_no_audit_event(
+    roles_postgres: PostgresContainer,
+    owner: Engine,
+    runtime_factory: Callable[[str], sessionmaker[Session]],
+) -> None:
+    # Estado de um banco que rodou uma versão anterior do script, ou recebeu um GRANT à mão.
+    with owner.begin() as connection:
+        for role in RUNTIME_ROLES:
+            connection.exec_driver_sql(f"GRANT UPDATE (id) ON audit_event TO {role}")
+
+    _apply_script(_settings(roles_postgres, roles_postgres.username, roles_postgres.password))
+
+    for role in RUNTIME_LOGINS:
+        with (
+            pytest.raises(ProgrammingError, match="permission denied"),
+            unit_of_work(runtime_factory(role)) as session,
+        ):
+            session.execute(text("UPDATE audit_event SET id = DEFAULT"))
+
+
+@pytest.mark.integration
 def test_tabela_nova_de_migration_futura_ja_nasce_acessivel(owner: Engine) -> None:
     with owner.begin() as connection:
         connection.exec_driver_sql(
