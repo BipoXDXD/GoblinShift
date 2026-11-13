@@ -50,6 +50,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // O dobro dos 5 s do findBy (src/test/setup.ts): a espera falha primeiro e diz o que faltou na
+    // tela, em vez de um "Test timed out" mudo.
+    testTimeout: 10_000,
     // As specs do Playwright rodam com o próprio runner; aqui entra só a lógica pura de e2e/support.
     exclude: [...configDefaults.exclude, "e2e/**/*.spec.ts"],
     // Sem isso o Vitest troca todo CSS por módulo vazio, inclusive o `?raw` que o teste de

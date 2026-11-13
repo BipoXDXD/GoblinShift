@@ -42,6 +42,9 @@ def index_error(reason: str) -> str:
     return rf"^{prefix} for role {FIRST_ROLE} \({reason}\)$"
 
 
+DIGEST_ERROR = rf"^Refusing digest for role {FIRST_ROLE} \(invalid-digest\)$"
+
+
 TOOLS_BESIDES_JQ = ("bash", "cat", "dirname", "find", "mkdir", "rm", "tar")
 
 INDEX_MANIFEST = json.dumps(
@@ -196,6 +199,7 @@ def run_target(
     target: Target,
     manifests: list[str | None],
     search_path: SearchPath = search_path_with_jq,
+    single_digest: str = SINGLE_DIGEST,
 ) -> Outcome:
     with tempfile.TemporaryDirectory() as raw_root:
         root = Path(raw_root)
@@ -216,7 +220,7 @@ def run_target(
         environment = {
             "PATH": search_path(bin_dir),
             "STUB_DIR": str(stub_dir),
-            "STUB_SINGLE_DIGEST": SINGLE_DIGEST,
+            "STUB_SINGLE_DIGEST": single_digest,
             "TMPDIR": str(work_dir),
             "RUNNER_TEMP": str(work_dir),
             "RELEASE_COMMIT": "d" * 40,
@@ -323,6 +327,43 @@ class ManifestClassificationTests(unittest.TestCase):
                     outcome = run_target(target, [manifest] * ROLE_COUNT)
 
                     self.assert_release_stopped(outcome, index_error(reason))
+
+    def test_digest_fora_do_formato_sha256_para_antes_do_pull(self) -> None:
+        malformed = {
+            "numero": "42",
+            "canario": CANARY,
+            "vazio": "",
+            "hex_curto": "sha256:" + "a" * 63,
+            "hex_longo": "sha256:" + "a" * 65,
+            "maiusculas": "sha256:" + "A" * 64,
+            "outro_algoritmo": "sha512:" + "a" * 64,
+            "sem_prefixo": "a" * 64,
+            "nova_linha_no_fim": f"{INDEX_DIGEST}\nsha256:{CANARY}",
+        }
+        for target in TARGETS:
+            for case, digest in malformed.items():
+                with self.subTest(target=target.__name__, source="index", case=case):
+                    platform = {"os": "linux", "architecture": "amd64"}
+                    manifest = json.dumps({"manifests": [{"digest": digest, "platform": platform}]})
+
+                    outcome = run_target(target, [manifest] * ROLE_COUNT)
+
+                    self.assert_release_stopped(outcome, DIGEST_ERROR)
+                with self.subTest(target=target.__name__, source="registry", case=case):
+                    outcome = run_target(
+                        target, [SINGLE_MANIFEST] * ROLE_COUNT, single_digest=digest
+                    )
+
+                    self.assert_digest_refused_after_lookup(outcome)
+
+    def assert_digest_refused_after_lookup(self, outcome: Outcome) -> None:
+        self.assertEqual(outcome.returncode, 1, outcome.stderr)
+        self.assertRegex(outcome.stderr.strip(), DIGEST_ERROR)
+        self.assertNotIn(CANARY, outcome.stdout + outcome.stderr)
+        self.assertEqual(len(outcome.called("crane digest")), 1)
+        self.assertEqual(outcome.called("crane pull"), ())
+        self.assertEqual(outcome.called("docker"), ())
+        self.assertEqual(outcome.called("ssh"), ())
 
 
 if __name__ == "__main__":

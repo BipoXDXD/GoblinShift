@@ -6,7 +6,7 @@ import { installFakeMatchMedia } from "./fakeMatchMedia";
 
 // As telas carregam por rota (lazy): no primeiro teste de cada arquivo, o Vitest ainda transforma
 // o módulo da tela, o que passa do 1 s padrão do findBy no CI. 5 s só pesa quando o teste já ia
-// falhar.
+// falhar. O `testTimeout` do vite.config.ts fica acima disto, e o setup.test.ts confere.
 configure({ asyncUtilTimeout: 5_000 });
 
 // O jsdom não implementa o `<dialog>` modal. O dublê abre e fecha, com o evento `close`, e devolve o

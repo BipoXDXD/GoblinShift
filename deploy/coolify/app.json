@@ -165,6 +165,7 @@
           "target": "/run/secrets/db_password"
         }
       ],
+      "stop_grace_period": "30s",
       "volumes": [
         {
           "source": "/srv/goblinshift/storage",

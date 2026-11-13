@@ -120,7 +120,8 @@ testpaths = ["tests"]
 # ambiente; a suíte não o usa, e sem ele ela roda igual com ou sem o grupo.
 addopts = "-ra --strict-markers -p no:schemathesis"
 # O executor-ctl é um pacote do host em deploy/, fora de src/ (roda no Python do sistema).
-pythonpath = ["deploy"]
+# src/ vem antes do editable da .venv, que pode apontar para o src de outro checkout.
+pythonpath = ["src", "deploy"]
 # Aviso é erro: uma depreciação nova reprova a suíte em vez de passar despercebida.
 filterwarnings = ["error"]
 markers = [

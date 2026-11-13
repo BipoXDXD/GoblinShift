@@ -166,6 +166,19 @@ A chave tem o formato `gsk_<public_id>_<segredo>`: 16 dígitos hexadecimais púb
 sudo docker exec -i goblinshift-api-1 gs-admin orphan-files --min-age-hours 6 --limit 200 > orfaos.tsv
 ```
 
+Limitações do relatório, para ler antes de agir sobre ele:
+
+- **`deleted` e `missing` saem juntos** em `marcado-removido-mas-presente`. A diferença importa: em `deleted` o arquivo pode ser apagado; em `missing` o administrador pode preferir restaurar a linha. Para separar, consulte o estado de cada chave numa transação só de leitura:
+
+  ```bash
+  sudo docker exec -i goblinshift-postgres-1 psql -U goblinshift -d goblinshift \
+    -c "BEGIN READ ONLY; SELECT storage_key, state FROM stored_object WHERE storage_key = '<chave>'; COMMIT;"
+  ```
+
+- **É uma foto de um instante.** O expurgo roda em paralelo e confirma o estado no banco antes de apagar o arquivo, então uma chave pode aparecer no meio dessa transição. Repita a execução depois de pelo menos um ciclo da manutenção e só aja sobre as chaves que aparecem nas duas.
+- **Arquivo com modificação no futuro fica invisível.** O corte de idade compara o `mtime` com o relógio da máquina: um `mtime` à frente dele (relógio ajustado, arquivo tocado à mão) nunca passa do corte e nunca é listado.
+- **Só entram arquivos comuns com nome de chave válido.** Nomes fora do padrão de chave (espaço, acento, começo por ponto), symlinks e o diretório `.tmp` não aparecem; os temporários têm limpeza própria na manutenção. Um arquivo assim no storage não foi criado pela aplicação e pede inspeção à mão.
+
 ## Publicação em produção
 
 A produção é publicada só pelo Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)). O caminho antigo por SSH está morto: o `deploy/deploy.sh` só recusa, o `deploy/release.sh` não tem quem o chame e o job `deploy` da CI fica pulado, porque o gate de release exige esse resultado (`deploy/coolify/release/gate.py`).

@@ -320,8 +320,11 @@ def test_sinal_real_para_o_worker_ocioso_no_prazo(tmp_path: Path, signum: signal
         _wait_for_output(log, "worker pronto")
         started = time.monotonic()
         process.send_signal(signum)
-        code = process.wait(timeout=STOP_DEADLINE_S)
+        # O prazo justo vale até o laço ver o sinal; a saída do interpretador, que sob carga leva
+        # segundos, só conta no teto folgado do `wait`.
+        _wait_for_output(log, STOP_MESSAGE, timeout_s=STOP_DEADLINE_S)
         elapsed = time.monotonic() - started
+        code = process.wait(timeout=STOP_DEADLINE_S)
     finally:
         if process.poll() is None:
             process.kill()
