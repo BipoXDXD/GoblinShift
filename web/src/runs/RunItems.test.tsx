@@ -1,10 +1,12 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, runBody, RUN_ID } from "../test/fakeApi";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/execucoes/id");
 
 const UPLOAD = (n: number) => `7d3c2a1e-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
