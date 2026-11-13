@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler, catalogVersion, withVersion } from "../test/catalog";
 import {
@@ -18,10 +18,8 @@ import {
 import { fakeUploader } from "../test/fakeUploader";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
-// A rota carrega a tela por `lazy`. Sem este import, o primeiro teste do arquivo buscava o
-// módulo no processo principal do Vitest, disputado por todos os workers na suíte completa, e
-// estourava os 5 s. Importada aqui, a tela entra na coleta e o `import()` da rota sai do cache.
-import "./WorkbenchPage";
+
+await preloadRoutes("/bancada/csv-janitor");
 
 const csv = (name: string) => new File(["a,b\n1,2\n"], name, { type: "text/csv" });
 
