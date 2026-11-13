@@ -11,7 +11,7 @@ administrador:
   arquivo; por isso a categoria é separada.
 
 Linha `pending`, `committed` ou `delete_requested` com arquivo não é órfã: o expurgo ainda a
-trata. Nada aqui apaga ou altera arquivo ou linha.
+trata. Nada aqui apaga ou altera arquivo ou linha, e cada lote roda em transação `READ ONLY`.
 
 Duas travas contra falso alarme. Arquivo modificado depois de `modified_before` fica de fora: é
 gravação em curso (arquivo no disco antes de a linha ser confirmada). E o disco é lido antes do
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from itertools import batched
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from goblinshift.files.states import ObjectState
@@ -106,6 +106,8 @@ def _classify(
 ) -> Iterable[tuple[StoredFile, OrphanReason]]:
     files = list(batch)
     with session.begin():
+        # O banco garante o "só leitura": qualquer escrita aqui falha com SQLSTATE 25006.
+        session.execute(text("SET TRANSACTION READ ONLY"))
         rows = session.execute(
             select(stored_object.c.storage_key, stored_object.c.state).where(
                 stored_object.c.storage_key.in_([f.key for f in files])
