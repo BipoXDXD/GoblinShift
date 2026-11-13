@@ -54,7 +54,9 @@ function fakeApi() {
     failNextWith: { code: string; status: number } | null;
     deleteStatus: number;
     holdIntents: (() => void)[] | null;
-  } = { failNextWith: null, deleteStatus: 202, holdIntents: null };
+    /** Quantas intenções faltam no fim da resposta (API que devolve menos itens que o lote). */
+    missingIntents: number;
+  } = { failNextWith: null, deleteStatus: 202, holdIntents: null, missingIntents: 0 };
   const deleted: string[] = [];
   const fetchMock = vi.fn<typeof fetch>((input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
@@ -83,10 +85,15 @@ function fakeApi() {
     const rawBody = typeof init?.body === "string" ? init.body : "";
     const { items } = createUploadsBody.parse(JSON.parse(rawBody));
     const respond = (): Response =>
-      new Response(JSON.stringify({ items: items.map(intentFor) }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      });
+      new Response(
+        JSON.stringify({
+          items: items.slice(0, items.length - state.missingIntents).map(intentFor),
+        }),
+        {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     const held = state.holdIntents;
     if (held !== null) {
       return new Promise((resolve) => {
@@ -483,5 +490,70 @@ describe("useUploadBatch: exclusão no servidor", () => {
       expect(hook.result.current.failedDeletions).toEqual([]);
     });
     expect(api.deleted).toEqual([idOf(pending[0]), idOf(pending[0])]);
+  });
+});
+
+describe("useUploadBatch: corridas e contrato do lote", () => {
+  it("marca como falho, por erro interno, o arquivo que a API não devolveu no lote", async () => {
+    const { api, pending, hook } = setup();
+    api.state.missingIntents = 1;
+    const first = file("a.csv");
+
+    act(() => {
+      hook.result.current.add([first, file("b.csv")]);
+    });
+
+    await waitFor(() => {
+      expect(statuses(hook.result.current.entries)).toEqual(["waiting", "failed"]);
+    });
+    expect(hook.result.current.entries[1]?.state).toEqual({
+      status: "failed",
+      failure: { kind: "internal" },
+    });
+    // O arquivo que ganhou intenção segue para o envio; o outro não vai ao uploader.
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+    expect(pending[0]?.options.file).toBe(first);
+  });
+
+  it("não troca por falha o cancelamento feito enquanto a intenção ainda era pedida", async () => {
+    const { api, pending, hook } = setup();
+    api.state.failNextWith = { code: "QUOTA_EXCEEDED", status: 429 };
+
+    // Tudo no mesmo tick síncrono: a resposta de erro só é processada depois do cancelamento.
+    act(() => {
+      hook.result.current.add([file("a.csv")]);
+    });
+    act(() => {
+      hook.result.current.cancel(hook.result.current.entries[0]?.localId ?? "");
+    });
+
+    await waitFor(() => {
+      expect(api.fetchMock).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(statuses(hook.result.current.entries)).toEqual(["canceled"]);
+    expect(pending).toEqual([]);
+  });
+
+  it("ignora o refazer de um arquivo que não falhou, sem pedir outra intenção", async () => {
+    const { api, pending, hook } = setup();
+    act(() => {
+      hook.result.current.add([file("a.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+
+    act(() => {
+      hook.result.current.retry(hook.result.current.entries[0]?.localId ?? "");
+    });
+
+    expect(api.fetchMock).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveLength(1);
+    expect(statuses(hook.result.current.entries)).toEqual(["waiting"]);
   });
 });
