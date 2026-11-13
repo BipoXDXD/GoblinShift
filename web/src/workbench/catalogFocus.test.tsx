@@ -3,12 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { CATALOG_BODY } from "../test/catalogBody";
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { withVersion } from "../test/catalog";
 import { fakeApi, jsonResponse, problemResponse } from "../test/fakeApi";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
+
+await preloadRoutes("/bancada/csv-janitor");
 
 /**
  * Abre a Bancada com o GET /catalog em voo; `release` entrega a resposta quando o teste quiser,
