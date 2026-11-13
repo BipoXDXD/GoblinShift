@@ -11,13 +11,20 @@ import sys
 import unicodedata
 from typing import Any
 
+import pytest
+
 from goblinshift.entrypoints.openapi_export import render_openapi
 from goblinshift.files.uploads import UPLOAD_NAME_PATTERN
 
 SPEC: dict[str, Any] = json.loads(render_openapi())
 # Caracteres que o domínio recusa no nome de um upload (files.uploads, 3.6). Os surrogates soltos
-# (Cs) também são recusados, mas ficam fora do padrão publicado (ver UPLOAD_NAME_PATTERN).
+# (Cs) e o formato invisível fora do plano básico também são recusados, mas ficam fora do padrão
+# publicado (ver UPLOAD_NAME_PATTERN).
 FORBIDDEN_CATEGORIES = {"Cc", "Zl", "Zp"}
+BMP_FORMAT_CATEGORY = "Cf"
+# ZWNJ (escrita persa) e ZWJ (emoji composto) são Cf, mas legítimos num nome de arquivo.
+ALLOWED_FORMAT_CHARS = {"\u200c", "\u200d"}
+LAST_BMP_CODEPOINT = 0xFFFF
 SURROGATES = range(0xD800, 0xE000)
 SEPARATORS = {"/", "\\"}
 
@@ -56,7 +63,7 @@ def test_tamanho_do_upload_publica_de_0_ao_teto_do_video() -> None:
     assert "32 MiB" in size["description"]
 
 
-def test_padrao_do_nome_recusa_exatamente_separadores_e_controles() -> None:
+def test_padrao_do_nome_recusa_exatamente_separadores_controles_e_formato() -> None:
     pattern = re.compile(UPLOAD_NAME_PATTERN)
     disagreements = [
         f"U+{codepoint:04X}"
@@ -68,8 +75,26 @@ def test_padrao_do_nome_recusa_exatamente_separadores_e_controles() -> None:
     assert disagreements == []
 
 
+@pytest.mark.parametrize(
+    "name", ["a\u200cb.pdf", "foto \U0001f468\u200d\U0001f469\u200d\U0001f467.jpg"]
+)
+def test_padrao_do_nome_aceita_zwnj_e_emoji_com_zwj(name: str) -> None:
+    assert re.fullmatch(UPLOAD_NAME_PATTERN, name) is not None
+
+
+@pytest.mark.parametrize("name", ["fatura\u202efdp.exe", "a\u2066b.pdf"])
+def test_padrao_do_nome_recusa_controles_bidi(name: str) -> None:
+    assert re.fullmatch(UPLOAD_NAME_PATTERN, name) is None
+
+
 def _is_forbidden(char: str) -> bool:
-    return char in SEPARATORS or unicodedata.category(char) in FORBIDDEN_CATEGORIES
+    category = unicodedata.category(char)
+    is_bmp_format = (
+        category == BMP_FORMAT_CATEGORY
+        and ord(char) <= LAST_BMP_CODEPOINT
+        and char not in ALLOWED_FORMAT_CHARS
+    )
+    return char in SEPARATORS or category in FORBIDDEN_CATEGORIES or is_bmp_format
 
 
 def test_idempotency_key_publica_o_formato_aceito_sem_null() -> None:

@@ -10,10 +10,8 @@
 // - VPS (E2E_VPS=1, com E2E_BASE_URL): só specs/vps.spec.ts, as jornadas de leitura, no Chromium e
 //   no Firefox. A chave é opcional: sem ela, as jornadas que exigem conta são puladas com o motivo.
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
+import { claimArtifactsDir } from "./artifactsDir.ts";
 import { parseSpecKeys } from "./specKeys.ts";
 import { assertLocalWriteTarget } from "./writeTarget.ts";
 
@@ -52,7 +50,7 @@ function readEnv(): E2EEnv {
       specKeys: new Map(),
       // Fixa por variável só para o sabotage.ts plantar a mesma chave no bundle.
       apiKey: process.env["GS_E2E_API_KEY"] ?? `CANARY-${randomUUID()}`,
-      artifactsDir: sharedArtifactsDir(),
+      artifactsDir: claimArtifactsDir(process.env, process.pid),
     };
   }
   const apiKey = process.env["GS_E2E_API_KEY"] ?? "";
@@ -78,20 +76,6 @@ function readEnv(): E2EEnv {
     specKeys,
     artifactsDir: null,
   };
-}
-
-/**
- * Pasta temporária criada pelo processo principal do Playwright, que carrega a configuração antes
- * de tudo; os workers e o servidor a herdam pela variável de ambiente.
- */
-function sharedArtifactsDir(): string {
-  const inherited = process.env["E2E_ARTIFACTS_DIR"];
-  if (inherited !== undefined && inherited !== "") {
-    return inherited;
-  }
-  const created = mkdtempSync(join(tmpdir(), "goblinshift-e2e-"));
-  process.env["E2E_ARTIFACTS_DIR"] = created;
-  return created;
 }
 
 export const E2E = readEnv();

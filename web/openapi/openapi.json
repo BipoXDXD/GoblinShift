@@ -1077,7 +1077,7 @@
                           "type": "string",
                           "maxLength": 255,
                           "minLength": 1,
-                          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*$",
+                          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029\\xad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890\\u0891\\u08e2\\u180e\\u200b\\u200e\\u200f\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb]*$",
                           "title": "Name"
                         },
                         "size": {

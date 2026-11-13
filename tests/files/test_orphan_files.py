@@ -5,10 +5,12 @@ import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy import event, func, select, update
+from sqlalchemy import Executable, Select, event, func, select, update
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.orphans import (
@@ -295,3 +297,34 @@ def test_nao_segura_transacao_aberta_enquanto_percorre_o_disco(
         assert report.orphan_count == 3
         assert in_transaction_when_disk_is_read == [False, False, False]
         assert not session.in_transaction()
+
+
+def test_classify_roda_em_transacao_read_only(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O "só leitura" é garantido pelo banco: escrever dentro da transação do lote falha."""
+    put(storage, "uploads/solto")
+    sqlstates: list[str | None] = []
+
+    with factory() as session:
+        real_execute = session.execute
+
+        def execute_then_try_write(statement: Executable, *args: Any, **kwargs: Any) -> Any:
+            result = real_execute(statement, *args, **kwargs)
+            if isinstance(statement, Select) and not sqlstates:
+                try:
+                    with session.begin_nested():
+                        real_execute(update(stored_object).values(state=stored_object.c.state))
+                    sqlstates.append(None)
+                except DBAPIError as error:
+                    sqlstates.append(getattr(error.orig, "sqlstate", None))
+            return result
+
+        monkeypatch.setattr(session, "execute", execute_then_try_write)
+
+        report = find_orphan_files(
+            session, storage, modified_before=future_cutoff(), list_limit=LIST_LIMIT
+        )
+
+    assert sqlstates == ["25006"]
+    assert report.orphan_count == 1

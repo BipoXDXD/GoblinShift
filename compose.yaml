@@ -48,7 +48,7 @@ x-storage: &storage
 
 services:
   postgres:
-    image: postgres:18.6-trixie
+    image: postgres:18.6-trixie@sha256:1267c7e692de235fda2a50dbcdbcbca4672ea6a0298576a6bd9d07cafc319b32
     environment:
       POSTGRES_DB: goblinshift
       POSTGRES_USER: goblinshift
@@ -146,6 +146,9 @@ services:
       GS_MISSING_SWEEP_MAX_ABSENT_RATIO:
     volumes: [*storage]
     depends_on: *worker-deps
+    # A volta para entre os passos, e um passo pode esperar o prazo de uma chamada ao executor-ctl
+    # (a sonda da imagem, 10 s) antes do prazo do tracing: a carência padrão de 10 s não cabe.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   # Nginx com o build da SPA e a própria configuração (docker/web.Dockerfile).
@@ -181,7 +184,7 @@ services:
     logging: *logging
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.162.0
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
       OPENOBSERVE_BASIC_AUTH: ${OPENOBSERVE_BASIC_AUTH:?defina em .env (scripts/dev-secrets.sh)}

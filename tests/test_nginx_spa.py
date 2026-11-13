@@ -222,12 +222,26 @@ class Stack:
         request = urllib.request.Request(  # noqa: S310
             self.base_url + path, data=data, method=method, headers=headers or {}
         )
-        try:
-            with urllib.request.urlopen(request, timeout=RUN_TIMEOUT_SECONDS) as response:  # noqa: S310
-                return Response(response.status, _lower(response.headers), response.read())
-        except urllib.error.HTTPError as error:
-            with error:
-                return Response(error.code, _lower(error.headers), error.read())
+        return _send(urllib.request.build_opener(), request)
+
+    def get_without_following(self, path: str) -> Response:
+        """O GET sem seguir redirect: a resposta é o próprio 3xx do Nginx."""
+        request = urllib.request.Request(self.base_url + path)  # noqa: S310
+        return _send(urllib.request.build_opener(_NoRedirect), request)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def _send(opener: urllib.request.OpenerDirector, request: urllib.request.Request) -> Response:
+    try:
+        with opener.open(request, timeout=RUN_TIMEOUT_SECONDS) as response:
+            return Response(response.status, _lower(response.headers), response.read())
+    except urllib.error.HTTPError as error:
+        with error:
+            return Response(error.code, _lower(error.headers), error.read())
 
 
 def _lower(headers: Any) -> dict[str, str]:
@@ -345,6 +359,47 @@ class TestSpa:
         assert response.body == stack.get("/").body
         assert response.headers["cache-control"] == "no-cache"
         _assert_spa_security_headers(response)
+
+    @pytest.mark.parametrize(
+        ("path", "location"),
+        [
+            ("/termos/", "/termos"),
+            ("/runs/0192f1c2-aaaa/resultado/", "/runs/0192f1c2-aaaa/resultado"),
+            ("/entrar/?next=/runs&x=1", "/entrar?next=/runs&x=1"),
+        ],
+    )
+    def test_rota_da_spa_com_barra_final_redireciona_para_a_forma_canonica(
+        self, stack: Stack, path: str, location: str
+    ) -> None:
+        response = stack.get_without_following(path)
+
+        assert response.status == 301
+        # Relativo: atrás da borda o esquema do Nginx é http, e um absoluto desceria de https.
+        assert response.headers["location"] == location
+        _assert_spa_security_headers(response)
+
+    @pytest.mark.parametrize("path", ["//exemplo.com/", "/%2Fexemplo.com/"])
+    def test_barra_final_com_barras_duplicadas_redireciona_na_mesma_origem(
+        self, stack: Stack, path: str
+    ) -> None:
+        # O Nginx junta as barras antes da location: o Location nunca vira `//exemplo.com`, que o
+        # navegador leria como outro host.
+        response = stack.get_without_following(path)
+
+        assert response.status == 301
+        assert response.headers["location"] == "/exemplo.com"
+
+    @pytest.mark.parametrize("path", ["/%5Cexemplo.com/", "/a%0D%0ASet-Cookie:x=1/"])
+    def test_barra_final_com_caminho_fora_das_rotas_nao_redireciona(
+        self, stack: Stack, path: str
+    ) -> None:
+        # Decodificado, o caminho viraria `/\exemplo.com` (outro host para o navegador) ou levaria
+        # CR LF ao Location. Fica como antes: o index.html.
+        response = stack.get_without_following(path)
+
+        assert response.status == 200
+        assert "location" not in response.headers
+        assert response.body == stack.get("/").body
 
     @pytest.mark.parametrize("extension", ["js", "css"])
     def test_asset_com_hash_tem_cache_imutavel(self, stack: Stack, extension: str) -> None:
@@ -529,8 +584,10 @@ class TestApi:
         "path",
         [
             "/api/v1/runs?limit=5",
+            "/api/v1/runs/",
             "/api/v1/rota-que-nao-existe",
             "/auth/login/google",
+            "/auth/login/google/",
             "/docs",
             "/docs/assets/swagger-init.js",
             "/openapi.json",

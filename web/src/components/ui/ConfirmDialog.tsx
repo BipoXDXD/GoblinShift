@@ -19,7 +19,10 @@ interface ConfirmDialogProps {
   readonly onCancel: () => void;
   /** A confirmação fica `aria-disabled` (pedido em curso). */
   readonly confirmBlocked?: boolean;
-  /** Pedido em curso: o Esc não fecha, para a resposta aparecer no diálogo. */
+  /**
+   * Pedido em curso: o Esc não fecha, para a resposta aparecer no diálogo, e o `aria-busy` avisa o
+   * leitor de tela.
+   */
   readonly busy?: boolean;
   /** Vermelho só aqui, onde a ação destrutiva é a primária (RUI cap. 2). */
   readonly destructive?: boolean;
@@ -92,6 +95,8 @@ export function ConfirmDialog({
       ref={dialog}
       aria-labelledby={titleId}
       aria-describedby={bodyId}
+      // undefined tira o atributo: sem pedido, nada a anunciar.
+      aria-busy={busy || undefined}
       onCancel={(event) => {
         // O Chrome ainda força o fechamento no Esc seguinte; aí o onClose avisa quem chamou.
         if (busy) {

@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from goblinshift.entrypoints.maintenance import CYCLE_SPAN, run_cycles
+from goblinshift.entrypoints.maintenance import ACCOUNT_STEPS_FAILED, CYCLE_SPAN, run_cycles
 from goblinshift.platform.telemetry import AlertEventCounter
 from goblinshift.runs.maintenance import STEPS_FAILED
 
@@ -150,3 +150,24 @@ def test_evento_de_alerta_de_um_ciclo_que_depois_falha_chega_ao_span_da_volta(
 
     [span] = exporter.get_finished_spans()
     assert dict(span.attributes or {})["alert.capacity_divergence"] == 1
+
+
+def test_ciclo_de_contas_com_passo_falho_conta_como_falha_sem_apagar_o_de_execucoes(
+    provider: TracerProvider, exporter: InMemorySpanExporter
+) -> None:
+    run_cycles(
+        provider.get_tracer("t"),
+        (
+            ("execuções", lambda: {STEPS_FAILED: 0}),
+            ("contas", lambda: {"login_states_removed": 1, ACCOUNT_STEPS_FAILED: 1}),
+        ),
+    )
+
+    [span] = exporter.get_finished_spans()
+    attributes = dict(span.attributes or {})
+    assert attributes["maintenance.failed_cycles"] == 1
+    # Cada ciclo com a própria contagem: a de contas não sobrescreve a de execuções.
+    assert attributes["maintenance.steps_failed"] == 0
+    assert attributes["maintenance.account_steps_failed"] == 1
+    assert attributes["maintenance.login_states_removed"] == 1
+    assert span.status.status_code is StatusCode.ERROR

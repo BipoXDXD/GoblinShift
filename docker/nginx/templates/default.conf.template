@@ -110,6 +110,15 @@ server {
     # SPA: arquivo existente ou o index.html, que o React Router resolve no navegador. Sem
     # cache: um deploy novo vale na próxima navegação.
     location / {
+        # Rota da SPA com barra final: 301 para a forma sem barra, a que o React Router canoniza
+        # no cliente, para os buscadores não verem duas URLs com o mesmo conteúdo. A query segue
+        # junto. Só nesta location, que é a do index.html: /api/, /auth/, /assets/ e /.well-known/
+        # têm a própria. Só caracteres de rota: o caminho decodificado nunca vira `//host` ou
+        # `/\host` (redirect aberto) nem leva bytes de controle ao Location; o resto cai no
+        # index.html como antes. Location relativo: atrás da borda, o esquema do Nginx é http, e
+        # um absoluto mandaria o navegador de https para http.
+        absolute_redirect off;
+        rewrite "^(/[A-Za-z0-9._~-][A-Za-z0-9._~/-]*)/$" $1 permanent;
         try_files $uri /index.html;
         add_header Cache-Control no-cache always;
         include /etc/nginx/snippets/spa-headers.conf;

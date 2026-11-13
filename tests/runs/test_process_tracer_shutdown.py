@@ -30,6 +30,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.maintenance import Maintenance
+from goblinshift.runs.worker.executor_ctl_runner import CALL_TIMEOUT
 from goblinshift.runs.worker.work_area_gate import WorkAreaGate
 from tests.span_exporters import (
     BATCH_DELAY_MS,
@@ -385,6 +386,15 @@ def test_parada_da_manutencao_ociosa_ou_sem_banco_com_o_prazo_do_tracing_cabe_na
     step_s = _idle_or_database_down_step_s()
 
     assert _grace_s(service) > step_s + telemetry.TRACING_SHUTDOWN_TIMEOUT_S
+
+
+@pytest.mark.parametrize("service", _deployments("maintenance"))
+def test_parada_da_manutencao_com_sonda_travada_cabe_na_carencia(service: dict[str, Any]) -> None:
+    # Com o executor-ctl travado, a sonda da imagem espera o prazo inteiro da chamada antes de a
+    # volta conferir a parada.
+    probe_s = CALL_TIMEOUT.total_seconds()
+
+    assert _grace_s(service) > probe_s + telemetry.TRACING_SHUTDOWN_TIMEOUT_S
 
 
 @pytest.mark.parametrize("service", _deployments("worker"))

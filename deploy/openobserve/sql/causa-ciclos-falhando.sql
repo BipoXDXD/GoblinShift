@@ -1,7 +1,8 @@
 -- Causa: ciclo da manutenção falhando (docs/GoblinShiftPlan.md, 3.4 e 3.7). `run_cycles` conta em
 -- `maintenance.failed_cycles` os ciclos que levantaram exceção, cujas contagens ficam fora do span
--- daquela volta, e os que tiveram passo falho (`maintenance.steps_failed`). A volta seguinte tenta
--- de novo, e por isso uma falha isolada não dispara: são pelo menos três voltas no período.
+-- daquela volta, e os que tiveram passo falho (`maintenance.steps_failed`, do ciclo de execuções, ou
+-- `maintenance.account_steps_failed`, do ciclo de contas). A volta seguinte tenta de novo, e por
+-- isso uma falha isolada não dispara: são pelo menos três voltas no período.
 SELECT count(*) AS cycles
 FROM "${stream}"
 WHERE main = 'true'
