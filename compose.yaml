@@ -139,6 +139,9 @@ services:
       GS_MISSING_SWEEP_MAX_ABSENT_RATIO:
     volumes: [*storage]
     depends_on: *worker-deps
+    # A volta para entre os passos, e um passo pode esperar o prazo de uma chamada ao executor-ctl
+    # (a sonda da imagem, 10 s) antes do prazo do tracing: a carência padrão de 10 s não cabe.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   # Nginx com o build da SPA e a própria configuração (docker/web.Dockerfile).
