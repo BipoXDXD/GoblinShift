@@ -2,6 +2,12 @@
   "name": "goblinshift",
   "services": {
     "api": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
       "depends_on": {
         "migrate": {
           "condition": "service_completed_successfully",
@@ -104,6 +110,12 @@
       }
     },
     "maintenance": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
       "command": [
         "gs-maintenance"
       ],
@@ -257,7 +269,19 @@
     },
     "nginx": {
       "cap_drop": [
-        "NET_RAW"
+        "AUDIT_WRITE",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "FSETID",
+        "KILL",
+        "MKNOD",
+        "NET_RAW",
+        "SETFCAP",
+        "SETPCAP",
+        "SYS_CHROOT"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
       ],
       "depends_on": {
         "api": {
@@ -379,6 +403,12 @@
       }
     },
     "worker": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
       "command": [
         "gs-worker"
       ],

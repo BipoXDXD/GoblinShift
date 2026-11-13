@@ -85,13 +85,22 @@ def delete_ended_web_sessions(session: Session, now: datetime, limit: int) -> in
 
 
 def delete_old_audit_events(session: Session, now: datetime, limit: int) -> int:
-    return _delete_batch(
-        session,
-        audit_event,
-        audit_event.c.id,
-        audit_event.c.occurred_at < now - AUDIT_RETENTION,
-        limit,
+    """Apaga até `limit` eventos além da retenção, sem travar as linhas antes.
+
+    O papel da manutenção não tem UPDATE no `audit_event` (ADR 055), e `FOR UPDATE` exige UPDATE.
+    Sem a trava não há o que pular: ninguém altera um evento, e duas manutenções simultâneas só
+    disputam o mesmo `DELETE`, que a segunda encontra já feito. A CTE fica materializada para o
+    teto do lote valer, como em `skip_locked_batch`.
+    """
+    expired = audit_event.c.occurred_at < now - AUDIT_RETENTION
+    chosen = select(audit_event.c.id).where(expired).limit(limit).cte("chosen")
+    chosen = chosen.prefix_with("MATERIALIZED")
+    deleted = session.execute(
+        delete(audit_event)
+        .where(audit_event.c.id.in_(select(chosen.c.id)))
+        .returning(audit_event.c.id)
     )
+    return len(deleted.all())
 
 
 def _delete_batch(
