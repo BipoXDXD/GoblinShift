@@ -25,6 +25,7 @@ await preloadRoutes(
 type MeHandler = () => Response | null;
 
 const REF = "0b8f3c2e-5d4a-4f1b-9c7e-2a6d8e0f1b3c";
+const HOME_TITLE = "Arquivos em lote, limpos pelas goblins da oficina.";
 
 function setup(
   me: MeHandler,
@@ -227,6 +228,23 @@ describe("Layout: login recusado", () => {
     );
     expect(within(alert).queryByText(/Código/)).toBeNull();
     expect(alert).not.toHaveTextContent(/golpe|PERIGO|<b>/);
+  });
+
+  it("o foco inicial fica no alerta, e o h1 da Oficina não o rouba ao aparecer", async () => {
+    setup(() => problemResponse(401, "AUTHENTICATION_REQUIRED"), `/?login_error=failed#ref=${REF}`);
+
+    const alert = await screen.findByRole("alert");
+    // A Oficina é lazy: o h1 chega depois do alerta, e o efeito dele roda depois do findBy.
+    await screen.findByRole("heading", { level: 1, name: HOME_TITLE });
+    await act(() => Promise.resolve());
+
+    expect(alert).toHaveFocus();
+  });
+
+  it("sem o login_error, o foco inicial continua no h1 da Oficina", async () => {
+    setup(() => jsonResponse(meBody()), "/");
+
+    await expectHeadingFocused(HOME_TITLE);
   });
 
   it("código sem o login_error não mostra nada", async () => {

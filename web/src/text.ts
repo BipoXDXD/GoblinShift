@@ -380,6 +380,7 @@ export const TEXT = {
       title: "Cancelar esta execução?",
       body: "A execução para e não publica resultados. Os arquivos enviados continuam na sua conta até expirarem.",
       confirm: "Cancelar execução",
+      canceling: "Cancelando…",
       keepGoing: "Continuar a execução",
       requested:
         "Cancelamento pedido. A execução para assim que o trabalho em curso for interrompido.",

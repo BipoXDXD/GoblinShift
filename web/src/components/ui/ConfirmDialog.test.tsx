@@ -192,6 +192,17 @@ describe("ConfirmDialog", () => {
     expect(notCanceled).toBe(true);
   });
 
+  it.each([
+    [true, "true"],
+    [false, null],
+  ])("com busy=%s, aria-busy do diálogo é %s", async (busy, expected) => {
+    const user = userEvent.setup();
+    render(<Harness busy={busy} />);
+    await user.click(screen.getByRole("button", { name: "Abrir" }));
+
+    expect(screen.getByRole("dialog").getAttribute("aria-busy")).toBe(expected);
+  });
+
   it("Cancelar devolve o foco a quem abriu", async () => {
     const user = userEvent.setup();
     render(<Harness />);
