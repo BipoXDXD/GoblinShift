@@ -6,7 +6,14 @@ from uuid import UUID
 from sqlalchemy import Engine, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity import IssuedKey, Scope, create_admin_user, issue_key
+from goblinshift.identity import (
+    IssuedKey,
+    Scope,
+    create_admin_user,
+    issue_key,
+    purge_owner,
+    request_account_deletion,
+)
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from goblinshift.platform.settings import Settings
@@ -31,6 +38,13 @@ def new_user(factory: sessionmaker[Session], *, blocked: bool = False) -> UUID:
                 update(app_user).where(app_user.c.id == user_id).values(status="blocked")
             )
     return user_id
+
+
+def purge_account(factory: sessionmaker[Session], user_id: UUID, now: datetime) -> None:
+    """Pede a exclusão e purga a conta, como a manutenção faz depois do prazo de 1.8."""
+    with unit_of_work(factory) as session:
+        request_account_deletion(session, user_id, now)
+        purge_owner(session, user_id)
 
 
 def new_key(
