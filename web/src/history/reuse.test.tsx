@@ -1,10 +1,12 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { appRoutes } from "../test/appRoutes";
+import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, runBody } from "../test/fakeApi";
 import { renderRoutes } from "../test/renderRoutes";
+
+await preloadRoutes("/historico", "/bancada/csv-janitor");
 
 // O relógio das telas nos testes é 14/10/2026 12:00 UTC (test/appRoutes.ts).
 const RUN_ID = "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a";
