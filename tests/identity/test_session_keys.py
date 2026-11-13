@@ -21,6 +21,7 @@ from goblinshift.identity import (
     list_keys,
     revoke_owned_key,
 )
+from goblinshift.identity.accounts import MAX_LISTED_KEYS
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_user
@@ -85,7 +86,7 @@ def test_chave_revogada_ou_vencida_libera_vaga(factory: sessionmaker[Session]) -
         )
     revoked = issue(factory, owner)
     with unit_of_work(factory) as session:
-        [summary] = [k for k in list_keys(session, owner) if k.public_id == revoked.public_id]
+        [summary] = [k for k in list_keys(session, owner, NOW) if k.public_id == revoked.public_id]
         revoke_owned_key(session, owner, summary.id, NOW)
 
     issue(factory, owner)
@@ -196,7 +197,7 @@ def test_listagem_traz_so_as_chaves_da_conta_mais_recentes_primeiro(
     issue(factory, other)
 
     with unit_of_work(factory) as session:
-        listed = list_keys(session, owner)
+        listed = list_keys(session, owner, NOW)
 
     assert [key.public_id for key in listed] == [second.public_id, first.public_id]
     assert listed[0].scopes == READ
@@ -206,9 +207,58 @@ def test_listagem_traz_so_as_chaves_da_conta_mais_recentes_primeiro(
     assert listed[0].revoked_at is None
 
 
+def test_listar_chaves_mostra_ativa_antiga_depois_de_100_revogadas(
+    factory: sessionmaker[Session],
+) -> None:
+    # Revogada nunca sai da tabela: sem priorizar as ativas, 100 chaves mais novas tirariam da
+    # listagem uma chave que ainda autentica, e o dono não teria o id para revogá-la.
+    owner = new_user(factory)
+    active = issue(factory, owner, NOW - timedelta(days=1))
+    with unit_of_work(factory) as session:
+        for minute in range(MAX_LISTED_KEYS):
+            issue_key_for_session(
+                session, owner_id=owner, scopes=READ, days=30, now=NOW + timedelta(minutes=minute)
+            )
+            session.execute(
+                update(api_key)
+                .where(api_key.c.owner_id == owner, api_key.c.revoked_at.is_(None))
+                .where(api_key.c.public_id != active.public_id)
+                .values(revoked_at=NOW + timedelta(minutes=minute))
+            )
+
+    with unit_of_work(factory) as session:
+        listed = list_keys(session, owner, NOW + timedelta(hours=2))
+
+    assert len(listed) == MAX_LISTED_KEYS
+    assert listed[0].public_id == active.public_id
+
+
+def test_listagem_poe_as_ativas_antes_das_vencidas_e_revogadas(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = new_user(factory)
+    active = issue(factory, owner, NOW - timedelta(days=10))
+    with unit_of_work(factory) as session:
+        expired = issue_key_for_session(
+            session, owner_id=owner, scopes=READ, days=1, now=NOW - timedelta(days=5)
+        )
+    revoked = issue(factory, owner, NOW - timedelta(days=1))
+    with unit_of_work(factory) as session:
+        session.execute(update(api_key).where(api_key.c.id == revoked.id).values(revoked_at=NOW))
+
+    with unit_of_work(factory) as session:
+        listed = list_keys(session, owner, NOW)
+
+    assert [key.public_id for key in listed] == [
+        active.public_id,
+        revoked.public_id,
+        expired.public_id,
+    ]
+
+
 def test_listagem_de_conta_sem_chaves_e_vazia(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
-        assert list_keys(session, new_user(factory)) == []
+        assert list_keys(session, new_user(factory), NOW) == []
 
 
 # --- Revogação --------------------------------------------------------------------------------
@@ -218,7 +268,7 @@ def test_dono_revoga_a_propria_chave(factory: sessionmaker[Session]) -> None:
     owner = new_user(factory)
     issued = issue(factory, owner)
     with factory() as session:
-        [summary] = list_keys(session, owner)
+        [summary] = list_keys(session, owner, NOW)
 
     with unit_of_work(factory) as session:
         found = revoke_owned_key(session, owner, summary.id, NOW)
@@ -226,7 +276,7 @@ def test_dono_revoga_a_propria_chave(factory: sessionmaker[Session]) -> None:
     assert found is True
     with unit_of_work(factory) as session:
         assert authenticate_api_key(session, issued.token, NOW) is None
-        [after] = list_keys(session, owner)
+        [after] = list_keys(session, owner, NOW)
     assert after.revoked_at == NOW
 
 
@@ -234,13 +284,13 @@ def test_revogar_de_novo_preserva_o_primeiro_instante(factory: sessionmaker[Sess
     owner = new_user(factory)
     issue(factory, owner)
     with factory() as session:
-        [summary] = list_keys(session, owner)
+        [summary] = list_keys(session, owner, NOW)
     with unit_of_work(factory) as session:
         revoke_owned_key(session, owner, summary.id, NOW)
 
     with unit_of_work(factory) as session:
         found = revoke_owned_key(session, owner, summary.id, NOW + timedelta(hours=1))
-        [after] = list_keys(session, owner)
+        [after] = list_keys(session, owner, NOW)
 
     assert found is True
     assert after.revoked_at == NOW
@@ -250,7 +300,7 @@ def test_revogar_chave_alheia_devolve_false_e_nao_a_toca(factory: sessionmaker[S
     owner, intruder = new_user(factory), new_user(factory)
     issued = issue(factory, owner)
     with factory() as session:
-        [summary] = list_keys(session, owner)
+        [summary] = list_keys(session, owner, NOW)
 
     with unit_of_work(factory) as session:
         found = revoke_owned_key(session, intruder, summary.id, NOW)
