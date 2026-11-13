@@ -160,6 +160,11 @@ jobs:
                 exit 1
                 ;;
             esac
+            # Same rule as send.sh: a malformed digest stops here, not as an obscure docker pull error.
+            if ! [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              printf 'Refusing digest for role %s (invalid-digest)\n' "$role" >&2
+              exit 1
+            fi
             reference="ghcr.io/bipoxdxd/$name@$digest"
             docker pull "$reference"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock:ro "$TRIVY_IMAGE" image \
