@@ -1,16 +1,19 @@
 """Migração 0019: índices das buscas da manutenção e da FK de `object_use` (#442).
 
-Expand: só índices novos, que o código anterior ignora. O downgrade os remove.
+Expand: só índices novos, que o código anterior ignora. O downgrade os remove. A 0019 também
+normaliza a marca de pendente que a API antiga deixou errada na janela do deploy da 0018.
 """
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import pytest
 from sqlalchemy import Connection, Engine, event, text
 from sqlalchemy.orm import Session
 
+from goblinshift.identity.accounts import list_pending_accounts
 from goblinshift.identity.purge import delete_ended_web_sessions
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
@@ -92,3 +95,120 @@ def test_limpeza_de_sessoes_usa_o_indice_do_fim(db_settings: Settings, engine: E
         connection.rollback()
 
     assert any("web_session_ended_at_idx" in line for line in plan), plan
+
+
+def at_0018(settings: Settings) -> None:
+    """Leva o schema a 0018 venha ele de baixo (banco novo) ou de cima (head)."""
+    run_migrations(settings, "0018")
+    downgrade_migrations(settings, "0018")
+
+
+def new_user(conn: Connection, status: str, *, awaiting_approval: bool) -> UUID:
+    user_id: UUID = conn.execute(
+        text(
+            "INSERT INTO app_user (issuer, subject, display_name, status, awaiting_approval) "
+            "VALUES ('teste', gen_random_uuid()::text, 'Ana', :status, :awaiting) RETURNING id"
+        ),
+        {"status": status, "awaiting": awaiting_approval},
+    ).scalar_one()
+    return user_id
+
+
+def new_session(conn: Connection, user_id: UUID) -> None:
+    conn.execute(
+        text(
+            "INSERT INTO web_session (user_id, secret_hash, authenticated_at, last_seen_at, "
+            "idle_expires_at, absolute_expires_at) "
+            "VALUES (:user_id, sha256(gen_random_uuid()::text::bytea), now(), now(), "
+            "now() + interval '1 hour', now() + interval '8 hours')"
+        ),
+        {"user_id": user_id},
+    )
+
+
+def record_block(conn: Connection, user_id: UUID) -> None:
+    conn.execute(
+        text(
+            "INSERT INTO audit_event (user_id, event_type, outcome) "
+            "VALUES (:user_id, 'ACCOUNT_BLOCKED', 'success')"
+        ),
+        {"user_id": user_id},
+    )
+
+
+def pending_flags(engine: Engine, user_ids: dict[str, UUID]) -> dict[str, bool]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, awaiting_approval FROM app_user WHERE id = ANY(:ids)"),
+            {"ids": list(user_ids.values())},
+        ).all()
+    flag_by_id = {row.id: row.awaiting_approval for row in rows}
+    return {name: flag_by_id[user_id] for name, user_id in user_ids.items()}
+
+
+def accounts_left_by_the_old_api(engine: Engine) -> dict[str, UUID]:
+    """Contas como a API antiga as grava entre a 0018 e a 0019: ela nunca escreve a marca."""
+    with engine.begin() as conn:
+        signup = new_user(conn, "blocked", awaiting_approval=False)
+        blocked_while_pending = new_user(conn, "blocked", awaiting_approval=True)
+        record_block(conn, blocked_while_pending)
+        approved_while_pending = new_user(conn, "active", awaiting_approval=True)
+        pending = new_user(conn, "blocked", awaiting_approval=True)
+        blocked_for_abuse = new_user(conn, "blocked", awaiting_approval=False)
+        record_block(conn, blocked_for_abuse)
+        blocked_with_session = new_user(conn, "blocked", awaiting_approval=False)
+        new_session(conn, blocked_with_session)
+        active = new_user(conn, "active", awaiting_approval=False)
+    return {
+        "signup": signup,
+        "blocked_while_pending": blocked_while_pending,
+        "approved_while_pending": approved_while_pending,
+        "pending": pending,
+        "blocked_for_abuse": blocked_for_abuse,
+        "blocked_with_session": blocked_with_session,
+        "active": active,
+    }
+
+
+NORMALIZED = {
+    "signup": True,
+    "blocked_while_pending": False,
+    "approved_while_pending": False,
+    "pending": True,
+    "blocked_for_abuse": False,
+    "blocked_with_session": False,
+    "active": False,
+}
+
+
+def test_0019_normaliza_a_marca_deixada_pela_api_antiga(
+    db_settings: Settings, engine: Engine
+) -> None:
+    at_0018(db_settings)
+    accounts = accounts_left_by_the_old_api(engine)
+
+    run_migrations(db_settings, "0019")
+
+    assert pending_flags(engine, accounts) == NORMALIZED
+
+
+def test_conta_criada_na_janela_entra_nos_pendentes(db_settings: Settings, engine: Engine) -> None:
+    at_0018(db_settings)
+    accounts = accounts_left_by_the_old_api(engine)
+
+    run_migrations(db_settings, "0019")
+
+    with Session(engine) as session:
+        listed = {listing.id for listing in list_pending_accounts(session)}
+    assert listed & set(accounts.values()) == {accounts["signup"], accounts["pending"]}
+
+
+def test_rodar_a_0019_de_novo_nao_muda_a_marca(db_settings: Settings, engine: Engine) -> None:
+    at_0018(db_settings)
+    accounts = accounts_left_by_the_old_api(engine)
+    run_migrations(db_settings, "0019")
+
+    downgrade_migrations(db_settings, "0018")
+    run_migrations(db_settings, "0019")
+
+    assert pending_flags(engine, accounts) == NORMALIZED

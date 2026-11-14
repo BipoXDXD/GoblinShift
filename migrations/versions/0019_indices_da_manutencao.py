@@ -1,4 +1,4 @@
-"""Índices das buscas da manutenção e da FK de `object_use` (#442).
+"""Índices das buscas da manutenção e da FK de `object_use` (#442) e marca de pendente refeita.
 
 Revision ID: 0019
 Revises: 0018
@@ -17,6 +17,15 @@ transação do Alembic, basta, como na 0010.
   ao predicado da limpeza de sessões, senão o planejador não a casa com o índice.
 - `resource_reservation(released_at)`, parcial: a limpeza das reservas liberadas; as vivas, com
   `released_at` nulo, nunca entram nela.
+
+A marca `awaiting_approval` (0018) é refeita. Na janela do deploy da 0018, a API antiga ainda
+gravava sem conhecer a coluna: o cadastro fechado criava a conta pendente com o default `false`
+(fora da fila de liberação), e o bloqueio ou a liberação de uma pendente deixavam a marca `true`.
+A 0019 sai num deploy separado, com a API nova já no ar, e repete o backfill da 0018 nos dois
+sentidos. Na API nova, toda conta marcada está bloqueada e sem `ACCOUNT_BLOCKED`, e toda conta
+bloqueada sem sessão nem `ACCOUNT_BLOCKED` está marcada, então os dois `UPDATE` só mexem no que a
+API antiga deixou e rodar a 0019 de novo não muda nada. O downgrade não desfaz a marca: ela já é
+o estado certo para o código atual e para o anterior, que nunca a lê.
 """
 
 from collections.abc import Sequence
@@ -48,6 +57,33 @@ def upgrade() -> None:
         "resource_reservation",
         ["released_at"],
         postgresql_where=sa.text("released_at IS NOT NULL"),
+    )
+    op.execute(
+        """
+        UPDATE app_user AS u
+           SET awaiting_approval = true
+         WHERE u.status = 'blocked'
+           AND NOT u.awaiting_approval
+           AND NOT EXISTS (SELECT 1 FROM web_session AS s WHERE s.user_id = u.id)
+           AND NOT EXISTS (
+                 SELECT 1 FROM audit_event AS e
+                  WHERE e.user_id = u.id AND e.event_type = 'ACCOUNT_BLOCKED'
+               )
+        """
+    )
+    op.execute(
+        """
+        UPDATE app_user AS u
+           SET awaiting_approval = false
+         WHERE u.awaiting_approval
+           AND (
+                 u.status <> 'blocked'
+                 OR EXISTS (
+                      SELECT 1 FROM audit_event AS e
+                       WHERE e.user_id = u.id AND e.event_type = 'ACCOUNT_BLOCKED'
+                    )
+               )
+        """
     )
 
 
