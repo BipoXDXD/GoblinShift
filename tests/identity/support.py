@@ -35,7 +35,9 @@ def new_user(factory: sessionmaker[Session], *, blocked: bool = False) -> UUID:
         user_id = create_admin_user(session, "Conta de teste")
         if blocked:
             session.execute(
-                update(app_user).where(app_user.c.id == user_id).values(status="blocked")
+                update(app_user)
+                .where(app_user.c.id == user_id)
+                .values(status="blocked", awaiting_approval=True)
             )
     return user_id
 

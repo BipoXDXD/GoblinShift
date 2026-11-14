@@ -16,7 +16,6 @@ from sqlalchemy import (
     and_,
     bindparam,
     case,
-    exists,
     func,
     insert,
     or_,
@@ -36,7 +35,7 @@ from goblinshift.identity.keys import (
     secret_matches,
 )
 from goblinshift.identity.principal import InvalidScopesError, Principal, Scope
-from goblinshift.identity.tables import api_key, app_user, web_session
+from goblinshift.identity.tables import api_key, app_user
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +267,7 @@ def block_account(session: Session, owner_id: UUID, now: datetime) -> bool:
     blocked = session.execute(
         update(app_user)
         .where(app_user.c.id == owner_id)
-        .values(status=BLOCKED_STATUS)
+        .values(status=BLOCKED_STATUS, awaiting_approval=False)
         .returning(app_user.c.id)
     ).first()
     if blocked is None:
@@ -287,7 +286,7 @@ def unblock_account(session: Session, owner_id: UUID) -> bool:
     unblocked = session.execute(
         update(app_user)
         .where(app_user.c.id == owner_id, app_user.c.deletion_requested_at.is_(None))
-        .values(status=ACTIVE_STATUS)
+        .values(status=ACTIVE_STATUS, awaiting_approval=False)
         .returning(app_user.c.id)
     ).first()
     return unblocked is not None
@@ -429,10 +428,11 @@ def find_account_by_user_hash(
 def list_pending_accounts(session: Session) -> list[AccountListing]:
     """Contas à espera de liberação no cadastro fechado (ADR 023).
 
-    Pendente e bloqueada por abuso têm o mesmo `status`; a pendente nunca teve sessão.
+    Pendente e bloqueada por abuso têm o mesmo `status`; a marca `awaiting_approval` as separa.
     """
-    ever_had_session = exists().where(web_session.c.user_id == app_user.c.id)
-    query = _listing_query().where(app_user.c.status == BLOCKED_STATUS, ~ever_had_session)
+    query = _listing_query().where(
+        app_user.c.status == BLOCKED_STATUS, app_user.c.awaiting_approval.is_(True)
+    )
     return _listings(session, query)
 
 
