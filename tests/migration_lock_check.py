@@ -94,6 +94,8 @@ TARGET_TABLE = {
     "add_column": (0, "table_name"),
 }
 
+# Operações que trocam a tabela por trás de um nome; anulam a dispensa por tabela nova.
+TABLE_SWAPS = frozenset({"drop_table", "rename_table"})
 # Só para os checks de CONCURRENTLY, que leem o SQL montado de qualquer `execute`.
 EXECUTE_OPERATIONS = frozenset({"execute", "exec_driver_sql"})
 # Combinações de textos que uma concatenação pode gerar. Acima disso o resto não é lido, e o texto
@@ -204,23 +206,27 @@ def unmarked_blocking_lines(source: str) -> list[int]:
 
 
 def concurrent_in_transaction_lines(source: str) -> list[int]:
-    """Linhas do `upgrade()` que pedem CONCURRENTLY dentro de uma transação.
+    """Linhas que pedem CONCURRENTLY fora de um `autocommit_block()` escrito na mesma função.
 
     O PostgreSQL recusa CONCURRENTLY na transação da migration, ou seja, fora de um
     `autocommit_block()`, e também num `execute` com mais de uma instrução, que roda numa
-    transação implícita. Nenhuma marca libera.
+    transação implícita. Vale para o módulo inteiro, salvo o que só o `downgrade()` alcança: a
+    função auxiliar chamada de dentro do bloco também é recusada, porque a limpeza só é conferida
+    dentro do bloco em que a criação está escrita. Nenhuma marca libera.
     """
     tree = ast.parse(source)
-    scope = _upgrade_scope(tree)
-    if not scope:
-        return []
-    upgrade, assignments = scope[0], _assignments(tree, scope)
+    roots = _checked_roots(tree)
+    assignments = _assignments(tree, _upgrade_scope(tree))
     inside_autocommit = {
-        id(call) for block in _autocommit_blocks(upgrade) for call in _calls_in_order(block)
+        id(call)
+        for root in roots
+        for block in _autocommit_blocks(root)
+        for call in _calls_in_order(block)
     }
     return sorted(
         node.lineno
-        for node in ast.walk(upgrade)
+        for root in roots
+        for node in ast.walk(root)
         if isinstance(node, ast.Call)
         and _is_concurrent(node, assignments)
         and (id(node) not in inside_autocommit or _runs_several_statements(node, assignments))
@@ -236,12 +242,9 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
     resolve nunca conta como apagado: na dúvida, a criação é recusada.
     """
     tree = ast.parse(source)
-    scope = _upgrade_scope(tree)
-    if not scope:
-        return []
-    upgrade, assignments = scope[0], _assignments(tree, scope)
+    assignments = _assignments(tree, _upgrade_scope(tree))
     unsafe: list[int] = []
-    for block in _autocommit_blocks(upgrade):
+    for block in (block for root in _checked_roots(tree) for block in _autocommit_blocks(root)):
         dropped: set[IndexName] = set()
         for call in _calls_in_order(block):
             dropped.update(
@@ -510,8 +513,10 @@ def _calls_on_new_tables(roots: list[ast.stmt], trusted: Trusted) -> set[int]:
 
     Só conta o `create_table` de nome literal escrito direto no corpo da função (fora de `if`,
     laço ou `try`), antes da operação: se a função chegou à operação, a tabela nasceu nela, vazia,
-    porque o CREATE TABLE de um nome que já existe falha. As colunas não importam aqui: o próprio
-    `create_table` passa pela allowlist como qualquer chamada.
+    porque o CREATE TABLE de um nome que já existe falha. `drop_table`, `rename_table` ou `execute`
+    fora da allowlist entre os dois podem pôr outra tabela no mesmo nome: depois deles, nada é
+    dispensado. As colunas não importam aqui: o `create_table` passa pela allowlist como qualquer
+    chamada.
     """
     on_new: set[int] = set()
     functions = (
@@ -530,14 +535,24 @@ def _calls_on_new_tables(roots: list[ast.stmt], trusted: Trusted) -> set[int]:
                     name = _table_name(call.args[0], trusted)
                     if name is not None:
                         created.setdefault(name, call.lineno)
+        calls = [node for node in ast.walk(function) if isinstance(node, ast.Call)]
+        swaps = [call.lineno for call in calls if _may_swap_tables(call, trusted)]
         on_new.update(
             id(node)
-            for node in ast.walk(function)
-            if isinstance(node, ast.Call)
-            and (table := _target_table(node, trusted)) in created
+            for node in calls
+            if (table := _target_table(node, trusted)) in created
             and created[table] < node.lineno
+            and not any(created[table] <= swap <= node.lineno for swap in swaps)
         )
     return on_new
+
+
+def _may_swap_tables(call: ast.Call, trusted: Trusted) -> bool:
+    """Chamada que pode apagar ou renomear uma tabela, pondo outra no lugar do nome."""
+    operation = _op_operation(call, trusted)
+    if operation in TABLE_SWAPS:
+        return True
+    return operation in EXECUTE_OPERATIONS and not _execute_is_safe(call, trusted)
 
 
 def _op_operation(call: ast.Call, trusted: Trusted) -> str | None:
@@ -721,10 +736,10 @@ def _render_fstring_part(part: ast.expr, assignments: Assignments, depth: int) -
     return [PLACEHOLDER]
 
 
-def _autocommit_blocks(upgrade: ast.FunctionDef) -> list[ast.With]:
+def _autocommit_blocks(root: ast.AST) -> list[ast.With]:
     return [
         node
-        for node in ast.walk(upgrade)
+        for node in ast.walk(root)
         if isinstance(node, ast.With) and any(_is_autocommit(item) for item in node.items)
     ]
 

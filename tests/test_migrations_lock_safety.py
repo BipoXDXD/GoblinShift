@@ -816,7 +816,7 @@ def test_funcao_auxiliar_do_downgrade_tambem_usada_fora_dele_e_lida(caller: str)
     ],
 )
 def test_sql_que_o_check_nao_entende_pede_a_marca(operation: str) -> None:
-    source = f"def upgrade() -> None:\n    {operation}\n"
+    source = f"def upgrade() -> None:\n    {operation}\n" + IMPORTS
     started = time.monotonic()
 
     assert unmarked_blocking_lines(source) == [2]
@@ -983,3 +983,69 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
 )
 def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:
     assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == []
+
+
+CREATE_IN_HELPER = (
+    'op.create_index("ix", "run", ["a"], postgresql_concurrently=True)',
+    'op.execute("CREATE INDEX CONCURRENTLY ix ON run (a)")',
+)
+
+
+@pytest.mark.parametrize("create", CREATE_IN_HELPER, ids=["create-index", "execute"])
+def test_concurrently_em_funcao_auxiliar_chamada_dentro_do_bloco_e_recusado(create: str) -> None:
+    # A limpeza só é conferida no bloco em que a criação está escrita.
+    source = (
+        "def upgrade() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        "        _indice()\n"
+        "def _indice() -> None:\n"
+        f"    {create}\n"
+    )
+
+    assert concurrent_in_transaction_lines(source + IMPORTS) == [5]
+
+
+@pytest.mark.parametrize("create", CREATE_IN_HELPER, ids=["create-index", "execute"])
+def test_concurrently_em_bloco_de_funcao_auxiliar_exige_a_limpeza(create: str) -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        "    _indice()\n"
+        "def _indice() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        "        {drop}"
+        f"        {create}\n"
+    )
+    drop = 'op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix")\n'
+
+    assert concurrent_in_transaction_lines(source.format(drop="") + IMPORTS) == []
+    assert concurrent_index_without_cleanup_lines(source.format(drop="") + IMPORTS) == [5]
+    assert concurrent_index_without_cleanup_lines(source.format(drop=drop) + IMPORTS) == []
+
+
+@pytest.mark.parametrize(
+    "swap",
+    [
+        'op.drop_table("t")',
+        'op.rename_table("t_antiga", "t")',
+        'op.execute("ALTER TABLE t_antiga RENAME TO t")',
+    ],
+    ids=["drop-table", "rename-table", "execute-fora-da-allowlist"],
+)
+def test_tabela_trocada_depois_de_criada_deixa_de_dispensar_a_marca(swap: str) -> None:
+    source = _upgrade(
+        'op.create_table("t", sa.Column("c", sa.Integer()))',
+        f"{swap}  # lock-ok: troca de propósito",
+        'op.create_index("ix_c", "t", ["c"])',
+    )
+
+    assert unmarked_blocking_lines(source) == [4]
+
+
+def test_troca_antes_da_criacao_nao_anula_a_dispensa() -> None:
+    source = _upgrade(
+        'op.drop_table("t")  # lock-ok: tabela antiga sai antes',
+        'op.create_table("t", sa.Column("c", sa.Integer()))',
+        'op.create_index("ix_c", "t", ["c"])',
+    )
+
+    assert unmarked_blocking_lines(source) == []

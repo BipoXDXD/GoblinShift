@@ -50,7 +50,7 @@ _TYPES_0016 = _TYPES_0008 + ", 'ACCOUNT_LIMITS_CHANGED'"
 
 def upgrade() -> None:
     _replace_event_type_check(_TYPES_0016)
-    # lock-ok: coluna nula sem default; astext_type só escolhe o tipo Python das chaves do JSONB
+    # lock-ok: coluna nula sem default; astext_type só escolhe o tipo SQL do resultado de ->>
     op.add_column(
         "audit_event",
         sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),

@@ -23,7 +23,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # lock-ok: coluna nula sem default; astext_type só escolhe o tipo Python das chaves do JSONB
+    # lock-ok: coluna nula sem default; astext_type só escolhe o tipo SQL do resultado de ->>
     op.add_column(
         "run_input",
         sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
