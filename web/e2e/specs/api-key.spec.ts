@@ -53,14 +53,17 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   expect(credentialsFromPage, "pedidos com Authorization montado pelo bundle").toEqual([]);
 });
 
-test("sem a chave do processo de teste, a API recusa e a Bancada convida a entrar", async ({
+// Monta a API falsa à mão, sem o fixture `fakeApi`; a tag @fake-api o tira do modo remoto.
+test("sem a chave do processo de teste, a API recusa e a Bancada convida a entrar @fake-api", async ({
   browser,
   apiKey,
 }) => {
-  test.skip(E2E.artifactsDir === null, "a API falsa só existe no modo local");
+  if (E2E.artifactsDir === null) {
+    throw new Error("@fake-api coletado sem a API falsa: o modo remoto deveria excluir a tag");
+  }
   // Contexto sem o fixture `api`: só a API falsa, que exige a chave, e nenhuma injeção.
   const context = await browser.newContext();
-  await installFakeApi(context, apiKey, E2E.artifactsDir ?? "");
+  await installFakeApi(context, apiKey, E2E.artifactsDir);
   const page = await context.newPage();
   const catalogStatuses: number[] = [];
   page.on("response", (response) => {

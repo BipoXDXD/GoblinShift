@@ -7,7 +7,10 @@ import { fulfillProblem } from "../support/fakeAccount";
 import { holdRequest } from "../support/held";
 import { expect, test } from "../support/test";
 
-test("em andamento: confirma, anuncia o pedido e termina cancelada", async ({ page, fakeApi }) => {
+test("em andamento: confirma, anuncia o pedido e termina cancelada @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   const execucao = new ExecucaoPage(page);
   await execucao.open(
     fakeApi.seedRun({
@@ -27,7 +30,7 @@ test("em andamento: confirma, anuncia o pedido e termina cancelada", async ({ pa
   await expect(page.getByRole("button", { name: "Cancelar execução" })).toBeHidden();
 });
 
-test("na fila: cancela na hora", async ({ page, fakeApi }) => {
+test("na fila: cancela na hora @fake-api", async ({ page, fakeApi }) => {
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "queued" }));
 
@@ -41,7 +44,7 @@ test("na fila: cancela na hora", async ({ page, fakeApi }) => {
   await execucao.waitForStatus("Cancelada");
 });
 
-test("concluída: sem botão de cancelar", async ({ page, fakeApi }) => {
+test("concluída: sem botão de cancelar @fake-api", async ({ page, fakeApi }) => {
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "succeeded" }));
 
@@ -49,7 +52,7 @@ test("concluída: sem botão de cancelar", async ({ page, fakeApi }) => {
   await expect(page.getByRole("button", { name: "Cancelar execução" })).toHaveCount(0);
 });
 
-test("Esc com o pedido em voo não fecha; a falha aparece e o diálogo reabre", async ({
+test("Esc com o pedido em voo não fecha; a falha aparece e o diálogo reabre @fake-api", async ({
   page,
   fakeApi,
 }) => {

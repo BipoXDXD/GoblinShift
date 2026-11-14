@@ -1,18 +1,15 @@
 // Jornadas só de leitura contra a VPS (E2E_VPS=1, workflow e2e-vps.yml), no Chromium e no Firefox.
-// Também rodam no modo local, contra a API falsa, para não apodrecerem entre um deploy e outro.
+// Também rodam no modo local, contra a API falsa, para não apodrecerem entre um deploy e outro;
+// só o caso @api-real fica para a pilha real (job sob gVisor) e para o job contra a VPS.
 //
 // Sem conta, o que qualquer visitante vê. Com a chave (secret opcional E2E_VPS_API_KEY), as telas
-// que leem dados da conta; sem ela, essas jornadas são puladas com o motivo no relatório. Nenhuma
+// que leem dados da conta (@conta); sem ela, o config não coleta essas jornadas. Nenhuma
 // jornada muda estado: o fixture `readOnly` reprova qualquer pedido à API que não seja GET.
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
 import { watchCsp } from "../support/cspWatch";
-import { E2E } from "../support/env";
 import { expect, test as base } from "../support/test";
-
-const NO_ACCOUNT_REASON =
-  "E2E_VPS_API_KEY vazio: as jornadas que exigem conta foram puladas (só as anônimas rodaram).";
 
 const test = base.extend<{ readOnly: undefined }>({
   readOnly: [
@@ -81,8 +78,8 @@ test.describe("sem conta", () => {
     await openClean(page, "/rota-que-nao-existe-na-vps", "Página não encontrada");
   });
 
-  test("a documentação da API e o contrato respondem", async ({ request }) => {
-    test.skip(!E2E.remote, "/docs e /openapi.json vêm da API real; o servidor local só tem a SPA.");
+  // @api-real: /docs e /openapi.json vêm da API real; o servidor local só tem a SPA.
+  test("a documentação da API e o contrato respondem @api-real", async ({ request }) => {
     const docs = await request.get("/docs");
     expect(docs.status()).toBe(200);
     expect(await docs.text()).toContain("swagger-ui");
@@ -92,9 +89,7 @@ test.describe("sem conta", () => {
   });
 });
 
-test.describe("com conta (chave de API)", () => {
-  test.skip(!E2E.hasAccount, NO_ACCOUNT_REASON);
-
+test.describe("com conta (chave de API) @conta", () => {
   test("Bancada carrega o catálogo e mostra o formulário", async ({ page }) => {
     await openClean(page, "/bancada/csv-janitor", "Bancada: CSV Janitor");
     await expect(page.getByLabel("Escolher arquivos")).toBeVisible();

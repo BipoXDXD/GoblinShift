@@ -81,11 +81,14 @@ uv run python -m scripts.contract_spec "$WORK/openapi.json" "$WORK/openapi.contr
 
 status=0
 # Recusas que o domínio impõe e o JSON Schema não expressa: scripts/contract_rules.py.
+# Fases explícitas, sem `examples`: nenhuma operação da spec declara example(s), e a fase só
+# terminaria com tudo pulado (tests/test_ci_testes_pulados.py confere as duas coisas).
 SCHEMATHESIS_HOOKS=scripts.contract_hooks uv run --group contract \
   schemathesis run "$WORK/openapi.contract.json" \
   --url "$BASE_URL" \
   --header "Authorization: Bearer $key" \
   --checks all \
+  --phases=coverage,fuzzing,stateful \
   --max-examples "$MAX_EXAMPLES" \
   --seed "$SEED" \
   --request-timeout 10 ||

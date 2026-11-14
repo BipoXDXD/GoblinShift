@@ -8,7 +8,7 @@ test.use({ auth: "none" });
 
 const CSRF_COOKIE = "__Host-gs_csrf";
 
-test("toda mutação pela sessão leva o X-CSRF-Token igual ao cookie", async ({
+test("toda mutação pela sessão leva o X-CSRF-Token igual ao cookie @fake-api", async ({
   page,
   context,
   fakeApi,
@@ -47,7 +47,7 @@ test("toda mutação pela sessão leva o X-CSRF-Token igual ao cookie", async ({
   expect(fakeApi.account.csrfFailures).toEqual([]);
 });
 
-test("sem o cookie de CSRF, a API recusa, a tela pede para recarregar e a sessão continua", async ({
+test("sem o cookie de CSRF, a API recusa, a tela pede para recarregar e a sessão continua @fake-api", async ({
   page,
   context,
   fakeApi,
