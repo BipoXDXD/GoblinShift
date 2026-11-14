@@ -196,8 +196,10 @@ class AccountJobs:
     Passos independentes, como no ciclo de execuções: a exceção de um fica no log e em
     `account_steps_failed`, e os outros seguem, inclusive o alerta da exclusão atrasada; as
     contagens do passo que falhou ficam fora do evento. Na purga, a falha de uma conta conta em
-    `accounts_purge_failed` e não impede as seguintes. Perda de conexão derruba o ciclo inteiro,
-    como antes: com o banco fora, cada passo seguinte só esperaria o `connect_timeout` de novo.
+    `accounts_purge_failed` e não impede as seguintes: cada ciclo marca a tentativa nas contas
+    que pega, e a fila segue pela tentativa mais antiga (#442). Perda de conexão derruba o ciclo
+    inteiro, como antes: com o banco fora, cada passo seguinte só esperaria o `connect_timeout` de
+    novo.
     """
 
     def __init__(
@@ -277,7 +279,7 @@ class AccountJobs:
     def purge_accounts(self) -> dict[str, int]:
         """Avança a purga das contas em exclusão: quantas terminaram e quantas falharam no ciclo."""
         owners = self._in_transaction(
-            lambda s: identity_purge.accounts_pending_purge(s, self._config.accounts_per_cycle)
+            lambda s: identity_purge.claim_accounts_for_purge(s, self._config.accounts_per_cycle)
         )
         purged = 0
         failed = 0
@@ -287,7 +289,7 @@ class AccountJobs:
             except Exception as error:
                 if is_connection_error(error):
                     raise
-                # Uma conta com defeito volta no próximo ciclo; as seguintes não esperam por ela.
+                # Uma conta com defeito vai para o fim da fila; as seguintes não esperam por ela.
                 _log_purge_failure(owner_id, error)
                 failed += 1
         return {"accounts_purged": purged, ACCOUNTS_PURGE_FAILED: failed}

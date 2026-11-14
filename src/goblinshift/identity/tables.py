@@ -43,6 +43,8 @@ app_user = Table(
     Column("terms_accepted_at", DateTime(timezone=True)),
     # `DELETE /me`: a conta deixa de autenticar na hora e a manutenção a purga em até 24 h.
     Column("deletion_requested_at", DateTime(timezone=True)),
+    # Última vez que a manutenção escolheu a conta para a purga: rodízio entre as pendentes (#442).
+    Column("purge_attempted_at", DateTime(timezone=True)),
     UniqueConstraint("issuer", "subject"),
     CheckConstraint("status IN ('active', 'blocked')", name="status"),
     CheckConstraint("length(display_name) BETWEEN 1 AND 200", name="display_name"),

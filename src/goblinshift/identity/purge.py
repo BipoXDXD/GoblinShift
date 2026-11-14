@@ -10,7 +10,7 @@ mais de 7 dias e eventos de auditoria com mais de 90 dias, sempre em lotes.
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Table, delete, func, select
+from sqlalchemy import ColumnElement, Table, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
@@ -46,16 +46,35 @@ def purge_owner(session: Session, owner_id: UUID) -> None:
     session.execute(delete(app_user).where(app_user.c.id == owner_id))
 
 
-def accounts_pending_purge(session: Session, limit: int) -> list[UUID]:
-    """Contas com exclusão pedida, as mais antigas primeiro."""
-    return list(
-        session.execute(
-            select(app_user.c.id)
-            .where(app_user.c.deletion_requested_at.is_not(None))
-            .order_by(app_user.c.deletion_requested_at, app_user.c.id)
-            .limit(limit)
-        ).scalars()
+def claim_accounts_for_purge(session: Session, limit: int) -> list[UUID]:
+    """Escolhe até `limit` contas com exclusão pedida e marca a tentativa em cada uma.
+
+    Primeiro as nunca tentadas, das mais antigas para as mais novas; depois as tentadas há mais
+    tempo. A marca é gravada antes da purga e numa transação própria: a conta que falha sempre,
+    ou que espera uma Run não terminal, vai para o fim da fila mesmo quando a purga lança (#442).
+    `SKIP LOCKED` só evita que duas manutenções escolham a mesma conta no mesmo instante: a
+    escolha commita antes da purga, e outra réplica pode pegar a conta em seguida. Purgar o mesmo
+    dono duas vezes é seguro, porque os lotes são `DELETE` e `purge_owner` aceita a conta que já
+    sumiu.
+    """
+    chosen = skip_locked_batch(
+        select(app_user.c.id)
+        .where(app_user.c.deletion_requested_at.is_not(None))
+        .order_by(
+            app_user.c.purge_attempted_at.asc().nulls_first(),
+            app_user.c.deletion_requested_at,
+            app_user.c.id,
+        ),
+        limit,
     )
+    claimed = session.execute(
+        update(app_user)
+        .where(app_user.c.id.in_(select(chosen.c.id)))
+        .values(purge_attempted_at=func.now())
+        .returning(app_user.c.id, app_user.c.deletion_requested_at)
+    ).all()
+    # `RETURNING` não garante ordem: dentro do lote, as mais antigas primeiro.
+    return [row.id for row in sorted(claimed, key=lambda row: (row.deletion_requested_at, row.id))]
 
 
 def count_overdue_deletions(session: Session, now: datetime) -> int:
