@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterator, Mapping
 
 import alembic.op
 
-from tests.migration_source import is_marked
+from tests.migration_source import comments, is_marked
 from tests.migration_sql import PLACEHOLDER, IndexName, analyze_sql, default_sql_is_safe
 
 REVISION_FILE = re.compile(r"^(\d{4})_\w+\.py$")
@@ -150,7 +150,7 @@ def unmarked_blocking_lines(source: str) -> list[int]:
     apelido, a lambda, o método de classe e o `upgrade = outra_funcao`.
     """
     tree = ast.parse(source)
-    lines = source.splitlines()
+    found = comments(source)
     roots = _checked_roots(tree)
     assignments = _module_assignments(roots)
     on_new_table = _calls_on_new_tables(roots)
@@ -163,7 +163,7 @@ def unmarked_blocking_lines(source: str) -> list[int]:
         and _reaches_database(node, modules, imported, assignments)
         and id(node) not in on_new_table
         and not _is_safe(node, assignments)
-        and not is_marked(lines, node.lineno, LOCK_OK_MARK)
+        and not is_marked(found, node.lineno, LOCK_OK_MARK)
     )
 
 

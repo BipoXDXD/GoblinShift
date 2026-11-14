@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.migration_source import is_marked, string_constants, upgrade_function
+from tests.migration_source import comments, is_marked, string_constants, upgrade_function
 
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 CONTRACT_MARK = re.compile(r"#\s*contract:\s*\S")
@@ -31,7 +31,7 @@ DESTRUCTIVE_SQL = re.compile(
 
 def unmarked_destructive_lines(source: str) -> list[int]:
     """Linhas do `upgrade()` com DROP/RENAME de coluna ou tabela sem a marca de contract."""
-    lines = source.splitlines()
+    found = comments(source)
     upgrade = upgrade_function(source)
     if upgrade is None:
         return []
@@ -40,7 +40,7 @@ def unmarked_destructive_lines(source: str) -> list[int]:
         for node in ast.walk(upgrade)
         if isinstance(node, ast.Call)
         and _is_destructive(node)
-        and not is_marked(lines, node.lineno, CONTRACT_MARK)
+        and not is_marked(found, node.lineno, CONTRACT_MARK)
     )
 
 
@@ -127,3 +127,10 @@ def test_marca_de_outra_operacao_na_linha_acima_nao_cobre() -> None:
     )
 
     assert unmarked_destructive_lines(source) == [3]
+
+
+def test_marca_dentro_de_um_texto_nao_vale() -> None:
+    # Só comentário de verdade marca: o mesmo texto dentro do SQL não se autoriza.
+    source = 'def upgrade() -> None:\n    op.execute("DROP TABLE run -- # contract: x")\n'
+
+    assert unmarked_destructive_lines(source) == [2]

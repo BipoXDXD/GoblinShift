@@ -1,7 +1,16 @@
 """Leitura estática do `upgrade()` das migrations, para os checks de contract e de travas."""
 
 import ast
+import io
 import re
+import tokenize
+from typing import NamedTuple
+
+
+class Comment(NamedTuple):
+    text: str
+    alone: bool
+    """O comentário é tudo o que há na linha."""
 
 
 def upgrade_function(source: str) -> ast.FunctionDef | None:
@@ -16,15 +25,24 @@ def upgrade_function(source: str) -> ast.FunctionDef | None:
     )
 
 
-def is_marked(lines: list[str], line: int, mark: re.Pattern[str]) -> bool:
-    """A marca está na linha `line` (1-based) ou numa linha só de comentário logo acima.
+def comments(source: str) -> dict[int, Comment]:
+    """Os comentários do código por linha (1-based); texto dentro de string não conta."""
+    return {
+        token.start[0]: Comment(token.string, not token.line[: token.start[1]].strip())
+        for token in tokenize.generate_tokens(io.StringIO(source).readline)
+        if token.type == tokenize.COMMENT
+    }
+
+
+def is_marked(found: dict[int, Comment], line: int, mark: re.Pattern[str]) -> bool:
+    """A marca está num comentário da linha `line` ou numa linha só de comentário logo acima.
 
     Na linha acima vale só uma linha que é apenas o comentário: a marca de outra operação não
-    cobre esta.
+    cobre esta. Só comentário marca: o mesmo texto dentro do SQL não autoriza a si mesmo.
     """
-    previous = lines[line - 2].strip() if line >= 2 else ""
+    here, above = found.get(line), found.get(line - 1)
     return bool(
-        mark.search(lines[line - 1]) or (previous.startswith("#") and mark.search(previous))
+        (here and mark.search(here.text)) or (above and above.alone and mark.search(above.text))
     )
 
 

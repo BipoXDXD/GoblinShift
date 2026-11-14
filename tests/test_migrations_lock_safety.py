@@ -256,6 +256,29 @@ def test_marca_e_downgrade_passam(source: str) -> None:
     assert unmarked_blocking_lines(source) == []
 
 
+@pytest.mark.parametrize(
+    ("source", "lines"),
+    [
+        (
+            'def upgrade() -> None:\n    op.execute("CREATE INDEX i ON run (a) -- # lock-ok: x")\n',
+            [2],
+        ),
+        (
+            "def upgrade() -> None:\n"
+            '    op.execute("""SELECT 1\n'
+            '# lock-ok: forjado""")\n'
+            '    op.create_index("j", "run", ["a"])\n',
+            [2, 4],
+        ),
+    ],
+    ids=["na-linha", "linha-acima"],
+)
+def test_marca_dentro_de_um_texto_nao_vale(source: str, lines: list[int]) -> None:
+    # Só comentário de verdade marca: o mesmo texto dentro do SQL não se autoriza. Na linha 2,
+    # o `#` dentro do SELECT não é SQL que o parser aceite.
+    assert unmarked_blocking_lines(source) == lines
+
+
 def test_marca_sem_motivo_nao_vale() -> None:
     source = 'def upgrade() -> None:\n    op.create_index("ix", "run", ["a"])  # lock-ok:\n'
 
