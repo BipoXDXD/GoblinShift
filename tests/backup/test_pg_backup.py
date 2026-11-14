@@ -241,6 +241,34 @@ def test_credencial_recusada_pinga_falha_e_nao_grava_nada(
     assert healthchecks.pings == ["/start", "/fail"]
 
 
+@pytest.mark.parametrize(
+    ("database", "reason"),
+    [
+        ("empty_migrated_db", "o banco não tem contas"),
+        ("schemaless_db", "o banco não tem alembic_version"),
+    ],
+    ids=["migrado-sem-contas", "sem-esquema"],
+)
+def test_banco_que_falha_a_conferencia_nao_envia_e_pinga_falha(
+    s3: S3,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    request: pytest.FixtureRequest,
+    database: str,
+    reason: str,
+) -> None:
+    # O pg_dump de um banco recriado vazio sai 0: sem a conferência, viraria o "backup bom" do dia.
+    source: SourceDatabase = request.getfixturevalue(database)
+
+    result = run_script(BACKUP_SCRIPT, backup_env(s3, source, age_keys, healthchecks, prefix))
+
+    assert result.returncode != 0
+    assert reason in result.stderr
+    assert s3.keys(prefix) == []
+    assert healthchecks.pings == ["/start", "/fail"]
+
+
 def test_dump_que_falha_nao_envia_nada(
     s3: S3,
     source_db: SourceDatabase,

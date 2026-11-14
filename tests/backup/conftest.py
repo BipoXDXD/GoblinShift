@@ -299,6 +299,20 @@ def source_db(postgres: PostgresContainer, db_settings: Settings) -> SourceDatab
 
 
 @pytest.fixture
+def empty_migrated_db(postgres: PostgresContainer, db_settings: Settings) -> SourceDatabase:
+    """Banco no head do Alembic sem nenhuma conta: o volume recriado vazio que o `migrate` refez."""
+    database = _new_database(postgres, "backup_vazio")
+    run_migrations(db_settings.model_copy(update={"db_name": database.name}), "head")
+    return SourceDatabase(database, canary="")
+
+
+@pytest.fixture
+def schemaless_db(postgres: PostgresContainer) -> SourceDatabase:
+    """Banco recém-criado, sem esquema nem `alembic_version`."""
+    return SourceDatabase(_new_database(postgres, "backup_sem_esquema"), canary="")
+
+
+@pytest.fixture
 def restore_db(postgres: PostgresContainer) -> Database:
     return _new_database(postgres, "restore_dst")
 

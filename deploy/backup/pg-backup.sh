@@ -47,6 +47,24 @@ if ! grep -qvE '^[[:space:]]*(#|$)' "$recipients" 2>/dev/null; then
   exit 1
 fi
 
+# O pg_dump de um volume recriado vazio, com o esquema refeito pelo migrate, sai 0. Sem esta
+# conferência ele seria o backup bom do dia, e a restauração mensal só perceberia semanas depois.
+# Nada sobe, e o EXIT pinga /fail no alerta que já existe.
+pg_value() {
+  docker exec "$BACKUP_PG_CONTAINER" psql --no-psqlrc --tuples-only --no-align \
+    --set ON_ERROR_STOP=1 --no-password --username="$pg_user" --dbname="$pg_db" --command="$1"
+}
+if [[ "$(pg_value "SELECT to_regclass('public.alembic_version') IS NOT NULL")" != "t" ]]; then
+  echo "o banco não tem alembic_version: dump não enviado" >&2
+  exit 1
+fi
+accounts="$(pg_value "SELECT count(*) FROM app_user")"
+require_count accounts "$accounts"
+if ((accounts == 0)); then
+  echo "o banco não tem contas: dump não enviado" >&2
+  exit 1
+fi
+
 key="${prefix}$(dump_name)"
 encrypted="$workdir/dump.age"
 # Formato custom: comprimido e restaurável seletivamente pelo pg_restore. Com pipefail, um
