@@ -43,8 +43,10 @@ NGINX_IP = "172.31.0.4"
 # em compose.yaml depois do `cap_drop` (tests/test_container_hardening.py).
 NGINX_CAPABILITY_MASK = (1 << 0) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 10)
 # Sinal 0 do root a cada worker (usuário `nginx`, outro UID): só passa com KILL no container.
+# O próprio `sh -c` tem "worker process" no cmdline e fica de fora, senão sem worker passaria.
 SIGNAL_WORKERS_SCRIPT = (
     "found=0; for d in /proc/[0-9]*; do"
+    ' [ "${d#/proc/}" = "$$" ] && continue;'
     ' grep -q "worker process" "$d/cmdline" 2>/dev/null || continue;'
     ' kill -0 "${d#/proc/}" || exit 1; found=1;'
     ' done; [ "$found" = 1 ]'
