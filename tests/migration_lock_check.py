@@ -3,9 +3,14 @@
 DDL que reescreve ou varre a tabela sob ACCESS EXCLUSIVE ou SHARE (índice sem CONCURRENTLY,
 constraint validada na hora, SET NOT NULL, troca de tipo, coluna com default volátil, única,
 indexada, com FK ou CHECK) para as escritas, e às vezes as leituras, enquanto roda. A forma
-segura existe para cada caso. Quem precisa da forma bloqueante marca `# lock-ok: <motivo>` na
-linha da operação ou na linha só de comentário logo acima. Operação sobre uma tabela criada no
-mesmo `upgrade()` não trava ninguém e dispensa a marca.
+segura existe para cada caso.
+
+O check nega por padrão: só passa sem a marca a operação do Alembic que está em `SAFE_OPERATIONS`
+na forma segura, e o SQL cujas instruções estão na allowlist de `tests/migration_sql.py`.
+Operação nova ou desconhecida (`rename_table`, `batch_alter_table`, opção nova de `alter_column`)
+pede a marca, mesmo que não trave nada. Quem precisa dela marca `# lock-ok: <motivo>` na linha
+da operação ou na linha só de comentário logo acima. Operação sobre uma tabela criada no mesmo
+`upgrade()` não trava ninguém e dispensa a marca.
 
 O check lê o `upgrade()` e as funções do módulo que ele chama, resolve texto e colunas guardados
 em variável e monta f-strings e concatenações com um marcador no lugar do valor. O SQL montado
@@ -15,7 +20,9 @@ vindo de fora do módulo ou montado em laço escapa, e a revisão do PR vale.
 
 import ast
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+
+import alembic.op
 
 from tests.migration_source import is_marked
 from tests.migration_sql import PLACEHOLDER, VOLATILE_FUNCTION, IndexName, analyze_sql
@@ -36,12 +43,6 @@ EXECUTE_OPERATIONS = frozenset({"execute", "exec_driver_sql"})
 SQL_KEYWORDS = frozenset({"sqltext", "statement"})
 FORMAT_FIELD = re.compile(r"\{[^{}]*\}")
 PERCENT_FIELD = re.compile(r"%(\([^)]*\))?[sdr]")
-# Constraints que constroem índice sob lock: a forma segura é criar o índice com CONCURRENTLY
-# antes e anexá-lo com `USING INDEX`, o que o Alembic não expressa nestas chamadas.
-INDEX_BUILDING_CONSTRAINTS = frozenset(
-    {"create_unique_constraint", "create_primary_key", "create_exclude_constraint"}
-)
-VALIDATING_CONSTRAINTS = frozenset({"create_foreign_key", "create_check_constraint"})
 # Posição e keyword da tabela-alvo de cada operação do Alembic.
 TARGET_TABLE = {
     "create_index": (1, "table_name"),
@@ -58,8 +59,55 @@ INDEXED_COLUMN_FLAGS = ("unique", "index", "primary_key")
 # Partes de `sa.Column` que varrem a tabela ao entrar: FK e CHECK são validadas na hora.
 VALIDATED_COLUMN_PARTS = frozenset({"ForeignKey", "CheckConstraint"})
 VOLATILE_DEFAULT = re.compile(rf"\b({VOLATILE_FUNCTION.pattern})\b", re.IGNORECASE)
+# Opções de `alter_column` que só mexem no catálogo; `existing_*` só informam o estado atual.
+SAFE_ALTER_COLUMN_OPTIONS = frozenset(
+    {
+        "nullable",
+        "server_default",
+        "comment",
+        "schema",
+        "existing_type",
+        "existing_nullable",
+        "existing_server_default",
+        "existing_comment",
+    }
+)
+ALTER_COLUMN_POSITIONAL = 2
+# Nomes do `alembic.op`: chamados soltos (`create_index(...)`, de `import *` ou de um apelido)
+# também são operações.
+ALEMBIC_OPERATIONS = frozenset(name for name in dir(alembic.op) if not name.startswith("_"))
 
 type Assignments = dict[str, list[ast.expr]]
+type Condition = Callable[[ast.Call, Assignments], bool]
+
+
+def _always(_call: ast.Call, _assignments: Assignments) -> bool:
+    return True
+
+
+# A allowlist: operação do Alembic → condição em que ela não trava tabela em uso. UNIQUE, PK e
+# EXCLUDE ficam de fora: constroem índice sob lock, e o Alembic não expressa o `USING INDEX` de
+# um índice criado antes com CONCURRENTLY (esse caminho vai por `op.execute`).
+SAFE_OPERATIONS: dict[str, Condition] = {
+    "create_table": _always,
+    "create_index": lambda call, _: _keyword_is_true(call, "postgresql_concurrently"),
+    "drop_index": lambda call, _: _keyword_is_true(call, "postgresql_concurrently"),
+    "add_column": lambda call, assignments: not _adds_rewriting_column(call, assignments),
+    "drop_column": _always,
+    "alter_column": lambda call, _: _alter_column_is_safe(call),
+    "create_foreign_key": lambda call, _: _keyword_is_true(call, "postgresql_not_valid"),
+    "create_check_constraint": lambda call, _: _keyword_is_true(call, "postgresql_not_valid"),
+    "drop_constraint": _always,
+    # DML: trava linhas, não a tabela.
+    "bulk_insert": _always,
+    "execute": lambda call, assignments: _sql_is_safe(call, assignments),
+    "exec_driver_sql": lambda call, assignments: _sql_is_safe(call, assignments),
+    # Não falam com o banco.
+    "f": _always,
+    "get_bind": _always,
+    "get_context": _always,
+    "inline_literal": _always,
+}
 
 
 def checked_revisions(names: list[str]) -> list[str]:
@@ -78,13 +126,15 @@ def unmarked_blocking_lines(source: str) -> list[int]:
     scope = _upgrade_scope(tree)
     assignments = _assignments(tree, scope)
     created = _tables_created(scope)
+    modules, imported = _op_module_names(tree), _imported_operations(tree)
     return sorted(
         node.lineno
         for function in scope
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
+        and _reaches_database(node, modules, imported)
         and _target_table(node) not in created
-        and _is_blocking(node, assignments)
+        and not _is_safe(node, assignments)
         and not is_marked(lines, node.lineno, LOCK_OK_MARK)
     )
 
@@ -224,21 +274,62 @@ def _table_name(node: ast.expr) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
-def _is_blocking(call: ast.Call, assignments: Assignments) -> bool:
-    name = _operation(call)
-    if name == "create_index":
-        return not _keyword_is_true(call, "postgresql_concurrently")
-    if name in INDEX_BUILDING_CONSTRAINTS:
-        return True
-    if name in VALIDATING_CONSTRAINTS:
-        return not _keyword_is_true(call, "postgresql_not_valid")
-    if name == "alter_column":
-        return _keyword_is_false(call, "nullable") or _has_keyword(call, "type_")
-    if name == "add_column":
-        return _adds_rewriting_column(call, assignments)
-    if name in EXECUTE_OPERATIONS:
-        return any(_is_blocking_sql(text) for text in _sql_texts(call, assignments))
+def _op_module_names(tree: ast.Module) -> frozenset[str]:
+    """`op` e os apelidos do módulo: `from alembic import op as ops`, `import alembic.op as o`."""
+    aliases = {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom | ast.Import)
+        for alias in node.names
+        if alias.asname
+        and (
+            (isinstance(node, ast.ImportFrom) and node.module == "alembic" and alias.name == "op")
+            or (isinstance(node, ast.Import) and alias.name == "alembic.op")
+        )
+    }
+    return frozenset({"op", *aliases})
+
+
+def _imported_operations(tree: ast.Module) -> frozenset[str]:
+    """Operações importadas com outro nome: `from alembic.op import create_index as ci`."""
+    return frozenset(
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "alembic.op"
+        for alias in node.names
+    )
+
+
+def _reaches_database(call: ast.Call, modules: frozenset[str], imported: frozenset[str]) -> bool:
+    """Operação do Alembic (`op.x(...)` ou chamada solta) ou SQL por uma conexão."""
+    match call.func:
+        case ast.Attribute(value=ast.Name(id=module)) if module in modules:
+            return True
+        case ast.Attribute(attr=attribute):
+            return attribute in EXECUTE_OPERATIONS
+        case ast.Name(id=name):
+            return name in imported or name in ALEMBIC_OPERATIONS
     return False
+
+
+def _is_safe(call: ast.Call, assignments: Assignments) -> bool:
+    condition = SAFE_OPERATIONS.get(_operation(call) or "")
+    return condition is not None and condition(call, assignments)
+
+
+def _alter_column_is_safe(call: ast.Call) -> bool:
+    """Só opções de catálogo; `nullable` só pode ser um True literal (False varre a tabela)."""
+    options = {keyword.arg for keyword in call.keywords}
+    return (
+        len(call.args) <= ALTER_COLUMN_POSITIONAL
+        and None not in options
+        and options <= SAFE_ALTER_COLUMN_OPTIONS
+        and ("nullable" not in options or _keyword_is_true(call, "nullable"))
+    )
+
+
+def _sql_is_safe(call: ast.Call, assignments: Assignments) -> bool:
+    return not any(_is_blocking_sql(text) for text in _sql_texts(call, assignments))
 
 
 def _adds_rewriting_column(call: ast.Call, assignments: Assignments) -> bool:
@@ -449,16 +540,8 @@ def _operation(call: ast.Call) -> str | None:
     return call.func.id if isinstance(call.func, ast.Name) else None
 
 
-def _has_keyword(call: ast.Call, name: str) -> bool:
-    return any(keyword.arg == name for keyword in call.keywords)
-
-
 def _keyword_is_true(call: ast.Call, name: str) -> bool:
     return _keyword_constant(call, name) is True
-
-
-def _keyword_is_false(call: ast.Call, name: str) -> bool:
-    return _keyword_constant(call, name) is False
 
 
 def _keyword_constant(call: ast.Call, name: str) -> object:

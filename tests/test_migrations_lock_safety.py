@@ -8,14 +8,18 @@ import time
 from pathlib import Path
 
 import pytest
+from pglast import parse_sql
+from pglast.ast import AlterTableStmt
 
 from tests.migration_lock_check import (
     REVISION_FILE,
+    SAFE_OPERATIONS,
     checked_revisions,
     concurrent_in_transaction_lines,
     concurrent_index_without_cleanup_lines,
     unmarked_blocking_lines,
 )
+from tests.migration_sql import SAFE_ALTER_TABLE_COMMANDS, SAFE_STATEMENTS
 
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 # Folga larga para a máquina do CI: o caso linear leva milissegundos.
@@ -427,23 +431,208 @@ def test_refresh_concorrente_que_o_parser_recusa_roda_em_transacao() -> None:
         # No PostgreSQL 18 a coluna gerada sem STORED é VIRTUAL: não grava nada.
         'op.execute("ALTER TABLE run ADD COLUMN t int GENERATED ALWAYS AS (a)")',
         'op.execute("VACUUM (FULL false) run")',
-        'op.execute("DO $$BEGIN CREATE INDEX ix ON run (a); END$$")',
         "op.execute(\"SELECT 'ALTER TABLE run ALTER c SET NOT NULL' /* CLUSTER run */\")",
-        'op.execute("ALTER DOMAIN d ADD CONSTRAINT k CHECK (VALUE > 0) NOT VALID")',
         "op.execute(\"ALTER TABLE run ADD COLUMN c text DEFAULT '{}'\".format(rotulo))",
     ],
     ids=[
         "not-null-not-valid",
         "gerada-sem-stored",
         "vacuum-full-false",
-        "corpo-do-do",
         "texto",
-        "dominio-not-valid",
         "default-texto-montado",
     ],
 )
 def test_forma_segura_lida_pelo_parser_passa(operation: str) -> None:
     source = f"def upgrade() -> None:\n    {operation}\n"
+
+    assert unmarked_blocking_lines(source) == []
+
+
+# Um caso por entrada da allowlist (negar por padrão): o tipo de nó, a forma segura.
+SAFE_SQL_BY_NODE = [
+    ("SelectStmt", "SELECT count(*) FROM run"),
+    ("InsertStmt", "INSERT INTO run_status (name) VALUES ('paused')"),
+    ("UpdateStmt", "UPDATE run SET size = 0 WHERE size IS NULL"),
+    ("DeleteStmt", "DELETE FROM run_status WHERE name = 'old'"),
+    ("CommentStmt", "COMMENT ON COLUMN run.size IS 'bytes'"),
+    ("CreateStmt", "CREATE TABLE run_tag (run_id bigint REFERENCES run (id), tag text)"),
+    ("CreateSchemaStmt", "CREATE SCHEMA audit CREATE TABLE entry (id bigint)"),
+    ("IndexStmt", "CREATE INDEX CONCURRENTLY ix ON run (a)"),
+    ("DropStmt", "DROP INDEX CONCURRENTLY IF EXISTS ix"),
+    ("ReindexStmt", "REINDEX INDEX CONCURRENTLY ix"),
+    ("RefreshMatViewStmt", "REFRESH MATERIALIZED VIEW CONCURRENTLY run_summary"),
+    ("VacuumStmt", "ANALYZE run"),
+    ("AlterEnumStmt", "ALTER TYPE run_status ADD VALUE IF NOT EXISTS 'paused'"),
+    ("AlterTableStmt", "ALTER TABLE run ADD COLUMN note text"),
+]
+SAFE_ALTER_TABLE_BY_COMMAND = [
+    ("AT_AddColumn", "ALTER TABLE run ADD COLUMN on_hold boolean DEFAULT false"),
+    ("AT_DropColumn", "ALTER TABLE run DROP COLUMN IF EXISTS legacy"),
+    ("AT_ColumnDefault", "ALTER TABLE run ALTER COLUMN status SET DEFAULT 'new'"),
+    ("AT_DropNotNull", "ALTER TABLE run ALTER COLUMN status DROP NOT NULL"),
+    ("AT_AddConstraint", "ALTER TABLE run ADD CONSTRAINT ck CHECK (size > 0) NOT VALID"),
+    ("AT_ValidateConstraint", "ALTER TABLE run VALIDATE CONSTRAINT ck"),
+    ("AT_DropConstraint", "ALTER TABLE run DROP CONSTRAINT IF EXISTS ck"),
+    ("AT_DetachPartition", "ALTER TABLE run DETACH PARTITION run_2027 CONCURRENTLY"),
+    ("AT_DetachPartitionFinalize", "ALTER TABLE run DETACH PARTITION run_2027 FINALIZE"),
+]
+SAFE_OPERATION_CASES = [
+    ("create_table", 'op.create_table("run_tag", sa.Column("tag", sa.Text()))'),
+    ("create_index", 'op.create_index("ix", "run", ["a"], postgresql_concurrently=True)'),
+    ("drop_index", 'op.drop_index("ix", "run", postgresql_concurrently=True, if_exists=True)'),
+    ("add_column", 'op.add_column("run", sa.Column("note", sa.Text()))'),
+    ("drop_column", 'op.drop_column("run", "legacy")'),
+    ("alter_column", 'op.alter_column("run", "status", server_default="new", comment="fase")'),
+    (
+        "create_foreign_key",
+        'op.create_foreign_key("fk", "run", "account", ["o"], ["id"], postgresql_not_valid=True)',
+    ),
+    (
+        "create_check_constraint",
+        'op.create_check_constraint("ck", "run", "size > 0", postgresql_not_valid=True)',
+    ),
+    ("drop_constraint", 'op.drop_constraint("ck", "run", type_="check")'),
+    ("bulk_insert", 'op.bulk_insert(run_status, [{"name": "paused"}])'),
+    ("execute", 'op.execute("UPDATE run SET size = 0 WHERE size IS NULL")'),
+    ("exec_driver_sql", 'op.get_bind().exec_driver_sql("SELECT 1")'),
+    ("f", 'op.f("ix_run_note")'),
+    ("get_bind", "op.get_bind()"),
+    ("get_context", "op.get_context()"),
+    ("inline_literal", 'op.inline_literal("paused")'),
+]
+
+
+@pytest.mark.parametrize(("node", "sql"), SAFE_SQL_BY_NODE, ids=[n for n, _ in SAFE_SQL_BY_NODE])
+def test_cada_no_da_allowlist_de_sql_passa_sem_marca(node: str, sql: str) -> None:
+    (statement,) = parse_sql(sql)
+    source = f"def upgrade() -> None:\n    op.execute({sql!r})\n"
+
+    assert type(statement.stmt).__name__ == node
+    assert unmarked_blocking_lines(source) == []
+
+
+@pytest.mark.parametrize(
+    ("command", "sql"), SAFE_ALTER_TABLE_BY_COMMAND, ids=[c for c, _ in SAFE_ALTER_TABLE_BY_COMMAND]
+)
+def test_cada_subcomando_seguro_de_alter_table_passa_sem_marca(command: str, sql: str) -> None:
+    (statement,) = parse_sql(sql)
+    source = f"def upgrade() -> None:\n    op.execute({sql!r})\n"
+
+    assert isinstance(statement.stmt, AlterTableStmt)
+    assert [cmd.subtype.name for cmd in statement.stmt.cmds or ()] == [command]
+    assert unmarked_blocking_lines(source) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "operation"), SAFE_OPERATION_CASES, ids=[n for n, _ in SAFE_OPERATION_CASES]
+)
+def test_cada_operacao_da_allowlist_passa_sem_marca(name: str, operation: str) -> None:
+    source = f"def upgrade() -> None:\n    {operation}\n"
+
+    assert f".{name}(" in operation
+    assert unmarked_blocking_lines(source) == []
+
+
+def test_allowlist_tem_um_caso_por_entrada() -> None:
+    # Entrada nova na allowlist sem caso aqui reprova: cada uma precisa de uma forma segura testada.
+    assert {node for node, _ in SAFE_SQL_BY_NODE} == {kind.__name__ for kind in SAFE_STATEMENTS}
+    assert {command for command, _ in SAFE_ALTER_TABLE_BY_COMMAND} == {
+        subtype.name for subtype in SAFE_ALTER_TABLE_COMMANDS
+    }
+    assert {name for name, _ in SAFE_OPERATION_CASES} == set(SAFE_OPERATIONS)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE TRIGGER t BEFORE UPDATE ON run FOR EACH ROW EXECUTE FUNCTION touch()",
+        "CREATE FUNCTION touch() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'",
+        # Desligaria a proteção do lock_timeout para o resto da migration.
+        "SET lock_timeout = 0",
+        "DO $$BEGIN CREATE INDEX ix ON run (a); END$$",
+        "DROP TABLE run",
+        "ALTER TABLE run RENAME TO runs",
+        "ALTER TABLE run ENABLE ROW LEVEL SECURITY",
+        "ALTER DOMAIN d ADD CONSTRAINT k CHECK (VALUE > 0) NOT VALID",
+        "CREATE TABLE run_2028 PARTITION OF run FOR VALUES IN (2028)",
+        "CREATE TABLE run_child () INHERITS (run)",
+        "GRANT SELECT ON run TO reader",
+        "ALTER TYPE run_status RENAME VALUE 'old' TO 'new'",
+    ],
+    ids=[
+        "trigger",
+        "funcao",
+        "set",
+        "do",
+        "drop-table",
+        "rename",
+        "subcomando-desconhecido",
+        "dominio",
+        "partition-of",
+        "inherits",
+        "grant",
+        "enum-rename",
+    ],
+)
+def test_no_de_sql_fora_da_allowlist_pede_a_marca(sql: str) -> None:
+    unmarked = f"def upgrade() -> None:\n    op.execute({sql!r})\n"
+    marked = f"def upgrade() -> None:\n    op.execute({sql!r})  # lock-ok: revisado\n"
+
+    assert unmarked_blocking_lines(unmarked) == [2]
+    assert unmarked_blocking_lines(marked) == []
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        'op.rename_table("run", "runs")',
+        'op.drop_table("run")',
+        'op.batch_alter_table("run")',
+        'op.drop_index("ix", "run")',
+        'op.alter_column("run", "status", new_column_name="state")',
+        'op.alter_column("run", "status", nullable=True, autoincrement=True)',
+        'op.alter_column("run", "status", nullable=flag)',
+        'op.create_table_comment("run", "execuções")',
+    ],
+    ids=[
+        "rename-table",
+        "drop-table",
+        "batch",
+        "drop-index-sem-concurrently",
+        "alter-column-rename",
+        "alter-column-opcao-desconhecida",
+        "alter-column-nullable-variavel",
+        "operacao-desconhecida",
+    ],
+)
+def test_operacao_fora_da_allowlist_pede_a_marca(operation: str) -> None:
+    source = f"def upgrade() -> None:\n    {operation}\n"
+
+    assert unmarked_blocking_lines(source) == [2]
+
+
+@pytest.mark.parametrize(
+    ("header", "call"),
+    [
+        ("from alembic.op import rename_table as rename", 'rename("run", "runs")'),
+        ("from alembic import op as ops", 'ops.rename_table("run", "runs")'),
+        ("import alembic.op as o", 'o.rename_table("run", "runs")'),
+        ("from alembic.op import *", 'rename_table("run", "runs")'),
+    ],
+    ids=["importada-com-apelido", "apelido-do-op", "import-do-modulo", "import-estrela"],
+)
+def test_operacao_chamada_por_outro_nome_tambem_e_conferida(header: str, call: str) -> None:
+    source = f"{header}\n\n\ndef upgrade() -> None:\n    {call}\n"
+
+    assert unmarked_blocking_lines(source) == [5]
+
+
+def test_chamada_que_nao_e_do_alembic_nao_pede_a_marca() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    rotulo = "a".upper()\n'
+        '    op.add_column("run", sa.Column(rotulo, sa.Text(), nullable=True))\n'
+    )
 
     assert unmarked_blocking_lines(source) == []
 

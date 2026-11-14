@@ -5,13 +5,19 @@ quoting, comentários e nomes com aspas seguem as regras do servidor, sem expres
 O texto é dividido em instruções pelo scanner e cada uma é lida à parte: uma instrução que não
 parseia (valor desconhecido no lugar de uma palavra-chave, por exemplo) não esconde as outras.
 
-Na dúvida o resultado peca pelo lado seguro: instrução que não parseia conta como bloqueante,
-CONCURRENTLY no meio dela conta, e índice criado sem nome resolvido nunca conta como apagado.
+Nega por padrão: só passa sem a marca a instrução cujo tipo de nó está em `SAFE_STATEMENTS` e
+cumpre a condição dele (CREATE INDEX só com CONCURRENTLY, ALTER TABLE só com subcomandos de
+`SAFE_ALTER_TABLE_COMMANDS` na forma segura etc.). Nó novo ou desconhecido pede a marca, mesmo
+que não trave nada; quem o conhece decide e escreve o motivo.
+
+Na dúvida o resultado peca pelo lado seguro: instrução que não parseia pede a marca, CONCURRENTLY
+no meio dela conta, e índice criado sem nome resolvido nunca conta como apagado.
 """
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 from pglast import ast, parse_sql, split
 from pglast.enums import AlterTableType, ConstrType, ObjectType
@@ -26,19 +32,6 @@ VOLATILE_FUNCTION = re.compile(
     r"gen_random_uuid|uuid_generate_v\w+|uuidv\d|random|clock_timestamp|timeofday|nextval"
 )
 SERIAL_TYPES = frozenset({"smallserial", "serial", "bigserial", "serial2", "serial4", "serial8"})
-# Subcomandos de ALTER TABLE que reescrevem ou varrem a tabela sob ACCESS EXCLUSIVE.
-BLOCKING_ALTERS = frozenset(
-    {
-        AlterTableType.AT_SetNotNull,
-        AlterTableType.AT_AlterColumnType,
-        AlterTableType.AT_SetLogged,
-        AlterTableType.AT_SetUnLogged,
-        AlterTableType.AT_SetTableSpace,
-        AlterTableType.AT_AttachPartition,
-        AlterTableType.AT_SetAccessMethod,
-        AlterTableType.AT_SetExpression,
-    }
-)
 # Constraints validadas na hora: a forma segura é NOT VALID e VALIDATE depois.
 VALIDATED_CONSTRAINTS = frozenset(
     {ConstrType.CONSTR_FOREIGN, ConstrType.CONSTR_CHECK, ConstrType.CONSTR_NOTNULL}
@@ -58,9 +51,40 @@ REWRITING_COLUMN_CONSTRAINTS = frozenset(
     }
 )
 STORED = "s"
-# Subtipos de ALTER DOMAIN (`subtype` do nó) que varrem as colunas de todas as tabelas do domínio.
-DOMAIN_SET_NOT_NULL = "O"
-DOMAIN_ADD_CONSTRAINT = "C"
+
+# A allowlist: tipo de nó → condição em que ele não reescreve nem varre tabela em uso sob lock.
+SAFE_STATEMENTS: dict[type[Any], Callable[[Any], bool]] = {
+    # DML não é DDL: trava linhas, não a tabela.
+    ast.SelectStmt: lambda _: True,
+    ast.InsertStmt: lambda _: True,
+    ast.UpdateStmt: lambda _: True,
+    ast.DeleteStmt: lambda _: True,
+    ast.CommentStmt: lambda _: True,
+    # Tabela nova; PARTITION OF e INHERITS travam a tabela-mãe.
+    ast.CreateStmt: lambda node: not node.partbound and not node.inhRelations,
+    ast.CreateSchemaStmt: lambda node: all(_is_safe(item) for item in node.schemaElts or ()),
+    ast.IndexStmt: lambda node: bool(node.concurrent),
+    ast.DropStmt: lambda node: node.removeType == ObjectType.OBJECT_INDEX and bool(node.concurrent),
+    ast.ReindexStmt: lambda node: _has_option(node.params, "concurrently"),
+    ast.RefreshMatViewStmt: lambda node: bool(node.concurrent),
+    ast.VacuumStmt: lambda node: not _has_option(node.options, "full"),
+    # Só ADD VALUE; RENAME VALUE quebra quem ainda grava o nome antigo.
+    ast.AlterEnumStmt: lambda node: node.oldVal is None,
+    ast.AlterTableStmt: lambda node: all(_alter_is_safe(command) for command in node.cmds or ()),
+}
+# Subcomandos de ALTER TABLE que só mexem no catálogo, na forma segura de cada um.
+SAFE_ALTER_TABLE_COMMANDS: dict[AlterTableType, Callable[[Any], bool]] = {
+    AlterTableType.AT_AddColumn: lambda command: not _column_is_blocking(command.def_),
+    AlterTableType.AT_DropColumn: lambda _: True,
+    AlterTableType.AT_ColumnDefault: lambda _: True,
+    AlterTableType.AT_DropNotNull: lambda _: True,
+    AlterTableType.AT_AddConstraint: lambda command: _constraint_is_safe(command.def_),
+    AlterTableType.AT_ValidateConstraint: lambda _: True,
+    AlterTableType.AT_DropConstraint: lambda _: True,
+    AlterTableType.AT_DetachPartition: lambda command: bool(command.def_.concurrent),
+    # Conclui um DETACH CONCURRENTLY interrompido.
+    AlterTableType.AT_DetachPartitionFinalize: lambda _: True,
+}
 
 
 @dataclass(frozen=True)
@@ -101,7 +125,7 @@ def _statement_facts(statement: str) -> SqlFacts:
     if node is None:
         return _unparsed_facts(statement)
     return SqlFacts(
-        blocking=_is_blocking(node),
+        blocking=not _is_safe(node),
         concurrent=_is_concurrent(node),
         statements=1,
         created_concurrent_indexes=_created_concurrent_indexes(node),
@@ -117,54 +141,24 @@ def _unparsed_facts(statement: str) -> SqlFacts:
     return SqlFacts(True, concurrent, 1, [None] if creates_index else [], [])
 
 
-def _is_blocking(node: ast.Node) -> bool:
-    match node:
-        case ast.IndexStmt():
-            return not node.concurrent
-        case ast.ReindexStmt():
-            return not _has_option(node.params, "concurrently")
-        case ast.AlterTableStmt():
-            return any(_alter_is_blocking(command) for command in node.cmds or ())
-        case ast.VacuumStmt():
-            return _has_option(node.options, "full")
-        case ast.AlterDomainStmt():
-            return _domain_alter_is_blocking(node)
-        case ast.ClusterStmt() | ast.LockStmt() | ast.AlterTableMoveAllStmt():
-            return True
-        case ast.CreateSchemaStmt():
-            return any(_is_blocking(element) for element in node.schemaElts or ())
-        case ast.RefreshMatViewStmt():
-            return not node.concurrent
-    return False
+def _is_safe(node: ast.Node) -> bool:
+    condition = SAFE_STATEMENTS.get(type(node))
+    return condition is not None and condition(node)
 
 
-def _alter_is_blocking(command: ast.AlterTableCmd) -> bool:
-    if command.subtype in BLOCKING_ALTERS:
-        return True
-    match command.def_:
-        # O FINALIZE é outro subtipo e conclui um DETACH CONCURRENTLY: não trava.
-        case ast.PartitionCmd() as partition if _detaches(command):
-            return not partition.concurrent
-        case ast.Constraint() as constraint if command.subtype == AlterTableType.AT_AddConstraint:
-            return _constraint_is_blocking(constraint)
-        case ast.ColumnDef() as column if command.subtype == AlterTableType.AT_AddColumn:
-            return _column_is_blocking(column)
-    return False
+def _alter_is_safe(command: ast.AlterTableCmd) -> bool:
+    if command.subtype is None:
+        return False
+    condition = SAFE_ALTER_TABLE_COMMANDS.get(command.subtype)
+    return condition is not None and condition(command)
 
 
-def _domain_alter_is_blocking(node: ast.AlterDomainStmt) -> bool:
-    if node.subtype == DOMAIN_SET_NOT_NULL:
-        return True
-    if node.subtype == DOMAIN_ADD_CONSTRAINT and isinstance(node.def_, ast.Constraint):
-        return _constraint_is_blocking(node.def_)
-    return False
-
-
-def _constraint_is_blocking(constraint: ast.Constraint) -> bool:
+def _constraint_is_safe(constraint: ast.Constraint) -> bool:
+    """FK, CHECK e NOT NULL com NOT VALID; UNIQUE, PK e EXCLUDE só com `USING INDEX`."""
     if constraint.contype in VALIDATED_CONSTRAINTS:
-        return not constraint.skip_validation
+        return bool(constraint.skip_validation)
     if constraint.contype in INDEX_CONSTRAINTS:
-        return constraint.indexname is None
+        return constraint.indexname is not None
     return False
 
 
