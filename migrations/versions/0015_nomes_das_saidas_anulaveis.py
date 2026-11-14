@@ -47,10 +47,12 @@ _ANONYMIZE_INDEX = "run_output_anonymize_idx"
 
 def upgrade() -> None:
     op.alter_column("artifact", "file_name", existing_type=sa.Text(), nullable=True)
+    # lock-ok: artifact tem poucos milhares de linhas numa VPS; varre em ms (docstring)
     op.create_check_constraint(
         op.f(_NAME_CHECK), "artifact", "file_name IS NOT NULL OR deleted_at IS NOT NULL"
     )
     op.alter_column("run_output", "logical_name", existing_type=sa.Text(), nullable=True)
+    # lock-ok: índice parcial em run_output, que guarda até 90 dias de uma VPS
     op.create_index(
         _ANONYMIZE_INDEX,
         "run_output",

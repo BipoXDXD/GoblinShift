@@ -34,29 +34,34 @@ _ANONYMIZED_NAME = "anonimizado"
 
 def upgrade() -> None:
     op.alter_column("upload", "original_name", existing_type=sa.Text(), nullable=True)
+    # lock-ok: upload é pequena (uma VPS, poucas contas); o CHECK varre em milissegundos
     op.create_check_constraint(
         op.f("upload_name_until_deleted_check"),
         "upload",
         "original_name IS NOT NULL OR deleted_at IS NOT NULL",
     )
     op.alter_column("run", "parameters", existing_type=postgresql.JSONB(), nullable=True)
+    # lock-ok: run guarda 90 dias de uma VPS; o CHECK varre em milissegundos
     op.create_check_constraint(
         op.f("run_parameters_until_finished_check"),
         "run",
         "parameters IS NOT NULL OR finished_at IS NOT NULL",
     )
+    # lock-ok: índice parcial em run, que guarda 90 dias de uma VPS (docstring)
     op.create_index(
         "run_anonymize_idx",
         "run",
         ["finished_at"],
         postgresql_where=sa.text("parameters IS NOT NULL AND finished_at IS NOT NULL"),
     )
+    # lock-ok: índice parcial em run, que guarda 90 dias de uma VPS (docstring)
     op.create_index(
         "run_finished_at_idx",
         "run",
         ["finished_at"],
         postgresql_where=sa.text("finished_at IS NOT NULL"),
     )
+    # lock-ok: índice parcial em upload, pequena (uma VPS, poucas contas)
     op.create_index(
         "upload_anonymize_idx",
         "upload",

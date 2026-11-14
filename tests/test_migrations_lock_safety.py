@@ -1,7 +1,8 @@
-"""Migration nova não segura lock que trava a API sem declarar por quê (ADR 057).
+"""Migration não segura lock que trava a API sem declarar por quê (ADR 057).
 
-As migrations até a 0018 são anteriores ao check e ficam de fora; o `downgrade()` também, como
-no check de contract. As regras estão em `tests/migration_lock_check.py`.
+Vale para todas as migrations, inclusive as anteriores ao check, marcadas com o motivo de cada
+operação. O `downgrade()` fica de fora, como no check de contract. As regras
+estão em `tests/migration_lock_check.py`.
 """
 
 import time
@@ -26,7 +27,7 @@ VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 MAX_ANALYSIS_S = 2.0
 
 
-def test_migrations_novas_so_bloqueiam_com_a_marca_lock_ok() -> None:
+def test_migrations_so_bloqueiam_com_a_marca_lock_ok() -> None:
     problems = {}
     for name in checked_revisions([path.name for path in VERSIONS.glob("*.py")]):
         source = (VERSIONS / name).read_text()
@@ -50,10 +51,11 @@ def test_todo_arquivo_de_migration_comeca_pelo_numero_da_revisao() -> None:
     assert [name for name in names if not REVISION_FILE.match(name)] == []
 
 
-def test_check_cobre_da_0019_em_diante() -> None:
-    names = ["0001_a.py", "0018_b.py", "0019_c.py", "0020_d.py", "README.md"]
+def test_check_cobre_todas_as_migrations() -> None:
+    # As antigas também: as que travam levam `# lock-ok:` com o motivo de cada operação.
+    names = ["0001_a.py", "0018_b.py", "0019_c.py", "README.md", "__init__.py"]
 
-    assert checked_revisions(names) == ["0019_c.py", "0020_d.py"]
+    assert checked_revisions(names) == ["0001_a.py", "0018_b.py", "0019_c.py"]
 
 
 @pytest.mark.parametrize(

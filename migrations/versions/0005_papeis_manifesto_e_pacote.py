@@ -23,6 +23,7 @@ _CHECK = "artifact_role_check"
 
 def upgrade() -> None:
     op.drop_constraint(op.f(_CHECK), "artifact", type_="check")
+    # lock-ok: alarga o CHECK de role; artifact tem retenção curta e a varredura leva ms
     op.create_check_constraint(
         op.f(_CHECK), "artifact", "role IN ('output', 'report', 'manifest', 'package')"
     )

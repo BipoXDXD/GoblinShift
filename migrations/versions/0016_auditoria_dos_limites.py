@@ -54,6 +54,7 @@ def upgrade() -> None:
         "audit_event",
         sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     )
+    # lock-ok: details recém-criada e nula; audit_event tem poucos milhares de linhas, varre em ms
     op.create_check_constraint(
         op.f(_DETAILS_CHECK),
         "audit_event",
@@ -72,4 +73,5 @@ def downgrade() -> None:
 
 def _replace_event_type_check(types: str) -> None:
     op.drop_constraint(op.f(_TYPE_CHECK), "audit_event", type_="check")
+    # lock-ok: audit_event guarda 90 dias, poucos milhares de linhas; varre em ms (docstring)
     op.create_check_constraint(op.f(_TYPE_CHECK), "audit_event", f"event_type IN ({types})")

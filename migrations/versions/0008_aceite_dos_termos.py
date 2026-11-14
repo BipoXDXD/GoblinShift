@@ -41,4 +41,5 @@ def _replace_event_type_check(types: str) -> None:
     # `NOT VALID` + `VALIDATE` evitaria o bloqueio da tabela durante a varredura; a auditoria guarda
     # 90 dias de eventos de segurança, poucos o bastante para validar de uma vez.
     op.drop_constraint(op.f(_CONSTRAINT), "audit_event", type_="check")
+    # lock-ok: audit_event nasceu na 0006, no mesmo dia; retenção de 90 dias, varre em ms
     op.create_check_constraint(op.f(_CONSTRAINT), "audit_event", f"event_type IN ({types})")

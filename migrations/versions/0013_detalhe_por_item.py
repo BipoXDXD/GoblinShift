@@ -27,6 +27,7 @@ def upgrade() -> None:
         "run_input",
         sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     )
+    # lock-ok: details recém-criada e nula em todas as linhas; a varredura de run_input leva ms
     op.create_check_constraint(
         op.f("run_input_details_check"), "run_input", "jsonb_typeof(details) = 'object'"
     )

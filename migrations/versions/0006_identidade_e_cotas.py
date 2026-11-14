@@ -58,16 +58,19 @@ def _expand_app_user() -> None:
     op.add_column("app_user", sa.Column("terms_version", sa.Text(), nullable=True))
     op.add_column("app_user", _timestamp("terms_accepted_at", nullable=True))
     op.add_column("app_user", _timestamp("deletion_requested_at", nullable=True))
+    # lock-ok: colunas recém-criadas, nulas em todas as linhas; app_user tem uma linha por conta
     op.create_check_constraint(
         op.f("app_user_terms_check"),
         "app_user",
         "(terms_version IS NULL) = (terms_accepted_at IS NULL)",
     )
+    # lock-ok: coluna recém-criada, nula em todas as linhas; app_user tem uma linha por conta
     op.create_check_constraint(
         op.f("app_user_terms_version_check"),
         "app_user",
         "length(terms_version) BETWEEN 1 AND 64",
     )
+    # lock-ok: índice parcial sobre coluna nula recém-criada; app_user tem uma linha por conta
     op.create_index(
         op.f("app_user_deletion_requested_at_idx"),
         "app_user",

@@ -27,7 +27,6 @@ import alembic.op
 from tests.migration_source import is_marked
 from tests.migration_sql import PLACEHOLDER, VOLATILE_FUNCTION, IndexName, analyze_sql
 
-FIRST_CHECKED_REVISION = 19
 REVISION_FILE = re.compile(r"^(\d{4})_\w+\.py$")
 LOCK_OK_MARK = re.compile(r"#\s*lock-ok:\s*\S")
 # Combinações de textos que uma concatenação pode gerar. Acima disso o resto não é lido, e o texto
@@ -111,12 +110,8 @@ SAFE_OPERATIONS: dict[str, Condition] = {
 
 
 def checked_revisions(names: list[str]) -> list[str]:
-    """Os arquivos de migration que o check cobre: da FIRST_CHECKED_REVISION em diante."""
-    return sorted(
-        name
-        for name in names
-        if (match := REVISION_FILE.match(name)) and int(match.group(1)) >= FIRST_CHECKED_REVISION
-    )
+    """Os arquivos de migration que o check cobre: todos os que seguem o nome `NNNN_*.py`."""
+    return sorted(name for name in names if REVISION_FILE.match(name))
 
 
 def unmarked_blocking_lines(source: str) -> list[int]:
