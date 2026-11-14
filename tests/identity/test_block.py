@@ -135,6 +135,16 @@ def test_liberar_reativa_a_conta_sem_ressuscitar_chaves(factory: sessionmaker[Se
         assert authenticate_api_key(session, issued.token, NOW) is None
 
 
+def test_liberar_conta_pendente_tira_a_marca_de_espera(factory: sessionmaker[Session]) -> None:
+    pending = new_user(factory, blocked=True)
+
+    with unit_of_work(factory) as session:
+        assert unblock_account(session, pending) is True
+
+    row = account_row(factory, pending)
+    assert (row["status"], row["awaiting_approval"]) == ("active", False)
+
+
 def test_liberar_conta_inexistente_devolve_false(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         assert unblock_account(session, uuid7()) is False
@@ -224,6 +234,23 @@ def test_conta_bloqueada_nao_completa_login(factory: sessionmaker[Session]) -> N
 
     assert isinstance(outcome, LoginRefusal)
     assert (outcome.account_id, outcome.reason) == (user_id, LoginRefused.BLOCKED)
+
+
+def test_bloquear_conta_pendente_tira_da_fila_e_o_login_responde_bloqueio(
+    factory: sessionmaker[Session],
+) -> None:
+    pending = new_user(factory, blocked=True)
+    with unit_of_work(factory) as session:
+        block_account(session, pending, NOW)
+
+    with unit_of_work(factory) as session:
+        listed = {account.id for account in list_pending_accounts(session)}
+    with unit_of_work(factory) as session:
+        outcome = resolve_login(session, _identity_of(factory, pending), signup_open=True, now=NOW)
+
+    assert pending not in listed
+    assert isinstance(outcome, LoginRefusal)
+    assert (outcome.account_id, outcome.reason) == (pending, LoginRefused.BLOCKED)
 
 
 def blocked_after_use_with_sessions_purged(factory: sessionmaker[Session]) -> UUID:

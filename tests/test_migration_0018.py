@@ -98,14 +98,18 @@ def test_backfill_marca_so_a_pendente_legitima(db_settings: Settings, engine: En
         pending = new_user(conn, "blocked")
         blocked_without_sessions = new_user(conn, "blocked")
         record_block(conn, blocked_without_sessions)
+        blocked_with_session = new_user(conn, "blocked")
+        new_session(conn, blocked_with_session)
         active = new_user(conn, "active")
         new_session(conn, active)
 
     run_migrations(db_settings, "0018")
 
-    assert pending_flags(engine, pending, blocked_without_sessions, active) == {
+    flags = pending_flags(engine, pending, blocked_without_sessions, blocked_with_session, active)
+    assert flags == {
         pending: True,
         blocked_without_sessions: False,
+        blocked_with_session: False,
         active: False,
     }
 
