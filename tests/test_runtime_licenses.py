@@ -65,6 +65,18 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
         ),
         (["License: \n        (c) Foo\n        GPL-3.0-or-later"], "GPL-3.0-or-later"),
         (["License: \u00a9 2020 Foo\n        GPLv2"], "GPLv2"),
+        # O campo License inteiro é lido: o cabeçalho da GPL e o texto colado depois de outra.
+        (
+            [
+                "License: This program is free software; you can redistribute it\n"
+                "        under the terms of the GNU General Public License as published by"
+            ],
+            "under the terms of the GNU General Public License as published by",
+        ),
+        (
+            ["License: MIT\n        GNU General Public License text pasted below"],
+            "GNU General Public License text pasted below",
+        ),
     ],
     ids=[
         "spdx-gpl",
@@ -79,6 +91,8 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
         "copyright-antes",
         "linha-vazia-e-copyright-antes",
         "simbolo-de-copyright-antes",
+        "cabecalho-gpl",
+        "texto-longo",
     ],
 )
 def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str], reason: str) -> None:
@@ -93,19 +107,21 @@ def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str], reason: st
         ["License-Expression: LGPL-3.0-or-later"],
         ["License: GNU LGPL v3"],
         ["Classifier: License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"],
-        ["License: GPL-compatible, see LICENSE"],
         ["License-Expression: Apache-2.0", "Classifier: Programming Language :: Python"],
-        ["License: MIT\n        GNU General Public License text pasted below"],
         ["Classifier: License :: OSI Approved :: GNU Library or Lesser General Public License"],
+        ["License: Copyright (c) 2020 Foo\n        BSD 3-Clause License"],
+        ["License: Mozilla Public License 2.0 (MPL 2.0)"],
+        ["License: Apache Software License 2.0"],
     ],
     ids=[
         "spdx-lgpl",
         "texto-lgpl",
         "classifier-lgpl",
-        "compativel",
         "apache",
-        "texto-longo",
         "classifier-library",
+        "bsd-com-copyright",
+        "mpl",
+        "apache-por-extenso",
     ],
 )
 def test_lgpl_e_permissivas_passam(tmp_path: Path, headers: list[str]) -> None:
@@ -130,6 +146,46 @@ def test_pacote_sem_licenca_declarada_e_recusado(tmp_path: Path, headers: list[s
     package = _fake_distribution(tmp_path, "unknown", headers)
 
     assert refused_packages([package]) == ["unknown 1.0 (sem licença declarada)"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "MIT",
+        "BSD-3-Clause",
+        "Apache 2.0",
+        "PSF-2.0",
+        "Python Software Foundation License",
+        "ISC License (ISCL)",
+        "MPL-2.0",
+        "Mozilla Public License 2.0",
+        "LGPLv3+",
+        "GNU Lesser General Public License v3",
+        "The Unlicense",
+        "zlib/libpng",
+        "CC0 1.0 Universal",
+        "HPND",
+        "Public Domain",
+    ],
+)
+def test_licenca_permissiva_em_texto_livre_passa(tmp_path: Path, value: str) -> None:
+    # Uma por alternativa de PERMISSIVE: tirar uma delas reprova o caso.
+    package = _fake_distribution(tmp_path, "livre", [f"License: {value}"])
+
+    assert refused_packages([package]) == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["N/A", "see LICENSE", "None", "Unknown license", "GPL-compatible, see LICENSE", "Proprietary"],
+    ids=["na", "ver-arquivo", "none", "unknown-license", "compativel", "proprietaria"],
+)
+def test_licenca_so_em_texto_livre_nao_reconhecida_e_recusada(tmp_path: Path, value: str) -> None:
+    # Sem SPDX nem classifier, o texto livre precisa nomear uma licença permissiva conhecida;
+    # o resto pode esconder qualquer coisa.
+    package = _fake_distribution(tmp_path, "vago", [f"License: {value}"])
+
+    assert refused_packages([package]) == [f"vago 1.0 (licença não reconhecida: {value})"]
 
 
 def test_ferramenta_de_dev_e_recusada_pelo_nome_mesmo_com_licenca_permissiva(
