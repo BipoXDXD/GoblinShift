@@ -87,10 +87,11 @@ s3_curl --upload-file "$encrypted" --header "Content-Type: application/octet-str
   --header "Content-MD5: $md5" --max-time 1800 --output /dev/null "$(s3_url "$key")"
 echo "backup enviado: dump de $(dump_instant "$key") ($(wc -c <"$encrypted" | tr -d ' ') bytes cifrados)"
 
-# Marcador do último upload bom, para a conferência do host (fora deste repositório) alertar quando
-# ele passar de 2 dias: os /fail repetidos não correm em silêncio enquanto o ciclo de vida do
-# bucket expira os dumps antigos. Um date ou mv que falhe aqui pinga /fail com o dump já enviado:
-# a escolha conservadora, porque o marcador deixaria de refletir o último upload.
+# Marcador do último upload bom, para a conferência do host (fora deste repositório, ainda não
+# ligada; ver ADR 022) alertar quando ele passar de 2 dias: os /fail repetidos não correm em
+# silêncio enquanto o ciclo de vida do bucket expira os dumps antigos. Um date ou mv que falhe
+# aqui pinga /fail com o dump já enviado: a escolha conservadora, porque o marcador deixaria de
+# refletir o último upload.
 # Só o instante UTC, sem bucket nem chave. Gravado num temporário e renomeado: quem lê nunca vê
 # um arquivo pela metade, e uma falha antes daqui deixa o marcador anterior intacto.
 marker="$STATE_DIRECTORY/last-upload-ok"

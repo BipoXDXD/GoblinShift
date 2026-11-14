@@ -301,7 +301,8 @@ def test_credencial_recusada_pinga_falha_e_nao_grava_nada(
     assert result.returncode != 0
     assert s3.keys(prefix) == []
     assert healthchecks.pings == ["/start", "/fail"]
-    # O marcador continua com o último upload bom: é pela idade dele que o host alerta.
+    # O marcador continua com o último upload bom: a conferência do host vai alertar pela idade
+    # dele.
     assert marker.read_text() == PREVIOUS_SUCCESS
     assert sorted(path.name for path in state_dir.iterdir()) == [MARKER_NAME]
 
