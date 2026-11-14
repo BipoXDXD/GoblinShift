@@ -353,6 +353,23 @@ def test_funcao_auxiliar_so_do_downgrade_fica_de_fora() -> None:
     assert unmarked_blocking_lines(source) == []
 
 
+@pytest.mark.parametrize(
+    "caller",
+    ["def upgrade() -> None:\n    _add_index()\n", "passos = [_add_index]\n"],
+    ids=["chamada-pelo-upgrade", "citada-no-modulo"],
+)
+def test_funcao_auxiliar_do_downgrade_tambem_usada_fora_dele_e_lida(caller: str) -> None:
+    source = (
+        "def downgrade() -> None:\n"
+        "    _add_index()\n"
+        "def _add_index() -> None:\n"
+        '    op.create_index("ix_run_owner", "run", ["owner_id"])\n'
+        f"{caller}"
+    )
+
+    assert unmarked_blocking_lines(source) == [4]
+
+
 def test_tabela_criada_no_mesmo_upgrade_dispensa_a_marca() -> None:
     # Ninguém lê nem escreve numa tabela que esta migration acabou de criar.
     source = (
@@ -434,15 +451,8 @@ def test_refresh_concorrente_que_o_parser_recusa_roda_em_transacao() -> None:
         'op.execute("ALTER TABLE run ADD COLUMN t int GENERATED ALWAYS AS (a)")',
         'op.execute("VACUUM (FULL false) run")',
         "op.execute(\"SELECT 'ALTER TABLE run ALTER c SET NOT NULL' /* CLUSTER run */\")",
-        "op.execute(\"ALTER TABLE run ADD COLUMN c text DEFAULT '{}'\".format(rotulo))",
     ],
-    ids=[
-        "not-null-not-valid",
-        "gerada-sem-stored",
-        "vacuum-full-false",
-        "texto",
-        "default-texto-montado",
-    ],
+    ids=["not-null-not-valid", "gerada-sem-stored", "vacuum-full-false", "texto"],
 )
 def test_forma_segura_lida_pelo_parser_passa(operation: str) -> None:
     source = f"def upgrade() -> None:\n    {operation}\n"
@@ -501,6 +511,8 @@ SAFE_OPERATION_CASES = [
     ("get_bind", "op.get_bind()"),
     ("get_context", "op.get_context()"),
     ("inline_literal", 'op.inline_literal("paused")'),
+    ("autocommit_block", "op.get_context().autocommit_block()"),
+    ("cursor", "op.get_bind().connection.cursor()"),
 ]
 
 
@@ -1028,3 +1040,257 @@ def test_metodo_de_texto_desconhecido_nao_e_lido_como_o_sql() -> None:
     )
 
     assert unmarked_blocking_lines(source) == [3]
+
+
+@pytest.mark.parametrize(
+    ("source", "line"),
+    [
+        ('def upgrade() -> None:\n    op.execute(**{"sqltext": "CREATE INDEX i ON run (a)"})\n', 2),
+        ("def upgrade() -> None:\n    op.execute()\n", 2),
+        (
+            "def upgrade() -> None:\n"
+            '    op.execute("SELECT {}".format("1; CREATE INDEX i ON run (a)"))\n',
+            2,
+        ),
+        (
+            "def upgrade() -> None:\n"
+            '    op.execute("SELECT %s" % "1; CREATE INDEX i ON run (a)")\n',
+            2,
+        ),
+        (
+            "def _valor() -> str:\n"
+            '    return "1; CREATE INDEX i ON run (a)"\n'
+            "def upgrade() -> None:\n"
+            '    op.execute(f"SELECT {_valor()}")\n',
+            4,
+        ),
+        (
+            'sql = "SELECT 1"\n'
+            "def upgrade() -> None:\n"
+            '    for sql in ["CREATE INDEX i ON run (a)"]:\n'
+            "        op.execute(sql)\n",
+            4,
+        ),
+        (
+            'sql = "SELECT 1"\n'
+            "def _run(sql: str) -> None:\n"
+            "    op.execute(sql)\n"
+            "def upgrade() -> None:\n"
+            '    _run("CREATE INDEX i ON run (a)")\n',
+            3,
+        ),
+        (
+            "def upgrade() -> None:\n"
+            "    cur = op.get_bind().connection.cursor()\n"
+            '    cur.executemany("CREATE INDEX i ON run (a)", [()])\n',
+            3,
+        ),
+        (
+            "def upgrade() -> None:\n"
+            '    op.get_context().impl._exec(sa.text("CREATE INDEX i ON run (a)"))\n',
+            2,
+        ),
+        (
+            "def _rodar(conn: object) -> None:\n"
+            '    conn.executemany("CREATE INDEX i ON run (a)", [()])\n',
+            2,
+        ),
+        (
+            "def upgrade() -> None:\n"
+            "    cur = op.get_bind().connection.cursor()\n"
+            '    cur.copy_expert("COPY run FROM STDIN", arquivo)\n',
+            3,
+        ),
+        (
+            "def upgrade() -> None:\n"
+            "    op.execute(\"ALTER TABLE run ADD COLUMN c text DEFAULT '{}'\".format(rotulo))\n",
+            2,
+        ),
+        ('def _real() -> None:\n    op.create_index("i", "run", ["a"])\nupgrade = _real\n', 2),
+        (
+            'criar = lambda: op.create_index("i", "run", ["a"])\n'
+            "def upgrade() -> None:\n"
+            "    criar()\n",
+            1,
+        ),
+        (
+            "class Passos:\n"
+            "    @staticmethod\n"
+            "    def indice() -> None:\n"
+            '        op.create_index("i", "run", ["a"])\n'
+            "def upgrade() -> None:\n"
+            "    Passos.indice()\n",
+            4,
+        ),
+    ],
+    ids=[
+        "kwargs-no-execute",
+        "execute-sem-sql",
+        "format-com-literal",
+        "percent-com-literal",
+        "fstring-com-chamada",
+        "for-religa-o-nome",
+        "parametro-religa-o-nome",
+        "executemany-do-cursor",
+        "metodo-privado-do-contexto",
+        "executemany-de-parametro",
+        "outro-metodo-do-cursor",
+        "format-entre-aspas",
+        "upgrade-apelido",
+        "lambda-do-modulo",
+        "metodo-de-classe",
+    ],
+)
+def test_operacao_que_o_check_nao_resolve_pede_a_marca(source: str, line: int) -> None:
+    # O check lê o módulo inteiro, salvo o downgrade(); valor que ele não resolve com certeza
+    # (parâmetro, laço, chamada) conta como desconhecido, e SQL desconhecido pede a marca.
+    assert unmarked_blocking_lines(source) == [line]
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        "    with abrir() as sql:\n        op.execute(sql)\n",
+        "    try:\n        ler()\n    except Exception as sql:\n        op.execute(sql)\n",
+        "    if sql := ler():\n        op.execute(sql)\n",
+        "    sql, _ = ler()\n    op.execute(sql)\n",
+        "    from textos import sql\n    op.execute(sql)\n",
+        "    import textos as sql\n    op.execute(sql)\n",
+        "    match ler():\n        case sql:\n            op.execute(sql)\n",
+        "    match ler():\n        case [*sql]:\n            op.execute(sql)\n",
+        "    _ = [op.execute(sql) for sql in ler()]\n",
+    ],
+    ids=[
+        "with",
+        "except",
+        "walrus",
+        "desempacotamento",
+        "from-import",
+        "import-como",
+        "match-captura",
+        "match-estrela",
+        "compreensao",
+    ],
+)
+def test_nome_religado_de_outra_forma_conta_como_desconhecido(binding: str) -> None:
+    # A atribuição do módulo não vale mais depois que o nome é ligado de novo. O execute fica
+    # sempre na última linha.
+    source = f'sql = "SELECT 1"\ndef upgrade() -> None:\n{binding}'
+
+    assert unmarked_blocking_lines(source) == [source.count("\n")]
+
+
+@pytest.mark.parametrize(
+    ("source", "lines"),
+    [
+        (
+            'OPCOES = {"if_not_exists": True}\n'
+            "def upgrade() -> None:\n"
+            '    op.create_table("run", sa.Column("a", sa.Text()), **OPCOES)\n'
+            '    op.create_index("i", "run", ["a"])\n',
+            [3, 4],
+        ),
+        (
+            "def upgrade() -> None:\n"
+            "    if FLAG:\n"
+            '        op.create_table("run", sa.Column("a", sa.Text()))\n'
+            '    op.create_index("i", "run", ["a"])\n',
+            [4],
+        ),
+        (
+            "def _criar() -> None:\n"
+            '    op.create_table("run", sa.Column("a", sa.Text()))\n'
+            "def upgrade() -> None:\n"
+            "    _criar()\n"
+            '    op.create_index("i", "run", ["a"])\n',
+            [5],
+        ),
+        (
+            "def upgrade() -> None:\n"
+            '    op.create_index("i", "run", ["a"])\n'
+            '    op.create_table("run", sa.Column("a", sa.Text()))\n',
+            [2],
+        ),
+        (
+            "def upgrade() -> None:\n"
+            '    op.create_table("filho", sa.Column("a", sa.Text()), postgresql_inherits="run")\n',
+            [2],
+        ),
+    ],
+    ids=["kwargs", "ramo-condicional", "outra-funcao", "depois-da-operacao", "inherits"],
+)
+def test_tabela_criada_so_dispensa_a_marca_quando_e_certo_que_e_nova(
+    source: str, lines: list[int]
+) -> None:
+    # Com `**`, o próprio create_table pede a marca: as opções escondidas podem herdar de outra.
+    assert unmarked_blocking_lines(source) == lines
+
+
+def test_tabela_criada_na_mesma_funcao_auxiliar_dispensa_a_marca() -> None:
+    source = (
+        "def _criar() -> None:\n"
+        '    op.create_table("run_tag", sa.Column("a", sa.Text()))\n'
+        '    op.create_index("i", "run_tag", ["a"])\n'
+        "def upgrade() -> None:\n"
+        "    _criar()\n"
+    )
+
+    assert unmarked_blocking_lines(source) == []
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        'sa.Column("x", sa.Boolean(create_constraint=True), nullable=True)',
+        'sa.Column("x", sa.Enum("a", "b", native_enum=False, create_constraint=True))',
+        'sa.Column("x", Dominio())',
+        'sa.Column("x", sa.ARRAY(Dominio()))',
+        'sa.Column("x", sa.Numeric(**PRECISAO))',
+        'sa.Column("x", Fabrica())',
+        'sa.Column("x", fabrica())',
+    ],
+    ids=[
+        "boolean-com-check",
+        "enum-com-check",
+        "tipo-local",
+        "tipo-local-aninhado",
+        "kwargs",
+        "funcao-local",
+        "funcao-importada",
+    ],
+)
+def test_tipo_que_cria_check_ou_e_do_projeto_pede_a_marca(column: str) -> None:
+    source = (
+        "from textos import fabrica\n"
+        "class Dominio(sa.types.UserDefinedType):\n"
+        "    def get_col_spec(self) -> str:\n"
+        '        return "meu_dominio"\n'
+        "def Fabrica() -> object:\n"
+        "    return Dominio()\n"
+        "def upgrade() -> None:\n"
+        f'    op.add_column("run", {column})\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [8]
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        'sa.Column("x", sa.Enum("a", "b", name="fase"))',
+        'sa.Column("x", sa.Boolean(create_constraint=False))',
+        'sa.Column("x", postgresql.JSONB())',
+        'sa.Column("x", sa.ARRAY(sa.Text()))',
+        'sa.Column("x", Text())',
+    ],
+    ids=["enum-nativo", "boolean-sem-check", "jsonb", "array", "importado-solto"],
+)
+def test_tipo_do_sqlalchemy_sem_check_passa(column: str) -> None:
+    source = (
+        "import sqlalchemy as sa\n"
+        "from sqlalchemy import Text\n"
+        "from sqlalchemy.dialects import postgresql\n"
+        f'def upgrade() -> None:\n    op.add_column("run", {column})\n'
+    )
+
+    assert unmarked_blocking_lines(source) == []

@@ -9,18 +9,19 @@ O check nega por padrão: só passa sem a marca a operação do Alembic que est�
 na forma segura, e o SQL cujas instruções estão na allowlist de `tests/migration_sql.py`.
 Operação nova ou desconhecida (`rename_table`, `batch_alter_table`, opção nova de `alter_column`)
 pede a marca, mesmo que não trave nada. Quem precisa dela marca `# lock-ok: <motivo>` na linha
-da operação ou na linha só de comentário logo acima. Operação sobre uma tabela criada no mesmo
-`upgrade()` não trava ninguém e dispensa a marca.
+da operação ou na linha só de comentário logo acima. Operação sobre uma tabela que a mesma
+função acabou de criar não trava ninguém e dispensa a marca.
 
-O check lê o `upgrade()` e as funções do módulo que ele chama, resolve texto e colunas guardados
-em variável e monta f-strings e concatenações com um marcador no lugar do valor. O SQL montado
-vai para `tests/migration_sql.py`, que o lê com o parser do PostgreSQL. Continua estático: SQL
-vindo de fora do módulo ou montado em laço escapa, e a revisão do PR vale.
+O check lê o módulo inteiro, salvo as funções que só o `downgrade()` alcança, resolve texto e
+colunas guardados em variável e monta f-strings e concatenações com um marcador no lugar do
+valor que não resolve; SQL com esse marcador pede a marca. O SQL montado vai para
+`tests/migration_sql.py`, que o lê com o parser do PostgreSQL. Continua estático: SQL vindo de
+fora do módulo escapa, e a revisão do PR vale.
 """
 
 import ast
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 
 import alembic.op
 
@@ -38,6 +39,18 @@ TOO_MANY_RENDERINGS = f"{PLACEHOLDER}_too_many_renderings"
 MAX_NAME_DEPTH = 3
 
 EXECUTE_OPERATIONS = frozenset({"execute", "exec_driver_sql"})
+# Método que roda SQL em qualquer receptor (`execute`, `executemany`, `_exec`, `exec_driver_sql`).
+DATABASE_METHOD = re.compile(r"exec", re.IGNORECASE)
+# Opções de `create_table` que não mexem em tabela existente; `postgresql_inherits` trava a mãe.
+SAFE_CREATE_TABLE_OPTIONS = frozenset(
+    {"schema", "if_not_exists", "comment", "info", "postgresql_partition_by"}
+    | {"postgresql_with", "postgresql_using", "postgresql_tablespace"}
+)
+# Valor de um nome que o check não resolve: parâmetro, variável de laço, desempacotamento,
+# classe ou função do módulo. Lido como texto, vira o PLACEHOLDER; como coluna ou tipo, é recusado.
+UNRESOLVED = ast.Name(id=PLACEHOLDER)
+# Valor de um nome importado: texto desconhecido, mas tipo externo (`from sqlalchemy import Text`).
+IMPORTED = ast.Name(id=PLACEHOLDER)
 # Keywords que levam o SQL em `op.execute(sqltext=...)` e `exec_driver_sql(statement=...)`.
 SQL_KEYWORDS = frozenset({"sqltext", "statement"})
 FORMAT_FIELD = re.compile(r"\{[^{}]*\}")
@@ -90,6 +103,7 @@ ALTER_COLUMN_POSITIONAL = 2
 ALEMBIC_OPERATIONS = frozenset(name for name in dir(alembic.op) if not name.startswith("_"))
 
 type Assignments = dict[str, list[ast.expr]]
+FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 type Condition = Callable[[ast.Call, Assignments], bool]
 
 
@@ -101,7 +115,7 @@ def _always(_call: ast.Call, _assignments: Assignments) -> bool:
 # EXCLUDE ficam de fora: constroem índice sob lock, e o Alembic não expressa o `USING INDEX` de
 # um índice criado antes com CONCURRENTLY (esse caminho vai por `op.execute`).
 SAFE_OPERATIONS: dict[str, Condition] = {
-    "create_table": _always,
+    "create_table": lambda call, _: _create_table_is_safe(call),
     "create_index": lambda call, _: _keyword_is_true(call, "postgresql_concurrently"),
     "drop_index": lambda call, _: _keyword_is_true(call, "postgresql_concurrently"),
     "add_column": lambda call, assignments: _add_column_is_safe(call, assignments),
@@ -118,6 +132,8 @@ SAFE_OPERATIONS: dict[str, Condition] = {
     "f": _always,
     "get_bind": _always,
     "get_context": _always,
+    "autocommit_block": _always,
+    "cursor": _always,
     "inline_literal": _always,
 }
 
@@ -128,20 +144,24 @@ def checked_revisions(names: list[str]) -> list[str]:
 
 
 def unmarked_blocking_lines(source: str) -> list[int]:
-    """Linhas do `upgrade()`, e das funções que ele chama, com DDL bloqueante sem `# lock-ok:`."""
+    """Linhas com DDL bloqueante sem `# lock-ok:`, no módulo inteiro salvo o `downgrade()`.
+
+    Ler só o `upgrade()` e o que ele chama pelo nome deixaria escapar a função chamada por
+    apelido, a lambda, o método de classe e o `upgrade = outra_funcao`.
+    """
     tree = ast.parse(source)
     lines = source.splitlines()
-    scope = _upgrade_scope(tree)
-    assignments = _assignments(tree, scope)
-    created = _tables_created(scope)
+    roots = _checked_roots(tree)
+    assignments = _module_assignments(roots)
+    on_new_table = _calls_on_new_tables(roots)
     modules, imported = _op_module_names(tree), _imported_operations(tree)
     return sorted(
         node.lineno
-        for function in scope
-        for node in ast.walk(function)
+        for root in roots
+        for node in ast.walk(root)
         if isinstance(node, ast.Call)
-        and _reaches_database(node, modules, imported)
-        and _target_table(node) not in created
+        and _reaches_database(node, modules, imported, assignments)
+        and id(node) not in on_new_table
         and not _is_safe(node, assignments)
         and not is_marked(lines, node.lineno, LOCK_OK_MARK)
     )
@@ -197,6 +217,134 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
     return sorted(unsafe)
 
 
+def _checked_roots(tree: ast.Module) -> list[ast.stmt]:
+    """O módulo sem as funções que só o `downgrade()` alcança."""
+    functions = {node.name: node for node in tree.body if isinstance(node, FUNCTION_NODES)}
+    downgrade = _reachable(functions, {"downgrade"})
+    outside = {
+        name
+        for node in tree.body
+        if not (isinstance(node, FUNCTION_NODES) and node.name in downgrade)
+        for name in _loaded_names(node)
+    }
+    excluded = downgrade - _reachable(functions, outside | {"upgrade"})
+    return [
+        node
+        for node in tree.body
+        if not (isinstance(node, FUNCTION_NODES) and node.name in excluded)
+    ]
+
+
+def _reachable(functions: Mapping[str, ast.stmt], start: set[str]) -> set[str]:
+    """As funções do módulo citadas a partir de `start`, chamadas ou passadas por referência."""
+    pending, seen = list(start), set()
+    while pending:
+        name = pending.pop()
+        if name in seen or name not in functions:
+            continue
+        seen.add(name)
+        pending.extend(_loaded_names(functions[name]))
+    return seen
+
+
+def _loaded_names(node: ast.AST) -> set[str]:
+    return {
+        child.id
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+    }
+
+
+def _module_assignments(roots: list[ast.stmt]) -> Assignments:
+    """As atribuições do módulo lido, com o UNRESOLVED para todo nome ligado de outra forma."""
+    assignments = _assignments_in_order(
+        sorted(
+            (node for root in roots for node in ast.walk(root) if isinstance(node, ast.stmt)),
+            key=lambda node: (node.lineno, node.col_offset),
+        )
+    )
+    for name in _unresolved_bindings(roots):
+        assignments.setdefault(name, []).append(UNRESOLVED)
+    for name in _imported_names(roots):
+        assignments.setdefault(name, []).append(IMPORTED)
+    return assignments
+
+
+def _imported_names(roots: list[ast.stmt]) -> set[str]:
+    return {
+        node.asname or node.name.split(".")[0]
+        for root in roots
+        for node in ast.walk(root)
+        if isinstance(node, ast.alias)
+    }
+
+
+def _unresolved_bindings(roots: list[ast.stmt]) -> set[str]:
+    """Nomes ligados por laço, parâmetro, desempacotamento, `with`, `except`, `match`, classe ou
+    função."""
+    simple = {
+        id(target)
+        for root in roots
+        for node in ast.walk(root)
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name)
+    }
+    names: set[str] = set()
+    for root in roots:
+        for node in ast.walk(root):
+            match node:
+                case ast.Name(ctx=ast.Store()) if id(node) not in simple:
+                    names.add(node.id)
+                case ast.arg(arg=name) | ast.ExceptHandler(name=str(name)):
+                    names.add(name)
+                case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name):
+                    names.add(name)
+                case ast.ClassDef(name=name) | ast.MatchAs(name=str(name)):
+                    names.add(name)
+                case ast.MatchStar(name=str(name)):
+                    names.add(name)
+    return names
+
+
+def _calls_on_new_tables(roots: list[ast.stmt]) -> set[int]:
+    """Chamadas sobre uma tabela que esta mesma função acabou de criar.
+
+    Só conta o `create_table` seguro escrito direto no corpo da função (fora de `if`, laço ou
+    `try`), antes da operação: se a função chegou à operação, a tabela nasceu nela, vazia.
+    """
+    on_new: set[int] = set()
+    functions = (
+        node for root in roots for node in ast.walk(root) if isinstance(node, FUNCTION_NODES)
+    )
+    for function in functions:
+        created: dict[str, int] = {}
+        for statement in function.body:
+            match statement:
+                case ast.Expr(value=ast.Call() as call) | ast.Assign(value=ast.Call() as call) if (
+                    _operation(call) == "create_table"
+                    and call.args
+                    and _create_table_is_safe(call)
+                    and not _has_keyword(call, "if_not_exists", "schema")
+                ):
+                    name = _table_name(call.args[0])
+                    if name is not None:
+                        created.setdefault(name, call.lineno)
+        on_new.update(
+            id(node)
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and (table := _target_table(node)) in created
+            and created[table] < node.lineno
+        )
+    return on_new
+
+
+def _create_table_is_safe(call: ast.Call) -> bool:
+    """Tabela nova, sem `**` nem opção fora da allowlist (`postgresql_inherits` trava a mãe)."""
+    return all(keyword.arg in SAFE_CREATE_TABLE_OPTIONS for keyword in call.keywords)
+
+
 def _upgrade_scope(tree: ast.Module) -> list[ast.FunctionDef]:
     """O `upgrade()` e as funções do módulo que ele chama, direta ou indiretamente."""
     functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
@@ -221,10 +369,14 @@ def _assignments(tree: ast.Module, scope: list[ast.FunctionDef]) -> Assignments:
     código, `sql += "..."` estende cada valor atual do nome; os valores de antes do acréscimo
     ficam depois deles como alternativas, porque o SQL pode ter rodado antes.
     """
-    statements: list[ast.AST] = [
+    statements: list[ast.stmt] = [
         node for node in tree.body if not isinstance(node, ast.FunctionDef)
     ]
     statements += [node for function in scope for node in _in_source_order(function)]
+    return _assignments_in_order(statements)
+
+
+def _assignments_in_order(statements: list[ast.stmt]) -> Assignments:
     current: Assignments = {}
     earlier: Assignments = {}
     for node in statements:
@@ -253,20 +405,6 @@ def _assignments(tree: ast.Module, scope: list[ast.FunctionDef]) -> Assignments:
 def _in_source_order(function: ast.FunctionDef) -> list[ast.stmt]:
     statements = [node for node in ast.walk(function) if isinstance(node, ast.stmt)]
     return sorted(statements, key=lambda node: (node.lineno, node.col_offset))
-
-
-def _tables_created(scope: list[ast.FunctionDef]) -> frozenset[str]:
-    """Tabelas que o `upgrade()` cria com certeza: sem `if_not_exists` e no schema padrão."""
-    names = (
-        _table_name(node.args[0])
-        for function in scope
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and _operation(node) == "create_table"
-        and node.args
-        and not _has_keyword(node, "if_not_exists", "schema")
-    )
-    return frozenset(name for name in names if name is not None)
 
 
 def _target_table(call: ast.Call) -> str | None:
@@ -312,21 +450,46 @@ def _imported_operations(tree: ast.Module) -> frozenset[str]:
     )
 
 
-def _reaches_database(call: ast.Call, modules: frozenset[str], imported: frozenset[str]) -> bool:
-    """Operação do Alembic, por qualquer receptor, ou SQL por uma conexão.
+def _reaches_database(
+    call: ast.Call, modules: frozenset[str], imported: frozenset[str], assignments: Assignments
+) -> bool:
+    """Operação do Alembic, por qualquer receptor, SQL por uma conexão ou método do que vem do op.
 
-    O receptor não decide: `alembic.op.x`, `o = op; o.x` e o `batch` de `batch_alter_table` também
-    contam pelo nome da operação. Chamada de algo que não é nome (`getattr(op, "x")(...)`) conta
-    sempre, porque não há como saber o que ela faz.
+    O receptor não decide: `alembic.op.x`, `o = op; o.x` e o `batch` de `batch_alter_table`
+    contam pelo nome da operação, e todo método com `exec` no nome conta (`cur.executemany`).
+    Qualquer método sobre o que sai do `op` (`op.get_context().impl._exec`, o cursor da conexão)
+    também conta. Chamada de algo que não é nome (`getattr(op, "x")(...)`) conta sempre.
     """
     match call.func:
         case ast.Attribute(value=ast.Name(id=module)) if module in modules:
             return True
-        case ast.Attribute(attr=attribute):
-            return attribute in EXECUTE_OPERATIONS or attribute in ALEMBIC_OPERATIONS
+        case ast.Attribute(attr=attribute, value=receiver):
+            return (
+                attribute in EXECUTE_OPERATIONS
+                or attribute in ALEMBIC_OPERATIONS
+                or DATABASE_METHOD.search(attribute) is not None
+                or _comes_from_op(receiver, modules, assignments, 0)
+            )
         case ast.Name(id=name):
             return name in imported or name in ALEMBIC_OPERATIONS
     return True
+
+
+def _comes_from_op(
+    node: ast.expr, modules: frozenset[str], assignments: Assignments, depth: int
+) -> bool:
+    """O valor sai do módulo `op`, direto (`op.get_bind().connection`) ou por variável."""
+    match node:
+        case ast.Attribute(value=inner) | ast.Subscript(value=inner) | ast.Call(func=inner):
+            return _comes_from_op(inner, modules, assignments, depth)
+        case ast.Name(id=name) if name in modules:
+            return True
+        case ast.Name(id=name) if name in assignments and depth < MAX_NAME_DEPTH:
+            return any(
+                _comes_from_op(value, modules, assignments, depth + 1)
+                for value in assignments[name]
+            )
+    return False
 
 
 def _is_safe(call: ast.Call, assignments: Assignments) -> bool:
@@ -420,23 +583,40 @@ def _single_default_is_safe(default: ast.expr) -> bool:
 
 
 def _type_is_safe(node: ast.expr, assignments: Assignments) -> bool:
-    """Classe de tipo do SQLAlchemy (`sa.Text()`, `postgresql.JSONB`), sem domínio dentro."""
+    """Classe de tipo do SQLAlchemy (`sa.Text()`, `postgresql.JSONB`), sem domínio nem CHECK.
+
+    Toda chamada dentro do tipo (`sa.ARRAY(sa.Text())`) precisa ser de uma classe que não vem
+    do módulo: uma classe local (`UserDefinedType`) pode devolver o nome de um domínio. Nenhuma
+    pode ter `**` nem `create_constraint` (o `Boolean` e o `Enum` não nativo viram CHECK).
+    """
     for value in _alternatives(node, assignments):
-        callee = value.func if isinstance(value, ast.Call) else value
-        name = (
-            callee.attr
-            if isinstance(callee, ast.Attribute)
-            else callee.id
-            if isinstance(callee, ast.Name)
-            else ""
-        )
-        if not name[:1].isupper() or any(
-            DOMAIN_TYPE in (child.attr if isinstance(child, ast.Attribute) else "")
-            or DOMAIN_TYPE in (child.id if isinstance(child, ast.Name) else "")
-            for child in ast.walk(value)
-        ):
+        if not _is_type_class(value.func if isinstance(value, ast.Call) else value, assignments):
             return False
+        for child in ast.walk(value):
+            if isinstance(child, ast.Attribute | ast.Name) and DOMAIN_TYPE in _node_name(child):
+                return False
+            if isinstance(child, ast.Call) and not (
+                _is_type_class(child.func, assignments)
+                and all(keyword.arg is not None for keyword in child.keywords)
+                and _keyword_constant(child, "create_constraint") in {None, False}
+            ):
+                return False
     return True
+
+
+def _is_type_class(callee: ast.expr, assignments: Assignments) -> bool:
+    """Nome de classe (maiúscula) que não é do módulo; nome resolvido conta por cada valor."""
+    return _is_class_name(callee) and all(
+        value is IMPORTED or _is_class_name(value) for value in _alternatives(callee, assignments)
+    )
+
+
+def _is_class_name(node: ast.expr) -> bool:
+    return isinstance(node, ast.Attribute | ast.Name) and _node_name(node)[:1].isupper()
+
+
+def _node_name(node: ast.Attribute | ast.Name) -> str:
+    return node.attr if isinstance(node, ast.Attribute) else node.id
 
 
 def _is_virtual_column(part: ast.expr) -> bool:
@@ -468,12 +648,18 @@ def _constant(node: ast.expr) -> object:
 
 
 def _is_blocking_sql(sql: str) -> bool:
-    return TOO_MANY_RENDERINGS in sql or analyze_sql(sql).blocking
+    """Trecho que o check não montou (PLACEHOLDER) pode ser qualquer SQL: conta como bloqueante."""
+    return PLACEHOLDER in sql or analyze_sql(sql).blocking
 
 
 def _sql_texts(call: ast.Call, assignments: Assignments) -> list[str]:
-    """Os textos de SQL que o `execute` pode receber, com variáveis e f-strings montadas."""
+    """Os textos de SQL que o `execute` pode receber, com variáveis e f-strings montadas.
+
+    Sem texto à vista (nenhum argumento, ou só `**`), o SQL vira o PLACEHOLDER.
+    """
     arguments = [*call.args, *(kw.value for kw in call.keywords if kw.arg in SQL_KEYWORDS)]
+    if not arguments:
+        return [PLACEHOLDER]
     return [text for argument in arguments for text in _render(argument, assignments, 0)]
 
 
