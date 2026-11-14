@@ -11,11 +11,10 @@ from datetime import datetime
 from enum import Enum, auto
 from uuid import UUID
 
-from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from goblinshift.identity.tables import app_user, web_session
+from goblinshift.identity.tables import app_user
 
 ACTIVE_STATUS = "active"
 BLOCKED_STATUS = "blocked"
@@ -63,26 +62,27 @@ def resolve_login(
             subject=identity.subject,
             display_name=identity.display_name,
             status=ACTIVE_STATUS if signup_open else BLOCKED_STATUS,
+            awaiting_approval=not signup_open,
             created_at=now,
         )
         .on_conflict_do_update(
             index_elements=[app_user.c.issuer, app_user.c.subject],
             set_={"display_name": identity.display_name},
         )
-        .returning(app_user.c.id, app_user.c.status, app_user.c.deletion_requested_at)
+        .returning(
+            app_user.c.id,
+            app_user.c.status,
+            app_user.c.awaiting_approval,
+            app_user.c.deletion_requested_at,
+        )
     )
     account = session.execute(statement).one()
     user_id: UUID = account.id
     if account.deletion_requested_at is not None:
         return LoginRefusal(user_id, LoginRefused.DELETION_REQUESTED)
     if account.status == BLOCKED_STATUS:
-        return LoginRefusal(user_id, _blocked_reason(session, user_id))
+        pending = account.awaiting_approval
+        return LoginRefusal(
+            user_id, LoginRefused.PENDING_APPROVAL if pending else LoginRefused.BLOCKED
+        )
     return user_id
-
-
-def _blocked_reason(session: Session, user_id: UUID) -> LoginRefused:
-    """Pendente é a conta bloqueada que nunca teve sessão (o critério do ADR 023)."""
-    had_session = session.execute(
-        select(exists().where(web_session.c.user_id == user_id))
-    ).scalar_one()
-    return LoginRefused.BLOCKED if had_session else LoginRefused.PENDING_APPROVAL

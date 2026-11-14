@@ -7,6 +7,7 @@ evento de aceite dos termos na auditoria (migração 0008).
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
     text,
 )
@@ -45,6 +47,9 @@ app_user = Table(
     Column("deletion_requested_at", DateTime(timezone=True)),
     # Última vez que a manutenção escolheu a conta para a purga: rodízio entre as pendentes (#442).
     Column("purge_attempted_at", DateTime(timezone=True)),
+    # Pendente de liberação no cadastro fechado (ADR 023). Só nasce `true`; bloquear ou liberar
+    # zera. Não se deduz de `web_session`, que a retenção apaga (migração 0018).
+    Column("awaiting_approval", Boolean, nullable=False, server_default=false()),
     UniqueConstraint("issuer", "subject"),
     CheckConstraint("status IN ('active', 'blocked')", name="status"),
     CheckConstraint("length(display_name) BETWEEN 1 AND 200", name="display_name"),
