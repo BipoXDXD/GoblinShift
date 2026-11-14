@@ -14,7 +14,7 @@ from testcontainers.community.postgres import PostgresContainer
 from goblinshift.capacity import GLOBAL_STORAGE_MAX_BYTES, Resource
 from goblinshift.capacity.tables import capacity_pool
 from goblinshift.platform.settings import Settings
-from tests.skip_guard import pytest_addoption, pytest_sessionfinish  # noqa: F401 (hooks do guard)
+from tests.skip_guard import pytest_addoption, pytest_configure  # noqa: F401 (hooks do guard)
 
 POSTGRES_IMAGE = "postgres:18.6-trixie"
 

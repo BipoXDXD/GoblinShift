@@ -14,6 +14,10 @@ XFAILED = (
     "import pytest\n\n@pytest.mark.xfail(strict=True)\n"
     "def test_falha_esperada():\n    assert False\n"
 )
+MODULE_SKIPPED = (
+    "import pytest\n\npytest.skip('módulo sem a ferramenta', allow_module_level=True)\n\n"
+    "def test_nunca_roda():\n    assert True\n"
+)
 DESELECTED = "import pytest\n\n@pytest.mark.lento\ndef test_lento():\n    assert True\n"
 
 
@@ -58,3 +62,16 @@ def test_sem_a_opcao_skip_nao_muda_o_resultado(tmp_path: Path) -> None:
     result = run_suite(tmp_path, SKIPPED)
 
     assert result.returncode == pytest.ExitCode.OK, result.stdout
+
+
+def test_com_a_opcao_skip_no_nivel_do_modulo_reprova_a_suite(tmp_path: Path) -> None:
+    result = run_suite(tmp_path, MODULE_SKIPPED, "--fail-on-skip")
+
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout
+
+
+def test_com_a_opcao_e_sem_o_terminal_o_skip_ainda_reprova(tmp_path: Path) -> None:
+    # Sem o terminalreporter não há estatística para ler: a contagem vem dos relatórios.
+    result = run_suite(tmp_path, SKIPPED, "--fail-on-skip", "-p", "no:terminal")
+
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout
