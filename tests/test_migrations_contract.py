@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.migration_source import is_marked, string_constants, upgrade_function
+
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 CONTRACT_MARK = re.compile(r"#\s*contract:\s*\S")
 DESTRUCTIVE_OPS = frozenset({"drop_column", "drop_table", "rename_table"})
@@ -30,29 +32,16 @@ DESTRUCTIVE_SQL = re.compile(
 def unmarked_destructive_lines(source: str) -> list[int]:
     """Linhas do `upgrade()` com DROP/RENAME de coluna ou tabela sem a marca de contract."""
     lines = source.splitlines()
-    upgrade = next(
-        (
-            node
-            for node in ast.parse(source).body
-            if isinstance(node, ast.FunctionDef) and node.name == "upgrade"
-        ),
-        None,
-    )
+    upgrade = upgrade_function(source)
     if upgrade is None:
         return []
-    found = []
-    for node in ast.walk(upgrade):
-        if isinstance(node, ast.Call) and _is_destructive(node):
-            line = node.lineno
-            # Na linha acima, só uma linha que é apenas o comentário: a marca de outra operação
-            # não cobre esta.
-            previous = lines[line - 2].strip() if line >= 2 else ""
-            marked = CONTRACT_MARK.search(lines[line - 1]) or (
-                previous.startswith("#") and CONTRACT_MARK.search(previous)
-            )
-            if not marked:
-                found.append(line)
-    return sorted(found)
+    return sorted(
+        node.lineno
+        for node in ast.walk(upgrade)
+        if isinstance(node, ast.Call)
+        and _is_destructive(node)
+        and not is_marked(lines, node.lineno, CONTRACT_MARK)
+    )
 
 
 def _is_destructive(call: ast.Call) -> bool:
@@ -62,12 +51,7 @@ def _is_destructive(call: ast.Call) -> bool:
     if name == "alter_column":
         return any(keyword.arg == "new_column_name" for keyword in call.keywords)
     if name == "execute":
-        return any(
-            isinstance(arg, ast.Constant)
-            and isinstance(arg.value, str)
-            and DESTRUCTIVE_SQL.search(arg.value)
-            for arg in ast.walk(call)
-        )
+        return any(DESTRUCTIVE_SQL.search(text) for text in string_constants(call))
     return False
 
 
