@@ -38,17 +38,33 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
 
 
 @pytest.mark.parametrize(
-    "headers",
+    ("headers", "reason"),
     [
-        ["License-Expression: GPL-3.0-or-later"],
-        ["License-Expression: AGPL-3.0-only"],
-        ["License-Expression: MIT OR GPL-2.0-only"],
-        ["License: GPLv3"],
-        ["Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)"],
-        ["Classifier: License :: OSI Approved :: GNU Affero General Public License v3"],
-        ["License: GNU General Public License v3"],
-        ["License: GNU GENERAL PUBLIC LICENSE\n        Version 3, 29 June 2007"],
-        ["License: gnu affero general public license"],
+        (["License-Expression: GPL-3.0-or-later"], "GPL-3.0-or-later"),
+        (["License-Expression: AGPL-3.0-only"], "AGPL-3.0-only"),
+        (["License-Expression: MIT OR GPL-2.0-only"], "MIT OR GPL-2.0-only"),
+        (["License: GPLv3"], "GPLv3"),
+        (
+            ["Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)"],
+            "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        ),
+        (
+            ["Classifier: License :: OSI Approved :: GNU Affero General Public License v3"],
+            "License :: OSI Approved :: GNU Affero General Public License v3",
+        ),
+        (["License: GNU General Public License v3"], "GNU General Public License v3"),
+        (
+            ["License: GNU GENERAL PUBLIC LICENSE\n        Version 3, 29 June 2007"],
+            "GNU GENERAL PUBLIC LICENSE",
+        ),
+        (["License: gnu affero general public license"], "gnu affero general public license"),
+        # A linha de copyright não declara licença: vale a primeira que declara.
+        (
+            ["License: Copyright (C) 2020 Foo\n        GNU General Public License v3"],
+            "GNU General Public License v3",
+        ),
+        (["License: \n        (c) Foo\n        GPL-3.0-or-later"], "GPL-3.0-or-later"),
+        (["License: \u00a9 2020 Foo\n        GPLv2"], "GPLv2"),
     ],
     ids=[
         "spdx-gpl",
@@ -60,13 +76,15 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
         "extenso",
         "texto-oficial",
         "extenso-minusculas",
+        "copyright-antes",
+        "linha-vazia-e-copyright-antes",
+        "simbolo-de-copyright-antes",
     ],
 )
-def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str]) -> None:
+def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str], reason: str) -> None:
     package = _fake_distribution(tmp_path, "copyleft", headers)
-    first_line = headers[0].split(": ", 1)[1].splitlines()[0]
 
-    assert refused_packages([package]) == [f"copyleft 1.0 ({first_line})"]
+    assert refused_packages([package]) == [f"copyleft 1.0 ({reason})"]
 
 
 @pytest.mark.parametrize(
@@ -96,9 +114,20 @@ def test_lgpl_e_permissivas_passam(tmp_path: Path, headers: list[str]) -> None:
     assert refused_packages([package]) == []
 
 
-def test_pacote_sem_licenca_declarada_e_recusado(tmp_path: Path) -> None:
-    # Sem nenhum dos três campos não há o que conferir; passar calado esconderia uma GPL.
-    package = _fake_distribution(tmp_path, "unknown", ["Classifier: Programming Language :: C"])
+@pytest.mark.parametrize(
+    "headers",
+    [
+        ["Classifier: Programming Language :: C"],
+        ["License: UNKNOWN"],
+        ["License-Expression: unknown", "License: Unknown"],
+        ["License: Copyright (c) 2020 Foo"],
+    ],
+    ids=["nenhum-campo", "unknown", "unknown-nos-dois", "so-copyright"],
+)
+def test_pacote_sem_licenca_declarada_e_recusado(tmp_path: Path, headers: list[str]) -> None:
+    # Sem licença declarada não há o que conferir; passar calado esconderia uma GPL. `UNKNOWN` é o
+    # valor que o setuptools antigo grava quando o autor não declarou nada.
+    package = _fake_distribution(tmp_path, "unknown", headers)
 
     assert refused_packages([package]) == ["unknown 1.0 (sem licença declarada)"]
 

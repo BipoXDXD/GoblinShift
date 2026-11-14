@@ -56,7 +56,9 @@ def upgrade() -> None:
 
 def _expand_app_user() -> None:
     op.add_column("app_user", sa.Column("terms_version", sa.Text(), nullable=True))
+    # lock-ok: _timestamp sem now=True dá timestamptz anulável sem DEFAULT; não reescreve app_user
     op.add_column("app_user", _timestamp("terms_accepted_at", nullable=True))
+    # lock-ok: idem, timestamptz anulável sem DEFAULT
     op.add_column("app_user", _timestamp("deletion_requested_at", nullable=True))
     # lock-ok: colunas recém-criadas, nulas em todas as linhas; app_user tem uma linha por conta
     op.create_check_constraint(

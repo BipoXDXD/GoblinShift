@@ -14,12 +14,12 @@ Na dúvida o resultado peca pelo lado seguro: instrução que não parseia pede 
 no meio dela conta, e índice criado sem nome resolvido nunca conta como apagado.
 """
 
-import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from pglast import ast, parse_sql, split
+from pglast.enums import A_Expr_Kind as AExprKind
 from pglast.enums import AlterTableType, ConstrType, ObjectType
 from pglast.parser import ParseError, scan
 
@@ -28,10 +28,34 @@ PLACEHOLDER = "__unresolved__"
 # Nome de índice em partes (schema, nome), como o PostgreSQL o guarda.
 type IndexName = tuple[str, ...]
 
-VOLATILE_FUNCTION = re.compile(
-    r"gen_random_uuid|uuid_generate_v\w+|uuidv\d|random|clock_timestamp|timeofday|nextval"
+# Default de coluna nova que não reescreve a tabela: só constante e função estável (o valor é
+# calculado uma vez e guardado no catálogo). Função volátil, desconhecida ou do projeto pede
+# a marca.
+SAFE_DEFAULT_FUNCTIONS = frozenset({"now", "transaction_timestamp", "statement_timestamp"})
+SAFE_DEFAULT_NODES: tuple[type[Any], ...] = (
+    ast.A_Const,
+    ast.TypeCast,
+    ast.TypeName,
+    ast.String,
+    ast.Integer,
+    ast.Float,
+    ast.Boolean,
+    ast.BitString,
+    ast.A_ArrayExpr,
+    ast.SQLValueFunction,
 )
-SERIAL_TYPES = frozenset({"smallserial", "serial", "bigserial", "serial2", "serial4", "serial8"})
+# Tipos nativos de coluna nova. Os de sintaxe própria vêm qualificados por `pg_catalog`; outro
+# nome pode ser domínio com CHECK (varre a tabela) ou serial (reescreve), então pede a marca.
+BUILTIN_TYPES = frozenset(
+    {
+        "text", "varchar", "bpchar", "char", "jsonb", "json", "uuid", "bytea", "date", "time",
+        "timetz", "timestamp", "timestamptz", "interval", "int2", "int4", "int8", "float4",
+        "float8", "numeric", "bool", "cidr", "inet", "macaddr", "tsvector", "xml", "oid",
+    }
+)  # fmt: skip
+CATALOG_SCHEMA = "pg_catalog"
+NON_CODE_TOKENS = frozenset({"C_COMMENT", "SQL_COMMENT", "ASCII_59"})
+QUALIFIED_NAME_PARTS = 2
 # Constraints validadas na hora: a forma segura é NOT VALID e VALIDATE depois.
 VALIDATED_CONSTRAINTS = frozenset(
     {ConstrType.CONSTR_FOREIGN, ConstrType.CONSTR_CHECK, ConstrType.CONSTR_NOTNULL}
@@ -107,6 +131,10 @@ def analyze_sql(sql: str) -> SqlFacts:
         # Nem o scanner aceita (texto entre aspas sem fechar): o servidor também recusaria.
         return SqlFacts(True, True, 1, [None], [])
     facts = [_statement_facts(statement) for statement in statements]
+    if _code_tokens(sql) > sum(_code_tokens(statement) for statement in statements):
+        # O split sem parser descarta a instrução que não começa por palavra-chave (`foo;`, o
+        # PLACEHOLDER de um trecho que o check não montou): o que sobrou não foi lido.
+        facts.append(_unparsed_facts(sql))
     return SqlFacts(
         blocking=any(fact.blocking for fact in facts),
         concurrent=any(fact.concurrent for fact in facts),
@@ -114,6 +142,11 @@ def analyze_sql(sql: str) -> SqlFacts:
         created_concurrent_indexes=[n for f in facts for n in f.created_concurrent_indexes],
         dropped_concurrent_indexes=[n for f in facts for n in f.dropped_concurrent_indexes],
     )
+
+
+def _code_tokens(sql: str) -> int:
+    """Tokens que são código: sem comentários e sem o `;` que separa as instruções."""
+    return sum(token.name not in NON_CODE_TOKENS for token in scan(sql))
 
 
 def _statement_facts(statement: str) -> SqlFacts:
@@ -164,11 +197,8 @@ def _constraint_is_safe(constraint: ast.Constraint) -> bool:
 
 def _column_is_blocking(column: ast.ColumnDef) -> bool:
     """Coluna nova que reescreve a tabela, a varre para validar ou constrói índice sob lock."""
-    if column.typeName is not None:
-        type_name = _last_name(column.typeName.names)
-        # Tipo que o check não resolve pode ser serial ou exigir reescrita.
-        if type_name in SERIAL_TYPES or PLACEHOLDER in type_name:
-            return True
+    if column.typeName is not None and not _is_builtin_type(column.typeName):
+        return True
     for constraint in column.constraints or ():
         if constraint.contype in REWRITING_COLUMN_CONSTRAINTS:
             return True
@@ -178,31 +208,51 @@ def _column_is_blocking(column: ast.ColumnDef) -> bool:
             and constraint.generated_kind == STORED
         ):
             return True
-        if constraint.contype == ConstrType.CONSTR_DEFAULT and _is_volatile(constraint.raw_expr):
+        if constraint.contype == ConstrType.CONSTR_DEFAULT and not default_is_safe(
+            constraint.raw_expr
+        ):
             return True
     return False
 
 
-def _is_volatile(expression: ast.Node | None) -> bool:
-    """O default chama função volátil, ou tem trecho que o check não resolve."""
-    return any(
-        _calls_volatile(node) or _is_unresolved_reference(node)
-        for node in (_walk(expression) if expression is not None else ())
-    )
-
-
-def _calls_volatile(node: ast.Node) -> bool:
-    if not isinstance(node, ast.FuncCall):
+def default_sql_is_safe(expression: str) -> bool:
+    """O texto de um `server_default` é constante ou função estável (ver `default_is_safe`)."""
+    try:
+        (statement,) = parse_sql(f"SELECT ({expression})")
+    except ParseError, ValueError:
         return False
-    name = _last_name(node.funcname)
-    return VOLATILE_FUNCTION.fullmatch(name) is not None or PLACEHOLDER in name
+    select = statement.stmt
+    if not isinstance(select, ast.SelectStmt) or select.targetList is None:
+        return False
+    match select.targetList:
+        case (ast.ResTarget(val=value),):
+            return default_is_safe(value)
+    return False
 
 
-def _is_unresolved_reference(node: ast.Node) -> bool:
-    """Valor montado no lugar de uma expressão: o PostgreSQL não aceita coluna num DEFAULT."""
-    return isinstance(node, ast.ColumnRef) and any(
-        PLACEHOLDER in (getattr(field, "sval", None) or "") for field in node.fields or ()
-    )
+def default_is_safe(expression: ast.Node | None) -> bool:
+    """Todo nó do default está na allowlist: constante, cast, operador e função estável."""
+    return expression is not None and all(_is_safe_default_node(node) for node in _walk(expression))
+
+
+def _is_safe_default_node(node: ast.Node) -> bool:
+    match node:
+        case ast.FuncCall(funcname=names):
+            return (
+                names is not None
+                and len(names) == 1
+                and _last_name(names) in SAFE_DEFAULT_FUNCTIONS
+            )
+        case ast.A_Expr(kind=AExprKind.AEXPR_OP):
+            return True
+    return isinstance(node, SAFE_DEFAULT_NODES)
+
+
+def _is_builtin_type(type_name: ast.TypeName) -> bool:
+    names = [name.sval for name in type_name.names or ()]
+    if len(names) == QUALIFIED_NAME_PARTS and names[0] == CATALOG_SCHEMA:
+        return True
+    return len(names) == 1 and names[0] in BUILTIN_TYPES
 
 
 def _is_concurrent(node: ast.Node) -> bool:

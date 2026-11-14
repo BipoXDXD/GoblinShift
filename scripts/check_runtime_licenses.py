@@ -8,6 +8,7 @@ que nunca entra em imagem; ali, uma delas viraria distribuição junto com o có
 Lê a licença de três campos dos metadados: `License-Expression` (SPDX), `License` e os
 classifiers `License ::`. Pacote do `DEV_ONLY` é recusado pelo nome, qualquer que seja a licença.
 Pacote sem licença declarada em nenhum dos três também é recusado: não há como conferi-lo.
+`UNKNOWN` e o aviso de copyright que abre o texto não contam como declaração.
 Licença dupla com uma opção GPL (`MIT OR GPL-2.0-only`) é recusada; aceitá-la exige decidir
 pelo pacote, no ADR 057.
 
@@ -31,6 +32,10 @@ SPDX_COPYLEFT = re.compile(r"(?<![A-Za-z])A?GPL(?=v\d|[^A-Za-z]|$)(?!-compatible
 # Nome por extenso, em classifier ou no campo License ("GNU GENERAL PUBLIC LICENSE", primeira
 # linha do texto oficial), sem pegar a Lesser nem a Library.
 FULL_NAME_COPYLEFT = re.compile(r"GNU (Affero )?General Public License", re.IGNORECASE)
+# Valor que o setuptools antigo grava quando o autor não declarou licença.
+UNDECLARED = "unknown"
+# Linhas do campo License que não declaram licença: o aviso de copyright que abre o texto.
+COPYRIGHT_PREFIXES = ("copyright", "(c)", "\u00a9")
 EXIT_REFUSED = 1
 EXIT_EMPTY = 2
 
@@ -63,9 +68,9 @@ def refusal_reason(name: str, distribution: Distribution) -> str:
     if name in DEV_ONLY:
         return "ferramenta só de dev"
     metadata = distribution.metadata
-    expression = metadata.get("License-Expression") or ""
-    # O campo License às vezes traz o texto inteiro da licença: a primeira linha basta.
-    declared = (metadata.get("License") or "").strip().splitlines()[:1]
+    expression = declared_value(metadata.get("License-Expression") or "")
+    # O campo License às vezes traz o texto inteiro da licença: a primeira linha que declara basta.
+    declared = [line] if (line := declared_value(metadata.get("License") or "")) else []
     classifiers = [
         classifier
         for classifier in map(str, metadata.get_all("Classifier") or ())
@@ -79,6 +84,15 @@ def refusal_reason(name: str, distribution: Distribution) -> str:
             return classifier
     if not (expression or declared or classifiers):
         return "sem licença declarada"
+    return ""
+
+
+def declared_value(field: str) -> str:
+    """A primeira linha que declara a licença; vazio se só houver copyright ou `UNKNOWN`."""
+    for raw in field.splitlines():
+        line = raw.strip()
+        if line and not line.lower().startswith(COPYRIGHT_PREFIXES):
+            return "" if line.lower() == UNDECLARED else line
     return ""
 
 

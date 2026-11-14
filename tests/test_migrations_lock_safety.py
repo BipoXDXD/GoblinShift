@@ -560,6 +560,8 @@ def test_allowlist_tem_um_caso_por_entrada() -> None:
         "CREATE TABLE run_child () INHERITS (run)",
         "GRANT SELECT ON run TO reader",
         "ALTER TYPE run_status RENAME VALUE 'old' TO 'new'",
+        "vacuum_full_custom run",
+        "SELECT 1; __unresolved__ x; SELECT 2",
     ],
     ids=[
         "trigger",
@@ -574,6 +576,8 @@ def test_allowlist_tem_um_caso_por_entrada() -> None:
         "inherits",
         "grant",
         "enum-rename",
+        "sem-palavra-chave",
+        "trecho-sem-palavra-chave-no-meio",
     ],
 )
 def test_no_de_sql_fora_da_allowlist_pede_a_marca(sql: str) -> None:
@@ -855,3 +859,172 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
 )
 def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:
     assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == []
+
+
+@pytest.mark.parametrize(
+    ("header", "body", "line"),
+    [
+        ("import alembic", 'alembic.op.create_index("ix", "run", ["a"])', 5),
+        ("from alembic import op", 'o = op\n    o.create_index("ix", "run", ["a"])', 6),
+        ("from alembic import op", 'getattr(op, "create_index")("ix", "run", ["a"])', 5),
+    ],
+    ids=["caminho-completo", "op-em-variavel", "getattr"],
+)
+def test_receptor_desconhecido_da_operacao_nao_esconde_a_chamada(
+    header: str, body: str, line: int
+) -> None:
+    source = f"{header}\n\n\ndef upgrade() -> None:\n    {body}\n"
+
+    assert unmarked_blocking_lines(source) == [line]
+
+
+@pytest.mark.parametrize(
+    ("body", "line"),
+    [
+        ('U = True\n    op.add_column("run", sa.Column("k", sa.Text(), unique=U))', 3),
+        ('op.add_column("run", sa.Column("k", sa.Text(), **opcoes))', 2),
+        ('op.add_column("run", sa.Column("k", sa.Text(), autoincrement=True))', 2),
+        ('op.add_column("run", sa.Column("k", sa.Text(), nullable=flag))', 2),
+        ('op.add_column("run", _coluna())', 2),
+        ('op.add_column("run", sa.Column("k", postgresql.DOMAIN("d", sa.Text())))', 2),
+        ('op.add_column("run", sa.Column("k", _tipo()))', 2),
+        ('op.add_column("run", sa.Column("k", sa.Text()), **opcoes)', 2),
+    ],
+    ids=[
+        "unique-por-variavel",
+        "kwargs",
+        "opcao-desconhecida",
+        "nullable-variavel",
+        "coluna-de-funcao",
+        "dominio",
+        "tipo-de-funcao",
+        "kwargs-no-add-column",
+    ],
+)
+def test_add_column_so_passa_com_coluna_literal_e_opcoes_conhecidas(body: str, line: int) -> None:
+    source = f"def upgrade() -> None:\n    {body}\n"
+
+    assert unmarked_blocking_lines(source) == [line]
+
+
+@pytest.mark.parametrize(
+    "default",
+    [
+        'sa.text("random_normal()")',
+        'sa.text("txid_current()")',
+        'sa.text("my_volatile()")',
+        "sa.func.my_volatile()",
+        "valor_externo",
+        'sa.text("now() + (SELECT 1)")',
+    ],
+    ids=["random-normal", "txid", "funcao-do-projeto", "sa-func", "variavel", "subconsulta"],
+)
+def test_default_de_coluna_nova_fora_da_allowlist_pede_a_marca(default: str) -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        f'    op.add_column("run", sa.Column("x", sa.Text(), server_default={default}))\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [2]
+
+
+@pytest.mark.parametrize(
+    "default",
+    [
+        '"novo"',
+        'sa.text("0")',
+        "sa.text(\"'{}'::jsonb\")",
+        'sa.text("CURRENT_TIMESTAMP")',
+        "sa.func.now()",
+        "sa.true()",
+    ],
+    ids=["texto", "numero", "cast", "current-timestamp", "sa-func-now", "sa-true"],
+)
+def test_default_constante_ou_estavel_passa(default: str) -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        f'    op.add_column("run", sa.Column("x", sa.Text(), server_default={default}))\n'
+    )
+
+    assert unmarked_blocking_lines(source) == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER TABLE run ADD COLUMN x float8 DEFAULT random_normal()",
+        "ALTER TABLE run ADD COLUMN x bigint DEFAULT txid_current()",
+        "ALTER TABLE run ADD COLUMN x text DEFAULT my_volatile()",
+        "ALTER TABLE run ADD COLUMN x positive_int",
+        "ALTER TABLE run ADD COLUMN x s.dominio DEFAULT 1",
+    ],
+    ids=["random-normal", "txid", "funcao-do-projeto", "dominio", "dominio-qualificado"],
+)
+def test_coluna_nova_em_sql_fora_da_allowlist_pede_a_marca(sql: str) -> None:
+    source = f'def upgrade() -> None:\n    op.execute("{sql}")\n'
+
+    assert unmarked_blocking_lines(source) == [2]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER TABLE run ADD COLUMN x int DEFAULT -1",
+        "ALTER TABLE run ADD COLUMN x varchar(10) DEFAULT 'a'",
+        "ALTER TABLE run ADD COLUMN x timestamptz DEFAULT now()",
+        "ALTER TABLE run ADD COLUMN x timestamp with time zone DEFAULT CURRENT_TIMESTAMP",
+        "ALTER TABLE run ADD COLUMN x jsonb DEFAULT '{}'::jsonb",
+        "ALTER TABLE run ADD COLUMN x uuid",
+        "ALTER TABLE run ADD COLUMN x text[] DEFAULT ARRAY[]::text[]",
+    ],
+    ids=["negativo", "varchar", "now", "current-timestamp", "cast", "uuid", "array"],
+)
+def test_coluna_nova_em_sql_com_tipo_nativo_e_default_estavel_passa(sql: str) -> None:
+    source = f'def upgrade() -> None:\n    op.execute("{sql}")\n'
+
+    assert unmarked_blocking_lines(source) == []
+
+
+@pytest.mark.parametrize(
+    "create",
+    [
+        'op.create_table("run", sa.Column("a", sa.Text()), if_not_exists=True)',
+        'op.create_table("run", sa.Column("a", sa.Text()), schema="arquivo")',
+    ],
+    ids=["if-not-exists", "outro-schema"],
+)
+def test_tabela_que_pode_ja_existir_nao_dispensa_a_marca(create: str) -> None:
+    source = f'def upgrade() -> None:\n    {create}\n    op.create_index("ix", "run", ["a"])\n'
+
+    assert unmarked_blocking_lines(source) == [3]
+
+
+def test_operacao_em_outro_schema_nao_e_a_tabela_criada() -> None:
+    # `arquivo.run` já existe e tem dados; só o `run` do schema padrão nasceu neste upgrade.
+    source = (
+        "def upgrade() -> None:\n"
+        '    op.create_table("run", sa.Column("a", sa.Text()))\n'
+        '    op.create_index("ix", "run", ["a"], schema="arquivo")\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [3]
+
+
+def test_operacao_dentro_do_batch_e_conferida_mesmo_com_a_marca_no_with() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    with op.batch_alter_table("run") as batch:  # lock-ok: rename barato\n'
+        '        batch.create_index("ix", ["a"])\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [3]
+
+
+def test_metodo_de_texto_desconhecido_nao_e_lido_como_o_sql() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    sql = "ALTER TABLE run ALTER COLUMN c SET NOT NULL"\n'
+        '    op.execute(sql.replace("SELECT 1", "SELECT 2"))\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [3]

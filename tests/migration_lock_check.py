@@ -25,7 +25,7 @@ from collections.abc import Callable, Iterator
 import alembic.op
 
 from tests.migration_source import is_marked
-from tests.migration_sql import PLACEHOLDER, VOLATILE_FUNCTION, IndexName, analyze_sql
+from tests.migration_sql import PLACEHOLDER, IndexName, analyze_sql, default_sql_is_safe
 
 REVISION_FILE = re.compile(r"^(\d{4})_\w+\.py$")
 LOCK_OK_MARK = re.compile(r"#\s*lock-ok:\s*\S")
@@ -53,11 +53,24 @@ TARGET_TABLE = {
     "alter_column": (0, "table_name"),
     "add_column": (0, "table_name"),
 }
-# Opções de `sa.Column` que viram índice ou constraint construídos sob lock.
-INDEXED_COLUMN_FLAGS = ("unique", "index", "primary_key")
-# Partes de `sa.Column` que varrem a tabela ao entrar: FK e CHECK são validadas na hora.
-VALIDATED_COLUMN_PARTS = frozenset({"ForeignKey", "CheckConstraint"})
-VOLATILE_DEFAULT = re.compile(rf"\b({VOLATILE_FUNCTION.pattern})\b", re.IGNORECASE)
+# Opções de `sa.Column` que não viram índice, constraint nem reescrita; `default` e `onupdate`
+# ficam no Python. Fora daqui (unique, index, primary_key, autoincrement...) pede a marca.
+SAFE_COLUMN_OPTIONS = frozenset(
+    {"nullable", "server_default", "comment", "doc", "info", "key", "quote", "name", "type_"}
+    | {"default", "onupdate"}
+)
+SAFE_ADD_COLUMN_OPTIONS = frozenset({"schema", "if_not_exists"})
+# `sa.true()`, `sa.false()` e `sa.null()` viram constantes no DEFAULT.
+CONSTANT_DEFAULT_CALLS = frozenset({"true", "false", "null"})
+SQL_FUNCTIONS = frozenset({"func"})
+# Tipo de coluna do SQLAlchemy (classe: `sa.Text`, `postgresql.JSONB`), salvo o domínio, que pode
+# ter CHECK e varrer a tabela.
+DOMAIN_TYPE = "DOMAIN"
+# Chamadas que embrulham o SQL sem mudar o texto, e métodos de texto que só tiram espaço. Outro
+# método (`replace`, `join`...) não é lido: o resultado vira o PLACEHOLDER e pede a marca.
+SQL_WRAPPERS = frozenset({"text", "DDL", "dedent"})
+WHITESPACE_METHODS = frozenset({"strip", "lstrip", "rstrip"})
+SQL_OBJECT_METHODS = frozenset({"bindparams", "columns", "execution_options"})
 # Opções de `alter_column` que só mexem no catálogo; `existing_*` só informam o estado atual.
 SAFE_ALTER_COLUMN_OPTIONS = frozenset(
     {
@@ -91,7 +104,7 @@ SAFE_OPERATIONS: dict[str, Condition] = {
     "create_table": _always,
     "create_index": lambda call, _: _keyword_is_true(call, "postgresql_concurrently"),
     "drop_index": lambda call, _: _keyword_is_true(call, "postgresql_concurrently"),
-    "add_column": lambda call, assignments: not _adds_rewriting_column(call, assignments),
+    "add_column": lambda call, assignments: _add_column_is_safe(call, assignments),
     "drop_column": _always,
     "alter_column": lambda call, _: _alter_column_is_safe(call),
     "create_foreign_key": lambda call, _: _keyword_is_true(call, "postgresql_not_valid"),
@@ -243,18 +256,22 @@ def _in_source_order(function: ast.FunctionDef) -> list[ast.stmt]:
 
 
 def _tables_created(scope: list[ast.FunctionDef]) -> frozenset[str]:
+    """Tabelas que o `upgrade()` cria com certeza: sem `if_not_exists` e no schema padrão."""
     names = (
         _table_name(node.args[0])
         for function in scope
         for node in ast.walk(function)
-        if isinstance(node, ast.Call) and _operation(node) == "create_table" and node.args
+        if isinstance(node, ast.Call)
+        and _operation(node) == "create_table"
+        and node.args
+        and not _has_keyword(node, "if_not_exists", "schema")
     )
     return frozenset(name for name in names if name is not None)
 
 
 def _target_table(call: ast.Call) -> str | None:
     position, keyword = TARGET_TABLE.get(_operation(call) or "", (None, None))
-    if position is None:
+    if position is None or _has_keyword(call, "schema"):
         return None
     if len(call.args) > position:
         return _table_name(call.args[position])
@@ -296,15 +313,20 @@ def _imported_operations(tree: ast.Module) -> frozenset[str]:
 
 
 def _reaches_database(call: ast.Call, modules: frozenset[str], imported: frozenset[str]) -> bool:
-    """Operação do Alembic (`op.x(...)` ou chamada solta) ou SQL por uma conexão."""
+    """Operação do Alembic, por qualquer receptor, ou SQL por uma conexão.
+
+    O receptor não decide: `alembic.op.x`, `o = op; o.x` e o `batch` de `batch_alter_table` também
+    contam pelo nome da operação. Chamada de algo que não é nome (`getattr(op, "x")(...)`) conta
+    sempre, porque não há como saber o que ela faz.
+    """
     match call.func:
         case ast.Attribute(value=ast.Name(id=module)) if module in modules:
             return True
         case ast.Attribute(attr=attribute):
-            return attribute in EXECUTE_OPERATIONS
+            return attribute in EXECUTE_OPERATIONS or attribute in ALEMBIC_OPERATIONS
         case ast.Name(id=name):
             return name in imported or name in ALEMBIC_OPERATIONS
-    return False
+    return True
 
 
 def _is_safe(call: ast.Call, assignments: Assignments) -> bool:
@@ -327,38 +349,122 @@ def _sql_is_safe(call: ast.Call, assignments: Assignments) -> bool:
     return not any(_is_blocking_sql(text) for text in _sql_texts(call, assignments))
 
 
-def _adds_rewriting_column(call: ast.Call, assignments: Assignments) -> bool:
-    """`add_column` que reescreve a tabela, a varre para validar ou constrói índice sob lock."""
-    for node in _expanded_nodes(call, assignments):
-        if not isinstance(node, ast.Call):
-            continue
-        kind = _operation(node)
-        if kind == "Identity" or kind in VALIDATED_COLUMN_PARTS:
-            return True
-        if kind == "Computed" and _keyword_constant(node, "persisted") is not False:
-            return True
-        if any(_keyword_is_true(node, flag) for flag in INDEXED_COLUMN_FLAGS):
-            return True
-        default = next((kw.value for kw in node.keywords if kw.arg == "server_default"), None)
-        if default is not None and _has_volatile_default(default, assignments):
-            return True
+def _add_column_is_safe(call: ast.Call, assignments: Assignments) -> bool:
+    """Coluna literal (`sa.Column(...)`) só com partes que não reescrevem, varrem nem indexam."""
+    options = {keyword.arg for keyword in call.keywords}
+    if not options <= SAFE_ADD_COLUMN_OPTIONS | {"column", "table_name"}:
+        return False
+    column = call.args[1] if len(call.args) > 1 else _keyword_value(call, "column")
+    return column is not None and all(
+        isinstance(value, ast.Call)
+        and _operation(value) == "Column"
+        and _column_is_safe(value, assignments)
+        for value in _alternatives(column, assignments)
+    )
+
+
+def _column_is_safe(column: ast.Call, assignments: Assignments) -> bool:
+    if any(keyword.arg is None for keyword in column.keywords) or any(
+        isinstance(argument, ast.Starred) for argument in column.args
+    ):
+        return False
+    options = {keyword.arg: keyword.value for keyword in column.keywords if keyword.arg}
+    if not set(options) <= SAFE_COLUMN_OPTIONS:
+        return False
+    nullable = options.get("nullable")
+    if nullable is not None and not (
+        isinstance(nullable, ast.Constant) and isinstance(nullable.value, bool)
+    ):
+        return False
+    default = options.get("server_default")
+    if default is not None and not _server_default_is_safe(default, assignments):
+        return False
+    # O primeiro posicional é o nome quando há mais de um; depois vêm o tipo e as partes.
+    parts = column.args[1:] if len(column.args) > 1 else column.args
+    types = [options["type_"]] if "type_" in options else []
+    if parts and not _is_text(parts[0]):
+        types.append(parts[0])
+        parts = parts[1:]
+    elif parts:
+        parts = parts[1:]
+    return all(_type_is_safe(node, assignments) for node in types) and all(
+        _is_virtual_column(part) for part in parts
+    )
+
+
+def _server_default_is_safe(default: ast.expr, assignments: Assignments) -> bool:
+    """Constante ou função estável: em texto, em `sa.text(...)`, `sa.true()` ou `sa.func.now()`."""
+    return all(_single_default_is_safe(value) for value in _alternatives(default, assignments))
+
+
+def _single_default_is_safe(default: ast.expr) -> bool:
+    if _is_text(default):
+        return True
+    if not isinstance(default, ast.Call) or default.keywords:
+        return False
+    name = _operation(default)
+    if name in CONSTANT_DEFAULT_CALLS:
+        return not default.args
+    if name == "text":
+        return (
+            len(default.args) == 1
+            and _is_text(default.args[0])
+            and default_sql_is_safe(str(_constant(default.args[0])))
+        )
+    match default.func:
+        case ast.Attribute(value=ast.Attribute(attr=module) | ast.Name(id=module)) if (
+            module in SQL_FUNCTIONS
+        ):
+            return default_sql_is_safe(f"{name}()") and not default.args
     return False
 
 
-def _has_volatile_default(default: ast.expr, assignments: Assignments) -> bool:
-    """O default chama função volátil: em texto, em `sa.func.<nome>()` ou por variável."""
-    for node in _expanded_nodes(default, assignments):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            text = node.value
-        elif isinstance(node, ast.Attribute):
-            text = node.attr
-        elif isinstance(node, ast.Name):
-            text = node.id
-        else:
-            continue
-        if VOLATILE_DEFAULT.search(text):
-            return True
-    return False
+def _type_is_safe(node: ast.expr, assignments: Assignments) -> bool:
+    """Classe de tipo do SQLAlchemy (`sa.Text()`, `postgresql.JSONB`), sem domínio dentro."""
+    for value in _alternatives(node, assignments):
+        callee = value.func if isinstance(value, ast.Call) else value
+        name = (
+            callee.attr
+            if isinstance(callee, ast.Attribute)
+            else callee.id
+            if isinstance(callee, ast.Name)
+            else ""
+        )
+        if not name[:1].isupper() or any(
+            DOMAIN_TYPE in (child.attr if isinstance(child, ast.Attribute) else "")
+            or DOMAIN_TYPE in (child.id if isinstance(child, ast.Name) else "")
+            for child in ast.walk(value)
+        ):
+            return False
+    return True
+
+
+def _is_virtual_column(part: ast.expr) -> bool:
+    """`sa.Computed(..., persisted=False)`: coluna gerada VIRTUAL, que não é gravada."""
+    return (
+        isinstance(part, ast.Call)
+        and _operation(part) == "Computed"
+        and _keyword_constant(part, "persisted") is False
+    )
+
+
+def _alternatives(node: ast.expr, assignments: Assignments, depth: int = 0) -> list[ast.expr]:
+    """Os valores que `node` pode ter: um nome atribuído vira cada valor que recebeu."""
+    if isinstance(node, ast.Name) and node.id in assignments and depth < MAX_NAME_DEPTH:
+        return [
+            alternative
+            for value in assignments[node.id]
+            for alternative in _alternatives(value, assignments, depth + 1)
+        ]
+    return [node]
+
+
+def _is_text(node: ast.expr) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _constant(node: ast.expr) -> object:
+    return node.value if isinstance(node, ast.Constant) else None
 
 
 def _is_blocking_sql(sql: str) -> bool:
@@ -417,11 +523,11 @@ def _render_call(call: ast.Call, assignments: Assignments, depth: int) -> list[s
             FORMAT_FIELD.sub(PLACEHOLDER, text)
             for text in _render(method.value, assignments, depth)
         ]
-    if method is not None and isinstance(method.value, ast.Call):
-        # `sa.text(sql).bindparams(...)` e afins: o SQL está no objeto de origem.
+    if method is not None and method.attr in WHITESPACE_METHODS | SQL_OBJECT_METHODS:
+        # `sql.strip()` e `sa.text(sql).bindparams(...)`: o SQL está no objeto de origem.
         return _render(method.value, assignments, depth)
-    if call.args:
-        # `sa.text(sql)`, `text(sql)` e afins: o SQL é o primeiro argumento.
+    if _operation(call) in SQL_WRAPPERS and call.args:
+        # `sa.text(sql)`, `text(sql)`, `textwrap.dedent(sql)`: o SQL é o primeiro argumento.
         return _render(call.args[0], assignments, depth)
     return [PLACEHOLDER]
 
@@ -533,6 +639,17 @@ def _operation(call: ast.Call) -> str | None:
     if isinstance(call.func, ast.Attribute):
         return call.func.attr
     return call.func.id if isinstance(call.func, ast.Name) else None
+
+
+def _has_keyword(call: ast.Call, *names: str) -> bool:
+    """Alguma das keywords aparece, com qualquer valor que não seja um False literal."""
+    return any(
+        keyword.arg in names and _constant(keyword.value) is not False for keyword in call.keywords
+    )
+
+
+def _keyword_value(call: ast.Call, name: str) -> ast.expr | None:
+    return next((keyword.value for keyword in call.keywords if keyword.arg == name), None)
 
 
 def _keyword_is_true(call: ast.Call, name: str) -> bool:
