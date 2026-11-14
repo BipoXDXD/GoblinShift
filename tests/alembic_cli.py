@@ -74,7 +74,10 @@ def db_version(settings: Settings) -> str:
     engine = create_engine(settings.database_url)
     try:
         with engine.connect() as conn:
-            return conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            version: str = conn.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            return version
     finally:
         engine.dispose()
 

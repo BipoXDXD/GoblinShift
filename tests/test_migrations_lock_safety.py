@@ -121,6 +121,21 @@ def test_check_cobre_da_0019_em_diante() -> None:
         'op.get_bind().exec_driver_sql("CREATE INDEX ix ON run (a)")',
         'create_index("ix_run_owner", "run", ["owner_id"])',
         "op.execute(\"ALTER TABLE run ALTER n SET DEFAULT 'a--b', ALTER n SET NOT NULL\")",
+        'ddl = "SET NOT NULL"; op.execute(f"ALTER TABLE run ALTER COLUMN c {ddl}")',
+        'op.execute("CREATE INDEX ix ON {} (c)".format(table))',
+        'op.execute("CREATE INDEX ix ON %s (c)" % table)',
+        'op.execute(sqltext="ALTER TABLE run ALTER COLUMN c SET NOT NULL")',
+        'op.execute(sa.text("ALTER TABLE run ALTER c SET NOT NULL").bindparams(x=1))',
+        'sql = "ALTER TABLE run "; sql += "ALTER COLUMN c SET NOT NULL"; op.execute(sql)',
+        "op.execute(\"ALTER TABLE run ADD CONSTRAINT ck CHECK (s <> 'NOT VALID')\")",
+        "op.execute('ALTER TABLE \"a--b\" ALTER COLUMN c SET NOT NULL')",
+        (
+            "op.execute(\"ALTER TABLE run ADD CONSTRAINT ck CHECK (s <> $c$don't$c$),"
+            ' ADD CONSTRAINT fk FOREIGN KEY (o) REFERENCES a NOT VALID")'
+        ),
+        "op.execute('ALTER TABLE run ALTER COLUMN \"my col\" TYPE bigint')",
+        'op.execute("ALTER TABLE run SET TABLESPACE fast")',
+        'op.execute("ALTER TABLE run ATTACH PARTITION run_2027 FOR VALUES IN (2027)")',
     ],
 )
 def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
@@ -155,6 +170,7 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         'op.execute("ALTER TABLE run ADD COLUMN t int GENERATED ALWAYS AS (a) VIRTUAL")',
         "op.execute(\"ALTER TABLE run ADD COLUMN n text DEFAULT 'a,b' -- UNIQUE\")",
         'op.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY run_summary")',
+        "op.execute(\"COMMENT ON TABLE run IS 'run CREATE INDEX later'\")",
     ],
     ids=[
         "indice-concorrente",
@@ -177,6 +193,7 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         "sql-coluna-gerada-virtual",
         "sql-virgula-entre-aspas-e-comentario",
         "sql-refresh-concorrente",
+        "sql-ddl-so-dentro-de-texto",
     ],
 )
 def test_forma_segura_passa(operation: str) -> None:
@@ -220,6 +237,8 @@ def test_marca_de_outra_operacao_na_linha_acima_nao_cobre() -> None:
         'op.create_index("ix", "run", ["a"], postgresql_concurrently=True)',
         'op.drop_index("ix", table_name="run", postgresql_concurrently=True)',
         'op.execute("CREATE INDEX CONCURRENTLY ix ON run (a)")',
+        'sql = "CREATE INDEX CONCURRENTLY ix ON run (a)"; op.execute(sql)',
+        'op.execute("REINDEX (CONCURRENTLY) INDEX ix")',
     ],
 )
 def test_concurrently_fora_do_autocommit_e_recusado_mesmo_com_marca(operation: str) -> None:
@@ -351,8 +370,41 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
         ('        op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_a ON run (a)")\n', 3),
         ('        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_b")\n' + CREATE_CONCURRENT, 4),
         (CREATE_CONCURRENT + '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_a")\n', 3),
+        # No PostgreSQL, "IX_A" entre aspas é outro índice: ix_a continua sem limpeza.
+        (
+            "        op.execute('DROP INDEX CONCURRENTLY IF EXISTS \"IX_A\"')\n"
+            + CREATE_CONCURRENT,
+            4,
+        ),
+        ('        sql = "CREATE INDEX CONCURRENTLY ix_a ON run (a)"\n        op.execute(sql)\n', 4),
+        (
+            '        name = "ix_a"\n'
+            '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_b")\n'
+            '        op.execute(f"CREATE INDEX CONCURRENTLY {name} ON run (a)")\n',
+            5,
+        ),
+        (
+            '        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {first()}")\n'
+            '        op.execute(f"CREATE INDEX CONCURRENTLY {second()} ON run (a)")\n',
+            4,
+        ),
+        (
+            '        op.drop_index("Ix_A", "run", postgresql_concurrently=True, if_exists=True)\n'
+            '        op.create_index("ix_a", "run", ["a"], postgresql_concurrently=True)\n',
+            4,
+        ),
     ],
-    ids=["op-sem-drop", "sql-sem-drop", "drop-de-outro-indice", "drop-depois"],
+    ids=[
+        "op-sem-drop",
+        "sql-sem-drop",
+        "drop-de-outro-indice",
+        "drop-depois",
+        "drop-com-aspas-e-outra-caixa",
+        "sql-em-variavel",
+        "f-string-com-outro-nome",
+        "nomes-desconhecidos",
+        "op-com-outra-caixa",
+    ],
 )
 def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> None:
     assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == [line]
@@ -365,9 +417,30 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
             '        op.drop_index("ix_a", "run", postgresql_concurrently=True, if_exists=True)\n'
             '        op.create_index("ix_a", "run", ["a"], postgresql_concurrently=True)\n'
         ),
-        "        op.execute('DROP INDEX CONCURRENTLY IF EXISTS \"IX_A\"')\n" + CREATE_CONCURRENT,
+        "        op.execute('DROP INDEX CONCURRENTLY IF EXISTS \"ix_a\"')\n" + CREATE_CONCURRENT,
+        '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS IX_A")\n' + CREATE_CONCURRENT,
+        (
+            '        name = "ix_a"\n'
+            '        op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")\n'
+            '        op.execute(f"CREATE INDEX CONCURRENTLY {name} ON run (a)")\n'
+        ),
+        (
+            '        op.drop_index("Ix_A", "run", postgresql_concurrently=True, if_exists=True)\n'
+            '        op.create_index("Ix_A", "run", ["a"], postgresql_concurrently=True)\n'
+        ),
+        (
+            '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS IX_A")\n'
+            '        op.create_index("ix_a", "run", ["a"], postgresql_concurrently=True)\n'
+        ),
     ],
-    ids=["op", "sql"],
+    ids=[
+        "op",
+        "sql-com-aspas",
+        "sql-sem-aspas-dobra-a-caixa",
+        "f-string",
+        "op-com-caixa",
+        "sql-e-op",
+    ],
 )
 def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:
     assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == []
