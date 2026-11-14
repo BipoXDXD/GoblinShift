@@ -279,7 +279,6 @@
         "DAC_OVERRIDE",
         "FOWNER",
         "FSETID",
-        "KILL",
         "MKNOD",
         "NET_RAW",
         "SETFCAP",
