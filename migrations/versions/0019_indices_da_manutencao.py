@@ -5,7 +5,7 @@ Revises: 0018
 Create Date: 2026-11-14 12:00:00.000000
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Só índices novos, que o código anterior
-ignora. As tabelas são pequenas (uma VPS, poucas contas), então o `CREATE INDEX` comum, dentro da
+ignora. As tabelas são pequenas (poucas contas), então o `CREATE INDEX` comum, dentro da
 transação do Alembic, basta, como na 0010.
 
 - `object_use(object_id)`, completo: o parcial `object_use_open_idx` só cobre os usos abertos e
