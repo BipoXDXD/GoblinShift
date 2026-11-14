@@ -151,6 +151,7 @@ def test_check_cobre_da_0019_em_diante() -> None:
         ),
         'op.execute(\'ALTER TABLE run ALTER COLUMN "a"" b" TYPE bigint\')',
         'op.execute("ALTER TABLE run DETACH PARTITION run_2027")',
+        "op.execute('ALTER TABLE run DETACH PARTITION s.\"p 1\"')",
     ],
 )
 def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
@@ -188,6 +189,8 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         "op.execute(\"COMMENT ON TABLE run IS 'run CREATE INDEX later'\")",
         'op.execute("ALTER TABLE run DETACH PARTITION run_2027 CONCURRENTLY")',
         'op.execute("ALTER TABLE run DETACH PARTITION run_2027 FINALIZE")',
+        "op.execute('ALTER TABLE run DETACH PARTITION s.\"p 1\" CONCURRENTLY')",
+        "op.execute('ALTER TABLE run DETACH PARTITION \"s\".p FINALIZE')",
     ],
     ids=[
         "indice-concorrente",
@@ -213,6 +216,8 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         "sql-ddl-so-dentro-de-texto",
         "sql-detach-concorrente",
         "sql-detach-finalize",
+        "sql-detach-qualificado-concorrente",
+        "sql-detach-qualificado-finalize",
     ],
 )
 def test_forma_segura_passa(operation: str) -> None:
@@ -259,6 +264,7 @@ def test_marca_de_outra_operacao_na_linha_acima_nao_cobre() -> None:
         'sql = "CREATE INDEX CONCURRENTLY ix ON run (a)"; op.execute(sql)',
         'op.execute("REINDEX (CONCURRENTLY) INDEX ix")',
         'op.execute("ALTER TABLE run DETACH PARTITION run_2026 CONCURRENTLY")',
+        "op.execute('ALTER TABLE run DETACH PARTITION s.\"p 1\" CONCURRENTLY')",
     ],
 )
 def test_concurrently_fora_do_autocommit_e_recusado_mesmo_com_marca(operation: str) -> None:
@@ -375,6 +381,18 @@ def test_valor_anterior_ao_mais_igual_continua_lido() -> None:
     )
 
     assert unmarked_blocking_lines(source) == [3]
+
+
+def test_alternativas_alem_do_teto_contam_como_bloqueantes() -> None:
+    # Cada atribuição é uma alternativa; a 17ª, a bloqueante, passa do teto de leitura.
+    source = (
+        "def upgrade() -> None:\n"
+        + '    sql = "SELECT 1"\n' * 16
+        + '    sql = "ALTER TABLE run ALTER COLUMN c SET NOT NULL"\n'
+        + "    op.execute(sql)\n"
+    )
+
+    assert unmarked_blocking_lines(source) == [19]
 
 
 def test_coluna_guardada_em_variavel_e_lida() -> None:

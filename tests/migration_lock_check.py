@@ -26,8 +26,11 @@ LOCK_OK_MARK = re.compile(r"#\s*lock-ok:\s*\S")
 # ("ALTER COLUMN {c} TYPE" vira "ALTER COLUMN __unresolved__ TYPE"). O nome é improvável num
 # índice de verdade, então um nome de índice que o contém é tratado como desconhecido.
 PLACEHOLDER = "__unresolved__"
-# Combinações de textos que uma concatenação pode gerar; acima disso o resto é ignorado.
+# Combinações de textos que uma concatenação pode gerar. Acima disso o resto não é lido, e o texto
+# TOO_MANY_RENDERINGS entra no lugar: na dúvida, o SQL conta como bloqueante e pede a marca. Ele
+# contém o PLACEHOLDER, então um nome de índice truncado também conta como desconhecido.
 MAX_RENDERINGS = 16
+TOO_MANY_RENDERINGS = f"{PLACEHOLDER}_too_many_renderings"
 # Profundidade de nomes resolvidos (um nome que aponta para outro nome).
 MAX_NAME_DEPTH = 3
 
@@ -88,7 +91,7 @@ BLOCKING_CLAUSES = [
         r"\bATTACH\s+PARTITION\b",
         # Sem CONCURRENTLY, o DETACH trava a tabela-mãe em ACCESS EXCLUSIVE. Grupo atômico: o
         # nome não pode encolher para escapar do lookahead.
-        rf"\bDETACH\s+PARTITION\s+(?>{SQL_NAME})(?!\s+(CONCURRENTLY|FINALIZE)\b)",
+        rf"\bDETACH\s+PARTITION\s+(?>{INDEX_NAME})(?!\s*(CONCURRENTLY|FINALIZE)\b)",
         r"\bVACUUM\s+(\([^)]*\bFULL\b[^)]*\)|FULL\b)",
         r"\bCLUSTER\b",
         r"\bLOCK\s+TABLE\b",
@@ -110,7 +113,7 @@ DEFAULT_SQL = re.compile(r"\bDEFAULT\b", re.IGNORECASE)
 CONCURRENT_INDEX_SQL = re.compile(
     r"\b(INDEX|TABLE|SCHEMA|DATABASE|SYSTEM)\s+CONCURRENTLY\b"
     r"|\bREINDEX\s*\([^)]*\bCONCURRENTLY\b"
-    rf"|\bDETACH\s+PARTITION\s+{SQL_NAME}\s+CONCURRENTLY\b",
+    rf"|\bDETACH\s+PARTITION\s+{INDEX_NAME}\s*CONCURRENTLY\b",
     re.IGNORECASE,
 )
 CREATE_CONCURRENT_INDEX_START = re.compile(
@@ -344,9 +347,7 @@ def _assignments(tree: ast.Module, scope: list[ast.FunctionDef]) -> Assignments:
         ):
             name = node.target.id
             before = current.get(name) or [ast.Constant(value=PLACEHOLDER)]
-            # Cada valor anterior já está dentro de um valor atual; a lista só guarda as
-            # alternativas para o render, que lê no máximo MAX_RENDERINGS.
-            earlier[name] = (current.get(name, []) + earlier.get(name, []))[:MAX_RENDERINGS]
+            earlier.setdefault(name, []).extend(current.get(name, []))
             current[name] = [
                 ast.BinOp(left=value, op=ast.Add(), right=node.value) for value in before
             ]
@@ -445,7 +446,7 @@ def _has_volatile_default(default: ast.expr, assignments: Assignments) -> bool:
 
 
 def _is_blocking_sql(sql: str) -> bool:
-    return any(
+    return TOO_MANY_RENDERINGS in sql or any(
         any(pattern.search(clause) for pattern in BLOCKING_CLAUSES)
         or _adds_rewriting_column_sql(clause)
         for clause in sql_clauses(sql)
@@ -479,12 +480,12 @@ def _render(node: ast.expr, assignments: Assignments, depth: int) -> list[str]:
         texts = [""]
         for part in node.values:
             options = _render_fstring_part(part, assignments, depth)
-            texts = [a + b for a in texts for b in options][:MAX_RENDERINGS]
+            texts = _capped([a + b for a in texts for b in options])
         return texts
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left = _render(node.left, assignments, depth)
         right = _render(node.right, assignments, depth)
-        return [a + b for a in left for b in right][:MAX_RENDERINGS]
+        return _capped([a + b for a in left for b in right])
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
         # `"... %s ..." % valor`: o molde com o PLACEHOLDER no lugar de cada campo.
         return [
@@ -493,13 +494,20 @@ def _render(node: ast.expr, assignments: Assignments, depth: int) -> list[str]:
     if isinstance(node, ast.Name) and node.id in assignments and depth < MAX_NAME_DEPTH:
         resolved: list[str] = []
         for value in assignments[node.id]:
-            if len(resolved) >= MAX_RENDERINGS:
+            if len(resolved) > MAX_RENDERINGS:
                 break
             resolved += _render(value, assignments, depth + 1)
-        return resolved[:MAX_RENDERINGS] or [PLACEHOLDER]
+        return _capped(resolved) or [PLACEHOLDER]
     if isinstance(node, ast.Call):
         return _render_call(node, assignments, depth)
     return [PLACEHOLDER]
+
+
+def _capped(texts: list[str]) -> list[str]:
+    """No máximo MAX_RENDERINGS textos; o que passa do teto vira o TOO_MANY_RENDERINGS."""
+    if len(texts) <= MAX_RENDERINGS:
+        return texts
+    return [*texts[: MAX_RENDERINGS - 1], TOO_MANY_RENDERINGS]
 
 
 def _render_call(call: ast.Call, assignments: Assignments, depth: int) -> list[str]:
