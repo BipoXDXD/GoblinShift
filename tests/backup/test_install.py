@@ -197,7 +197,12 @@ install -m 666 /dev/null /tmp/calls
 cat >/usr/local/bin/docker <<'EOF'
 #!/bin/sh
 echo "docker $*" >>/tmp/calls
-echo dump
+# A conferência antes do dump: um banco migrado e com contas.
+case "$*" in
+  *alembic_version*) echo t ;;
+  *"count(*) FROM app_user"*) echo 1 ;;
+  *) echo dump ;;
+esac
 EOF
 cat >/usr/local/bin/age <<'EOF'
 #!/bin/bash
