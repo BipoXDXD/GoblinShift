@@ -13,8 +13,12 @@ import pytest
 from sqlalchemy import Connection, Engine, event, text
 from sqlalchemy.orm import Session
 
-from goblinshift.identity.accounts import list_pending_accounts
-from goblinshift.identity.purge import AUDIT_RETENTION, delete_ended_web_sessions
+from goblinshift.identity.accounts import block_account, list_pending_accounts
+from goblinshift.identity.purge import (
+    AUDIT_RETENTION,
+    delete_ended_web_sessions,
+    delete_old_audit_events,
+)
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from tests.conftest import downgrade_migrations, run_migrations
@@ -237,3 +241,41 @@ def test_rodar_a_0019_de_novo_nao_muda_a_marca(db_settings: Settings, engine: En
     run_migrations(db_settings, "0019")
 
     assert pending_flags(engine, accounts) == NORMALIZED
+
+
+def test_bloqueada_pelo_admin_e_expurgada_nao_volta_a_pendente(
+    db_settings: Settings, engine: Engine
+) -> None:
+    # Caso da revisão, com datas coerentes: a auditoria só apaga o ACCOUNT_BLOCKED depois de 90
+    # dias, então a conta bloqueada tem mais que isso. A limpeza roda com o relógio de agora.
+    at_0018(db_settings)
+    with engine.begin() as conn:
+        user_id = new_user(conn, "active", awaiting_approval=False, age="100 days")
+        new_session(conn, user_id)
+    with Session(engine) as session, session.begin():
+        assert block_account(session, user_id, datetime.now(UTC))
+        record_block(session.connection(), user_id)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE audit_event SET occurred_at = now() - interval '91 days' "
+                "WHERE user_id = :id"
+            ),
+            {"id": user_id},
+        )
+        conn.execute(
+            text(
+                "UPDATE web_session SET revoked_at = now() - interval '91 days' WHERE user_id = :id"
+            ),
+            {"id": user_id},
+        )
+    now = datetime.now(UTC)
+    with Session(engine) as session, session.begin():
+        assert delete_ended_web_sessions(session, now, 100) >= 1
+        assert delete_old_audit_events(session, now, 100) >= 1
+
+    run_migrations(db_settings, "0019")
+
+    assert pending_flags(engine, {"blocked": user_id}) == {"blocked": False}
+    with Session(engine) as session:
+        assert user_id not in {listing.id for listing in list_pending_accounts(session)}
