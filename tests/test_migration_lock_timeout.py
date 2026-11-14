@@ -95,6 +95,32 @@ def test_lock_liberado_entre_as_tentativas_conclui_a_migration(one_behind: Setti
     assert db_version(one_behind) == head_revision()
 
 
+@pytest.mark.parametrize("lock_timeout_ms", ["0", "-5"])
+def test_lock_timeout_nao_positivo_e_recusado_com_mensagem(
+    one_behind: Settings, lock_timeout_ms: str
+) -> None:
+    # 0 desliga o limite no PostgreSQL: a migration voltaria a esperar o lock para sempre.
+    result = run_alembic(one_behind, "-x", f"lock_timeout_ms={lock_timeout_ms}", "upgrade", "head")
+
+    assert result.returncode != 0
+    assert "lock_timeout_ms precisa ser positivo" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert db_version(one_behind) == previous_revision()
+
+
+def test_script_offline_leva_os_limites_de_sessao(one_behind: Settings) -> None:
+    result = run_alembic(
+        one_behind,
+        *("-x", f"lock_timeout_ms={TEST_LOCK_TIMEOUT_MS}", "upgrade"),
+        *(f"{previous_revision()}:{head_revision()}", "--sql"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    script = result.stdout
+    assert f"SET lock_timeout = {TEST_LOCK_TIMEOUT_MS}" in script
+    assert script.index("SET lock_timeout") < script.index("ALTER TABLE app_user")
+
+
 @contextmanager
 def _holding_share_lock(settings: Settings) -> Iterator[Connection]:
     """Uma sessão que segura a tabela em SHARE: deixa ler, mas barra o ALTER TABLE."""

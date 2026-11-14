@@ -50,7 +50,11 @@ def run_migrations_offline() -> None:
         url=Settings().database_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
+        transaction_per_migration=True,
     )
+    # O script gerado leva os mesmos limites de sessão que o migrate aplica ao conectar.
+    for statement in session_settings(_lock_timeout_ms()):
+        context.execute(statement)
     with context.begin_transaction():
         context.run_migrations()
 
@@ -101,9 +105,13 @@ def _lock_timeout_ms() -> int:
     if raw is None:
         return MIGRATION_LOCK_TIMEOUT_MS
     try:
-        return int(raw)
+        lock_timeout_ms = int(raw)
     except ValueError:
         raise CommandError(f"-x lock_timeout_ms precisa ser inteiro, veio {raw!r}") from None
+    if lock_timeout_ms <= 0:
+        # 0 desliga o limite no PostgreSQL: a migration voltaria a esperar o lock para sempre.
+        raise CommandError(f"-x lock_timeout_ms precisa ser positivo, veio {lock_timeout_ms}")
+    return lock_timeout_ms
 
 
 def _destination(script: ScriptDirectory) -> frozenset[str] | None:

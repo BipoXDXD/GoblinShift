@@ -1,327 +1,25 @@
-"""Migration nova não segura lock que trava a API sem declarar por quê.
+"""Migration nova não segura lock que trava a API sem declarar por quê (ADR 057).
 
-DDL que reescreve ou varre a tabela sob ACCESS EXCLUSIVE ou SHARE (índice sem CONCURRENTLY,
-constraint validada na hora, SET NOT NULL, troca de tipo, coluna com default volátil, única ou
-indexada) para as escritas, e às vezes as leituras, enquanto roda. A forma segura existe para
-cada caso (docs/adr/057-travas-das-migrations.md). Quem precisa da forma bloqueante marca
-`# lock-ok: <motivo>` na linha da operação ou na linha só de comentário logo acima. Operação
-sobre uma tabela criada no mesmo `upgrade()` não trava ninguém e dispensa a marca.
-CONCURRENTLY fora de `autocommit_block` falha no PostgreSQL dentro da transação da migration,
-então nenhuma marca o libera.
-
-O check lê o `upgrade()` e as funções do módulo que ele chama, e resolve SQL guardado em
-variável. As migrations até a 0018 são anteriores ao check e ficam de fora; o `downgrade()`
-também, como no check de contract.
+As migrations até a 0018 são anteriores ao check e ficam de fora; o `downgrade()` também, como
+no check de contract. As regras estão em `tests/migration_lock_check.py`.
 """
 
-import ast
-import re
 import time
 from pathlib import Path
 
 import pytest
 
-from tests.migration_source import is_marked, string_constants, upgrade_function
+from tests.migration_lock_check import (
+    REVISION_FILE,
+    checked_revisions,
+    concurrent_index_without_cleanup_lines,
+    concurrent_outside_autocommit_lines,
+    unmarked_blocking_lines,
+)
 
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
-FIRST_CHECKED_REVISION = 19
-REVISION_FILE = re.compile(r"^(\d{4})_\w+\.py$")
-LOCK_OK_MARK = re.compile(r"#\s*lock-ok:\s*\S")
 # Folga larga para a máquina do CI: o caso linear leva milissegundos.
 MAX_ANALYSIS_S = 2.0
-
-# Constraints que constroem índice sob lock: a forma segura é criar o índice com CONCURRENTLY
-# antes e anexá-lo com `USING INDEX`, o que o Alembic não expressa nestas chamadas.
-INDEX_BUILDING_CONSTRAINTS = frozenset(
-    {"create_unique_constraint", "create_primary_key", "create_exclude_constraint"}
-)
-VALIDATING_CONSTRAINTS = frozenset({"create_foreign_key", "create_check_constraint"})
-# Posição e keyword da tabela-alvo de cada operação do Alembic.
-TARGET_TABLE = {
-    "create_index": (1, "table_name"),
-    "create_unique_constraint": (1, "table_name"),
-    "create_primary_key": (1, "table_name"),
-    "create_exclude_constraint": (1, "table_name"),
-    "create_foreign_key": (1, "source_table"),
-    "create_check_constraint": (1, "table_name"),
-    "alter_column": (0, "table_name"),
-    "add_column": (0, "table_name"),
-}
-# Opções de `sa.Column` que viram índice ou constraint construídos sob lock.
-INDEXED_COLUMN_FLAGS = ("unique", "index", "primary_key")
-VOLATILE_DEFAULT = re.compile(
-    r"\b(gen_random_uuid|uuid_generate_v\w+|uuidv\d|random|clock_timestamp|timeofday|nextval)\b",
-    re.IGNORECASE,
-)
-SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
-# Cada padrão roda numa cláusula só (ver `sql_clauses`) e tem no máximo um trecho variável
-# longo, para o custo crescer em linha com o tamanho do SQL.
-BLOCKING_CLAUSES = [
-    re.compile(pattern, re.IGNORECASE | re.DOTALL)
-    for pattern in (
-        r"\bCREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY\b)",
-        r"\bREINDEX\b(?!.*\bCONCURRENTLY\b)",
-        r"\bADD\s+(CONSTRAINT\s+\S+\s+)?(FOREIGN\s+KEY|CHECK)\b(?!.*\bNOT\s+VALID\b)",
-        r"\bADD\s+(CONSTRAINT\s+\S+\s+)?(UNIQUE|PRIMARY\s+KEY|EXCLUDE)\b(?!\s+USING\s+INDEX\b)",
-        r"\bSET\s+NOT\s+NULL\b",
-        r"\bALTER\s+(COLUMN\s+)?\S+\s+(SET\s+DATA\s+)?TYPE\b",
-        r"\bVACUUM\s+(\([^)]*\bFULL\b[^)]*\)|FULL\b)",
-        r"\bCLUSTER\b",
-    )
-]
-ADD_COLUMN_SQL = re.compile(
-    r"\bADD\s+(?!CONSTRAINT\b|UNIQUE\b|PRIMARY\b|FOREIGN\b|CHECK\b|EXCLUDE\b)", re.IGNORECASE
-)
-REWRITING_COLUMN_SQL = re.compile(
-    r"\b(SMALLSERIAL|BIGSERIAL|SERIAL|UNIQUE|PRIMARY\s+KEY)\b", re.IGNORECASE
-)
-GENERATED_SQL = re.compile(r"\bGENERATED\b", re.IGNORECASE)
-VIRTUAL_SQL = re.compile(r"\bVIRTUAL\b", re.IGNORECASE)
-DEFAULT_SQL = re.compile(r"\bDEFAULT\b", re.IGNORECASE)
-CONCURRENTLY_SQL = re.compile(r"\bCONCURRENTLY\b", re.IGNORECASE)
-
-
-def checked_revisions(names: list[str]) -> list[str]:
-    """Os arquivos de migration que o check cobre: da FIRST_CHECKED_REVISION em diante."""
-    return sorted(
-        name
-        for name in names
-        if (match := REVISION_FILE.match(name)) and int(match.group(1)) >= FIRST_CHECKED_REVISION
-    )
-
-
-def unmarked_blocking_lines(source: str) -> list[int]:
-    """Linhas do `upgrade()`, e das funções que ele chama, com DDL bloqueante sem `# lock-ok:`."""
-    tree = ast.parse(source)
-    lines = source.splitlines()
-    scope = _upgrade_scope(tree)
-    created = _tables_created(scope)
-    assignments = _string_assignments(tree)
-    return sorted(
-        node.lineno
-        for function in scope
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and _target_table(node) not in created
-        and _is_blocking(node, assignments)
-        and not is_marked(lines, node.lineno, LOCK_OK_MARK)
-    )
-
-
-def concurrent_outside_autocommit_lines(source: str) -> list[int]:
-    """Linhas do `upgrade()` que pedem CONCURRENTLY fora de um `autocommit_block()`."""
-    upgrade = upgrade_function(source)
-    if upgrade is None:
-        return []
-    inside_autocommit = {
-        id(child)
-        for node in ast.walk(upgrade)
-        if isinstance(node, ast.With) and any(_is_autocommit(item) for item in node.items)
-        for statement in node.body
-        for child in ast.walk(statement)
-    }
-    return sorted(
-        node.lineno
-        for node in ast.walk(upgrade)
-        if isinstance(node, ast.Call) and _is_concurrent(node) and id(node) not in inside_autocommit
-    )
-
-
-def sql_clauses(sql: str) -> list[str]:
-    """O SQL sem comentários, dividido nas vírgulas e ponto e vírgula fora de parênteses e aspas."""
-    text = SQL_COMMENT.sub(" ", sql)
-    clauses: list[str] = []
-    depth, quoted, start = 0, False, 0
-    for index, char in enumerate(text):
-        if char == "'":
-            quoted = not quoted
-        elif quoted:
-            continue
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth = max(depth - 1, 0)
-        elif char in ",;" and depth == 0:
-            clauses.append(text[start:index])
-            start = index + 1
-    clauses.append(text[start:])
-    return clauses
-
-
-def _upgrade_scope(tree: ast.Module) -> list[ast.FunctionDef]:
-    """O `upgrade()` e as funções do módulo que ele chama, direta ou indiretamente."""
-    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
-    pending, seen = ["upgrade"], []
-    while pending:
-        name = pending.pop()
-        if name in seen or name not in functions or name == "downgrade":
-            continue
-        seen.append(name)
-        pending.extend(
-            node.func.id
-            for node in ast.walk(functions[name])
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        )
-    return [functions[name] for name in seen]
-
-
-def _tables_created(scope: list[ast.FunctionDef]) -> frozenset[str]:
-    return frozenset(
-        node.args[0].value
-        for function in scope
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and _operation(node) == "create_table"
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and isinstance(node.args[0].value, str)
-    )
-
-
-def _string_assignments(tree: ast.Module) -> dict[str, list[str]]:
-    """Textos atribuídos a cada nome no módulo, para achar o SQL passado por variável."""
-    texts: dict[str, list[str]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name):
-                texts.setdefault(target.id, []).extend(string_constants(value))
-    return texts
-
-
-def _target_table(call: ast.Call) -> str | None:
-    position, keyword = TARGET_TABLE.get(_operation(call) or "", (None, None))
-    if position is None:
-        return None
-    if len(call.args) > position:
-        node: ast.expr | None = call.args[position]
-    else:
-        node = next((kw.value for kw in call.keywords if kw.arg == keyword), None)
-    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
-
-
-def _is_blocking(call: ast.Call, assignments: dict[str, list[str]]) -> bool:
-    name = _operation(call)
-    if name == "create_index":
-        return not _keyword_is_true(call, "postgresql_concurrently")
-    if name in INDEX_BUILDING_CONSTRAINTS:
-        return True
-    if name in VALIDATING_CONSTRAINTS:
-        return not _keyword_is_true(call, "postgresql_not_valid")
-    if name == "alter_column":
-        return _keyword_is_false(call, "nullable") or _has_keyword(call, "type_")
-    if name == "add_column":
-        return _adds_rewriting_column(call)
-    if name == "execute":
-        return any(_is_blocking_sql(text) for text in _sql_texts(call, assignments))
-    return False
-
-
-def _adds_rewriting_column(call: ast.Call) -> bool:
-    """`add_column` que reescreve a tabela ou constrói índice sob lock."""
-    for node in ast.walk(call):
-        if not isinstance(node, ast.Call):
-            continue
-        kind = _callable_name(node)
-        if kind == "Identity" or (
-            kind == "Computed" and _keyword_constant(node, "persisted") is not False
-        ):
-            return True
-        if any(_keyword_is_true(node, flag) for flag in INDEXED_COLUMN_FLAGS):
-            return True
-        default = next((kw.value for kw in node.keywords if kw.arg == "server_default"), None)
-        if default is not None and any(VOLATILE_DEFAULT.search(text) for text in _texts(default)):
-            return True
-    return False
-
-
-def _is_blocking_sql(sql: str) -> bool:
-    return any(
-        any(pattern.search(clause) for pattern in BLOCKING_CLAUSES)
-        or _adds_rewriting_column_sql(clause)
-        for clause in sql_clauses(sql)
-    )
-
-
-def _adds_rewriting_column_sql(clause: str) -> bool:
-    added = ADD_COLUMN_SQL.search(clause)
-    if added is None:
-        return False
-    column = clause[added.end() :]
-    if REWRITING_COLUMN_SQL.search(column):
-        return True
-    if GENERATED_SQL.search(column) and not VIRTUAL_SQL.search(column):
-        return True
-    default = DEFAULT_SQL.search(column)
-    return default is not None and VOLATILE_DEFAULT.search(column, default.end()) is not None
-
-
-def _sql_texts(call: ast.Call, assignments: dict[str, list[str]]) -> list[str]:
-    referenced = [
-        text
-        for node in ast.walk(call)
-        if isinstance(node, ast.Name)
-        for text in assignments.get(node.id, [])
-    ]
-    return string_constants(call) + referenced
-
-
-def _texts(node: ast.AST) -> list[str]:
-    """Literais e nomes dentro de `node`: `sa.func.gen_random_uuid()` traz o nome da função."""
-    names = [
-        child.attr if isinstance(child, ast.Attribute) else child.id
-        for child in ast.walk(node)
-        if isinstance(child, ast.Attribute | ast.Name)
-    ]
-    return string_constants(node) + names
-
-
-def _is_concurrent(call: ast.Call) -> bool:
-    name = _operation(call)
-    if name in {"create_index", "drop_index"}:
-        return _keyword_is_true(call, "postgresql_concurrently")
-    if name == "execute":
-        return any(CONCURRENTLY_SQL.search(text) for text in string_constants(call))
-    return False
-
-
-def _is_autocommit(item: ast.withitem) -> bool:
-    expression = item.context_expr
-    return isinstance(expression, ast.Call) and _operation(expression) == "autocommit_block"
-
-
-def _operation(call: ast.Call) -> str | None:
-    return call.func.attr if isinstance(call.func, ast.Attribute) else None
-
-
-def _callable_name(call: ast.Call) -> str | None:
-    if isinstance(call.func, ast.Attribute):
-        return call.func.attr
-    return call.func.id if isinstance(call.func, ast.Name) else None
-
-
-def _has_keyword(call: ast.Call, name: str) -> bool:
-    return any(keyword.arg == name for keyword in call.keywords)
-
-
-def _keyword_is_true(call: ast.Call, name: str) -> bool:
-    return _keyword_constant(call, name) is True
-
-
-def _keyword_is_false(call: ast.Call, name: str) -> bool:
-    return _keyword_constant(call, name) is False
-
-
-def _keyword_constant(call: ast.Call, name: str) -> object:
-    for keyword in call.keywords:
-        if keyword.arg == name and isinstance(keyword.value, ast.Constant):
-            return keyword.value.value
-    return None
 
 
 def test_migrations_novas_so_bloqueiam_com_a_marca_lock_ok() -> None:
@@ -330,10 +28,12 @@ def test_migrations_novas_so_bloqueiam_com_a_marca_lock_ok() -> None:
         source = (VERSIONS / name).read_text()
         blocking = unmarked_blocking_lines(source)
         concurrent = concurrent_outside_autocommit_lines(source)
-        if blocking or concurrent:
+        without_cleanup = concurrent_index_without_cleanup_lines(source)
+        if blocking or concurrent or without_cleanup:
             problems[name] = {
                 "sem lock-ok": blocking,
                 "CONCURRENTLY fora do autocommit": concurrent,
+                "índice CONCURRENTLY sem DROP IF EXISTS antes": without_cleanup,
             }
 
     assert problems == {}
@@ -407,6 +107,20 @@ def test_check_cobre_da_0019_em_diante() -> None:
         'op.execute("ALTER TABLE run ADD COLUMN x text, ADD COLUMN k uuid DEFAULT uuidv7()")',
         'op.execute("ALTER TABLE run ADD CONSTRAINT fk FOREIGN KEY (o) REFERENCES a -- NOT VALID")',
         'op.execute("ALTER TABLE run ADD CHECK (size > 0) /* NOT VALID */")',
+        'op.execute(f"ALTER TABLE run ALTER COLUMN {column} TYPE bigint")',
+        'op.execute(f"ALTER TABLE run ADD COLUMN {name} uuid DEFAULT gen_random_uuid()")',
+        'op.execute("ALTER TABLE run ALTER COLUMN " + column + " TYPE bigint")',
+        'op.add_column("run", sa.Column("u", sa.Integer(), sa.ForeignKey("account.id")))',
+        'op.add_column("run", sa.Column("n", sa.Integer(), sa.CheckConstraint("n >= 0")))',
+        'op.execute("ALTER TABLE run ADD COLUMN u int REFERENCES account (id)")',
+        'op.execute("ALTER TABLE run ADD COLUMN n int DEFAULT 0 CHECK (n >= 0)")',
+        'op.execute("LOCK TABLE run")',
+        'op.execute("LOCK run IN ACCESS EXCLUSIVE MODE")',
+        'op.execute("REFRESH MATERIALIZED VIEW run_summary")',
+        'op.execute("ALTER TABLE run SET LOGGED")',
+        'op.get_bind().exec_driver_sql("CREATE INDEX ix ON run (a)")',
+        'create_index("ix_run_owner", "run", ["owner_id"])',
+        "op.execute(\"ALTER TABLE run ALTER n SET DEFAULT 'a--b', ALTER n SET NOT NULL\")",
     ],
 )
 def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
@@ -440,6 +154,7 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         'op.execute("ALTER TABLE run ADD COLUMN x text, ADD COLUMN y int DEFAULT 0")',
         'op.execute("ALTER TABLE run ADD COLUMN t int GENERATED ALWAYS AS (a) VIRTUAL")',
         "op.execute(\"ALTER TABLE run ADD COLUMN n text DEFAULT 'a,b' -- UNIQUE\")",
+        'op.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY run_summary")',
     ],
     ids=[
         "indice-concorrente",
@@ -461,6 +176,7 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         "sql-varias-colunas-estaveis",
         "sql-coluna-gerada-virtual",
         "sql-virgula-entre-aspas-e-comentario",
+        "sql-refresh-concorrente",
     ],
 )
 def test_forma_segura_passa(operation: str) -> None:
@@ -579,3 +295,79 @@ def test_sql_grande_e_analisado_em_tempo_linear() -> None:
 
     assert unmarked_blocking_lines(source) == []
     assert time.monotonic() - started < MAX_ANALYSIS_S
+
+
+def test_coluna_guardada_em_variavel_e_lida() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    column = sa.Column("key", sa.Text(), unique=True)\n'
+        '    op.add_column("run", column)\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [3]
+
+
+def test_default_volatil_guardado_em_constante_e_lido() -> None:
+    source = (
+        'NEW_TOKEN = sa.text("gen_random_uuid()")\n\n\n'
+        "def upgrade() -> None:\n"
+        '    op.add_column("run", sa.Column("t", sa.Uuid(), server_default=NEW_TOKEN))\n'
+    )
+
+    assert unmarked_blocking_lines(source) == [5]
+
+
+def test_variavel_do_downgrade_nao_contamina_o_upgrade() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    sql = "UPDATE run SET size = 0 WHERE size IS NULL"\n'
+        "    op.execute(sql)\n\n\n"
+        "def downgrade() -> None:\n"
+        '    sql = "CREATE INDEX ix_run_size ON run (size)"\n'
+        "    op.execute(sql)\n"
+    )
+
+    assert unmarked_blocking_lines(source) == []
+
+
+def test_tabela_criada_com_op_f_dispensa_a_marca() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    op.create_table(op.f("share"), sa.Column("id", sa.BigInteger()))\n'
+        '    op.create_index("ix_share_id", "share", ["id"])\n'
+    )
+
+    assert unmarked_blocking_lines(source) == []
+
+
+AUTOCOMMIT_HEADER = "def upgrade() -> None:\n    with op.get_context().autocommit_block():\n"
+CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (a)")\n'
+
+
+@pytest.mark.parametrize(
+    ("body", "line"),
+    [
+        ('        op.create_index("ix_a", "run", ["a"], postgresql_concurrently=True)\n', 3),
+        ('        op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_a ON run (a)")\n', 3),
+        ('        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_b")\n' + CREATE_CONCURRENT, 4),
+        (CREATE_CONCURRENT + '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_a")\n', 3),
+    ],
+    ids=["op-sem-drop", "sql-sem-drop", "drop-de-outro-indice", "drop-depois"],
+)
+def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> None:
+    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == [line]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        (
+            '        op.drop_index("ix_a", "run", postgresql_concurrently=True, if_exists=True)\n'
+            '        op.create_index("ix_a", "run", ["a"], postgresql_concurrently=True)\n'
+        ),
+        "        op.execute('DROP INDEX CONCURRENTLY IF EXISTS \"IX_A\"')\n" + CREATE_CONCURRENT,
+    ],
+    ids=["op", "sql"],
+)
+def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:
+    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == []
