@@ -325,6 +325,7 @@ def test_usos_de_execucao_terminal_sao_liberados(
     counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
 
     assert counts["holds_released"] == 1
+    assert counts["download_holds_released"] == 0
     assert open_run_uses(factory, run_id) == 0
 
 
@@ -776,7 +777,8 @@ def test_uso_de_download_so_e_encerrado_depois_do_lease_da_transferencia(
     counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
 
     assert (_use_ended_at(factory, holder_id) is not None) is released
-    assert counts["holds_released"] == int(released)
+    assert counts["download_holds_released"] == int(released)
+    assert counts["holds_released"] == 0
 
 
 def test_uso_de_execucao_nao_e_encerrado_pelo_lease_de_download(
@@ -794,6 +796,7 @@ def test_uso_de_execucao_nao_e_encerrado_pelo_lease_de_download(
 
     assert open_run_uses(factory, run_id) > 0
     assert counts["holds_released"] == 0
+    assert counts["download_holds_released"] == 0
 
 
 def test_uso_de_download_ja_encerrado_nao_muda(
@@ -811,4 +814,5 @@ def test_uso_de_download_ja_encerrado_nao_muda(
     counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
 
     assert _use_ended_at(factory, holder_id) == ended_before
+    assert counts["download_holds_released"] == 0
     assert counts["holds_released"] == 0

@@ -103,6 +103,10 @@ STEPS_FAILED = "steps_failed"
 # Passos não tentados na volta: os de banco depois de uma falha de conexão e os que a parada
 # pedida deixou para trás.
 STEPS_SKIPPED = "steps_skipped"
+# Contagens dos usos órfãos encerrados na volta, uma por tipo de detentor: execuções terminais
+# (nome anterior aos downloads, mantido com o mesmo significado) e downloads além do lease.
+RUN_HOLDS_RELEASED = "holds_released"
+DOWNLOAD_HOLDS_RELEASED = "download_holds_released"
 # SQLSTATE de conexão (classe 08) e de servidor parando (admin_shutdown, crash_shutdown,
 # cannot_connect_now): o banco não vai responder ao passo seguinte desta volta.
 _CONNECTION_EXCEPTION_CLASS = "08"
@@ -138,12 +142,13 @@ class _Step:
     uses_database: bool = True
 
 
-class _ConnectionLostWithCountsError(Exception):
-    """Passo que isola a própria falha, mas perdeu a conexão: o ciclo precisa saber.
+class _StepFailedWithCountsError(Exception):
+    """Passo que falhou depois de confirmar parte do trabalho, ou que isola a própria falha mas
+    perdeu a conexão: o ciclo precisa saber das duas coisas.
 
-    Leva as contagens que o passo devolveria (com a falha dele, para o medidor do alerta) e o
-    erro de conexão. `_CycleOutcome.run` aplica as contagens e trata o passo como falho, igual a
-    qualquer passo que levanta erro de conexão.
+    Leva as contagens do que já foi confirmado (ou da falha, para o medidor do alerta) e o erro
+    original. `_CycleOutcome.run` aplica as contagens e trata o passo como falho, igual a qualquer
+    passo que levanta esse erro: perda de conexão ainda pula os passos de banco restantes.
     """
 
     def __init__(self, error: Exception, counts: Mapping[str, int]) -> None:
@@ -165,7 +170,7 @@ class _CycleOutcome:
     def run(self, step: _Step) -> None:
         try:
             self.counts.update(step.run())
-        except _ConnectionLostWithCountsError as lost:
+        except _StepFailedWithCountsError as lost:
             self.counts.update(lost.counts)
             self._record_failure(step, lost.error)
         except Exception as error:
@@ -264,10 +269,11 @@ class Maintenance:
 
         Passos independentes: a exceção de um fica no log e em `steps_failed`, e o ciclo segue
         para prazo, retenção, expurgo e medidores; as contagens do passo que falhou ficam fora do
-        evento, exceto as da varredura de ausentes, que as mantém mesmo na perda de conexão
-        (`_ConnectionLostWithCountsError`). Falha de conexão (banco inalcançável) pula os passos de
-        banco restantes da volta, que só esperariam o `connect_timeout` de novo, mas não a limpeza
-        de temporários, que só usa o storage; `should_stop` (a parada pedida por sinal) é
+        evento, exceto as que o passo leva em `_StepFailedWithCountsError`: a varredura de
+        ausentes, mesmo na perda de conexão, e os downloads já encerrados pelos usos órfãos.
+        Falha de conexão (banco inalcançável) pula os passos de banco restantes da volta, que só
+        esperariam o `connect_timeout` de novo, mas não a limpeza de temporários, que só usa o
+        storage; `should_stop` (a parada pedida por sinal) é
         conferido antes de cada passo. Os dois contam em `steps_skipped`. Os passos que chamam o
         Runner item a item também conferem a parada entre os itens: o item em curso termina, e o
         seguinte fica para o próximo processo. Esse item em curso pode, sozinho, passar da carência
@@ -303,7 +309,7 @@ class Maintenance:
             ),
             _Step("expire_queue", lambda: {"queue_expired": self.expire_queue()}),
             _Step("apply_deadlines", lambda: {"deadlines": self.apply_deadlines()}),
-            _Step("release_orphan_holds", lambda: {"holds_released": self.release_orphan_holds()}),
+            _Step("release_orphan_holds", self.release_orphan_holds),
             _Step("discard_stale_candidates", self.discard_stale_candidates),
             _Step(
                 "sweep_work_areas",
@@ -491,16 +497,27 @@ class Maintenance:
 
     # Usos e candidatos -----------------------------------------------------------------
 
-    def release_orphan_holds(self) -> int:
-        """Usos órfãos: de execuções terminais e de downloads que passaram do lease.
+    def release_orphan_holds(self) -> dict[str, int]:
+        """Usos órfãos: de downloads que passaram do lease e de execuções terminais.
 
-        Na execução, a transação seguinte ao término não chegou; no download, a API caiu antes
-        de `finish_download`. A contagem soma os dois tipos de detentor.
+        No download, a API caiu antes de `finish_download`; na execução, a transação seguinte ao
+        término não chegou. Cada tipo de detentor tem a sua contagem: `holds_released` segue só
+        com as execuções. Os downloads são encerrados numa transação própria, confirmada antes da
+        parte das execuções: se esta falhar, o passo sobe como `_StepFailedWithCountsError` com a
+        contagem dos downloads, e o ciclo a mantém no evento.
         """
         downloads = run_transaction(
             self._factory,
             partial(release_expired_downloads, limit=self._config.batch_size),
         )
+        try:
+            runs = self._release_terminal_run_holds()
+        except Exception as error:
+            raise _StepFailedWithCountsError(error, {DOWNLOAD_HOLDS_RELEASED: downloads}) from error
+        return {RUN_HOLDS_RELEASED: runs, DOWNLOAD_HOLDS_RELEASED: downloads}
+
+    def _release_terminal_run_holds(self) -> int:
+        """Libera os usos das execuções já terminais; devolve quantas execuções."""
         with self._factory() as session, session.begin():
             holders = holders_with_open_uses(session, HolderKind.RUN, self._config.batch_size)
             terminal = session.execute(
@@ -513,7 +530,7 @@ class Maintenance:
                 self._factory,
                 partial(release_run_holds, run_id=row.id, generation=row.generation),
             )
-        return downloads + len(terminal)
+        return len(terminal)
 
     def discard_stale_candidates(self) -> dict[str, int]:
         """Candidatos de tentativas encerradas que não viraram artefato (gerações vencidas)."""
@@ -642,7 +659,7 @@ class Maintenance:
         Isolada do resto do ciclo: uma falha dela (disco, banco) fica no log e na contagem
         `missing_sweep_failed`, e a retenção e os medidores seguem. A reconciliação de capacidade
         do ciclo seguinte já vê as reservas liberadas aqui. Perda de conexão tem o mesmo log e a
-        mesma contagem, e além disso sobe como `_ConnectionLostWithCountsError`: o ciclo conta o
+        mesma contagem, e além disso sobe como `_StepFailedWithCountsError`: o ciclo conta o
         passo em `steps_failed` e pula os passos de banco restantes, que só esperariam o timeout de
         novo. Chamada fora do ciclo, ela levanta nesse caso.
         """
@@ -662,7 +679,7 @@ class Maintenance:
             )
             failed = {**_sweep_counts(MissingSweep.idle()), "missing_sweep_failed": 1}
             if is_connection_error(error):
-                raise _ConnectionLostWithCountsError(error, failed) from error
+                raise _StepFailedWithCountsError(error, failed) from error
             return failed
         self._missing_resume_after = sweep.resume_after
         self._report_sweep(sweep)

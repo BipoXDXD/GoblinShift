@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.telemetry import JsonFormatter, omit_database_error_detail
+from goblinshift.runs import maintenance as maintenance_module
 from goblinshift.runs.maintenance import STEPS_FAILED, STEPS_SKIPPED, Maintenance
 from goblinshift.runs.worker.runner import Runner
 
@@ -37,7 +38,7 @@ STEPS: dict[str, dict[str, int]] = {
     "reconcile_expired_leases": {"leases_reconciled": 1},
     "expire_queue": {"queue_expired": 2},
     "apply_deadlines": {"deadlines": 3},
-    "release_orphan_holds": {"holds_released": 4},
+    "release_orphan_holds": {"holds_released": 4, "download_holds_released": 11},
     "discard_stale_candidates": {"candidates_discarded": 5},
     "sweep_work_areas": {"work_areas_removed": 6},
     "apply_retention": {"objects_purged": 7},
@@ -50,7 +51,6 @@ INT_STEPS = {
     "reconcile_expired_leases",
     "expire_queue",
     "apply_deadlines",
-    "release_orphan_holds",
     "sweep_work_areas",
 }
 
@@ -319,6 +319,34 @@ def test_falha_de_conexao_no_ultimo_passo_nao_pula_nada(
 
     assert counts[STEPS_SKIPPED] == 0
     assert SKIPPED_AFTER_CONNECTION_MESSAGE not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("error", "skipped"),
+    [(database_error, 0), (connection_refused, 5)],
+    ids=["statement_timeout", "conexao_recusada"],
+)
+def test_falha_nos_usos_de_execucao_mantem_os_downloads_ja_encerrados(
+    maintenance: Maintenance,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Callable[[], Exception],
+    skipped: int,
+) -> None:
+    """Os downloads são encerrados numa transação própria, já confirmada quando os usos de
+    execução falham: a contagem deles vai ao evento, e a de execuções fica fora."""
+    monkeypatch.delattr(maintenance, "release_orphan_holds")
+    monkeypatch.setattr(maintenance_module, "run_transaction", lambda *_: 1)
+
+    def unreachable() -> Session:
+        raise error()
+
+    monkeypatch.setattr(maintenance, "_factory", unreachable)
+
+    counts = maintenance.run_cycle()
+
+    assert counts["download_holds_released"] == 1
+    assert "holds_released" not in counts
+    assert (counts[STEPS_FAILED], counts[STEPS_SKIPPED]) == (1, skipped)
 
 
 # Parada pedida no meio da volta -----------------------------------------------------------
