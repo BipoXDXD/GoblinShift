@@ -1,6 +1,6 @@
 # ADR 056. O `migrate` da imagem anterior tolera o banco à frente; produção só sobe para o head
 
-- **Estado:** aceito (coordenação, 14/11, por delegação do dono)
+- **Estado:** aceito (coordenação, 14/11, por delegação do dono); o item "Transação única" foi substituído pelo [ADR 057](057-travas-das-migrations.md)
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (implantação, expand/contract)
 - **Relacionado:** issue #442, `migrations/env.py`, `tests/test_migrate_tolerante.py`, `tests/test_migrations_contract.py`, `deploy/coolify/release/ISOLATION.md`
 
@@ -24,7 +24,7 @@ Opção C.
 
 - **Banco à frente.** Com o destino igual ao head da imagem (`upgrade head` ou `stamp head`), o `env.py` lê as revisões do banco antes de migrar. Uma revisão que a imagem não conhece gera um WARN no stderr, com a revisão do banco e o head da imagem, e o comando sai com 0 sem migrar nem regravar a versão. Qualquer outro erro do Alembic, inclusive banco inacessível, continua falhando.
 - **Produção.** Com `GS_ENVIRONMENT=production`, o único destino aceito é o head da imagem. `downgrade` para baixo do head, `base`, revisões relativas e `stamp` em outra revisão são recusados antes de conectar (`downgrade head` resolve para o head e não muda nada). Comandos sem destino (`current`, `check`, `history`) só leem e continuam permitidos, porque o rollback depende de conferir a revisão do banco. `stamp head` também é aceito, e com o banco atrás do head ele marca a versão sem rodar as migrações pendentes: é ferramenta de recuperação manual, não passo de deploy. Descer o schema em produção é restauração de backup (ADR 022).
-- **Transação única.** Todas as revisões pendentes rodam numa transação só, com `statement_timeout` desligado nela: uma falha desfaz o lote inteiro, e o banco fica na revisão em que estava. A leitura das revisões fecha a própria transação implícita antes, para que o `begin_transaction` do Alembic não entre nela.
+- **Transação única** (substituído pelo ADR 057: cada migration roda na sua transação, com `lock_timeout` curto e retry). Todas as revisões pendentes rodam numa transação só, com `statement_timeout` desligado nela: uma falha desfaz o lote inteiro, e o banco fica na revisão em que estava. A leitura das revisões fecha a própria transação implícita antes, para que o `begin_transaction` do Alembic não entre nela.
 - **Contract.** `tests/test_migrations_contract.py` varre o `upgrade()` de cada migration e recusa `drop_column`, `drop_table`, `rename_table`, `alter_column(new_column_name=...)` e `op.execute` com DROP/RENAME de coluna ou tabela (dentro de um `ALTER TABLE`, qualquer DROP ou RENAME em qualquer ação da lista, com ou sem o `COLUMN` opcional; DROP de constraint, default, NOT NULL, identity e expression e RENAME CONSTRAINT ficam de fora) sem `# contract: <motivo>` na linha da operação ou numa linha só de comentário logo acima. O `downgrade()` fica de fora.
 
 ## Consequências

@@ -1,0 +1,46 @@
+# ADR 057. Cada migration na sua transação, com `lock_timeout` curto e retry limitado
+
+- **Estado:** aceito (coordenação, 14/11, por delegação do dono)
+- **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (implantação, expand/contract)
+- **Relacionado:** issue #442, ADR 056 (substitui o item "Transação única"), `src/goblinshift/platform/migration_locks.py`, `migrations/env.py`, `tests/migration_lock_check.py`, `tests/test_migrations_lock_safety.py`, `tests/test_migration_lock_timeout.py`
+
+## Contexto
+
+O ADR 056 rodava todas as revisões pendentes numa transação só, com `statement_timeout` desligado. Um `ALTER TABLE` que pede ACCESS EXCLUSIVE numa tabela que outra sessão segura fica na fila do lock sem prazo, e toda consulta da API que chega depois espera atrás dele: o deploy congela o tráfego da tabela até a sessão concorrente terminar. Como a transação é única, o lock de cada migration já aplicada também fica preso até o fim do lote.
+
+O engine da aplicação usa `statement_timeout=5000` e `lock_timeout=2000` (`platform/db.py`), valores pensados para requisições, curtos demais para um backfill ou um índice CONCURRENTLY.
+
+Nada no CI barrava DDL que bloqueia leituras ou escritas por toda a duração: CREATE INDEX sem CONCURRENTLY, ADD CONSTRAINT sem NOT VALID, SET NOT NULL direto, ALTER COLUMN TYPE e ADD COLUMN com default volátil.
+
+## Alternativas
+
+| Alternativa | Prós | Contras |
+|-------------|------|---------|
+| **A. Transação única do ADR 056** | Falha desfaz o lote inteiro | Espera de lock sem prazo congela a API; locks das migrations anteriores ficam presos até o fim |
+| **B. Só `lock_timeout`, sem retry** | Simples | Uma transação longa da API no momento do deploy derruba o deploy, embora o lock fosse sair em segundos |
+| **C. Transação por migration, `lock_timeout` curto, retry com backoff e jitter, check estático no CI** (escolhida) | A espera atrás da migration fica limitada; uma disputa passageira não derruba o deploy; o padrão bloqueante é pego antes do merge | Um lote pode parar no meio, com parte das migrations aplicada; o check é estático e tem limites |
+| **D. Ferramenta externa de migração online** (pg-osc, pgroll) | Reescreve sem lock longo | Dependência nova e operação mais complexa para um banco pequeno |
+
+## Decisão
+
+Opção C.
+
+- **Tempos.** `MIGRATION_LOCK_TIMEOUT_MS = 5 000` e `MIGRATION_STATEMENT_TIMEOUT_MS = 15 min`, em `migration_locks.py`. A conexão das migrations aplica os dois com `SET` e faz commit antes de entregar a conexão ao Alembic, sobrepondo os valores do engine da aplicação. `-x lock_timeout_ms=<n>` troca o lock_timeout para testes; valor zero ou negativo é recusado com mensagem, porque 0 desliga o limite no PostgreSQL.
+- **Transação por migration.** `transaction_per_migration=True` no modo online e no offline: cada migration confirma e solta os locks ao terminar. O script `--sql` começa com os mesmos `SET`.
+- **Retry.** Só o erro 55P03 (`LockNotAvailable`) é repetido: até `LOCK_ATTEMPTS = 3` tentativas, com espera inicial de 1 s que dobra a cada vez, metade fixa e metade sorteada. A cada tentativa o Alembic relê a versão do banco, então nenhuma migration aplicada roda de novo. Statement timeout (57014) e qualquer outro erro não repetem: migration lenta não melhora ao repetir.
+- **Desistência.** Esgotadas as tentativas, `CommandError` com "lock ocupado em N tentativas"; o processo sai com código diferente de zero, sem traceback. `api` e `worker` dependem do `migrate` com `service_completed_successfully`, então o deploy aborta antes da troca, e a versão anterior continua no ar sobre um schema que ela tolera (expand/contract, ADR 056).
+- **Check no CI.** `tests/test_migrations_lock_safety.py` analisa por AST o `upgrade()` das migrations a partir da 0019 e as funções do módulo que ele chama. Recusa, sem `# lock-ok: <motivo>` na linha da operação ou numa linha só de comentário logo acima: `create_index` sem `postgresql_concurrently`, constraint sem NOT VALID (inclusive FK e CHECK declarados na coluna), SET NOT NULL, ALTER COLUMN TYPE, ADD COLUMN com default volátil, SET LOGGED/UNLOGGED, LOCK TABLE e REFRESH MATERIALIZED VIEW sem CONCURRENTLY, em `op.*` e em SQL de `execute`/`exec_driver_sql`. O SQL é lido também quando montado em variável, f-string ou concatenação. Tabela criada no mesmo `upgrade()` dispensa a marca, porque ninguém mais a enxerga.
+- **CONCURRENTLY.** Só dentro de `op.get_context().autocommit_block()`. O `lock_timeout` também vale para as esperas do CREATE INDEX CONCURRENTLY pelas transações antigas, e o timeout deixa um índice INVALID; por isso cada criação concorrente exige, antes e no mesmo bloco, `DROP INDEX CONCURRENTLY IF EXISTS` do mesmo índice, para o retry não falhar com "already exists".
+
+## Consequências
+
+- Um deploy pode parar com parte das migrations aplicada. Isso é seguro pelo expand/contract: a imagem anterior tolera o schema mais novo, e o próximo deploy continua da revisão em que o banco ficou.
+- Durante a espera de uma migration, as consultas à tabela esperam até 5 s atrás dela, três vezes no pior caso. Isso é aceito em troca de um deploy que não congela.
+- O check é estático: SQL vindo de arquivo, de parâmetro de função ou montado com `format()`/`%`, e chamadas indiretas (método de objeto, função de outro módulo) escapam dele. Ele peca pelo lado seguro nos casos ambíguos (pede a marca). A revisão do PR continua valendo.
+- `alembic upgrade +N` recalcula o destino a cada tentativa. Em produção o único destino aceito é o head (ADR 056), então isso só afeta uso manual fora de produção.
+
+## Compliance
+
+- `tests/test_migration_locks.py`, sem banco: constantes, `SET` gerados, só 55P03 repete, esperas dobradas e sorteadas, mensagem ao esgotar, statement timeout sem repetição.
+- `tests/test_migration_lock_timeout.py`, contra PostgreSQL real e pelo CLI, com uma sessão concorrente segurando a tabela em SHARE: a migration desiste em tempo limitado, com a versão inalterada e as leituras concorrentes esperando menos de 1,5 s; liberado o lock entre tentativas, a migration conclui; `lock_timeout_ms` 0 ou negativo é recusado com mensagem; o script offline traz o `SET lock_timeout` antes do primeiro DDL.
+- `tests/test_migrations_lock_safety.py`: as migrations existentes passam; cada padrão bloqueante sem a marca é recusado; a marca e as formas seguras passam; a análise de todas as migrations termina em menos de 2 s.
