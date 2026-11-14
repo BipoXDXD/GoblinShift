@@ -10,8 +10,10 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import subprocess
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -37,6 +39,10 @@ pytestmark = [pytest.mark.integration, pytest.mark.backup]
 AGE_HEADER = b"age-encryption.org/v1"
 # Instante UTC do início do dump, que ordena os nomes, e 128 bits aleatórios.
 DUMP_KEY = re.compile(r"goblinshift-\d{8}T\d{6}Z-(?P<suffix>[0-9a-f]{32})\.dump\.age")
+# Marcador do último upload bom, lido pelo estado do host (alerta acima de 2 dias).
+MARKER_NAME = "last-upload-ok"
+PREVIOUS_SUCCESS = "2026-11-01T03:05:42Z\n"
+
 # Separa as chamadas no registro do curl interceptado.
 CALL_END = "--fim-da-chamada--"
 
@@ -47,12 +53,21 @@ def prefix() -> str:
     return f"pg-{uuid.uuid4().hex[:8]}/"
 
 
+@pytest.fixture
+def state_dir(tmp_path: Path) -> Path:
+    """O StateDirectory= da unit: o systemd o cria com o modo 0700, dono goblinshift."""
+    directory = tmp_path / "goblinshift-backup"
+    directory.mkdir(mode=0o700)
+    return directory
+
+
 def backup_env(
     s3: S3,
     source: SourceDatabase,
     keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     credentials: Credentials = WRITER,
 ) -> dict[str, str]:
     return {
@@ -68,6 +83,8 @@ def backup_env(
         "BACKUP_S3_KEY_ID": credentials.key_id,
         "BACKUP_S3_SECRET": credentials.secret,
         "BACKUP_HEALTHCHECK_URL": healthchecks.url,
+        # O systemd define STATE_DIRECTORY a partir do StateDirectory= da unit.
+        "STATE_DIRECTORY": str(state_dir),
     }
 
 
@@ -115,9 +132,16 @@ def dump_suffix(key: str, prefix: str) -> str:
 
 
 def back_up(
-    s3: S3, source: SourceDatabase, keys: AgeKeys, healthchecks: FakeHealthchecks, prefix: str
+    s3: S3,
+    source: SourceDatabase,
+    keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    state_dir: Path,
 ) -> None:
-    result = run_script(BACKUP_SCRIPT, backup_env(s3, source, keys, healthchecks, prefix))
+    result = run_script(
+        BACKUP_SCRIPT, backup_env(s3, source, keys, healthchecks, prefix, state_dir)
+    )
     assert result.returncode == 0, result.stderr
     healthchecks.pings.clear()
 
@@ -131,8 +155,11 @@ def test_backup_envia_o_dump_cifrado_com_a_chave_que_so_escreve(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
 ) -> None:
-    result = run_script(BACKUP_SCRIPT, backup_env(s3, source_db, age_keys, healthchecks, prefix))
+    result = run_script(
+        BACKUP_SCRIPT, backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
+    )
 
     assert result.returncode == 0, result.stderr
     keys = s3.keys(prefix)
@@ -144,18 +171,48 @@ def test_backup_envia_o_dump_cifrado_com_a_chave_que_so_escreve(
     assert healthchecks.pings == ["/start", "/"]
 
 
+def test_backup_bom_grava_o_marcador_so_com_o_instante_do_upload(
+    s3: S3,
+    source_db: SourceDatabase,
+    age_keys: AgeKeys,
+    healthchecks: FakeHealthchecks,
+    prefix: str,
+    state_dir: Path,
+) -> None:
+    (state_dir / MARKER_NAME).write_text(PREVIOUS_SUCCESS)
+    before = datetime.now(UTC).replace(microsecond=0)
+
+    result = run_script(
+        BACKUP_SCRIPT, backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
+    )
+
+    after = datetime.now(UTC)
+    assert result.returncode == 0, result.stderr
+    assert sorted(path.name for path in state_dir.iterdir()) == [MARKER_NAME]
+    marker = state_dir / MARKER_NAME
+    assert stat.S_IMODE(marker.stat().st_mode) == 0o600
+    content = marker.read_text()
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\n", content), content
+    assert before <= datetime.fromisoformat(content.strip()) <= after
+    # Só o instante: nada do bucket, do prefixo nem do nome do objeto.
+    (key,) = s3.keys(prefix)
+    for revealing in (BUCKET, prefix.rstrip("/"), dump_suffix(key, prefix)):
+        assert revealing not in content
+
+
 def test_put_do_dump_leva_o_content_md5_do_arquivo_cifrado(
     s3: S3,
     source_db: SourceDatabase,
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     tmp_path: Path,
 ) -> None:
     """O B2 recusa com 400 o PUT sem Content-MD5 num bucket com Object Lock; o SeaweedFS não
     exige o header, então o teste o lê nos argumentos de um curl que só registra e repassa."""
     calls = tmp_path / "curl-calls"
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     env["PATH"] = f"{recording_curl(tmp_path, calls)}{os.pathsep}{env['PATH']}"
 
     result = run_script(BACKUP_SCRIPT, env)
@@ -195,9 +252,10 @@ def test_nome_do_dump_tem_sufixo_aleatorio_que_nao_vai_para_o_journal(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
 ) -> None:
     """Com o nome adivinhável, a chave que só escreve sobrescreveria o dump daquele instante."""
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
 
     first = run_script(BACKUP_SCRIPT, env)
     second = run_script(BACKUP_SCRIPT, env)
@@ -214,8 +272,9 @@ def test_backup_nao_imprime_o_segredo_do_s3(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
 ) -> None:
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     env["BACKUP_S3_SECRET"] = f"CANARY-{uuid.uuid4()}"
 
     result = run_script(BACKUP_SCRIPT, env)
@@ -230,8 +289,11 @@ def test_credencial_recusada_pinga_falha_e_nao_grava_nada(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
 ) -> None:
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    marker = state_dir / MARKER_NAME
+    marker.write_text(PREVIOUS_SUCCESS)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     env["BACKUP_S3_SECRET"] = "segredo-errado-" + "x" * 24
 
     result = run_script(BACKUP_SCRIPT, env)
@@ -239,6 +301,9 @@ def test_credencial_recusada_pinga_falha_e_nao_grava_nada(
     assert result.returncode != 0
     assert s3.keys(prefix) == []
     assert healthchecks.pings == ["/start", "/fail"]
+    # O marcador continua com o último upload bom: é a idade dele que o estado do host alerta.
+    assert marker.read_text() == PREVIOUS_SUCCESS
+    assert sorted(path.name for path in state_dir.iterdir()) == [MARKER_NAME]
 
 
 @pytest.mark.parametrize(
@@ -254,6 +319,7 @@ def test_banco_que_falha_a_conferencia_nao_envia_e_pinga_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     request: pytest.FixtureRequest,
     database: str,
     reason: str,
@@ -261,12 +327,15 @@ def test_banco_que_falha_a_conferencia_nao_envia_e_pinga_falha(
     # O pg_dump de um banco recriado vazio sai 0: sem a conferência, viraria o "backup bom" do dia.
     source: SourceDatabase = request.getfixturevalue(database)
 
-    result = run_script(BACKUP_SCRIPT, backup_env(s3, source, age_keys, healthchecks, prefix))
+    result = run_script(
+        BACKUP_SCRIPT, backup_env(s3, source, age_keys, healthchecks, prefix, state_dir)
+    )
 
     assert result.returncode != 0
     assert reason in result.stderr
     assert s3.keys(prefix) == []
     assert healthchecks.pings == ["/start", "/fail"]
+    assert list(state_dir.iterdir()) == []
 
 
 def test_dump_que_falha_nao_envia_nada(
@@ -275,8 +344,9 @@ def test_dump_que_falha_nao_envia_nada(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
 ) -> None:
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     env["BACKUP_PG_DB"] = "banco_que_nao_existe"
 
     result = run_script(BACKUP_SCRIPT, env)
@@ -292,11 +362,12 @@ def test_sem_destinatario_age_falha_sem_enviar_texto_claro(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     tmp_path: Path,
 ) -> None:
     only_comments = tmp_path / "vazio.txt"
     only_comments.write_text("# coloque aqui a chave pública age\n\n")
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     env["BACKUP_AGE_RECIPIENTS_FILE"] = str(only_comments)
 
     result = run_script(BACKUP_SCRIPT, env)
@@ -309,7 +380,13 @@ def test_sem_destinatario_age_falha_sem_enviar_texto_claro(
 
 @pytest.mark.parametrize(
     "missing",
-    ["BACKUP_S3_BUCKET", "BACKUP_S3_SECRET", "BACKUP_HEALTHCHECK_URL", "BACKUP_PG_CONTAINER"],
+    [
+        "BACKUP_S3_BUCKET",
+        "BACKUP_S3_SECRET",
+        "BACKUP_HEALTHCHECK_URL",
+        "BACKUP_PG_CONTAINER",
+        "STATE_DIRECTORY",
+    ],
 )
 def test_configuracao_incompleta_falha_antes_de_comecar(
     s3: S3,
@@ -317,9 +394,10 @@ def test_configuracao_incompleta_falha_antes_de_comecar(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     missing: str,
 ) -> None:
-    env = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    env = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     del env[missing]
 
     result = run_script(BACKUP_SCRIPT, env)
@@ -339,13 +417,14 @@ def test_restauracao_do_dump_mais_recente_passa_nas_verificacoes(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
 ) -> None:
     # Um dump de outro banco, enviado antes do backup: a restauração escolhe pelo envio (o
     # LastModified do S3), então ele precisa chegar primeiro. Enviado depois, venceria por direito.
     old = f"{prefix}goblinshift-20200101T000000Z-{'0' * 32}.dump.age"
     s3.put(old, Path(__file__))
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     (latest,) = set(s3.keys(prefix)) - {old}
 
     result = run_script(
@@ -374,10 +453,11 @@ def test_restauracao_de_dump_sem_object_lock_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
 ) -> None:
     """Sem retenção em compliance, a chave que só escreve sobrescreveria o dump."""
-    backup = backup_env(s3, source_db, age_keys, healthchecks, prefix)
+    backup = backup_env(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     backup["BACKUP_S3_BUCKET"] = UNLOCKED_BUCKET
     assert run_script(BACKUP_SCRIPT, backup).returncode == 0
     healthchecks.pings.clear()
@@ -399,10 +479,11 @@ def test_restauracao_com_dump_de_data_futura_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
 ) -> None:
     """Um nome no futuro venceria qualquer dump real pela ordem dos nomes, para sempre."""
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     (latest,) = s3.keys(prefix)
     s3.put(latest.replace("goblinshift-2026", "goblinshift-2099"), Path(__file__))
 
@@ -423,6 +504,7 @@ def test_erro_do_pg_restore_nao_publica_dados_do_dump(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
 ) -> None:
     """O log do Actions é público, e o erro de um COPY traz a linha que falhou.
@@ -440,7 +522,7 @@ def test_erro_do_pg_restore_nao_publica_dados_do_dump(
     # O canário é `CANARY-<uuid4>`, gerado pela fixture: nada externo entra no SQL.
     insert = f"INSERT INTO public.leak_probe VALUES ('{source_db.canary}')"  # noqa: S608
     source_db.database.scalar(insert)
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
 
     result = run_script(
         RESTORE_SCRIPT,
@@ -503,9 +585,10 @@ def test_restauracao_de_dump_velho_demais_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
 ) -> None:
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     env = restore_env(s3, restore_db, age_keys, healthchecks, prefix, known_revisions)
     env["RESTORE_MAX_AGE_HOURS"] = "0"
 
@@ -523,8 +606,9 @@ def test_restauracao_com_revisao_desconhecida_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
 ) -> None:
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
 
     result = run_script(
         RESTORE_SCRIPT,
@@ -543,10 +627,11 @@ def test_restauracao_com_chave_age_errada_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
     tmp_path: Path,
 ) -> None:
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
     other = tmp_path / "outra-identidade.txt"
     subprocess.run(["age-keygen", "-o", str(other)], check=True, capture_output=True)
     env = restore_env(s3, restore_db, age_keys, healthchecks, prefix, known_revisions)
@@ -565,10 +650,11 @@ def test_restauracao_em_banco_que_ja_tem_tabelas_falha(
     age_keys: AgeKeys,
     healthchecks: FakeHealthchecks,
     prefix: str,
+    state_dir: Path,
     known_revisions: str,
 ) -> None:
     """O destino tem de ser descartável: restaurar por cima de dados não prova nada."""
-    back_up(s3, source_db, age_keys, healthchecks, prefix)
+    back_up(s3, source_db, age_keys, healthchecks, prefix, state_dir)
 
     result = run_script(
         RESTORE_SCRIPT,

@@ -14,6 +14,8 @@
 #   BACKUP_S3_ENDPOINT, BACKUP_S3_REGION, BACKUP_S3_BUCKET, BACKUP_S3_PREFIX (padrão: pg/)
 #   BACKUP_S3_KEY_ID, BACKUP_S3_SECRET  chave de aplicação só de escrita
 #   BACKUP_HEALTHCHECK_URL      URL de ping do check "backup diário"
+#   STATE_DIRECTORY             definido pelo systemd (StateDirectory=goblinshift-backup, 0700):
+#                               guarda o marcador last-upload-ok com o instante do último upload bom
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +23,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/lib.sh"
 
 require_env BACKUP_PG_CONTAINER BACKUP_S3_ENDPOINT BACKUP_S3_REGION BACKUP_S3_BUCKET \
-  BACKUP_S3_KEY_ID BACKUP_S3_SECRET BACKUP_HEALTHCHECK_URL
+  BACKUP_S3_KEY_ID BACKUP_S3_SECRET BACKUP_HEALTHCHECK_URL STATE_DIRECTORY
 pg_user="${BACKUP_PG_USER:-goblinshift}"
 pg_db="${BACKUP_PG_DB:-goblinshift}"
 prefix="${BACKUP_S3_PREFIX:-pg/}"
@@ -81,3 +83,11 @@ md5="$(openssl dgst -md5 -binary "$encrypted" | base64)"
 s3_curl --upload-file "$encrypted" --header "Content-Type: application/octet-stream" \
   --header "Content-MD5: $md5" --max-time 1800 --output /dev/null "$(s3_url "$key")"
 echo "backup enviado: dump de $(dump_instant "$key") ($(wc -c <"$encrypted" | tr -d ' ') bytes cifrados)"
+
+# Marcador do último upload bom: o estado do host alerta quando ele passa de 2 dias, para os /fail
+# repetidos não correrem em silêncio enquanto o ciclo de vida do bucket expira os dumps antigos.
+# Só o instante UTC, sem bucket nem chave. Gravado num temporário e renomeado: quem lê nunca vê
+# um arquivo pela metade, e uma falha antes daqui deixa o marcador anterior intacto.
+marker="$STATE_DIRECTORY/last-upload-ok"
+(umask 077 && date -u +%Y-%m-%dT%H:%M:%SZ >"$marker.tmp")
+mv -f "$marker.tmp" "$marker"

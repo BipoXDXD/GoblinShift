@@ -48,6 +48,14 @@ def test_servico_roda_como_usuario_da_aplicacao_com_o_script_instalado_pelo_root
     assert "/srv/goblinshift/app" not in (BACKUP_DIR / "goblinshift-pg-backup.service").read_text()
 
 
+def test_marcador_do_ultimo_upload_bom_fica_num_diretorio_privado_da_unit() -> None:
+    service = unit("goblinshift-pg-backup.service")["Service"]
+
+    assert service["StateDirectory"] == "goblinshift-backup"
+    assert service["StateDirectoryMode"] == "0700"
+    assert '"$STATE_DIRECTORY/last-upload-ok"' in (BACKUP_DIR / "pg-backup.sh").read_text()
+
+
 def test_timer_e_diario_sem_sorteio_e_recupera_execucao_perdida() -> None:
     timer = unit("goblinshift-pg-backup.timer")["Timer"]
 
@@ -96,7 +104,8 @@ def test_documento_nao_atribui_sorteio_ao_backup(document: str, stale_text: str)
 
 def test_instalador_exige_o_que_o_script_exige_fora_o_que_a_unit_define() -> None:
     service = unit("goblinshift-pg-backup.service")["Service"]
-    defined_by_unit = {service["Environment"].split("=", 1)[0]}
+    # O StateDirectory= faz o systemd definir STATE_DIRECTORY.
+    defined_by_unit = {service["Environment"].split("=", 1)[0], "STATE_DIRECTORY"}
 
     assert required_by_installer() == required_by_script() - defined_by_unit
 

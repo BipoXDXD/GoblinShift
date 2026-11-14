@@ -222,13 +222,17 @@ cd /
 set -a
 . <(as_app cat {CONFIG})
 set +a
+# O que o StateDirectory=goblinshift-backup da unit cria antes do ExecStart.
+install -d -o goblinshift -g goblinshift -m 700 /var/lib/goblinshift-backup
 runuser -u goblinshift -- env BACKUP_PG_CONTAINER=goblinshift-postgres-1 \\
-  {BACKUP_PREFIX}/pg-backup.sh
+  STATE_DIRECTORY=/var/lib/goblinshift-backup {BACKUP_PREFIX}/pg-backup.sh
 cat /tmp/calls
+stat -c 'marcador %U %a' /var/lib/goblinshift-backup/last-upload-ok
 """
     )
 
     assert result.returncode == 0, result.stderr
+    assert "marcador goblinshift 600" in result.stdout
     assert "docker exec goblinshift-postgres-1 pg_dump" in result.stdout
     assert f"--recipients-file {BACKUP_PREFIX}/age-recipients.txt" in result.stdout
     assert "--upload-file" in result.stdout

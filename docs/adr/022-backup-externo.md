@@ -67,3 +67,22 @@ Por ordem do dono, às 04:45 UTC de 2026-11-09, a janela noturna da VPS ficou as
 - **Alerta:** o check "backup diário" continua com 1 dia de período e 2 h de tolerância, ou 26 h entre sucessos. Em regime, os sucessos ficam a 24 h um do outro, mais a diferença de duração entre um dump e outro.
 - **Restauração:** o `restore-check.yml` roda no dia 1, às 10:23 UTC, e o dump escolhido terá cerca de 7 h, abaixo das 26 h exigidas.
 - **Compliance:** `tests/backup/test_backup_config.py` fixa o `OnCalendar` e o `RandomizedDelaySec` e confere este registro. Na VPS, `systemctl cat goblinshift-pg-backup.timer` mostra o horário efetivo.
+
+## Atualização de 2026-11-14: conferência antes do upload e marcador do último upload bom
+
+O `pg_dump` de um volume recriado vazio, com o esquema refeito pelo migrate, sai com status 0. Sem conferência, esse dump viraria o backup bom do dia, e só a restauração mensal perceberia.
+
+- **Conferência:** antes do dump, o `pg-backup.sh` exige a tabela `alembic_version` e ao menos uma linha em `app_user`. Se faltar uma das duas, nada sobe e o EXIT pinga `/fail`.
+- **O que continua aberto:** o ciclo de vida do bucket expira cada dump aos 30 dias (mais 1 para apagar), sem olhar se existe um dump bom mais novo. Depois de 31 dias seguidos de `/fail`, o último dump bom some. Guardar o último bom não cabe no script, porque a chave do host só escreve e não lista nem apaga. Fica como decisão e aplicação do dono, por retenção do Object Lock ou por regra de ciclo de vida.
+- **Marcador:** para os `/fail` repetidos não passarem em silêncio, o script grava `/var/lib/goblinshift-backup/last-upload-ok` só depois que o PUT é aceito. O conteúdo é apenas o instante UTC do upload (`2026-11-14T03:05:42Z`), sem bucket nem chave.
+  - O diretório vem do `StateDirectory=goblinshift-backup` da unit, com `StateDirectoryMode=0700`. O arquivo tem modo 0600 e pertence ao usuário do serviço, então só ele e o root o leem.
+  - A gravação passa por um temporário e um rename, então uma falha antes do fim deixa o marcador anterior intacto.
+  - O estado do host alerta quando o marcador passa de 2 dias. É um segundo sinal, independente do healthchecks.io.
+- **Custo:** como o resto do backup, a mudança só chega ao timer quando o `deploy/backup/install.sh` roda de novo, a partir de um checkout temporário da `main`.
+- **Compliance:** `tests/backup/test_pg_backup.py` cobre:
+  - o banco migrado sem contas e o banco sem esquema, que não enviam nada;
+  - o marcador gravado com modo 0600 e só o instante;
+  - o marcador intacto quando o upload falha;
+  - o `STATE_DIRECTORY` obrigatório.
+
+  `tests/backup/test_backup_config.py` fixa o `StateDirectory` da unit. `tests/backup/test_install.py` roda o script instalado e confere o dono e o modo do marcador.
