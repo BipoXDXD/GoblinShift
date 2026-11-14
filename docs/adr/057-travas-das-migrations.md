@@ -2,7 +2,7 @@
 
 - **Estado:** aceito (coordenação, 14/11, por delegação do dono)
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (implantação, expand/contract)
-- **Relacionado:** issue #442, ADR 056 (substitui o item "Transação única"), `src/goblinshift/platform/migration_locks.py`, `migrations/env.py`, `tests/migration_lock_check.py`, `tests/migration_sql.py`, `tests/test_migrations_lock_safety.py`, `tests/test_migration_lock_timeout.py`
+- **Relacionado:** issue #442, ADR 056 (substitui o item "Transação única"), `src/goblinshift/platform/migration_locks.py`, `migrations/env.py`, `tests/migration_lock_check.py`, `tests/migration_sql.py`, `tests/test_migrations_lock_safety.py`, `tests/test_migration_lock_timeout.py`, `scripts/check_runtime_licenses.py`
 
 ## Contexto
 
@@ -39,6 +39,7 @@ Opção C.
 - Durante a espera de uma migration, as consultas à tabela esperam até 5 s atrás dela, três vezes no pior caso. Isso é aceito em troca de um deploy que não congela.
 - O check é estático: SQL vindo de arquivo, de parâmetro de função ou montado em laço, e chamadas indiretas (método de objeto, função de outro módulo) escapam dele. Ele peca pelo lado seguro nos casos ambíguos (pede a marca), inclusive quando o SQL tem mais de 16 montagens possíveis (atribuições alternativas, `+=`, concatenações): o resto não é lido e a operação conta como bloqueante. SQL que o parser recusa por causa de um valor desconhecido também pede a marca, mesmo quando a instrução real seria segura, e o mesmo vale para coluna nova cujo tipo ou DEFAULT inteiro vem de um valor desconhecido.
 - O pglast é GPL-3.0-or-later e fica só no grupo `dev`: roda nos testes e no CI, nunca entra em imagem nem em pacote distribuído (os Dockerfiles instalam `--no-dev` ou só o grupo `executor`). A versão segue o PostgreSQL de produção: subir a major do servidor pede a versão do pglast com a libpg_query correspondente. A revisão do PR continua valendo.
+- **Por que ele não pode sair do grupo `dev`.** Como ferramenta de CI, sem distribuição nem link com o produto, a GPL não alcança o código Apache-2.0. Numa dependência de runtime ou dentro de uma imagem publicada ele seria distribuído junto com a aplicação, e aí a GPL valeria para o conjunto. A precisão do parser do próprio PostgreSQL justifica a exceção; a alternativa permissiva (sqlparse) não segue as regras do servidor. `scripts/check_runtime_licenses.py` recusa o pglast pelo nome e qualquer pacote GPL ou AGPL (LGPL passa) nas dependências de runtime do lock, da aplicação e do executor (`tests/test_runtime_licenses.py`), dentro da imagem do executor (`tests/test_executor_image.py`, job do gVisor) e dentro das duas imagens publicadas (passo dos jobs de imagem do `ci.yml`, que o gate da publicação exige verdes). O check cobre pacotes Python; binários do sistema e o FFmpeg têm a licença decidida nos próprios ADRs (036).
 - Uma função auxiliar do módulo que rode CONCURRENTLY fora do `autocommit_block` não é rastreada até o bloco de quem a chama; o PostgreSQL a recusa em runtime ("cannot run inside a transaction block"), então o erro aparece no primeiro teste de migration, não em produção.
 - `alembic upgrade +N` recalcula o destino a cada tentativa. Em produção o único destino aceito é o head (ADR 056), então isso só afeta uso manual fora de produção.
 
@@ -46,4 +47,5 @@ Opção C.
 
 - `tests/test_migration_locks.py`, sem banco: constantes, `SET` gerados, só 55P03 repete, esperas dobradas e sorteadas, mensagem ao esgotar, statement timeout sem repetição.
 - `tests/test_migration_lock_timeout.py`, contra PostgreSQL real e pelo CLI, com uma sessão concorrente segurando a tabela em SHARE: a migration desiste em tempo limitado, com a versão inalterada e as leituras concorrentes esperando menos de 1,5 s; liberado o lock entre tentativas, a migration conclui; `lock_timeout_ms` 0 ou negativo é recusado com mensagem; o script offline traz o `SET lock_timeout` antes do primeiro DDL.
+- `tests/test_runtime_licenses.py`: GPL, AGPL e pglast recusados, LGPL e permissivas aceitas, ambiente vazio falha; as dependências de runtime do lock não têm nenhum deles; os dois jobs de imagem rodam o check.
 - `tests/test_migrations_lock_safety.py`: as migrations existentes passam; cada padrão bloqueante sem a marca é recusado; a marca e as formas seguras passam; SQL que o parser recusa pede a marca; a análise de todas as migrations termina em menos de 2 s.
