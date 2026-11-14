@@ -5,7 +5,7 @@ normaliza a marca de pendente que a API antiga deixou errada na janela do deploy
 """
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -14,7 +14,7 @@ from sqlalchemy import Connection, Engine, event, text
 from sqlalchemy.orm import Session
 
 from goblinshift.identity.accounts import list_pending_accounts
-from goblinshift.identity.purge import delete_ended_web_sessions
+from goblinshift.identity.purge import AUDIT_RETENTION, delete_ended_web_sessions
 from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from tests.conftest import downgrade_migrations, run_migrations
@@ -103,13 +103,16 @@ def at_0018(settings: Settings) -> None:
     downgrade_migrations(settings, "0018")
 
 
-def new_user(conn: Connection, status: str, *, awaiting_approval: bool) -> UUID:
+def new_user(
+    conn: Connection, status: str, *, awaiting_approval: bool, age: str = "0 seconds"
+) -> UUID:
     user_id: UUID = conn.execute(
         text(
-            "INSERT INTO app_user (issuer, subject, display_name, status, awaiting_approval) "
-            "VALUES ('teste', gen_random_uuid()::text, 'Ana', :status, :awaiting) RETURNING id"
+            "INSERT INTO app_user (issuer, subject, display_name, status, awaiting_approval, "
+            "created_at) VALUES ('teste', gen_random_uuid()::text, 'Ana', :status, :awaiting, "
+            "now() - CAST(:age AS interval)) RETURNING id"
         ),
-        {"status": status, "awaiting": awaiting_approval},
+        {"status": status, "awaiting": awaiting_approval, "age": age},
     ).scalar_one()
     return user_id
 
@@ -159,6 +162,14 @@ def accounts_left_by_the_old_api(engine: Engine) -> dict[str, UUID]:
         blocked_with_session = new_user(conn, "blocked", awaiting_approval=False)
         new_session(conn, blocked_with_session)
         active = new_user(conn, "active", awaiting_approval=False)
+        # A auditoria guarda 90 dias: numa conta mais velha, o ACCOUNT_BLOCKED do bloqueio pelo
+        # admin pode já ter saído, junto com as sessões. Sem rastro, ela não é da janela.
+        blocked_before_retention = new_user(
+            conn, "blocked", awaiting_approval=False, age="90 days 1 hour"
+        )
+        signup_inside_retention = new_user(
+            conn, "blocked", awaiting_approval=False, age="89 days 23 hours"
+        )
     return {
         "signup": signup,
         "blocked_while_pending": blocked_while_pending,
@@ -167,7 +178,15 @@ def accounts_left_by_the_old_api(engine: Engine) -> dict[str, UUID]:
         "blocked_for_abuse": blocked_for_abuse,
         "blocked_with_session": blocked_with_session,
         "active": active,
+        "blocked_before_retention": blocked_before_retention,
+        "signup_inside_retention": signup_inside_retention,
     }
+
+
+def test_prazo_da_marcacao_e_a_retencao_da_auditoria() -> None:
+    # A 0019 só marca contas mais novas que a retenção: um prazo menor apagaria o ACCOUNT_BLOCKED
+    # de contas que ela ainda olha. Mudar a retenção antes do deploy da 0019 pede rever o literal.
+    assert timedelta(days=90) == AUDIT_RETENTION
 
 
 NORMALIZED = {
@@ -178,6 +197,8 @@ NORMALIZED = {
     "blocked_for_abuse": False,
     "blocked_with_session": False,
     "active": False,
+    "blocked_before_retention": False,
+    "signup_inside_retention": True,
 }
 
 
@@ -200,7 +221,11 @@ def test_conta_criada_na_janela_entra_nos_pendentes(db_settings: Settings, engin
 
     with Session(engine) as session:
         listed = {listing.id for listing in list_pending_accounts(session)}
-    assert listed & set(accounts.values()) == {accounts["signup"], accounts["pending"]}
+    assert listed & set(accounts.values()) == {
+        accounts["signup"],
+        accounts["pending"],
+        accounts["signup_inside_retention"],
+    }
 
 
 def test_rodar_a_0019_de_novo_nao_muda_a_marca(db_settings: Settings, engine: Engine) -> None:
