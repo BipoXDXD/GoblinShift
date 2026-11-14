@@ -112,6 +112,10 @@ paralelas com a versão antiga; ela não oferece esta coordenação. Não apagar
 Rollback do aplicativo continua pelo procedimento existente, com backup e schema compatível; não restaura
 bancos, volumes nem versões de schema automaticamente.
 
+O `migrate` tolera o banco numa revisão que a imagem não conhece: avisa e sai com 0, sem migrar
+(ADR 056). Rollback do aplicativo para antes de d02b8d86 exige restaurar o banco: a imagem anterior
+falha no `migrate` com o schema mais novo (um rollback para a 962d28f1 continua quebrando).
+
 ## Reconciliação de falhas e estados pendentes
 
 Operação exclusiva de administrador, fora do SSH restrito de CI; não existe endpoint de limpeza remota:
