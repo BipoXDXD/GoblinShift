@@ -156,6 +156,13 @@ def test_check_cobre_da_0019_em_diante() -> None:
         'op.execute("ALTER TABLE run ADD COLUMN c int, ADD c2 serial")',
         'op.execute("ALTER TABLE run ADD COLUMN c uuid DEFAULT public.gen_random_uuid()")',
         'op.execute("ALTER TABLE run ADD COLUMN c int DEFAULT coalesce(random()::int, 0)")',
+        # Domínio: valida todas as colunas que o usam, com lock nas tabelas delas.
+        'op.execute("ALTER DOMAIN d ADD CONSTRAINT k CHECK (VALUE > 0)")',
+        'op.execute("ALTER DOMAIN d SET NOT NULL")',
+        'op.execute("ALTER TABLE ALL IN TABLESPACE a SET TABLESPACE b")',
+        'op.execute("ALTER TABLE run SET ACCESS METHOD heap2")',
+        'op.execute("ALTER TABLE run ALTER c SET EXPRESSION AS (a + 1)")',
+        'op.execute("CREATE SCHEMA s CREATE TABLE t (a int) CREATE INDEX i ON run (a)")',
     ],
 )
 def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
@@ -369,8 +376,18 @@ def test_sql_grande_e_analisado_em_tempo_linear() -> None:
         'op.execute("' + "ALTER TABLE run ADD a " * 2_000 + 'DEFAULT 0")',
         'op.execute(f"ALTER TABLE run {acao}")',
         'op.execute("ALTER TABLE run ADD COLUMN c int DEFAULT {}()".format(funcao))',
+        'op.execute(f"ALTER TABLE run ADD COLUMN c {tipo}")',
+        'op.execute(f"ALTER TABLE run ADD COLUMN c int DEFAULT {expr}")',
+        'op.execute("SELECT \'x")',
     ],
-    ids=["sql-invalido-longo", "palavra-chave-desconhecida", "funcao-desconhecida-no-default"],
+    ids=[
+        "sql-invalido-longo",
+        "palavra-chave-desconhecida",
+        "funcao-desconhecida-no-default",
+        "tipo-desconhecido",
+        "default-desconhecido",
+        "aspas-sem-fechar",
+    ],
 )
 def test_sql_que_o_check_nao_entende_pede_a_marca(operation: str) -> None:
     source = f"def upgrade() -> None:\n    {operation}\n"
@@ -388,6 +405,21 @@ def test_concurrently_em_sql_que_o_parser_recusa_continua_valendo() -> None:
     assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + f"        {create}") == [3]
 
 
+def test_texto_que_nem_o_scanner_aceita_conta_como_concorrente() -> None:
+    source = 'def upgrade() -> None:\n    op.execute("SELECT \'x")\n'
+
+    assert concurrent_in_transaction_lines(source) == [2]
+
+
+def test_refresh_concorrente_que_o_parser_recusa_roda_em_transacao() -> None:
+    # O CONCURRENTLY do REFRESH MATERIALIZED VIEW não exige autocommit, parseando ou não.
+    refresh = 'op.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY mv {opcao}")'
+    source = f"def upgrade() -> None:\n    {refresh}\n"
+
+    assert unmarked_blocking_lines(source) == [2]
+    assert concurrent_in_transaction_lines(source) == []
+
+
 @pytest.mark.parametrize(
     "operation",
     [
@@ -397,8 +429,18 @@ def test_concurrently_em_sql_que_o_parser_recusa_continua_valendo() -> None:
         'op.execute("VACUUM (FULL false) run")',
         'op.execute("DO $$BEGIN CREATE INDEX ix ON run (a); END$$")',
         "op.execute(\"SELECT 'ALTER TABLE run ALTER c SET NOT NULL' /* CLUSTER run */\")",
+        'op.execute("ALTER DOMAIN d ADD CONSTRAINT k CHECK (VALUE > 0) NOT VALID")',
+        "op.execute(\"ALTER TABLE run ADD COLUMN c text DEFAULT '{}'\".format(rotulo))",
     ],
-    ids=["not-null-not-valid", "gerada-sem-stored", "vacuum-full-false", "corpo-do-do", "texto"],
+    ids=[
+        "not-null-not-valid",
+        "gerada-sem-stored",
+        "vacuum-full-false",
+        "corpo-do-do",
+        "texto",
+        "dominio-not-valid",
+        "default-texto-montado",
+    ],
 )
 def test_forma_segura_lida_pelo_parser_passa(operation: str) -> None:
     source = f"def upgrade() -> None:\n    {operation}\n"

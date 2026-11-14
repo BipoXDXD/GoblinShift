@@ -35,6 +35,8 @@ BLOCKING_ALTERS = frozenset(
         AlterTableType.AT_SetUnLogged,
         AlterTableType.AT_SetTableSpace,
         AlterTableType.AT_AttachPartition,
+        AlterTableType.AT_SetAccessMethod,
+        AlterTableType.AT_SetExpression,
     }
 )
 # Constraints validadas na hora: a forma segura é NOT VALID e VALIDATE depois.
@@ -56,6 +58,9 @@ REWRITING_COLUMN_CONSTRAINTS = frozenset(
     }
 )
 STORED = "s"
+# Subtipos de ALTER DOMAIN (`subtype` do nó) que varrem as colunas de todas as tabelas do domínio.
+DOMAIN_SET_NOT_NULL = "O"
+DOMAIN_ADD_CONSTRAINT = "C"
 
 
 @dataclass(frozen=True)
@@ -122,8 +127,12 @@ def _is_blocking(node: ast.Node) -> bool:
             return any(_alter_is_blocking(command) for command in node.cmds or ())
         case ast.VacuumStmt():
             return _has_option(node.options, "full")
-        case ast.ClusterStmt() | ast.LockStmt():
+        case ast.AlterDomainStmt():
+            return _domain_alter_is_blocking(node)
+        case ast.ClusterStmt() | ast.LockStmt() | ast.AlterTableMoveAllStmt():
             return True
+        case ast.CreateSchemaStmt():
+            return any(_is_blocking(element) for element in node.schemaElts or ())
         case ast.RefreshMatViewStmt():
             return not node.concurrent
     return False
@@ -143,6 +152,14 @@ def _alter_is_blocking(command: ast.AlterTableCmd) -> bool:
     return False
 
 
+def _domain_alter_is_blocking(node: ast.AlterDomainStmt) -> bool:
+    if node.subtype == DOMAIN_SET_NOT_NULL:
+        return True
+    if node.subtype == DOMAIN_ADD_CONSTRAINT and isinstance(node.def_, ast.Constraint):
+        return _constraint_is_blocking(node.def_)
+    return False
+
+
 def _constraint_is_blocking(constraint: ast.Constraint) -> bool:
     if constraint.contype in VALIDATED_CONSTRAINTS:
         return not constraint.skip_validation
@@ -153,8 +170,11 @@ def _constraint_is_blocking(constraint: ast.Constraint) -> bool:
 
 def _column_is_blocking(column: ast.ColumnDef) -> bool:
     """Coluna nova que reescreve a tabela, a varre para validar ou constrói índice sob lock."""
-    if column.typeName is not None and _last_name(column.typeName.names) in SERIAL_TYPES:
-        return True
+    if column.typeName is not None:
+        type_name = _last_name(column.typeName.names)
+        # Tipo que o check não resolve pode ser serial ou exigir reescrita.
+        if type_name in SERIAL_TYPES or PLACEHOLDER in type_name:
+            return True
     for constraint in column.constraints or ():
         if constraint.contype in REWRITING_COLUMN_CONSTRAINTS:
             return True
@@ -170,14 +190,24 @@ def _column_is_blocking(column: ast.ColumnDef) -> bool:
 
 
 def _is_volatile(expression: ast.Node | None) -> bool:
-    """O default chama função volátil, ou função cujo nome o check não resolve."""
+    """O default chama função volátil, ou tem trecho que o check não resolve."""
     return any(
-        isinstance(node, ast.FuncCall)
-        and (
-            VOLATILE_FUNCTION.fullmatch(name := _last_name(node.funcname)) is not None
-            or PLACEHOLDER in name
-        )
+        _calls_volatile(node) or _is_unresolved_reference(node)
         for node in (_walk(expression) if expression is not None else ())
+    )
+
+
+def _calls_volatile(node: ast.Node) -> bool:
+    if not isinstance(node, ast.FuncCall):
+        return False
+    name = _last_name(node.funcname)
+    return VOLATILE_FUNCTION.fullmatch(name) is not None or PLACEHOLDER in name
+
+
+def _is_unresolved_reference(node: ast.Node) -> bool:
+    """Valor montado no lugar de uma expressão: o PostgreSQL não aceita coluna num DEFAULT."""
+    return isinstance(node, ast.ColumnRef) and any(
+        PLACEHOLDER in (getattr(field, "sval", None) or "") for field in node.fields or ()
     )
 
 
