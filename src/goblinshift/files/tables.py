@@ -43,6 +43,11 @@ stored_object = Table(
     UniqueConstraint("owner_id", "id"),
     Index(None, "owner_id"),
     Index(
+        "stored_object_attempt_id_idx",
+        "attempt_id",
+        postgresql_where=text("attempt_id IS NOT NULL"),
+    ),
+    Index(
         "stored_object_delete_requested_idx",
         "delete_requested_at",
         postgresql_where=text("state = 'delete_requested'"),
@@ -155,6 +160,8 @@ object_use = Table(
         unique=True,
         postgresql_where=text("ended_at IS NULL"),
     ),
+    # Completo: o parcial acima não serve à checagem RESTRICT da FK nem ao "nenhum uso".
+    Index("object_use_object_id_idx", "object_id"),
     Index(None, "holder_kind", "holder_id"),
     CheckConstraint("holder_kind IN ('run', 'download')", name="holder_kind"),
 )

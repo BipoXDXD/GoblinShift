@@ -93,6 +93,10 @@ web_session = Table(
     Column("revoked_at", DateTime(timezone=True)),
     Index(None, "user_id"),
     Index(None, "absolute_expires_at", postgresql_where=text("revoked_at IS NULL")),
+    # A mesma expressão do fim da sessão em `purge.delete_ended_web_sessions`, senão não casa.
+    Index(
+        "web_session_ended_at_idx", text("least(revoked_at, idle_expires_at, absolute_expires_at)")
+    ),
     CheckConstraint("octet_length(secret_hash) = 32", name="secret_hash"),
     # Comparadas a `authenticated_at`, que vem do mesmo relógio da aplicação: `created_at` usa o
     # do banco e não serve de base a prazos calculados no código.
