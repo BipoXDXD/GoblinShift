@@ -33,6 +33,7 @@ _ANONYMIZED_NAME = "anonimizado"
 
 
 def upgrade() -> None:
+    # lock-ok: DROP NOT NULL só muda o catálogo: lock de um instante, sem varredura
     op.alter_column("upload", "original_name", existing_type=sa.Text(), nullable=True)
     # lock-ok: upload é pequena (uma VPS, poucas contas); o CHECK varre em milissegundos
     op.create_check_constraint(
@@ -40,6 +41,7 @@ def upgrade() -> None:
         "upload",
         "original_name IS NOT NULL OR deleted_at IS NOT NULL",
     )
+    # lock-ok: DROP NOT NULL só muda o catálogo: lock de um instante, sem varredura
     op.alter_column("run", "parameters", existing_type=postgresql.JSONB(), nullable=True)
     # lock-ok: run guarda 90 dias de uma VPS; o CHECK varre em milissegundos
     op.create_check_constraint(

@@ -82,6 +82,7 @@ def _expand_app_user() -> None:
 
 
 def _create_web_session() -> None:
+    # lock-ok: tabela nova; `_timestamp` é função deste módulo que só monta a coluna
     op.create_table(
         "web_session",
         sa.Column("id", sa.Uuid(), server_default=sa.text("uuidv7()"), nullable=False),
@@ -120,6 +121,7 @@ def _create_web_session() -> None:
 
 
 def _create_login_state() -> None:
+    # lock-ok: tabela nova; `_timestamp` é função deste módulo que só monta a coluna
     op.create_table(
         "login_state",
         sa.Column("key", sa.Text(), nullable=False),
@@ -133,7 +135,9 @@ def _create_login_state() -> None:
 
 
 def _create_audit_event() -> None:
+    # lock-ok: monta em memória a lista de tipos do CHECK, sem falar com o banco
     event_types = ", ".join(f"'{event}'" for event in AUDIT_EVENT_TYPES)
+    # lock-ok: tabela nova; `_timestamp` é função deste módulo que só monta a coluna
     op.create_table(
         "audit_event",
         sa.Column("id", sa.BigInteger(), sa.Identity(always=True), nullable=False),
@@ -198,6 +202,7 @@ def _create_capacity_pool() -> None:
         ),
     )
     op.create_index(op.f("capacity_pool_owner_id_idx"), "capacity_pool", ["owner_id"])
+    # lock-ok: uma linha na capacity_pool criada logo acima, ainda vazia
     op.bulk_insert(
         pool,
         [
@@ -212,6 +217,7 @@ def _create_capacity_pool() -> None:
 
 
 def _create_resource_reservation() -> None:
+    # lock-ok: tabela nova; `_timestamp` é função deste módulo que só monta a coluna
     op.create_table(
         "resource_reservation",
         sa.Column("id", sa.Uuid(), server_default=sa.text("uuidv7()"), nullable=False),

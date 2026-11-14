@@ -33,6 +33,7 @@ _SOURCE_INDEX = "artifact_source_artifact_id_idx"
 
 
 def upgrade() -> None:
+    # lock-ok: DROP CONSTRAINT de CHECK só muda o catálogo: lock de um instante, sem varredura
     op.drop_constraint(op.f(_ROLE_CHECK), "artifact", type_="check")
     # lock-ok: alarga o CHECK de role; artifact guarda só 48 h de saídas, varre em ms
     op.create_check_constraint(
