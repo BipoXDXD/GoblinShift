@@ -289,7 +289,7 @@ class AccountJobs:
             except Exception as error:
                 if is_connection_error(error):
                     raise
-                # Uma conta com defeito volta no próximo ciclo; as seguintes não esperam por ela.
+                # Uma conta com defeito vai para o fim da fila; as seguintes não esperam por ela.
                 _log_purge_failure(owner_id, error)
                 failed += 1
         return {"accounts_purged": purged, ACCOUNTS_PURGE_FAILED: failed}

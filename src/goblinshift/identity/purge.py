@@ -52,7 +52,10 @@ def claim_accounts_for_purge(session: Session, limit: int) -> list[UUID]:
     Primeiro as nunca tentadas, das mais antigas para as mais novas; depois as tentadas há mais
     tempo. A marca é gravada antes da purga e numa transação própria: a conta que falha sempre,
     ou que espera uma Run não terminal, vai para o fim da fila mesmo quando a purga lança (#442).
-    Contas travadas por outra manutenção ficam de fora (`SKIP LOCKED`).
+    `SKIP LOCKED` só evita que duas manutenções escolham a mesma conta no mesmo instante: a
+    escolha commita antes da purga, e outra réplica pode pegar a conta em seguida. Purgar o mesmo
+    dono duas vezes é seguro, porque os lotes são `DELETE` e `purge_owner` aceita a conta que já
+    sumiu.
     """
     chosen = skip_locked_batch(
         select(app_user.c.id)
