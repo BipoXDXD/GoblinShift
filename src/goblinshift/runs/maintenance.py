@@ -39,7 +39,7 @@ from goblinshift.files.missing import (
     MissingSweep,
     sweep_missing_objects,
 )
-from goblinshift.files.objects import holders_with_open_uses
+from goblinshift.files.objects import holders_with_open_uses, release_expired_downloads
 from goblinshift.files.retention import (
     anonymize_deleted_uploads,
     delete_old_file_rows,
@@ -492,7 +492,15 @@ class Maintenance:
     # Usos e candidatos -----------------------------------------------------------------
 
     def release_orphan_holds(self) -> int:
-        """Execuções terminais com uso aberto: a transação seguinte ao término não chegou."""
+        """Usos órfãos: de execuções terminais e de downloads que passaram do lease.
+
+        Na execução, a transação seguinte ao término não chegou; no download, a API caiu antes
+        de `finish_download`. A contagem soma os dois tipos de detentor.
+        """
+        downloads = run_transaction(
+            self._factory,
+            partial(release_expired_downloads, limit=self._config.batch_size),
+        )
         with self._factory() as session, session.begin():
             holders = holders_with_open_uses(session, HolderKind.RUN, self._config.batch_size)
             terminal = session.execute(
@@ -505,7 +513,7 @@ class Maintenance:
                 self._factory,
                 partial(release_run_holds, run_id=row.id, generation=row.generation),
             )
-        return len(terminal)
+        return downloads + len(terminal)
 
     def discard_stale_candidates(self) -> dict[str, int]:
         """Candidatos de tentativas encerradas que não viraram artefato (gerações vencidas)."""

@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -14,10 +14,12 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object
+from goblinshift.files.limits import TRANSFER_MAX_DURATION, TRANSFER_SLOT_LEASE
 from goblinshift.files.missing import GOVERNOR_MIN_SAMPLE
-from goblinshift.files.states import Availability, ObjectState
+from goblinshift.files.objects import hold
+from goblinshift.files.states import Availability, HolderKind, ObjectState
 from goblinshift.files.storage import FileStorage, ObjectStat
-from goblinshift.files.tables import stored_object, upload
+from goblinshift.files.tables import object_use, stored_object, upload
 from goblinshift.files.uploads import get_upload, request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.cancellation import cancel_run
@@ -26,6 +28,7 @@ from goblinshift.runs.maintenance import UNREADABLE_LOG_SAMPLE, Maintenance, Mai
 from goblinshift.runs.tables import run
 from goblinshift.runs.worker.claim import claim_next
 from goblinshift.runs.worker.runner import LocalRunner
+from tests.capacity.support import account_reserved
 from tests.files.support import create_intent, mark_mounted, ready_upload
 from tests.runs.worker_support import (
     LEASE,
@@ -688,3 +691,124 @@ def test_falha_ao_apagar_um_temporario_marca_o_ciclo_e_limpa_os_demais(
     assert counts["tmp_parts"] == 1
     assert counts["tmp_parts_bytes"] == len(b"ab")
     assert counts["tmp_parts_sweep_failed"] == 1
+
+
+def test_uso_de_download_orfao_apos_queda_da_api_nao_impede_o_expurgo(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    """Issue #442: a API morreu no meio do download e o `finally` com `finish_download` não rodou.
+
+    Passada a duração máxima de uma transferência (com folga), o uso aberto não pode segurar o
+    objeto excluído no disco nem a reserva de capacidade da conta.
+    """
+    owner = create_user(factory)
+    view = ready_upload(factory, storage, owner, b"abcd")
+    with factory() as session:
+        object_id = session.execute(
+            select(upload.c.object_id).where(upload.c.id == view.id)
+        ).scalar_one()
+    with unit_of_work(factory) as session:
+        hold(session, [object_id], HolderKind.DOWNLOAD, uuid.uuid7())
+    # Sem `release`: o processo recebeu SIGKILL. O relógio do banco avança além do teto.
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(object_use)
+            .where(object_use.c.object_id == object_id)
+            .values(started_at=func.now() - TRANSFER_MAX_DURATION - timedelta(minutes=5))
+        )
+        request_deletion(session, owner, view.id)
+
+    janitor = maintenance(factory, storage, local_runner(work_root))
+    janitor.run_cycle()
+    janitor.run_cycle()
+
+    with factory() as session:
+        state = session.execute(
+            select(stored_object.c.state).where(stored_object.c.id == object_id)
+        ).scalar_one()
+    assert state == ObjectState.DELETED
+    assert account_reserved(factory, owner) == 0
+
+
+def _download_use(
+    factory: sessionmaker[Session], storage: FileStorage, *, age: timedelta
+) -> uuid.UUID:
+    """Um uso de download aberto há `age`, pelo relógio do banco; devolve o detentor."""
+    view = ready_upload(factory, storage, create_user(factory), b"abcd")
+    holder_id = uuid.uuid7()
+    with unit_of_work(factory) as session:
+        object_id = session.execute(
+            select(upload.c.object_id).where(upload.c.id == view.id)
+        ).scalar_one()
+        hold(session, [object_id], HolderKind.DOWNLOAD, holder_id)
+        session.execute(
+            update(object_use)
+            .where(object_use.c.holder_id == holder_id)
+            .values(started_at=func.now() - age)
+        )
+    return holder_id
+
+
+def _use_ended_at(factory: sessionmaker[Session], holder_id: uuid.UUID) -> datetime | None:
+    with factory() as session:
+        ended_at: datetime | None = session.execute(
+            select(object_use.c.ended_at).where(object_use.c.holder_id == holder_id)
+        ).scalar_one()
+    return ended_at
+
+
+@pytest.mark.parametrize(
+    ("age", "released"),
+    [
+        (TRANSFER_SLOT_LEASE - timedelta(seconds=30), False),
+        (TRANSFER_SLOT_LEASE + timedelta(seconds=1), True),
+    ],
+)
+def test_uso_de_download_so_e_encerrado_depois_do_lease_da_transferencia(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    work_root: Path,
+    age: timedelta,
+    released: bool,
+) -> None:
+    holder_id = _download_use(factory, storage, age=age)
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert (_use_ended_at(factory, holder_id) is not None) is released
+    assert counts["holds_released"] == int(released)
+
+
+def test_uso_de_execucao_nao_e_encerrado_pelo_lease_de_download(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory))
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(object_use)
+            .where(object_use.c.holder_id == run_id)
+            .values(started_at=func.now() - TRANSFER_SLOT_LEASE - timedelta(hours=1))
+        )
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert open_run_uses(factory, run_id) > 0
+    assert counts["holds_released"] == 0
+
+
+def test_uso_de_download_ja_encerrado_nao_muda(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    holder_id = _download_use(factory, storage, age=TRANSFER_SLOT_LEASE + timedelta(hours=1))
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(object_use)
+            .where(object_use.c.holder_id == holder_id)
+            .values(ended_at=func.now() - timedelta(hours=1))
+        )
+    ended_before = _use_ended_at(factory, holder_id)
+
+    counts = maintenance(factory, storage, local_runner(work_root)).run_cycle()
+
+    assert _use_ended_at(factory, holder_id) == ended_before
+    assert counts["holds_released"] == 0
