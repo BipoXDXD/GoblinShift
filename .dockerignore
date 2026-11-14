@@ -6,4 +6,5 @@
 !src/
 !alembic.ini
 !migrations/
+!scripts/check_runtime_licenses.py
 **/__pycache__

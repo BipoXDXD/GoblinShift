@@ -99,6 +99,10 @@ COPY src/goblinshift/processing /opt/goblinshift/goblinshift/processing
 RUN python -m compileall -q --invalidation-mode unchecked-hash \
         /opt/goblinshift /usr/local/lib/python3.14/site-packages/PIL \
         /usr/local/lib/python3.14/site-packages/pikepdf
+# Nenhum pacote GPL/AGPL nem ferramenta de dev no runtime (ADR 057). Roda no build de cada
+# plataforma, antes do push; o bind mount não deixa o script na imagem.
+RUN --mount=type=bind,source=scripts/check_runtime_licenses.py,target=/tmp/check_runtime_licenses.py \
+    python -I -B /tmp/check_runtime_licenses.py
 
 USER 61000:61001
 WORKDIR /work

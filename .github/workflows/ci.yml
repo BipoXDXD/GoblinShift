@@ -461,15 +461,6 @@ jobs:
           IMAGE_REF: ghcr.io/bipoxdxd/goblinshift@${{ steps.build.outputs.digest }}
         run: scripts/docker-build.sh published "$IMAGE_REF"
 
-      # GPL/AGPL e ferramentas só de dev (pglast) não entram em imagem (ADR 057). O job falha e o
-      # gate da publicação recusa a release com ele vermelho.
-      - name: Sem pacote GPL nem ferramenta de dev na imagem publicada
-        env:
-          IMAGE_REF: ghcr.io/bipoxdxd/goblinshift@${{ steps.build.outputs.digest }}
-        run: >-
-          docker run --rm -i --network=none --entrypoint /app/.venv/bin/python "$IMAGE_REF" -
-          < scripts/check_runtime_licenses.py
-
   executor-image:
     name: Imagem do executor
     needs: [checks, secrets]
@@ -515,15 +506,6 @@ jobs:
         env:
           IMAGE_REF: ghcr.io/bipoxdxd/goblinshift-executor@${{ steps.build.outputs.digest }}
         run: scripts/docker-build.sh published "$IMAGE_REF"
-
-      # GPL/AGPL e ferramentas só de dev (pglast) não entram em imagem (ADR 057). O job falha e o
-      # gate da publicação recusa a release com ele vermelho.
-      - name: Sem pacote GPL nem ferramenta de dev na imagem publicada
-        env:
-          IMAGE_REF: ghcr.io/bipoxdxd/goblinshift-executor@${{ steps.build.outputs.digest }}
-        run: >-
-          docker run --rm -i --network=none --entrypoint python "$IMAGE_REF" -
-          < scripts/check_runtime_licenses.py
 
   web-image:
     name: Imagem do Nginx com a SPA

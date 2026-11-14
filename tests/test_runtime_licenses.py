@@ -12,7 +12,6 @@ from importlib.metadata import Distribution, distribution, distributions
 from pathlib import Path
 
 import pytest
-import yaml
 from packaging.requirements import Requirement
 
 from scripts.check_runtime_licenses import (
@@ -47,6 +46,9 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
         ["License: GPLv3"],
         ["Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)"],
         ["Classifier: License :: OSI Approved :: GNU Affero General Public License v3"],
+        ["License: GNU General Public License v3"],
+        ["License: GNU GENERAL PUBLIC LICENSE\n        Version 3, 29 June 2007"],
+        ["License: gnu affero general public license"],
     ],
     ids=[
         "spdx-gpl",
@@ -55,12 +57,16 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
         "texto-livre",
         "classifier-gpl",
         "classifier-agpl",
+        "extenso",
+        "texto-oficial",
+        "extenso-minusculas",
     ],
 )
 def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str]) -> None:
     package = _fake_distribution(tmp_path, "copyleft", headers)
+    first_line = headers[0].split(": ", 1)[1].splitlines()[0]
 
-    assert refused_packages([package]) == [f"copyleft 1.0 ({headers[0].split(': ', 1)[1]})"]
+    assert refused_packages([package]) == [f"copyleft 1.0 ({first_line})"]
 
 
 @pytest.mark.parametrize(
@@ -72,7 +78,7 @@ def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str]) -> None:
         ["License: GPL-compatible, see LICENSE"],
         ["License-Expression: Apache-2.0", "Classifier: Programming Language :: Python"],
         ["License: MIT\n        GNU General Public License text pasted below"],
-        [],
+        ["Classifier: License :: OSI Approved :: GNU Library or Lesser General Public License"],
     ],
     ids=[
         "spdx-lgpl",
@@ -81,13 +87,20 @@ def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str]) -> None:
         "compativel",
         "apache",
         "texto-longo",
-        "sem",
+        "classifier-library",
     ],
 )
 def test_lgpl_e_permissivas_passam(tmp_path: Path, headers: list[str]) -> None:
     package = _fake_distribution(tmp_path, "permissive", headers)
 
     assert refused_packages([package]) == []
+
+
+def test_pacote_sem_licenca_declarada_e_recusado(tmp_path: Path) -> None:
+    # Sem nenhum dos três campos não há o que conferir; passar calado esconderia uma GPL.
+    package = _fake_distribution(tmp_path, "unknown", ["Classifier: Programming Language :: C"])
+
+    assert refused_packages([package]) == ["unknown 1.0 (sem licença declarada)"]
 
 
 def test_ferramenta_de_dev_e_recusada_pelo_nome_mesmo_com_licenca_permissiva(
@@ -134,12 +147,40 @@ def test_pglast_continua_no_grupo_dev() -> None:
     assert "pglast" in dev
 
 
-@pytest.mark.parametrize("job", ["image", "executor-image"])
-def test_imagens_publicadas_rodam_o_check_de_licenca(job: str) -> None:
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
-    commands = [step.get("run", "") for step in workflow["jobs"][job]["steps"]]
+@pytest.mark.parametrize(
+    ("dockerfile", "python"),
+    [("app.Dockerfile", "/app/.venv/bin/python"), ("executor.Dockerfile", "python")],
+)
+def test_build_das_imagens_roda_o_check_depois_do_ultimo_copy(dockerfile: str, python: str) -> None:
+    # No build, o check roda em cada plataforma e antes do push. Depois do último COPY do estágio
+    # final ele vê todos os pacotes; a instrução exata barra `|| true` e troca de interpretador.
+    instructions = _instructions(ROOT / "docker" / dockerfile)
+    last_from = max(i for i, line in enumerate(instructions) if line.startswith("FROM "))
+    final_stage = instructions[last_from:]
+    expected = (
+        "RUN --mount=type=bind,source=scripts/check_runtime_licenses.py,"
+        f"target=/tmp/check_runtime_licenses.py {python} -I -B /tmp/check_runtime_licenses.py"
+    )
+    last_copy = max(i for i, line in enumerate(final_stage) if line.startswith("COPY "))
 
-    assert any("< scripts/check_runtime_licenses.py" in command for command in commands)
+    assert expected in final_stage[last_copy:]
+
+
+def _instructions(dockerfile: Path) -> list[str]:
+    """Instruções do Dockerfile, com as continuações `\\` unidas e sem comentários."""
+    instructions: list[str] = []
+    pending = ""
+    for raw in dockerfile.read_text("utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        pending = f"{pending} {line}".strip() if pending else line
+        if pending.endswith("\\"):
+            pending = pending[:-1].rstrip()
+            continue
+        instructions.append(pending)
+        pending = ""
+    return instructions
 
 
 def _runtime_names(export: tuple[str, ...]) -> list[str]:
