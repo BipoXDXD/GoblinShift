@@ -1,7 +1,10 @@
 """Ambiente do Alembic: a URL vem das mesmas configurações da aplicação.
 
-Todas as revisões pendentes rodam numa transação só (`begin_transaction` abaixo): uma falha no
-meio desfaz o lote inteiro, e o banco fica na revisão em que estava (ADR 056).
+Cada revisão pendente roda na sua transação (`transaction_per_migration`), com `lock_timeout`
+curto e `statement_timeout` finito (ADR 057). Uma migration que não consegue o lock desiste em
+segundos, sem enfileirar a API atrás dela, e é repetida algumas vezes com espera sorteada; as
+anteriores a ela ficam aplicadas. Esgotadas as tentativas, o comando falha e a API nova não
+sobe. `-x lock_timeout_ms=<ms>` troca o `lock_timeout` de uma execução.
 
 O `migrate` de uma imagem anterior encontra o banco numa revisão que ela não conhece depois de
 um rollback do app. Pela política expand/contract (docs/GoblinShiftPlan.md, 3.8) essa imagem
@@ -15,7 +18,7 @@ from logging.config import fileConfig
 from alembic import context
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
-from sqlalchemy import Connection
+from sqlalchemy import Connection, Engine
 
 # As tabelas de cada módulo se registram no MetaData comum ao serem importadas.
 import goblinshift.capacity.tables
@@ -24,6 +27,11 @@ import goblinshift.identity.tables
 import goblinshift.presets.tables
 import goblinshift.runs.tables  # noqa: F401
 from goblinshift.platform.db import make_engine, metadata
+from goblinshift.platform.migration_locks import (
+    MIGRATION_LOCK_TIMEOUT_MS,
+    run_with_lock_retries,
+    session_settings,
+)
 from goblinshift.platform.schema import read_db_heads
 from goblinshift.platform.settings import Settings
 
@@ -58,18 +66,44 @@ def run_migrations_online() -> None:
         raise CommandError(
             "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
         )
+    lock_timeout_ms = _lock_timeout_ms()
     engine = make_engine(settings)
     try:
-        with engine.connect() as connection:
-            if goes_to_head and _db_is_ahead_of_image(connection, script, image_heads):
-                return
-            context.configure(connection=connection, target_metadata=target_metadata)
-            with context.begin_transaction():
-                # Migrações podem demorar mais que o statement_timeout da aplicação.
-                context.execute("SET LOCAL statement_timeout = 0")
-                context.run_migrations()
+        if goes_to_head:
+            with engine.connect() as connection:
+                if _db_is_ahead_of_image(connection, script, image_heads):
+                    return
+        run_with_lock_retries(lambda: _migrate(engine, lock_timeout_ms))
     finally:
         engine.dispose()
+
+
+def _migrate(engine: Engine, lock_timeout_ms: int) -> None:
+    """Uma rodada do comando numa conexão nova, cada migration na sua transação."""
+    with engine.connect() as connection:
+        for statement in session_settings(lock_timeout_ms):
+            connection.exec_driver_sql(statement)
+        # SET de sessão é transacional no PostgreSQL: sem o commit, o rollback da primeira
+        # migration que falhar desfaria os tempos, e a conexão ficaria fora de transação aberta
+        # para o Alembic abrir uma por migration.
+        connection.commit()
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            transaction_per_migration=True,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+def _lock_timeout_ms() -> int:
+    raw = context.get_x_argument(as_dictionary=True).get("lock_timeout_ms")
+    if raw is None:
+        return MIGRATION_LOCK_TIMEOUT_MS
+    try:
+        return int(raw)
+    except ValueError:
+        raise CommandError(f"-x lock_timeout_ms precisa ser inteiro, veio {raw!r}") from None
 
 
 def _destination(script: ScriptDirectory) -> frozenset[str] | None:
@@ -96,9 +130,6 @@ def _db_is_ahead_of_image(
 ) -> bool:
     """Avisa e devolve True se o banco tem uma revisão que esta imagem não conhece."""
     db_heads = read_db_heads(connection)
-    # A leitura abre uma transação implícita; sem fechá-la, o `begin_transaction` do Alembic
-    # entraria nela, e as migrações seriam desfeitas quando a conexão fechasse.
-    connection.rollback()
     known = frozenset(revision.revision for revision in script.walk_revisions())
     unknown = db_heads - known
     if not unknown:
