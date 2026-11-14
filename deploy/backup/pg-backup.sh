@@ -56,7 +56,10 @@ pg_value() {
   docker exec "$BACKUP_PG_CONTAINER" psql --no-psqlrc --tuples-only --no-align \
     --set ON_ERROR_STOP=1 --no-password --username="$pg_user" --dbname="$pg_db" --command="$1"
 }
-if [[ "$(pg_value "SELECT to_regclass('public.alembic_version') IS NOT NULL")" != "t" ]]; then
+# Em variável, e não dentro do [[ ]]: com o psql falhando (container parado, autenticação), o
+# set -e para aqui com o erro do psql, em vez de culpar a falta de alembic_version.
+migrated="$(pg_value "SELECT to_regclass('public.alembic_version') IS NOT NULL")"
+if [[ "$migrated" != "t" ]]; then
   echo "o banco não tem alembic_version: dump não enviado" >&2
   exit 1
 fi
@@ -84,8 +87,10 @@ s3_curl --upload-file "$encrypted" --header "Content-Type: application/octet-str
   --header "Content-MD5: $md5" --max-time 1800 --output /dev/null "$(s3_url "$key")"
 echo "backup enviado: dump de $(dump_instant "$key") ($(wc -c <"$encrypted" | tr -d ' ') bytes cifrados)"
 
-# Marcador do último upload bom: o estado do host alerta quando ele passa de 2 dias, para os /fail
-# repetidos não correrem em silêncio enquanto o ciclo de vida do bucket expira os dumps antigos.
+# Marcador do último upload bom, para a conferência do host (fora deste repositório) alertar quando
+# ele passar de 2 dias: os /fail repetidos não correm em silêncio enquanto o ciclo de vida do
+# bucket expira os dumps antigos. Um date ou mv que falhe aqui pinga /fail com o dump já enviado:
+# a escolha conservadora, porque o marcador deixaria de refletir o último upload.
 # Só o instante UTC, sem bucket nem chave. Gravado num temporário e renomeado: quem lê nunca vê
 # um arquivo pela metade, e uma falha antes daqui deixa o marcador anterior intacto.
 marker="$STATE_DIRECTORY/last-upload-ok"

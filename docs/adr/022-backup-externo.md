@@ -77,7 +77,8 @@ O `pg_dump` de um volume recriado vazio, com o esquema refeito pelo migrate, sai
 - **Marcador:** para os `/fail` repetidos não passarem em silêncio, o script grava `/var/lib/goblinshift-backup/last-upload-ok` só depois que o PUT é aceito. O conteúdo é apenas o instante UTC do upload (`2026-11-14T03:05:42Z`), sem bucket nem chave.
   - O diretório vem do `StateDirectory=goblinshift-backup` da unit, com `StateDirectoryMode=0700`. O arquivo tem modo 0600 e pertence ao usuário do serviço, então só ele e o root o leem.
   - A gravação passa por um temporário e um rename, então uma falha antes do fim deixa o marcador anterior intacto.
-  - O estado do host alerta quando o marcador passa de 2 dias. É um segundo sinal, independente do healthchecks.io.
+  - Quem lê o marcador fica fora deste repositório: a conferência de estado do host, que alerta quando ele passa de 2 dias. É um segundo sinal, independente do healthchecks.io. Enquanto essa leitura não estiver ligada no host, o marcador é gravado, mas ninguém o confere.
+  - Se o `date` ou o `mv` do marcador falharem depois do PUT aceito, o script pinga `/fail` com o dump já no bucket. A escolha é conservadora: o alerta prefere um falso positivo a um marcador que não reflete o último upload.
 - **Custo:** como o resto do backup, a mudança só chega ao timer quando o `deploy/backup/install.sh` roda de novo, a partir de um checkout temporário da `main`.
 - **Compliance:** `tests/backup/test_pg_backup.py` cobre:
   - o banco migrado sem contas e o banco sem esquema, que não enviam nada;

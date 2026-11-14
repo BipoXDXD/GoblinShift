@@ -39,7 +39,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.backup]
 AGE_HEADER = b"age-encryption.org/v1"
 # Instante UTC do início do dump, que ordena os nomes, e 128 bits aleatórios.
 DUMP_KEY = re.compile(r"goblinshift-\d{8}T\d{6}Z-(?P<suffix>[0-9a-f]{32})\.dump\.age")
-# Marcador do último upload bom, lido pelo estado do host (alerta acima de 2 dias).
+# Marcador do último upload bom, para a conferência do host alertar acima de 2 dias.
 MARKER_NAME = "last-upload-ok"
 PREVIOUS_SUCCESS = "2026-11-01T03:05:42Z\n"
 
@@ -301,7 +301,7 @@ def test_credencial_recusada_pinga_falha_e_nao_grava_nada(
     assert result.returncode != 0
     assert s3.keys(prefix) == []
     assert healthchecks.pings == ["/start", "/fail"]
-    # O marcador continua com o último upload bom: é a idade dele que o estado do host alerta.
+    # O marcador continua com o último upload bom: é pela idade dele que o host alerta.
     assert marker.read_text() == PREVIOUS_SUCCESS
     assert sorted(path.name for path in state_dir.iterdir()) == [MARKER_NAME]
 
@@ -352,6 +352,9 @@ def test_dump_que_falha_nao_envia_nada(
     result = run_script(BACKUP_SCRIPT, env)
 
     assert result.returncode != 0
+    # O erro é do psql, não um banco sem esquema: a conferência não pode culpar o alembic_version.
+    assert "banco_que_nao_existe" in result.stderr
+    assert "não tem alembic_version" not in result.stderr
     assert s3.keys(prefix) == []
     assert healthchecks.pings == ["/start", "/fail"]
 
