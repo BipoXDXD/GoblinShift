@@ -85,7 +85,9 @@ def refusal_reason(name: str, distribution: Distribution) -> str:
         if classifier.startswith("License ::")
     ]
     lines = [line.strip() for line in license_field.splitlines()]
-    for text in (expression, *lines):
+    # O campo inteiro numa linha só pega o nome quebrado entre linhas ("GNU General / Public").
+    whole = " ".join(license_field.split())
+    for text in (expression, *lines, whole):
         if SPDX_COPYLEFT.search(text) or FULL_NAME_COPYLEFT.search(text):
             return text
     for classifier in classifiers:

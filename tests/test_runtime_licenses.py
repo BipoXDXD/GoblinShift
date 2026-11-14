@@ -77,6 +77,10 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
             ["License: MIT\n        GNU General Public License text pasted below"],
             "GNU General Public License text pasted below",
         ),
+        (
+            ["License: Licensed under the GNU General\n        Public License v3"],
+            "Licensed under the GNU General Public License v3",
+        ),
     ],
     ids=[
         "spdx-gpl",
@@ -93,6 +97,7 @@ def _fake_distribution(site: Path, name: str, headers: list[str]) -> Distributio
         "simbolo-de-copyright-antes",
         "cabecalho-gpl",
         "texto-longo",
+        "nome-quebrado-entre-linhas",
     ],
 )
 def test_gpl_e_agpl_sao_recusadas(tmp_path: Path, headers: list[str], reason: str) -> None:
