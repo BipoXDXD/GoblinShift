@@ -617,8 +617,8 @@ jobs:
       - name: Apontar a main para as imagens deste commit
         # Com uma fonte só, o imagetools copia o índice multiplataforma como está; o digest
         # conferido no fim prova isso. Um push novo na main cancela esta execução (concorrência
-        # do workflow) e pode deixar as imagens em commits diferentes por alguns segundos; todas
-        # passaram nos portões, e a execução seguinte que passar realinha as três.
+        # do workflow) e pode deixar as imagens em commits diferentes até a próxima execução que
+        # passar nos portões, que realinha as três; enquanto isso, todas já passaram nos portões.
         run: |
           tag="sha-${GITHUB_SHA::12}"
           for name in goblinshift goblinshift-executor goblinshift-web; do

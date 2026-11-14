@@ -34,11 +34,13 @@ HOST_PACKAGE_TESTS = {
     "openobserve": "tests/openobserve",
     "tls_check": "tests/tls_check",
 }
-# Pastas de pacotes do host que ficam fora do job, e por quê. O checador ainda confere o piso
-# de versão e a importação desses pacotes no 3.12.
+# Pastas de pacotes do host que ficam fora do job, e por quê. O conftest de cada uma carrega
+# dependências da imagem já no topo, então nenhum módulo delas roda no 3.12, nem os que só
+# usam a stdlib (como test_budget e test_provision_errors): esses rodam só no 3.14. O
+# checador ainda confere o piso de versão e a importação desses pacotes no 3.12.
 NOT_HOST_DIRS = {
     "tests/backup": "o conftest sobe o PostgreSQL e importa a aplicação",
-    "tests/openobserve": "precisa do OpenTelemetry e do OpenObserve real (job openobserve)",
+    "tests/openobserve": "o conftest importa OpenTelemetry e testcontainers",
 }
 HOST_MARKER = "pytest.mark.host_python"
 # Módulos dessas pastas que não rodam no Python do host, e por quê.
@@ -117,6 +119,8 @@ def test_job_do_host_roda_o_checador_e_os_testes_marcados() -> None:
     assert CHECKER in runs.splitlines()
     assert "-m host_python" in runs
     assert all(directory in runs for directory in HOST_TEST_DIRS)
+    # Sem o `ls`, uma pasta renomeada some do grep em silêncio e o job passa com menos testes.
+    assert 'ls -d "${pastas[@]}" > /dev/null' in runs.splitlines()
 
 
 def test_todo_pacote_do_host_tem_seus_testes_no_job_ou_explica_por_que_nao() -> None:
