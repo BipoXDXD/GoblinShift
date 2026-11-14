@@ -12,7 +12,8 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   context,
   apiKey,
 }) => {
-  const bodies: Promise<string>[] = [];
+  // Corpo que não pôde ser lido fica `null` e não conta: a prova precisa ter visto o conteúdo.
+  const bodies: Promise<string | null>[] = [];
   const credentialsFromPage: string[] = [];
   page.on("request", (request) => {
     // O evento vem antes das rotas: este é o pedido como o bundle o montou.
@@ -23,7 +24,7 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   });
   page.on("response", (response) => {
     if (!new URL(response.url()).pathname.startsWith("/api/")) {
-      bodies.push(response.text().catch(() => ""));
+      bodies.push(response.text().catch(() => null));
     }
   });
 
@@ -31,7 +32,9 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   await bancada.open("csv-janitor");
   await bancada.addFiles(CSV_FILES);
 
-  const served = await Promise.all(bodies);
+  const served = (await Promise.all(bodies)).filter(
+    (body): body is string => body !== null && body.length > 0,
+  );
   expect(served.length, "HTML, theme-init.js, JS e CSS lidos").toBeGreaterThanOrEqual(4);
   // Booleanos: uma falha imprimiria o valor comparado (corpo, storage, cookies) no relatório HTML,
   // e a chave nunca pode ir parar lá.
