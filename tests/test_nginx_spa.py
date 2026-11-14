@@ -39,9 +39,16 @@ EDGE_SUBNET = "172.31.0.0/24"
 # Faixa dinâmica fora dos IPs fixos, como na rede edge (deploy/edge/compose.yaml).
 EDGE_DYNAMIC_RANGE = "172.31.0.128/25"
 NGINX_IP = "172.31.0.4"
-# CHOWN (bit 0), SETGID (6), SETUID (7) e NET_BIND_SERVICE (10): o que sobra ao Nginx em
-# compose.yaml depois do `cap_drop` (tests/test_container_hardening.py).
-NGINX_CAPABILITY_MASK = (1 << 0) | (1 << 6) | (1 << 7) | (1 << 10)
+# CHOWN (bit 0), KILL (5), SETGID (6), SETUID (7) e NET_BIND_SERVICE (10): o que sobra ao Nginx
+# em compose.yaml depois do `cap_drop` (tests/test_container_hardening.py).
+NGINX_CAPABILITY_MASK = (1 << 0) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 10)
+# Sinal 0 do root a cada worker (usuário `nginx`, outro UID): só passa com KILL no container.
+SIGNAL_WORKERS_SCRIPT = (
+    "found=0; for d in /proc/[0-9]*; do"
+    ' grep -q "worker process" "$d/cmdline" 2>/dev/null || continue;'
+    ' kill -0 "${d#/proc/}" || exit 1; found=1;'
+    ' done; [ "$found" = 1 ]'
+)
 BUILD_TIMEOUT_SECONDS = 900
 RUN_TIMEOUT_SECONDS = 60
 READY_TIMEOUT_SECONDS = 30
@@ -332,13 +339,18 @@ class TestSpa:
     pytestmark = pytestmark_integration
 
     def test_nginx_sobe_so_com_as_capabilities_do_compose(self, stack: Stack) -> None:
-        # Conjunto limite de CHOWN (0), SETGID (6), SETUID (7) e NET_BIND_SERVICE (10), e
+        # Conjunto limite de CHOWN (0), KILL (5), SETGID (6), SETUID (7) e NET_BIND_SERVICE (10), e
         # no-new-privileges ligado: as restrições do Compose chegaram ao container que serve.
         status = docker_ok("exec", stack.nginx_container, "cat", "/proc/1/status")
         fields = dict(line.split(":\t", 1) for line in status.splitlines() if ":\t" in line)
 
         assert int(fields["CapBnd"], 16) == NGINX_CAPABILITY_MASK
         assert fields["NoNewPrivs"].strip() == "1"
+
+    def test_mestre_root_consegue_sinalizar_os_workers(self, stack: Stack) -> None:
+        # Sem KILL, o SIGKILL do mestre ao worker que não sai depois do TERM falha com EPERM e o
+        # mestre fica preso até o Docker matar o container.
+        docker_ok("exec", stack.nginx_container, "sh", "-c", SIGNAL_WORKERS_SCRIPT)
 
     def test_raiz_serve_o_index_sem_cache_e_com_os_cabecalhos_de_seguranca(
         self, stack: Stack

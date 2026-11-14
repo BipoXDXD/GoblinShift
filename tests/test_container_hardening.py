@@ -11,6 +11,9 @@ derrubando o serviço quando falta:
 - Nginx: sem CHOWN o mestre não cria `/var/cache/nginx/*_temp` com o dono `nginx`; sem SETUID e
   SETGID não troca de usuário nos workers. NET_BIND_SERVICE fica porque a porta 80 só abre sem ela
   se o daemon do host baixar `ip_unprivileged_port_start`, o que depende da versão do Docker da VPS.
+  KILL fica porque o mestre (root) só sinaliza os workers (`nginx`, outro UID) com ela: sem KILL, o
+  SIGKILL ao worker que não sai depois do TERM falha com EPERM e o mestre fica preso até o Docker
+  matar o container (medido com a imagem; o caso comum passa pelo canal interno e não acusa).
 - Postgres: o entrypoint, como root, entrega o PGDATA ao `postgres` (CHOWN) e, no reinício,
   percorre o PGDATA de modo 700 do `postgres` (DAC_OVERRIDE) antes de trocar de usuário pelo
   `gosu` (SETUID e SETGID).
@@ -64,7 +67,7 @@ DOCKER_DEFAULT_CAPS = frozenset(
         "SYS_CHROOT",
     }
 )
-NGINX_CAPS = frozenset({"CHOWN", "SETGID", "SETUID", "NET_BIND_SERVICE"})
+NGINX_CAPS = frozenset({"CHOWN", "KILL", "SETGID", "SETUID", "NET_BIND_SERVICE"})
 # Serviços que sobem como root, com as capabilities medidas que ficam.
 ROOT_SERVICE_CAPS = {
     "nginx": NGINX_CAPS,
