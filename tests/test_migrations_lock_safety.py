@@ -152,6 +152,10 @@ def test_check_cobre_da_0019_em_diante() -> None:
         'op.execute(\'ALTER TABLE run ALTER COLUMN "a"" b" TYPE bigint\')',
         'op.execute("ALTER TABLE run DETACH PARTITION run_2027")',
         "op.execute('ALTER TABLE run DETACH PARTITION s.\"p 1\"')",
+        'op.execute("ALTER TABLE run ADD CONSTRAINT nn NOT NULL c")',
+        'op.execute("ALTER TABLE run ADD COLUMN c int, ADD c2 serial")',
+        'op.execute("ALTER TABLE run ADD COLUMN c uuid DEFAULT public.gen_random_uuid()")',
+        'op.execute("ALTER TABLE run ADD COLUMN c int DEFAULT coalesce(random()::int, 0)")',
     ],
 )
 def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
@@ -350,13 +354,56 @@ def test_tabela_criada_no_mesmo_upgrade_dispensa_a_marca() -> None:
 
 
 def test_sql_grande_e_analisado_em_tempo_linear() -> None:
-    # Entrada que faria um regex com dois trechos variáveis voltar atrás em cada posição.
-    sql = "ALTER TABLE run ADD a " * 2_000 + "DEFAULT 0"
+    sql = "ALTER TABLE run " + ", ".join(f"ADD a{i} int DEFAULT 0" for i in range(2_000))
     source = f'def upgrade() -> None:\n    op.execute("{sql}")\n'
     started = time.monotonic()
 
     assert unmarked_blocking_lines(source) == []
     assert time.monotonic() - started < MAX_ANALYSIS_S
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        # Repetição que faria um regex com dois trechos variáveis voltar atrás em cada posição.
+        'op.execute("' + "ALTER TABLE run ADD a " * 2_000 + 'DEFAULT 0")',
+        'op.execute(f"ALTER TABLE run {acao}")',
+        'op.execute("ALTER TABLE run ADD COLUMN c int DEFAULT {}()".format(funcao))',
+    ],
+    ids=["sql-invalido-longo", "palavra-chave-desconhecida", "funcao-desconhecida-no-default"],
+)
+def test_sql_que_o_check_nao_entende_pede_a_marca(operation: str) -> None:
+    source = f"def upgrade() -> None:\n    {operation}\n"
+    started = time.monotonic()
+
+    assert unmarked_blocking_lines(source) == [2]
+    assert time.monotonic() - started < MAX_ANALYSIS_S
+
+
+def test_concurrently_em_sql_que_o_parser_recusa_continua_valendo() -> None:
+    create = 'op.execute(f"CREATE INDEX CONCURRENTLY ix ON run {cols}")\n'
+
+    assert concurrent_in_transaction_lines(f"def upgrade() -> None:\n    {create}") == [2]
+    # Sem nome resolvido, nenhum DROP anterior conta como limpeza.
+    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + f"        {create}") == [3]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        'op.execute("ALTER TABLE run ADD CONSTRAINT nn NOT NULL c NOT VALID")',
+        # No PostgreSQL 18 a coluna gerada sem STORED é VIRTUAL: não grava nada.
+        'op.execute("ALTER TABLE run ADD COLUMN t int GENERATED ALWAYS AS (a)")',
+        'op.execute("VACUUM (FULL false) run")',
+        'op.execute("DO $$BEGIN CREATE INDEX ix ON run (a); END$$")',
+        "op.execute(\"SELECT 'ALTER TABLE run ALTER c SET NOT NULL' /* CLUSTER run */\")",
+    ],
+    ids=["not-null-not-valid", "gerada-sem-stored", "vacuum-full-false", "corpo-do-do", "texto"],
+)
+def test_forma_segura_lida_pelo_parser_passa(operation: str) -> None:
+    source = f"def upgrade() -> None:\n    {operation}\n"
+
+    assert unmarked_blocking_lines(source) == []
 
 
 def test_muitos_acrescimos_com_mais_igual_sao_lidos_em_sequencia() -> None:
@@ -495,7 +542,8 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
         (
             '        op.execute("CREATE INDEX CONCURRENTLY ON run (a)")\n',
             3,
-        ),
+        ),  # Sem IF EXISTS, o DROP falha no primeiro deploy, quando o índice ainda não existe.
+        ('        op.execute("DROP INDEX CONCURRENTLY ix_a")\n' + CREATE_CONCURRENT, 4),
     ],
     ids=[
         "op-sem-drop",
@@ -514,6 +562,7 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
         # O PostgreSQL só dobra a caixa de A a Z.
         "caixa-nao-ascii",
         "sem-nome",
+        "drop-sem-if-exists",
     ],
 )
 def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> None:

@@ -8,24 +8,21 @@ linha da operação ou na linha só de comentário logo acima. Operação sobre 
 mesmo `upgrade()` não trava ninguém e dispensa a marca.
 
 O check lê o `upgrade()` e as funções do módulo que ele chama, resolve texto e colunas guardados
-em variável e monta f-strings e concatenações com um marcador no lugar do valor. Continua
-estático: SQL vindo de fora do módulo ou montado em laço escapa, e a revisão do PR vale.
+em variável e monta f-strings e concatenações com um marcador no lugar do valor. O SQL montado
+vai para `tests/migration_sql.py`, que o lê com o parser do PostgreSQL. Continua estático: SQL
+vindo de fora do módulo ou montado em laço escapa, e a revisão do PR vale.
 """
 
 import ast
 import re
-import string
 from collections.abc import Iterator
 
 from tests.migration_source import is_marked
+from tests.migration_sql import PLACEHOLDER, VOLATILE_FUNCTION, IndexName, analyze_sql
 
 FIRST_CHECKED_REVISION = 19
 REVISION_FILE = re.compile(r"^(\d{4})_\w+\.py$")
 LOCK_OK_MARK = re.compile(r"#\s*lock-ok:\s*\S")
-# Valor desconhecido numa f-string ou concatenação: um identificador mantém a forma do SQL
-# ("ALTER COLUMN {c} TYPE" vira "ALTER COLUMN __unresolved__ TYPE"). O nome é improvável num
-# índice de verdade, então um nome de índice que o contém é tratado como desconhecido.
-PLACEHOLDER = "__unresolved__"
 # Combinações de textos que uma concatenação pode gerar. Acima disso o resto não é lido, e o texto
 # TOO_MANY_RENDERINGS entra no lugar: na dúvida, o SQL conta como bloqueante e pede a marca. Ele
 # contém o PLACEHOLDER, então um nome de índice truncado também conta como desconhecido.
@@ -39,15 +36,6 @@ EXECUTE_OPERATIONS = frozenset({"execute", "exec_driver_sql"})
 SQL_KEYWORDS = frozenset({"sqltext", "statement"})
 FORMAT_FIELD = re.compile(r"\{[^{}]*\}")
 PERCENT_FIELD = re.compile(r"%(\([^)]*\))?[sdr]")
-# Delimitador de dollar quoting: $$ ou $tag$.
-DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_]\w*)?\$")
-# Caracteres que continuam um identificador sem aspas: `$` logo depois deles não abre texto.
-IDENTIFIER_CHAR = re.compile(r"[\w$]")
-# Parte de nome de índice: com aspas ("" é uma aspa dentro do nome) ou sem.
-INDEX_NAME_PART = r'(?:"(?:[^"]|"")*"|[\w$]+)'
-INDEX_NAME = rf"({INDEX_NAME_PART}(?:\s*\.\s*{INDEX_NAME_PART})*)"
-# Parte capturada: com aspas mantém a caixa; sem aspas, vai para minúsculas.
-SQL_NAME_PART = re.compile(r'"((?:[^"]|"")*)"|([\w$]+)')
 # Constraints que constroem índice sob lock: a forma segura é criar o índice com CONCURRENTLY
 # antes e anexá-lo com `USING INDEX`, o que o Alembic não expressa nestas chamadas.
 INDEX_BUILDING_CONSTRAINTS = frozenset(
@@ -69,71 +57,9 @@ TARGET_TABLE = {
 INDEXED_COLUMN_FLAGS = ("unique", "index", "primary_key")
 # Partes de `sa.Column` que varrem a tabela ao entrar: FK e CHECK são validadas na hora.
 VALIDATED_COLUMN_PARTS = frozenset({"ForeignKey", "CheckConstraint"})
-VOLATILE_DEFAULT = re.compile(
-    r"\b(gen_random_uuid|uuid_generate_v\w+|uuidv\d|random|clock_timestamp|timeofday|nextval)\b",
-    re.IGNORECASE,
-)
-# Nome de coluna ou constraint, com aspas (pode ter espaço e `""`) ou sem.
-SQL_NAME = r'(?:"(?:[^"]|"")*"|\S+)'
-# Cada padrão roda numa cláusula só (ver `sql_clauses`) e tem no máximo um trecho variável
-# longo, para o custo crescer em linha com o tamanho do SQL.
-BLOCKING_CLAUSES = [
-    re.compile(pattern, re.IGNORECASE | re.DOTALL)
-    for pattern in (
-        r"\bCREATE\s+(UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY\b)",
-        r"\bREINDEX\b(?!.*\bCONCURRENTLY\b)",
-        rf"\bADD\s+(CONSTRAINT\s+{SQL_NAME}\s+)?(FOREIGN\s+KEY|CHECK)\b(?!.*\bNOT\s+VALID\b)",
-        rf"\bADD\s+(CONSTRAINT\s+{SQL_NAME}\s+)?(UNIQUE|PRIMARY\s+KEY|EXCLUDE)\b(?!\s+USING\s+INDEX\b)",
-        r"\bSET\s+NOT\s+NULL\b",
-        rf"\bALTER\s+(COLUMN\s+)?{SQL_NAME}\s+(SET\s+DATA\s+)?TYPE\b",
-        r"\bSET\s+(UN)?LOGGED\b",
-        r"\bSET\s+TABLESPACE\b",
-        r"\bATTACH\s+PARTITION\b",
-        # Sem CONCURRENTLY, o DETACH trava a tabela-mãe em ACCESS EXCLUSIVE. Grupo atômico: o
-        # nome não pode encolher para escapar do lookahead.
-        rf"\bDETACH\s+PARTITION\s+(?>{INDEX_NAME})(?!\s*(CONCURRENTLY|FINALIZE)\b)",
-        r"\bVACUUM\s+(\([^)]*\bFULL\b[^)]*\)|FULL\b)",
-        r"\bCLUSTER\b",
-        r"\bLOCK\s+TABLE\b",
-        rf"\bLOCK\s+{SQL_NAME}\s+IN\s+[\w\s]+\bMODE\b",
-        r"\bREFRESH\s+MATERIALIZED\s+VIEW\s+(?!CONCURRENTLY\b)",
-    )
-]
-ADD_COLUMN_SQL = re.compile(
-    r"\bADD\s+(?!CONSTRAINT\b|UNIQUE\b|PRIMARY\b|FOREIGN\b|CHECK\b|EXCLUDE\b)", re.IGNORECASE
-)
-REWRITING_COLUMN_SQL = re.compile(
-    r"\b(SMALLSERIAL|BIGSERIAL|SERIAL|UNIQUE|PRIMARY\s+KEY|REFERENCES|CHECK)\b", re.IGNORECASE
-)
-GENERATED_SQL = re.compile(r"\bGENERATED\b", re.IGNORECASE)
-VIRTUAL_SQL = re.compile(r"\bVIRTUAL\b", re.IGNORECASE)
-DEFAULT_SQL = re.compile(r"\bDEFAULT\b", re.IGNORECASE)
-# CONCURRENTLY de índice (CREATE, DROP, REINDEX); o de REFRESH MATERIALIZED VIEW roda em
-# transação.
-CONCURRENT_INDEX_SQL = re.compile(
-    r"\b(INDEX|TABLE|SCHEMA|DATABASE|SYSTEM)\s+CONCURRENTLY\b"
-    r"|\bREINDEX\s*\([^)]*\bCONCURRENTLY\b"
-    rf"|\bDETACH\s+PARTITION\s+{INDEX_NAME}\s*CONCURRENTLY\b",
-    re.IGNORECASE,
-)
-CREATE_CONCURRENT_INDEX_START = re.compile(
-    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b", re.IGNORECASE
-)
-# O nome do índice não leva schema: ele fica no schema da tabela, que vem depois do ON.
-CREATE_CONCURRENT_INDEX_SQL = re.compile(
-    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-    rf"(?:({INDEX_NAME_PART})\s+)?ON\s+(?:ONLY\s+)?{INDEX_NAME}",
-    re.IGNORECASE,
-)
-# O PostgreSQL só dobra a caixa de A a Z em nome sem aspas.
-ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
-DROP_CONCURRENT_INDEX_SQL = re.compile(
-    rf"\bDROP\s+INDEX\s+CONCURRENTLY\s+IF\s+EXISTS\s+{INDEX_NAME}", re.IGNORECASE
-)
+VOLATILE_DEFAULT = re.compile(rf"\b({VOLATILE_FUNCTION.pattern})\b", re.IGNORECASE)
 
 type Assignments = dict[str, list[ast.expr]]
-# Nome de índice em partes (schema, nome), como o PostgreSQL o guarda.
-type IndexName = tuple[str, ...]
 
 
 def checked_revisions(names: list[str]) -> list[str]:
@@ -211,102 +137,6 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
             if any(name is None or name not in dropped for name in created):
                 unsafe.append(call.lineno)
     return sorted(unsafe)
-
-
-def sql_clauses(sql: str) -> list[str]:
-    """O SQL sem comentários, dividido nas vírgulas e ponto e vírgula fora de parênteses e aspas.
-
-    Texto entre aspas simples (inclusive a string de escape `E'...'`) ou em dollar quoting vira
-    `''`: palavra-chave dentro de um texto (`'NOT VALID'`, `COMMENT ON ... IS 'CREATE INDEX'`)
-    não conta. Nome entre aspas duplas fica como está, mas `--`, vírgula e parêntese dentro dele
-    não são SQL.
-    """
-    return _split_sql(sql, ",;")
-
-
-def _split_sql(sql: str, separators: str) -> list[str]:
-    clauses: list[str] = []
-    current: list[str] = []
-    depth, index = 0, 0
-    while index < len(sql):
-        char = sql[index]
-        dollar = _dollar_quote(sql, index) if char == "$" else None
-        if dollar is not None:
-            index = _after_closing(sql, dollar, index + len(dollar))
-            current.append("''")
-            continue
-        if char == "'":
-            index = _after_text(sql, index + 1, escaped=_opens_escape_string(sql, index))
-            current.append("''")
-            continue
-        if char == '"':
-            end = _after_closing(sql, '"', index + 1)
-            current.append(sql[index:end])
-            index = end
-            continue
-        if sql.startswith("--", index):
-            end = sql.find("\n", index)
-            index = len(sql) if end == -1 else end
-            current.append(" ")
-            continue
-        elif sql.startswith("/*", index):
-            end = sql.find("*/", index + 2)
-            index = len(sql) if end == -1 else end + 2
-            current.append(" ")
-            continue
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth = max(depth - 1, 0)
-        elif char in separators and depth == 0:
-            clauses.append("".join(current))
-            current = []
-            index += 1
-            continue
-        current.append(char)
-        index += 1
-    clauses.append("".join(current))
-    return clauses
-
-
-def _dollar_quote(sql: str, index: int) -> str | None:
-    """O delimitador `$tag$` que começa em `index`; `$` no meio de um identificador não abre."""
-    if index > 0 and IDENTIFIER_CHAR.match(sql[index - 1]):
-        return None
-    match = DOLLAR_QUOTE.match(sql, index)
-    return None if match is None else match.group()
-
-
-def _opens_escape_string(sql: str, quote: int) -> bool:
-    """A aspa em `quote` abre uma string de escape: `E'` ou `e'` com o E solto antes."""
-    prefix = quote - 1
-    return (
-        prefix >= 0
-        and sql[prefix] in "eE"
-        and (prefix == 0 or not IDENTIFIER_CHAR.match(sql[prefix - 1]))
-    )
-
-
-def _after_text(sql: str, start: int, *, escaped: bool) -> int:
-    """A posição logo depois da aspa que fecha o texto; na string de escape, `\\'` não fecha."""
-    if not escaped:
-        return _after_closing(sql, "'", start)
-    index = start
-    while index < len(sql):
-        # Barra invertida escapa o caractere seguinte; `''` é uma aspa dentro do texto.
-        if sql[index] == "\\" or sql[index : index + 2] == "''":
-            index += 2
-        elif sql[index] == "'":
-            return index + 1
-        else:
-            index += 1
-    return len(sql)
-
-
-def _after_closing(sql: str, delimiter: str, start: int) -> int:
-    """A posição logo depois do `delimiter` que fecha o trecho; o fim do SQL se não fechar."""
-    end = sql.find(delimiter, start)
-    return len(sql) if end == -1 else end + len(delimiter)
 
 
 def _upgrade_scope(tree: ast.Module) -> list[ast.FunctionDef]:
@@ -446,24 +276,7 @@ def _has_volatile_default(default: ast.expr, assignments: Assignments) -> bool:
 
 
 def _is_blocking_sql(sql: str) -> bool:
-    return TOO_MANY_RENDERINGS in sql or any(
-        any(pattern.search(clause) for pattern in BLOCKING_CLAUSES)
-        or _adds_rewriting_column_sql(clause)
-        for clause in sql_clauses(sql)
-    )
-
-
-def _adds_rewriting_column_sql(clause: str) -> bool:
-    added = ADD_COLUMN_SQL.search(clause)
-    if added is None:
-        return False
-    column = clause[added.end() :]
-    if REWRITING_COLUMN_SQL.search(column):
-        return True
-    if GENERATED_SQL.search(column) and not VIRTUAL_SQL.search(column):
-        return True
-    default = DEFAULT_SQL.search(column)
-    return default is not None and VOLATILE_DEFAULT.search(column, default.end()) is not None
+    return TOO_MANY_RENDERINGS in sql or analyze_sql(sql).blocking
 
 
 def _sql_texts(call: ast.Call, assignments: Assignments) -> list[str]:
@@ -571,23 +384,11 @@ def _created_concurrent_indexes(call: ast.Call, assignments: Assignments) -> lis
         return [_index_name(call)]
     if name in EXECUTE_OPERATIONS:
         return [
-            _created_sql_index_name(clause, start.start())
+            index
             for text in _sql_texts(call, assignments)
-            for clause in sql_clauses(text)
-            for start in CREATE_CONCURRENT_INDEX_START.finditer(clause)
+            for index in analyze_sql(text).created_concurrent_indexes
         ]
     return []
-
-
-def _created_sql_index_name(clause: str, start: int) -> IndexName | None:
-    """`(schema da tabela, nome)` ou `(nome,)`; None sem nome.
-
-    Parte não resolvida não precisa de tratamento aqui: o DROP nunca a resolve, então não casa.
-    """
-    match = CREATE_CONCURRENT_INDEX_SQL.match(clause, start)
-    if match is None or match.group(1) is None:
-        return None
-    return (*_sql_name(match.group(2))[:-1], *_sql_name(match.group(1)))
 
 
 def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> list[IndexName | None]:
@@ -600,7 +401,11 @@ def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> lis
     ):
         return [_index_name(call)]
     if name in EXECUTE_OPERATIONS:
-        return _sql_index_names(call, assignments, DROP_CONCURRENT_INDEX_SQL)
+        return [
+            index
+            for text in _sql_texts(call, assignments)
+            for index in analyze_sql(text).dropped_concurrent_indexes
+        ]
     return []
 
 
@@ -616,46 +421,19 @@ def _index_name(call: ast.Call) -> IndexName | None:
     return (schema, name) if isinstance(schema, str) else (name,)
 
 
-def _sql_index_names(
-    call: ast.Call, assignments: Assignments, pattern: re.Pattern[str]
-) -> list[IndexName | None]:
-    names = (
-        _sql_name(match.group(1))
-        for text in _sql_texts(call, assignments)
-        for clause in sql_clauses(text)
-        for match in pattern.finditer(clause)
-    )
-    return [None if any(PLACEHOLDER in part for part in name) else name for name in names]
-
-
-def _sql_name(identifier: str) -> IndexName:
-    """Como o PostgreSQL guarda o nome: sem aspas, só A a Z viram minúsculas; com aspas, igual."""
-    return tuple(
-        part.group(2).translate(ASCII_LOWER)
-        if part.group(1) is None
-        else part.group(1).replace('""', '"')
-        for part in SQL_NAME_PART.finditer(identifier)
-    )
-
-
 def _is_concurrent(call: ast.Call, assignments: Assignments) -> bool:
     name = _operation(call)
     if name in {"create_index", "drop_index"}:
         return _keyword_is_true(call, "postgresql_concurrently")
     if name in EXECUTE_OPERATIONS:
-        return any(
-            CONCURRENT_INDEX_SQL.search(clause)
-            for text in _sql_texts(call, assignments)
-            for clause in sql_clauses(text)
-        )
+        return any(analyze_sql(text).concurrent for text in _sql_texts(call, assignments))
     return False
 
 
 def _runs_several_statements(call: ast.Call, assignments: Assignments) -> bool:
-    """O `execute` manda mais de uma instrução numa mensagem só (`;` no meio do SQL)."""
+    """O `execute` manda mais de uma instrução numa mensagem só."""
     return _operation(call) in EXECUTE_OPERATIONS and any(
-        sum(1 for statement in _split_sql(text, ";") if statement.strip()) > 1
-        for text in _sql_texts(call, assignments)
+        analyze_sql(text).statements > 1 for text in _sql_texts(call, assignments)
     )
 
 

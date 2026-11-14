@@ -1,0 +1,254 @@
+"""O que um texto de SQL de migration faz quanto a locks, lido pelo parser do PostgreSQL (ADR 057).
+
+O pglast embute o parser do próprio PostgreSQL (libpg_query), então texto entre aspas, dollar
+quoting, comentários e nomes com aspas seguem as regras do servidor, sem expressão regular.
+O texto é dividido em instruções pelo scanner e cada uma é lida à parte: uma instrução que não
+parseia (valor desconhecido no lugar de uma palavra-chave, por exemplo) não esconde as outras.
+
+Na dúvida o resultado peca pelo lado seguro: instrução que não parseia conta como bloqueante,
+CONCURRENTLY no meio dela conta, e índice criado sem nome resolvido nunca conta como apagado.
+"""
+
+import re
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+
+from pglast import ast, parse_sql, split
+from pglast.enums import AlterTableType, ConstrType, ObjectType
+from pglast.parser import ParseError, scan
+
+# Valor desconhecido na montagem do SQL (variável, campo de f-string): vira um identificador.
+PLACEHOLDER = "__unresolved__"
+# Nome de índice em partes (schema, nome), como o PostgreSQL o guarda.
+type IndexName = tuple[str, ...]
+
+VOLATILE_FUNCTION = re.compile(
+    r"gen_random_uuid|uuid_generate_v\w+|uuidv\d|random|clock_timestamp|timeofday|nextval"
+)
+SERIAL_TYPES = frozenset({"smallserial", "serial", "bigserial", "serial2", "serial4", "serial8"})
+# Subcomandos de ALTER TABLE que reescrevem ou varrem a tabela sob ACCESS EXCLUSIVE.
+BLOCKING_ALTERS = frozenset(
+    {
+        AlterTableType.AT_SetNotNull,
+        AlterTableType.AT_AlterColumnType,
+        AlterTableType.AT_SetLogged,
+        AlterTableType.AT_SetUnLogged,
+        AlterTableType.AT_SetTableSpace,
+        AlterTableType.AT_AttachPartition,
+    }
+)
+# Constraints validadas na hora: a forma segura é NOT VALID e VALIDATE depois.
+VALIDATED_CONSTRAINTS = frozenset(
+    {ConstrType.CONSTR_FOREIGN, ConstrType.CONSTR_CHECK, ConstrType.CONSTR_NOTNULL}
+)
+# Constraints que constroem índice sob lock, salvo `USING INDEX` de um índice já pronto.
+INDEX_CONSTRAINTS = frozenset(
+    {ConstrType.CONSTR_UNIQUE, ConstrType.CONSTR_PRIMARY, ConstrType.CONSTR_EXCLUSION}
+)
+# Constraints de coluna nova que constroem índice, varrem a tabela ou a reescrevem.
+REWRITING_COLUMN_CONSTRAINTS = frozenset(
+    {
+        ConstrType.CONSTR_UNIQUE,
+        ConstrType.CONSTR_PRIMARY,
+        ConstrType.CONSTR_FOREIGN,
+        ConstrType.CONSTR_CHECK,
+        ConstrType.CONSTR_IDENTITY,
+    }
+)
+STORED = "s"
+
+
+@dataclass(frozen=True)
+class SqlFacts:
+    """O que importa ao check num texto de SQL; `statements` conta as instruções não vazias."""
+
+    blocking: bool = False
+    concurrent: bool = False
+    statements: int = 0
+    # None no lugar de um nome que o check não resolve.
+    created_concurrent_indexes: list[IndexName | None] = field(default_factory=list)
+    dropped_concurrent_indexes: list[IndexName | None] = field(default_factory=list)
+
+
+def analyze_sql(sql: str) -> SqlFacts:
+    """Lê cada instrução do texto e junta o que elas fazem."""
+    try:
+        statements = split(sql, with_parser=False)
+    except ParseError:
+        # Nem o scanner aceita (texto entre aspas sem fechar): o servidor também recusaria.
+        return SqlFacts(True, True, 1, [None], [])
+    facts = [_statement_facts(statement) for statement in statements]
+    return SqlFacts(
+        blocking=any(fact.blocking for fact in facts),
+        concurrent=any(fact.concurrent for fact in facts),
+        statements=len(facts),
+        created_concurrent_indexes=[n for f in facts for n in f.created_concurrent_indexes],
+        dropped_concurrent_indexes=[n for f in facts for n in f.dropped_concurrent_indexes],
+    )
+
+
+def _statement_facts(statement: str) -> SqlFacts:
+    try:
+        (raw,) = parse_sql(statement)
+    except ParseError:
+        return _unparsed_facts(statement)
+    node = raw.stmt
+    if node is None:
+        return _unparsed_facts(statement)
+    return SqlFacts(
+        blocking=_is_blocking(node),
+        concurrent=_is_concurrent(node),
+        statements=1,
+        created_concurrent_indexes=_created_concurrent_indexes(node),
+        dropped_concurrent_indexes=_dropped_concurrent_indexes(node),
+    )
+
+
+def _unparsed_facts(statement: str) -> SqlFacts:
+    """Instrução que o parser recusa: bloqueante, e as palavras-chave decidem o CONCURRENTLY."""
+    keywords = [token.name for token in scan(statement)]
+    concurrent = "CONCURRENTLY" in keywords and keywords[:1] != ["REFRESH"]
+    creates_index = concurrent and "CREATE" in keywords and "INDEX" in keywords
+    return SqlFacts(True, concurrent, 1, [None] if creates_index else [], [])
+
+
+def _is_blocking(node: ast.Node) -> bool:
+    match node:
+        case ast.IndexStmt():
+            return not node.concurrent
+        case ast.ReindexStmt():
+            return not _has_option(node.params, "concurrently")
+        case ast.AlterTableStmt():
+            return any(_alter_is_blocking(command) for command in node.cmds or ())
+        case ast.VacuumStmt():
+            return _has_option(node.options, "full")
+        case ast.ClusterStmt() | ast.LockStmt():
+            return True
+        case ast.RefreshMatViewStmt():
+            return not node.concurrent
+    return False
+
+
+def _alter_is_blocking(command: ast.AlterTableCmd) -> bool:
+    if command.subtype in BLOCKING_ALTERS:
+        return True
+    match command.def_:
+        # O FINALIZE é outro subtipo e conclui um DETACH CONCURRENTLY: não trava.
+        case ast.PartitionCmd() as partition if _detaches(command):
+            return not partition.concurrent
+        case ast.Constraint() as constraint if command.subtype == AlterTableType.AT_AddConstraint:
+            return _constraint_is_blocking(constraint)
+        case ast.ColumnDef() as column if command.subtype == AlterTableType.AT_AddColumn:
+            return _column_is_blocking(column)
+    return False
+
+
+def _constraint_is_blocking(constraint: ast.Constraint) -> bool:
+    if constraint.contype in VALIDATED_CONSTRAINTS:
+        return not constraint.skip_validation
+    if constraint.contype in INDEX_CONSTRAINTS:
+        return constraint.indexname is None
+    return False
+
+
+def _column_is_blocking(column: ast.ColumnDef) -> bool:
+    """Coluna nova que reescreve a tabela, a varre para validar ou constrói índice sob lock."""
+    if column.typeName is not None and _last_name(column.typeName.names) in SERIAL_TYPES:
+        return True
+    for constraint in column.constraints or ():
+        if constraint.contype in REWRITING_COLUMN_CONSTRAINTS:
+            return True
+        # Coluna gerada VIRTUAL (padrão no PostgreSQL 18) não é gravada; STORED reescreve.
+        if (
+            constraint.contype == ConstrType.CONSTR_GENERATED
+            and constraint.generated_kind == STORED
+        ):
+            return True
+        if constraint.contype == ConstrType.CONSTR_DEFAULT and _is_volatile(constraint.raw_expr):
+            return True
+    return False
+
+
+def _is_volatile(expression: ast.Node | None) -> bool:
+    """O default chama função volátil, ou função cujo nome o check não resolve."""
+    return any(
+        isinstance(node, ast.FuncCall)
+        and (
+            VOLATILE_FUNCTION.fullmatch(name := _last_name(node.funcname)) is not None
+            or PLACEHOLDER in name
+        )
+        for node in (_walk(expression) if expression is not None else ())
+    )
+
+
+def _is_concurrent(node: ast.Node) -> bool:
+    """CONCURRENTLY que exige autocommit; o de REFRESH MATERIALIZED VIEW roda em transação."""
+    match node:
+        case ast.IndexStmt():
+            return bool(node.concurrent)
+        case ast.DropStmt():
+            return node.removeType == ObjectType.OBJECT_INDEX and bool(node.concurrent)
+        case ast.ReindexStmt():
+            return _has_option(node.params, "concurrently")
+        case ast.AlterTableStmt():
+            return any(
+                _detaches(command)
+                and isinstance(command.def_, ast.PartitionCmd)
+                and bool(command.def_.concurrent)
+                for command in node.cmds or ()
+            )
+    return False
+
+
+def _created_concurrent_indexes(node: ast.Node) -> list[IndexName | None]:
+    """O índice criado fica no schema da tabela do ON: `(schema, nome)` ou `(nome,)`."""
+    if not isinstance(node, ast.IndexStmt) or not node.concurrent:
+        return []
+    if node.idxname is None:
+        return [None]
+    schema = node.relation.schemaname if node.relation is not None else None
+    return [_resolved((schema, node.idxname) if schema else (node.idxname,))]
+
+
+def _dropped_concurrent_indexes(node: ast.Node) -> list[IndexName | None]:
+    """Só `DROP INDEX CONCURRENTLY IF EXISTS` serve de limpeza antes de um retry."""
+    if not (
+        isinstance(node, ast.DropStmt)
+        and node.removeType == ObjectType.OBJECT_INDEX
+        and node.concurrent
+        and node.missing_ok
+    ):
+        return []
+    return [_resolved(tuple(part.sval for part in name)) for name in node.objects or ()]
+
+
+def _resolved(name: IndexName) -> IndexName | None:
+    return None if any(PLACEHOLDER in part for part in name) else name
+
+
+def _has_option(options: tuple[ast.DefElem, ...] | None, name: str) -> bool:
+    """A opção está ligada: presente sem valor ou com valor diferente de false/off/0."""
+    for option in options or ():
+        if option.defname == name:
+            value = getattr(option.arg, "sval", None) or getattr(option.arg, "ival", None)
+            return str(value).lower() not in {"false", "off", "0"} if value is not None else True
+    return False
+
+
+def _detaches(command: ast.AlterTableCmd) -> bool:
+    return command.subtype == AlterTableType.AT_DetachPartition
+
+
+def _last_name(names: tuple[ast.String, ...] | None) -> str:
+    """Última parte de um nome qualificado, em minúsculas; vazio sem nome."""
+    return (names[-1].sval or "").lower() if names else ""
+
+
+def _walk(node: ast.Node) -> Iterator[ast.Node]:
+    yield node
+    for attribute in node:
+        child = getattr(node, attribute)
+        children = child if isinstance(child, tuple) else (child,)
+        for item in children:
+            if isinstance(item, ast.Node):
+                yield from _walk(item)
