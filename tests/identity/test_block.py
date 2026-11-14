@@ -21,6 +21,7 @@ from goblinshift.identity import (
     unblock_account,
 )
 from goblinshift.identity.accounts import list_accounts, list_pending_accounts
+from goblinshift.identity.purge import WEB_SESSION_RETENTION, delete_ended_web_sessions
 from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_key, new_user
@@ -134,6 +135,16 @@ def test_liberar_reativa_a_conta_sem_ressuscitar_chaves(factory: sessionmaker[Se
         assert authenticate_api_key(session, issued.token, NOW) is None
 
 
+def test_liberar_conta_pendente_tira_a_marca_de_espera(factory: sessionmaker[Session]) -> None:
+    pending = new_user(factory, blocked=True)
+
+    with unit_of_work(factory) as session:
+        assert unblock_account(session, pending) is True
+
+    row = account_row(factory, pending)
+    assert (row["status"], row["awaiting_approval"]) == ("active", False)
+
+
 def test_liberar_conta_inexistente_devolve_false(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         assert unblock_account(session, uuid7()) is False
@@ -225,6 +236,48 @@ def test_conta_bloqueada_nao_completa_login(factory: sessionmaker[Session]) -> N
     assert (outcome.account_id, outcome.reason) == (user_id, LoginRefused.BLOCKED)
 
 
+def test_bloquear_conta_pendente_tira_da_fila_e_o_login_responde_bloqueio(
+    factory: sessionmaker[Session],
+) -> None:
+    pending = new_user(factory, blocked=True)
+    with unit_of_work(factory) as session:
+        block_account(session, pending, NOW)
+
+    with unit_of_work(factory) as session:
+        listed = {account.id for account in list_pending_accounts(session)}
+    with unit_of_work(factory) as session:
+        outcome = resolve_login(session, _identity_of(factory, pending), signup_open=True, now=NOW)
+
+    assert pending not in listed
+    assert isinstance(outcome, LoginRefusal)
+    assert (outcome.account_id, outcome.reason) == (pending, LoginRefused.BLOCKED)
+
+
+def blocked_after_use_with_sessions_purged(factory: sessionmaker[Session]) -> UUID:
+    """Conta que usou o site, foi bloqueada por abuso e teve as sessões apagadas pela retenção."""
+    user_id = new_user(factory)
+    new_web_session(factory, user_id)
+    with unit_of_work(factory) as session:
+        block_account(session, user_id, NOW)
+    after_retention = NOW + WEB_SESSION_RETENTION + timedelta(days=1)
+    with unit_of_work(factory) as session:
+        deleted = delete_ended_web_sessions(session, after_retention, limit=100)
+    assert deleted == 1
+    return user_id
+
+
+def test_bloqueio_continua_bloqueio_no_login_depois_da_retencao_das_sessoes(
+    factory: sessionmaker[Session],
+) -> None:
+    user_id = blocked_after_use_with_sessions_purged(factory)
+
+    with unit_of_work(factory) as session:
+        outcome = resolve_login(session, _identity_of(factory, user_id), signup_open=True, now=NOW)
+
+    assert isinstance(outcome, LoginRefusal)
+    assert (outcome.account_id, outcome.reason) == (user_id, LoginRefused.BLOCKED)
+
+
 # --- Listagem para o administrador ------------------------------------------------------------
 
 
@@ -257,3 +310,16 @@ def test_pendentes_sao_as_bloqueadas_que_nunca_tiveram_sessao(
 
     assert listed == {pending}
     assert active not in listed
+
+
+def test_bloqueada_por_abuso_nao_vira_pendente_depois_da_retencao_das_sessoes(
+    factory: sessionmaker[Session],
+) -> None:
+    pending = new_user(factory, blocked=True)
+    blocked_after_use = blocked_after_use_with_sessions_purged(factory)
+
+    with unit_of_work(factory) as session:
+        listed = {account.id for account in list_pending_accounts(session)}
+
+    assert listed == {pending}
+    assert blocked_after_use not in listed
