@@ -75,6 +75,36 @@ jobs:
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
         run: uv run pytest -m "not openobserve and not executor_image"
 
+  host-python:
+    name: Scripts do host (Python 3.12)
+    # Os pacotes de deploy/ marcados py312 no pyproject rodam no python3 do host (3.12, o do
+    # Ubuntu 24.04), não no Python da imagem. Este job confere o piso de versão e roda os testes
+    # deles nesse interpretador. Sem `if`: o gate da publicação exige o sucesso dele.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Instalar pytest, PyYAML, cryptography e vermin (hashes conferidos)
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary ':all:' -r tests/host_python/requirements.txt
+      - name: Piso de versão e importação dos pacotes do host
+        # Recusa rodar fora do 3.12 e falha com API ou sintaxe acima dele (vermin) ou com módulo
+        # que não importa.
+        run: python scripts/check_host_python.py
+      - name: Testes dos pacotes do host
+        # Só os módulos marcados host_python: os outros de tests/executor_ctl testam o cliente do
+        # worker e importam a aplicação. tests/test_ci_host_python.py confere que todo módulo
+        # dessas pastas está marcado ou explica por que não. O --confcutdir deixa de fora o
+        # tests/conftest.py, que também importa a aplicação. Sem nenhum módulo na lista, o pytest
+        # coleta a suíte inteira e falha na importação: o job não passa vazio.
+        run: |
+          mapfile -t modulos < <(grep -rlF --include='test_*.py' 'pytest.mark.host_python' tests/executor_ctl tests/tls_check tests/host_python | sort)
+          python -m pytest -p no:cacheprovider --confcutdir=tests/executor_ctl -m host_python "${modulos[@]}"
+
   openobserve:
     name: SLOs e alertas (OpenObserve)
     runs-on: ubuntu-24.04
@@ -452,7 +482,6 @@ jobs:
           build-args: GS_SERVICE_VERSION=${{ steps.vars.outputs.tag }}
           tags: |
             ghcr.io/bipoxdxd/goblinshift:${{ steps.vars.outputs.tag }}
-            ghcr.io/bipoxdxd/goblinshift:main
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -497,7 +526,6 @@ jobs:
           # Mesma tag da imagem da aplicação: o deploy resolve o digest do executor por ela.
           tags: |
             ghcr.io/bipoxdxd/goblinshift-executor:${{ steps.vars.outputs.tag }}
-            ghcr.io/bipoxdxd/goblinshift-executor:main
           # Escopo próprio, para não disputar o cache da imagem da aplicação.
           cache-from: type=gha,scope=executor
           cache-to: type=gha,scope=executor,mode=max
@@ -545,7 +573,6 @@ jobs:
           # Mesma tag da imagem da aplicação: o Compose do deploy referencia as duas por ela.
           tags: |
             ghcr.io/bipoxdxd/goblinshift-web:${{ steps.vars.outputs.tag }}
-            ghcr.io/bipoxdxd/goblinshift-web:main
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
@@ -554,11 +581,50 @@ jobs:
           IMAGE_REF: ghcr.io/bipoxdxd/goblinshift-web@${{ steps.build.outputs.digest }}
         run: scripts/docker-build.sh published "$IMAGE_REF"
 
+  tag-main:
+    name: Tag main das imagens
+    # As tags sha-* saem assim que cada imagem fica pronta, e a publicação pelo Coolify confere o
+    # CI inteiro antes de usá-las. A `:main` só passa a apontar para o commit depois de todos os
+    # portões: quem puxa `:main` nunca recebe uma imagem que reprovou em algum job.
+    needs:
+      - checks
+      - host-python
+      - openobserve
+      - contract
+      - web
+      - e2e
+      - secrets
+      - gvisor
+      - e2e-gvisor
+      - image
+      - executor-image
+      - web-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apontar a main para as imagens deste commit
+        # Com uma fonte só, o imagetools copia o índice multiplataforma como está.
+        run: |
+          tag="sha-${GITHUB_SHA::12}"
+          for name in goblinshift goblinshift-executor goblinshift-web; do
+            docker buildx imagetools create --tag "ghcr.io/bipoxdxd/$name:main" "ghcr.io/bipoxdxd/$name:$tag"
+          done
+
   deploy:
     name: Deploy na VPS
     # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
     # execuções aceitas sem ter onde rodar.
-    needs: [image, executor-image, web-image, gvisor, openobserve]
+    needs: [image, executor-image, web-image, gvisor, openobserve, host-python]
     # Coolify é o único ingresso automático de publicação. O legado fica desativado na fonte,
     # independentemente de variáveis administrativas. Manter este job pulado e seu dependente
     # preserva os dois resultados skipped que o gate de release exige antes de enviar imagens.

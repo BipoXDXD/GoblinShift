@@ -1,0 +1,8 @@
+# Ferramentas do job "Scripts do host (Python 3.12)" do CI: os pacotes do host usam só a stdlib;
+# o cryptography é dependência dos testes do tls_check. Gere o requirements.txt com:
+#   uv pip compile --universal --python-version 3.12 --generate-hashes \
+#     tests/host_python/requirements.in -o tests/host_python/requirements.txt
+pytest==9.2.0
+pyyaml==6.0.3
+cryptography==50.0.2
+vermin==1.9.2

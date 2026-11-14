@@ -18,6 +18,8 @@ from executor_ctl.server import MAX_BODY_BYTES
 
 from .conftest import make_config, running_server
 
+pytestmark = pytest.mark.host_python
+
 ATTEMPT = "0193a3f0-7b2c-7def-8a01-23456789abcd"
 ALLOWED = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 OTHER_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "f" * 64

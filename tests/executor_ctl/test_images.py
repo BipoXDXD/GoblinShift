@@ -11,7 +11,7 @@ import pytest
 
 from executor_ctl.images import ImageNotAllowedError, require_allowed
 
-pytestmark = pytest.mark.usefixtures("synthetic_policy_metadata")
+pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
 DIGEST = "sha256:" + "b" * 64
 IMAGE = f"ghcr.io/bipoxdxd/goblinshift-executor@{DIGEST}"
