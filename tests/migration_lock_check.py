@@ -37,8 +37,13 @@ FORMAT_FIELD = re.compile(r"\{[^{}]*\}")
 PERCENT_FIELD = re.compile(r"%(\([^)]*\))?[sdr]")
 # Delimitador de dollar quoting: $$ ou $tag$.
 DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_]\w*)?\$")
-# Parte de nome SQL: com aspas mantém a caixa; sem aspas, vai para minúsculas.
-SQL_NAME_PART = re.compile(r'"([^"]*)"|([^".]+)')
+# Caracteres que continuam um identificador sem aspas: `$` logo depois deles não abre texto.
+IDENTIFIER_CHAR = re.compile(r"[\w$]")
+# Parte de nome de índice: com aspas ("" é uma aspa dentro do nome) ou sem.
+INDEX_NAME_PART = r'(?:"(?:[^"]|"")*"|[\w$]+)'
+INDEX_NAME = rf"({INDEX_NAME_PART}(?:\s*\.\s*{INDEX_NAME_PART})*)"
+# Parte capturada: com aspas mantém a caixa; sem aspas, vai para minúsculas.
+SQL_NAME_PART = re.compile(r'"((?:[^"]|"")*)"|([\w$]+)')
 # Constraints que constroem índice sob lock: a forma segura é criar o índice com CONCURRENTLY
 # antes e anexá-lo com `USING INDEX`, o que o Alembic não expressa nestas chamadas.
 INDEX_BUILDING_CONSTRAINTS = frozenset(
@@ -99,18 +104,22 @@ DEFAULT_SQL = re.compile(r"\bDEFAULT\b", re.IGNORECASE)
 # CONCURRENTLY de índice (CREATE, DROP, REINDEX); o de REFRESH MATERIALIZED VIEW roda em
 # transação.
 CONCURRENT_INDEX_SQL = re.compile(
-    r"\b(INDEX|TABLE|SCHEMA|DATABASE|SYSTEM)\s+CONCURRENTLY\b|\bREINDEX\s*\([^)]*\bCONCURRENTLY\b",
+    r"\b(INDEX|TABLE|SCHEMA|DATABASE|SYSTEM)\s+CONCURRENTLY\b"
+    r"|\bREINDEX\s*\([^)]*\bCONCURRENTLY\b"
+    rf"|\bDETACH\s+PARTITION\s+{SQL_NAME}\s+CONCURRENTLY\b",
     re.IGNORECASE,
 )
 CREATE_CONCURRENT_INDEX_SQL = re.compile(
-    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w.\"]+)",
+    rf"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?{INDEX_NAME}",
     re.IGNORECASE,
 )
 DROP_CONCURRENT_INDEX_SQL = re.compile(
-    r"\bDROP\s+INDEX\s+CONCURRENTLY\s+IF\s+EXISTS\s+([\w.\"]+)", re.IGNORECASE
+    rf"\bDROP\s+INDEX\s+CONCURRENTLY\s+IF\s+EXISTS\s+{INDEX_NAME}", re.IGNORECASE
 )
 
 type Assignments = dict[str, list[ast.expr]]
+# Nome de índice em partes (schema, nome), como o PostgreSQL o guarda.
+type IndexName = tuple[str, ...]
 
 
 def checked_revisions(names: list[str]) -> list[str]:
@@ -140,11 +149,12 @@ def unmarked_blocking_lines(source: str) -> list[int]:
     )
 
 
-def concurrent_outside_autocommit_lines(source: str) -> list[int]:
-    """Linhas do `upgrade()` que pedem CONCURRENTLY fora de um `autocommit_block()`.
+def concurrent_in_transaction_lines(source: str) -> list[int]:
+    """Linhas do `upgrade()` que pedem CONCURRENTLY dentro de uma transação.
 
-    O PostgreSQL recusa CONCURRENTLY dentro da transação da migration, então nenhuma marca o
-    libera.
+    O PostgreSQL recusa CONCURRENTLY na transação da migration, ou seja, fora de um
+    `autocommit_block()`, e também num `execute` com mais de uma instrução, que roda numa
+    transação implícita. Nenhuma marca libera.
     """
     tree = ast.parse(source)
     scope = _upgrade_scope(tree)
@@ -159,7 +169,7 @@ def concurrent_outside_autocommit_lines(source: str) -> list[int]:
         for node in ast.walk(upgrade)
         if isinstance(node, ast.Call)
         and _is_concurrent(node, assignments)
-        and id(node) not in inside_autocommit
+        and (id(node) not in inside_autocommit or _runs_several_statements(node, assignments))
     )
 
 
@@ -178,7 +188,7 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
     upgrade, assignments = scope[0], _assignments(tree, scope)
     unsafe: list[int] = []
     for block in _autocommit_blocks(upgrade):
-        dropped: set[str] = set()
+        dropped: set[IndexName] = set()
         for call in _calls_in_order(block):
             dropped.update(
                 name for name in _dropped_concurrent_indexes(call, assignments) if name is not None
@@ -192,19 +202,27 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
 def sql_clauses(sql: str) -> list[str]:
     """O SQL sem comentários, dividido nas vírgulas e ponto e vírgula fora de parênteses e aspas.
 
-    Texto entre aspas simples ou em dollar quoting vira `''`: palavra-chave dentro de um texto
-    (`'NOT VALID'`, `COMMENT ON ... IS 'CREATE INDEX'`) não conta. Nome entre aspas duplas fica
-    como está, mas `--`, vírgula e parêntese dentro dele não são SQL.
+    Texto entre aspas simples (inclusive a string de escape `E'...'`) ou em dollar quoting vira
+    `''`: palavra-chave dentro de um texto (`'NOT VALID'`, `COMMENT ON ... IS 'CREATE INDEX'`)
+    não conta. Nome entre aspas duplas fica como está, mas `--`, vírgula e parêntese dentro dele
+    não são SQL.
     """
+    return _split_sql(sql, ",;")
+
+
+def _split_sql(sql: str, separators: str) -> list[str]:
     clauses: list[str] = []
     current: list[str] = []
     depth, index = 0, 0
     while index < len(sql):
         char = sql[index]
-        dollar = DOLLAR_QUOTE.match(sql, index) if char == "$" else None
-        if char == "'" or dollar is not None:
-            delimiter = "'" if dollar is None else dollar.group()
-            index = _after_closing(sql, delimiter, index + len(delimiter))
+        dollar = _dollar_quote(sql, index) if char == "$" else None
+        if dollar is not None:
+            index = _after_closing(sql, dollar, index + len(dollar))
+            current.append("''")
+            continue
+        if char == "'":
+            index = _after_text(sql, index + 1, escaped=_opens_escape_string(sql, index))
             current.append("''")
             continue
         if char == '"':
@@ -226,7 +244,7 @@ def sql_clauses(sql: str) -> list[str]:
             depth += 1
         elif char == ")":
             depth = max(depth - 1, 0)
-        elif char in ",;" and depth == 0:
+        elif char in separators and depth == 0:
             clauses.append("".join(current))
             current = []
             index += 1
@@ -235,6 +253,39 @@ def sql_clauses(sql: str) -> list[str]:
         index += 1
     clauses.append("".join(current))
     return clauses
+
+
+def _dollar_quote(sql: str, index: int) -> str | None:
+    """O delimitador `$tag$` que começa em `index`; `$` no meio de um identificador não abre."""
+    if index > 0 and IDENTIFIER_CHAR.match(sql[index - 1]):
+        return None
+    match = DOLLAR_QUOTE.match(sql, index)
+    return None if match is None else match.group()
+
+
+def _opens_escape_string(sql: str, quote: int) -> bool:
+    """A aspa em `quote` abre uma string de escape: `E'` ou `e'` com o E solto antes."""
+    prefix = quote - 1
+    return (
+        prefix >= 0
+        and sql[prefix] in "eE"
+        and (prefix == 0 or not IDENTIFIER_CHAR.match(sql[prefix - 1]))
+    )
+
+
+def _after_text(sql: str, start: int, *, escaped: bool) -> int:
+    """A posição logo depois da aspa que fecha o texto; na string de escape, `\\'` não fecha."""
+    if not escaped:
+        return _after_closing(sql, "'", start)
+    index = start
+    while index < len(sql):
+        if sql[index] == "\\":
+            index += 2
+        elif sql[index] == "'":
+            return index + 1
+        else:
+            index += 1
+    return len(sql)
 
 
 def _after_closing(sql: str, delimiter: str, start: int) -> int:
@@ -263,32 +314,42 @@ def _upgrade_scope(tree: ast.Module) -> list[ast.FunctionDef]:
 def _assignments(tree: ast.Module, scope: list[ast.FunctionDef]) -> Assignments:
     """Valores atribuídos a cada nome no nível do módulo e nas funções do escopo do upgrade.
 
-    O `downgrade()` fica de fora: um nome igual lá não contamina o `upgrade()`.
+    O `downgrade()` fica de fora: um nome igual lá não contamina o `upgrade()`. Na ordem do
+    código, `sql += "..."` estende cada valor atual do nome; os valores de antes do acréscimo
+    ficam depois deles como alternativas, porque o SQL pode ter rodado antes.
     """
     statements: list[ast.AST] = [
         node for node in tree.body if not isinstance(node, ast.FunctionDef)
     ]
-    statements += [node for function in scope for node in ast.walk(function)]
-    values: Assignments = {}
+    statements += [node for function in scope for node in _in_source_order(function)]
+    current: Assignments = {}
+    earlier: Assignments = {}
     for node in statements:
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        elif isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Add):
-            # `sql += "..."` acrescenta ao valor anterior: vira `sql + "..."`.
-            targets = [node.target]
-            value = ast.BinOp(left=_loaded(node.target), op=ast.Add(), right=node.value)
-        else:
-            continue
-        for target in targets:
-            if isinstance(target, ast.Name):
-                values.setdefault(target.id, []).append(value)
-    return values
+        if (
+            isinstance(node, ast.AugAssign)
+            and isinstance(node.op, ast.Add)
+            and isinstance(node.target, ast.Name)
+        ):
+            name = node.target.id
+            before = current.get(name) or [ast.Constant(value=PLACEHOLDER)]
+            earlier.setdefault(name, []).extend(current.get(name, []))
+            current[name] = [
+                ast.BinOp(left=value, op=ast.Add(), right=node.value) for value in before
+            ]
+        elif isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    current.setdefault(target.id, []).append(node.value)
+    return {
+        name: current.get(name, []) + earlier.get(name, [])
+        for name in current.keys() | earlier.keys()
+    }
 
 
-def _loaded(target: ast.expr) -> ast.expr:
-    return ast.Name(id=target.id, ctx=ast.Load()) if isinstance(target, ast.Name) else target
+def _in_source_order(function: ast.FunctionDef) -> list[ast.stmt]:
+    statements = [node for node in ast.walk(function) if isinstance(node, ast.stmt)]
+    return sorted(statements, key=lambda node: (node.lineno, node.col_offset))
 
 
 def _tables_created(scope: list[ast.FunctionDef]) -> frozenset[str]:
@@ -416,12 +477,12 @@ def _render(node: ast.expr, assignments: Assignments, depth: int) -> list[str]:
             PERCENT_FIELD.sub(PLACEHOLDER, text) for text in _render(node.left, assignments, depth)
         ]
     if isinstance(node, ast.Name) and node.id in assignments and depth < MAX_NAME_DEPTH:
-        texts = [
-            text
-            for value in assignments[node.id]
-            for text in _render(value, assignments, depth + 1)
-        ]
-        return texts[:MAX_RENDERINGS] or [PLACEHOLDER]
+        resolved: list[str] = []
+        for value in assignments[node.id]:
+            if len(resolved) >= MAX_RENDERINGS:
+                break
+            resolved += _render(value, assignments, depth + 1)
+        return resolved[:MAX_RENDERINGS] or [PLACEHOLDER]
     if isinstance(node, ast.Call):
         return _render_call(node, assignments, depth)
     return [PLACEHOLDER]
@@ -481,7 +542,7 @@ def _calls_in_order(block: ast.With) -> list[ast.Call]:
     return sorted(calls, key=lambda call: (call.lineno, call.col_offset))
 
 
-def _created_concurrent_indexes(call: ast.Call, assignments: Assignments) -> list[str | None]:
+def _created_concurrent_indexes(call: ast.Call, assignments: Assignments) -> list[IndexName | None]:
     """Nomes dos índices criados com CONCURRENTLY; None para nome que o check não resolve."""
     name = _operation(call)
     if name == "create_index" and _keyword_is_true(call, "postgresql_concurrently"):
@@ -491,7 +552,7 @@ def _created_concurrent_indexes(call: ast.Call, assignments: Assignments) -> lis
     return []
 
 
-def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> list[str | None]:
+def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> list[IndexName | None]:
     """Nomes dos índices apagados com `DROP INDEX CONCURRENTLY IF EXISTS`; None se não resolve."""
     name = _operation(call)
     if (
@@ -505,31 +566,35 @@ def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> lis
     return []
 
 
-def _index_name(call: ast.Call) -> str | None:
+def _index_name(call: ast.Call) -> IndexName | None:
     """O nome dado ao Alembic, exato: ele põe aspas em nome com maiúscula, e a caixa fica."""
     node = call.args[0] if call.args else None
     if node is None:
         node = next((kw.value for kw in call.keywords if kw.arg == "index_name"), None)
-    return None if node is None else _table_name(node)
+    name = None if node is None else _table_name(node)
+    if name is None:
+        return None
+    schema = _keyword_constant(call, "schema")
+    return (schema, name) if isinstance(schema, str) else (name,)
 
 
 def _sql_index_names(
     call: ast.Call, assignments: Assignments, pattern: re.Pattern[str]
-) -> list[str | None]:
+) -> list[IndexName | None]:
     names = (
         _sql_name(match.group(1))
         for text in _sql_texts(call, assignments)
         for clause in sql_clauses(text)
         for match in pattern.finditer(clause)
     )
-    return [None if PLACEHOLDER in name else name for name in names]
+    return [None if any(PLACEHOLDER in part for part in name) else name for name in names]
 
 
-def _sql_name(identifier: str) -> str:
+def _sql_name(identifier: str) -> IndexName:
     """O nome como o PostgreSQL o guarda: sem aspas vira minúsculas, com aspas mantém a caixa."""
-    parts = SQL_NAME_PART.finditer(identifier)
-    return ".".join(
-        part.group(2).lower() if part.group(1) is None else part.group(1) for part in parts
+    return tuple(
+        part.group(2).lower() if part.group(1) is None else part.group(1).replace('""', '"')
+        for part in SQL_NAME_PART.finditer(identifier)
     )
 
 
@@ -544,6 +609,14 @@ def _is_concurrent(call: ast.Call, assignments: Assignments) -> bool:
             for clause in sql_clauses(text)
         )
     return False
+
+
+def _runs_several_statements(call: ast.Call, assignments: Assignments) -> bool:
+    """O `execute` manda mais de uma instrução numa mensagem só (`;` no meio do SQL)."""
+    return _operation(call) in EXECUTE_OPERATIONS and any(
+        sum(1 for statement in _split_sql(text, ";") if statement.strip()) > 1
+        for text in _sql_texts(call, assignments)
+    )
 
 
 def _is_autocommit(item: ast.withitem) -> bool:
