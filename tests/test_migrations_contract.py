@@ -15,12 +15,14 @@ import pytest
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 CONTRACT_MARK = re.compile(r"#\s*contract:\s*\S")
 DESTRUCTIVE_OPS = frozenset({"drop_column", "drop_table", "rename_table"})
-# No PostgreSQL o COLUMN de `ALTER TABLE t DROP c` é opcional; CONSTRAINT, DEFAULT e afins não são
-# coluna nem tabela e ficam de fora.
+# Dentro de um ALTER TABLE, qualquer DROP ou RENAME conta, em qualquer ação da lista: no
+# PostgreSQL o COLUMN é opcional nos dois. DROP de CONSTRAINT, DEFAULT, NOT NULL, IDENTITY e
+# EXPRESSION e RENAME CONSTRAINT não são coluna nem tabela e ficam de fora.
 DESTRUCTIVE_SQL = re.compile(
-    r"\bDROP\s+(COLUMN|TABLE)\b|\bRENAME\s+(COLUMN|TO)\b"
-    r"|\bALTER\s+TABLE\s+(IF\s+EXISTS\s+)?(ONLY\s+)?\S+\s+DROP\s+"
-    r"(?!CONSTRAINT\b|DEFAULT\b|NOT\s+NULL\b|IDENTITY\b|EXPRESSION\b)",
+    r"\bDROP\s+(COLUMN|TABLE)\b"
+    r"|\bALTER\s+TABLE\b[^;]*?\b("
+    r"DROP\s+(?!CONSTRAINT\b|DEFAULT\b|NOT\s+NULL\b|IDENTITY\b|EXPRESSION\b)"
+    r"|RENAME\b(?!\s+CONSTRAINT\b))",
     re.IGNORECASE,
 )
 
@@ -88,6 +90,9 @@ def test_migration_so_remove_ou_renomeia_com_a_marca_de_contract(path: Path) -> 
         'op.execute("ALTER TABLE run RENAME TO job")',
         'op.execute("ALTER TABLE run DROP status")',
         'op.execute("ALTER TABLE IF EXISTS run DROP COLUMN IF EXISTS status")',
+        'op.execute("ALTER TABLE run RENAME status TO state")',
+        'op.execute("ALTER TABLE run ADD COLUMN y int, DROP status")',
+        "op.execute('ALTER TABLE \"my run\" DROP status')",
         'op.execute(sa.text("DROP TABLE run"))',
     ],
 )
@@ -107,6 +112,7 @@ def test_operacao_destrutiva_sem_marca_e_recusada(operation: str) -> None:
         'def downgrade() -> None:\n    op.drop_column("run", "status")\n',
         'def upgrade() -> None:\n    op.execute("ALTER TABLE run DROP CONSTRAINT ck_status")\n',
         'def upgrade() -> None:\n    op.execute("ALTER TABLE run ALTER COLUMN x DROP DEFAULT")\n',
+        'def upgrade() -> None:\n    op.execute("ALTER TABLE run RENAME CONSTRAINT a TO b")\n',
     ],
     ids=[
         "marca-na-linha",
@@ -116,6 +122,7 @@ def test_operacao_destrutiva_sem_marca_e_recusada(operation: str) -> None:
         "so-downgrade",
         "drop-constraint",
         "drop-default",
+        "rename-constraint",
     ],
 )
 def test_marca_expand_e_downgrade_passam(source: str) -> None:
