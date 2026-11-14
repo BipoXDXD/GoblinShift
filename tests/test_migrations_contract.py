@@ -15,7 +15,14 @@ import pytest
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 CONTRACT_MARK = re.compile(r"#\s*contract:\s*\S")
 DESTRUCTIVE_OPS = frozenset({"drop_column", "drop_table", "rename_table"})
-DESTRUCTIVE_SQL = re.compile(r"\b(DROP\s+(COLUMN|TABLE)|RENAME\s+(COLUMN|TO))\b", re.IGNORECASE)
+# No PostgreSQL o COLUMN de `ALTER TABLE t DROP c` é opcional; CONSTRAINT, DEFAULT e afins não são
+# coluna nem tabela e ficam de fora.
+DESTRUCTIVE_SQL = re.compile(
+    r"\bDROP\s+(COLUMN|TABLE)\b|\bRENAME\s+(COLUMN|TO)\b"
+    r"|\bALTER\s+TABLE\s+(IF\s+EXISTS\s+)?(ONLY\s+)?\S+\s+DROP\s+"
+    r"(?!CONSTRAINT\b|DEFAULT\b|NOT\s+NULL\b|IDENTITY\b|EXPRESSION\b)",
+    re.IGNORECASE,
+)
 
 
 def unmarked_destructive_lines(source: str) -> list[int]:
@@ -35,8 +42,11 @@ def unmarked_destructive_lines(source: str) -> list[int]:
     for node in ast.walk(upgrade):
         if isinstance(node, ast.Call) and _is_destructive(node):
             line = node.lineno
+            # Na linha acima, só uma linha que é apenas o comentário: a marca de outra operação
+            # não cobre esta.
+            previous = lines[line - 2].strip() if line >= 2 else ""
             marked = CONTRACT_MARK.search(lines[line - 1]) or (
-                line >= 2 and CONTRACT_MARK.search(lines[line - 2])
+                previous.startswith("#") and CONTRACT_MARK.search(previous)
             )
             if not marked:
                 found.append(line)
@@ -76,6 +86,8 @@ def test_migration_so_remove_ou_renomeia_com_a_marca_de_contract(path: Path) -> 
         'op.execute("ALTER TABLE run DROP COLUMN status")',
         'op.execute("ALTER TABLE run RENAME COLUMN status TO state")',
         'op.execute("ALTER TABLE run RENAME TO job")',
+        'op.execute("ALTER TABLE run DROP status")',
+        'op.execute("ALTER TABLE IF EXISTS run DROP COLUMN IF EXISTS status")',
         'op.execute(sa.text("DROP TABLE run"))',
     ],
 )
@@ -93,8 +105,18 @@ def test_operacao_destrutiva_sem_marca_e_recusada(operation: str) -> None:
         'def upgrade() -> None:\n    op.add_column("run", sa.Column("x", sa.Text()))\n',
         'def upgrade() -> None:\n    op.alter_column("run", "status", nullable=True)\n',
         'def downgrade() -> None:\n    op.drop_column("run", "status")\n',
+        'def upgrade() -> None:\n    op.execute("ALTER TABLE run DROP CONSTRAINT ck_status")\n',
+        'def upgrade() -> None:\n    op.execute("ALTER TABLE run ALTER COLUMN x DROP DEFAULT")\n',
     ],
-    ids=["marca-na-linha", "marca-acima", "expand", "alter-sem-rename", "so-downgrade"],
+    ids=[
+        "marca-na-linha",
+        "marca-acima",
+        "expand",
+        "alter-sem-rename",
+        "so-downgrade",
+        "drop-constraint",
+        "drop-default",
+    ],
 )
 def test_marca_expand_e_downgrade_passam(source: str) -> None:
     assert unmarked_destructive_lines(source) == []
@@ -104,3 +126,13 @@ def test_marca_sem_motivo_nao_vale() -> None:
     source = 'def upgrade() -> None:\n    op.drop_table("x")  # contract:\n'
 
     assert unmarked_destructive_lines(source) == [2]
+
+
+def test_marca_de_outra_operacao_na_linha_acima_nao_cobre() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        '    op.drop_table("a")  # contract: sem leitor\n'
+        '    op.drop_table("b")\n'
+    )
+
+    assert unmarked_destructive_lines(source) == [3]

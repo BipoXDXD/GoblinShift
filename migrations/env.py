@@ -51,8 +51,10 @@ def run_migrations_online() -> None:
     settings = Settings()
     script = ScriptDirectory.from_config(config)
     image_heads = frozenset(script.get_heads())
-    goes_to_head = _destination(script) == image_heads
-    if settings.environment == "production" and not goes_to_head:
+    destination = _destination(script)
+    goes_to_head = destination == image_heads
+    # Sem destino (`current`, `check`, `history`) o comando só lê, e vale também em produção.
+    if settings.environment == "production" and destination is not None and not goes_to_head:
         raise CommandError(
             "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
         )
@@ -71,17 +73,22 @@ def run_migrations_online() -> None:
 
 
 def _destination(script: ScriptDirectory) -> frozenset[str] | None:
-    """O destino do comando, já resolvido ("head" vira a revisão); None sem destino."""
+    """Destino do comando resolvido ("head" vira a revisão, "base" vazio); None sem destino."""
     try:
-        destination = context.get_revision_argument()
+        argument = context.get_revision_argument()
     except KeyError:
         # `current`, `history` e afins não têm destino.
         return None
-    if destination is None:
-        return frozenset()
-    if isinstance(destination, str):
-        return frozenset({destination})
-    return frozenset(destination)
+    # O `stamp` passa o destino como tupla, que o Alembic devolve sem resolver ("head" literal).
+    elements = argument if isinstance(argument, tuple) else (argument,)
+    revisions: set[str] = set()
+    for element in elements:
+        resolved = script.as_revision_number(element) if element is not None else None
+        if isinstance(resolved, str):
+            revisions.add(resolved)
+        elif resolved is not None:
+            revisions.update(resolved)
+    return frozenset(revisions)
 
 
 def _db_is_ahead_of_image(

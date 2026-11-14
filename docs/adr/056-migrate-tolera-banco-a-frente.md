@@ -22,18 +22,18 @@ Duas outras lacunas: nada impedia um `alembic downgrade` com o ambiente de produ
 
 Opção C.
 
-- **Banco à frente.** Com o destino igual ao head da imagem, o `env.py` lê as revisões do banco antes de migrar. Uma revisão que a imagem não conhece gera um WARN no stderr, com a revisão do banco e o head da imagem, e o comando sai com 0 sem migrar. Qualquer outro erro do Alembic, inclusive banco inacessível, continua falhando.
-- **Produção.** Com `GS_ENVIRONMENT=production`, o único destino aceito é o head da imagem. `downgrade`, `base`, revisões relativas e `stamp` em outra revisão são recusados antes de conectar. Descer o schema em produção é restauração de backup (ADR 022).
+- **Banco à frente.** Com o destino igual ao head da imagem (`upgrade head` ou `stamp head`), o `env.py` lê as revisões do banco antes de migrar. Uma revisão que a imagem não conhece gera um WARN no stderr, com a revisão do banco e o head da imagem, e o comando sai com 0 sem migrar nem regravar a versão. Qualquer outro erro do Alembic, inclusive banco inacessível, continua falhando.
+- **Produção.** Com `GS_ENVIRONMENT=production`, o único destino aceito é o head da imagem. `downgrade`, `base`, revisões relativas e `stamp` em outra revisão são recusados antes de conectar. Comandos sem destino (`current`, `check`, `history`) só leem e continuam permitidos, porque o rollback depende de conferir a revisão do banco. Descer o schema em produção é restauração de backup (ADR 022).
 - **Transação única.** Todas as revisões pendentes rodam numa transação só, com `statement_timeout` desligado nela: uma falha desfaz o lote inteiro, e o banco fica na revisão em que estava. A leitura das revisões fecha a própria transação implícita antes, para que o `begin_transaction` do Alembic não entre nela.
-- **Contract.** `tests/test_migrations_contract.py` varre o `upgrade()` de cada migration e recusa `drop_column`, `drop_table`, `rename_table`, `alter_column(new_column_name=...)` e `op.execute` com DROP/RENAME de coluna ou tabela sem `# contract: <motivo>` na linha ou na linha acima. O `downgrade()` fica de fora.
+- **Contract.** `tests/test_migrations_contract.py` varre o `upgrade()` de cada migration e recusa `drop_column`, `drop_table`, `rename_table`, `alter_column(new_column_name=...)` e `op.execute` com DROP/RENAME de coluna ou tabela (inclusive `ALTER TABLE t DROP c`, sem o `COLUMN` opcional) sem `# contract: <motivo>` na linha da operação ou numa linha só de comentário logo acima. O `downgrade()` fica de fora.
 
 ## Consequências
 
 - Um rollback do app para uma imagem que já tem esta mudança passa pelo `migrate`. Um rollback para uma imagem anterior a ela continua travando no `migrate` e exige restaurar o banco (ver `ISOLATION.md`).
 - O WARN é o único sinal de que o schema está à frente da imagem: quem acompanha o rollback deve conferi-lo no log do `migrate`.
-- O teste de contract é estático: SQL montado em variável ou f-string escapa dele. A revisão do PR continua valendo.
+- O teste de contract é estático: SQL montado em variável ou f-string e operação dentro de função auxiliar chamada pelo `upgrade()` escapam dele. A revisão do PR continua valendo.
 
 ## Compliance
 
-- `tests/test_migrate_tolerante.py`, contra PostgreSQL real e pelo CLI: banco à frente → saída 0, WARN com as duas revisões e versão inalterada; banco atrás → chega ao head; banco inexistente → saída diferente de 0; `downgrade -1` e `downgrade base` em produção → recusados com o banco intacto; fora de produção, `downgrade` continua permitido.
+- `tests/test_migrate_tolerante.py`, contra PostgreSQL real e pelo CLI: banco à frente → saída 0, WARN com as duas revisões e versão inalterada (também no `stamp head`); banco atrás → chega ao head; banco inexistente → saída diferente de 0; `downgrade -1`, `downgrade base` e `stamp` em revisão anterior, em produção → recusados com o banco intacto; `stamp head`, `stamp heads` e `current` em produção → aceitos; fora de produção, `downgrade` continua permitido.
 - `tests/test_migrations_contract.py`: as migrations existentes passam, e cada operação destrutiva sem a marca é recusada.

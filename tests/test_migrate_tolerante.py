@@ -148,3 +148,36 @@ def test_downgrade_fora_de_producao_continua_permitido(at_head: Settings) -> Non
 
     assert result.returncode == 0, result.stderr
     assert _db_version(at_head) == _previous()
+
+
+@pytest.mark.parametrize("target", ["head", "heads"])
+def test_stamp_no_head_em_producao_e_aceito(at_head: Settings, target: str) -> None:
+    result = _alembic(at_head, "stamp", target)
+
+    assert result.returncode == 0, result.stderr
+    assert _db_version(at_head) == _head()
+
+
+def test_stamp_em_outra_revisao_em_producao_e_recusado(at_head: Settings) -> None:
+    result = _alembic(at_head, "stamp", _previous())
+
+    assert result.returncode != 0
+    assert "produção" in result.stderr
+    assert _db_version(at_head) == _head()
+
+
+def test_stamp_head_com_banco_a_frente_avisa_sem_regravar_a_versao(at_head: Settings) -> None:
+    _stamp_raw(at_head, NEWER_REVISION)
+
+    result = _alembic(at_head, "stamp", "head")
+
+    assert result.returncode == 0, result.stderr
+    assert NEWER_REVISION in result.stderr
+    assert _db_version(at_head) == NEWER_REVISION
+
+
+def test_current_em_producao_continua_permitido(at_head: Settings) -> None:
+    result = _alembic(at_head, "current")
+
+    assert result.returncode == 0, result.stderr
+    assert _head() in result.stdout
