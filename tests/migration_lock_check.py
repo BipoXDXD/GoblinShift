@@ -14,6 +14,7 @@ estático: SQL vindo de fora do módulo ou montado em laço escapa, e a revisão
 
 import ast
 import re
+import string
 from collections.abc import Iterator
 
 from tests.migration_source import is_marked
@@ -69,8 +70,8 @@ VOLATILE_DEFAULT = re.compile(
     r"\b(gen_random_uuid|uuid_generate_v\w+|uuidv\d|random|clock_timestamp|timeofday|nextval)\b",
     re.IGNORECASE,
 )
-# Nome de coluna ou constraint, com aspas (pode ter espaço) ou sem.
-SQL_NAME = r'(?:"[^"]*"|\S+)'
+# Nome de coluna ou constraint, com aspas (pode ter espaço e `""`) ou sem.
+SQL_NAME = r'(?:"(?:[^"]|"")*"|\S+)'
 # Cada padrão roda numa cláusula só (ver `sql_clauses`) e tem no máximo um trecho variável
 # longo, para o custo crescer em linha com o tamanho do SQL.
 BLOCKING_CLAUSES = [
@@ -85,6 +86,9 @@ BLOCKING_CLAUSES = [
         r"\bSET\s+(UN)?LOGGED\b",
         r"\bSET\s+TABLESPACE\b",
         r"\bATTACH\s+PARTITION\b",
+        # Sem CONCURRENTLY, o DETACH trava a tabela-mãe em ACCESS EXCLUSIVE. Grupo atômico: o
+        # nome não pode encolher para escapar do lookahead.
+        rf"\bDETACH\s+PARTITION\s+(?>{SQL_NAME})(?!\s+(CONCURRENTLY|FINALIZE)\b)",
         r"\bVACUUM\s+(\([^)]*\bFULL\b[^)]*\)|FULL\b)",
         r"\bCLUSTER\b",
         r"\bLOCK\s+TABLE\b",
@@ -109,10 +113,17 @@ CONCURRENT_INDEX_SQL = re.compile(
     rf"|\bDETACH\s+PARTITION\s+{SQL_NAME}\s+CONCURRENTLY\b",
     re.IGNORECASE,
 )
+CREATE_CONCURRENT_INDEX_START = re.compile(
+    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b", re.IGNORECASE
+)
+# O nome do índice não leva schema: ele fica no schema da tabela, que vem depois do ON.
 CREATE_CONCURRENT_INDEX_SQL = re.compile(
-    rf"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?{INDEX_NAME}",
+    r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    rf"(?:({INDEX_NAME_PART})\s+)?ON\s+(?:ONLY\s+)?{INDEX_NAME}",
     re.IGNORECASE,
 )
+# O PostgreSQL só dobra a caixa de A a Z em nome sem aspas.
+ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 DROP_CONCURRENT_INDEX_SQL = re.compile(
     rf"\bDROP\s+INDEX\s+CONCURRENTLY\s+IF\s+EXISTS\s+{INDEX_NAME}", re.IGNORECASE
 )
@@ -279,7 +290,8 @@ def _after_text(sql: str, start: int, *, escaped: bool) -> int:
         return _after_closing(sql, "'", start)
     index = start
     while index < len(sql):
-        if sql[index] == "\\":
+        # Barra invertida escapa o caractere seguinte; `''` é uma aspa dentro do texto.
+        if sql[index] == "\\" or sql[index : index + 2] == "''":
             index += 2
         elif sql[index] == "'":
             return index + 1
@@ -332,7 +344,9 @@ def _assignments(tree: ast.Module, scope: list[ast.FunctionDef]) -> Assignments:
         ):
             name = node.target.id
             before = current.get(name) or [ast.Constant(value=PLACEHOLDER)]
-            earlier.setdefault(name, []).extend(current.get(name, []))
+            # Cada valor anterior já está dentro de um valor atual; a lista só guarda as
+            # alternativas para o render, que lê no máximo MAX_RENDERINGS.
+            earlier[name] = (current.get(name, []) + earlier.get(name, []))[:MAX_RENDERINGS]
             current[name] = [
                 ast.BinOp(left=value, op=ast.Add(), right=node.value) for value in before
             ]
@@ -548,8 +562,24 @@ def _created_concurrent_indexes(call: ast.Call, assignments: Assignments) -> lis
     if name == "create_index" and _keyword_is_true(call, "postgresql_concurrently"):
         return [_index_name(call)]
     if name in EXECUTE_OPERATIONS:
-        return _sql_index_names(call, assignments, CREATE_CONCURRENT_INDEX_SQL)
+        return [
+            _created_sql_index_name(clause, start.start())
+            for text in _sql_texts(call, assignments)
+            for clause in sql_clauses(text)
+            for start in CREATE_CONCURRENT_INDEX_START.finditer(clause)
+        ]
     return []
+
+
+def _created_sql_index_name(clause: str, start: int) -> IndexName | None:
+    """`(schema da tabela, nome)` ou `(nome,)`; None sem nome.
+
+    Parte não resolvida não precisa de tratamento aqui: o DROP nunca a resolve, então não casa.
+    """
+    match = CREATE_CONCURRENT_INDEX_SQL.match(clause, start)
+    if match is None or match.group(1) is None:
+        return None
+    return (*_sql_name(match.group(2))[:-1], *_sql_name(match.group(1)))
 
 
 def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> list[IndexName | None]:
@@ -591,9 +621,11 @@ def _sql_index_names(
 
 
 def _sql_name(identifier: str) -> IndexName:
-    """O nome como o PostgreSQL o guarda: sem aspas vira minúsculas, com aspas mantém a caixa."""
+    """Como o PostgreSQL guarda o nome: sem aspas, só A a Z viram minúsculas; com aspas, igual."""
     return tuple(
-        part.group(2).lower() if part.group(1) is None else part.group(1).replace('""', '"')
+        part.group(2).translate(ASCII_LOWER)
+        if part.group(1) is None
+        else part.group(1).replace('""', '"')
         for part in SQL_NAME_PART.finditer(identifier)
     )
 

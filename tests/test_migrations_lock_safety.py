@@ -144,6 +144,13 @@ def test_check_cobre_da_0019_em_diante() -> None:
         ),
         # `$` dentro de identificador não abre dollar quoting.
         'op.execute("ALTER TABLE run$x$ ALTER COLUMN c SET NOT NULL")',
+        # Na string de escape, `''` também é uma aspa dentro do texto.
+        (
+            "op.execute(\"ALTER TABLE run ALTER COLUMN c SET DEFAULT E'a''\\\\'b',"
+            ' ALTER COLUMN c SET NOT NULL")'
+        ),
+        'op.execute(\'ALTER TABLE run ALTER COLUMN "a"" b" TYPE bigint\')',
+        'op.execute("ALTER TABLE run DETACH PARTITION run_2027")',
     ],
 )
 def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
@@ -179,6 +186,8 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         "op.execute(\"ALTER TABLE run ADD COLUMN n text DEFAULT 'a,b' -- UNIQUE\")",
         'op.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY run_summary")',
         "op.execute(\"COMMENT ON TABLE run IS 'run CREATE INDEX later'\")",
+        'op.execute("ALTER TABLE run DETACH PARTITION run_2027 CONCURRENTLY")',
+        'op.execute("ALTER TABLE run DETACH PARTITION run_2027 FINALIZE")',
     ],
     ids=[
         "indice-concorrente",
@@ -202,6 +211,8 @@ def test_ddl_bloqueante_sem_marca_e_recusado(operation: str) -> None:
         "sql-virgula-entre-aspas-e-comentario",
         "sql-refresh-concorrente",
         "sql-ddl-so-dentro-de-texto",
+        "sql-detach-concorrente",
+        "sql-detach-finalize",
     ],
 )
 def test_forma_segura_passa(operation: str) -> None:
@@ -453,6 +464,20 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
             '        op.execute("CREATE INDEX CONCURRENTLY a.b ON run (a)")\n',
             4,
         ),
+        (
+            '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_a")\n'
+            '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON s.run (a)")\n',
+            4,
+        ),
+        (
+            '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ÍX_A")\n'
+            "        op.execute('CREATE INDEX CONCURRENTLY \"íx_a\" ON run (a)')\n",
+            4,
+        ),
+        (
+            '        op.execute("CREATE INDEX CONCURRENTLY ON run (a)")\n',
+            3,
+        ),
     ],
     ids=[
         "op-sem-drop",
@@ -466,6 +491,11 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
         "op-com-outra-caixa",
         "aspas-com-espaco-e-outro-nome",
         "ponto-entre-aspas-e-outro-schema",
+        # O índice fica no schema da tabela; o DROP sem schema pode mirar outro.
+        "drop-sem-schema-e-tabela-de-outro-schema",
+        # O PostgreSQL só dobra a caixa de A a Z.
+        "caixa-nao-ascii",
+        "sem-nome",
     ],
 )
 def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> None:
@@ -500,7 +530,15 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
         ),
         (
             "        op.execute('DROP INDEX CONCURRENTLY IF EXISTS public.\"ix_a\"')\n"
-            '        op.execute("CREATE INDEX CONCURRENTLY PUBLIC.ix_a ON run (a)")\n'
+            '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON PUBLIC.run (a)")\n'
+        ),
+        (
+            "        op.drop_index(\n"
+            '            "ix_a", "run", schema="s", postgresql_concurrently=True, if_exists=True\n'
+            "        )\n"
+            "        op.create_index(\n"
+            '            "ix_a", "run", ["a"], schema="s", postgresql_concurrently=True\n'
+            "        )\n"
         ),
     ],
     ids=[
@@ -511,7 +549,8 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
         "op-com-caixa",
         "sql-e-op",
         "aspas-com-espaco",
-        "com-schema",
+        "schema-da-tabela",
+        "op-com-schema",
     ],
 )
 def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:
