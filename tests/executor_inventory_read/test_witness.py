@@ -21,6 +21,8 @@ from executor_ctl.witness import (
 from .conftest import MetadataBoundary
 from .test_snapshot import A, B, policy
 
+pytestmark = pytest.mark.host_python
+
 ATTEMPT = uuid.UUID("11111111-1111-4111-8111-111111111111")
 
 

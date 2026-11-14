@@ -5,6 +5,7 @@ Python da imagem. O job só protege se rodar sempre, no 3.12, com todo teste des
 """
 
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +18,34 @@ HOST_JOB = "host-python"
 TAG_JOB = "tag-main"
 HOST_PYTHON = "3.12"
 CHECKER = "python scripts/check_host_python.py"
-HOST_TEST_DIRS = ("tests/executor_ctl", "tests/tls_check", "tests/host_python")
+HOST_TEST_DIRS = (
+    "tests/acceptance",
+    "tests/executor_ctl",
+    "tests/executor_inventory_read",
+    "tests/host_python",
+    "tests/tls_check",
+)
+# Pasta de testes de cada pacote py312 do pyproject; todo pacote novo do host entra aqui.
+HOST_PACKAGE_TESTS = {
+    "acceptance": "tests/acceptance",
+    "backup": "tests/backup",
+    "executor_ctl": "tests/executor_ctl",
+    "executor_inventory": "tests/executor_inventory_read",
+    "openobserve": "tests/openobserve",
+    "tls_check": "tests/tls_check",
+}
+# Pastas de pacotes do host que ficam fora do job, e por quê. O checador ainda confere o piso
+# de versão e a importação desses pacotes no 3.12.
+NOT_HOST_DIRS = {
+    "tests/backup": "o conftest sobe o PostgreSQL e importa a aplicação",
+    "tests/openobserve": "precisa do OpenTelemetry e do OpenObserve real (job openobserve)",
+}
 HOST_MARKER = "pytest.mark.host_python"
 # Módulos dessas pastas que não rodam no Python do host, e por quê.
 NOT_HOST_PYTHON = {
+    "tests/acceptance/test_chaos.py": "compara com o CSV Janitor, que é da aplicação",
+    "tests/acceptance/test_install.py": "instalador como root no Debian (host_installer)",
+    "tests/acceptance/test_media_mill_load.py": "lê o catálogo da aplicação",
     "tests/executor_ctl/test_area_busy.py": "testa o cliente do worker, que importa a aplicação",
     "tests/executor_ctl/test_client_deadlines.py": "confronta o cliente do worker com o servidor",
     "tests/executor_ctl/test_integration.py": "Docker real (marcador executor_ctl)",
@@ -47,8 +72,18 @@ def _host_test_modules() -> list[str]:
     return sorted(
         str(path.relative_to(ROOT))
         for directory in HOST_TEST_DIRS
-        for path in (ROOT / directory).glob("test_*.py")
+        for path in (ROOT / directory).rglob("test_*.py")
     )
+
+
+def _host_packages() -> set[str]:
+    document = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    targets: dict[str, str] = document["tool"]["ruff"]["per-file-target-version"]
+    return {
+        pattern.removeprefix("deploy/").removesuffix("/**")
+        for pattern, target in targets.items()
+        if target == "py312" and pattern.startswith("deploy/")
+    }
 
 
 def test_job_do_host_roda_sempre_e_sem_tolerar_falha() -> None:
@@ -82,6 +117,18 @@ def test_job_do_host_roda_o_checador_e_os_testes_marcados() -> None:
     assert CHECKER in runs.splitlines()
     assert "-m host_python" in runs
     assert all(directory in runs for directory in HOST_TEST_DIRS)
+
+
+def test_todo_pacote_do_host_tem_seus_testes_no_job_ou_explica_por_que_nao() -> None:
+    assert set(HOST_PACKAGE_TESTS) == _host_packages()
+    for directory in HOST_PACKAGE_TESTS.values():
+        assert (directory in HOST_TEST_DIRS) != (directory in NOT_HOST_DIRS), directory
+
+
+@pytest.mark.parametrize("directory", HOST_TEST_DIRS)
+def test_pasta_do_job_existe_e_tem_testes(directory: str) -> None:
+    # Pasta renomeada some do grep do job sem erro; aqui ela reprova.
+    assert any((ROOT / directory).rglob("test_*.py")), directory
 
 
 @pytest.mark.parametrize("module", _host_test_modules())
@@ -121,7 +168,19 @@ def test_tag_main_aponta_cada_imagem_para_a_tag_do_commit(image: str) -> None:
 
     assert image in loop.removesuffix("; do").split()[3:]
     assert 'tag="sha-${GITHUB_SHA::12}"' in runs
-    assert (
-        'imagetools create --tag "ghcr.io/bipoxdxd/$name:main" "ghcr.io/bipoxdxd/$name:$tag"'
-        in runs
-    )
+    assert 'image="ghcr.io/bipoxdxd/$name"' in runs
+    assert 'imagetools create --tag "$image:main" "$image:$tag"' in runs
+
+
+def test_tag_main_confere_que_a_main_ficou_com_o_digest_do_commit() -> None:
+    runs = [line.strip() for line in _runs(TAG_JOB).splitlines()]
+    inspect = "docker buildx imagetools inspect --format '{{.Manifest.Digest}}'"
+
+    assert f'esperado=$({inspect} "$image:$tag")' in runs
+    assert f'obtido=$({inspect} "$image:main")' in runs
+    assert 'if [ "$obtido" != "$esperado" ]; then' in runs
+    assert "exit 1" in runs
+
+
+def test_tag_main_so_pode_escrever_pacotes() -> None:
+    assert _jobs()[TAG_JOB]["permissions"] == {"packages": "write"}

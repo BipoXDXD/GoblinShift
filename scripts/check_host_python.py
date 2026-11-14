@@ -74,6 +74,7 @@ def version_floor_report(paths: Sequence[Path]) -> str:
             "--no-tips",
             "--violations",
             "--eval-annotations",
+            "--no-parse-comments",
             *(str(path) for path in paths),
         ],
         check=False,

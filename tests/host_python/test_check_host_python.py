@@ -39,6 +39,17 @@ def test_api_que_so_existe_no_313_reprova_o_piso(tmp_path: Path) -> None:
     assert "3.13" in report
 
 
+def test_comentario_novm_nao_cala_o_piso(tmp_path: Path) -> None:
+    # O vermin aceita `# novm` para ignorar uma linha; no host, a linha quebra do mesmo jeito.
+    package = _package(
+        tmp_path, "import copy\n\n\ndef clone(x):\n    return copy.replace(x)  # novm\n"
+    )
+
+    report = check_host_python.version_floor_report([package])
+
+    assert "copy.replace" in report
+
+
 def test_api_que_existe_no_312_passa_no_piso(tmp_path: Path) -> None:
     package = _package(tmp_path, "import tomllib\n\nLOADS = tomllib.loads\n")
 

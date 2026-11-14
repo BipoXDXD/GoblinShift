@@ -18,6 +18,8 @@ from acceptance.run import Outcome
 
 from executor_ctl import profile
 
+pytestmark = pytest.mark.host_python
+
 DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 MAINTENANCE = "c0ffee"
 PROBE_OUTCOME = Outcome("sonda", True, "ok")

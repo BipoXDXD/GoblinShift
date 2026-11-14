@@ -96,13 +96,16 @@ jobs:
         # que não importa.
         run: python scripts/check_host_python.py
       - name: Testes dos pacotes do host
-        # Só os módulos marcados host_python: os outros de tests/executor_ctl testam o cliente do
-        # worker e importam a aplicação. tests/test_ci_host_python.py confere que todo módulo
-        # dessas pastas está marcado ou explica por que não. O --confcutdir deixa de fora o
-        # tests/conftest.py, que também importa a aplicação. Sem nenhum módulo na lista, o pytest
-        # coleta a suíte inteira e falha na importação: o job não passa vazio.
+        # Só os módulos marcados host_python: os outros dessas pastas importam a aplicação.
+        # tests/test_ci_host_python.py confere que todo módulo das pastas está marcado ou explica
+        # por que não. O `ls` derruba o job se uma pasta sumir, o que o grep dentro do `< <(...)`
+        # não faria. O --confcutdir ignora o conftest de tests/ e da raiz (só os das pastas acima
+        # dele), que importa a aplicação. Sem nenhum módulo na lista, o pytest coleta a suíte
+        # inteira e falha na importação: o job não passa vazio.
         run: |
-          mapfile -t modulos < <(grep -rlF --include='test_*.py' 'pytest.mark.host_python' tests/executor_ctl tests/tls_check tests/host_python | sort)
+          pastas=(tests/acceptance tests/executor_ctl tests/executor_inventory_read tests/host_python tests/tls_check)
+          ls -d "${pastas[@]}" > /dev/null
+          mapfile -t modulos < <(grep -rlF --include='test_*.py' 'pytest.mark.host_python' "${pastas[@]}" | sort)
           python -m pytest -p no:cacheprovider --confcutdir=tests/executor_ctl -m host_python "${modulos[@]}"
 
   openobserve:
@@ -603,7 +606,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read
       packages: write
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -613,11 +615,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Apontar a main para as imagens deste commit
-        # Com uma fonte só, o imagetools copia o índice multiplataforma como está.
+        # Com uma fonte só, o imagetools copia o índice multiplataforma como está; o digest
+        # conferido no fim prova isso. Um push novo na main cancela esta execução (concorrência
+        # do workflow) e pode deixar as imagens em commits diferentes por alguns segundos; todas
+        # passaram nos portões, e a execução seguinte que passar realinha as três.
         run: |
           tag="sha-${GITHUB_SHA::12}"
           for name in goblinshift goblinshift-executor goblinshift-web; do
-            docker buildx imagetools create --tag "ghcr.io/bipoxdxd/$name:main" "ghcr.io/bipoxdxd/$name:$tag"
+            image="ghcr.io/bipoxdxd/$name"
+            docker buildx imagetools create --tag "$image:main" "$image:$tag"
+            esperado=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:$tag")
+            obtido=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:main")
+            if [ "$obtido" != "$esperado" ]; then
+              echo "::error::$image:main aponta para $obtido, e não para $esperado"
+              exit 1
+            fi
           done
 
   deploy:
