@@ -15,7 +15,7 @@ from goblinshift.identity.purge import (
     AUDIT_RETENTION,
     WEB_SESSION_RETENTION,
     AccountNotMarkedForDeletionError,
-    accounts_pending_purge,
+    claim_accounts_for_purge,
     count_overdue_deletions,
     delete_ended_web_sessions,
     delete_expired_login_states,
@@ -168,9 +168,42 @@ def test_contas_a_purgar_sao_as_com_pedido_mais_antigas_primeiro(
     request_deletion(factory, newer, NOW)
     request_deletion(factory, older, NOW - timedelta(hours=1))
 
+    with unit_of_work(factory) as session:
+        assert claim_accounts_for_purge(session, limit=10) == [older, newer]
+
+
+def test_conta_reivindicada_vai_para_o_fim_da_fila(factory: sessionmaker[Session]) -> None:
+    """#442: sem o rodízio, a mais antiga voltaria a cada ciclo e a outra nunca seria tentada."""
+    newer, older = new_user(factory), new_user(factory)
+    request_deletion(factory, newer, NOW)
+    request_deletion(factory, older, NOW - timedelta(hours=1))
+
+    claimed: list[UUID] = []
+    for _ in range(3):
+        with unit_of_work(factory) as session:
+            claimed.extend(claim_accounts_for_purge(session, limit=1))
+
+    assert claimed == [older, newer, older]
+
+
+def test_reivindicar_marca_a_tentativa_so_nas_contas_escolhidas(
+    factory: sessionmaker[Session],
+) -> None:
+    untouched, newer, older = new_user(factory), new_user(factory), new_user(factory)
+    request_deletion(factory, newer, NOW)
+    request_deletion(factory, older, NOW - timedelta(hours=1))
+
+    with unit_of_work(factory) as session:
+        claim_accounts_for_purge(session, limit=1)
+
     with factory() as session:
-        assert accounts_pending_purge(session, limit=10) == [older, newer]
-        assert accounts_pending_purge(session, limit=1) == [older]
+        attempted = {
+            row.id: row.purge_attempted_at
+            for row in session.execute(select(app_user.c.id, app_user.c.purge_attempted_at))
+        }
+    assert attempted[older] is not None
+    assert attempted[newer] is None
+    assert attempted[untouched] is None
 
 
 def test_exclusao_atrasada_conta_a_partir_de_20_horas(factory: sessionmaker[Session]) -> None:

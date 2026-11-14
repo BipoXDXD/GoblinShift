@@ -418,7 +418,7 @@ def test_falha_na_purga_nao_impede_limpezas_nem_alerta(
     def timing_out(_session: Session, _limit: int) -> list[uuid.UUID]:
         raise statement_timeout()
 
-    monkeypatch.setattr(identity_purge, "accounts_pending_purge", timing_out)
+    monkeypatch.setattr(identity_purge, "claim_accounts_for_purge", timing_out)
 
     with caplog.at_level(logging.WARNING):
         counts = AccountJobs(factory, clock=lambda: now).run_cycle()
@@ -490,7 +490,7 @@ def test_banco_inalcancavel_ainda_derruba_o_ciclo_de_contas(
     def refused(_session: Session, _limit: int) -> list[uuid.UUID]:
         raise connection_refused()
 
-    monkeypatch.setattr(identity_purge, "accounts_pending_purge", refused)
+    monkeypatch.setattr(identity_purge, "claim_accounts_for_purge", refused)
 
     with pytest.raises(DBAPIError):
         AccountJobs(factory).run_cycle()
@@ -525,3 +525,34 @@ def test_banco_inalcancavel_na_purga_de_uma_conta_derruba_o_ciclo(
 
     assert attempted == [first]
     assert count_owned(factory, second)["app_user"] == 1
+
+
+def test_contas_com_falha_permanente_na_frente_nao_impedem_a_purga_das_seguintes(
+    factory: sessionmaker[Session],
+    maintenance: Maintenance,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#442: o lote inteiro de `accounts_per_cycle` contas mais antigas falha sempre."""
+    per_cycle = 2
+    now = datetime.now(UTC)
+    stuck = [create_user(factory, f"presa-{index}") for index in range(per_cycle)]
+    healthy = create_user(factory, "sa")
+    with unit_of_work(factory) as session:
+        for index, owner in enumerate(stuck):
+            request_account_deletion(session, owner, now - timedelta(hours=3, minutes=index))
+        request_account_deletion(session, healthy, now - timedelta(hours=1))
+    real_batch = runs_purge.purge_owner_batch
+
+    def failing_for_stuck(session: Session, owner_id: uuid.UUID, limit: int) -> bool:
+        if owner_id in stuck:
+            raise statement_timeout()
+        return real_batch(session, owner_id, limit)
+
+    monkeypatch.setattr(runs_purge, "purge_owner_batch", failing_for_stuck)
+    jobs = AccountJobs(factory, config=AccountJobsConfig(accounts_per_cycle=per_cycle))
+
+    for _ in range(MAX_CYCLES):
+        maintenance.run_cycle()
+        jobs.run_cycle()
+
+    assert count_owned(factory, healthy)["app_user"] == 0
