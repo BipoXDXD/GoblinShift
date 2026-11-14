@@ -2,8 +2,8 @@
 
 O pglast (GPL-3.0-or-later) é aceito só no grupo dev. Aqui se confere o script com metadados
 falsos e as dependências de runtime do lock (aplicação e executor) com os metadados instalados.
-Dentro das imagens, o mesmo script roda no CI (imagens publicadas) e no teste da imagem do
-executor (tests/test_executor_image.py).
+Dentro das imagens, o mesmo script roda no build de cada plataforma (RUN --mount nos
+Dockerfiles) e no teste da imagem do executor (tests/test_executor_image.py).
 """
 
 import shutil
