@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from goblinshift.files.errors import ObjectNotAvailableError
-from goblinshift.files.limits import USED_INPUT_TTL
+from goblinshift.files.limits import TRANSFER_SLOT_LEASE, USED_INPUT_TTL
 from goblinshift.files.states import HolderKind, ObjectState
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 
@@ -156,6 +156,33 @@ def holders_with_open_uses(
             .limit(limit)
         ).scalars()
     )
+
+
+def release_expired_downloads(session: Session, limit: int) -> int:
+    """Encerra os downloads abertos há mais que `TRANSFER_SLOT_LEASE`; devolve quantos detentores.
+
+    Nenhum download vive tanto (a transferência é cortada em `TRANSFER_MAX_DURATION`): um uso
+    assim ficou para trás quando a API caiu antes de `finish_download`, e seguraria o objeto no
+    disco para sempre. O relógio é o do banco, o mesmo que gravou `started_at`.
+    """
+    expired = object_use.c.started_at < func.now() - TRANSFER_SLOT_LEASE
+    open_download = and_(
+        object_use.c.holder_kind == HolderKind.DOWNLOAD, object_use.c.ended_at.is_(None)
+    )
+    holders = (
+        select(object_use.c.holder_id)
+        .where(open_download, expired)
+        .group_by(object_use.c.holder_id)
+        .order_by(object_use.c.holder_id)
+        .limit(limit)
+    )
+    released = session.execute(
+        update(object_use)
+        .where(open_download, expired, object_use.c.holder_id.in_(holders))
+        .values(ended_at=func.now())
+        .returning(object_use.c.holder_id)
+    ).scalars()
+    return len(set(released))
 
 
 def has_valid_reference() -> ColumnElement[bool]:
