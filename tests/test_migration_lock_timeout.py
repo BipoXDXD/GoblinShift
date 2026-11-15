@@ -85,6 +85,24 @@ def test_lock_liberado_entre_as_tentativas_conclui_a_migration(
     [
         ("upgrade", "+2", BEFORE_COLUMN_MIGRATION, HOLD_OBJECT_USE_LOCK, INDEX_MIGRATION),
         ("downgrade", "-2", INDEX_MIGRATION, HOLD_APP_USER_LOCK, BEFORE_COLUMN_MIGRATION),
+        ("upgrade", "+\u0662", BEFORE_COLUMN_MIGRATION, HOLD_OBJECT_USE_LOCK, INDEX_MIGRATION),
+        ("downgrade", "-\u0662", INDEX_MIGRATION, HOLD_APP_USER_LOCK, BEFORE_COLUMN_MIGRATION),
+        (
+            "downgrade",
+            f"{INDEX_MIGRATION}@-\uff12",
+            INDEX_MIGRATION,
+            HOLD_APP_USER_LOCK,
+            BEFORE_COLUMN_MIGRATION,
+        ),
+        ("downgrade", "-2 ", INDEX_MIGRATION, HOLD_APP_USER_LOCK, BEFORE_COLUMN_MIGRATION),
+    ],
+    ids=[
+        "upgrade-ascii",
+        "downgrade-ascii",
+        "upgrade-unicode",
+        "downgrade-unicode",
+        "downgrade-unicode-qualificado",
+        "downgrade-espaco-final",
     ],
 )
 def test_retry_preserva_destino_relativo_apos_commit_parcial(
@@ -97,7 +115,7 @@ def test_retry_preserva_destino_relativo_apos_commit_parcial(
 ) -> None:
     settings = before_column_migration
     run_migrations(settings, start)
-    args = ("-x", f"lock_timeout_ms={TEST_LOCK_TIMEOUT_MS}", operation, relative)
+    args = ("-x", f"lock_timeout_ms={TEST_LOCK_TIMEOUT_MS}", operation, "--", relative)
 
     _release_lock_after_retry(settings, lock, args, COLUMN_MIGRATION, environment="development")
 

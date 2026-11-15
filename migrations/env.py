@@ -13,12 +13,12 @@ migrar. Em produção o único destino aceito é o head: descer o schema é rest
 """
 
 import logging
-import re
 from collections.abc import Sequence
 from logging.config import fileConfig
 
 from alembic import command, context
 from alembic.script import ScriptDirectory
+from alembic.script.revision import _relative_destination
 from alembic.util import CommandError
 from sqlalchemy import Connection, Engine
 
@@ -47,7 +47,6 @@ if config.config_file_name is not None:
 
 target_metadata = metadata
 log = logging.getLogger("alembic.env")
-RELATIVE_REVISION = re.compile(r"[+-][0-9]+$")
 
 
 def run_migrations_offline() -> None:
@@ -78,7 +77,7 @@ def run_migrations_online() -> None:
     lock_timeout_ms = _lock_timeout_ms()
     relative_plan = (
         RelativeMigrationPlan()
-        if any(RELATIVE_REVISION.search(target) for target in destination or ())
+        if any(_relative_destination.match(target) for target in destination or ())
         else None
     )
     engine = make_engine(settings)
@@ -161,7 +160,7 @@ def _destination(script: ScriptDirectory) -> frozenset[str] | None:
     revisions: set[str] = set()
     for element in elements:
         # Um destino relativo depende da revisão corrente e segue para o Alembic fora de produção.
-        if element is not None and RELATIVE_REVISION.search(element):
+        if element is not None and _relative_destination.match(element):
             revisions.add(element)
             continue
         resolved = script.get_revisions(element) if element is not None else ()
