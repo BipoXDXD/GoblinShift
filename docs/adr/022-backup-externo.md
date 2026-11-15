@@ -77,13 +77,13 @@ O `pg_dump` de um volume recriado vazio, com o esquema refeito pelo migrate, sai
 - **Marcador:** para os `/fail` repetidos não passarem em silêncio, o script grava `/var/lib/goblinshift-backup/last-upload-ok` só depois que o PUT recebe HTTP 200 da API S3. O conteúdo é apenas o instante UTC do upload (`2026-11-14T03:05:42Z`), sem bucket nem chave.
   - O diretório vem do `StateDirectory=goblinshift-backup` da unit, com `StateDirectoryMode=0700`. O arquivo tem modo 0600 e pertence ao usuário do serviço, então só ele e o root o leem.
   - A gravação passa por um temporário e um rename, então uma falha antes do fim deixa o marcador anterior intacto.
+  - Até o daemon-reload da reinstalação, a unit antiga ainda pode chamar o script novo sem `STATE_DIRECTORY`. Nesse caso, um PUT aceito preserva o ping de sucesso e gera um aviso no journal. A nova unit fornece o diretório e habilita a gravação do marcador.
   - Quem lê o marcador fica fora deste repositório: a conferência de estado do host, que alerta quando ele passa de 2 dias. É um segundo sinal, independente do healthchecks.io. Enquanto essa leitura não estiver ligada no host, o marcador é gravado, mas ninguém o confere.
   - Se o `date` ou o `mv` do marcador falharem depois do PUT aceito, o script pinga `/fail` com o dump já no bucket. A escolha é conservadora: o alerta prefere um falso positivo a um marcador que não reflete o último upload.
 - **Custo:** como o resto do backup, a mudança só chega ao timer quando o `deploy/backup/install.sh` roda de novo, a partir de um checkout temporário da `main`.
 - **Compliance:** `tests/backup/test_pg_backup.py` cobre:
   - o banco migrado sem contas e o banco sem esquema, que não enviam nada;
   - o marcador gravado com modo 0600 e só o instante;
-  - o marcador intacto quando o upload falha;
-  - o `STATE_DIRECTORY` obrigatório.
+  - o marcador intacto quando o upload falha.
 
-  `tests/backup/test_backup_config.py` fixa o `StateDirectory` da unit. `tests/backup/test_install.py` roda o script instalado e confere o dono e o modo do marcador.
+  `tests/backup/test_backup_config.py` fixa o `StateDirectory` da unit. `tests/backup/test_install.py` roda o script instalado, confere o dono e o modo do marcador e simula a unit antiga após falha no daemon-reload. Os testes de upload exercitam falhas de `date` e `mv` depois de criar o temporário.

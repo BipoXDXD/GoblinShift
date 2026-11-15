@@ -389,7 +389,6 @@ def test_sem_destinatario_age_falha_sem_enviar_texto_claro(
         "BACKUP_S3_SECRET",
         "BACKUP_HEALTHCHECK_URL",
         "BACKUP_PG_CONTAINER",
-        "STATE_DIRECTORY",
     ],
 )
 def test_configuracao_incompleta_falha_antes_de_comecar(

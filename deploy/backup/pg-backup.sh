@@ -15,7 +15,7 @@
 #   BACKUP_S3_KEY_ID, BACKUP_S3_SECRET  chave de aplicação só de escrita
 #   BACKUP_HEALTHCHECK_URL      URL de ping do check "backup diário"
 #   STATE_DIRECTORY             definido pelo systemd (StateDirectory=goblinshift-backup, 0700):
-#                               guarda o marcador last-upload-ok com o instante do último upload bom
+#                               guarda last-upload-ok; a unit antiga ainda faz backup sem marcador
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +23,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/lib.sh"
 
 require_env BACKUP_PG_CONTAINER BACKUP_S3_ENDPOINT BACKUP_S3_REGION BACKUP_S3_BUCKET \
-  BACKUP_S3_KEY_ID BACKUP_S3_SECRET BACKUP_HEALTHCHECK_URL STATE_DIRECTORY
+  BACKUP_S3_KEY_ID BACKUP_S3_SECRET BACKUP_HEALTHCHECK_URL
 pg_user="${BACKUP_PG_USER:-goblinshift}"
 pg_db="${BACKUP_PG_DB:-goblinshift}"
 prefix="${BACKUP_S3_PREFIX:-pg/}"
@@ -132,6 +132,12 @@ echo "backup enviado: dump de $(dump_instant "$key") ($(wc -c <"$encrypted" | tr
 # refletir o último upload.
 # Só o instante UTC, sem bucket nem chave. Gravado num temporário e renomeado: quem lê nunca vê
 # um arquivo pela metade, e uma falha antes daqui deixa o marcador anterior intacto.
+# O instalador troca o script antes do daemon-reload. Se a unit antiga ainda estiver em
+# memória, preserve o backup e o ping de sucesso e avise que a instalação precisa terminar.
+if [[ -z "${STATE_DIRECTORY:-}" ]]; then
+  echo "aviso: STATE_DIRECTORY ausente; conclua a instalação da unit para gravar last-upload-ok" >&2
+  exit 0
+fi
 marker="$STATE_DIRECTORY/last-upload-ok"
 if [[ -d "$marker" ]]; then
   echo "last-upload-ok deveria ser um arquivo" >&2

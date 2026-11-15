@@ -52,6 +52,20 @@ done
 exit 2
 """
 
+# Os stubs falham com 17 só se receberam o temporário que o marcador criou.
+FAIL_DATE = """#!/bin/sh
+if [ "$2" = +%Y-%m-%dT%H:%M:%SZ ]; then
+  set -- "$STATE_DIRECTORY"/.last-upload-ok.*
+  test -f "$1" || exit 18
+  exit 17
+fi
+exec /bin/date "$@"
+"""
+FAIL_MV = """#!/bin/sh
+test -f "$3" || exit 18
+exit 17
+"""
+
 
 @pytest.mark.parametrize(
     ("status", "failure"),
@@ -62,6 +76,8 @@ exit 2
         pytest.param(200, "pg_dump", id="dump-parcial"),
         pytest.param(200, "psql", id="psql-fecha-stdin"),
         pytest.param(200, "marker", id="marcador-e-diretorio"),
+        pytest.param(200, "date", id="date-falha-com-temporario"),
+        pytest.param(200, "mv", id="mv-falha-com-temporario"),
     ],
 )
 def test_o_put_precisa_confirmar_o_upload_para_avancar_o_marcador(
@@ -86,7 +102,12 @@ def test_o_put_precisa_confirmar_o_upload_para_avancar_o_marcador(
 
     tools = tmp_path / "bin"
     tools.mkdir()
-    for name, source in (("docker", FAKE_DOCKER), ("age", FAKE_AGE)):
+    stubs = {"docker": FAKE_DOCKER, "age": FAKE_AGE}
+    if failure == "date":
+        stubs["date"] = FAIL_DATE
+    if failure == "mv":
+        stubs["mv"] = FAIL_MV
+    for name, source in stubs.items():
         path = tools / name
         path.write_text(source)
         path.chmod(0o700)
@@ -145,6 +166,10 @@ def test_o_put_precisa_confirmar_o_upload_para_avancar_o_marcador(
         assert result.returncode != 0
         assert events[2] == ("GET", "/check/fail")
         assert list(marker.iterdir()) == []
+    elif failure in {"date", "mv"}:
+        assert result.returncode == 17, result.stderr
+        assert events[2] == ("GET", "/check/fail")
+        assert marker.read_text() == PREVIOUS_SUCCESS
     elif status == 200:
         assert result.returncode == 0, result.stderr
         assert events[2] == ("GET", "/check")
