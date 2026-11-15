@@ -10,6 +10,7 @@ migrar. Em produção o único destino aceito é o head: descer o schema é rest
 """
 
 import logging
+import re
 from collections.abc import Sequence
 from logging.config import fileConfig
 
@@ -37,6 +38,7 @@ if config.config_file_name is not None:
 
 target_metadata = metadata
 log = logging.getLogger("alembic.env")
+RELATIVE_REVISION = re.compile(r"[+-][0-9]+$")
 
 
 def run_migrations_offline() -> None:
@@ -88,11 +90,16 @@ def _destination(script: ScriptDirectory) -> frozenset[str] | None:
     """Resolve todos os destinos do comando, reservando None para inspeções sem destino."""
     elements: Sequence[str | None]
     options = config.cmd_opts
-    if cli_command is command.stamp and options is not None:
-        # get_revision_argument normaliza a tupla e pode descartar elementos após o primeiro.
-        elements = options.revisions
-        if context.is_offline_mode():
-            elements = [revision.rsplit(":", 1)[-1] for revision in options.revisions]
+    if options is not None and cli_command in (command.upgrade, command.downgrade, command.stamp):
+        # get_revision_argument perde qualificadores de ramo e pode descartar destinos do stamp.
+        targets: Sequence[str] = (
+            options.revisions if cli_command is command.stamp else (options.revision,)
+        )
+        elements = (
+            [target.rsplit(":", 1)[-1] for target in targets]
+            if context.is_offline_mode()
+            else targets
+        )
     else:
         try:
             argument = context.get_revision_argument()
@@ -101,13 +108,14 @@ def _destination(script: ScriptDirectory) -> frozenset[str] | None:
         elements = argument if isinstance(argument, tuple) else (argument,)
     revisions: set[str] = set()
     for element in elements:
-        resolved = script.as_revision_number(element) if element is not None else None
-        if resolved is None:
+        # Um destino relativo depende da revisão corrente e segue para o Alembic fora de produção.
+        if element is not None and RELATIVE_REVISION.search(element):
+            revisions.add(element)
+            continue
+        resolved = script.get_revisions(element) if element is not None else ()
+        revisions.update(revision.revision for revision in resolved)
+        if not resolved:
             revisions.add("base")
-        elif isinstance(resolved, str):
-            revisions.add(resolved)
-        else:
-            revisions.update(resolved)
     return frozenset(revisions)
 
 

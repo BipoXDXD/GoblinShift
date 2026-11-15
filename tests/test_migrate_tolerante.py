@@ -213,6 +213,26 @@ def test_stamp_head_com_banco_a_frente_avisa_sem_regravar_a_versao(at_head: Sett
     assert _db_version(at_head) == NEWER_REVISION
 
 
+@pytest.mark.parametrize("mode", ["online", "sql"])
+@pytest.mark.parametrize("operation", ["upgrade", "stamp"])
+def test_destino_qualificado_invalido_nao_aciona_tolerancia(
+    at_head: Settings, operation: str, mode: str
+) -> None:
+    _stamp_raw(at_head, NEWER_REVISION)
+    invalid = f"ramo_inexistente@{_head()}"
+    args = (invalid,) if operation == "upgrade" else ("head", invalid)
+    if mode == "sql":
+        args = (f"{_head()}:{args[0]}", *args[1:], "--sql")
+
+    result = _alembic(at_head, operation, *args)
+
+    assert result.returncode != 0
+    assert "ramo_inexistente" in result.stderr
+    assert "WARN" not in result.stderr
+    assert all(line.startswith("FAILED:") for line in result.stdout.splitlines() if line.strip())
+    assert _db_version(at_head) == NEWER_REVISION
+
+
 def test_current_em_producao_continua_permitido(at_head: Settings) -> None:
     result = _alembic(at_head, "current")
 
