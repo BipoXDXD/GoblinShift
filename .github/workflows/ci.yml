@@ -73,7 +73,60 @@ jobs:
         # stage (5 min): só o cenário do agendador leva cerca de 2 min.
         # A imagem do executor compila o FFmpeg (ADR 036): os testes dela rodam só no job gvisor,
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
-        run: uv run pytest -m "not openobserve and not executor_image"
+        # `--fail-on-skip`: teste pulado reprova (tests/skip_guard.py). O que só roda como root fica
+        # fora daqui (`needs_root`) e roda no passo seguinte.
+        run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root"
+      - name: Testes que exigem root (runner descartável, sudo sem senha)
+        # Política nativa de imagens e troca de UID na área de trabalho do executor-ctl. O runner
+        # hospedado é descartado no fim do job; nada disso roda como root fora dele. Sem bytecode
+        # nem cache, o root não deixa arquivo seu na árvore.
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: sudo -E env "PATH=$PATH" .venv/bin/pytest --fail-on-skip -p no:cacheprovider -m needs_root tests/executor_ctl
+
+  host-python:
+    name: Scripts do host (Python 3.12)
+    # Os pacotes de deploy/ marcados py312 no pyproject rodam no python3 do host (3.12, o do
+    # Ubuntu 24.04), não no Python da imagem. Este job confere o piso de versão e roda os testes
+    # deles nesse interpretador. Sem `if`: o gate da publicação exige o sucesso dele.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # O import de dump_check criaria __pycache__ ao lado dos arquivos de configuração do backup.
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+      - name: Importar os pacotes com o Python limpo do host
+        run: python -I -S -B scripts/check_host_python.py --imports-only
+      - name: Instalar ferramentas de análise e de teste (hashes conferidos)
+        run: python -m pip install --disable-pip-version-check --require-hashes --only-binary ':all:' -r tests/host_python/requirements.txt
+      - name: Piso de versão dos pacotes do host
+        # Vermin confere a versão mínima. O mypy usa as assinaturas da stdlib do Python 3.12.
+        run: python scripts/check_host_python.py
+      - name: Testes dos pacotes do host
+        # O shell bash usa pipefail. Se o grep falhar, o job para antes de chamar o pytest.
+        # O conftest da aplicação fica fora, e os testes com needs_root rodam em Verificações.
+        shell: bash
+        run: |
+          marca='^pytestmark = (\[)?pytest\.mark\.host_python\b'
+          pastas=(tests/acceptance tests/executor_ctl tests/executor_inventory_read tests/host_python tests/tls_check)
+          marcados=$(grep -rlE --include='test_*.py' "$marca" "${pastas[@]}" | sort)
+          mapfile -t modulos <<< "$marcados"
+          python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --confcutdir=tests/executor_ctl -m "host_python and not needs_root" "${modulos[@]}"
+      - name: Testes unitários do backup e do OpenObserve
+        # Os conftests destas pastas carregam a aplicação e serviços de integração.
+        # Os módulos marcados aqui exercitam os scripts com fixtures do próprio pytest.
+        shell: bash
+        run: |
+          marca='^pytestmark = (\[)?pytest\.mark\.host_python\b'
+          marcados=$(grep -rlE --include='test_*.py' "$marca" tests/backup tests/openobserve | sort)
+          mapfile -t modulos <<< "$marcados"
+          python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --noconftest -m "host_python and not needs_root" "${modulos[@]}"
 
   openobserve:
     name: SLOs e alertas (OpenObserve)
@@ -93,7 +146,7 @@ jobs:
       - run: uv sync --locked
       - name: OpenObserve e Collector reais via Testcontainers
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito.
-        run: uv run pytest -m openobserve -q
+        run: uv run pytest -m "openobserve and not needs_root" -q --fail-on-skip
 
   contract:
     name: Contrato (Schemathesis)
@@ -248,6 +301,9 @@ jobs:
         env:
           E2E_PHASE: notice
         run: npm run e2e:notice
+      # Caso que não roda num projeto sai dele por tag (grepInvert), não por skip em runtime.
+      - name: Nenhum teste pulado (relatórios json das três fases)
+        run: npm run e2e:check-skips -- e2e-results/ui.json e2e-results/gpu.json e2e-results/notice.json
       # O relatório e os traces ficam fora do artefato se a chave da conta de teste (formato
       # gsk_...) aparecer em qualquer arquivo ou dentro de um .zip: o repositório é público.
       - name: Canário (chave de API nos artefatos)
@@ -337,7 +393,7 @@ jobs:
           GS_TEST_RUNTIME: runsc
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito: os testes
         # executor_image sempre existem, então zero testes indica um seletor quebrado.
-        run: uv run pytest -m "executor_ctl or executor_image" -q
+        run: uv run pytest -m "(executor_ctl or executor_image) and not needs_root" -q --fail-on-skip
 
   e2e-gvisor:
     name: Jornadas reais sob gVisor (Playwright)
@@ -390,6 +446,9 @@ jobs:
       - name: Specs contra a API real (desktop e celular, só Chromium)
         # Falha também se alguma tentativa do banco não tiver rodado sob runsc.
         run: scripts/e2e-gvisor.sh journeys
+      - name: Nenhum teste pulado (relatório json da suíte gVisor)
+        working-directory: web
+        run: npm run e2e:check-skips -- e2e-results/all.json
       - name: Logs da pilha e do executor-ctl
         if: failure()
         run: scripts/e2e-gvisor.sh logs "$RUNNER_TEMP/e2e-gvisor-logs"
@@ -425,6 +484,7 @@ jobs:
       packages: write
     outputs:
       tag: ${{ steps.vars.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -452,7 +512,6 @@ jobs:
           build-args: GS_SERVICE_VERSION=${{ steps.vars.outputs.tag }}
           tags: |
             ghcr.io/bipoxdxd/goblinshift:${{ steps.vars.outputs.tag }}
-            ghcr.io/bipoxdxd/goblinshift:main
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -470,6 +529,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -497,7 +558,6 @@ jobs:
           # Mesma tag da imagem da aplicação: o deploy resolve o digest do executor por ela.
           tags: |
             ghcr.io/bipoxdxd/goblinshift-executor:${{ steps.vars.outputs.tag }}
-            ghcr.io/bipoxdxd/goblinshift-executor:main
           # Escopo próprio, para não disputar o cache da imagem da aplicação.
           cache-from: type=gha,scope=executor
           cache-to: type=gha,scope=executor,mode=max
@@ -518,6 +578,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -545,7 +607,6 @@ jobs:
           # Mesma tag da imagem da aplicação: o Compose do deploy referencia as duas por ela.
           tags: |
             ghcr.io/bipoxdxd/goblinshift-web:${{ steps.vars.outputs.tag }}
-            ghcr.io/bipoxdxd/goblinshift-web:main
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
@@ -554,11 +615,78 @@ jobs:
           IMAGE_REF: ghcr.io/bipoxdxd/goblinshift-web@${{ steps.build.outputs.digest }}
         run: scripts/docker-build.sh published "$IMAGE_REF"
 
+  tag-main:
+    name: Imagem e componentes com tag main
+    # As tags sha-* saem assim que cada imagem fica pronta, e a publicação pelo Coolify confere o
+    # CI inteiro antes de usá-las. A `:main` só passa a apontar para o commit depois de todos os
+    # portões: quem puxa `:main` nunca recebe uma imagem que reprovou em algum job.
+    needs:
+      - checks
+      - host-python
+      - openobserve
+      - contract
+      - web
+      - e2e
+      - secrets
+      - gvisor
+      - e2e-gvisor
+      - image
+      - executor-image
+      - web-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apontar a main para as imagens deste commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_DIGEST: ${{ needs.image.outputs.digest }}
+          EXECUTOR_DIGEST: ${{ needs.executor-image.outputs.digest }}
+          WEB_DIGEST: ${{ needs.web-image.outputs.digest }}
+        shell: bash
+        # Com uma fonte só, o imagetools copia o índice multiplataforma como está; o digest
+        # conferido no fim prova isso. Um push novo na main cancela esta execução (concorrência
+        # do workflow) e pode deixar as imagens em commits diferentes até a próxima execução que
+        # passar nos portões, que realinha as três; enquanto isso, todas já passaram nos portões.
+        run: |
+          ponta=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$ponta" != "$GITHUB_SHA" ]; then
+            echo "A main avançou. As tags ficam para o CI do commit atual."
+            exit 0
+          fi
+          images=(goblinshift goblinshift-executor goblinshift-web)
+          digests=("$APP_DIGEST" "$EXECUTOR_DIGEST" "$WEB_DIGEST")
+          for digest in "${digests[@]}"; do
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo '::error::Digest ausente ou inválido nos outputs dos builds'
+              exit 1
+            fi
+          done
+          for index in "${!images[@]}"; do
+            image="ghcr.io/bipoxdxd/${images[index]}"
+            esperado="${digests[index]}"
+            docker buildx imagetools create --tag "$image:main" "$image@$esperado"
+            obtido=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:main")
+            if [ "$obtido" != "$esperado" ]; then
+              echo "::error::$image:main aponta para $obtido, e não para $esperado"
+              exit 1
+            fi
+          done
+
   deploy:
     name: Deploy na VPS
     # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
     # execuções aceitas sem ter onde rodar.
-    needs: [image, executor-image, web-image, gvisor, openobserve]
+    needs: [image, executor-image, web-image, gvisor, openobserve, host-python]
     # Coolify é o único ingresso automático de publicação. O legado fica desativado na fonte,
     # independentemente de variáveis administrativas. Manter este job pulado e seu dependente
     # preserva os dois resultados skipped que o gate de release exige antes de enviar imagens.

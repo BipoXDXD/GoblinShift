@@ -8,6 +8,8 @@ from openobserve.catalog import DestinationKey, alerts
 from openobserve.client import OpenObserveError
 from openobserve.provision import ProvisionError, provision
 
+pytestmark = pytest.mark.host_python
+
 CHANNEL_URL = "https://discord.com/api/webhooks/1/SEGREDO-DO-CANAL"
 
 

@@ -5,7 +5,10 @@ import { fulfillProblem } from "../support/fakeAccount";
 import { holdRequest } from "../support/held";
 import { expect, test } from "../support/test";
 
-test("salvar na Bancada, abrir pela Oficina já preenchido e excluir", async ({ page, fakeApi }) => {
+test("salvar na Bancada, abrir pela Oficina já preenchido e excluir @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   const bancada = new BancadaPage(page);
   await bancada.open("csv-janitor");
   await bancada.choose("Delimitador dos arquivos de saída", "Ponto e vírgula (;)");

@@ -8,7 +8,7 @@ import pytest
 
 from executor_ctl.config import Config, ConfigError, load_config
 
-pytestmark = pytest.mark.usefixtures("synthetic_policy_metadata")
+pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
 VALID: dict[str, Any] = {
     "socket": "/run/goblinshift/executor-ctl.sock",

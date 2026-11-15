@@ -3,7 +3,11 @@
 import uuid
 from pathlib import Path
 
+import pytest
+
 from executor_ctl import profile
+
+pytestmark = pytest.mark.host_python
 
 ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64

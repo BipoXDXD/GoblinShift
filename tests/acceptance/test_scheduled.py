@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.host_python
+
 ROOT = Path(__file__).resolve().parents[2]
 ACCEPTANCE_DIR = ROOT / "deploy" / "acceptance"
 SCRIPT = ACCEPTANCE_DIR / "scheduled.sh"

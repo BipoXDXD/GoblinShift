@@ -7,7 +7,7 @@ import { expect, test } from "../support/test";
 
 test.use({ auth: "none" });
 
-test("a chave nova aparece uma vez, copia, e o segredo não fica em storage, cookie nem console", async ({
+test("a chave nova aparece uma vez, copia, e o segredo não fica em storage, cookie nem console @fake-api", async ({
   page,
   context,
   fakeApi,
@@ -44,7 +44,7 @@ test("a chave nova aparece uma vez, copia, e o segredo não fica em storage, coo
   expect(await page.content()).not.toContain(canary);
 });
 
-test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista mostra", async ({
+test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista mostra @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -71,7 +71,7 @@ test("revogar pede confirmação: Cancelar mantém, confirmar revoga e a lista m
 
 // O dublê do jsdom devolve o foco como o navegador, mas a ordem real só o Chromium garante: o
 // diálogo devolve o foco ao Revogar antes de a lista tirá-lo, e o título ganha depois.
-test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova e ao revogar @keyboard", async ({
+test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova e ao revogar @keyboard @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -110,7 +110,7 @@ test("pelo teclado, o foco tem destino ao abrir, cancelar e fechar a chave nova 
   await expect(sectionHeading).toHaveCSS("outline-style", "none");
 });
 
-test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reabre", async ({
+test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reabre @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -143,7 +143,7 @@ test("Esc com a revogação em voo não fecha; a falha aparece e o diálogo reab
   await expect(await acesso.askRevoke(publicId)).toBeVisible();
 });
 
-test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Acesso", async ({
+test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Acesso @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -164,7 +164,7 @@ test("criar chave sem login recente leva ao provedor com reauth=1 e volta ao Ace
   await expect(await acesso.createKey(["Ler arquivos (files:read)"])).toBeVisible();
 });
 
-test("excluir a conta só age com a frase; depois, a exclusão pedida e nenhuma sessão", async ({
+test("excluir a conta só age com a frase; depois, a exclusão pedida e nenhuma sessão @fake-api", async ({
   page,
   context,
   fakeApi,
@@ -197,7 +197,7 @@ test("excluir a conta só age com a frase; depois, a exclusão pedida e nenhuma 
   expect(await context.cookies()).toEqual([]);
 });
 
-test("Esc com a exclusão da conta em voo não fecha; a falha aparece e o diálogo reabre", async ({
+test("Esc com a exclusão da conta em voo não fecha; a falha aparece e o diálogo reabre @fake-api", async ({
   page,
   fakeApi,
 }) => {

@@ -24,7 +24,7 @@ interface Motion {
 }
 
 for (const screen of SCREENS) {
-  test(`${screen.name}: com movimento reduzido, nada se move nem fica tocando`, async ({
+  test(`${screen.name}: com movimento reduzido, nada se move nem fica tocando @fake-api`, async ({
     page,
     fakeApi,
   }) => {

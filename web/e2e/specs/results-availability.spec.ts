@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { expect, test } from "../support/test";
 
-test("resultados expirados não oferecem download e dizem quando venceram", async ({
+test("resultados expirados não oferecem download e dizem quando venceram @fake-api", async ({
   page,
   fakeApi,
 }) => {

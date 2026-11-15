@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from functools import partial
 from importlib.metadata import version
+from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from opentelemetry.sdk.trace.export import SpanExporter
@@ -36,7 +37,11 @@ from goblinshift.entrypoints.api.cookies import (
     LOGIN_COOKIE_MAX_AGE_S,
     LOGIN_COOKIE_PATH,
 )
-from goblinshift.entrypoints.api.problems import PROBLEM_RESPONSES, install_problem_handlers
+from goblinshift.entrypoints.api.problems import (
+    PROBLEM_RESPONSES,
+    install_problem_handlers,
+    normalize_problem_responses,
+)
 from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
@@ -53,6 +58,15 @@ from goblinshift.runs.quotas import QuotaLimits
 API_PREFIX = "/api/v1"
 
 logger = logging.getLogger(__name__)
+
+
+class _GoblinShiftAPI(FastAPI):
+    def openapi(self) -> dict[str, Any]:
+        cached_schema = self.openapi_schema
+        schema = super().openapi()
+        if schema is not cached_schema:
+            normalize_problem_responses(schema)
+        return schema
 
 
 def create_app(
@@ -94,7 +108,7 @@ def create_app(
                 # janela final de saturação, relatada ao sair do `async with` acima.
                 running.state.tracing.shut_down()
 
-    app = FastAPI(
+    app = _GoblinShiftAPI(
         title="GoblinShift",
         # A versão do contrato é a do pacote, a mesma do arquivo versionado (gs-export-openapi),
         # e não a do deploy: o commit em produção não aparece no /openapi.json público.

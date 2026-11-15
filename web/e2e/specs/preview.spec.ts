@@ -43,7 +43,10 @@ function watchUnsafe(page: Page): string[] {
   return problems;
 }
 
-test("imagem: o preview aparece junto da saída, sem virar download", async ({ page, fakeApi }) => {
+test("imagem: o preview aparece junto da saída, sem virar download @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   const problems = watchUnsafe(page);
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "succeeded", recipe_id: "image-forge" }, [PHOTO]));
@@ -60,7 +63,10 @@ test("imagem: o preview aparece junto da saída, sem virar download", async ({ p
   expect(problems).toEqual([]);
 });
 
-test("CSV: a amostra vira tabela e a fórmula aparece como texto", async ({ page, fakeApi }) => {
+test("CSV: a amostra vira tabela e a fórmula aparece como texto @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   const problems = watchUnsafe(page);
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "succeeded" }, [TABLE]));

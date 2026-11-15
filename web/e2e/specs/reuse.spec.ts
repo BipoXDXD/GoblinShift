@@ -15,7 +15,7 @@ const PARAMETERS = {
   formula_guard: "tab_prefix",
 };
 
-test("Histórico → Reutilizar parâmetros → Bancada com os parâmetros da execução", async ({
+test("Histórico → Reutilizar parâmetros → Bancada com os parâmetros da execução @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -43,7 +43,7 @@ test("Histórico → Reutilizar parâmetros → Bancada com os parâmetros da ex
   );
 });
 
-test("o aviso de origem entra numa região viva que já existia antes de a execução chegar", async ({
+test("o aviso de origem entra numa região viva que já existia antes de a execução chegar @fake-api", async ({
   page,
   fakeApi,
 }) => {

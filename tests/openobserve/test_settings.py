@@ -7,6 +7,8 @@ import pytest
 
 from openobserve.settings import ProvisionSettings, SettingsError
 
+pytestmark = pytest.mark.host_python
+
 URGENT = "https://ntfy.sh/gs-urgente-0f3a"
 HEARTBEAT = "https://hc-ping.com/7d2b8c1e-0000-4000-8000-000000000001"
 
