@@ -153,25 +153,32 @@ class ReviewRegressionTests(unittest.TestCase):
                 r.unpack(SlowInput(), Path(temp), {"app"}, timeout=0.02)
 
 
-if __name__ == "__main__":
-    unittest.main()
+PARSER_SOURCE = "def parse_manifest(text, image_prefix):\n    return 'parsed:' + image_prefix\n"
+LOAD_PARSER_CODE = (
+    "import sys; sys.path.insert(0, sys.argv[1]); import receiver; from pathlib import Path; "
+    "parser = receiver.load_reviewed_manifest_parser(Path(sys.argv[2])); "
+    "print(parser.parse_manifest('{}', image_prefix='p-'))"
+)
 
 
 class ManifestParserLoadTests(unittest.TestCase):
-    def test_loads_suffixless_parser_in_a_fresh_interpreter(self):
+    def test_loads_suffixless_parser_in_a_fresh_interpreter(self) -> None:
         # A fresh interpreter matters: the test runner may already have importlib.machinery loaded.
         with tempfile.TemporaryDirectory() as directory:
             parser = Path(directory) / "duora-deploy"
-            parser.write_text("def parse_manifest(text, image_prefix):\n    return 'parsed:' + image_prefix\n")
+            parser.write_text(PARSER_SOURCE)
             here = Path(__file__).resolve().parent
-            code = (
-                "import sys; sys.path.insert(0, sys.argv[1]); import receiver; from pathlib import Path; "
-                "print(receiver.load_reviewed_manifest_parser(Path(sys.argv[2])).parse_manifest('{}', image_prefix='p-'))"
-            )
-            result = subprocess.run(
-                [sys.executable, "-I", "-c", code, str(here), str(parser)],
-                capture_output=True, text=True, timeout=60,
+            # Fixed argv: this interpreter, isolated mode, test-owned code and paths; no shell.
+            result = subprocess.run(  # noqa: S603
+                [sys.executable, "-I", "-c", LOAD_PARSER_CODE, str(here), str(parser)],
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "parsed:p-")
+
+
+if __name__ == "__main__":
+    unittest.main()
