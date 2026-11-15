@@ -8,6 +8,8 @@ que nenhuma imagem em uso lê o que sai. O `downgrade()` fica de fora: ele desfa
 
 import ast
 import re
+import tokenize
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -40,15 +42,19 @@ def unmarked_destructive_lines(source: str) -> list[int]:
     )
     if upgrade is None:
         return []
+    marked_lines = {
+        token.start[0]
+        for token in tokenize.generate_tokens(StringIO(source).readline)
+        if token.type == tokenize.COMMENT and CONTRACT_MARK.search(token.string)
+    }
     found = []
     for node in ast.walk(upgrade):
         if isinstance(node, ast.Call) and _is_destructive(node):
             line = node.lineno
             # Na linha acima, só uma linha que é apenas o comentário: a marca de outra operação
             # não cobre esta.
-            previous = lines[line - 2].strip() if line >= 2 else ""
-            marked = CONTRACT_MARK.search(lines[line - 1]) or (
-                previous.startswith("#") and CONTRACT_MARK.search(previous)
+            marked = line in marked_lines or (
+                line - 1 in marked_lines and lines[line - 2].lstrip().startswith("#")
             )
             if not marked:
                 found.append(line)
@@ -61,7 +67,7 @@ def _is_destructive(call: ast.Call) -> bool:
         return True
     if name == "alter_column":
         return any(keyword.arg == "new_column_name" for keyword in call.keywords)
-    if name == "execute":
+    if name in {"execute", "exec_driver_sql"}:
         return any(
             isinstance(arg, ast.Constant)
             and isinstance(arg.value, str)
@@ -94,6 +100,8 @@ def test_migration_so_remove_ou_renomeia_com_a_marca_de_contract(path: Path) -> 
         'op.execute("ALTER TABLE run ADD COLUMN y int, DROP status")',
         "op.execute('ALTER TABLE \"my run\" DROP status')",
         'op.execute(sa.text("DROP TABLE run"))',
+        'op.get_bind().exec_driver_sql("ALTER TABLE run DROP COLUMN status")',
+        'op.execute("ALTER TABLE run DROP COLUMN status /* # contract: anotação no SQL */")',
     ],
 )
 def test_operacao_destrutiva_sem_marca_e_recusada(operation: str) -> None:

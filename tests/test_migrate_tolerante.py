@@ -73,7 +73,9 @@ def _db_version(settings: Settings) -> str:
     engine = create_engine(settings.database_url)
     try:
         with engine.connect() as conn:
-            return conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            assert isinstance(revision, str)
+            return revision
     finally:
         engine.dispose()
 
@@ -132,7 +134,7 @@ def test_erro_real_do_alembic_continua_falhando(at_head: Settings) -> None:
     assert "banco_que_nao_existe" in result.stderr
 
 
-@pytest.mark.parametrize("target", ["-1", "base"])
+@pytest.mark.parametrize("target", ["-1", "base", "head"])
 def test_downgrade_em_producao_e_recusado_sem_mexer_no_banco(
     at_head: Settings, target: str
 ) -> None:
@@ -141,6 +143,24 @@ def test_downgrade_em_producao_e_recusado_sem_mexer_no_banco(
     assert result.returncode != 0
     assert "produção" in result.stderr
     assert _db_version(at_head) == _head()
+
+
+def test_downgrade_sql_em_producao_e_recusado_sem_emitir_ddl(at_head: Settings) -> None:
+    result = _alembic(at_head, "downgrade", f"{_head()}:{_previous()}", "--sql")
+
+    assert result.returncode != 0
+    assert "produção" in result.stderr
+    assert "DROP INDEX" not in result.stdout
+    assert _db_version(at_head) == _head()
+
+
+def test_current_com_revisao_desconhecida_conserva_o_erro(at_head: Settings) -> None:
+    _stamp_raw(at_head, NEWER_REVISION)
+
+    result = _alembic(at_head, "current")
+
+    assert result.returncode != 0
+    assert NEWER_REVISION in result.stderr
 
 
 def test_downgrade_fora_de_producao_continua_permitido(at_head: Settings) -> None:

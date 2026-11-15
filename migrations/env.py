@@ -12,7 +12,7 @@ migrar. Em produção o único destino aceito é o head: descer o schema é rest
 import logging
 from logging.config import fileConfig
 
-from alembic import context
+from alembic import command, context
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import Connection
@@ -38,8 +38,11 @@ log = logging.getLogger("alembic.env")
 
 
 def run_migrations_offline() -> None:
+    settings = Settings()
+    script = ScriptDirectory.from_config(config)
+    _check_production_destination(settings, _destination(script), frozenset(script.get_heads()))
     context.configure(
-        url=Settings().database_url.render_as_string(hide_password=False),
+        url=settings.database_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
     )
@@ -53,11 +56,7 @@ def run_migrations_online() -> None:
     image_heads = frozenset(script.get_heads())
     destination = _destination(script)
     goes_to_head = destination == image_heads
-    # Sem destino (`current`, `check`, `history`) o comando só lê, e vale também em produção.
-    if settings.environment == "production" and destination is not None and not goes_to_head:
-        raise CommandError(
-            "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
-        )
+    _check_production_destination(settings, destination, image_heads)
     engine = make_engine(settings)
     try:
         with engine.connect() as connection:
@@ -70,6 +69,19 @@ def run_migrations_online() -> None:
                 context.run_migrations()
     finally:
         engine.dispose()
+
+
+def _check_production_destination(
+    settings: Settings, destination: frozenset[str] | None, image_heads: frozenset[str]
+) -> None:
+    if settings.environment != "production":
+        return
+    # O CLI do Alembic põe o comando em cmd_opts.cmd, inclusive no modo --sql.
+    cli_command = getattr(config.cmd_opts, "cmd", (None,))[0]
+    if cli_command is command.downgrade or (destination is not None and destination != image_heads):
+        raise CommandError(
+            "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
+        )
 
 
 def _destination(script: ScriptDirectory) -> frozenset[str] | None:
