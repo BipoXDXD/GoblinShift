@@ -197,11 +197,19 @@ install -m 666 /dev/null /tmp/calls
 cat >/usr/local/bin/docker <<'EOF'
 #!/bin/sh
 echo "docker $*" >>/tmp/calls
-# A conferência antes do dump: um banco migrado e com contas.
+# Simula a sessão que exporta o snapshot e o pg_dump que o usa.
 case "$*" in
-  *alembic_version*) echo t ;;
-  *"count(*) FROM app_user"*) echo 1 ;;
-  *) echo dump ;;
+  *psql*)
+    while IFS= read -r sql; do
+      case "$sql" in
+        *alembic_version*) echo t ;;
+        *"count(*) FROM public.app_user"*) echo 1 ;;
+        *pg_export_snapshot*) echo 00000003-00000010-1 ;;
+      esac
+    done
+    ;;
+  *pg_dump*--snapshot=00000003-00000010-1*) echo dump ;;
+  *) exit 2 ;;
 esac
 EOF
 cat >/usr/local/bin/age <<'EOF'
@@ -216,6 +224,7 @@ cat >/usr/local/bin/curl <<'EOF'
 #!/bin/sh
 cat >/dev/null
 echo "curl $*" >>/tmp/calls
+case "$*" in *--upload-file*) printf '200' ;; esac
 EOF
 chmod 755 /usr/local/bin/docker /usr/local/bin/age /usr/local/bin/curl
 cd /

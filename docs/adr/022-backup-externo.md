@@ -72,9 +72,9 @@ Por ordem do dono, às 04:45 UTC de 2026-11-09, a janela noturna da VPS ficou as
 
 O `pg_dump` de um volume recriado vazio, com o esquema refeito pelo migrate, sai com status 0. Sem conferência, esse dump viraria o backup bom do dia, e só a restauração mensal perceberia.
 
-- **Conferência:** antes do dump, o `pg-backup.sh` exige a tabela `alembic_version` e ao menos uma linha em `app_user`. Se faltar uma das duas, nada sobe e o EXIT pinga `/fail`.
+- **Conferência:** o `pg-backup.sh` exige a tabela `alembic_version` e ao menos uma linha em `app_user`. O `pg_dump` usa o mesmo snapshot que a conferência, mesmo quando a purga do banco roda em paralelo. Se faltar esquema ou conta no snapshot, o script sai com erro e pinga `/fail`.
 - **O que continua aberto:** o ciclo de vida do bucket expira cada dump aos 30 dias (mais 1 para apagar), sem olhar se existe um dump bom mais novo. Depois de 31 dias seguidos de `/fail`, o último dump bom some. Guardar o último bom não cabe no script, porque a chave do host só escreve e não lista nem apaga. Fica como decisão e aplicação do dono, por retenção do Object Lock ou por regra de ciclo de vida.
-- **Marcador:** para os `/fail` repetidos não passarem em silêncio, o script grava `/var/lib/goblinshift-backup/last-upload-ok` só depois que o PUT é aceito. O conteúdo é apenas o instante UTC do upload (`2026-11-14T03:05:42Z`), sem bucket nem chave.
+- **Marcador:** para os `/fail` repetidos não passarem em silêncio, o script grava `/var/lib/goblinshift-backup/last-upload-ok` só depois que o PUT recebe HTTP 200 da API S3. O conteúdo é apenas o instante UTC do upload (`2026-11-14T03:05:42Z`), sem bucket nem chave.
   - O diretório vem do `StateDirectory=goblinshift-backup` da unit, com `StateDirectoryMode=0700`. O arquivo tem modo 0600 e pertence ao usuário do serviço, então só ele e o root o leem.
   - A gravação passa por um temporário e um rename, então uma falha antes do fim deixa o marcador anterior intacto.
   - Quem lê o marcador fica fora deste repositório: a conferência de estado do host, que alerta quando ele passa de 2 dias. É um segundo sinal, independente do healthchecks.io. Enquanto essa leitura não estiver ligada no host, o marcador é gravado, mas ninguém o confere.

@@ -339,7 +339,7 @@ def test_banco_que_falha_a_conferencia_nao_envia_e_pinga_falha(
     assert list(state_dir.iterdir()) == []
 
 
-def test_dump_que_falha_nao_envia_nada(
+def test_psql_que_falha_na_conferencia_nao_envia_nada(
     s3: S3,
     source_db: SourceDatabase,
     age_keys: AgeKeys,
