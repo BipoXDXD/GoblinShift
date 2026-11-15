@@ -18,6 +18,8 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tls_check.__main__ import main
 
+pytestmark = pytest.mark.host_python
+
 HOST = "localhost"
 # Instante fixo para o cálculo; a validade dos certificados é relativa a ele.
 NOW = datetime.now(UTC).replace(microsecond=0)

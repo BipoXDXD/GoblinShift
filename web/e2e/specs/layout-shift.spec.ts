@@ -133,7 +133,10 @@ for (const [name, screen] of [
   });
 }
 
-test("Execução: CLS abaixo de 0,05 do carregamento aos resultados", async ({ page, fakeApi }) => {
+test("Execução: CLS abaixo de 0,05 do carregamento aos resultados @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "succeeded" }));
   await expect(page.getByRole("link", { name: /^Baixar csv-janitor\.zip/ })).toBeVisible();

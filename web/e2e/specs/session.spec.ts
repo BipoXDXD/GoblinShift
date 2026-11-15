@@ -15,7 +15,7 @@ const TOUCH_TARGET_PX = 44;
 /** Arredondamento subpixel das caixas. */
 const WIDTH_TOLERANCE_PX = 1;
 
-test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada", async ({
+test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -40,7 +40,7 @@ test("sem sessão, entra pelo cabeçalho, aceita os termos e volta à Bancada", 
   ).toBeVisible();
 });
 
-test("login recusado volta à Oficina com o erro literal e o código para o recurso", async ({
+test("login recusado volta à Oficina com o erro literal e o código para o recurso @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -77,7 +77,7 @@ test("código fora do formato no endereço não aparece na tela de erro", async 
   await expect(alert.getByText(/Código/)).toHaveCount(0);
 });
 
-test("Sair encerra a sessão: os cookies somem e a próxima tela pede para entrar", async ({
+test("Sair encerra a sessão: os cookies somem e a próxima tela pede para entrar @fake-api", async ({
   page,
   context,
   fakeApi,
@@ -97,7 +97,7 @@ test("Sair encerra a sessão: os cookies somem e a próxima tela pede para entra
   await expect(page.getByRole("region", { name: "Entre para continuar" })).toBeVisible();
 });
 
-test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões @keyboard", async ({
+test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões @keyboard @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -133,7 +133,7 @@ test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões
   }
 });
 
-test("Sair de todos: Esc cancela e devolve o foco; confirmar revoga as chaves @keyboard", async ({
+test("Sair de todos: Esc cancela e devolve o foco; confirmar revoga as chaves @keyboard @fake-api", async ({
   page,
   context,
   fakeApi,

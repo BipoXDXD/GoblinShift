@@ -510,7 +510,7 @@ class RemoteScriptTests(unittest.TestCase):
         roles = {line.split("|")[0]: line.split("|")[1] for line in self.containers()}
         config = {"uuid": self.facts["UUID"], "image_roles": roles, "token": self.CANARY}
         (etc / "coolify-release/goblinshift.json").write_text(json.dumps(config))
-        versions = self.root / "opt/coolify-release/versions/2.1.1"
+        versions = self.root / "opt/coolify-release/versions/2.1.2"
         versions.mkdir(parents=True)
         shutil.copy(RECEIVER, versions / "receiver.py")
         (self.root / "opt/coolify-release/receiver.py").symlink_to(versions / "receiver.py")

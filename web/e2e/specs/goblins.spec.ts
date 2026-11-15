@@ -84,7 +84,7 @@ async function goblinHeight(page: Page): Promise<number> {
 }
 
 for (const screen of SCREENS) {
-  test(`${screen.name}: a goblin aparece em destaque, sem rolagem lateral`, async ({
+  test(`${screen.name}: a goblin aparece em destaque, sem rolagem lateral @fake-api`, async ({
     page,
     fakeApi,
   }, info) => {
@@ -98,11 +98,11 @@ for (const screen of SCREENS) {
   });
 }
 
-test("Execução concluída no celular: o Baixar fica na primeira tela, acima da goblin", async ({
+// @mobile: só o celular empilha o cartão de estado; o projeto desktop não coleta o caso.
+test("Execução concluída no celular: o Baixar fica na primeira tela, acima da goblin @mobile @fake-api", async ({
   page,
   fakeApi,
-}, info) => {
-  test.skip(info.project.name !== "mobile", "só o celular empilha o cartão de estado");
+}) => {
   await page.setViewportSize(PHONE);
   await new ExecucaoPage(page).open(fakeApi.seedRun({ status: "succeeded" }));
 

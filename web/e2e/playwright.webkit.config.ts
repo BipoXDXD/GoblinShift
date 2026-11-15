@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 import base from "./playwright.config";
 import { E2E, NOTICE_BUILD } from "./support/env";
+import { CDP_TAG, titleTag } from "./support/tags";
 
 if (E2E.remote || NOTICE_BUILD) {
   throw new Error("A suíte WebKit do palco exige o build local normal, com API falsa.");
@@ -18,11 +19,18 @@ export default defineConfig({
   globalTimeout: 4 * 60_000,
   fullyParallel: false,
   retries: 0,
-  reporter: [["list"], ["html", { outputFolder: "../playwright-report-webkit", open: "never" }]],
+  reporter: [
+    ["list"],
+    ["html", { outputFolder: "../playwright-report-webkit", open: "never" }],
+    // O guard de pulados (check-no-skips.ts) lê este relatório na CI.
+    ["json", { outputFile: "../e2e-results/webkit.json" }],
+  ],
   projects: [
     {
       name: "webkit-mobile",
       use: { ...devices["iPhone 13"], reducedMotion: "no-preference" },
+      // A pinça nativa via CDP só existe no Chromium.
+      grepInvert: titleTag(CDP_TAG),
     },
   ],
 });

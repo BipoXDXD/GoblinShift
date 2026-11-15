@@ -10,6 +10,8 @@ from executor_ctl import config, images
 
 from .conftest import MetadataBoundary
 
+pytestmark = pytest.mark.host_python
+
 A = "example.invalid/executor@sha256:" + "a" * 64
 B = "example.invalid/executor@sha256:" + "b" * 64
 

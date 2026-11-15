@@ -66,6 +66,11 @@ resource_reservation = Table(
         postgresql_where=text("released_at IS NULL"),
     ),
     Index(None, "owner_id"),
+    Index(
+        "resource_reservation_released_at_idx",
+        "released_at",
+        postgresql_where=text("released_at IS NOT NULL"),
+    ),
     CheckConstraint("holder_kind IN ('upload', 'run', 'object')", name="holder_kind"),
     CheckConstraint("resource IN ('storage_bytes')", name="resource"),
     CheckConstraint("amount >= 0", name="amount"),

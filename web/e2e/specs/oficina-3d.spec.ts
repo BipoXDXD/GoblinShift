@@ -261,12 +261,8 @@ test.describe("com GPU", () => {
     });
   });
 
-  test("pinça no palco amplia a página; um dedo gira e rola", async ({
-    page,
-    isMobile,
-    browserName,
-  }) => {
-    test.skip(!isMobile || browserName !== "chromium", "Pinça nativa via CDP exige Chromium móvel");
+  // Pinça nativa via CDP exige Chromium móvel: @mobile tira o desktop, @cdp tira o WebKit.
+  test("pinça no palco amplia a página; um dedo gira e rola @mobile @cdp", async ({ page }) => {
     await page.goto("/");
     await waitSceneStill(page);
     const host = sceneHost(page);

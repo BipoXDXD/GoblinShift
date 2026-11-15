@@ -4,6 +4,7 @@ import { test as base, expect, type Page } from "@playwright/test";
 
 import { injectApiKey } from "./apiKey";
 import { E2E } from "./env";
+import { FAKE_API_TAG } from "./tags";
 import { installFakeApi, type FakeApi } from "./fakeApi";
 import { pickApiKey, specKeyId } from "./specKeys";
 
@@ -13,7 +14,10 @@ interface Fixtures {
    * a única do processo (specKeys.ts).
    */
   apiKey: string;
-  /** API falsa do modo local; a spec que a usa é pulada no modo remoto. */
+  /**
+   * API falsa do modo local. O teste que a usa leva a tag @fake-api no título, e o modo remoto não
+   * coleta essa tag (playwright.config.ts).
+   */
   fakeApi: FakeApi;
   /** Liga a API (falsa ou real) e a chave em todo contexto, sem a spec pedir. */
   api: FakeApi | null;
@@ -46,11 +50,16 @@ export const test = base.extend<Fixtures & Options>({
     },
     { auto: true },
   ],
-  fakeApi: async ({ api }, use) => {
-    test.skip(api === null, "estado forçado só existe com a API falsa (modo local)");
-    if (api !== null) {
-      await use(api);
+  fakeApi: async ({ api }, use, testInfo) => {
+    if (!testInfo.tags.includes(FAKE_API_TAG)) {
+      throw new Error(`teste que usa a API falsa precisa da tag ${FAKE_API_TAG} no título`);
     }
+    if (api === null) {
+      throw new Error(
+        `${FAKE_API_TAG} coletado sem a API falsa: o modo remoto deveria excluir a tag`,
+      );
+    }
+    await use(api);
   },
 });
 

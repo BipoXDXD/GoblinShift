@@ -9,7 +9,7 @@ const WCAG_22_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 for (const theme of THEMES) {
   for (const screen of SCREENS) {
-    test(`${screen.name}, tema ${theme}: zero violações do axe, contraste incluído`, async ({
+    test(`${screen.name}, tema ${theme}: zero violações do axe, contraste incluído @fake-api`, async ({
       page,
       fakeApi,
     }) => {

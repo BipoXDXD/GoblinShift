@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { ExecucaoPage } from "../pages/ExecucaoPage";
 import { expect, test } from "../support/test";
 
-test("excluir resultados tira os downloads e diz por quê", async ({ page, fakeApi }) => {
+test("excluir resultados tira os downloads e diz por quê @fake-api", async ({ page, fakeApi }) => {
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "succeeded" }));
   const results = page.getByRole("region", { name: "Resultados" });

@@ -15,6 +15,8 @@ from executor_ctl.docker_cli import (
     parse_inspect,
 )
 
+pytestmark = pytest.mark.host_python
+
 NEVER = "0001-01-01T00:00:00Z"
 STARTED = "2026-10-14T04:10:16.315791338Z"
 FINISHED = "2026-10-14T04:10:46.1Z"

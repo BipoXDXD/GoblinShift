@@ -8,7 +8,7 @@
 //   minuto vale por conta (issue #338, specKeys.ts), e a chave única vira só o recurso de quem roda
 //   à mão.
 // - VPS (E2E_VPS=1, com E2E_BASE_URL): só specs/vps.spec.ts, as jornadas de leitura, no Chromium e
-//   no Firefox. A chave é opcional: sem ela, as jornadas que exigem conta são puladas com o motivo.
+//   no Firefox. A chave é opcional: sem ela, as jornadas que exigem conta (@conta) não são coletadas.
 import { randomUUID } from "node:crypto";
 
 import { claimArtifactsDir } from "./artifactsDir.ts";

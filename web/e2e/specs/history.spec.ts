@@ -36,7 +36,7 @@ test("a execução criada na Bancada abre pela Oficina e pelo Histórico", async
   await expect(page).toHaveURL(runUrl);
 });
 
-test("Carregar mais traz a página seguinte e anuncia quantas chegaram", async ({
+test("Carregar mais traz a página seguinte e anuncia quantas chegaram @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -53,7 +53,7 @@ test("Carregar mais traz a página seguinte e anuncia quantas chegaram", async (
   await expect(page.getByRole("button", { name: "Carregar mais" })).toHaveCount(0);
 });
 
-test("na última página, o foco segue para a primeira linha nova e o fim da lista é anunciado", async ({
+test("na última página, o foco segue para a primeira linha nova e o fim da lista é anunciado @fake-api", async ({
   page,
   fakeApi,
 }) => {
@@ -80,7 +80,7 @@ test("na última página, o foco segue para a primeira linha nova e o fim da lis
   ).toHaveCount(1);
 });
 
-test("filtrar por estado vai para a URL, sobrevive ao reload e só lista esse estado", async ({
+test("filtrar por estado vai para a URL, sobrevive ao reload e só lista esse estado @fake-api", async ({
   page,
   fakeApi,
 }) => {

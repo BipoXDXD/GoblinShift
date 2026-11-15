@@ -13,6 +13,8 @@ from acceptance.run import MAINTENANCE_CRITERION, Outcome
 
 from tests.acceptance.test_run import FakeDocker
 
+pytestmark = pytest.mark.host_python
+
 EXPECTED = {
     "recipe_id": "image-forge",
     "recipe_version": 1,

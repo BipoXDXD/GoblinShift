@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.host_python
+
 ROOT = Path(__file__).resolve().parents[2]
 BACKUP_DIR = ROOT / "deploy" / "backup"
 INSTALLED_SCRIPT = Path("/usr/local/lib/goblinshift/backup/pg-backup.sh")

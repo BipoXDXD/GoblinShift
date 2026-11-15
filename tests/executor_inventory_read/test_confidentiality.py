@@ -14,6 +14,8 @@ from executor_ctl import service
 from .test_snapshot import A, policy
 from .test_witness import ATTEMPT, DockerBoundary, binding, cfg, witness_module
 
+pytestmark = pytest.mark.host_python
+
 
 def test_sink_exception_is_closed_at_existing_http_error_boundary(
     tmp_path: Path,
