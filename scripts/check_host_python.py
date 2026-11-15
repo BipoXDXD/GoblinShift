@@ -1,12 +1,10 @@
 """Confere que os pacotes de deploy/ que rodam no Python do host funcionam nele (3.12).
 
-O ruff só pega sintaxe nova e o pytest do CI roda no Python da imagem: uma função da stdlib
-que só existe a partir do 3.13 passaria pelos dois e quebraria no host com AttributeError.
-Este script roda no próprio 3.12 (job "Scripts do host" do CI) e faz duas coisas:
+O Vermin verifica sintaxe e APIs da stdlib. O mypy usa os tipos da stdlib do 3.12 e
+alcança também argumentos de métodos cuja versão do Vermin não conhece.
 
-1. o vermin aponta qualquer API ou sintaxe que exija versão acima do host;
-2. cada módulo é importado, o que pega erro de tempo de importação que o vermin não vê
-   (anotação sem aspas avaliada na definição, por exemplo).
+O modo `--imports-only` roda com `python -I -S -B`, antes de instalar dependências no CI.
+Assim, cada módulo precisa importar com a stdlib do host e sem depender do site-packages.
 
 Sem argumentos, confere os pacotes marcados como `py312` em
 `[tool.ruff.per-file-target-version]` do pyproject.toml, que fica sendo a única lista deles.
@@ -34,6 +32,9 @@ WRONG_PYTHON_EXIT = 2
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Confere os pacotes do host no Python do host.")
     parser.add_argument("paths", nargs="*", type=Path, help="pastas (padrão: as do host)")
+    parser.add_argument(
+        "--imports-only", action="store_true", help="valida imports só com a stdlib"
+    )
     args = parser.parse_args(argv)
 
     if _running_python() != HOST_PYTHON:
@@ -41,12 +42,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"precisa rodar no Python {expected}, veio {sys.version}", file=sys.stderr)
         return WRONG_PYTHON_EXIT
     paths: list[Path] = args.paths or host_paths()
-    report = version_floor_report(paths)
-    failures = import_failures(paths)
-    for problem in [report, *failures]:
-        if problem:
-            print(problem, file=sys.stderr)
-    return 1 if report or failures else 0
+    if args.imports_only:
+        if not (sys.flags.isolated and sys.flags.no_site):
+            parser.error("rode --imports-only com python -I -S -B")
+        failures = import_failures(paths)
+    else:
+        failures = [
+            report for report in (version_floor_report(paths), type_check_report(paths)) if report
+        ]
+    for problem in failures:
+        print(problem, file=sys.stderr)
+    return 1 if failures else 0
 
 
 def host_paths() -> list[Path]:
@@ -65,7 +71,7 @@ def host_paths() -> list[Path]:
 
 def version_floor_report(paths: Sequence[Path]) -> str:
     """Relato do vermin quando algo exige Python acima do host; vazio quando tudo cabe."""
-    result = subprocess.run(  # noqa: S603 - vermin do mesmo ambiente, argumentos fixos
+    return _failure_report(
         [
             sys.executable,
             "-c",
@@ -75,8 +81,22 @@ def version_floor_report(paths: Sequence[Path]) -> str:
             "--violations",
             "--eval-annotations",
             "--no-parse-comments",
-            *(str(path) for path in paths),
         ],
+        paths,
+    )
+
+
+def type_check_report(paths: Sequence[Path]) -> str:
+    """O mypy usa as assinaturas da stdlib da versão alvo, mesmo nos testes que rodam em 3.14."""
+    return _failure_report(
+        [sys.executable, "-m", "mypy", "--python-version", _dotted(HOST_PYTHON)],
+        paths,
+    )
+
+
+def _failure_report(command: Sequence[str], paths: Sequence[Path]) -> str:
+    result = subprocess.run(  # noqa: S603 - ferramentas no mesmo ambiente, argumentos fixos
+        [*command, *(str(path) for path in paths)],
         check=False,
         capture_output=True,
         text=True,
@@ -84,7 +104,7 @@ def version_floor_report(paths: Sequence[Path]) -> str:
     if result.returncode == 0:
         return ""
     report = f"{result.stdout}\n{result.stderr}".strip()
-    return report or f"vermin falhou (código {result.returncode})"
+    return report or f"checagem falhou (código {result.returncode})"
 
 
 def import_failures(paths: Sequence[Path]) -> list[str]:

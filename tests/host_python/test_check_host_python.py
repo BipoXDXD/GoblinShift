@@ -56,6 +56,27 @@ def test_api_que_existe_no_312_passa_no_piso(tmp_path: Path) -> None:
     assert check_host_python.version_floor_report([package]) == ""
 
 
+def test_mypy_recusa_argumento_que_so_existe_no_313(tmp_path: Path) -> None:
+    package = _package(
+        tmp_path,
+        "from pathlib import Path\n\n"
+        "def read(path: Path) -> str:\n"
+        '    return path.read_text(newline="")\n',
+    )
+
+    assert check_host_python.version_floor_report([package]) == ""
+    assert 'Unexpected keyword argument "newline"' in check_host_python.type_check_report([package])
+
+
+def test_imports_only_exige_um_interpretador_isolado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(check_host_python, "_running_python", lambda: check_host_python.HOST_PYTHON)
+
+    with pytest.raises(SystemExit, match="2"):
+        check_host_python.main(["--imports-only"])
+
+
 def test_as_pastas_do_host_sao_as_py312_do_pyproject() -> None:
     paths = check_host_python.host_paths()
 

@@ -101,11 +101,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
-      - name: Instalar pytest, PyYAML, cryptography e vermin (hashes conferidos)
+      - name: Importar os pacotes com o Python limpo do host
+        run: python -I -S -B scripts/check_host_python.py --imports-only
+      - name: Instalar ferramentas de análise e de teste (hashes conferidos)
         run: python -m pip install --disable-pip-version-check --require-hashes --only-binary ':all:' -r tests/host_python/requirements.txt
-      - name: Piso de versão e importação dos pacotes do host
-        # Recusa rodar fora do 3.12 e falha com API ou sintaxe acima dele (vermin) ou com módulo
-        # que não importa.
+      - name: Piso de versão dos pacotes do host
+        # Vermin confere a versão mínima. O mypy usa as assinaturas da stdlib do Python 3.12.
         run: python scripts/check_host_python.py
       - name: Testes dos pacotes do host
         # O shell bash usa pipefail. Se o grep falhar, o job para antes de chamar o pytest.
@@ -483,6 +484,7 @@ jobs:
       packages: write
     outputs:
       tag: ${{ steps.vars.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -527,6 +529,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -574,6 +578,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -643,6 +649,9 @@ jobs:
       - name: Apontar a main para as imagens deste commit
         env:
           GH_TOKEN: ${{ github.token }}
+          APP_DIGEST: ${{ needs.image.outputs.digest }}
+          EXECUTOR_DIGEST: ${{ needs.executor-image.outputs.digest }}
+          WEB_DIGEST: ${{ needs.web-image.outputs.digest }}
         shell: bash
         # Com uma fonte só, o imagetools copia o índice multiplataforma como está; o digest
         # conferido no fim prova isso. Um push novo na main cancela esta execução (concorrência
@@ -654,11 +663,18 @@ jobs:
             echo "A main avançou. As tags ficam para o CI do commit atual."
             exit 0
           fi
-          tag="sha-${GITHUB_SHA::12}"
-          for name in goblinshift goblinshift-executor goblinshift-web; do
-            image="ghcr.io/bipoxdxd/$name"
-            docker buildx imagetools create --tag "$image:main" "$image:$tag"
-            esperado=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:$tag")
+          images=(goblinshift goblinshift-executor goblinshift-web)
+          digests=("$APP_DIGEST" "$EXECUTOR_DIGEST" "$WEB_DIGEST")
+          for digest in "${digests[@]}"; do
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo '::error::Digest ausente ou inválido nos outputs dos builds'
+              exit 1
+            fi
+          done
+          for index in "${!images[@]}"; do
+            image="ghcr.io/bipoxdxd/${images[index]}"
+            esperado="${digests[index]}"
+            docker buildx imagetools create --tag "$image:main" "$image@$esperado"
             obtido=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:main")
             if [ "$obtido" != "$esperado" ]; then
               echo "::error::$image:main aponta para $obtido, e não para $esperado"

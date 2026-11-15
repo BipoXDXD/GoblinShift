@@ -140,7 +140,7 @@ markers = [
     "openobserve: SLOs e alertas contra OpenObserve e Collector reais (precisa de Docker)",
     "needs_root: precisa de root no Linux; roda só no passo com sudo do job Verificações (CI)",
     "host_installer: instaladores de deploy/ como root num container Debian (precisa de Docker)",
-    "host_python: roda também no Python do host (3.12), só com stdlib, pytest, PyYAML, cryptography e vermin",
+    "host_python: roda também no Python do host (3.12), só com stdlib, pytest, PyYAML, cryptography, vermin e mypy",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

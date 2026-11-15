@@ -18,6 +18,7 @@ HOST_JOB = "host-python"
 TAG_JOB = "tag-main"
 HOST_PYTHON = "3.12"
 CHECKER = "python scripts/check_host_python.py"
+CLEAN_IMPORTS = f"python -I -S -B {CHECKER.removeprefix('python ')} --imports-only"
 HOST_TEST_DIRS = (
     "tests/acceptance",
     "tests/executor_ctl",
@@ -59,7 +60,11 @@ NOT_HOST_PYTHON = {
 # Jobs que não são portão da `:main`: o deploy legado, que nunca roda, e o que depende dele.
 NOT_GATES = {"deploy", "vps-smoke", TAG_JOB}
 MAIN_TAG = re.compile(r":main\b")
-IMAGES = ("goblinshift", "goblinshift-executor", "goblinshift-web")
+IMAGE_JOBS = [
+    ("image", "goblinshift", "APP_DIGEST"),
+    ("executor-image", "goblinshift-executor", "EXECUTOR_DIGEST"),
+    ("web-image", "goblinshift-web", "WEB_DIGEST"),
+]
 
 
 def _jobs() -> dict[str, dict[str, Any]]:
@@ -113,6 +118,13 @@ def test_job_do_host_instala_so_o_que_tem_hash() -> None:
 
     assert "--require-hashes" in install
     assert "-r tests/host_python/requirements.txt" in install
+
+
+def test_imports_do_host_rodam_isolados_antes_de_instalar_dependencias() -> None:
+    runs = _runs(HOST_JOB)
+
+    assert CLEAN_IMPORTS in runs.splitlines()
+    assert runs.index(CLEAN_IMPORTS) < runs.index("pip install")
 
 
 def test_job_do_host_roda_o_checador_e_os_testes_marcados() -> None:
@@ -171,25 +183,38 @@ def test_tag_main_so_no_push_da_main() -> None:
     )
 
 
-@pytest.mark.parametrize("image", IMAGES)
-def test_tag_main_aponta_cada_imagem_para_a_tag_do_commit(image: str) -> None:
+@pytest.mark.parametrize(("job", "image", "env_var"), IMAGE_JOBS)
+def test_tag_main_publica_os_digests_verificados_por_cada_build(
+    job: str, image: str, env_var: str
+) -> None:
+    jobs = _jobs()
+    image_job = jobs[job]
+    assert image_job["outputs"]["digest"] == "${{ steps.build.outputs.digest }}"
+    verify_step = next(
+        step
+        for step in image_job["steps"]
+        if "scripts/docker-build.sh published" in step.get("run", "")
+    )
+    assert verify_step["env"]["IMAGE_REF"] == (
+        f"ghcr.io/bipoxdxd/{image}@${{{{ steps.build.outputs.digest }}}}"
+    )
+
+    step = next(step for step in jobs[TAG_JOB]["steps"] if "run" in step)
+    assert step["env"][env_var] == f"${{{{ needs.{job}.outputs.digest }}}}"
+    assert image in step["run"]
+    assert f'"${env_var}"' in step["run"]
+    assert 'imagetools create --tag "$image:main" "$image@$esperado"' in step["run"]
+
+
+def test_tag_main_confere_digests_antes_e_depois_da_promocao() -> None:
     runs = _runs(TAG_JOB)
-    loop = next(line for line in runs.splitlines() if line.strip().startswith("for name in "))
-
-    assert image in loop.removesuffix("; do").split()[3:]
-    assert 'tag="sha-${GITHUB_SHA::12}"' in runs
-    assert 'image="ghcr.io/bipoxdxd/$name"' in runs
-    assert 'imagetools create --tag "$image:main" "$image:$tag"' in runs
-
-
-def test_tag_main_confere_que_a_main_ficou_com_o_digest_do_commit() -> None:
-    runs = [line.strip() for line in _runs(TAG_JOB).splitlines()]
+    check = 'if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then'
+    assert runs.index(check) < runs.index("exit 1") < runs.index("imagetools create")
+    assert 'esperado="${digests[index]}"' in runs
     inspect = "docker buildx imagetools inspect --format '{{.Manifest.Digest}}'"
-
-    assert f'esperado=$({inspect} "$image:$tag")' in runs
     assert f'obtido=$({inspect} "$image:main")' in runs
-    assert 'if [ "$obtido" != "$esperado" ]; then' in runs
-    assert "exit 1" in runs
+    mismatch = 'if [ "$obtido" != "$esperado" ]; then'
+    assert runs.index("imagetools create") < runs.index(mismatch) < runs.rindex("exit 1")
 
 
 def test_tag_main_confere_a_ponta_antes_de_publicar() -> None:
