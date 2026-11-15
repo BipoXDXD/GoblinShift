@@ -125,7 +125,7 @@ jobs:
           marca='^pytestmark = (\[)?pytest\.mark\.host_python\b'
           marcados=$(grep -rlE --include='test_*.py' "$marca" tests/backup tests/openobserve | sort)
           mapfile -t modulos <<< "$marcados"
-          python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --noconftest -m host_python "${modulos[@]}"
+          python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --noconftest -m "host_python and not needs_root" "${modulos[@]}"
 
   openobserve:
     name: SLOs e alertas (OpenObserve)

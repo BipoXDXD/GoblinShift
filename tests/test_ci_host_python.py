@@ -124,7 +124,8 @@ def test_job_do_host_roda_o_checador_e_os_testes_marcados() -> None:
     assert all("-p tests.skip_guard --fail-on-skip" in command for command in pytest_commands)
     assert "--confcutdir=tests/executor_ctl" in pytest_commands[0]
     assert '-m "host_python and not needs_root"' in pytest_commands[0]
-    assert "--noconftest -m host_python" in pytest_commands[1]
+    assert "--noconftest" in pytest_commands[1]
+    assert '-m "host_python and not needs_root"' in pytest_commands[1]
     assert all(directory in runs for directory in (*HOST_TEST_DIRS, *ISOLATED_TEST_DIRS))
 
 
