@@ -186,6 +186,23 @@ def test_stamp_em_outra_revisao_em_producao_e_recusado(at_head: Settings) -> Non
     assert _db_version(at_head) == _head()
 
 
+@pytest.mark.parametrize("offline", [False, True], ids=["online", "sql"])
+@pytest.mark.parametrize("base", [False, True], ids=["anterior", "base"])
+def test_stamp_com_head_e_outro_destino_em_producao_e_recusado(
+    at_head: Settings, offline: bool, base: bool
+) -> None:
+    other = "base" if base else _previous()
+    args = (f"{_head()}:head", other, "--sql") if offline else ("head", other)
+    unreachable = at_head.model_copy(update={"db_name": "banco_que_nao_existe"})
+
+    result = _alembic(unreachable, "stamp", *args)
+
+    assert result.returncode != 0
+    assert "produção" in result.stderr
+    assert all(line.startswith("FAILED:") for line in result.stdout.splitlines() if line.strip())
+    assert _db_version(at_head) == _head()
+
+
 def test_stamp_head_com_banco_a_frente_avisa_sem_regravar_a_versao(at_head: Settings) -> None:
     _stamp_raw(at_head, NEWER_REVISION)
 

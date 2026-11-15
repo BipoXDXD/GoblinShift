@@ -10,6 +10,7 @@ migrar. Em produção o único destino aceito é o head: descer o schema é rest
 """
 
 import logging
+from collections.abc import Sequence
 from logging.config import fileConfig
 
 from alembic import command, context
@@ -28,6 +29,7 @@ from goblinshift.platform.schema import read_db_heads
 from goblinshift.platform.settings import Settings
 
 config = context.config
+cli_command = getattr(config.cmd_opts, "cmd", (None,))[0]
 if config.config_file_name is not None:
     # Sem desligar os loggers já criados: no mesmo processo (testes, CLI), o padrão do
     # fileConfig silenciaria para sempre os logs da aplicação importados antes da migração.
@@ -76,8 +78,6 @@ def _check_production_destination(
 ) -> None:
     if settings.environment != "production":
         return
-    # O CLI do Alembic põe o comando em cmd_opts.cmd, inclusive no modo --sql.
-    cli_command = getattr(config.cmd_opts, "cmd", (None,))[0]
     if cli_command is command.downgrade or (destination is not None and destination != image_heads):
         raise CommandError(
             "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
@@ -85,20 +85,28 @@ def _check_production_destination(
 
 
 def _destination(script: ScriptDirectory) -> frozenset[str] | None:
-    """Destino do comando resolvido ("head" vira a revisão, "base" vazio); None sem destino."""
-    try:
-        argument = context.get_revision_argument()
-    except KeyError:
-        # `current`, `history` e afins não têm destino.
-        return None
-    # O `stamp` passa o destino como tupla, que o Alembic devolve sem resolver ("head" literal).
-    elements = argument if isinstance(argument, tuple) else (argument,)
+    """Resolve todos os destinos do comando, reservando None para inspeções sem destino."""
+    elements: Sequence[str | None]
+    options = config.cmd_opts
+    if cli_command is command.stamp and options is not None:
+        # get_revision_argument normaliza a tupla e pode descartar elementos após o primeiro.
+        elements = options.revisions
+        if context.is_offline_mode():
+            elements = [revision.rsplit(":", 1)[-1] for revision in options.revisions]
+    else:
+        try:
+            argument = context.get_revision_argument()
+        except KeyError:
+            return None
+        elements = argument if isinstance(argument, tuple) else (argument,)
     revisions: set[str] = set()
     for element in elements:
         resolved = script.as_revision_number(element) if element is not None else None
-        if isinstance(resolved, str):
+        if resolved is None:
+            revisions.add("base")
+        elif isinstance(resolved, str):
             revisions.add(resolved)
-        elif resolved is not None:
+        else:
             revisions.update(resolved)
     return frozenset(revisions)
 

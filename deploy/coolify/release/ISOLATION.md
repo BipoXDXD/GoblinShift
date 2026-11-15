@@ -113,8 +113,8 @@ Rollback do aplicativo continua pelo procedimento existente, com backup e schema
 bancos, volumes nem versões de schema automaticamente.
 
 O `migrate` tolera o banco numa revisão que a imagem não conhece: avisa e sai com 0, sem migrar
-(ADR 056). Rollback do aplicativo para antes de d02b8d86 exige restaurar o banco: a imagem anterior
-falha no `migrate` com o schema mais novo (um rollback para a 962d28f1 continua quebrando).
+(ADR 056). Se a imagem escolhida para o rollback for anterior a d02b8d86 e não reconhecer a revisão
+atual do banco, restaure o banco para uma revisão compatível antes de iniciar essa imagem.
 
 ## Reconciliação de falhas e estados pendentes
 

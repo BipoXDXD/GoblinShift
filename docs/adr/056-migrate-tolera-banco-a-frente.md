@@ -23,15 +23,15 @@ Duas outras lacunas: nada impedia um `alembic downgrade` com o ambiente de produ
 Opção C.
 
 - **Banco à frente.** Com o destino igual ao head da imagem (`upgrade head` ou `stamp head`), o `env.py` lê as revisões do banco antes de migrar. Uma revisão que a imagem não conhece gera um WARN no stderr, com a revisão do banco e o head da imagem, e o comando sai com 0 sem migrar nem regravar a versão. Qualquer outro erro do Alembic, inclusive banco inacessível, continua falhando.
-- **Produção.** Com `GS_ENVIRONMENT=production`, o único destino aceito é o head da imagem. O CLI recusa todo `downgrade`, inclusive para o head e com `--sql`. Outros destinos são recusados antes de conectar ou emitir SQL. Comandos de inspeção sem destino (`current`, `check`, `history`) continuam permitidos para conferir a revisão do banco. `stamp head` é aceito para recuperação manual: com o banco atrás do head ele marca a versão sem rodar as migrações pendentes. Descer o schema em produção é restauração de backup (ADR 022).
+- **Produção.** Com `GS_ENVIRONMENT=production`, o único destino aceito pelo CLI é o head da imagem. Todo `downgrade` é recusado, inclusive para o head e com `--sql`. Todos os destinos de um `stamp` são conferidos antes de conectar ou emitir SQL. Comandos de inspeção sem destino (`current`, `check`, `history`) continuam permitidos para conferir a revisão do banco. `stamp head` é aceito para recuperação manual: com o banco atrás do head ele marca a versão sem rodar as migrações pendentes. Descer o schema em produção é restauração de backup (ADR 022).
 - **Transação única.** Todas as revisões pendentes rodam numa transação só, com `statement_timeout` desligado nela: uma falha desfaz o lote inteiro, e o banco fica na revisão em que estava. A leitura das revisões fecha a própria transação implícita antes, para que o `begin_transaction` do Alembic não entre nela.
 - **Contract.** `tests/test_migrations_contract.py` varre o `upgrade()` de cada migration e recusa `drop_column`, `drop_table`, `rename_table`, `alter_column(new_column_name=...)` e SQL literal via `execute` ou `exec_driver_sql` com DROP/RENAME de coluna ou tabela. Em `ALTER TABLE`, confere cada ação da lista, com ou sem `COLUMN`, exceto as operações sobre constraint, default, NOT NULL, identity e expression. A marca `# contract: <motivo>` precisa ser comentário Python na linha da operação ou em linha própria logo acima. O `downgrade()` fica de fora.
 
 ## Consequências
 
-- Um rollback do app para uma imagem que já tem esta mudança passa pelo `migrate`. Um rollback para uma imagem anterior a ela continua travando no `migrate` e exige restaurar o banco (ver `ISOLATION.md`).
+- Um rollback do app para uma imagem que já tem esta mudança tolera revisões mais novas no `migrate`. Ao voltar para uma imagem anterior ao wrapper que desconhece a revisão atual, é preciso restaurar o banco para uma revisão compatível (ver `ISOLATION.md`).
 - O WARN é o único sinal de que o schema está à frente da imagem: quem acompanha o rollback deve conferi-lo no log do `migrate`.
-- O teste de contract é estático: SQL montado em variável ou f-string e operação dentro de função auxiliar chamada pelo `upgrade()` escapam dele. Ele peca pelo lado seguro: `DROP COLUMN` num comentário SQL também pede a marca. A revisão do PR continua valendo.
+- O teste de contract é estático. Para SQL literal, separa comentários e valores entre aspas dos delimitadores de comando. Corpos de `DO` mantêm a conferência conservadora. SQL montado em variável ou f-string e operações em funções auxiliares continuam a exigir revisão manual.
 
 ## Compliance
 
