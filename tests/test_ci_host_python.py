@@ -34,15 +34,8 @@ HOST_PACKAGE_TESTS = {
     "openobserve": "tests/openobserve",
     "tls_check": "tests/tls_check",
 }
-# Pastas de pacotes do host que ficam fora do job, e por quê. O conftest de cada uma carrega
-# dependências da imagem já no topo, então nenhum módulo delas roda no 3.12, nem os que só
-# usam a stdlib (como test_budget e test_provision_errors): esses rodam só no 3.14. O
-# checador ainda confere o piso de versão e a importação desses pacotes no 3.12.
-NOT_HOST_DIRS = {
-    "tests/backup": "o conftest sobe o PostgreSQL e importa a aplicação",
-    "tests/openobserve": "o conftest importa OpenTelemetry e testcontainers",
-}
-HOST_MARKER = "pytest.mark.host_python"
+ISOLATED_TEST_DIRS = ("tests/backup", "tests/openobserve")
+HOST_MARKER = re.compile(r"^pytestmark = (\[)?pytest\.mark\.host_python\b", re.MULTILINE)
 # Módulos dessas pastas que não rodam no Python do host, e por quê.
 NOT_HOST_PYTHON = {
     "tests/acceptance/test_chaos.py": "compara com o CSV Janitor, que é da aplicação",
@@ -53,6 +46,15 @@ NOT_HOST_PYTHON = {
     "tests/executor_ctl/test_integration.py": "Docker real (marcador executor_ctl)",
     "tests/executor_ctl/test_capabilities.py": "instalador como root no Debian (host_installer)",
     "tests/executor_ctl/test_policy_native.py": "precisa de runner Linux com root",
+    "tests/backup/test_install.py": "instalador como root no Debian (host_installer)",
+    "tests/backup/test_pg_backup.py": "integração com PostgreSQL e S3 local (backup)",
+    "tests/openobserve/test_alert_firing.py": "integração com OpenObserve e Collector reais",
+    "tests/openobserve/test_catalog.py": "compara a configuração com a aplicação",
+    "tests/openobserve/test_cli.py": "inclui cenários com OpenObserve e Collector reais",
+    "tests/openobserve/test_provision.py": "integração com OpenObserve e Collector reais",
+    "tests/openobserve/test_saturation_runbook.py": "exercita a aplicação com uvicorn",
+    "tests/openobserve/test_scheduler_round.py": "importa os cenários de integração do agendador",
+    "tests/openobserve/test_sql.py": "integração de SQL com OpenObserve e Collector reais",
 }
 # Jobs que não são portão da `:main`: o deploy legado, que nunca roda, e o que depende dele.
 NOT_GATES = {"deploy", "vps-smoke", TAG_JOB}
@@ -73,7 +75,7 @@ def _runs(job_id: str) -> str:
 def _host_test_modules() -> list[str]:
     return sorted(
         str(path.relative_to(ROOT))
-        for directory in HOST_TEST_DIRS
+        for directory in (*HOST_TEST_DIRS, *ISOLATED_TEST_DIRS)
         for path in (ROOT / directory).rglob("test_*.py")
     )
 
@@ -117,29 +119,30 @@ def test_job_do_host_roda_o_checador_e_os_testes_marcados() -> None:
     runs = _runs(HOST_JOB)
 
     assert CHECKER in runs.splitlines()
-    assert '-m "host_python and not needs_root"' in runs
-    # O conftest de tests/ fica fora (--confcutdir): o guard de pulados entra como plugin.
-    assert "-p tests.skip_guard --fail-on-skip" in runs
-    assert all(directory in runs for directory in HOST_TEST_DIRS)
-    # Sem o `ls`, uma pasta renomeada some do grep em silêncio e o job passa com menos testes.
-    assert 'ls -d "${pastas[@]}" > /dev/null' in runs.splitlines()
+    pytest_commands = [line for line in runs.splitlines() if line.startswith("python -m pytest ")]
+    assert len(pytest_commands) == 2
+    assert all("-p tests.skip_guard --fail-on-skip" in command for command in pytest_commands)
+    assert "--confcutdir=tests/executor_ctl" in pytest_commands[0]
+    assert '-m "host_python and not needs_root"' in pytest_commands[0]
+    assert "--noconftest -m host_python" in pytest_commands[1]
+    assert all(directory in runs for directory in (*HOST_TEST_DIRS, *ISOLATED_TEST_DIRS))
 
 
-def test_todo_pacote_do_host_tem_seus_testes_no_job_ou_explica_por_que_nao() -> None:
+def test_todo_pacote_do_host_tem_testes_no_job() -> None:
     assert set(HOST_PACKAGE_TESTS) == _host_packages()
-    for directory in HOST_PACKAGE_TESTS.values():
-        assert (directory in HOST_TEST_DIRS) != (directory in NOT_HOST_DIRS), directory
+    assert set(HOST_PACKAGE_TESTS.values()) <= set(HOST_TEST_DIRS) | set(ISOLATED_TEST_DIRS)
 
 
-@pytest.mark.parametrize("directory", HOST_TEST_DIRS)
+@pytest.mark.parametrize("directory", (*HOST_TEST_DIRS, *ISOLATED_TEST_DIRS))
 def test_pasta_do_job_existe_e_tem_testes(directory: str) -> None:
-    # Pasta renomeada some do grep do job sem erro; aqui ela reprova.
-    assert any((ROOT / directory).rglob("test_*.py")), directory
+    assert any(
+        HOST_MARKER.search(path.read_text()) for path in (ROOT / directory).rglob("test_*.py")
+    ), directory
 
 
 @pytest.mark.parametrize("module", _host_test_modules())
 def test_modulo_do_host_roda_no_python_do_host_ou_explica_por_que_nao(module: str) -> None:
-    marked = HOST_MARKER in (ROOT / module).read_text()
+    marked = HOST_MARKER.search((ROOT / module).read_text()) is not None
 
     assert marked != (module in NOT_HOST_PYTHON)
 
@@ -188,5 +191,12 @@ def test_tag_main_confere_que_a_main_ficou_com_o_digest_do_commit() -> None:
     assert "exit 1" in runs
 
 
+def test_tag_main_confere_a_ponta_antes_de_publicar() -> None:
+    runs = _runs(TAG_JOB)
+    assert 'gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main"' in runs
+    stale = 'if [ "$ponta" != "$GITHUB_SHA" ]; then'
+    assert runs.index(stale) < runs.index("exit 0") < runs.index("imagetools create")
+
+
 def test_tag_main_so_pode_escrever_pacotes() -> None:
-    assert _jobs()[TAG_JOB]["permissions"] == {"packages": "write"}
+    assert _jobs()[TAG_JOB]["permissions"] == {"contents": "read", "packages": "write"}

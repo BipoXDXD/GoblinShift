@@ -83,7 +83,8 @@ def version_floor_report(paths: Sequence[Path]) -> str:
     )
     if result.returncode == 0:
         return ""
-    return f"{result.stdout}\n{result.stderr}".strip()
+    report = f"{result.stdout}\n{result.stderr}".strip()
+    return report or f"vermin falhou (código {result.returncode})"
 
 
 def import_failures(paths: Sequence[Path]) -> list[str]:
@@ -108,8 +109,6 @@ def _modules(package_dir: Path) -> list[str]:
     base = package_dir.parent
     names = []
     for file in sorted(package_dir.rglob("*.py")):
-        if file.name == "__main__.py":
-            continue  # executa o CLI ao importar
         parts = file.relative_to(base).with_suffix("").parts
         if parts[-1] == "__init__":
             parts = parts[:-1]

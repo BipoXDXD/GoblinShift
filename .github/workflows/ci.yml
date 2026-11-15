@@ -91,6 +91,9 @@ jobs:
     # deles nesse interpretador. Sem `if`: o gate da publicação exige o sucesso dele.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # O import de dump_check criaria __pycache__ ao lado dos arquivos de configuração do backup.
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -105,19 +108,24 @@ jobs:
         # que não importa.
         run: python scripts/check_host_python.py
       - name: Testes dos pacotes do host
-        # Só os módulos marcados host_python: os outros dessas pastas importam a aplicação.
-        # tests/test_ci_host_python.py confere que todo módulo das pastas está marcado ou explica
-        # por que não. O `ls` derruba o job se uma pasta sumir, o que o grep dentro do `< <(...)`
-        # não faria. O --confcutdir ignora o conftest de tests/ e da raiz (só os das pastas acima
-        # dele), que importa a aplicação. Sem nenhum módulo na lista, o pytest coleta a suíte
-        # inteira e falha na importação: o job não passa vazio.
-        # O guard de pulados vem por `-p tests.skip_guard` (só stdlib e pytest), já que o conftest de
-        # tests/ fica de fora; o que exige root roda no passo com sudo do job Verificações.
+        # O shell bash usa pipefail. Se o grep falhar, o job para antes de chamar o pytest.
+        # O conftest da aplicação fica fora, e os testes com needs_root rodam em Verificações.
+        shell: bash
         run: |
+          marca='^pytestmark = (\[)?pytest\.mark\.host_python\b'
           pastas=(tests/acceptance tests/executor_ctl tests/executor_inventory_read tests/host_python tests/tls_check)
-          ls -d "${pastas[@]}" > /dev/null
-          mapfile -t modulos < <(grep -rlF --include='test_*.py' 'pytest.mark.host_python' "${pastas[@]}" | sort)
+          marcados=$(grep -rlE --include='test_*.py' "$marca" "${pastas[@]}" | sort)
+          mapfile -t modulos <<< "$marcados"
           python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --confcutdir=tests/executor_ctl -m "host_python and not needs_root" "${modulos[@]}"
+      - name: Testes unitários do backup e do OpenObserve
+        # Os conftests destas pastas carregam a aplicação e serviços de integração.
+        # Os módulos marcados aqui exercitam os scripts com fixtures do próprio pytest.
+        shell: bash
+        run: |
+          marca='^pytestmark = (\[)?pytest\.mark\.host_python\b'
+          marcados=$(grep -rlE --include='test_*.py' "$marca" tests/backup tests/openobserve | sort)
+          mapfile -t modulos <<< "$marcados"
+          python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --noconftest -m host_python "${modulos[@]}"
 
   openobserve:
     name: SLOs e alertas (OpenObserve)
@@ -602,7 +610,7 @@ jobs:
         run: scripts/docker-build.sh published "$IMAGE_REF"
 
   tag-main:
-    name: Tag main das imagens
+    name: Imagem e componentes com tag main
     # As tags sha-* saem assim que cada imagem fica pronta, e a publicação pelo Coolify confere o
     # CI inteiro antes de usá-las. A `:main` só passa a apontar para o commit depois de todos os
     # portões: quem puxa `:main` nunca recebe uma imagem que reprovou em algum job.
@@ -623,6 +631,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      contents: read
       packages: write
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -632,11 +641,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Apontar a main para as imagens deste commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         # Com uma fonte só, o imagetools copia o índice multiplataforma como está; o digest
         # conferido no fim prova isso. Um push novo na main cancela esta execução (concorrência
         # do workflow) e pode deixar as imagens em commits diferentes até a próxima execução que
         # passar nos portões, que realinha as três; enquanto isso, todas já passaram nos portões.
         run: |
+          ponta=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [ "$ponta" != "$GITHUB_SHA" ]; then
+            echo "A main avançou. As tags ficam para o CI do commit atual."
+            exit 0
+          fi
           tag="sha-${GITHUB_SHA::12}"
           for name in goblinshift goblinshift-executor goblinshift-web; do
             image="ghcr.io/bipoxdxd/$name"

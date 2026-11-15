@@ -49,7 +49,7 @@ REQUIRED = {
         "Imagem do executor",
         "Imagem do Nginx com a SPA",
         "Scripts do host (Python 3.12)",
-        "Tag main das imagens",
+        "Imagem e componentes com tag main",
     },
 }
 LEGACY_SKIPS = {"Deploy na VPS", "Jornadas na VPS (pós-deploy)"}

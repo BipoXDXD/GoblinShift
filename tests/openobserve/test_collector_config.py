@@ -3,7 +3,10 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.host_python
 
 ROOT = Path(__file__).resolve().parents[2]
 WATCHED = {"/srv/goblinshift/pg", "/srv/goblinshift/storage", "/srv/goblinshift/telemetry"}

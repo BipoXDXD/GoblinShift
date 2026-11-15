@@ -73,10 +73,14 @@ def test_todo_modulo_do_host_importa() -> None:
 
 def test_modulo_que_quebra_ao_importar_e_relatado(tmp_path: Path) -> None:
     package = _package(tmp_path, "raise RuntimeError('quebrado')\n")
+    (package / "__main__.py").write_text("raise RuntimeError('CLI quebrado')\n")
 
     failures = check_host_python.import_failures([package])
 
-    assert failures == [f"{package.name}.modulo: RuntimeError: quebrado"]
+    assert failures == [
+        f"{package.name}.__main__: RuntimeError: CLI quebrado",
+        f"{package.name}.modulo: RuntimeError: quebrado",
+    ]
 
 
 def test_recusa_rodar_fora_do_python_do_host(monkeypatch: pytest.MonkeyPatch) -> None:
