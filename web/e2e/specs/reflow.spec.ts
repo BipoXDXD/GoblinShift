@@ -35,7 +35,7 @@ test("Bancada a 320 px: o nome longo aparece inteiro e a página não rola para 
   await expectFitsDeviceWidth(page, "rolagem lateral na Bancada");
 });
 
-test("Execução a 320 px: o link Baixar com nome longo quebra linha, sem rolagem lateral", async ({
+test("Execução a 320 px: o link Baixar com nome longo quebra linha, sem rolagem lateral @fake-api", async ({
   page,
   fakeApi,
 }) => {

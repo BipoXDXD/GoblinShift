@@ -13,7 +13,7 @@ function notice(page: Page) {
 }
 
 for (const screen of SCREENS) {
-  test(`${screen.name}: a faixa do aviso fica entre a barra e o conteúdo`, async ({
+  test(`${screen.name}: a faixa do aviso fica entre a barra e o conteúdo @fake-api`, async ({
     page,
     fakeApi,
   }) => {

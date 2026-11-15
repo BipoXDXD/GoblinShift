@@ -80,7 +80,7 @@ def test_erro_real_do_alembic_continua_falhando(at_head: Settings) -> None:
     assert "banco_que_nao_existe" in result.stderr
 
 
-@pytest.mark.parametrize("target", ["-1", "base"])
+@pytest.mark.parametrize("target", ["-1", "base", "head"])
 def test_downgrade_em_producao_e_recusado_sem_mexer_no_banco(
     at_head: Settings, target: str
 ) -> None:
@@ -89,6 +89,24 @@ def test_downgrade_em_producao_e_recusado_sem_mexer_no_banco(
     assert result.returncode != 0
     assert "produção" in result.stderr
     assert db_version(at_head) == head_revision()
+
+
+def test_downgrade_sql_em_producao_e_recusado_sem_emitir_ddl(at_head: Settings) -> None:
+    result = run_alembic(at_head, "downgrade", f"{head_revision()}:{previous_revision()}", "--sql")
+
+    assert result.returncode != 0
+    assert "produção" in result.stderr
+    assert "DROP INDEX" not in result.stdout
+    assert db_version(at_head) == head_revision()
+
+
+def test_current_com_revisao_desconhecida_conserva_o_erro(at_head: Settings) -> None:
+    _stamp_raw(at_head, NEWER_REVISION)
+
+    result = run_alembic(at_head, "current")
+
+    assert result.returncode != 0
+    assert NEWER_REVISION in result.stderr
 
 
 def test_downgrade_fora_de_producao_continua_permitido(at_head: Settings) -> None:
@@ -114,6 +132,23 @@ def test_stamp_em_outra_revisao_em_producao_e_recusado(at_head: Settings) -> Non
     assert db_version(at_head) == head_revision()
 
 
+@pytest.mark.parametrize("offline", [False, True], ids=["online", "sql"])
+@pytest.mark.parametrize("base", [False, True], ids=["anterior", "base"])
+def test_stamp_com_head_e_outro_destino_em_producao_e_recusado(
+    at_head: Settings, offline: bool, base: bool
+) -> None:
+    other = "base" if base else previous_revision()
+    args = (f"{head_revision()}:head", other, "--sql") if offline else ("head", other)
+    unreachable = at_head.model_copy(update={"db_name": "banco_que_nao_existe"})
+
+    result = run_alembic(unreachable, "stamp", *args)
+
+    assert result.returncode != 0
+    assert "produção" in result.stderr
+    assert all(line.startswith("FAILED:") for line in result.stdout.splitlines() if line.strip())
+    assert db_version(at_head) == head_revision()
+
+
 def test_stamp_head_com_banco_a_frente_avisa_sem_regravar_a_versao(at_head: Settings) -> None:
     _stamp_raw(at_head, NEWER_REVISION)
 
@@ -121,6 +156,26 @@ def test_stamp_head_com_banco_a_frente_avisa_sem_regravar_a_versao(at_head: Sett
 
     assert result.returncode == 0, result.stderr
     assert NEWER_REVISION in result.stderr
+    assert db_version(at_head) == NEWER_REVISION
+
+
+@pytest.mark.parametrize("mode", ["online", "sql"])
+@pytest.mark.parametrize("operation", ["upgrade", "stamp"])
+def test_destino_qualificado_invalido_nao_aciona_tolerancia(
+    at_head: Settings, operation: str, mode: str
+) -> None:
+    _stamp_raw(at_head, NEWER_REVISION)
+    invalid = f"ramo_inexistente@{head_revision()}"
+    args = (invalid,) if operation == "upgrade" else ("head", invalid)
+    if mode == "sql":
+        args = (f"{head_revision()}:{args[0]}", *args[1:], "--sql")
+
+    result = run_alembic(at_head, operation, *args)
+
+    assert result.returncode != 0
+    assert "ramo_inexistente" in result.stderr
+    assert "WARN" not in result.stderr
+    assert all(line.startswith("FAILED:") for line in result.stdout.splitlines() if line.strip())
     assert db_version(at_head) == NEWER_REVISION
 
 

@@ -103,8 +103,8 @@ test("/termos: o item do sumário leva a seção com folga acima do título e o 
 // WCAG 1.4.10 (Reflow): na largura do celular, nenhum texto legal rola na horizontal. As URLs
 // longas dos .md (60 a 75 caracteres sem espaço) são o caso que vigia.
 for (const path of ["/termos", "/privacidade", "/creditos"]) {
-  test(`${path} cabe na largura do celular, sem rolagem horizontal`, async ({ page }, info) => {
-    test.skip(info.project.name !== "mobile", "a largura estreita é a do projeto mobile");
+  // @mobile: a largura estreita é a do projeto mobile; o desktop não coleta o caso.
+  test(`${path} cabe na largura do celular, sem rolagem horizontal @mobile`, async ({ page }) => {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 

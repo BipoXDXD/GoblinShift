@@ -13,9 +13,11 @@ migrar. Em produção o único destino aceito é o head: descer o schema é rest
 """
 
 import logging
+import re
+from collections.abc import Sequence
 from logging.config import fileConfig
 
-from alembic import context
+from alembic import command, context
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import Connection, Engine
@@ -36,6 +38,7 @@ from goblinshift.platform.schema import read_db_heads
 from goblinshift.platform.settings import Settings
 
 config = context.config
+cli_command = getattr(config.cmd_opts, "cmd", (None,))[0]
 if config.config_file_name is not None:
     # Sem desligar os loggers já criados: no mesmo processo (testes, CLI), o padrão do
     # fileConfig silenciaria para sempre os logs da aplicação importados antes da migração.
@@ -43,17 +46,22 @@ if config.config_file_name is not None:
 
 target_metadata = metadata
 log = logging.getLogger("alembic.env")
+RELATIVE_REVISION = re.compile(r"[+-][0-9]+$")
 
 
 def run_migrations_offline() -> None:
+    settings = Settings()
+    script = ScriptDirectory.from_config(config)
+    _check_production_destination(settings, _destination(script), frozenset(script.get_heads()))
+    lock_timeout_ms = _lock_timeout_ms()
     context.configure(
-        url=Settings().database_url.render_as_string(hide_password=False),
+        url=settings.database_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
         transaction_per_migration=True,
     )
     # O script gerado leva os mesmos limites de sessão que o migrate aplica ao conectar.
-    for statement in session_settings(_lock_timeout_ms()):
+    for statement in session_settings(lock_timeout_ms):
         context.execute(statement)
     with context.begin_transaction():
         context.run_migrations()
@@ -65,11 +73,7 @@ def run_migrations_online() -> None:
     image_heads = frozenset(script.get_heads())
     destination = _destination(script)
     goes_to_head = destination == image_heads
-    # Sem destino (`current`, `check`, `history`) o comando só lê, e vale também em produção.
-    if settings.environment == "production" and destination is not None and not goes_to_head:
-        raise CommandError(
-            "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
-        )
+    _check_production_destination(settings, destination, image_heads)
     lock_timeout_ms = _lock_timeout_ms()
     engine = make_engine(settings)
     try:
@@ -87,9 +91,7 @@ def _migrate(engine: Engine, lock_timeout_ms: int) -> None:
     with engine.connect() as connection:
         for statement in session_settings(lock_timeout_ms):
             connection.exec_driver_sql(statement)
-        # SET de sessão é transacional no PostgreSQL: sem o commit, o rollback da primeira
-        # migration que falhar desfaria os tempos, e a conexão ficaria fora de transação aberta
-        # para o Alembic abrir uma por migration.
+        # O commit preserva os SETs de sessão entre revisões e deixa o Alembic abrir a transação.
         connection.commit()
         context.configure(
             connection=connection,
@@ -114,22 +116,47 @@ def _lock_timeout_ms() -> int:
     return lock_timeout_ms
 
 
+def _check_production_destination(
+    settings: Settings, destination: frozenset[str] | None, image_heads: frozenset[str]
+) -> None:
+    if settings.environment != "production":
+        return
+    if cli_command is command.downgrade or (destination is not None and destination != image_heads):
+        raise CommandError(
+            "em produção o migrate só sobe para o head; descer o schema é restaurar o backup"
+        )
+
+
 def _destination(script: ScriptDirectory) -> frozenset[str] | None:
-    """Destino do comando resolvido ("head" vira a revisão, "base" vazio); None sem destino."""
-    try:
-        argument = context.get_revision_argument()
-    except KeyError:
-        # `current`, `history` e afins não têm destino.
-        return None
-    # O `stamp` passa o destino como tupla, que o Alembic devolve sem resolver ("head" literal).
-    elements = argument if isinstance(argument, tuple) else (argument,)
+    """Resolve todos os destinos do comando, reservando None para inspeções sem destino."""
+    elements: Sequence[str | None]
+    options = config.cmd_opts
+    if options is not None and cli_command in (command.upgrade, command.downgrade, command.stamp):
+        # get_revision_argument perde qualificadores de ramo e pode descartar destinos do stamp.
+        targets: Sequence[str] = (
+            options.revisions if cli_command is command.stamp else (options.revision,)
+        )
+        elements = (
+            [target.rsplit(":", 1)[-1] for target in targets]
+            if context.is_offline_mode()
+            else targets
+        )
+    else:
+        try:
+            argument = context.get_revision_argument()
+        except KeyError:
+            return None
+        elements = argument if isinstance(argument, tuple) else (argument,)
     revisions: set[str] = set()
     for element in elements:
-        resolved = script.as_revision_number(element) if element is not None else None
-        if isinstance(resolved, str):
-            revisions.add(resolved)
-        elif resolved is not None:
-            revisions.update(resolved)
+        # Um destino relativo depende da revisão corrente e segue para o Alembic fora de produção.
+        if element is not None and RELATIVE_REVISION.search(element):
+            revisions.add(element)
+            continue
+        resolved = script.get_revisions(element) if element is not None else ()
+        revisions.update(revision.revision for revision in resolved)
+        if not resolved:
+            revisions.add("base")
     return frozenset(revisions)
 
 
@@ -138,6 +165,9 @@ def _db_is_ahead_of_image(
 ) -> bool:
     """Avisa e devolve True se o banco tem uma revisão que esta imagem não conhece."""
     db_heads = read_db_heads(connection)
+    # A leitura abre uma transação implícita; sem fechá-la, o `begin_transaction` do Alembic
+    # entraria nela, e as migrações seriam desfeitas quando a conexão fechasse.
+    connection.rollback()
     known = frozenset(revision.revision for revision in script.walk_revisions())
     unknown = db_heads - known
     if not unknown:

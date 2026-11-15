@@ -13,6 +13,8 @@ from executor_ctl import images
 from .conftest import MetadataBoundary
 from .test_snapshot import A, policy
 
+pytestmark = pytest.mark.host_python
+
 
 def assert_closed_and_cleanup(
     descriptors: set[int], real_fstat: Callable[[int], os.stat_result]

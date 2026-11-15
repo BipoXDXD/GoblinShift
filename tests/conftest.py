@@ -1,3 +1,5 @@
+import os
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -12,8 +14,20 @@ from testcontainers.community.postgres import PostgresContainer
 from goblinshift.capacity import GLOBAL_STORAGE_MAX_BYTES, Resource
 from goblinshift.capacity.tables import capacity_pool
 from goblinshift.platform.settings import Settings
+from tests.skip_guard import pytest_addoption, pytest_configure  # noqa: F401 (hooks do guard)
 
 POSTGRES_IMAGE = "postgres:18.6-trixie"
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    # `needs_root` sai dos jobs comuns por `-m` e roda no passo com sudo do job Verificações. Se
+    # chegar a rodar sem root, falha alto em vez de pular.
+    if item.get_closest_marker("needs_root") and not _is_linux_root():
+        pytest.fail("teste needs_root fora de root no Linux: rode com sudo e `-m needs_root`")
+
+
+def _is_linux_root() -> bool:
+    return sys.platform == "linux" and os.geteuid() == 0
 
 
 @pytest.fixture(scope="session")

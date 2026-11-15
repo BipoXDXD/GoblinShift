@@ -1,6 +1,6 @@
 """Migration que não consegue o lock desiste em tempo limitado sem segurar a API (ADR 057).
 
-Uma sessão concorrente segura a tabela que a última migration altera. Enquanto a migration
+Uma sessão concorrente segura a tabela que a migration 0018 altera. Enquanto a migration
 espera o lock, as leituras que chegam depois esperam atrás dela; com `lock_timeout` curto essa
 espera fica limitada, e o `migrate` termina com erro em vez de ficar pendurado.
 
@@ -25,14 +25,17 @@ from tests.alembic_cli import (
     alembic_env,
     db_version,
     head_revision,
-    previous_revision,
     run_alembic,
     with_password_file,
 )
 from tests.conftest import downgrade_migrations, run_migrations
 
-# A migration do head acrescenta uma coluna em app_user e precisa de ACCESS EXCLUSIVE nela.
-HOLD_LOCK_SQL = "LOCK TABLE app_user IN SHARE MODE"
+BEFORE_COLUMN_MIGRATION = "0017"
+COLUMN_MIGRATION = "0018"
+# A 0018 acrescenta uma coluna em app_user e precisa de ACCESS EXCLUSIVE nela.
+HOLD_APP_USER_LOCK = "LOCK TABLE app_user IN SHARE MODE"
+# A 0019 constrói um índice comum em object_use, que precisa de SHARE.
+HOLD_OBJECT_USE_LOCK = "LOCK TABLE object_use IN ROW EXCLUSIVE MODE"
 READ_SQL = "SELECT count(*) FROM app_user"
 TEST_LOCK_TIMEOUT_MS = 300
 UPGRADE_ARGS = ("-x", f"lock_timeout_ms={TEST_LOCK_TIMEOUT_MS}", "upgrade", "head")
@@ -45,34 +48,38 @@ RETRY_WARNING = "migration sem o lock"
 
 
 @pytest.fixture
-def one_behind(db_settings: Settings, tmp_path: Path) -> Iterator[Settings]:
+def before_column_migration(db_settings: Settings, tmp_path: Path) -> Iterator[Settings]:
     settings = with_password_file(db_settings, tmp_path)
     run_migrations(settings, "head")
-    downgrade_migrations(settings, "-1")
+    downgrade_migrations(settings, BEFORE_COLUMN_MIGRATION)
     yield settings
     # Outros testes usam o mesmo banco: ele volta ao head.
     run_migrations(settings, "head")
 
 
 def test_migration_sem_o_lock_desiste_em_tempo_limitado_sem_segurar_as_leituras(
-    one_behind: Settings,
+    before_column_migration: Settings,
 ) -> None:
-    with _holding_share_lock(one_behind), _read_waits(one_behind) as waits:
-        result = run_alembic(one_behind, *UPGRADE_ARGS, timeout_s=GIVE_UP_WITHIN_S)
+    settings = before_column_migration
+    with _holding_lock(settings, HOLD_APP_USER_LOCK), _read_waits(settings) as waits:
+        result = run_alembic(settings, *UPGRADE_ARGS, timeout_s=GIVE_UP_WITHIN_S)
 
     assert result.returncode != 0
     assert "lock ocupado em 3 tentativas" in result.stderr
-    assert db_version(one_behind) == previous_revision()
+    assert db_version(settings) == BEFORE_COLUMN_MIGRATION
     assert waits, "nenhuma leitura concluída durante a migration"
     assert max(waits) < MAX_READ_WAIT_S
 
 
-def test_lock_liberado_entre_as_tentativas_conclui_a_migration(one_behind: Settings) -> None:
-    with _holding_share_lock(one_behind) as holder:
+def test_lock_liberado_entre_as_tentativas_conclui_a_migration(
+    before_column_migration: Settings,
+) -> None:
+    settings = before_column_migration
+    with _holding_lock(settings, HOLD_APP_USER_LOCK) as holder:
         process = subprocess.Popen(  # noqa: S603 - CLI do Alembic com argumentos fixos do teste
             alembic_command(*UPGRADE_ARGS),
             cwd=REPO_ROOT,
-            env=alembic_env(one_behind),
+            env=alembic_env(settings),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -92,42 +99,62 @@ def test_lock_liberado_entre_as_tentativas_conclui_a_migration(one_behind: Setti
                 process.wait()
 
     assert process.returncode == 0, stderr
-    assert db_version(one_behind) == head_revision()
+    assert db_version(settings) == head_revision()
+
+
+def test_migration_anterior_fica_aplicada_quando_a_seguinte_perde_o_lock(
+    before_column_migration: Settings,
+) -> None:
+    settings = before_column_migration
+    with _holding_lock(settings, HOLD_OBJECT_USE_LOCK):
+        result = run_alembic(settings, *UPGRADE_ARGS, timeout_s=GIVE_UP_WITHIN_S)
+
+    assert result.returncode != 0
+    assert "lock ocupado em 3 tentativas" in result.stderr
+    assert db_version(settings) == COLUMN_MIGRATION
+
+    resumed = run_alembic(settings, *UPGRADE_ARGS, timeout_s=GIVE_UP_WITHIN_S)
+    assert resumed.returncode == 0, resumed.stderr
+    assert db_version(settings) == head_revision()
 
 
 @pytest.mark.parametrize("lock_timeout_ms", ["0", "-5"])
 def test_lock_timeout_nao_positivo_e_recusado_com_mensagem(
-    one_behind: Settings, lock_timeout_ms: str
+    before_column_migration: Settings, lock_timeout_ms: str
 ) -> None:
     # 0 desliga o limite no PostgreSQL: a migration voltaria a esperar o lock para sempre.
-    result = run_alembic(one_behind, "-x", f"lock_timeout_ms={lock_timeout_ms}", "upgrade", "head")
+    result = run_alembic(
+        before_column_migration, "-x", f"lock_timeout_ms={lock_timeout_ms}", "upgrade", "head"
+    )
 
     assert result.returncode != 0
     assert "lock_timeout_ms precisa ser positivo" in result.stderr
     assert "Traceback" not in result.stderr
-    assert db_version(one_behind) == previous_revision()
+    assert db_version(before_column_migration) == BEFORE_COLUMN_MIGRATION
 
 
-def test_script_offline_leva_os_limites_de_sessao(one_behind: Settings) -> None:
+def test_script_offline_leva_os_limites_de_sessao(
+    before_column_migration: Settings,
+) -> None:
     result = run_alembic(
-        one_behind,
+        before_column_migration,
         *("-x", f"lock_timeout_ms={TEST_LOCK_TIMEOUT_MS}", "upgrade"),
-        *(f"{previous_revision()}:{head_revision()}", "--sql"),
+        *(f"{BEFORE_COLUMN_MIGRATION}:head", "--sql"),
     )
 
     assert result.returncode == 0, result.stderr
     script = result.stdout
     assert f"SET lock_timeout = {TEST_LOCK_TIMEOUT_MS}" in script
     assert script.index("SET lock_timeout") < script.index("ALTER TABLE app_user")
+    assert script.index("SET statement_timeout = 900000") < script.index("ALTER TABLE app_user")
 
 
 @contextmanager
-def _holding_share_lock(settings: Settings) -> Iterator[Connection]:
-    """Uma sessão que segura a tabela em SHARE: deixa ler, mas barra o ALTER TABLE."""
+def _holding_lock(settings: Settings, statement: str) -> Iterator[Connection]:
     engine = create_engine(settings.database_url)
     try:
         with engine.connect() as conn:
-            conn.execute(text(HOLD_LOCK_SQL))
+            conn.execute(text(statement))
             yield conn
             conn.rollback()
     finally:

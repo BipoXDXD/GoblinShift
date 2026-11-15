@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.host_python
+
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "deploy" / "backup" / "lib.sh"
 RESTORE_SCRIPT = ROOT / "deploy" / "backup" / "pg-restore-check.sh"

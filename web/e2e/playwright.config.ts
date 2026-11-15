@@ -1,6 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import { E2E, LOCAL_PORT, NOTICE_BUILD } from "./support/env";
+import {
+  ACCOUNT_TAG,
+  FAKE_API_TAG,
+  KEYBOARD_TAG,
+  MOBILE_TAG,
+  titleTag,
+  REAL_API_TAG,
+} from "./support/tags";
 
 // O build com aviso (npm run e2e:notice) roda a spec do aviso e, com a faixa em toda tela, as de
 // layout shift e de contraste; o build normal não tem aviso e pula a spec dele.
@@ -8,6 +16,12 @@ const NOTICE_SPECS = /(notice|layout-shift|contrast)\.spec\.ts$/;
 const NOTICE_SPEC = /notice\.spec\.ts$/;
 const VPS_SPEC = /vps\.spec\.ts$/;
 const GPU_SUITE = /\bcom GPU\b/;
+// Nenhum caso roda para pular: o que não cabe num projeto ou modo não é coletado nele.
+function excluding(patterns: readonly RegExp[]): { grepInvert?: RegExp } {
+  return patterns.length === 0
+    ? {}
+    : { grepInvert: new RegExp(patterns.map((pattern) => pattern.source).join("|")) };
+}
 // CI separa a renderização pesada; sem fase explícita, a seleção local segue completa.
 const RUN_PHASE = process.env["E2E_PHASE"];
 if (RUN_PHASE !== undefined && !["ui", "gpu", "notice"].includes(RUN_PHASE)) {
@@ -17,7 +31,9 @@ if (RUN_PHASE !== undefined && (E2E.remote || (RUN_PHASE === "notice") !== NOTIC
   throw new Error("E2E_PHASE exige o build local correspondente à fase");
 }
 
-// Contra a VPS (E2E_VPS=1): só as jornadas de leitura, no Chromium e no Firefox, em desktop.
+// Contra a VPS (E2E_VPS=1): só as jornadas de leitura, no Chromium e no Firefox, em desktop. Sem a
+// chave, as que leem dados da conta não são coletadas.
+const VPS_EXCLUDED = excluding(E2E.hasAccount ? [] : [titleTag(ACCOUNT_TAG)]);
 const VPS_PROJECTS = [
   {
     name: "chromium",
@@ -25,6 +41,7 @@ const VPS_PROJECTS = [
       ...devices["Desktop Chrome"],
       viewport: { width: 1280, height: 800 },
     },
+    ...VPS_EXCLUDED,
   },
   {
     name: "firefox",
@@ -32,11 +49,18 @@ const VPS_PROJECTS = [
       ...devices["Desktop Firefox"],
       viewport: { width: 1280, height: 800 },
     },
+    ...VPS_EXCLUDED,
   },
 ];
 
 // Desktop e celular (~400 px, D8), só Chromium: Firefox fica para o job contra a VPS, fora do
-// orçamento do commit stage (plano de fechamento da fatia 7, 4.1).
+// orçamento do commit stage (plano de fechamento da fatia 7, 4.1). Cada caso roda onde existe o que
+// ele exige: o @api-real precisa da API real atrás da SPA (job sob gVisor e job contra a VPS), e o
+// @fake-api, da API falsa do modo local (job "Interface no navegador").
+const LOCAL_EXCLUDED = [
+  titleTag(E2E.remote ? FAKE_API_TAG : REAL_API_TAG),
+  ...(RUN_PHASE === "ui" ? [GPU_SUITE] : []),
+];
 const LOCAL_PROJECTS = [
   {
     name: "desktop",
@@ -45,7 +69,8 @@ const LOCAL_PROJECTS = [
       viewport: { width: 1280, height: 800 },
     },
     ...(RUN_PHASE === "gpu" ? { grep: GPU_SUITE } : {}),
-    ...(RUN_PHASE === "ui" ? { grepInvert: GPU_SUITE } : {}),
+    // Largura e toque do celular são do projeto mobile.
+    ...excluding([titleTag(MOBILE_TAG), ...LOCAL_EXCLUDED]),
   },
   {
     name: "mobile",
@@ -57,7 +82,7 @@ const LOCAL_PROJECTS = [
     },
     // Tab e anel de foco são do teclado: no celular, só o que muda com a largura.
     ...(RUN_PHASE === "gpu" ? { grep: GPU_SUITE } : {}),
-    grepInvert: RUN_PHASE === "ui" ? /@keyboard|\bcom GPU\b/ : /@keyboard/,
+    ...excluding([titleTag(KEYBOARD_TAG), ...LOCAL_EXCLUDED]),
   },
 ];
 
@@ -95,9 +120,12 @@ export default defineConfig({
   // Cada spec tem poucos segundos; um teste preso falha cedo em vez de comer o orçamento.
   timeout: E2E.vps ? 60_000 : 20_000,
   expect: { timeout: 5_000 },
+  // Na CI, o relatório json alimenta o guard de pulados (check-no-skips.ts), fora das pastas que
+  // vão para o artefato.
   reporter: process.env["CI"]
     ? [
         ["list"],
+        ["json", { outputFile: `../e2e-results/${RUN_PHASE ?? "all"}.json` }],
         [
           "html",
           {

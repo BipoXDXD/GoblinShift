@@ -28,7 +28,10 @@ test("remover um, cancelar e remover todos", async ({ page }) => {
   await expect(page.getByLabel("Escolher arquivos")).toBeFocused();
 });
 
-test("remover exclui os uploads no servidor, não só na lista", async ({ page, fakeApi }) => {
+test("remover exclui os uploads no servidor, não só na lista @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   const bancada = new BancadaPage(page);
   await bancada.open("csv-janitor");
   await bancada.addFiles(CSV_FILES);

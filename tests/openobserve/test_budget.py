@@ -5,6 +5,8 @@ import pytest
 from openobserve.catalog import slo_named
 from openobserve.report import SliReport
 
+pytestmark = pytest.mark.host_python
+
 ACCEPTANCE = slo_named("aceitacao")  # 99,5%: orçamento de 1 em 200
 
 

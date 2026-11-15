@@ -1,12 +1,12 @@
 """Linux/root acceptance SOURCE: execute only in a dedicated disposable runner.
 
-No metadata simulation. Ordinary Mac/non-root collection skips every case; those
-skips are not native evidence. All changes stay in a private /root directory.
+No metadata simulation. Marked `needs_root`: deselected by default and run only by the
+sudo step of the CI checks job (a disposable GitHub runner). All changes stay in a private
+/root directory.
 """
 
 import json
 import os
-import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,10 +15,7 @@ import pytest
 
 from executor_ctl.images import ImageNotAllowedError, require_allowed
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux" or os.geteuid() != 0,
-    reason="requires disposable Linux runner as root; native acceptance still pending",
-)
+pytestmark = pytest.mark.needs_root
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
 PREVIOUS = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
 

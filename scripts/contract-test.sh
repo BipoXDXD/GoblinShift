@@ -79,13 +79,19 @@ uv run gs-export-openapi "$WORK/openapi.json"
 # reescreve só esse corpo num equivalente e falha se o formato mudar (scripts/contract_spec.py).
 uv run python -m scripts.contract_spec "$WORK/openapi.json" "$WORK/openapi.contract.json"
 
+# Confere que o Schemathesis rejeita um corpo inválido antes de executar os casos gerados.
+uv run --locked --group contract pytest --fail-on-skip -q tests/contract_response_schema.py
+
 status=0
 # Recusas que o domínio impõe e o JSON Schema não expressa: scripts/contract_rules.py.
+# Fases explícitas, sem `examples`: nenhuma operação da spec declara example(s), e a fase só
+# terminaria com tudo pulado (tests/test_ci_testes_pulados.py confere as duas coisas).
 SCHEMATHESIS_HOOKS=scripts.contract_hooks uv run --group contract \
   schemathesis run "$WORK/openapi.contract.json" \
   --url "$BASE_URL" \
   --header "Authorization: Bearer $key" \
   --checks all \
+  --phases=coverage,fuzzing,stateful \
   --max-examples "$MAX_EXAMPLES" \
   --seed "$SEED" \
   --request-timeout 10 ||

@@ -69,7 +69,7 @@ após confirmar que o processo/import correspondente terminou. Nunca executar pr
 
 ## Versionamento e instalação administrativa (produção não alterada)
 
-`receiver-release.json` identifica a versão 2.1.1/protocolo 2 e o hash exato de `receiver.py`.
+`receiver-release.json` identifica a versão 2.1.2/protocolo 2 e o hash exato de `receiver.py`.
 Alterar receptor requer nova versão/hash e PRs coordenados nas três cópias (Duora, GoblinShift e StillOn). O teste de artefato roda
 na suíte existente; não é necessária mudança de workflow. Para conferir os três checkouts:
 
@@ -95,7 +95,7 @@ Checklist para o administrador, depois da aprovação dos três PRs:
 3. Adquirir `/var/lib/coolify-release/host.lock` sem recriar seu inode. Sob essa trava, revisar o inventário
    de storage, confirmar ausência de intents e guardar evidência da versão atual, hashes e entrypoints.
 4. Instalar **os bytes aprovados**, sem editar no host, em diretório imutável root-owned
-   `/opt/coolify-release/versions/2.1.1-<sha256>/`, com `receiver.py` e `receiver-release.json`.
+   `/opt/coolify-release/versions/2.1.2-<sha256>/`, com `receiver.py` e `receiver-release.json`.
    Diretórios e executável 0755, metadados 0644; nenhum pai pode ser gravável pelas contas de publicação.
    Conferir a versão instalada com `verify_artifact.py --peer <diretorio-da-versao>`.
 5. Manter `/opt/coolify-release/receiver.py` como entrada estável apontando para a versão aprovada.
@@ -113,8 +113,8 @@ Rollback do aplicativo continua pelo procedimento existente, com backup e schema
 bancos, volumes nem versões de schema automaticamente.
 
 O `migrate` tolera o banco numa revisão que a imagem não conhece: avisa e sai com 0, sem migrar
-(ADR 056). Rollback do aplicativo para antes de d02b8d86 exige restaurar o banco: a imagem anterior
-falha no `migrate` com o schema mais novo (um rollback para a 962d28f1 continua quebrando).
+(ADR 056). Se a imagem escolhida para o rollback for anterior a d02b8d86 e não reconhecer a revisão
+atual do banco, restaure o banco para uma revisão compatível antes de iniciar essa imagem.
 
 ## Reconciliação de falhas e estados pendentes
 

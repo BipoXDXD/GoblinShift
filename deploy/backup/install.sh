@@ -99,6 +99,8 @@ root_dir "$PREFIX"
 # Arquivo por arquivo, e não o diretório inteiro: o lib.sh é dividido com a aceitação
 # (deploy/acceptance/install.sh). O rename é atômico, e o pg-backup.sh, que depende dos outros, vem
 # por último. Tudo antes de instalar a unit, que nunca aponta para arquivo que falta.
+# A unit antiga ainda pode disparar o script até o daemon-reload. O upload funciona com essa
+# unit, que ainda não fornece STATE_DIRECTORY; a instalação da nova unit habilita o marcador.
 for file in lib.sh age-recipients.txt pg-backup.sh; do
   mv -f "$staging/code/$file" "$PREFIX/$file"
 done

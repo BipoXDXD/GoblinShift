@@ -32,7 +32,10 @@ test("o documento e os assets chegam com a CSP do snippet de produção", async 
 
 for (const theme of THEMES) {
   for (const screen of SCREENS) {
-    test(`${screen.name}, tema ${theme}: nenhuma violação de CSP`, async ({ page, fakeApi }) => {
+    test(`${screen.name}, tema ${theme}: nenhuma violação de CSP @fake-api`, async ({
+      page,
+      fakeApi,
+    }) => {
       const violations = await watchCsp(page);
       await useTheme(page, theme);
       await screen.open(page, fakeApi);
