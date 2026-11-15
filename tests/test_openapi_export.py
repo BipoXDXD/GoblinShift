@@ -50,6 +50,36 @@ def _operations_by_id(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def test_problemas_publicam_o_schema_no_media_type_de_erro() -> None:
+    operations = _operations_by_id(json.loads(render_openapi()))
+
+    for operation_id, operation in operations.items():
+        for status, response in operation["responses"].items():
+            if status.startswith(("4", "5")):
+                assert response["content"] == {
+                    "application/problem+json": {
+                        "schema": {"$ref": "#/components/schemas/ProblemDetails"}
+                    }
+                }, (operation_id, status)
+
+
+@pytest.mark.parametrize(
+    ("operation_id", "media_types"),
+    [
+        ("downloadArtifact", ("application/octet-stream",)),
+        ("getArtifactPreview", ("image/jpeg", "application/octet-stream")),
+    ],
+)
+def test_artefatos_publicam_o_sucesso_binario(
+    operation_id: str, media_types: tuple[str, ...]
+) -> None:
+    operation = _operations_by_id(json.loads(render_openapi()))[operation_id]
+
+    assert operation["responses"]["200"]["content"] == {
+        media_type: {"schema": {"type": "string", "format": "binary"}} for media_type in media_types
+    }
+
+
 def _assert_retry_after_header(response: dict[str, Any]) -> None:
     assert "application/problem+json" in response["content"]
     assert response["headers"]["Retry-After"] == {
