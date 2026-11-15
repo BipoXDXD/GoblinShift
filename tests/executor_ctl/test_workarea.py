@@ -12,6 +12,8 @@ import pytest
 from executor_ctl import workarea
 from executor_ctl.workarea import WorkAreaDirtyError, WorkDirMissingError, WorkDirModeError
 
+pytestmark = pytest.mark.host_python
+
 ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 OTHER = uuid.UUID("0193a3f0-7b2c-7def-8a01-000000000000")
 

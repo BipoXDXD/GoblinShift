@@ -4,6 +4,8 @@ import pytest
 
 from tls_check import days_remaining, has_enough_margin
 
+pytestmark = pytest.mark.host_python
+
 NOW = datetime(2026, 10, 15, 9, 17, tzinfo=UTC)
 
 

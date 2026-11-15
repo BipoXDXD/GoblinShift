@@ -58,6 +58,9 @@ dev = [
     "ruff>=0.17.0",
     "testcontainers[postgres]>=4.15.0",
     "types-pyyaml>=6.0.12.20260906",
+    # Piso de versão dos pacotes do host (scripts/check_host_python.py). Versão exata, como a de
+    # tests/host_python/requirements.txt: as regras de detecção mudam a cada release.
+    "vermin==1.9.2",
 ]
 
 [tool.ruff]
@@ -137,6 +140,7 @@ markers = [
     "openobserve: SLOs e alertas contra OpenObserve e Collector reais (precisa de Docker)",
     "needs_root: precisa de root no Linux; roda só no passo com sudo do job Verificações (CI)",
     "host_installer: instaladores de deploy/ como root num container Debian (precisa de Docker)",
+    "host_python: roda também no Python do host (3.12), só com stdlib, pytest, PyYAML, cryptography, vermin e mypy",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).

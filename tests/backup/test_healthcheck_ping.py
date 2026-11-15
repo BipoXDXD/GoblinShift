@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.host_python
+
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "deploy" / "backup" / "lib.sh"
 CHECK_URL = "https://hc-ping.com/0b1c2d3e-CANARY-check"

@@ -19,7 +19,7 @@ from executor_ctl.workarea import WorkAreaDirtyError
 from .conftest import make_config
 from .stuck_docker import StuckDocker, holding_area
 
-pytestmark = pytest.mark.usefixtures("synthetic_policy_metadata")
+pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
 HOLDER = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 LATECOMER = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abce")

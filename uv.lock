@@ -449,6 +449,7 @@ dev = [
     { name = "ruff" },
     { name = "testcontainers" },
     { name = "types-pyyaml" },
+    { name = "vermin" },
 ]
 executor = [
     { name = "pikepdf" },
@@ -488,6 +489,7 @@ dev = [
     { name = "ruff", specifier = ">=0.17.0" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.15.0" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
+    { name = "vermin", specifier = "==1.9.2" },
 ]
 executor = [
     { name = "pikepdf", specifier = "==10.16.0" },
@@ -2026,6 +2028,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/83/f421a077712c1e87603bfec62744c3cd3a2f4b47378025db3d740df9af0d/uvloop-0.23.0-cp315-cp315t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:12634f15e6625f78b3f2922f91404c4d7173487eba11746764153f556e9852dc", size = 4661763, upload-time = "2026-10-01T03:16:38.719Z" },
     { url = "https://files.pythonhosted.org/packages/f5/62/25dcaa6b7e7b48f82ce633854ce96597ab768f9650931f4f86c572de392c/uvloop-0.23.0-cp315-cp315t-musllinux_1_2_aarch64.whl", hash = "sha256:378188efbb1524f2219d05246a3e1e5907217848d2882144dff59585f1b81d55", size = 4421324, upload-time = "2026-10-01T03:16:40.488Z" },
     { url = "https://files.pythonhosted.org/packages/05/46/04628239b43dcef703af314202a3307d6060918e2d76aa86c5b1188f5551/uvloop-0.23.0-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:4b8e207c67d207a8608fec57e116511030af3495dc0109b8c333cf9cb412b16f", size = 4462501, upload-time = "2026-10-01T03:16:42.359Z" },
+]
+
+[[package]]
+name = "vermin"
+version = "1.9.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/e2/ec751ab6385d29be7a8d7a54379fa7d3267440c55dde0f265a0730417027/vermin-1.9.2.tar.gz", hash = "sha256:ba4e01ab817c6baadf5f057bd6ea691e1147bcaf00c1ac8db54df0e25c6d2c6d", size = 223209, upload-time = "2026-10-19T18:59:36.454Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/c5/def1f1b124f67d085e219b99c6da4274b569d750558535ef373979fafa26/vermin-1.9.2-py3-none-any.whl", hash = "sha256:3e3e95d937f7d165eb928e0c268dfec466ccc40e9e1ce825e5d6e5aa027b6f30", size = 107769, upload-time = "2026-10-19T18:59:34.861Z" },
 ]
 
 [[package]]

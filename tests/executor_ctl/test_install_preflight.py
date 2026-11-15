@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.host_python
+
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = "/var/lib/coolify-release/goblinshift/executor-images.json"
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
