@@ -10,9 +10,12 @@ sai com erro e a API nova não sobe (ela depende do `migrate` concluído).
 import logging
 import random
 import time
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+from functools import partial
 
 import psycopg
+from alembic.runtime.migration import MigrationContext, MigrationInfo, RevisionStep
 from alembic.util import CommandError
 from sqlalchemy.exc import OperationalError
 
@@ -26,6 +29,51 @@ LOCK_ATTEMPTS = 3
 LOCK_RETRY_FIRST_DELAY_S = 1.0
 
 log = logging.getLogger(__name__)
+
+
+class RelativeMigrationPlan:
+    """Retoma as etapas calculadas pelo Alembic para o destino relativo original."""
+
+    def __init__(self) -> None:
+        self._pending: deque[RevisionStep] | None = None
+        self._confirmed_heads: frozenset[str] = frozenset()
+        self._applied_heads: frozenset[str] = frozenset()
+
+    def install(self, migration_context: MigrationContext) -> None:
+        # O Alembic monta o fn do comando antes de carregar env.py e não expõe um getter.
+        planner = migration_context._migrations_fn
+        if planner is None:
+            raise CommandError("o Alembic não forneceu um plano para a migration relativa")
+        migration_context._migrations_fn = partial(self._remaining_steps, planner)
+
+    def record_heads(
+        self,
+        ctx: MigrationContext,
+        step: MigrationInfo,
+        heads: Collection[str],
+        run_args: Mapping[str, object],
+    ) -> None:
+        """Recebe o evento `on_version_apply` do Alembic antes do commit."""
+        self._applied_heads = frozenset(heads)
+
+    def _remaining_steps(
+        self,
+        planner: Callable[[tuple[str, ...], MigrationContext], Iterable[RevisionStep]],
+        heads: tuple[str, ...],
+        migration_context: MigrationContext,
+    ) -> Iterator[RevisionStep]:
+        current_heads = frozenset(heads)
+        if self._pending is None:
+            self._pending = deque(planner(heads, migration_context))
+            self._confirmed_heads = current_heads
+        elif current_heads != self._confirmed_heads:
+            raise CommandError("o banco mudou entre tentativas da migration relativa")
+
+        while self._pending:
+            yield self._pending[0]
+            # O callback roda dentro da transação. O Alembic só pede a próxima etapa após o commit.
+            self._confirmed_heads = self._applied_heads
+            self._pending.popleft()
 
 
 def session_settings(lock_timeout_ms: int) -> list[str]:

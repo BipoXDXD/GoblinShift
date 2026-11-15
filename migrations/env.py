@@ -31,6 +31,7 @@ import goblinshift.runs.tables  # noqa: F401
 from goblinshift.platform.db import make_engine, metadata
 from goblinshift.platform.migration_locks import (
     MIGRATION_LOCK_TIMEOUT_MS,
+    RelativeMigrationPlan,
     run_with_lock_retries,
     session_settings,
 )
@@ -75,18 +76,25 @@ def run_migrations_online() -> None:
     goes_to_head = destination == image_heads
     _check_production_destination(settings, destination, image_heads)
     lock_timeout_ms = _lock_timeout_ms()
+    relative_plan = (
+        RelativeMigrationPlan()
+        if any(RELATIVE_REVISION.search(target) for target in destination or ())
+        else None
+    )
     engine = make_engine(settings)
     try:
         if goes_to_head:
             with engine.connect() as connection:
                 if _db_is_ahead_of_image(connection, script, image_heads):
                     return
-        run_with_lock_retries(lambda: _migrate(engine, lock_timeout_ms))
+        run_with_lock_retries(lambda: _migrate(engine, lock_timeout_ms, relative_plan))
     finally:
         engine.dispose()
 
 
-def _migrate(engine: Engine, lock_timeout_ms: int) -> None:
+def _migrate(
+    engine: Engine, lock_timeout_ms: int, relative_plan: RelativeMigrationPlan | None
+) -> None:
     """Uma rodada do comando numa conexão nova, cada migration na sua transação."""
     with engine.connect() as connection:
         for statement in session_settings(lock_timeout_ms):
@@ -97,7 +105,10 @@ def _migrate(engine: Engine, lock_timeout_ms: int) -> None:
             connection=connection,
             target_metadata=target_metadata,
             transaction_per_migration=True,
+            on_version_apply=relative_plan.record_heads if relative_plan is not None else None,
         )
+        if relative_plan is not None:
+            relative_plan.install(context.get_context())
         with context.begin_transaction():
             context.run_migrations()
 

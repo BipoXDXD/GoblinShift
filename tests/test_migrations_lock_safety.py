@@ -934,6 +934,13 @@ DROP_CONCURRENT = (
         ),  # Sem IF EXISTS, o DROP falha no primeiro deploy, quando o índice ainda não existe.
         ('        op.execute("DROP INDEX CONCURRENTLY ix_a")\n' + CREATE_CONCURRENT, 4),
         ("        if cleanup:\n    " + DROP_CONCURRENT + CREATE_CONCURRENT, 5),
+        (
+            '        sql = "SELECT 1"\n'
+            "        if cleanup:\n"
+            '            sql = "DROP INDEX CONCURRENTLY IF EXISTS ix_a"\n'
+            "        op.execute(sql)  # lock-ok: limpeza\n" + CREATE_CONCURRENT,
+            7,
+        ),
         (DROP_CONCURRENT + CREATE_CONCURRENT + CREATE_CONCURRENT, 5),
     ],
     ids=[
@@ -955,6 +962,7 @@ DROP_CONCURRENT = (
         "sem-nome",
         "drop-sem-if-exists",
         "drop-condicional",
+        "drop-em-so-uma-alternativa",
         "drop-ja-consumido",
     ],
 )
@@ -1001,6 +1009,12 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
             "        )\n"
         ),
         (DROP_CONCURRENT + CREATE_CONCURRENT) * 2,
+        (
+            '        sql = "DROP INDEX CONCURRENTLY IF EXISTS ix_a"\n'
+            "        if quoted:\n"
+            "            sql = 'DROP INDEX CONCURRENTLY IF EXISTS \"ix_a\"'\n"
+            "        op.execute(sql)  # lock-ok: limpeza\n" + CREATE_CONCURRENT
+        ),
     ],
     ids=[
         "op",
@@ -1013,6 +1027,7 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
         "schema-da-tabela",
         "op-com-schema",
         "um-drop-por-create",
+        "mesmo-drop-em-todas-as-alternativas",
     ],
 )
 def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:

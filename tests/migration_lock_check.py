@@ -792,11 +792,11 @@ def _dropped_concurrent_indexes(call: ast.Call, assignments: Assignments) -> lis
     ):
         return [_index_name(call)]
     if name in EXECUTE_OPERATIONS:
-        return [
-            index
+        alternatives = [
+            set(analyze_sql(text).dropped_concurrent_indexes)
             for text in _sql_texts(call, assignments)
-            for index in analyze_sql(text).dropped_concurrent_indexes
         ]
+        return list(set.intersection(*alternatives)) if alternatives else []
     return []
 
 

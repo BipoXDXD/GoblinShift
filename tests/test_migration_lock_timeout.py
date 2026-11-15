@@ -32,6 +32,7 @@ from tests.conftest import downgrade_migrations, run_migrations
 
 BEFORE_COLUMN_MIGRATION = "0017"
 COLUMN_MIGRATION = "0018"
+INDEX_MIGRATION = "0019"
 # A 0018 acrescenta uma coluna em app_user e precisa de ACCESS EXCLUSIVE nela.
 HOLD_APP_USER_LOCK = "LOCK TABLE app_user IN SHARE MODE"
 # A 0019 constrói um índice comum em object_use, que precisa de SHARE.
@@ -75,31 +76,32 @@ def test_lock_liberado_entre_as_tentativas_conclui_a_migration(
     before_column_migration: Settings,
 ) -> None:
     settings = before_column_migration
-    with _holding_lock(settings, HOLD_APP_USER_LOCK) as holder:
-        process = subprocess.Popen(  # noqa: S603 - CLI do Alembic com argumentos fixos do teste
-            alembic_command(*UPGRADE_ARGS),
-            cwd=REPO_ROOT,
-            env=alembic_env(settings),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        # Sem o aviso, a leitura do stderr esperaria para sempre: o vigia encerra o processo.
-        watchdog = threading.Timer(GIVE_UP_WITHIN_S, process.kill)
-        watchdog.start()
-        try:
-            assert process.stderr is not None
-            assert _wait_for_line(process.stderr, RETRY_WARNING)
-            holder.commit()
-            _, stderr = process.communicate(timeout=GIVE_UP_WITHIN_S)
-        finally:
-            watchdog.cancel()
-            if process.poll() is None:
-                process.kill()
-                process.wait()
-
-    assert process.returncode == 0, stderr
+    _release_lock_after_retry(settings, HOLD_APP_USER_LOCK, UPGRADE_ARGS, BEFORE_COLUMN_MIGRATION)
     assert db_version(settings) == head_revision()
+
+
+@pytest.mark.parametrize(
+    ("operation", "relative", "start", "lock", "destination"),
+    [
+        ("upgrade", "+2", BEFORE_COLUMN_MIGRATION, HOLD_OBJECT_USE_LOCK, INDEX_MIGRATION),
+        ("downgrade", "-2", INDEX_MIGRATION, HOLD_APP_USER_LOCK, BEFORE_COLUMN_MIGRATION),
+    ],
+)
+def test_retry_preserva_destino_relativo_apos_commit_parcial(
+    before_column_migration: Settings,
+    operation: str,
+    relative: str,
+    start: str,
+    lock: str,
+    destination: str,
+) -> None:
+    settings = before_column_migration
+    run_migrations(settings, start)
+    args = ("-x", f"lock_timeout_ms={TEST_LOCK_TIMEOUT_MS}", operation, relative)
+
+    _release_lock_after_retry(settings, lock, args, COLUMN_MIGRATION, environment="development")
+
+    assert db_version(settings) == destination
 
 
 def test_migration_anterior_fica_aplicada_quando_a_seguinte_perde_o_lock(
@@ -159,6 +161,41 @@ def _holding_lock(settings: Settings, statement: str) -> Iterator[Connection]:
             conn.rollback()
     finally:
         engine.dispose()
+
+
+def _release_lock_after_retry(
+    settings: Settings,
+    lock: str,
+    args: tuple[str, ...],
+    partial_revision: str,
+    *,
+    environment: str = "production",
+) -> None:
+    with _holding_lock(settings, lock) as holder:
+        process = subprocess.Popen(  # noqa: S603 - CLI do Alembic com argumentos fixos do teste
+            alembic_command(*args),
+            cwd=REPO_ROOT,
+            env=alembic_env(settings, environment),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # Sem o aviso, a leitura do stderr esperaria para sempre: o vigia encerra o processo.
+        watchdog = threading.Timer(GIVE_UP_WITHIN_S, process.kill)
+        watchdog.start()
+        try:
+            assert process.stderr is not None
+            assert _wait_for_line(process.stderr, RETRY_WARNING)
+            assert db_version(settings) == partial_revision
+            holder.commit()
+            _, stderr = process.communicate(timeout=GIVE_UP_WITHIN_S)
+        finally:
+            watchdog.cancel()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+    assert process.returncode == 0, stderr
 
 
 @contextmanager
