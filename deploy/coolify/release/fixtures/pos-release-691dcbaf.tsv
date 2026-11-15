@@ -7,11 +7,11 @@ RECEPTOR_ATIVO
 COMMIT	691dcbaf60feb888215b7c3266086e243b04f9e1
 PROJETO	goblinshift
 VERSAO	2
-RECV_SHA	e9af03f08162ecf2bda094d38511b44b810043863d3104f60ea1046ae687f3b3
+RECV_SHA	6a8352bb8996c15c7c8115ab92ae35328afdffc76a513bde7929d7ea51cfc835
 DEPLOY_UUID	uuid-do-deployment
 FINISHED	1794355749
 IMAGES	{"app":"ghcr.io/bipoxdxd/goblinshift@sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308","web":"ghcr.io/bipoxdxd/goblinshift-web@sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c","executor":"ghcr.io/bipoxdxd/goblinshift-executor@sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c"}
-RECV_INST	e9af03f08162ecf2bda094d38511b44b810043863d3104f60ea1046ae687f3b3
+RECV_INST	6a8352bb8996c15c7c8115ab92ae35328afdffc76a513bde7929d7ea51cfc835
 HIST_TOPO	691dcbaf60feb888215b7c3266086e243b04f9e1-1794355749.json
 HIST_N_COMMIT	1
 HIST_IGUAL	true
@@ -29,7 +29,7 @@ CONTAINER	goblinshift-maintenance-1|app|running|healthy|sha256:831beab7ce340857c
 CONTAINER	goblinshift-nginx-1|web|running|healthy|sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c|uuid-do-recurso-coolify|ghcr.io/bipoxdxd/goblinshift-web:release-691dcbaf60feb888215b7c3266086e243b04f9e1@sha256:9be0d7fa9b1ec41dd103eadb9f5231b01422188ff8829e4f999e4233b04ae96c
 READYZ	200
 ERRLOG_MTIME	1794244860
-RECV_REPO	e9af03f08162ecf2bda094d38511b44b810043863d3104f60ea1046ae687f3b3
+RECV_REPO	6a8352bb8996c15c7c8115ab92ae35328afdffc76a513bde7929d7ea51cfc835
 ALLOWED	["ghcr.io/bipoxdxd/goblinshift-executor@sha256:83d663ee19321b55ac22512cbf14778b03c5e97627608ca2fac330894c654a9c","ghcr.io/bipoxdxd/goblinshift-executor@sha256:1111111111111111111111111111111111111111111111111111111111111111","ghcr.io/bipoxdxd/goblinshift-executor@sha256:2222222222222222222222222222222222222222222222222222222222222222"]
 MANIFEST_APP	{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308","size":2383,"platform":{"architecture":"amd64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:89a9c406324ae3f5dd84014e04eb890cf02577cb9cf5e65252d945eb39922353","size":2383,"platform":{"architecture":"arm64","os":"linux"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:0e9b37e560de3cf867ae02073e5aa9e36a0166915fbbc1f3d041050d294fe999","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:831beab7ce340857c612cf57f8a08977379cc0649d8d9298823a857c4e284308","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:7514b8d910de3a79aab34c2d4c11eafa391948fe0e524b990f3b259aeea2261e","size":838,"annotations":{"vnd.docker.reference.digest":"sha256:89a9c406324ae3f5dd84014e04eb890cf02577cb9cf5e65252d945eb39922353","vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}}]}
 TAG_DIGEST_APP	sha256:110ffe984d13c58ca6a378141c2bafc729fd181dd86d3d7ce0dff8bf420c8f2b
