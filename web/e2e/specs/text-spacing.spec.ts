@@ -33,7 +33,7 @@ interface Clip {
 }
 
 for (const screen of SCREENS) {
-  test(`${screen.name}: com o espaçamento de texto da WCAG 1.4.12, nenhum texto fica cortado`, async ({
+  test(`${screen.name}: com o espaçamento de texto da WCAG 1.4.12, nenhum texto fica cortado @fake-api`, async ({
     page,
     fakeApi,
   }) => {

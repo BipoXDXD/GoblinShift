@@ -82,6 +82,9 @@ jobs:
           CI: "1"
         # --trace off reforça a config do modo VPS: trace guarda os cabeçalhos dos pedidos.
         run: npx playwright test -c e2e --trace off
+      - name: Nenhum teste pulado (sem a chave, o bloco com conta sai por tag, não por skip)
+        working-directory: web
+        run: npm run e2e:check-skips -- e2e-results/all.json
       - name: Canário (chave de API nos artefatos)
         id: canario
         if: always()

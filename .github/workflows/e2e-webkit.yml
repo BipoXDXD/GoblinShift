@@ -49,6 +49,8 @@ jobs:
       - run: npm run build
       - name: Palco e contratos móveis (um worker, até quatro minutos)
         run: npm run e2e:webkit
+      - name: Nenhum teste pulado (relatório json do WebKit)
+        run: npm run e2e:check-skips -- e2e-results/webkit.json
       - name: Canário (chave de API nos artefatos)
         id: canario
         if: always()
