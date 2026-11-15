@@ -92,7 +92,10 @@ test("Moldura: o pular para o conteúdo, com foco, tem a altura do alvo de toque
   expect(await heightOf(link)).toBeGreaterThanOrEqual(MIN_TARGET_PX);
 });
 
-test("Execução: o link de download tem a altura do alvo de toque", async ({ page, fakeApi }) => {
+test("Execução: o link de download tem a altura do alvo de toque @fake-api", async ({
+  page,
+  fakeApi,
+}) => {
   await new ExecucaoPage(page).open(fakeApi.seedRun({ status: "succeeded" }, [OUTPUT]));
 
   const link = page.getByRole("link", { name: `Baixar ${OUTPUT.name}` });

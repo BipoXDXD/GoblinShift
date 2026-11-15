@@ -73,7 +73,16 @@ jobs:
         # stage (5 min): só o cenário do agendador leva cerca de 2 min.
         # A imagem do executor compila o FFmpeg (ADR 036): os testes dela rodam só no job gvisor,
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
-        run: uv run pytest -m "not openobserve and not executor_image"
+        # `--fail-on-skip`: teste pulado reprova (tests/skip_guard.py). O que só roda como root fica
+        # fora daqui (`needs_root`) e roda no passo seguinte.
+        run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root"
+      - name: Testes que exigem root (runner descartável, sudo sem senha)
+        # Política nativa de imagens e troca de UID na área de trabalho do executor-ctl. O runner
+        # hospedado é descartado no fim do job; nada disso roda como root fora dele. Sem bytecode
+        # nem cache, o root não deixa arquivo seu na árvore.
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: sudo -E env "PATH=$PATH" .venv/bin/pytest --fail-on-skip -p no:cacheprovider -m needs_root tests/executor_ctl
 
   host-python:
     name: Scripts do host (Python 3.12)
@@ -126,7 +135,7 @@ jobs:
       - run: uv sync --locked
       - name: OpenObserve e Collector reais via Testcontainers
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito.
-        run: uv run pytest -m openobserve -q
+        run: uv run pytest -m "openobserve and not needs_root" -q --fail-on-skip
 
   contract:
     name: Contrato (Schemathesis)
@@ -281,6 +290,9 @@ jobs:
         env:
           E2E_PHASE: notice
         run: npm run e2e:notice
+      # Caso que não roda num projeto sai dele por tag (grepInvert), não por skip em runtime.
+      - name: Nenhum teste pulado (relatórios json das três fases)
+        run: npm run e2e:check-skips -- e2e-results/ui.json e2e-results/gpu.json e2e-results/notice.json
       # O relatório e os traces ficam fora do artefato se a chave da conta de teste (formato
       # gsk_...) aparecer em qualquer arquivo ou dentro de um .zip: o repositório é público.
       - name: Canário (chave de API nos artefatos)
@@ -370,7 +382,7 @@ jobs:
           GS_TEST_RUNTIME: runsc
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito: os testes
         # executor_image sempre existem, então zero testes indica um seletor quebrado.
-        run: uv run pytest -m "executor_ctl or executor_image" -q
+        run: uv run pytest -m "(executor_ctl or executor_image) and not needs_root" -q --fail-on-skip
 
   e2e-gvisor:
     name: Jornadas reais sob gVisor (Playwright)
@@ -423,6 +435,9 @@ jobs:
       - name: Specs contra a API real (desktop e celular, só Chromium)
         # Falha também se alguma tentativa do banco não tiver rodado sob runsc.
         run: scripts/e2e-gvisor.sh journeys
+      - name: Nenhum teste pulado (relatório json da suíte gVisor)
+        working-directory: web
+        run: npm run e2e:check-skips -- e2e-results/all.json
       - name: Logs da pilha e do executor-ctl
         if: failure()
         run: scripts/e2e-gvisor.sh logs "$RUNNER_TEMP/e2e-gvisor-logs"

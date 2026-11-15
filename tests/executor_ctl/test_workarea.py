@@ -4,7 +4,6 @@ import os
 import shutil
 import stat
 import subprocess
-import sys
 import uuid
 from pathlib import Path
 
@@ -233,10 +232,8 @@ def test_entrada_de_inputs_que_nao_e_arquivo_regular_e_recusada(
 WORKER_UID = 10001
 
 
-@pytest.mark.skipif(
-    sys.platform != "linux" or os.geteuid() != 0,
-    reason="trocar de UID exige root no Linux (roda na VPS ou num runner com sudo)",
-)
+# Trocar de UID exige root no Linux: roda no passo com sudo do job Verificações.
+@pytest.mark.needs_root
 @pytest.mark.parametrize("entry", [".", "inputs", "out"])
 def test_worker_nao_renomeia_nada_da_tentativa_depois_do_start(area: Path, entry: str) -> None:
     group = os.getgid()

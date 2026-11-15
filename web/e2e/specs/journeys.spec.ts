@@ -117,7 +117,7 @@ for (const journey of JOURNEYS) {
   });
 }
 
-test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ver miniaturas → baixar", async ({
+test("media-mill: vídeos → áudio FLAC e três miniaturas → executar → ver miniaturas → baixar @fake-api", async ({
   page,
   fakeApi,
 }) => {
