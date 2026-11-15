@@ -216,11 +216,12 @@ def concurrent_in_transaction_lines(source: str) -> list[int]:
     """
     tree = ast.parse(source)
     roots = _checked_roots(tree)
+    trusted = _trusted_names(tree, _binding_counts(tree))
     assignments = _assignments(tree, _upgrade_scope(tree))
     inside_autocommit = {
         id(call)
         for root in roots
-        for block in _autocommit_blocks(root)
+        for block in _autocommit_blocks(root, trusted)
         for call in _calls_in_order(block)
     }
     return sorted(
@@ -242,17 +243,29 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
     resolve nunca conta como apagado: na dúvida, a criação é recusada.
     """
     tree = ast.parse(source)
+    trusted = _trusted_names(tree, _binding_counts(tree))
     assignments = _assignments(tree, _upgrade_scope(tree))
     unsafe: list[int] = []
-    for block in (block for root in _checked_roots(tree) for block in _autocommit_blocks(root)):
+    blocks = (block for root in _checked_roots(tree) for block in _autocommit_blocks(root, trusted))
+    for block in blocks:
+        # Um DROP em condição, laço ou auxiliar pode não rodar antes da criação.
+        direct_calls = {
+            statement.value
+            for statement in block.body
+            if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)
+        }
         dropped: set[IndexName] = set()
         for call in _calls_in_order(block):
-            dropped.update(
-                name for name in _dropped_concurrent_indexes(call, assignments) if name is not None
-            )
+            if call in direct_calls:
+                dropped.update(
+                    name
+                    for name in _dropped_concurrent_indexes(call, assignments)
+                    if name is not None
+                )
             created = _created_concurrent_indexes(call, assignments)
             if any(name is None or name not in dropped for name in created):
                 unsafe.append(call.lineno)
+            dropped.difference_update(created)
     return sorted(unsafe)
 
 
@@ -736,11 +749,12 @@ def _render_fstring_part(part: ast.expr, assignments: Assignments, depth: int) -
     return [PLACEHOLDER]
 
 
-def _autocommit_blocks(root: ast.AST) -> list[ast.With]:
+def _autocommit_blocks(root: ast.AST, trusted: Trusted) -> list[ast.With]:
     return [
         node
         for node in ast.walk(root)
-        if isinstance(node, ast.With) and any(_is_autocommit(item) for item in node.items)
+        if isinstance(node, ast.With)
+        and any(_is_autocommit_block(item.context_expr, trusted) for item in node.items)
     ]
 
 
@@ -814,11 +828,6 @@ def _runs_several_statements(call: ast.Call, assignments: Assignments) -> bool:
     return _operation(call) in EXECUTE_OPERATIONS and any(
         analyze_sql(text).statements > 1 for text in _sql_texts(call, assignments)
     )
-
-
-def _is_autocommit(item: ast.withitem) -> bool:
-    expression = item.context_expr
-    return isinstance(expression, ast.Call) and _operation(expression) == "autocommit_block"
 
 
 def _operation(call: ast.Call) -> str | None:

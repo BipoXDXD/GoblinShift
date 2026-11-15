@@ -732,9 +732,32 @@ def test_concurrently_dentro_do_autocommit_passa() -> None:
         '        op.create_index("ix", "run", ["a"], postgresql_concurrently=True)\n'
     )
 
-    assert concurrent_in_transaction_lines(source) == []
+    assert concurrent_in_transaction_lines(source + IMPORTS) == []
     # O CREATE CONCURRENTLY está na allowlist; o DROP da limpeza não, e pede a marca.
     assert unmarked_blocking_lines(source + IMPORTS) == [3]
+
+
+def test_concurrently_em_contexto_sem_autocommit_do_alembic_e_recusado() -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        "    with outro.autocommit_block():  # lock-ok: contexto de outro objeto\n"
+        '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix")  # lock-ok: limpeza\n'
+        '        op.execute("CREATE INDEX CONCURRENTLY ix ON run (a)")\n'
+    )
+
+    assert unmarked_blocking_lines(source + IMPORTS) == []
+    assert concurrent_in_transaction_lines(source + IMPORTS) == [3, 4]
+
+
+def test_concurrently_em_autocommit_com_alias_do_alembic_passa() -> None:
+    source = (
+        "from alembic import op as operations\n"
+        "def upgrade() -> None:\n"
+        "    with operations.get_context().autocommit_block():\n"
+        '        operations.execute("CREATE INDEX CONCURRENTLY ix ON run (a)")\n'
+    )
+
+    assert concurrent_in_transaction_lines(source) == []
 
 
 def test_concurrently_junto_de_outra_instrucao_no_mesmo_execute_e_recusado() -> None:
@@ -745,13 +768,13 @@ def test_concurrently_junto_de_outra_instrucao_no_mesmo_execute_e_recusado() -> 
         + ' CREATE INDEX CONCURRENTLY ix_a ON run (a)")\n'
     )
 
-    assert concurrent_in_transaction_lines(source) == [3]
+    assert concurrent_in_transaction_lines(source + IMPORTS) == [3]
 
 
 def test_concurrently_com_ponto_e_virgula_no_fim_passa() -> None:
     source = AUTOCOMMIT_HEADER + '        op.execute("CREATE INDEX CONCURRENTLY ix ON run (a);")\n'
 
-    assert concurrent_in_transaction_lines(source) == []
+    assert concurrent_in_transaction_lines(source + IMPORTS) == []
 
 
 def test_operacao_em_funcao_auxiliar_chamada_pelo_upgrade_e_lida() -> None:
@@ -828,7 +851,9 @@ def test_concurrently_em_sql_que_o_parser_recusa_continua_valendo() -> None:
 
     assert concurrent_in_transaction_lines(f"def upgrade() -> None:\n    {create}") == [2]
     # Sem nome resolvido, nenhum DROP anterior conta como limpeza.
-    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + f"        {create}") == [3]
+    assert concurrent_index_without_cleanup_lines(
+        AUTOCOMMIT_HEADER + f"        {create}" + IMPORTS
+    ) == [3]
 
 
 def test_texto_que_nem_o_scanner_aceita_conta_como_concorrente() -> None:
@@ -848,6 +873,9 @@ def test_refresh_concorrente_que_o_parser_recusa_roda_em_transacao() -> None:
 
 AUTOCOMMIT_HEADER = "def upgrade() -> None:\n    with op.get_context().autocommit_block():\n"
 CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (a)")\n'
+DROP_CONCURRENT = (
+    '        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_a")  # lock-ok: limpeza\n'
+)
 
 
 @pytest.mark.parametrize(
@@ -905,6 +933,8 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
             3,
         ),  # Sem IF EXISTS, o DROP falha no primeiro deploy, quando o índice ainda não existe.
         ('        op.execute("DROP INDEX CONCURRENTLY ix_a")\n' + CREATE_CONCURRENT, 4),
+        ("        if cleanup:\n    " + DROP_CONCURRENT + CREATE_CONCURRENT, 5),
+        (DROP_CONCURRENT + CREATE_CONCURRENT + CREATE_CONCURRENT, 5),
     ],
     ids=[
         "op-sem-drop",
@@ -924,10 +954,12 @@ CREATE_CONCURRENT = '        op.execute("CREATE INDEX CONCURRENTLY ix_a ON run (
         "caixa-nao-ascii",
         "sem-nome",
         "drop-sem-if-exists",
+        "drop-condicional",
+        "drop-ja-consumido",
     ],
 )
 def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> None:
-    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == [line]
+    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body + IMPORTS) == [line]
 
 
 @pytest.mark.parametrize(
@@ -968,6 +1000,7 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
             '            "ix_a", "run", ["a"], schema="s", postgresql_concurrently=True\n'
             "        )\n"
         ),
+        (DROP_CONCURRENT + CREATE_CONCURRENT) * 2,
     ],
     ids=[
         "op",
@@ -979,10 +1012,11 @@ def test_indice_concorrente_sem_drop_previo_e_recusado(body: str, line: int) -> 
         "aspas-com-espaco",
         "schema-da-tabela",
         "op-com-schema",
+        "um-drop-por-create",
     ],
 )
 def test_indice_concorrente_com_drop_previo_passa(body: str) -> None:
-    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body) == []
+    assert concurrent_index_without_cleanup_lines(AUTOCOMMIT_HEADER + body + IMPORTS) == []
 
 
 CREATE_IN_HELPER = (
