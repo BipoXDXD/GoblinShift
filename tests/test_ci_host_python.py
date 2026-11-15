@@ -117,7 +117,9 @@ def test_job_do_host_roda_o_checador_e_os_testes_marcados() -> None:
     runs = _runs(HOST_JOB)
 
     assert CHECKER in runs.splitlines()
-    assert "-m host_python" in runs
+    assert '-m "host_python and not needs_root"' in runs
+    # O conftest de tests/ fica fora (--confcutdir): o guard de pulados entra como plugin.
+    assert "-p tests.skip_guard --fail-on-skip" in runs
     assert all(directory in runs for directory in HOST_TEST_DIRS)
     # Sem o `ls`, uma pasta renomeada some do grep em silêncio e o job passa com menos testes.
     assert 'ls -d "${pastas[@]}" > /dev/null' in runs.splitlines()

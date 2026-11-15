@@ -111,11 +111,13 @@ jobs:
         # não faria. O --confcutdir ignora o conftest de tests/ e da raiz (só os das pastas acima
         # dele), que importa a aplicação. Sem nenhum módulo na lista, o pytest coleta a suíte
         # inteira e falha na importação: o job não passa vazio.
+        # O guard de pulados vem por `-p tests.skip_guard` (só stdlib e pytest), já que o conftest de
+        # tests/ fica de fora; o que exige root roda no passo com sudo do job Verificações.
         run: |
           pastas=(tests/acceptance tests/executor_ctl tests/executor_inventory_read tests/host_python tests/tls_check)
           ls -d "${pastas[@]}" > /dev/null
           mapfile -t modulos < <(grep -rlF --include='test_*.py' 'pytest.mark.host_python' "${pastas[@]}" | sort)
-          python -m pytest -p no:cacheprovider --confcutdir=tests/executor_ctl -m host_python "${modulos[@]}"
+          python -m pytest -p no:cacheprovider -p tests.skip_guard --fail-on-skip --confcutdir=tests/executor_ctl -m "host_python and not needs_root" "${modulos[@]}"
 
   openobserve:
     name: SLOs e alertas (OpenObserve)
