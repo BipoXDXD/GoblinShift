@@ -226,6 +226,27 @@ def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
     return responses
 
 
+def normalize_problem_responses(schema: dict[str, Any]) -> None:
+    """Vincula o componente ProblemDetails ao media type usado pelos handlers."""
+    # O FastAPI registra o componente pelo `model`, mas põe sua referência no media type
+    # da classe de resposta da rota, inclusive nas respostas de erro do download binário.
+    generated_content = {"schema": {"$ref": f"#/components/schemas/{ProblemDetails.__name__}"}}
+    for path in schema.get("paths", {}).values():
+        for operation in path.values():
+            if not isinstance(operation, dict):
+                continue
+            for response in operation.get("responses", {}).values():
+                content = response.get("content", {})
+                problem_content = content.get(PROBLEM_MEDIA_TYPE)
+                if problem_content is None or "schema" in problem_content:
+                    continue
+                for media_type, media in tuple(content.items()):
+                    if media_type != PROBLEM_MEDIA_TYPE and media == generated_content:
+                        problem_content["schema"] = media["schema"]
+                        del content[media_type]
+                        break
+
+
 # Respostas de erro comuns a toda rota autenticada.
 PROBLEM_RESPONSES = problem_responses(401, 403, 422, 429, 500, 503)
 

@@ -186,18 +186,52 @@ test -e /tmp/do-app/pg-backup.sh && echo "COPIADO" || true
     assert BACKUP_PREFIX in result.stderr
 
 
-def test_script_instalado_faz_o_backup_sem_a_copia_parada() -> None:
-    """Prova do ExecStart da unit: como goblinshift, com /srv/goblinshift/app já arquivado."""
+@pytest.mark.parametrize("interrompido", [False, True], ids=["unit-nova", "antes-do-reload"])
+def test_script_instalado_faz_o_backup_sem_a_copia_parada(interrompido: bool) -> None:
+    """Executa o script instalado como goblinshift, com a unit que o daemon tem em memória."""
+    unit_ativa = SERVICE
+    antes = ""
+    saida_instalador = 0
+    if interrompido:
+        unit_ativa = "/root/unit-ativa.service"
+        saida_instalador = 71
+        antes = f"""
+install -d -m 0755 {BACKUP_PREFIX}
+printf '[Service]\nExecStart={BACKUP_PREFIX}/pg-backup.sh\n' >{SERVICE}
+cp {SERVICE} {unit_ativa}
+cat >/usr/local/bin/systemctl <<'EOF'
+#!/bin/sh
+test "$*" = daemon-reload || exit 72
+exit 71
+EOF
+"""
     result = run_as_root(
         FILLED_CONFIG
+        + antes
         + f"""
-{INSTALL} >/dev/null
+rc=0
+{INSTALL} >/dev/null || rc=$?
+test "$rc" = {saida_instalador}
+grep -q '^StateDirectory=goblinshift-backup$' {SERVICE}
 rm -rf /srv/goblinshift/app
 install -m 666 /dev/null /tmp/calls
 cat >/usr/local/bin/docker <<'EOF'
 #!/bin/sh
 echo "docker $*" >>/tmp/calls
-echo dump
+# Simula a sessão que exporta o snapshot e o pg_dump que o usa.
+case "$*" in
+  *psql*)
+    while IFS= read -r sql; do
+      case "$sql" in
+        *alembic_version*) echo t ;;
+        *"count(*) FROM public.app_user"*) echo 1 ;;
+        *pg_export_snapshot*) echo 00000003-00000010-1 ;;
+      esac
+    done
+    ;;
+  *pg_dump*--snapshot=00000003-00000010-1*) echo dump ;;
+  *) exit 2 ;;
+esac
 EOF
 cat >/usr/local/bin/age <<'EOF'
 #!/bin/bash
@@ -209,21 +243,44 @@ done
 EOF
 cat >/usr/local/bin/curl <<'EOF'
 #!/bin/sh
-cat >/dev/null
+config="$(cat)"
 echo "curl $*" >>/tmp/calls
+case "$*" in
+  *--upload-file*) printf '200' ;;
+  *) printf '%s\n' "$config" >>/tmp/calls ;;
+esac
 EOF
 chmod 755 /usr/local/bin/docker /usr/local/bin/age /usr/local/bin/curl
 cd /
 set -a
 . <(as_app cat {CONFIG})
 set +a
-runuser -u goblinshift -- env BACKUP_PG_CONTAINER=goblinshift-postgres-1 \\
-  {BACKUP_PREFIX}/pg-backup.sh
+unset STATE_DIRECTORY
+# O daemon só passa a usar StateDirectory após o reload.
+if grep -q '^StateDirectory=' {unit_ativa}; then
+  export STATE_DIRECTORY=/var/lib/goblinshift-backup
+  install -d -o goblinshift -g goblinshift -m 700 "$STATE_DIRECTORY"
+fi
+script="$(sed -n 's/^ExecStart=//p' {unit_ativa})"
+runuser -u goblinshift -- env BACKUP_PG_CONTAINER=goblinshift-postgres-1 "$script"
 cat /tmp/calls
+if test -f /var/lib/goblinshift-backup/last-upload-ok; then
+  stat -c 'marcador %U %a' /var/lib/goblinshift-backup/last-upload-ok
+else
+  echo 'sem marcador'
+fi
 """
     )
 
     assert result.returncode == 0, result.stderr
+    assert 'url = "http://hc.invalid/ping/start"' in result.stdout
+    assert 'url = "http://hc.invalid/ping"' in result.stdout
+    assert 'url = "http://hc.invalid/ping/fail"' not in result.stdout
+    if interrompido:
+        assert "sem marcador" in result.stdout
+        assert "STATE_DIRECTORY" in result.stderr
+    else:
+        assert "marcador goblinshift 600" in result.stdout
     assert "docker exec goblinshift-postgres-1 pg_dump" in result.stdout
     assert f"--recipients-file {BACKUP_PREFIX}/age-recipients.txt" in result.stdout
     assert "--upload-file" in result.stdout
