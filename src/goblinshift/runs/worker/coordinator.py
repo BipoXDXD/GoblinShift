@@ -134,6 +134,8 @@ INPUT_TAMPERED_ALERT = "input_tampered"
 # propósito: desistir abandonaria um executor vivo, e repetir só custa um aviso, porque o teto da
 # tentativa e o fencing encerram a espera. Erro de SQL ou de constraint é defeito, e sobe.
 TRANSIENT_DATABASE_ERRORS = (OperationalError, PoolTimeoutError)
+# Reserva tempo entre a última tentativa de renovação e o vencimento observado do lease.
+LEASE_RETRY_MARGIN_S = 1.0
 
 
 def random_retry_jitter() -> timedelta:
@@ -237,12 +239,28 @@ class _LeaseKeeper:
     O primeiro bloco já renova: a última renovação do `supervise` pode estar perto de vencer.
     Run em `stopping` (cancelamento, ou prazo vencido aplicado na renovação) levanta
     `_StopRequested`; fencing perdido, `LostFencing`.
+    Na coleta e na gravação de candidatos, o vencimento observado sob fencing limita o retry.
     """
 
-    def __init__(self, renew: Callable[[], Status], every: timedelta) -> None:
+    def __init__(
+        self,
+        renew: Callable[[], Status],
+        config: CoordinatorConfig,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._renew = renew
-        self._every_s = every.total_seconds()
+        self._clock = clock
+        self._sleep = sleep
+        self._lease_s = config.lease.total_seconds()
+        self._every_s = config.renew_every.total_seconds()
+        self._retry_s = config.renew_retry_every.total_seconds()
         self._last = float("-inf")
+        self._lease_deadline: float | None = None
+
+    def set_lease_deadline(self, deadline: float) -> None:
+        self._lease_deadline = deadline
 
     def beating(self, chunks: Iterable[bytes]) -> Iterator[bytes]:
         for chunk in chunks:
@@ -250,11 +268,39 @@ class _LeaseKeeper:
             yield chunk
 
     def beat(self) -> None:
-        if time.monotonic() - self._last < self._every_s:
+        started = self._clock()
+        if started - self._last < self._every_s:
             return
-        self._last = time.monotonic()
-        if self._renew() is Status.STOPPING:
+        self._last, status = self._renew_with_retry(started)
+        if self._lease_deadline is not None:
+            # Só um retorno depois do commit confirma o novo prazo. Usa o início da chamada,
+            # pois o relógio do banco pode ter sido lido antes de a resposta chegar.
+            self._lease_deadline = self._last + self._lease_s
+        if status is Status.STOPPING:
             raise _StopRequested
+
+    def _renew_with_retry(self, started: float) -> tuple[float, Status]:
+        while True:
+            try:
+                return started, self._renew()
+            except TRANSIENT_DATABASE_ERRORS:
+                if self._lease_deadline is None:
+                    raise
+                cutoff = self._lease_deadline - LEASE_RETRY_MARGIN_S
+                if self._clock() + self._retry_s >= cutoff:
+                    raise
+                self._sleep(self._retry_s)
+                started = self._clock()
+                if started >= cutoff:
+                    raise
+
+
+def _lease_deadline(loaded: LoadedRun, observed_at: float) -> float:
+    live = loaded.live_attempt
+    if live is None:
+        raise LostFencing(f"execução {loaded.run_id} sem tentativa viva")
+    # Mede a folga pelo relógio do banco e desconta, por segurança, a ida até a transação.
+    return observed_at + (live.lease_expires_at - loaded.now).total_seconds()
 
 
 class Coordinator:
@@ -556,17 +602,18 @@ class Coordinator:
 
         return run_transaction(self._factory, renew)
 
-    def reach_phase(self, claimed: ClaimedAttempt, phase: Phase) -> None:
-        def reach(session: Session) -> None:
-            self.reach_phase_in(session, claimed, phase)
+    def reach_phase(self, claimed: ClaimedAttempt, phase: Phase) -> LoadedRun:
+        def reach(session: Session) -> LoadedRun:
+            return self.reach_phase_in(session, claimed, phase)
 
-        run_transaction(self._factory, reach)
+        return run_transaction(self._factory, reach)
 
-    def reach_phase_in(self, session: Session, claimed: ClaimedAttempt, phase: Phase) -> None:
+    def reach_phase_in(self, session: Session, claimed: ClaimedAttempt, phase: Phase) -> LoadedRun:
         loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
         if loaded.state.status is Status.STOPPING:
             raise _StopRequested
         self._apply_event(session, loaded, PhaseReached(claimed.generation, phase))
+        return loaded
 
     def _processed_count(self, claimed: ClaimedAttempt) -> int:
         """Linhas de `progress.jsonl`, até o total de entradas.
@@ -625,9 +672,11 @@ class Coordinator:
         attempt_event.record(attributes)
 
     def _package_and_publish(self, claimed: ClaimedAttempt) -> Applied:
-        self.reach_phase(claimed, Phase.PACKAGING)
+        observed_at = time.monotonic()
+        loaded = self.reach_phase(claimed, Phase.PACKAGING)
         out_dir = self._runner.work_dir(claimed.attempt_id) / "out"
         keeper = self._lease_keeper(claimed)
+        keeper.set_lease_deadline(_lease_deadline(loaded, observed_at))
         collect_started = time.monotonic()
         try:
             collected = collect_outputs(
@@ -675,10 +724,16 @@ class Coordinator:
         parada pedida no meio levanta `_StopRequested`.
         """
         keeper = self._lease_keeper(claimed)
+
+        def lock_running(session: Session) -> None:
+            observed_at = time.monotonic()
+            loaded = self._lock_running(session, claimed)
+            keeper.set_lease_deadline(_lease_deadline(loaded, observed_at))
+
         return self._candidates.store(
             claimed,
             collected,
-            lock_running=lambda session: self._lock_running(session, claimed),
+            lock_running=lock_running,
             beating=keeper.beating,
         )
 
@@ -842,12 +897,13 @@ class Coordinator:
         return apply_transition(session, loaded, decision)
 
     def _lease_keeper(self, claimed: ClaimedAttempt) -> _LeaseKeeper:
-        return _LeaseKeeper(lambda: self.renew_lease(claimed), self._config.renew_every)
+        return _LeaseKeeper(lambda: self.renew_lease(claimed), self._config)
 
-    def _lock_running(self, session: Session, claimed: ClaimedAttempt) -> None:
+    def _lock_running(self, session: Session, claimed: ClaimedAttempt) -> LoadedRun:
         loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
         if loaded.state.status is Status.STOPPING:
             raise _StopRequested
+        return loaded
 
     def _failure_code(self, claimed: ClaimedAttempt) -> ErrorCode | None:
         """Código de `failure.json`; fora do catálogo de falhas determinísticas → `None`."""
