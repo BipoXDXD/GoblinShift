@@ -1,8 +1,8 @@
-"""Falha de banco fora da supervisão deixa tentativa órfã; o worker pausa os claims (auditoria D3).
+"""Falha de banco que escapa do coordenador deixa a tentativa órfã e pausa os claims.
 
-Cenário: a falha de banco num dos pontos sem tratamento (`record_start`, renovação do lease na cópia
-da entrada ou no empacotamento pelo `_LeaseKeeper`, desfecho em `finish`) sobe até a volta do worker
-com a Attempt viva e a área de trabalho ocupada. O `executor-ctl` recusa outro `start` com área suja
+Cenário: a falha de banco em `record_start`, na renovação do lease ou no desfecho sobe até a volta
+do worker. No empacotamento, isso ocorre se a falha persistir até esgotar o prazo de retry.
+A Attempt viva ocupa a área de trabalho. O `executor-ctl` recusa outro `start` com área suja
 (`work_area_dirty`): sem a pausa, a Run seguinte, de outra conta, gasta um claim por um defeito que
 não é dela. O `record_start` falha com um `55P03` de verdade: a Run fica travada noutra sessão só
 entre o `start` e o fim do `record_start`, para a falha não vir de um passo seguinte. Nos outros
@@ -19,6 +19,7 @@ import sys
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import cast
@@ -38,9 +39,11 @@ from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.lifecycle import Status
-from goblinshift.runs.tables import attempt, run
+from goblinshift.runs.tables import attempt, run, run_output
+from goblinshift.runs.worker import coordinator as worker_coordinator
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.claim_pause import ClaimPause
+from goblinshift.runs.worker.collection import collect_outputs
 from goblinshift.runs.worker.coordinator import Coordinator
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
 from goblinshift.runs.worker.runner import ExecutorStatus, Runner
@@ -50,6 +53,7 @@ from tests.runs.worker_support import (
     LEASE,
     attempts,
     coordinator,
+    coordinator_config,
     create_user,
     queue_run,
     run_row,
@@ -60,6 +64,7 @@ pytestmark = pytest.mark.integration
 REAL_EXECUTOR = (sys.executable, "-m", "goblinshift.processing.executor")
 LOCK_TIMEOUT_MS = 100
 WINDOW = timedelta(seconds=100)
+RECOVERY_LEASE = timedelta(seconds=15)
 NO_PAUSE = timedelta(0)
 COORDINATOR_LOGGER = "goblinshift.runs.worker.coordinator"
 START_REFUSED = "executor não iniciou"
@@ -156,9 +161,8 @@ def fail_in_record_start(
 
 
 def fail_in_lease_keeper(worker: Coordinator, monkeypatch: pytest.MonkeyPatch) -> None:
-    # A supervisão absorve a falha da renovação (#217); o `_LeaseKeeper` do empacotamento não.
-    # Falha só depois do `record_start`: a cópia da entrada também renova o lease, e falhar já
-    # nela pararia a tentativa antes do executor, sem chegar ao empacotamento que este ponto mira.
+    # A falha contínua depois do `record_start` esgota o retry do empacotamento. A cópia da
+    # entrada ainda renova normalmente, para que a tentativa chegue ao executor.
     started: set[uuid.UUID] = set()
     record_start = worker.record_start
     renew_lease = worker.renew_lease
@@ -167,10 +171,12 @@ def fail_in_lease_keeper(worker: Coordinator, monkeypatch: pytest.MonkeyPatch) -
         record_start(claimed)
         started.add(claimed.attempt_id)
 
-    def renew(claimed: ClaimedAttempt) -> Status:
+    def renew(
+        claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
+    ) -> Status:
         if claimed.attempt_id in started:
             raise lock_not_available()
-        return renew_lease(claimed)
+        return renew_lease(claimed, retry_allowed=retry_allowed)
 
     monkeypatch.setattr(worker, "record_start", record_start_and_mark)
     monkeypatch.setattr(worker, "renew_lease", renew)
@@ -233,9 +239,11 @@ def turn(
     worker: Coordinator,
     pause: ClaimPause,
     gate: WorkAreaGate = GATE_OFF,
+    *,
+    lease: timedelta = LEASE,
 ) -> bool:
     finished = RunFinishedReporter(factory, UserHasher(b"k" * 32), NoOpTracer())
-    return _work_once(factory, storage, LEASE, worker, finished, pause, gate)
+    return _work_once(factory, storage, lease, worker, finished, pause, gate)
 
 
 def queue_two_runs(
@@ -244,6 +252,70 @@ def queue_two_runs(
     first = queue_run(factory, storage, create_user(factory, "ana"), executor_image=IMAGE)
     second = queue_run(factory, storage, create_user(factory, "bia"), executor_image=IMAGE)
     return first, second
+
+
+@pytest.mark.parametrize("stage", ["collection", "candidates"])
+def test_falha_breve_na_renovacao_publica_na_mesma_tentativa(
+    stage: str,
+    factory: sessionmaker[Session],
+    worker_factory: sessionmaker[Session],
+    storage: FileStorage,
+    ctl: FakeExecutorCtl,
+    area: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = queue_run(factory, storage, create_user(factory, "ana"), executor_image=IMAGE)
+    worker = Coordinator(
+        worker_factory,
+        storage,
+        ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid()),
+        replace(coordinator_config(), lease=RECOVERY_LEASE),
+    )
+    renew = worker.renew_lease
+    renewing_outputs = False
+    failed = False
+
+    def inject_during[**P, T](work: Callable[P, T]) -> Callable[P, T]:
+        def run_stage(*args: P.args, **kwargs: P.kwargs) -> T:
+            nonlocal renewing_outputs
+            renewing_outputs = True
+            try:
+                return work(*args, **kwargs)
+            finally:
+                renewing_outputs = False
+
+        return run_stage
+
+    def renew_after_failure(
+        claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
+    ) -> Status:
+        nonlocal failed
+        if renewing_outputs and not failed:
+            failed = True
+            raise lock_not_available()
+        return renew(claimed, retry_allowed=retry_allowed)
+
+    if stage == "collection":
+        monkeypatch.setattr(worker_coordinator, "collect_outputs", inject_during(collect_outputs))
+    else:
+        monkeypatch.setattr(worker, "store_candidates", inject_during(worker.store_candidates))
+    monkeypatch.setattr(worker, "renew_lease", renew_after_failure)
+    pause = ClaimPause(WINDOW, clock=FakeClock())
+
+    assert turn(factory, storage, worker, pause, lease=RECOVERY_LEASE)
+    assert failed
+    assert not pause.active
+    assert run_row(factory, run_id)["status"] == "succeeded"
+    [physical_attempt] = attempts(factory, run_id)
+    assert physical_attempt["executor_started_at"] is not None
+    assert physical_attempt["ended_at"] is not None
+    with factory() as session:
+        positions = (
+            select(run_output.c.position)
+            .where(run_output.c.run_id == run_id)
+            .order_by(run_output.c.position)
+        )
+        assert session.scalars(positions).all() == [0, 1, 2, 3, 4]
 
 
 @pytest.mark.parametrize("point", POINTS)
@@ -268,6 +340,9 @@ def test_falha_de_banco_deixa_a_tentativa_orfa_e_a_run_seguinte_espera_a_pausa(
     assert (first_turn, second_turn) == (False, False)
     [orphan] = attempts(factory, first)
     assert orphan["ended_at"] is None
+    with factory() as session:
+        outputs = select(run_output.c.artifact_id).where(run_output.c.run_id == first)
+        assert session.scalars(outputs).all() == []
     assert any(area.iterdir()), "a área da tentativa órfã devia continuar ocupada"
     waiting = run_row(factory, second)
     assert (waiting["status"], waiting["claim_count"]) == ("queued", 0)
@@ -356,7 +431,7 @@ def test_falha_de_banco_na_copia_da_entrada_pausa_os_claims_antes_do_executor(
         worker_factory, storage, ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
     )
 
-    def renew(_claimed: ClaimedAttempt) -> Status:
+    def renew(_claimed: ClaimedAttempt, **_kwargs: object) -> Status:
         raise lock_not_available()
 
     monkeypatch.setattr(worker, "renew_lease", renew)
