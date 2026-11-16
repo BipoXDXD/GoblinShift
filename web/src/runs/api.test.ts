@@ -1,6 +1,8 @@
-import { describe, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type { components } from "../api/schema";
+import { fakeApi, jsonResponse, RUN_ID, runBody } from "../test/fakeApi";
+import { getRun } from "./api";
 import type {
   Coded,
   ITEM_NOTICES,
@@ -46,5 +48,30 @@ describe("tipos de execução espelham a spec", () => {
       duplicate_of: SpecItem["duplicate_of"];
       formula_cells: SpecItem["formula_cells"];
     }>();
+  });
+});
+
+describe("GET /runs/{id}", () => {
+  const route = `GET /api/v1/runs/${RUN_ID}`;
+
+  it("aceita o corpo de uma execução válida", async () => {
+    const api = fakeApi({ [route]: () => jsonResponse(runBody()) });
+
+    await expect(getRun(api.client, RUN_ID)).resolves.toMatchObject({
+      status: 200,
+      data: { id: RUN_ID },
+    });
+  });
+
+  it.each([
+    ["UUID inválido", { id: "id-invalido" }],
+    ["data sem fuso", { created_at: "2026-10-14T12:00:00" }],
+    ["tentativa fracionária", { attempt: 1.5 }],
+  ] as const)("recusa %s como resposta inesperada", async (_description, override) => {
+    const api = fakeApi({ [route]: () => jsonResponse(runBody(override)) });
+
+    await expect(getRun(api.client, RUN_ID)).rejects.toMatchObject({
+      failure: { kind: "unexpected-response", status: 200 },
+    });
   });
 });
