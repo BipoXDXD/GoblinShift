@@ -244,7 +244,7 @@ class _LeaseKeeper:
 
     def __init__(
         self,
-        renew: Callable[[], Status],
+        renew: Callable[[Callable[[float], bool] | None], Status],
         config: CoordinatorConfig,
         *,
         clock: Callable[[], float] = time.monotonic,
@@ -280,19 +280,23 @@ class _LeaseKeeper:
             raise _StopRequested
 
     def _renew_with_retry(self, started: float) -> tuple[float, Status]:
+        retry_allowed = self._can_retry if self._lease_deadline is not None else None
         while True:
             try:
-                return started, self._renew()
+                return started, self._renew(retry_allowed)
             except TRANSIENT_DATABASE_ERRORS:
-                if self._lease_deadline is None:
-                    raise
-                cutoff = self._lease_deadline - LEASE_RETRY_MARGIN_S
-                if self._clock() + self._retry_s >= cutoff:
+                if not self._can_retry(self._retry_s):
                     raise
                 self._sleep(self._retry_s)
                 started = self._clock()
-                if started >= cutoff:
+                if not self._can_retry(0):
                     raise
+
+    def _can_retry(self, delay: float) -> bool:
+        return (
+            self._lease_deadline is not None
+            and self._clock() + delay < self._lease_deadline - LEASE_RETRY_MARGIN_S
+        )
 
 
 def _lease_deadline(loaded: LoadedRun, observed_at: float) -> float:
@@ -569,7 +573,9 @@ class Coordinator:
             logger.warning("executor não parou", extra={"fields": _ids(claimed, error)})
             return None
 
-    def renew_lease(self, claimed: ClaimedAttempt) -> Status:
+    def renew_lease(
+        self, claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
+    ) -> Status:
         """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status."""
         processed = self._processed_count(claimed)
 
@@ -600,7 +606,7 @@ class Coordinator:
             )
             return Status.RUNNING
 
-        return run_transaction(self._factory, renew)
+        return run_transaction(self._factory, renew, retry_allowed=retry_allowed)
 
     def reach_phase(self, claimed: ClaimedAttempt, phase: Phase) -> LoadedRun:
         def reach(session: Session) -> LoadedRun:
@@ -897,7 +903,10 @@ class Coordinator:
         return apply_transition(session, loaded, decision)
 
     def _lease_keeper(self, claimed: ClaimedAttempt) -> _LeaseKeeper:
-        return _LeaseKeeper(lambda: self.renew_lease(claimed), self._config)
+        return _LeaseKeeper(
+            lambda retry_allowed: self.renew_lease(claimed, retry_allowed=retry_allowed),
+            self._config,
+        )
 
     def _lock_running(self, session: Session, claimed: ClaimedAttempt) -> LoadedRun:
         loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)

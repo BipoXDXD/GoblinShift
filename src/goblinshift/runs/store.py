@@ -133,12 +133,14 @@ def run_transaction[T](
     *,
     draw: Callable[[], float] = random.random,
     sleep: Callable[[float], None] = time.sleep,
+    retry_allowed: Callable[[float], bool] | None = None,
 ) -> T:
     """Roda `work` numa transação; deadlock ou serialização repetem tudo, até o teto.
 
     `work` precisa ser repetível: lê de novo o que decide, nunca reaproveita leitura anterior.
     A pausa entre tentativas tem jitter (`retry_pause_s`) para workers concorrentes não
     voltarem a colidir em sincronia.
+    `retry_allowed` pode limitar a pausa e o início da próxima transação.
     """
     for attempt_number in range(1, MAX_TRANSACTION_ATTEMPTS + 1):
         try:
@@ -148,11 +150,16 @@ def run_transaction[T](
             sqlstate = getattr(error.orig, "sqlstate", None)
             if sqlstate not in RETRYABLE_SQLSTATES or attempt_number == MAX_TRANSACTION_ATTEMPTS:
                 raise
+            delay = retry_pause_s(attempt_number, draw=draw)
+            if retry_allowed is not None and not retry_allowed(delay):
+                raise
             logger.warning(
                 "transação repetida",
                 extra={"fields": {"sqlstate": sqlstate, "attempt": attempt_number}},
             )
-            sleep(retry_pause_s(attempt_number, draw=draw))
+            sleep(delay)
+            if retry_allowed is not None and not retry_allowed(0):
+                raise
     raise RuntimeError("laço de retentativa terminou sem resultado")  # inalcançável
 
 

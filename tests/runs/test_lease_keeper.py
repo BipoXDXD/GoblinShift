@@ -32,7 +32,7 @@ def transient_error() -> OperationalError:
 
 
 def keeper(renew: Callable[[], Status], clock: Clock, *, remaining: float = 20) -> _LeaseKeeper:
-    lease = _LeaseKeeper(renew, CONFIG, clock=clock.monotonic, sleep=clock.sleep)
+    lease = _LeaseKeeper(lambda _: renew(), CONFIG, clock=clock.monotonic, sleep=clock.sleep)
     lease.set_lease_deadline(clock.now + remaining)
     return lease
 
@@ -119,7 +119,8 @@ def test_retry_nao_entrega_bloco_depois_de_parada_ou_erro_definitivo(
 def test_keeper_sem_prazo_observado_propaga_o_primeiro_erro() -> None:
     clock = Clock()
 
-    def renew() -> Status:
+    def renew(retry_allowed: Callable[[float], bool] | None) -> Status:
+        assert retry_allowed is None
         raise transient_error()
 
     lease = _LeaseKeeper(renew, CONFIG, clock=clock.monotonic, sleep=clock.sleep)
@@ -162,8 +163,24 @@ def test_espera_que_ultrapassa_o_limite_nao_faz_nova_tentativa() -> None:
     def delayed_sleep(seconds: float) -> None:
         clock.sleep(seconds + 2)
 
-    lease = _LeaseKeeper(renew, CONFIG, clock=clock.monotonic, sleep=delayed_sleep)
+    lease = _LeaseKeeper(lambda _: renew(), CONFIG, clock=clock.monotonic, sleep=delayed_sleep)
     lease.set_lease_deadline(clock.now + 3)
     with pytest.raises(OperationalError):
         lease.beat()
     assert calls == 1
+
+
+def test_keeper_propaga_a_mesma_margem_ao_retry_interno() -> None:
+    clock = Clock()
+
+    def renew(retry_allowed: Callable[[float], bool] | None) -> Status:
+        assert retry_allowed is not None
+        assert retry_allowed(1)
+        assert not retry_allowed(2)
+        clock.now += 2
+        assert not retry_allowed(0)
+        return Status.RUNNING
+
+    lease = _LeaseKeeper(renew, CONFIG, clock=clock.monotonic, sleep=clock.sleep)
+    lease.set_lease_deadline(clock.now + 3)
+    lease.beat()

@@ -75,3 +75,38 @@ def test_run_transaction_dorme_a_pausa_sorteada_entre_retentativas() -> None:
 
     assert result == "ok"
     assert slept == [pytest.approx(BASE_S / 2), pytest.approx(BASE_S)]
+
+
+@pytest.mark.parametrize("initial_window", [0.01, 0.03], ids=["sem-folga", "atraso-na-espera"])
+def test_run_transaction_respeita_limite_do_retry_antes_e_depois_da_espera(
+    initial_window: float,
+) -> None:
+    now = 0.0
+    calls = 0
+    slept: list[float] = []
+    error = _deadlock()
+
+    def work(_session: Session) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise error
+        return "nova transação fora da janela"
+
+    def sleep(delay: float) -> None:
+        nonlocal now
+        slept.append(delay)
+        now += delay + 0.02
+
+    with pytest.raises(DBAPIError) as failure:
+        run_transaction(
+            _factory(),
+            work,
+            draw=lambda: 0.0,
+            sleep=sleep,
+            retry_allowed=lambda delay: now + delay < initial_window,
+        )
+
+    assert failure.value is error
+    assert calls == 1
+    assert len(slept) == (1 if initial_window > BASE_S / 2 else 0)

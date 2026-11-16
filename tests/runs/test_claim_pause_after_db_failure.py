@@ -19,6 +19,7 @@ import sys
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import cast
@@ -52,6 +53,7 @@ from tests.runs.worker_support import (
     LEASE,
     attempts,
     coordinator,
+    coordinator_config,
     create_user,
     queue_run,
     run_row,
@@ -62,6 +64,7 @@ pytestmark = pytest.mark.integration
 REAL_EXECUTOR = (sys.executable, "-m", "goblinshift.processing.executor")
 LOCK_TIMEOUT_MS = 100
 WINDOW = timedelta(seconds=100)
+RECOVERY_LEASE = timedelta(seconds=15)
 NO_PAUSE = timedelta(0)
 COORDINATOR_LOGGER = "goblinshift.runs.worker.coordinator"
 START_REFUSED = "executor não iniciou"
@@ -168,10 +171,12 @@ def fail_in_lease_keeper(worker: Coordinator, monkeypatch: pytest.MonkeyPatch) -
         record_start(claimed)
         started.add(claimed.attempt_id)
 
-    def renew(claimed: ClaimedAttempt) -> Status:
+    def renew(
+        claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
+    ) -> Status:
         if claimed.attempt_id in started:
             raise lock_not_available()
-        return renew_lease(claimed)
+        return renew_lease(claimed, retry_allowed=retry_allowed)
 
     monkeypatch.setattr(worker, "record_start", record_start_and_mark)
     monkeypatch.setattr(worker, "renew_lease", renew)
@@ -234,9 +239,11 @@ def turn(
     worker: Coordinator,
     pause: ClaimPause,
     gate: WorkAreaGate = GATE_OFF,
+    *,
+    lease: timedelta = LEASE,
 ) -> bool:
     finished = RunFinishedReporter(factory, UserHasher(b"k" * 32), NoOpTracer())
-    return _work_once(factory, storage, LEASE, worker, finished, pause, gate)
+    return _work_once(factory, storage, lease, worker, finished, pause, gate)
 
 
 def queue_two_runs(
@@ -258,8 +265,11 @@ def test_falha_breve_na_renovacao_publica_na_mesma_tentativa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_id = queue_run(factory, storage, create_user(factory, "ana"), executor_image=IMAGE)
-    worker = coordinator(
-        worker_factory, storage, ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+    worker = Coordinator(
+        worker_factory,
+        storage,
+        ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid()),
+        replace(coordinator_config(), lease=RECOVERY_LEASE),
     )
     renew = worker.renew_lease
     renewing_outputs = False
@@ -276,12 +286,14 @@ def test_falha_breve_na_renovacao_publica_na_mesma_tentativa(
 
         return run_stage
 
-    def renew_after_failure(claimed: ClaimedAttempt) -> Status:
+    def renew_after_failure(
+        claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
+    ) -> Status:
         nonlocal failed
         if renewing_outputs and not failed:
             failed = True
             raise lock_not_available()
-        return renew(claimed)
+        return renew(claimed, retry_allowed=retry_allowed)
 
     if stage == "collection":
         monkeypatch.setattr(worker_coordinator, "collect_outputs", inject_during(collect_outputs))
@@ -290,7 +302,7 @@ def test_falha_breve_na_renovacao_publica_na_mesma_tentativa(
     monkeypatch.setattr(worker, "renew_lease", renew_after_failure)
     pause = ClaimPause(WINDOW, clock=FakeClock())
 
-    assert turn(factory, storage, worker, pause)
+    assert turn(factory, storage, worker, pause, lease=RECOVERY_LEASE)
     assert failed
     assert not pause.active
     assert run_row(factory, run_id)["status"] == "succeeded"
@@ -419,7 +431,7 @@ def test_falha_de_banco_na_copia_da_entrada_pausa_os_claims_antes_do_executor(
         worker_factory, storage, ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
     )
 
-    def renew(_claimed: ClaimedAttempt) -> Status:
+    def renew(_claimed: ClaimedAttempt, **_kwargs: object) -> Status:
         raise lock_not_available()
 
     monkeypatch.setattr(worker, "renew_lease", renew)
