@@ -1,7 +1,10 @@
 """Ambiente do Alembic: a URL vem das mesmas configurações da aplicação.
 
-Todas as revisões pendentes rodam numa transação só (`begin_transaction` abaixo): uma falha no
-meio desfaz o lote inteiro, e o banco fica na revisão em que estava (ADR 056).
+Cada revisão pendente roda na sua transação (`transaction_per_migration`), com `lock_timeout`
+curto e `statement_timeout` finito (ADR 057). Uma migration que não consegue o lock desiste em
+segundos, sem enfileirar a API atrás dela, e é repetida algumas vezes com espera sorteada; as
+anteriores a ela ficam aplicadas. Esgotadas as tentativas, o comando falha e a API nova não
+sobe. `-x lock_timeout_ms=<ms>` troca o `lock_timeout` de uma execução.
 
 O `migrate` de uma imagem anterior encontra o banco numa revisão que ela não conhece depois de
 um rollback do app. Pela política expand/contract (docs/GoblinShiftPlan.md, 3.8) essa imagem
@@ -10,14 +13,14 @@ migrar. Em produção o único destino aceito é o head: descer o schema é rest
 """
 
 import logging
-import re
 from collections.abc import Sequence
 from logging.config import fileConfig
 
 from alembic import command, context
 from alembic.script import ScriptDirectory
+from alembic.script.revision import _relative_destination
 from alembic.util import CommandError
-from sqlalchemy import Connection
+from sqlalchemy import Connection, Engine
 
 # As tabelas de cada módulo se registram no MetaData comum ao serem importadas.
 import goblinshift.capacity.tables
@@ -26,6 +29,12 @@ import goblinshift.identity.tables
 import goblinshift.presets.tables
 import goblinshift.runs.tables  # noqa: F401
 from goblinshift.platform.db import make_engine, metadata
+from goblinshift.platform.migration_locks import (
+    MIGRATION_LOCK_TIMEOUT_MS,
+    RelativeMigrationPlan,
+    run_with_lock_retries,
+    session_settings,
+)
 from goblinshift.platform.schema import read_db_heads
 from goblinshift.platform.settings import Settings
 
@@ -38,18 +47,22 @@ if config.config_file_name is not None:
 
 target_metadata = metadata
 log = logging.getLogger("alembic.env")
-RELATIVE_REVISION = re.compile(r"[+-][0-9]+$")
 
 
 def run_migrations_offline() -> None:
     settings = Settings()
     script = ScriptDirectory.from_config(config)
     _check_production_destination(settings, _destination(script), frozenset(script.get_heads()))
+    lock_timeout_ms = _lock_timeout_ms()
     context.configure(
         url=settings.database_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
+        transaction_per_migration=True,
     )
+    # O script gerado leva os mesmos limites de sessão que o migrate aplica ao conectar.
+    for statement in session_settings(lock_timeout_ms):
+        context.execute(statement)
     with context.begin_transaction():
         context.run_migrations()
 
@@ -61,18 +74,56 @@ def run_migrations_online() -> None:
     destination = _destination(script)
     goes_to_head = destination == image_heads
     _check_production_destination(settings, destination, image_heads)
+    lock_timeout_ms = _lock_timeout_ms()
+    relative_plan = (
+        RelativeMigrationPlan()
+        if any(_relative_destination.match(target) for target in destination or ())
+        else None
+    )
     engine = make_engine(settings)
     try:
-        with engine.connect() as connection:
-            if goes_to_head and _db_is_ahead_of_image(connection, script, image_heads):
-                return
-            context.configure(connection=connection, target_metadata=target_metadata)
-            with context.begin_transaction():
-                # Migrações podem demorar mais que o statement_timeout da aplicação.
-                context.execute("SET LOCAL statement_timeout = 0")
-                context.run_migrations()
+        if goes_to_head:
+            with engine.connect() as connection:
+                if _db_is_ahead_of_image(connection, script, image_heads):
+                    return
+        run_with_lock_retries(lambda: _migrate(engine, lock_timeout_ms, relative_plan))
     finally:
         engine.dispose()
+
+
+def _migrate(
+    engine: Engine, lock_timeout_ms: int, relative_plan: RelativeMigrationPlan | None
+) -> None:
+    """Uma rodada do comando numa conexão nova, cada migration na sua transação."""
+    with engine.connect() as connection:
+        for statement in session_settings(lock_timeout_ms):
+            connection.exec_driver_sql(statement)
+        # O commit preserva os SETs de sessão entre revisões e deixa o Alembic abrir a transação.
+        connection.commit()
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            transaction_per_migration=True,
+            on_version_apply=relative_plan.record_heads if relative_plan is not None else None,
+        )
+        if relative_plan is not None:
+            relative_plan.install(context.get_context())
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+def _lock_timeout_ms() -> int:
+    raw = context.get_x_argument(as_dictionary=True).get("lock_timeout_ms")
+    if raw is None:
+        return MIGRATION_LOCK_TIMEOUT_MS
+    try:
+        lock_timeout_ms = int(raw)
+    except ValueError:
+        raise CommandError(f"-x lock_timeout_ms precisa ser inteiro, veio {raw!r}") from None
+    if lock_timeout_ms <= 0:
+        # 0 desliga o limite no PostgreSQL: a migration voltaria a esperar o lock para sempre.
+        raise CommandError(f"-x lock_timeout_ms precisa ser positivo, veio {lock_timeout_ms}")
+    return lock_timeout_ms
 
 
 def _check_production_destination(
@@ -109,7 +160,7 @@ def _destination(script: ScriptDirectory) -> frozenset[str] | None:
     revisions: set[str] = set()
     for element in elements:
         # Um destino relativo depende da revisão corrente e segue para o Alembic fora de produção.
-        if element is not None and RELATIVE_REVISION.search(element):
+        if element is not None and _relative_destination.match(element):
             revisions.add(element)
             continue
         resolved = script.get_revisions(element) if element is not None else ()

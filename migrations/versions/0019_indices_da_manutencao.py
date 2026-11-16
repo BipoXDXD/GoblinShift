@@ -43,24 +43,29 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # lock-ok: índice construído na transação da 0019, com poucos usos na implantação.
     op.create_index("object_use_object_id_idx", "object_use", ["object_id"])
+    # lock-ok: índice parcial numa tabela pequena, na mesma transação da 0019.
     op.create_index(
         "stored_object_attempt_id_idx",
         "stored_object",
         ["attempt_id"],
         postgresql_where=sa.text("attempt_id IS NOT NULL"),
     )
+    # lock-ok: índice de expressão em poucas sessões na implantação da 0019.
     op.create_index(
         "web_session_ended_at_idx",
         "web_session",
         [sa.text("least(revoked_at, idle_expires_at, absolute_expires_at)")],
     )
+    # lock-ok: índice parcial das poucas reservas liberadas na implantação da 0019.
     op.create_index(
         "resource_reservation_released_at_idx",
         "resource_reservation",
         ["released_at"],
         postgresql_where=sa.text("released_at IS NOT NULL"),
     )
+    # lock-ok: corrige somente contas recentes deixadas pendentes pela API anterior.
     op.execute(
         """
         UPDATE app_user AS u
@@ -76,6 +81,7 @@ def upgrade() -> None:
                )
         """
     )
+    # lock-ok: limpa a marca residual em poucas contas liberadas ou bloqueadas pela API anterior.
     op.execute(
         """
         UPDATE app_user AS u

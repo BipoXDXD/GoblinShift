@@ -207,6 +207,16 @@ def test_executor_processa_um_work_dir_real(image: str, tmp_path: Path) -> None:
     assert [entry["status"] for entry in manifest["inputs"]] == ["ok", "rejected"]
 
 
+def test_imagem_nao_tem_pacote_gpl_nem_ferramenta_de_dev(image: str) -> None:
+    # O mesmo script das imagens publicadas (ADR 057): pglast e qualquer GPL/AGPL ficam fora.
+    script = (ROOT / "scripts" / "check_runtime_licenses.py").read_text(encoding="utf-8")
+
+    result = run_python(image, script)
+
+    assert result.returncode == 0, result.stderr
+    assert "0 recusados" in result.stdout
+
+
 def test_pillow_fixado_e_a_versao_do_lock(image: str) -> None:
     result = run_python(image, "import PIL; print(PIL.__version__)")
 

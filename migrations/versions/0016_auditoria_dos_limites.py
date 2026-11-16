@@ -50,10 +50,12 @@ _TYPES_0016 = _TYPES_0008 + ", 'ACCOUNT_LIMITS_CHANGED'"
 
 def upgrade() -> None:
     _replace_event_type_check(_TYPES_0016)
+    # lock-ok: coluna nula sem default; astext_type só escolhe o tipo SQL do resultado de ->>
     op.add_column(
         "audit_event",
         sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     )
+    # lock-ok: details recém-criada e nula; audit_event tem poucos milhares de linhas, varre em ms
     op.create_check_constraint(
         op.f(_DETAILS_CHECK),
         "audit_event",
@@ -71,5 +73,7 @@ def downgrade() -> None:
 
 
 def _replace_event_type_check(types: str) -> None:
+    # lock-ok: DROP CONSTRAINT de CHECK só muda o catálogo: lock de um instante, sem varredura
     op.drop_constraint(op.f(_TYPE_CHECK), "audit_event", type_="check")
+    # lock-ok: audit_event guarda 90 dias, poucos milhares de linhas; varre em ms (docstring)
     op.create_check_constraint(op.f(_TYPE_CHECK), "audit_event", f"event_type IN ({types})")

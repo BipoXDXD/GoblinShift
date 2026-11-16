@@ -8,11 +8,11 @@ que nenhuma imagem em uso lê o que sai. O `downgrade()` fica de fora: ele desfa
 
 import ast
 import re
-import tokenize
-from io import StringIO
 from pathlib import Path
 
 import pytest
+
+from tests.migration_source import comments, is_marked, string_constants, upgrade_function
 
 VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 CONTRACT_MARK = re.compile(r"#\s*contract:\s*\S")
@@ -39,34 +39,17 @@ SQL_DO = re.compile(r"(?:^|;)\s*DO\b", re.IGNORECASE)
 
 def unmarked_destructive_lines(source: str) -> list[int]:
     """Linhas do `upgrade()` com DROP/RENAME de coluna ou tabela sem a marca de contract."""
-    lines = source.splitlines()
-    upgrade = next(
-        (
-            node
-            for node in ast.parse(source).body
-            if isinstance(node, ast.FunctionDef) and node.name == "upgrade"
-        ),
-        None,
-    )
+    upgrade = upgrade_function(source)
     if upgrade is None:
         return []
-    marked_lines = {
-        token.start[0]
-        for token in tokenize.generate_tokens(StringIO(source).readline)
-        if token.type == tokenize.COMMENT and CONTRACT_MARK.search(token.string)
-    }
-    found = []
-    for node in ast.walk(upgrade):
-        if isinstance(node, ast.Call) and _is_destructive(node):
-            line = node.lineno
-            # Na linha acima, só uma linha que é apenas o comentário: a marca de outra operação
-            # não cobre esta.
-            marked = line in marked_lines or (
-                line - 1 in marked_lines and lines[line - 2].lstrip().startswith("#")
-            )
-            if not marked:
-                found.append(line)
-    return sorted(found)
+    found = comments(source)
+    return sorted(
+        node.lineno
+        for node in ast.walk(upgrade)
+        if isinstance(node, ast.Call)
+        and _is_destructive(node)
+        and not is_marked(found, node.lineno, CONTRACT_MARK)
+    )
 
 
 def _is_destructive(call: ast.Call) -> bool:
@@ -76,12 +59,7 @@ def _is_destructive(call: ast.Call) -> bool:
     if name == "alter_column":
         return any(keyword.arg == "new_column_name" for keyword in call.keywords)
     if name in {"execute", "exec_driver_sql"}:
-        return any(
-            isinstance(arg, ast.Constant)
-            and isinstance(arg.value, str)
-            and _has_destructive_sql(arg.value)
-            for arg in ast.walk(call)
-        )
+        return any(_has_destructive_sql(text) for text in string_constants(call))
     return False
 
 

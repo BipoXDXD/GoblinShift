@@ -1,6 +1,6 @@
 # ADR 056. O `migrate` da imagem anterior tolera o banco à frente; produção só sobe para o head
 
-- **Estado:** aceito (coordenação, 14/11, por delegação do dono)
+- **Estado:** aceito (coordenação, 14/11, por delegação do dono). A política de transações foi atualizada pelo [ADR 057](057-travas-das-migrations.md).
 - **Plano:** [3.8](../GoblinShiftPlan.md#s3-8) (implantação, expand/contract)
 - **Relacionado:** issue #442, `migrations/env.py`, `tests/test_migrate_tolerante.py`, `tests/test_migrations_contract.py`, `deploy/coolify/release/ISOLATION.md`
 
@@ -24,7 +24,7 @@ Opção C.
 
 - **Banco à frente.** Após validar o destino completo, incluindo o qualificador de ramo, o `env.py` lê as revisões do banco para um destino igual ao head da imagem. Uma revisão que a imagem não conhece gera um WARN no stderr, com a revisão do banco e o head da imagem, e `upgrade head` ou `stamp head` sai com 0 sem migrar nem regravar a versão. Destinos inválidos, banco inacessível e outros erros do Alembic continuam falhando.
 - **Produção.** Com `GS_ENVIRONMENT=production`, o único destino aceito pelo CLI é o head da imagem. Todo `downgrade` é recusado, inclusive para o head e com `--sql`. Todos os destinos de um `stamp` são conferidos antes de conectar ou emitir SQL. Comandos de inspeção sem destino (`current`, `check`, `history`) continuam permitidos para conferir a revisão do banco. `stamp head` é aceito para recuperação manual: com o banco atrás do head ele marca a versão sem rodar as migrações pendentes. Descer o schema em produção é restauração de backup (ADR 022).
-- **Transação única.** Todas as revisões pendentes rodam numa transação só, com `statement_timeout` desligado nela: uma falha desfaz o lote inteiro, e o banco fica na revisão em que estava. A leitura das revisões fecha a própria transação implícita antes, para que o `begin_transaction` do Alembic não entre nela.
+- **Transação por revisão.** O [ADR 057](057-travas-das-migrations.md) substituiu a transação única por uma transação por revisão e prazos de sessão. A leitura das revisões fecha a própria transação implícita antes da execução das migrations.
 - **Contract.** `tests/test_migrations_contract.py` varre o `upgrade()` de cada migration e recusa `drop_column`, `drop_table`, `rename_table`, `alter_column(new_column_name=...)` e SQL literal via `execute` ou `exec_driver_sql` com DROP/RENAME de coluna ou tabela. Em `ALTER TABLE`, confere cada ação da lista, com ou sem `COLUMN`, exceto as operações sobre constraint, default, NOT NULL, identity e expression. A marca `# contract: <motivo>` precisa ser comentário Python na linha da operação ou em linha própria logo acima. O `downgrade()` fica de fora.
 
 ## Consequências

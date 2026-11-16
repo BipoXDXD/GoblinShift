@@ -24,7 +24,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # lock-ok: NOT NULL sem default só passa com artifact vazia; se a coluna existe, é no-op
     op.execute("ALTER TABLE artifact ADD COLUMN IF NOT EXISTS file_name text NOT NULL")
+    # lock-ok: o CHECK só entra se faltar; aí artifact está vazia, senão o NOT NULL acima falharia
     op.execute(
         """
         DO $$

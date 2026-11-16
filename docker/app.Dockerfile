@@ -34,6 +34,10 @@ WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY alembic.ini ./
 COPY migrations ./migrations
+# Nenhum pacote GPL/AGPL nem ferramenta de dev no runtime (ADR 057). Roda no build de cada
+# plataforma, antes do push; o bind mount não deixa o script na imagem.
+RUN --mount=type=bind,source=scripts/check_runtime_licenses.py,target=/tmp/check_runtime_licenses.py \
+    /app/.venv/bin/python -I -B /tmp/check_runtime_licenses.py
 ARG GS_SERVICE_VERSION=dev
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

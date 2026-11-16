@@ -58,6 +58,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("owner_id", "name", name=op.f("preset_owner_id_name_key")),
     )
     op.add_column("run", sa.Column("preset_id", sa.Uuid(), nullable=True))
+    # lock-ok: FK sobre preset_id recém-criada e nula em todas as linhas: validação imediata
     op.create_foreign_key(
         _RUN_PRESET_FK,
         "run",
@@ -66,6 +67,7 @@ def upgrade() -> None:
         ["owner_id", "id"],
         ondelete="SET NULL (preset_id)",
     )
+    # lock-ok: índice parcial em run, que guarda 90 dias de uma VPS (docstring)
     op.create_index(
         "run_preset_id_idx",
         "run",

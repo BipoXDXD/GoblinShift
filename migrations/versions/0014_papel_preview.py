@@ -33,13 +33,16 @@ _SOURCE_INDEX = "artifact_source_artifact_id_idx"
 
 
 def upgrade() -> None:
+    # lock-ok: DROP CONSTRAINT de CHECK só muda o catálogo: lock de um instante, sem varredura
     op.drop_constraint(op.f(_ROLE_CHECK), "artifact", type_="check")
+    # lock-ok: alarga o CHECK de role; artifact guarda só 48 h de saídas, varre em ms
     op.create_check_constraint(
         op.f(_ROLE_CHECK),
         "artifact",
         "role IN ('output', 'report', 'manifest', 'package', 'preview')",
     )
     op.add_column("artifact", sa.Column("source_artifact_id", sa.Uuid(), nullable=True))
+    # lock-ok: FK sobre source_artifact_id recém-criada e nula: validação imediata
     op.create_foreign_key(
         _SOURCE_FK,
         "artifact",
@@ -48,11 +51,13 @@ def upgrade() -> None:
         ["owner_id", "id"],
         ondelete="CASCADE",
     )
+    # lock-ok: coluna nula recém-criada, nenhuma linha é preview; artifact guarda 48 h
     op.create_check_constraint(
         op.f(_SOURCE_CHECK),
         "artifact",
         "(role = 'preview') = (source_artifact_id IS NOT NULL)",
     )
+    # lock-ok: índice parcial em artifact, que guarda só 48 h de saídas
     op.create_index(
         _SOURCE_INDEX,
         "artifact",

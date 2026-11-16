@@ -27,10 +27,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # lock-ok: default constante (false): o PG 11+ grava no catálogo, sem reescrever app_user
     op.add_column(
         "app_user",
         sa.Column("awaiting_approval", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
+    # lock-ok: UPDATE só das contas bloqueadas sem sessão; trava essas linhas, não a tabela
     op.execute(
         """
         UPDATE app_user AS u
