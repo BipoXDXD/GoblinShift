@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { NavigationType } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ME_QUERY_KEY } from "../account/api";
 import type { SiteNotice } from "../notice/notice";
@@ -9,6 +9,7 @@ import { meBody, TERMS_PENDING } from "../test/account";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { fakeApi, jsonResponse, problemResponse, TEST_CSRF_TOKEN } from "../test/fakeApi";
+import { installFakeMatchMedia } from "../test/fakeMatchMedia";
 import { expectHeadingFocused } from "../test/focus";
 import { currentUrl, renderRoutes } from "../test/renderRoutes";
 
@@ -445,4 +446,66 @@ describe("Layout: barra final no endereço", () => {
     expect(await screen.findByRole("heading", { level: 1 })).toBeVisible();
     expect(currentUrl(router)).toBe(path);
   });
+});
+
+describe("Layout: armazenamento de tema bloqueado", () => {
+  it.each([
+    ["antes da montagem", true, false],
+    ["antes da montagem", true, true],
+    ["depois da montagem", false, false],
+    ["depois da montagem", false, true],
+  ] as const)(
+    "getter bloqueado %s (antes = %s), sistema escuro = %s",
+    async (_case, blockBeforeMount, dark) => {
+      const system = installFakeMatchMedia(dark);
+      const storage = window.localStorage;
+      const blockStorage = () =>
+        vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+          throw new DOMException("bloqueado", "SecurityError");
+        });
+      let getter = blockBeforeMount ? blockStorage() : undefined;
+      try {
+        setup(() => jsonResponse(meBody()), "/historico");
+        expect(await nav()).toBeVisible();
+        expect(await screen.findByRole("heading", { level: 1, name: "Histórico" })).toBeVisible();
+        await userEvent.click(screen.getByText("Tema"));
+        expect(screen.getByRole("radio", { name: "Sistema" })).toBeChecked();
+        expect(document.documentElement).toHaveAttribute("data-theme", dark ? "dark" : "light");
+
+        getter ??= blockStorage();
+        for (const [label, theme] of [
+          ["Claro", "light"],
+          ["Escuro", "dark"],
+        ] as const) {
+          await userEvent.click(screen.getByRole("radio", { name: label }));
+          expect(screen.getByRole("radio", { name: label })).toBeChecked();
+          expect(document.documentElement).toHaveAttribute("data-theme", theme);
+          act(() => {
+            system.setSystemDark(theme === "light");
+          });
+          expect(document.documentElement).toHaveAttribute("data-theme", theme);
+        }
+        await userEvent.click(screen.getByRole("radio", { name: "Sistema" }));
+        expect(screen.getByRole("radio", { name: "Sistema" })).toBeChecked();
+        for (const nextDark of [true, false]) {
+          act(() => {
+            system.setSystemDark(nextDark);
+          });
+          expect(document.documentElement).toHaveAttribute(
+            "data-theme",
+            nextDark ? "dark" : "light",
+          );
+        }
+        expect(getter).toHaveBeenCalled();
+        expect(storage.getItem("gs-theme")).toBeNull();
+        expect(screen.getByRole("banner")).toBeVisible();
+        expect(screen.getByRole("navigation", { name: "Principal" })).toBeVisible();
+        expect(screen.getByRole("main")).toBeVisible();
+        expect(screen.getByRole("heading", { level: 1, name: "Histórico" })).toBeVisible();
+        expect(screen.getByRole("contentinfo")).toBeVisible();
+      } finally {
+        getter?.mockRestore();
+      }
+    },
+  );
 });

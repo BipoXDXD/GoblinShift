@@ -18,7 +18,7 @@ interface ThemeControl {
  * `theme-init.js` grava na carga). Em `system`, acompanha a troca de tema do sistema operacional.
  */
 export function useTheme(): ThemeControl {
-  const [preference, setPreference] = useState(() => readPreference(window.localStorage));
+  const [preference, setPreference] = useState(() => readPreference(() => window.localStorage));
 
   useEffect(() => {
     const system = window.matchMedia(DARK_QUERY);
@@ -36,7 +36,7 @@ export function useTheme(): ThemeControl {
   }, [preference]);
 
   const choose = (next: ThemePreference): void => {
-    writePreference(window.localStorage, next);
+    writePreference(() => window.localStorage, next);
     setPreference(next);
   };
   return { preference, choose };

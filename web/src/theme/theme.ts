@@ -28,18 +28,22 @@ export function parsePreference(value: string | null): ThemePreference {
 
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 
-export function readPreference(storage: PreferenceStorage): ThemePreference {
+/** O getter do armazenamento também pode lançar; avalie-o dentro do tratamento. */
+export function readPreference(storage: () => PreferenceStorage): ThemePreference {
   try {
-    return parsePreference(storage.getItem(STORAGE_KEY));
+    return parsePreference(storage().getItem(STORAGE_KEY));
   } catch {
     // Armazenamento bloqueado (modo privado, política do navegador): segue o sistema.
     return "system";
   }
 }
 
-export function writePreference(storage: PreferenceStorage, preference: ThemePreference): void {
+export function writePreference(
+  storage: () => PreferenceStorage,
+  preference: ThemePreference,
+): void {
   try {
-    storage.setItem(STORAGE_KEY, preference);
+    storage().setItem(STORAGE_KEY, preference);
   } catch {
     // Sem armazenamento a escolha vale só nesta página; o tema já foi aplicado por quem chamou.
   }

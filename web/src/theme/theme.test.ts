@@ -26,24 +26,36 @@ describe("parsePreference", () => {
 });
 
 describe("preferência gravada", () => {
+  it("getter bloqueado segue o sistema e não impede a escolha temporária", () => {
+    const storage = {
+      get localStorage(): Storage {
+        throw new DOMException("bloqueado", "SecurityError");
+      },
+    };
+    expect(readPreference(() => storage.localStorage)).toBe("system");
+    expect(() => {
+      writePreference(() => storage.localStorage, "dark");
+    }).not.toThrow();
+  });
+
   it("sem nada gravado, segue o sistema", () => {
-    expect(readPreference(window.localStorage)).toBe("system");
+    expect(readPreference(() => window.localStorage)).toBe("system");
   });
 
   it("grava e lê a mesma escolha", () => {
-    writePreference(window.localStorage, "dark");
+    writePreference(() => window.localStorage, "dark");
 
     expect(window.localStorage.getItem("gs-theme")).toBe("dark");
-    expect(readPreference(window.localStorage)).toBe("dark");
+    expect(readPreference(() => window.localStorage)).toBe("dark");
   });
 
   it("armazenamento bloqueado na leitura segue o sistema", () => {
-    expect(readPreference(blockedStorage())).toBe("system");
+    expect(readPreference(blockedStorage)).toBe("system");
   });
 
   it("armazenamento bloqueado na gravação não derruba a troca de tema", () => {
     expect(() => {
-      writePreference(blockedStorage(), "light");
+      writePreference(blockedStorage, "light");
     }).not.toThrow();
   });
 });
