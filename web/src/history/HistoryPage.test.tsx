@@ -408,7 +408,9 @@ describe("Histórico", () => {
     });
 
     it("resposta da paginação após sair da tela não agenda outro anúncio", async () => {
-      const fetchNextPage = vi.spyOn(InfiniteQueryObserver.prototype, "fetchNextPage");
+      const observerClass: { prototype: Pick<InfiniteQueryObserver, "fetchNextPage"> } =
+        InfiniteQueryObserver;
+      const fetchNextPage = vi.spyOn(observerClass.prototype, "fetchNextPage");
       onTestFinished(() => {
         fetchNextPage.mockRestore();
       });
