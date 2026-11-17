@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -277,7 +277,13 @@ describe("Resultados: excluir", () => {
     const confirm = within(dialog).getByRole("button", { name: "Excluindo resultados…" });
     expect(confirm).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).queryByRole("button", { name: "Excluir resultados" })).toBeNull();
-    await user.click(confirm);
+    await act(async () => {
+      await user.click(confirm);
+      // O primeiro DELETE continua em voo enquanto um segundo poderia sair no próximo tick.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
     expect(sent(api.requests, DELETE_ROUTE)).toHaveLength(1);
     held.answer(problemResponse(409, "STATE_CONFLICT"));
 

@@ -191,7 +191,13 @@ describe("OficinaHero", () => {
       <OficinaHero environment={REDUCED_MOTION} whenPageIdle={runNow} loadScene={loadScene} />,
     );
 
-    await userEvent.click(castButton("Nyx"));
+    await act(async () => {
+      await userEvent.click(castButton("Nyx"));
+      // Deixa uma carga adiada pelo clique começar antes de conferir que só ficou a imagem.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
 
     expect(loadScene).not.toHaveBeenCalled();
     expect(heroState(container)).toBe("imagem");
