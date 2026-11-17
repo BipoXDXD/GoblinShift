@@ -1,6 +1,7 @@
+import { InfiniteQueryObserver } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { ANNOUNCE_DELAY_MS } from "../components/a11y/LiveRegion";
 import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
@@ -16,7 +17,7 @@ const RUN_A = "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a";
 const RUN_B = "1c8d4e2f-0000-4000-8000-0000000000bb";
 const RUN_C = "2d9e5f30-0000-4000-8000-0000000000cc";
 
-type Handler = (request: Request) => Response | null;
+type Handler = (request: Request) => Response | Promise<Response> | null;
 
 function page(runs: readonly Record<string, unknown>[], nextCursor: string | null = null) {
   return jsonResponse({ data: runs, next_cursor: nextCursor });
@@ -404,6 +405,43 @@ describe("Histórico", () => {
       expect(() => {
         vi.advanceTimersByTime(ANNOUNCE_DELAY_MS);
       }).not.toThrow();
+    });
+
+    it("resposta da paginação após sair da tela não agenda outro anúncio", async () => {
+      const fetchNextPage = vi.spyOn(InfiniteQueryObserver.prototype, "fetchNextPage");
+      onTestFinished(() => {
+        fetchNextPage.mockRestore();
+      });
+      let resolvePage: (response: Response) => void = () => undefined;
+      const secondPage = new Promise<Response>((resolve) => {
+        resolvePage = resolve;
+      });
+      const { api, queryClient, unmount } = setup((request) =>
+        new URL(request.url).searchParams.get("cursor") === "pagina-2"
+          ? secondPage
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+      const loadMore = await screen.findByRole("button", { name: "Carregar mais" });
+      installAnnounceClock();
+      fireEvent.click(loadMore);
+      await untilFakeClock(() => {
+        expect(listCalls(api.requests)).toEqual([
+          "/api/v1/runs?limit=25",
+          "/api/v1/runs?limit=25&cursor=pagina-2",
+        ]);
+      });
+      const fetch = fetchNextPage.mock.results[0];
+      if (fetch?.type !== "return") {
+        throw new Error("O clique deveria iniciar a segunda página.");
+      }
+
+      unmount();
+      await act(async () => {
+        resolvePage(page([runBody({ id: RUN_B })]));
+        await fetch.value;
+      });
+      queryClient.clear();
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it("última página vazia leva o foco à última linha da lista", async () => {
