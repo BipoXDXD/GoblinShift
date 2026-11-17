@@ -115,8 +115,8 @@ describe("Execução: detalhe por arquivo", () => {
     expect(entry).toHaveTextContent(/^Arquivo 1Processado5 gravados$/);
   });
 
-  it("contagem que não é inteiro não derruba a página e fica de fora", async () => {
-    setup({ summary, items: [item(0, { counts: { records_read: 1.5, written: 5 } })] });
+  it.each([1.5, -1])("omite a contagem inválida %s e preserva a válida", async (recordsRead) => {
+    setup({ summary, items: [item(0, { counts: { records_read: recordsRead, written: 5 } })] });
 
     const entry = within(await itemsRegion()).getByRole("listitem");
     expect(entry).toHaveTextContent(/^Arquivo 1Processado5 gravados$/);
