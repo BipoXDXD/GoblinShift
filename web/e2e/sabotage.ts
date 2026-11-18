@@ -1,7 +1,8 @@
 // Devil's Advocate da suíte E2E (Testes 19): cada spec tem que falhar quando o defeito que ela
 // vigia é plantado. Cada caso copia o dist/ já construído, planta um defeito (CSS, script ou
 // arquivo trocado, sem tocar no código-fonte), serve a cópia numa porta própria e roda só a spec
-// do caso. O script sai com 1 se alguma spec continuar verde com o defeito.
+// do caso. Cada execução precisa terminar com todos os testes selecionados executados e detectar
+// o defeito em pelo menos um deles.
 //
 // Uso, depois de `npm run build` e `npm run build:notice-e2e`:
 // npm run e2e:sabotage [-- trecho do nome do caso]
@@ -18,6 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { inspectSabotageReport } from "./support/sabotageReport.ts";
 import { selectCases } from "./support/selectCases.ts";
 
 interface Case {
@@ -481,9 +483,11 @@ function appendToEntryScript(dist: string, js: string): void {
 }
 
 function runCase(sabotage: Case, port: number): boolean {
-  const dist = mkdtempSync(join(tmpdir(), "goblinshift-sabotagem-"));
   const edit = sabotage.sourceEdit;
   const original = edit === undefined ? null : readFileSync(edit.file, "utf8");
+  const work = mkdtempSync(join(tmpdir(), "goblinshift-sabotagem-"));
+  const dist = join(work, "dist");
+  const reportPath = join(work, "report.json");
   try {
     if (edit !== undefined && original !== null) {
       if (!original.includes(edit.search)) {
@@ -506,25 +510,45 @@ function runCase(sabotage: Case, port: number): boolean {
         "test",
         "--config=e2e/playwright.config.ts",
         `--project=${sabotage.project ?? "desktop"}`,
-        "--reporter=line",
+        "--reporter=json",
+        "--output",
+        join(work, "test-results"),
         ...sabotage.spec,
       ],
       {
-        encoding: "utf8",
-        env: { ...process.env, ...sabotage.env, E2E_DIST_DIR: dist, E2E_PORT: String(port) },
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          ...sabotage.env,
+          E2E_DIST_DIR: dist,
+          E2E_PORT: String(port),
+          PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
+        },
       },
     );
-    const summary = /\d+ failed[\s\S]*?(\d+ passed)?/.exec(result.stdout)?.[0] ?? "nenhuma falha";
-    const caught = result.status !== 0 && /\d+ failed/.test(result.stdout);
-    console.log(
-      `${caught ? "pegou " : "PASSOU"}  ${sabotage.name}: ${summary.replace(/\s+/g, " ")}`,
-    );
-    return caught;
-  } finally {
-    if (edit !== undefined && original !== null) {
-      writeFileSync(edit.file, original);
+    if (!existsSync(reportPath)) {
+      console.error(`${sabotage.name}: relatório Playwright ausente`);
+      return false;
     }
-    rmSync(dist, { recursive: true, force: true });
+    try {
+      const summary = inspectSabotageReport(
+        JSON.parse(readFileSync(reportPath, "utf8")),
+        result.status,
+      );
+      console.log(JSON.stringify({ sabotage: sabotage.name, exitCode: result.status, ...summary }));
+      return summary.caught;
+    } catch {
+      console.error(`${sabotage.name}: relatório Playwright inválido ou inconsistente`);
+      return false;
+    }
+  } finally {
+    try {
+      if (edit !== undefined && original !== null) {
+        writeFileSync(edit.file, original);
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   }
 }
 
@@ -538,7 +562,9 @@ if (!selection.found) {
 const selected = selection.cases;
 const escaped = selected.filter((sabotage, index) => !runCase(sabotage, FIRST_PORT + index));
 if (escaped.length > 0) {
-  console.error(`\n${String(escaped.length)} defeito(s) passaram pela suíte.`);
+  console.error(
+    `\n${String(escaped.length)} cenário(s) sem execução completa e detecção do defeito.`,
+  );
   process.exit(1);
 }
 console.log(`\nOs ${String(selected.length)} defeitos plantados derrubaram a spec que os vigia.`);
