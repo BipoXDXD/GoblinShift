@@ -31,7 +31,8 @@ tentativa_s=${CI_APT_TENTATIVA_S:-150}
 # Espelhos oficiais do Ubuntu, todos com o mesmo caminho /ubuntu. No download o apt confere a
 # assinatura do InRelease, então trocar de espelho não muda o que é instalado.
 espelhos=(archive.ubuntu.com mirrors.edge.kernel.org azure.archive.ubuntu.com)
-hosts_do_ubuntu='(?:azure\.archive\.ubuntu\.com|archive\.ubuntu\.com|mirrors\.edge\.kernel\.org)'
+# A lista mirror+file do runner pode apontar para um host regional da EC2.
+hosts_do_ubuntu='((azure\.|[a-z][a-z0-9-]*\.ec2\.)?archive\.ubuntu\.com|mirrors\.edge\.kernel\.org)'
 opcoes=(-q -y --no-install-recommends -o "Dir::Cache::archives=$debs")
 
 main() {
@@ -67,9 +68,10 @@ instalar_do_cache() {
 
 usar_espelho() {
   local arquivos
-  mapfile -t arquivos < <(sudo grep -rlE '//(azure\.)?archive\.ubuntu\.com/|//mirrors\.edge\.kernel\.org/' "$etc" || true)
+  local uri="(^|[[:space:]])(https?://)${hosts_do_ubuntu}/ubuntu"
+  mapfile -t arquivos < <(sudo grep -rlE "${uri}([/[:space:]]|$)" "$etc" || true)
   if ((${#arquivos[@]} > 0)); then
-    sudo perl -pi -e "s#//${hosts_do_ubuntu}/ubuntu#//$1/ubuntu#g" "${arquivos[@]}"
+    sudo perl -pi -e "s#${uri}(?=[/[:space:]]|$)#\${1}\${2}$1/ubuntu#g" "${arquivos[@]}"
   fi
 }
 

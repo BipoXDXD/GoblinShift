@@ -1,6 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { installAnnounceClock, untilFakeClock } from "../test/announceClock";
+import { preloadRoutes } from "../test/appRoutes";
 import { problemResponse } from "../test/fakeApi";
 
 import { App } from "./App";
@@ -72,6 +74,50 @@ describe("App", () => {
     expect(
       await screen.findByRole("link", { name: "Abrir a Bancada da CSV Janitor" }),
     ).toHaveAttribute("href", "/bancada/csv-janitor");
+  });
+
+  it("aguarda Retry-After nas consultas e só mostra o alerta após a última falha", async () => {
+    await preloadRoutes("/bancada/csv-janitor");
+    installAnnounceClock();
+    const catalog = vi.fn(() =>
+      Promise.resolve(
+        problemResponse(503, "SERVICE_UNAVAILABLE", { headers: { "Retry-After": "30" } }),
+      ),
+    );
+    const fetchMock = vi.fn<typeof fetch>((input) =>
+      new Request(input).url.endsWith("/api/v1/catalog")
+        ? catalog()
+        : Promise.resolve(problemResponse(401, "AUTHENTICATION_REQUIRED")),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.pushState({}, "", "/bancada/csv-janitor");
+
+    render(<App />);
+
+    await untilFakeClock(() => {
+      expect(catalog).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Carregando a receita.")).toBeVisible();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(29_999);
+    });
+    expect(catalog).toHaveBeenCalledTimes(1);
+
+    for (const [delay, calls] of [
+      [1, 2],
+      [30_000, 3],
+      [30_000, 4],
+    ] as const) {
+      expect(screen.queryByText(/serviço está indisponível/i)).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(delay);
+      });
+      expect(catalog).toHaveBeenCalledTimes(calls);
+    }
+
+    await untilFakeClock(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/serviço está indisponível/i);
+    });
   });
 
   it("sem login, a Bancada pede para entrar sem repetir o pedido do catálogo", async () => {
