@@ -142,15 +142,20 @@ describe("ReorderableList", () => {
     expect(button("Mover para baixo a.csv")).toHaveFocus();
   });
 
-  it("devolve o foco ao botão movido, que o navegador perde ao mover o nó", () => {
-    // O jsdom não tira o foco de um nó movido, como o Chrome faz; o teste confere a devolução.
+  it("devolve o foco ao botão movido depois de reordenar a lista", () => {
+    // Como o jsdom mantém o foco no nó movido, observe o DOM no instante da devolução.
     render(<Harness />);
     const moved = button("Mover para baixo a.csv");
-    const focus = vi.spyOn(moved, "focus");
+    const focus = moved.focus.bind(moved);
+    const ordersAtFocus: string[][] = [];
+    vi.spyOn(moved, "focus").mockImplementation((options) => {
+      ordersAtFocus.push(order());
+      focus(options);
+    });
 
     fireEvent.click(moved);
 
-    expect(focus).toHaveBeenCalled();
+    expect(ordersAtFocus).toEqual([["b.csv", "a.csv", "c.csv"]]);
   });
 
   it("atalho Alt + seta move o item que tem o foco", async () => {
