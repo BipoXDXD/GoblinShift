@@ -38,6 +38,10 @@ describe("guard de testes pulados do Playwright", () => {
     expect(() => skippedTests(report(["expected"], 1))).toThrow(/inconsistente/);
   });
 
+  it("recusa relatório sem testes mesmo quando há suítes", () => {
+    expect(() => skippedTests(report([], 0))).toThrow(/relatório sem testes/);
+  });
+
   it("recusa o que não é relatório do reporter json", () => {
     expect(() => skippedTests({ suites: [] })).toThrow();
   });
