@@ -3,10 +3,7 @@
   "package": "picomatch",
   "version": "4.0.7",
   "purl": "pkg:npm/picomatch@4.0.7",
-  "vulnerabilityIds": [
-    "CVE-2026-112366",
-    "GHSA-fc5q-39xc-vjpf"
-  ],
+  "vulnerabilityIds": ["CVE-2026-112366", "GHSA-fc5q-39xc-vjpf"],
   "upstream": {
     "tarball": "https://registry.npmjs.org/picomatch/-/picomatch-4.0.7.tgz",
     "integrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==",
