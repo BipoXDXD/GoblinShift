@@ -32,22 +32,36 @@ exec "$@"
 """
 FAKE_APT = r"""#!/usr/bin/env bash
 echo "apt-get $*" >> "$FAKE_LOG"
-espelho=$(grep -o '//[^/]*/ubuntu' "$CI_APT_ETC/apt-mirrors.txt" | head -n 1)
+uris=$(awk '$1 == "URIs:" {print $2; exit}' "$CI_APT_ETC/sources.list.d/ubuntu.sources")
+if [[ $uris != mirror+file:/etc/apt/* ]]; then
+  exit 100
+fi
+lista="$CI_APT_ETC/${uris#mirror+file:/etc/apt/}"
+espelho=$(grep -o '//[^/]*/ubuntu' "$lista" | head -n 1)
 archives=$(printf '%s\n' "$@" | sed -n 's/^Dir::Cache::archives=//p')
 case " $* " in
   *" --no-download "*.deb*)
     [[ ${FAKE_CACHE_RUIM:-} == 1 ]] && exit 100
     exit 0 ;;
-  *" update "* | *" --download-only "*)
-    for lento in ${FAKE_LENTOS:-}; do
-      [[ $espelho == "//$lento/ubuntu" ]] && exit 124
-    done
-    if [[ " $* " == *" --download-only "* ]]; then
-      mkdir -p "$archives/partial"
-      touch "$archives/ffmpeg_7.deb" "$archives/lock"
-    fi
+  *" update "*)
+    fase=update ;;
+  *" --download-only "*)
+    fase=download ;;
+  *)
     exit 0 ;;
 esac
+printf '%s %s\n' "$fase" "$(paste -sd '|' "$lista")" >> "$FAKE_FONTES"
+lentos=${FAKE_LENTOS:-}
+if [[ $fase == download ]]; then
+  lentos="$lentos ${FAKE_DOWNLOAD_LENTOS:-}"
+fi
+for lento in $lentos; do
+  [[ $espelho == "//$lento/ubuntu" ]] && exit 124
+done
+if [[ $fase == download ]]; then
+  mkdir -p "$archives/partial"
+  touch "$archives/ffmpeg_7.deb" "$archives/lock"
+fi
 exit 0
 """
 
@@ -69,7 +83,13 @@ def ambiente(tmp_path: Path) -> dict[str, Path]:
     (etc / "apt.conf.d").mkdir()
     (etc / "sources.list.d" / "ubuntu.sources").write_text(UBUNTU_SOURCES)
     (etc / "apt-mirrors.txt").write_text(MIRRORS)
-    return {"bin": bin_dir, "etc": etc, "debs": tmp_path / "debs", "log": tmp_path / "chamadas"}
+    return {
+        "bin": bin_dir,
+        "etc": etc,
+        "debs": tmp_path / "debs",
+        "log": tmp_path / "chamadas",
+        "fontes": tmp_path / "fontes",
+    }
 
 
 def instalar(
@@ -80,6 +100,7 @@ def instalar(
         "CI_APT_ETC": str(ambiente["etc"]),
         "CI_APT_TENTATIVA_S": str(TENTATIVA_S),
         "FAKE_LOG": str(ambiente["log"]),
+        "FAKE_FONTES": str(ambiente["fontes"]),
         **fake_env,
     }
     return subprocess.run(  # noqa: S603 - script do repositório
@@ -185,6 +206,71 @@ def test_todos_os_espelhos_lentos_falha_depois_de_tres_tentativas(
     updates = [c for c in chamadas(ambiente) if c.startswith("apt-get") and " update" in c]
     assert len(updates) == 3
     assert not any("--no-download" in c for c in chamadas(ambiente))
+
+
+@pytest.mark.parametrize(("protocolo", "prefixo"), [("http", ""), ("https", " \t")])
+@pytest.mark.parametrize(
+    ("lentos", "saida"),
+    [
+        ("archive.ubuntu.com mirrors.edge.kernel.org", 0),
+        ("archive.ubuntu.com mirrors.edge.kernel.org azure.archive.ubuntu.com", 1),
+    ],
+    ids=["fallback-conclui", "todos-os-downloads-expiram"],
+)
+def test_mirror_file_regional_troca_o_host_efetivo_apos_timeout_no_download(
+    ambiente: dict[str, Path], lentos: str, saida: int, protocolo: str, prefixo: str
+) -> None:
+    sources = ambiente["etc"] / "sources.list.d" / "ubuntu.sources"
+    deb822 = UBUNTU_SOURCES + (
+        "Components: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
+    )
+    sources.write_text(deb822)
+    regional = f"{prefixo}{protocolo}://us-east-2.ec2.archive.ubuntu.com/ubuntu/\tpriority:1"
+    security = "http://security.ubuntu.com/ubuntu/\tpriority:3"
+    (ambiente["etc"] / "apt-mirrors.txt").write_text(f"{regional}\n{security}\n")
+    # O endpoint regional também fica lento se o script deixar de trocar sua URI.
+    result = instalar(
+        ambiente, "ffmpeg", FAKE_DOWNLOAD_LENTOS=f"us-east-2.ec2.archive.ubuntu.com {lentos}"
+    )
+
+    assert ambiente["fontes"].read_text().splitlines() == [
+        f"{fase} {prefixo}{protocolo}://{host}/ubuntu/\tpriority:1|{security}"
+        for host in ("archive.ubuntu.com", "mirrors.edge.kernel.org", "azure.archive.ubuntu.com")
+        for fase in ("update", "download")
+    ]
+    assert sources.read_text() == deb822
+    assert result.returncode == saida, result.stdout + result.stderr
+    installs = [c for c in chamadas(ambiente) if c.startswith("apt-get") and "--no-download" in c]
+    assert len(installs) == (1 if saida == 0 else 0)
+
+
+@pytest.mark.parametrize(
+    "uri_alheia",
+    [
+        "https://packages.example.org/proxy//us-east-2.ec2.archive.ubuntu.com/ubuntu/",
+        "file:/srv/cache//us-east-2.ec2.archive.ubuntu.com/ubuntu/",
+    ],
+    ids=["proxy-http", "caminho-file"],
+)
+def test_host_ubuntu_em_caminho_de_outra_fonte_fica_intacto(
+    ambiente: dict[str, Path], uri_alheia: str
+) -> None:
+    extra = ambiente["etc"] / "sources.list.d" / "extra.list"
+    extra.write_text(f"deb {uri_alheia} noble main\n")
+    lista = ambiente["etc"] / "apt-mirrors.txt"
+    regional = "https://us-east-2.ec2.archive.ubuntu.com/ubuntu/\tpriority:1"
+    fonte_alheia = f"{uri_alheia}\tpriority:2"
+    lista.write_text(f"{regional}\n{fonte_alheia}\n")
+
+    result = instalar(ambiente, "ffmpeg")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    fontes_esperadas = f"https://archive.ubuntu.com/ubuntu/\tpriority:1|{fonte_alheia}"
+    assert ambiente["fontes"].read_text().splitlines() == [
+        f"update {fontes_esperadas}",
+        f"download {fontes_esperadas}",
+    ]
+    assert extra.read_text() == f"deb {uri_alheia} noble main\n"
 
 
 def test_debs_do_cache_instalam_sem_rede(ambiente: dict[str, Path]) -> None:
