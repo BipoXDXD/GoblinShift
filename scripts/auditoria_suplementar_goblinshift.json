@@ -1,0 +1,451 @@
+{
+  "base": "7a33280b5f33d9046af512eda36cab95414cc7d3",
+  "collector": "f4058b6711179e8bc14b87f0ae1214dee265e5e4",
+  "collector_blobs": {
+    "web/e2e/sabotage.ts": "b20ce15ae1531d391ef228ef16bfc9f155b7614c",
+    "web/e2e/support/sabotageReport.ts": "4a7a40a720ade9c4ad4860f944237db9bb57ad53",
+    "web/e2e/support/sabotageReport.test.ts": "cc56d00222012fe2c47f3c9fb4aaa99c44315541"
+  },
+  "subjects": [
+    {
+      "pr": 463,
+      "head": "22acc09890ba74cfd45aa8f42e3e0bb3d3bc7087",
+      "historical_ci": 44147265278,
+      "historical_webkit": null,
+      "repeat_chromium": false,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "92263e014645450d72b3e615a1961bef2b84bf5d"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 464,
+      "head": "6cd2b53dafab3b77e49de93ee09d2c1d59bba150",
+      "historical_ci": 44157205807,
+      "historical_webkit": 44157205554,
+      "repeat_chromium": true,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 465,
+      "head": "57cecb519d0ac5ec3f057255f9aeb1b4402c9537",
+      "historical_ci": 44160231039,
+      "historical_webkit": 44160235248,
+      "repeat_chromium": true,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 466,
+      "head": "c943f519c583dff461913f806e684c3758be0c55",
+      "historical_ci": 44166227364,
+      "historical_webkit": 44166227056,
+      "repeat_chromium": true,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 467,
+      "head": "176b10f43e58e0335cc5ca8de45d2c771e450588",
+      "historical_ci": 44206625357,
+      "historical_webkit": 44206624995,
+      "repeat_chromium": true,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 468,
+      "head": "8f8bee5aa36ac9a68a5e5b779b99300e03c317c4",
+      "historical_ci": 44211515681,
+      "historical_webkit": null,
+      "repeat_chromium": false,
+      "pytest_general_passed": 8065,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "d1173181d42c5ceb8673a47672d6650726af5bd1"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 469,
+      "head": "a26393f479f336180bdd5417cbf68d3b43f8b09b",
+      "historical_ci": 44217392048,
+      "historical_webkit": 44217391985,
+      "repeat_chromium": true,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    },
+    {
+      "pr": 470,
+      "head": "f4058b6711179e8bc14b87f0ae1214dee265e5e4",
+      "historical_ci": 44228515669,
+      "historical_webkit": 44228515814,
+      "repeat_chromium": false,
+      "pytest_general_passed": 8063,
+      "pytest_general_deselected": 154,
+      "python_inputs": [
+        {
+          "path": "tests",
+          "git_oid": "b8436edfeaf8b8596403c28fa2e83474dcc56885"
+        },
+        {
+          "path": "src",
+          "git_oid": "2c0bd2b2067a73073170df21aed70cd7c0b84870"
+        },
+        {
+          "path": "deploy",
+          "git_oid": "c944fb96ccc99ab9e387e832cc1781ceb10c4e9e"
+        },
+        {
+          "path": "scripts",
+          "git_oid": "cd3aeaddf24c7f37e12775b073925f760b4d76d4"
+        },
+        {
+          "path": "migrations",
+          "git_oid": "2e3cfa8a3838a33daed6676a7113824660a47f4d"
+        },
+        {
+          "path": "web/openapi",
+          "git_oid": "6ffa2407e4966dadf90ce3af2c96d18908ae0c9d"
+        },
+        {
+          "path": "pyproject.toml",
+          "git_oid": "440b255fa8bd246c4e126cf24f53da1ca3dce8db"
+        },
+        {
+          "path": "uv.lock",
+          "git_oid": "f8610b044d238984c12d91f2f85154ccc20be18b"
+        },
+        {
+          "path": ".python-version",
+          "git_oid": "6345df51f10a3519d4f645071f44f610dfa6e6fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "git_oid": "af100b3c4774bb156a92b7d463c327ddbd818a3b"
+        },
+        {
+          "path": ".github/workflows/e2e-webkit.yml",
+          "git_oid": "adfb3b44f3adbd2c3e8e48c18b4bf764ef155e09"
+        }
+      ]
+    }
+  ]
+}

@@ -1,113 +1,201 @@
 name: Palco 3D (WebKit móvel)
-
-# Fora do job Chromium/notice de 12 min do ci.yml, nos PRs que mexem na web: o palco em WebKit
-# móvel e os defeitos plantados do e2e (web/e2e/sabotage.ts, issue #426), que levam de 7 a 15 min
-# e dobrariam o job do ci.yml exigido pelo gate da release. Sem secrets, VPS ou deploy.
-on:
-  pull_request:
-    paths:
-      - "web/**"
-      - "docker/nginx/snippets/spa-headers.conf"
-      - ".github/workflows/e2e-webkit.yml"
-  push:
-    branches: [main]
-    paths:
-      - "web/**"
-      - "docker/nginx/snippets/spa-headers.conf"
-      - ".github/workflows/e2e-webkit.yml"
-  workflow_dispatch:
-
+run-name: Auditoria suplementar de zero pulos por SHA
+'on':
+  workflow_dispatch: null
 permissions:
   contents: read
-
-concurrency:
-  group: webkit-stage-${{ github.ref }}
-  cancel-in-progress: true
-
+defaults:
+  run:
+    shell: bash
 jobs:
-  webkit:
-    name: Palco em WebKit móvel
-    # O WebKit usa a implementação WebGL do sistema: medir e exigir a capacidade, sem presumir
-    # GPU no Linux nem disfarçar renderer software. O diagnóstico acompanha o relatório.
-    runs-on: macos-15
-    timeout-minutes: 8
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: web/.nvmrc
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - name: WebKit fixado pelo Playwright do lockfile
-        run: npx playwright install webkit
-      - run: npm run build
-      - name: Palco e contratos móveis (um worker, até quatro minutos)
-        run: npm run e2e:webkit
-      - name: Nenhum teste pulado (relatório json do WebKit)
-        run: npm run e2e:check-skips -- e2e-results/webkit.json
-      - name: Canário (chave de API nos artefatos)
-        id: canario
-        if: always()
-        run: python3 ../scripts/verificar_artefatos_sem_chave.py playwright-report-webkit test-results-webkit
-      - name: Relatório, capacidade WebGL e traces de falhas
-        if: always() && steps.canario.outcome == 'success'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: playwright-webkit-stage
-          path: |
-            web/playwright-report-webkit/
-            web/test-results-webkit/
-          if-no-files-found: warn
-          retention-days: 7
-
-  sabotagem:
-    name: Defeitos plantados derrubam as specs (Chromium)
-    # Um `playwright test` por caso: 7 min num Mac local. O teto cobre runner lento e o pior caso
-    # do apt (3 tentativas de 90 s).
+  audit:
+    name: 'Auditoria suplementar #${{ matrix.pr }}'
+    if: github.ref == 'refs/heads/codex/auditoria-suplementar-20261118'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+        - pr: '463'
+          head: 22acc09890ba74cfd45aa8f42e3e0bb3d3bc7087
+          chromium: false
+        - pr: '464'
+          head: 6cd2b53dafab3b77e49de93ee09d2c1d59bba150
+          chromium: true
+        - pr: '465'
+          head: 57cecb519d0ac5ec3f057255f9aeb1b4402c9537
+          chromium: true
+        - pr: '466'
+          head: c943f519c583dff461913f806e684c3758be0c55
+          chromium: true
+        - pr: '467'
+          head: 176b10f43e58e0335cc5ca8de45d2c771e450588
+          chromium: true
+        - pr: '468'
+          head: 8f8bee5aa36ac9a68a5e5b779b99300e03c317c4
+          chromium: false
+        - pr: '469'
+          head: a26393f479f336180bdd5417cbf68d3b43f8b09b
+          chromium: true
+        - pr: '470'
+          head: f4058b6711179e8bc14b87f0ae1214dee265e5e4
+          chromium: false
+    env:
+      UV_PYTHON_DOWNLOADS: never
+      PYTHONDONTWRITEBYTECODE: '1'
+      APT_PACOTES: age ffmpeg
     defaults:
       run:
-        working-directory: web
+        working-directory: subject
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: web/.nvmrc
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - name: Versão do Playwright (chave do cache do navegador)
-        id: playwright
-        run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
-      - name: Chromium headless e dependências do sistema
-        timeout-minutes: 6
-        env:
-          DEBS: ${{ runner.temp }}/apt-debs
-          CI_APT_TENTATIVA_S: "90"
-        run: |
-          lista=$(../scripts/ci-playwright-pacotes.sh chromium)
-          if [[ -n $lista ]]; then
-            mapfile -t pacotes <<<"$lista"
-            ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
-          fi
-          npx playwright install --only-shell chromium
-      # O sabotage.ts copia os dois builds; sem eles, ele falha pedindo o build.
-      - name: Build
-        run: npm run build
-      - name: Build com o aviso global
-        run: npm run build:notice-e2e
-      - name: Cada defeito plantado derruba a spec que o vigia
-        run: npm run e2e:sabotage
+    - name: Obter ferramentas de auditoria
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        path: tooling
+        persist-credentials: false
+    - name: Obter o head histórico exato
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ matrix.head }}
+        path: subject
+        persist-credentials: false
+    - name: Confirmar o SHA histórico sem alterações
+      env:
+        AUDIT_HEAD: ${{ matrix.head }}
+      run: |
+        test "$(git rev-parse HEAD)" = "$AUDIT_HEAD"
+        test -z "$(git status --porcelain)"
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      with:
+        python-version-file: subject/.python-version
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+      with:
+        enable-cache: true
+        working-directory: subject
+    - run: uv sync --locked
+    - name: Instalar o runsc e registrá-lo no Docker do runner
+      timeout-minutes: 5
+      run: scripts/ci-install-runsc.sh
+    - name: FFmpeg completo (gera os vídeos sintéticos dos testes do Media Mill na imagem)
+      timeout-minutes: 10
+      env:
+        DEBS: ${{ runner.temp }}/apt-debs
+      run: |
+        read -ra pacotes <<<"$APT_PACOTES"
+        scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+    - name: Coletar e executar as suítes dedicadas no próprio SHA
+      env:
+        AUDIT_HEAD: ${{ matrix.head }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$AUDIT_HEAD"
+        audit="$GITHUB_WORKSPACE/tooling/scripts/auditoria_suplementar_goblinshift.py"
+        manifest="$GITHUB_WORKSPACE/tooling/scripts/auditoria_suplementar_goblinshift.json"
+        proof="$RUNNER_TEMP/pytest-identities"
+        mkdir -p "$proof"
+        .venv/bin/python -B "$audit" capture --manifest "$manifest" \
+          --head "$AUDIT_HEAD" --lane general --output "$proof/$AUDIT_HEAD-general.json"
+        sudo -E env "PATH=$PATH" PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B "$audit" capture \
+          --manifest "$manifest" --head "$AUDIT_HEAD" --lane root --execute \
+          --output "$proof/$AUDIT_HEAD-root.json"
+        .venv/bin/python -B "$audit" capture --manifest "$manifest" \
+          --head "$AUDIT_HEAD" --lane openobserve --execute --output "$proof/$AUDIT_HEAD-openobserve.json"
+        GS_TEST_RUNTIME=runsc .venv/bin/python -B "$audit" capture --manifest "$manifest" \
+          --head "$AUDIT_HEAD" --lane executor --execute --output "$proof/$AUDIT_HEAD-executor.json"
+        .venv/bin/python -B "$audit" reconcile --manifest "$manifest" \
+          --head "$AUDIT_HEAD" --directory "$proof" --output "$proof/reconciliacao.json"
+    - name: Preservar as identidades capturadas
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: pytest-pr-${{ matrix.pr }}-${{ matrix.head }}
+        path: ${{ runner.temp }}/pytest-identities
+        if-no-files-found: error
+    - name: Aplicar somente os três blobs atestados do coletor
+      working-directory: subject
+      env:
+        AUDIT_HEAD: ${{ matrix.head }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$AUDIT_HEAD"
+        test -z "$(git status --porcelain)"
+        git fetch --no-tags --depth=1 origin f4058b6711179e8bc14b87f0ae1214dee265e5e4
+        test "$(git rev-parse FETCH_HEAD)" = f4058b6711179e8bc14b87f0ae1214dee265e5e4
+        git show f4058b6711179e8bc14b87f0ae1214dee265e5e4:web/e2e/sabotage.ts > web/e2e/sabotage.ts
+        test "$(git hash-object web/e2e/sabotage.ts)" = b20ce15ae1531d391ef228ef16bfc9f155b7614c
+        git show f4058b6711179e8bc14b87f0ae1214dee265e5e4:web/e2e/support/sabotageReport.ts > web/e2e/support/sabotageReport.ts
+        test "$(git hash-object web/e2e/support/sabotageReport.ts)" = 4a7a40a720ade9c4ad4860f944237db9bb57ad53
+        git show f4058b6711179e8bc14b87f0ae1214dee265e5e4:web/e2e/support/sabotageReport.test.ts > web/e2e/support/sabotageReport.test.ts
+        test "$(git hash-object web/e2e/support/sabotageReport.test.ts)" = cc56d00222012fe2c47f3c9fb4aaa99c44315541
+        test "$(git diff --name-only HEAD)" = web/e2e/sabotage.ts
+        test "$(git ls-files --others --exclude-standard | LC_ALL=C sort)" = "$(printf '%s\n' web/e2e/support/sabotageReport.test.ts web/e2e/support/sabotageReport.ts)"
+        test "$(git rev-parse HEAD)" = "$AUDIT_HEAD"
+      if: matrix.chromium
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      with:
+        node-version-file: subject/web/.nvmrc
+        cache: npm
+        cache-dependency-path: subject/web/package-lock.json
+      if: matrix.chromium
+    - run: npm ci
+      if: matrix.chromium
+      working-directory: subject/web
+    - name: Versão do Playwright (chave do cache do navegador)
+      id: playwright
+      run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+      if: matrix.chromium
+      working-directory: subject/web
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      if: matrix.chromium
+    - name: Chromium headless e dependências do sistema
+      timeout-minutes: 6
+      env:
+        DEBS: ${{ runner.temp }}/apt-debs
+        CI_APT_TENTATIVA_S: '90'
+      run: |
+        lista=$(../scripts/ci-playwright-pacotes.sh chromium)
+        if [[ -n $lista ]]; then
+          mapfile -t pacotes <<<"$lista"
+          ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+        fi
+        npx playwright install --only-shell chromium
+      if: matrix.chromium
+      working-directory: subject/web
+    - name: Build
+      run: npm run build
+      if: matrix.chromium
+      working-directory: subject/web
+    - name: Build com o aviso global
+      run: npm run build:notice-e2e
+      if: matrix.chromium
+      working-directory: subject/web
+    - name: Executar os 39 defeitos plantados
+      run: npm run e2e:sabotage | tee "$RUNNER_TEMP/chromium-audit.log"
+      if: matrix.chromium
+      working-directory: subject/web
+    - name: Conferir e preservar contagens por cenário
+      working-directory: subject
+      env:
+        AUDIT_HEAD: ${{ matrix.head }}
+      run: |
+        python3 "$GITHUB_WORKSPACE/tooling/scripts/auditoria_suplementar_goblinshift.py" chromium \
+          --head "$AUDIT_HEAD" \
+          --manifest "$GITHUB_WORKSPACE/tooling/scripts/auditoria_suplementar_goblinshift.json" \
+          --log "$RUNNER_TEMP/chromium-audit.log" --output "$RUNNER_TEMP/chromium-audit.json"
+      if: matrix.chromium
+    - name: Preservar evidência Chromium
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: chromium-pr-${{ matrix.pr }}-${{ matrix.head }}
+        path: ${{ runner.temp }}/chromium-audit.json
+        if-no-files-found: error
+      if: matrix.chromium
+concurrency:
+  group: auditoria-suplementar-${{ github.ref }}
+  cancel-in-progress: false
