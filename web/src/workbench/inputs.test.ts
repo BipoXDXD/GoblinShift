@@ -116,6 +116,20 @@ describe("runInputs", () => {
     ).toBe(ok);
   });
 
+  it.each([
+    ["arquivo", { maxInputs: 5, maxFileBytes: 1_024, maxTotalBytes: null }],
+    ["execução", { maxInputs: 5, maxFileBytes: null, maxTotalBytes: 1_024 }],
+  ] as const)("distingue um excesso de um byte no limite de %s", (_, limits) => {
+    const entries = [entry("a", ready("1"), "a.zip", "x".repeat(1_025))];
+
+    const result = runInputsWithLimits(entries, limits);
+
+    if (result.ok) {
+      throw new Error("O excesso de um byte deveria ser recusado.");
+    }
+    expect(result.message).toMatch(/1\.025 bytes.*1\.024 bytes/);
+  });
+
   it("acima do teto de bytes, a mensagem traz o teto", () => {
     const entries = [entry("a", ready("1"), "a.zip", "x".repeat(2_000))];
 
@@ -123,7 +137,7 @@ describe("runInputs", () => {
       runInputsWithLimits(entries, { maxInputs: 5, maxTotalBytes: 1_500, maxFileBytes: null }),
     ).toEqual({
       ok: false,
-      message: "Os arquivos somam 2 kB; o máximo por execução é 1,5 kB.",
+      message: "Os arquivos somam 2 KiB; o máximo por execução é 1,5 KiB.",
     });
   });
 });
@@ -178,7 +192,7 @@ describe("runInputs com teto por arquivo", () => {
 
     expect(runInputsWithLimits(entries, limits(1_500))).toEqual({
       ok: false,
-      message: "grande.mp4 tem 2 kB; o máximo por arquivo nesta receita é 1,5 kB.",
+      message: "grande.mp4 tem 2 KiB; o máximo por arquivo nesta receita é 1,5 KiB.",
     });
   });
 });
