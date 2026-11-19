@@ -27,7 +27,7 @@
         "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel-collector:4318",
         "OTEL_SERVICE_NAME": "goblinshift-api",
         "GS_CSRF_SECRET_FILE": "/run/secrets/csrf_secret",
-        "GS_CURSOR_SECRET": "${GS_CURSOR_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}",
+        "GS_CURSOR_SECRET": "${GS_CURSOR_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_GITHUB_CLIENT_ID": "${GS_GITHUB_CLIENT_ID:?defina em secrets/app.env (OAuth App do GitHub)}",
         "GS_GITHUB_CLIENT_SECRET_FILE": "/run/secrets/github_client_secret",
@@ -37,7 +37,7 @@
         "GS_PUBLIC_ORIGIN": "${GS_PUBLIC_ORIGIN:?defina em secrets/app.env (https://goblinshift.dev)}",
         "GS_RUNNER": "executor_ctl",
         "GS_SIGNUP_MODE": "${GS_SIGNUP_MODE:-closed}",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}"
+        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}"
       },
       "healthcheck": {
         "interval": "10s",
@@ -153,7 +153,7 @@
         "OTEL_SERVICE_NAME": "goblinshift-maintenance",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}",
+        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
@@ -467,7 +467,7 @@
         "OTEL_SERVICE_NAME": "goblinshift-worker",
         "GS_EXECUTOR_IMAGE": "${GS_EXECUTOR_IMAGE:?exportada pelo deploy/release.sh (imagem do executor por digest)}",
         "GS_RUNNER": "executor_ctl",
-        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?gerado pelo deploy/release.sh em secrets/app.env}",
+        "GS_USER_HASH_SECRET": "${GS_USER_HASH_SECRET:?defina a variável privada no recurso da aplicação no Coolify}",
         "GS_WORK_ROOT": "/var/lib/goblinshift/exec-work"
       },
       "group_add": [
