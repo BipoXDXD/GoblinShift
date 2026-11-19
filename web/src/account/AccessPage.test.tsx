@@ -163,12 +163,19 @@ describe("Acesso: sessão", () => {
 
 describe("Acesso: uso e cotas", () => {
   it("mostra o consumo em texto, com unidade", async () => {
-    setup();
+    setup({
+      "GET /api/v1/me": () =>
+        jsonResponse(
+          meBody({
+            limits: { input_bytes_per_24h: 2 * 1_024 ** 3, storage_bytes: 4 * 1_024 ** 3 },
+          }),
+        ),
+    });
 
     const usage = await section("Uso e cotas");
     expect(usage).toHaveTextContent("Execuções nas últimas 24 horas3 de 20");
-    expect(usage).toHaveTextContent("12,5 MB de 2 GB");
-    expect(usage).toHaveTextContent("40 MB de 5 GB");
+    expect(usage).toHaveTextContent("11,9 MiB de 2 GiB");
+    expect(usage).toHaveTextContent("38,1 MiB de 4 GiB");
     expect(within(usage).getAllByRole("meter")).toHaveLength(3);
     expect(usage).toHaveTextContent(/A cota diária começa a liberar em 15\/10\/2026/);
     expect(within(usage).queryByText("No limite")).toBeNull();
@@ -191,8 +198,8 @@ describe("Acesso: uso e cotas", () => {
     setup();
 
     const usage = await section("Uso e cotas");
-    expect(usage).toHaveTextContent("Por arquivo33,6 MB");
-    expect(usage).toHaveTextContent("Por vídeo268,4 MB");
+    expect(usage).toHaveTextContent("Por arquivo32 MiB");
+    expect(usage).toHaveTextContent("Por vídeo256 MiB");
   });
 
   it("chama os limites de por execução, como a Bancada", async () => {
@@ -222,7 +229,7 @@ describe("Acesso: uso e cotas", () => {
 
     const usage = await section("Uso e cotas");
     expect(usage).toHaveTextContent("0 de 20");
-    expect(usage).toHaveTextContent("0 bytes de 2 GB");
+    expect(usage).toHaveTextContent("0 bytes de 1,9 GiB");
     expect(usage).not.toHaveTextContent("A cota diária");
   });
 

@@ -1,12 +1,17 @@
 import { TEXT } from "./text";
 
-const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
-const STEP = 1_000;
+const UNITS = ["KiB", "MiB", "GiB", "TiB", "PiB"] as const;
+const STEP = 1_024;
+const exactBytes = new Intl.NumberFormat(TEXT.locale, { style: "unit", unit: "byte" });
+const roundedSize = new Intl.NumberFormat(TEXT.locale, { maximumFractionDigits: 1 });
 
-/** Tamanho em bytes com unidade SI (kB = 1000 bytes), no formato do idioma da interface. */
+/** Tamanho com unidades binárias, como os limites da API e dos Termos. */
 export function formatBytes(bytes: number): string {
-  let value = bytes;
-  let unit: (typeof UNITS)[number] = "byte";
+  if (bytes < STEP) {
+    return exactBytes.format(bytes);
+  }
+  let value = bytes / STEP;
+  let unit: (typeof UNITS)[number] = UNITS[0];
   for (const next of UNITS.slice(1)) {
     if (value < STEP) {
       break;
@@ -14,11 +19,14 @@ export function formatBytes(bytes: number): string {
     value /= STEP;
     unit = next;
   }
-  return new Intl.NumberFormat(TEXT.locale, {
-    style: "unit",
-    unit,
-    maximumFractionDigits: 1,
-  }).format(value);
+  return `${roundedSize.format(value)} ${unit}`;
+}
+
+/** Exibe os bytes exatos se o arredondamento esconder o excesso. */
+export function formatByteComparison(bytes: number, limit: number): readonly [string, string] {
+  const size = formatBytes(bytes);
+  const max = formatBytes(limit);
+  return size === max ? [exactBytes.format(bytes), exactBytes.format(limit)] : [size, max];
 }
 
 /** Instante (ISO 8601 com fuso) no fuso e no formato da pessoa. */
