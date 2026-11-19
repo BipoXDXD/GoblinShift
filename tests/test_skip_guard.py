@@ -10,6 +10,14 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 PASSING = "def test_passa():\n    assert True\n"
 SKIPPED = "import pytest\n\ndef test_pulado():\n    pytest.skip('sem a ferramenta')\n"
+SKIPPED_BY_MARKER = (
+    "import pytest\n\n@pytest.mark.skipif(True, reason='sem a ferramenta')\n"
+    "def test_pulado():\n    assert True\n"
+)
+SKIPPED_BY_FIXTURE = (
+    "import pytest\n\n@pytest.fixture\ndef ferramenta():\n    pytest.skip('sem a ferramenta')\n\n"
+    "def test_pulado(ferramenta):\n    assert True\n"
+)
 XFAILED = (
     "import pytest\n\n@pytest.mark.xfail(strict=True)\n"
     "def test_falha_esperada():\n    assert False\n"
@@ -37,7 +45,11 @@ def run_suite(tmp_path: Path, source: str, *options: str) -> subprocess.Complete
     )
 
 
-@pytest.mark.parametrize("source", [SKIPPED, XFAILED], ids=["skip", "xfail"])
+@pytest.mark.parametrize(
+    "source",
+    [SKIPPED, SKIPPED_BY_MARKER, SKIPPED_BY_FIXTURE, XFAILED],
+    ids=["skip", "skipif-setup", "fixture-setup", "xfail"],
+)
 def test_com_a_opcao_teste_que_nao_rodou_reprova_a_suite(tmp_path: Path, source: str) -> None:
     result = run_suite(tmp_path, source, "--fail-on-skip")
 

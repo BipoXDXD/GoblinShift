@@ -223,7 +223,7 @@ O `chmod 755` é necessário: o `mktemp -d` cria o diretório com 700, e quem pr
 
 ### Segredos do login
 
-Em produção, o login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração de variáveis privadas do Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)) e os segredos de arquivos em `/srv/goblinshift/secrets/` (diretório `700`, dono `goblinshift`). Os arquivos ficam com modo `644` dentro desse diretório, como o `db_password`, porque o container lê com o UID da aplicação; com `600` a API não sobe. Só o container `api` recebe esses valores, montados em `/run/secrets/<nome>` (`deploy/coolify/app.json`).
+Em produção, o login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a configuração de variáveis privadas do Coolify ([`deploy/coolify/README.md`](deploy/coolify/README.md)) e os segredos de arquivos em `/srv/goblinshift/secrets/` (diretório `700`, dono `goblinshift`). Os arquivos ficam com modo `644` dentro desse diretório, como o `db_password`, porque o container lê com o UID da aplicação; com `600` a API não sobe. Os arquivos de segredo do login são montados em `/run/secrets/<nome>` apenas no serviço `api` (`deploy/coolify/app.json`).
 
 | Nome | Onde | Quem grava |
 |---|---|---|
@@ -231,8 +231,12 @@ Em produção, o login web ([plano, 3.6](docs/GoblinShiftPlan.md#s3-6)) lê a co
 | `GS_SIGNUP_MODE` (padrão `closed`, [ADR 023](docs/adr/023-cadastro-fechado-ate-a-abertura.md)) | variável no Coolify | operador |
 | `google_client_secret`, `github_client_secret` | arquivo | operador, com `read -rs` (abaixo) |
 | `csrf_secret`, `login_cookie_secret` | arquivo | operador, com `openssl rand -hex 32` (abaixo); a publicação pelo Coolify não os cria |
+| `GS_CURSOR_SECRET` | variável privada no recurso da aplicação no Coolify, usada pela API | operador |
+| `GS_USER_HASH_SECRET` | variável privada no recurso da aplicação no Coolify, compartilhada pela API, pelo worker e pela manutenção | operador |
 
-Sem uma das variáveis, o Compose recusa o arquivo antes de qualquer comando. Se ainda assim a API subir sem um segredo, ela sai na partida com um erro que nomeia a variável.
+Se uma variável obrigatória estiver ausente ou vazia, a interpolação do Compose falha antes da execução. Se a API iniciar sem um segredo obrigatório, ela sai na partida com um erro que identifica a configuração ausente.
+
+Mantenha os valores de `GS_CURSOR_SECRET` e `GS_USER_HASH_SECRET` entre publicações. Trocar o primeiro invalida os cursores já emitidos e obriga os clientes a reiniciar a paginação. Trocar o segundo muda o hash da conta na telemetria e impede o `gs-admin find-user` de localizar hashes emitidos com a chave anterior. [Runbook de abuso](docs/runbooks/abuso.md)
 
 ```bash
 sudo -u goblinshift -i

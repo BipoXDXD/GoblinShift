@@ -1,5 +1,12 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactElement } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type SubmitEvent,
+  type ReactElement,
+} from "react";
 import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router";
 
@@ -99,9 +106,12 @@ function HistoryResults({
 
   const rows = useRef<HTMLDivElement>(null);
   const announceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => {
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
     const timer = announceTimer;
     return () => {
+      mounted.current = false;
       clearTimeout(timer.current);
     };
   }, []);
@@ -112,12 +122,18 @@ function HistoryResults({
     }
     clearTimeout(announceTimer.current);
     setAnnouncement(T.loadingMore);
+    const isMounted = (): boolean => mounted.current;
     const result = await runs.fetchNextPage();
+    if (!isMounted()) {
+      return;
+    }
     if (result.isFetchNextPageError) {
       if (isCursorRejected(result.error)) {
         // O cursor venceu (ou os filtros mudaram por baixo): recomeça do início em vez de travar.
         await queryClient.resetQueries({ queryKey, exact: true });
-        setAnnouncement(T.restarted);
+        if (isMounted()) {
+          setAnnouncement(T.restarted);
+        }
       } else {
         setAnnouncement(null);
       }
@@ -141,9 +157,11 @@ function HistoryResults({
         : rows.current?.querySelector<HTMLAnchorElement>(`a[href="${runPath(target.id)}"]`);
     (row ?? rows.current?.closest("main")?.querySelector<HTMLHeadingElement>("h1"))?.focus();
     // A mudança de foco cancela a fala pendente em alguns leitores: o anúncio vem depois dela.
-    announceTimer.current = setTimeout(() => {
-      setAnnouncement(message);
-    }, ANNOUNCE_DELAY_MS);
+    if (isMounted()) {
+      announceTimer.current = setTimeout(() => {
+        setAnnouncement(message);
+      }, ANNOUNCE_DELAY_MS);
+    }
   };
 
   const active = hasActiveFilters(filters);
