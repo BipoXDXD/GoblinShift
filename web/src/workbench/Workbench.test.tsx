@@ -816,7 +816,7 @@ describe("Bancada", () => {
     const input = screen.getByLabelText("Escolher arquivos");
     expect(input).toHaveAttribute("accept", ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm");
     expect(input).toHaveAccessibleDescription(
-      /Até 5 arquivos por execução, somando no máximo 536,9 MB\. Cada arquivo com até 268,4 MB\./,
+      /Até 5 arquivos por execução, somando no máximo 512 MiB\. Cada arquivo com até 256 MiB\./,
     );
   });
 
