@@ -42,3 +42,33 @@ jobs:
         # Versão fixada, como a do zizmor. Sem `--ignore-vuln`: uma CVE que não se aplica é decisão
         # escrita em ADR, não uma exceção silenciosa neste comando.
         run: uvx pip-audit@2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" --require-hashes --disable-pip
+
+  npm-audit:
+    name: Dependências npm (Trivy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Instalar o lock npm
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verificar instalação e varrer todas as dependências npm
+        run: |
+          reports=$(mktemp -d "$RUNNER_TEMP/supply-chain-npm-relatorios.XXXXXX")
+          echo "GS_NPM_SCAN_REPORTS=$reports" >> "$GITHUB_ENV"
+          bash scripts/checar-supply-chain-npm.sh "$reports"
+      - name: Preservar inventário, resultados e prova do backport
+        if: ${{ !cancelled() && env.GS_NPM_SCAN_REPORTS != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: supply-chain-npm
+          path: ${{ env.GS_NPM_SCAN_REPORTS }}/
+          if-no-files-found: error
+          retention-days: 30
