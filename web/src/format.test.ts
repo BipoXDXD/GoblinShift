@@ -5,11 +5,12 @@ import { formatBytes, formatCount, formatDateTime } from "./format";
 describe("formatBytes", () => {
   it.each([
     [0, "0 bytes"],
-    [999, "999 bytes"],
-    [1_000, "1 kB"],
-    [1_500, "1,5 kB"],
-    [12_345_678, "12,3 MB"],
-    [2_000_000_000, "2 GB"],
+    [1_023, "1.023 bytes"],
+    [1_024, "1 KiB"],
+    [1_536, "1,5 KiB"],
+    [32 * 1_024 ** 2, "32 MiB"],
+    [2 * 1_024 ** 3, "2 GiB"],
+    [2_000_000_000, "1,9 GiB"],
   ])("%i → %s", (bytes, expected) => {
     expect(formatBytes(bytes)).toBe(expected);
   });

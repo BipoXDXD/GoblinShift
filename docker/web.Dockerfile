@@ -5,6 +5,7 @@
 FROM node:24.22.2-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS build
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
+COPY web/vendor/picomatch-4.0.7-backport4.tgz ./vendor/
 # --ignore-scripts: nenhuma dependência precisa de script de instalação para o build.
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY web/ ./

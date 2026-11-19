@@ -6,7 +6,7 @@ import { refreshAccountOn } from "../account/useMe";
 import { ApiClientProvider } from "../api/ApiClientContext";
 import { createApiClient } from "../api/client";
 import { readCsrfCookie } from "../api/csrf";
-import { shouldRetryQuery } from "../api/queryRetry";
+import { queryRetryDelay, shouldRetryQuery } from "../api/queryRetry";
 import { SITE_NOTICE } from "../notice/siteNotice";
 import { createContentUploader } from "../upload/xhr";
 import { createRoutes } from "./routes";
@@ -72,7 +72,7 @@ function createQueryClient(): QueryClient {
         refreshAccountOn(client)(error);
       },
     }),
-    defaultOptions: { queries: { retry: shouldRetryQuery } },
+    defaultOptions: { queries: { retry: shouldRetryQuery, retryDelay: queryRetryDelay } },
   });
   return client;
 }
