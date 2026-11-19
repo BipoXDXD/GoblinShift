@@ -9,7 +9,7 @@ const testSchema = z.object({
   results: z.array(
     z.object({
       status: resultStatus,
-      error: z.object({ message: z.string().optional() }).optional(),
+      error: z.object({ message: z.string().optional(), stack: z.string().optional() }).optional(),
       errors: z.array(z.unknown()),
     }),
   ),
@@ -46,6 +46,7 @@ type SabotageReport = z.infer<typeof reportSchema>["stats"] & {
   readonly executed: number;
   readonly failed: number;
   readonly attributed: number;
+  readonly unattributed: readonly { marker: string | null; location: string | null }[];
   readonly errors: number;
   readonly caught: boolean;
 };
@@ -56,11 +57,12 @@ export function inspectSabotageReport(
   expected: ExpectedFailure,
 ): SabotageReport {
   const report = reportSchema.parse(raw);
-  const markers = new Set(expected.assertions.map((id) => `[sabotage:${id}]`));
+  const markers = new Set(expected.assertions.map((id) => `Error: [sabotage:${id}]`));
   const counts = { expected: 0, unexpected: 0, flaky: 0, skipped: 0, failed: 0, attributed: 0 };
   let selected = 0;
   let executed = 0;
-  let unexpectedSelection = false;
+  const selection = { mismatch: false };
+  const unattributed: SabotageReport["unattributed"][number][] = [];
 
   const visit = (suite: Suite): void => {
     for (const spec of suite.specs) {
@@ -69,7 +71,7 @@ export function inspectSabotageReport(
         counts[test.status]++;
         const matchesScenario =
           spec.file.split("/").at(-1) === expected.spec && test.projectName === expected.project;
-        unexpectedSelection ||= !matchesScenario || test.expectedStatus !== "passed";
+        selection.mismatch ||= !matchesScenario || test.expectedStatus !== "passed";
 
         if (
           test.results.length > 0 &&
@@ -95,6 +97,16 @@ export function inspectSabotageReport(
           })
         ) {
           counts.attributed++;
+        } else {
+          const failure = test.results.find(
+            ({ status }) => status === "failed" || status === "timedOut",
+          );
+          const firstLine = failure?.error?.message?.split(/\r?\n/, 1)[0] ?? "";
+          unattributed.push({
+            marker: /^Error: \[sabotage:([a-z0-9-]+)\]$/.exec(firstLine)?.[1] ?? null,
+            location:
+              /\/([a-z0-9-]+\.spec\.ts:\d+:\d+)\b/.exec(failure?.error?.stack ?? "")?.[1] ?? null,
+          });
         }
       }
     }
@@ -112,9 +124,9 @@ export function inspectSabotageReport(
     counts.attributed > 0 &&
     counts.attributed === counts.unexpected &&
     executed === selected &&
-    !unexpectedSelection &&
+    !selection.mismatch &&
     counts.skipped === 0 &&
     counts.flaky === 0 &&
     errors === 0;
-  return { ...counts, selected, executed, errors, caught };
+  return { ...counts, selected, executed, unattributed, errors, caught };
 }

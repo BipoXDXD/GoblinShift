@@ -17,7 +17,7 @@ function outcome(status: string, ...results: string[]) {
   };
 }
 
-function withError(message: string, extraErrors = 0) {
+function failureWithMessage(message: string, extraErrors = 0) {
   const error = { message };
   return {
     ...outcome("unexpected"),
@@ -39,7 +39,7 @@ function report(tests: readonly unknown[], stats = {}, errors: unknown[] = []) {
   };
 }
 
-const failed = withError("[sabotage:contrast-light]\n\nexpect(received).toEqual(expected)");
+const failed = failureWithMessage("Error: [sabotage:contrast-light]\n\nexpect(received).toEqual(expected)");
 
 describe("relatório do Chromium com defeito plantado", () => {
   it("confirma o defeito com todos os testes executados e uma falha", () => {
@@ -53,6 +53,7 @@ describe("relatório do Chromium com defeito plantado", () => {
       unexpected: 1,
       failed: 1,
       attributed: 1,
+      unattributed: [],
       flaky: 0,
       skipped: 0,
       errors: 0,
@@ -107,18 +108,18 @@ describe("relatório do Chromium com defeito plantado", () => {
   });
 
   it.each([
-    { name: "falha de setup", result: withError("browserType.launch: navegador indisponível") },
+    { name: "falha de setup", result: failureWithMessage("Error: browserType.launch: navegador indisponível") },
     {
       name: "marcador de outro defeito",
-      result: withError("[sabotage:contrast-dark]\n\nexpect(received).toEqual(expected)"),
+      result: failureWithMessage("Error: [sabotage:contrast-dark]\n\nexpect(received).toEqual(expected)"),
     },
     {
       name: "marcador dentro da mensagem de um erro genérico",
-      result: withError("erro de fixture\n[sabotage:contrast-light]\n\nquadro de código"),
+      result: failureWithMessage("Error: erro de fixture\nError: [sabotage:contrast-light]\n\nquadro de código"),
     },
     {
       name: "erro extra no teardown",
-      result: withError("[sabotage:contrast-light]\n\nexpect(received).toEqual(expected)", 1),
+      result: failureWithMessage("Error: [sabotage:contrast-light]\n\nexpect(received).toEqual(expected)", 1),
     },
     { name: "timeout do teste", result: outcome("unexpected", "timedOut") },
     { name: "projeto fora do cenário", result: { ...failed, projectName: "mobile" } },
