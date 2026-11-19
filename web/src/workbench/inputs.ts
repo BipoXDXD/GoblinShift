@@ -1,5 +1,5 @@
 import type { InputLimits } from "../catalog/inputLimits";
-import { formatBytes } from "../format";
+import { formatByteComparison } from "../format";
 import { TEXT } from "../text";
 import type { UploadEntry, UploadEntryState } from "../upload/useUploadBatch";
 
@@ -39,24 +39,16 @@ export function runInputs(entries: readonly UploadEntry[], limits: InputLimits):
   }
   const oversized = firstAbove(kept, limits.maxFileBytes);
   if (oversized !== null) {
+    const [size, max] = formatByteComparison(oversized.entry.file.size, oversized.maxFileBytes);
     return {
       ok: false,
-      message: TEXT.workbench.errors.fileTooLarge(
-        oversized.entry.file.name,
-        formatBytes(oversized.entry.file.size),
-        formatBytes(oversized.maxFileBytes),
-      ),
+      message: TEXT.workbench.errors.fileTooLarge(oversized.entry.file.name, size, max),
     };
   }
   const totalBytes = kept.reduce((sum, entry) => sum + entry.file.size, 0);
   if (limits.maxTotalBytes !== null && totalBytes > limits.maxTotalBytes) {
-    return {
-      ok: false,
-      message: TEXT.workbench.errors.tooManyBytes(
-        formatBytes(totalBytes),
-        formatBytes(limits.maxTotalBytes),
-      ),
-    };
+    const [total, max] = formatByteComparison(totalBytes, limits.maxTotalBytes);
+    return { ok: false, message: TEXT.workbench.errors.tooManyBytes(total, max) };
   }
   const uploadIds = kept.flatMap((entry) =>
     entry.state.status === "ready" ? [entry.state.uploadId] : [],
