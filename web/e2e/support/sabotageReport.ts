@@ -1,21 +1,29 @@
 import { z } from "zod";
 
 const outcome = z.enum(["expected", "unexpected", "flaky", "skipped"]);
+const resultStatus = z.enum(["passed", "failed", "timedOut", "skipped", "interrupted"]);
 const testSchema = z.object({
   status: outcome,
+  expectedStatus: resultStatus,
+  projectName: z.string(),
   results: z.array(
-    z.object({ status: z.enum(["passed", "failed", "timedOut", "skipped", "interrupted"]) }),
+    z.object({
+      status: resultStatus,
+      error: z.object({ message: z.string().optional() }).optional(),
+      errors: z.array(z.unknown()),
+    }),
   ),
 });
+const specSchema = z.object({ file: z.string(), tests: z.array(testSchema) });
 
 interface Suite {
-  specs: { tests: z.infer<typeof testSchema>[] }[];
+  specs: z.infer<typeof specSchema>[];
   suites?: Suite[] | undefined;
 }
 
 const suiteSchema: z.ZodType<Suite> = z.lazy(() =>
   z.object({
-    specs: z.array(z.object({ tests: z.array(testSchema) })),
+    specs: z.array(specSchema),
     suites: z.array(suiteSchema).optional(),
   }),
 );
@@ -27,36 +35,66 @@ const reportSchema = z.object({
   errors: z.array(z.unknown()),
 });
 
+interface ExpectedFailure {
+  readonly spec: string;
+  readonly project: string;
+  readonly assertions: readonly string[];
+}
+
 type SabotageReport = z.infer<typeof reportSchema>["stats"] & {
   readonly selected: number;
   readonly executed: number;
   readonly failed: number;
+  readonly attributed: number;
   readonly errors: number;
   readonly caught: boolean;
 };
 
-export function inspectSabotageReport(raw: unknown, exitCode: number | null): SabotageReport {
+export function inspectSabotageReport(
+  raw: unknown,
+  exitCode: number | null,
+  expected: ExpectedFailure,
+): SabotageReport {
   const report = reportSchema.parse(raw);
-  const counts = { expected: 0, unexpected: 0, flaky: 0, skipped: 0, failed: 0 };
+  const markers = new Set(expected.assertions.map((id) => `[sabotage:${id}]`));
+  const counts = { expected: 0, unexpected: 0, flaky: 0, skipped: 0, failed: 0, attributed: 0 };
   let selected = 0;
   let executed = 0;
+  let unexpectedSelection = false;
 
   const visit = (suite: Suite): void => {
     for (const spec of suite.specs) {
       for (const test of spec.tests) {
         selected++;
         counts[test.status]++;
+        const matchesScenario =
+          spec.file.split("/").at(-1) === expected.spec && test.projectName === expected.project;
+        unexpectedSelection ||= !matchesScenario || test.expectedStatus !== "passed";
+
         if (
           test.results.length > 0 &&
-          test.results.every(({ status }) => status !== "skipped" && status !== "interrupted")
+          test.results.every(({ status }) => status === "passed" || status === "failed")
         ) {
           executed++;
         }
         if (
-          test.status === "unexpected" &&
-          test.results.some(({ status }) => status === "failed" || status === "timedOut")
+          test.status !== "unexpected" ||
+          !test.results.some(({ status }) => status === "failed" || status === "timedOut")
         ) {
-          counts.failed++;
+          continue;
+        }
+        counts.failed++;
+        if (
+          matchesScenario &&
+          test.expectedStatus === "passed" &&
+          test.results.every(({ status, error, errors }) => {
+            const [marker = "", separator] = error?.message?.split(/\r?\n/, 2) ?? [];
+            return (
+              status === "failed" && errors.length === 1 && separator === "" && markers.has(marker)
+            );
+          })
+        ) {
+          counts.attributed++;
         }
       }
     }
@@ -71,8 +109,10 @@ export function inspectSabotageReport(raw: unknown, exitCode: number | null): Sa
   const errors = report.errors.length;
   const caught =
     exitCode === 1 &&
-    counts.failed > 0 &&
+    counts.attributed > 0 &&
+    counts.attributed === counts.unexpected &&
     executed === selected &&
+    !unexpectedSelection &&
     counts.skipped === 0 &&
     counts.flaky === 0 &&
     errors === 0;

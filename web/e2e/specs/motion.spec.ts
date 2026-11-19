@@ -38,9 +38,9 @@ for (const screen of SCREENS) {
     await screen.open(page, fakeApi);
 
     const motion = await readMotion(page, REDUCED_MAX_MS);
-    expect(motion.moving).toEqual([]);
+    expect(motion.moving, "[sabotage:reduced-motion-css]").toEqual([]);
     expect(motion.running).toEqual([]);
-    expect(threeDRequests, "chunk ou modelo 3D pedido com movimento reduzido").toEqual([]);
+    expect(threeDRequests, "[sabotage:reduced-motion-3d]").toEqual([]);
   });
 }
 

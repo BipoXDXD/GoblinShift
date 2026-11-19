@@ -118,7 +118,7 @@ test("no celular de 375 px, o Tab no diálogo segue a ordem vertical dos botões
   if (first === null || second === null) {
     throw new Error("botões do diálogo sem caixa");
   }
-  expect(first.y, "o primeiro do Tab tem de vir acima do segundo").toBeLessThan(second.y);
+  expect(first.y, "[sabotage:dialog-button-order]").toBeLessThan(second.y);
   // Largura útil do diálogo: a caixa de conteúdo, sem o padding.
   const contentWidth = await dialog.evaluate((element) => {
     const style = getComputedStyle(element);

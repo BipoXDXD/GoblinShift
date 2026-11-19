@@ -29,6 +29,9 @@ test("toda mutação pela sessão leva o X-CSRF-Token igual ao cookie @fake-api"
   await acesso.open();
 
   await acesso.createKey(["Ler arquivos (files:read)"]);
+  expect(mutations[0]?.route).toBe("POST /api/v1/api-keys");
+  expect(csrf).toBeDefined();
+  expect(mutations[0]?.token === csrf, "[sabotage:csrf-mutation-header]").toBe(true);
   await page.getByRole("button", { name: "Já copiei" }).click();
   const [stored] = [...fakeApi.account.keys.values()];
   const dialog = await acesso.askRevoke(stored?.key.public_id ?? "");

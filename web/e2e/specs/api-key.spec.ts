@@ -40,7 +40,7 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   // e a chave nunca pode ir parar lá.
   expect(
     served.some((body) => body.includes(apiKey)),
-    "algum corpo servido contém a chave",
+    "[sabotage:api-key-in-bundle]",
   ).toBe(false);
   const storage = await page.evaluate(() =>
     JSON.stringify({
@@ -77,6 +77,12 @@ test("sem a chave do processo de teste, a API recusa e a Bancada convida a entra
   await page.goto("/bancada/csv-janitor");
 
   // Sem login, o 401 é o estado normal: convite para entrar, não erro de sessão.
+  const title = page.getByRole("heading", { name: "Entre para continuar" });
+  await expect(title).toBeVisible();
+  const sectionRole = await title.evaluate((heading) =>
+    heading.closest("section")?.getAttribute("role"),
+  );
+  expect(sectionRole, "[sabotage:sign-in-prompt-role]").not.toBe("alert");
   const prompt = page.getByRole("region", { name: "Entre para continuar" });
   await expect(prompt).toBeVisible();
   await expect(prompt.getByRole("link", { name: "Entrar com Google" })).toHaveAttribute(

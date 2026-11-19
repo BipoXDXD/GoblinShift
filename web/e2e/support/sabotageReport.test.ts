@@ -2,31 +2,57 @@ import { describe, expect, it } from "vitest";
 
 import { inspectSabotageReport } from "./sabotageReport.ts";
 
+const scenario = {
+  spec: "contrast.spec.ts",
+  project: "desktop",
+  assertions: ["contrast-light"],
+};
+
 function outcome(status: string, ...results: string[]) {
-  return { status, results: results.map((result) => ({ status: result })) };
+  return {
+    status,
+    expectedStatus: "passed",
+    projectName: "desktop",
+    results: results.map((result) => ({ status: result, errors: [] })),
+  };
 }
 
-function report(tests: readonly ReturnType<typeof outcome>[], stats = {}, errors: unknown[] = []) {
+function withError(message: string, extraErrors = 0) {
+  const error = { message };
   return {
-    suites: [{ specs: [], suites: [{ specs: [{ tests }] }] }],
+    ...outcome("unexpected"),
+    results: [
+      {
+        status: "failed",
+        error,
+        errors: [error, ...Array.from({ length: extraErrors }, () => ({ message: "teardown" }))],
+      },
+    ],
+  };
+}
+
+function report(tests: readonly unknown[], stats = {}, errors: unknown[] = []) {
+  return {
+    suites: [{ specs: [], suites: [{ specs: [{ file: "contrast.spec.ts", tests }] }] }],
     stats: { expected: 0, unexpected: 0, flaky: 0, skipped: 0, ...stats },
     errors,
   };
 }
 
-const failed = outcome("unexpected", "failed");
+const failed = withError("[sabotage:contrast-light]\n\nexpect(received).toEqual(expected)");
 
 describe("relatório do Chromium com defeito plantado", () => {
   it("confirma o defeito com todos os testes executados e uma falha", () => {
     const raw = report([failed, outcome("expected", "passed")], { unexpected: 1, expected: 1 });
 
-    expect(inspectSabotageReport(raw, 1)).toEqual({
+    expect(inspectSabotageReport(raw, 1, scenario)).toEqual({
       caught: true,
       selected: 2,
       executed: 2,
       expected: 1,
       unexpected: 1,
       failed: 1,
+      attributed: 1,
       flaky: 0,
       skipped: 0,
       errors: 0,
@@ -40,7 +66,7 @@ describe("relatório do Chromium com defeito plantado", () => {
   ])("reprova teste $name mesmo com outra falha", ({ results }) => {
     const raw = report([failed, outcome("skipped", ...results)], { unexpected: 1, skipped: 1 });
 
-    expect(inspectSabotageReport(raw, 1)).toMatchObject({
+    expect(inspectSabotageReport(raw, 1, scenario)).toMatchObject({
       caught: false,
       selected: 2,
       executed: 1,
@@ -51,7 +77,7 @@ describe("relatório do Chromium com defeito plantado", () => {
   it("reprova resultado sem execução ainda que a contagem o classifique como esperado", () => {
     const raw = report([failed, outcome("expected")], { unexpected: 1, expected: 1 });
 
-    expect(inspectSabotageReport(raw, 1)).toMatchObject({
+    expect(inspectSabotageReport(raw, 1, scenario)).toMatchObject({
       caught: false,
       executed: 1,
       selected: 2,
@@ -61,7 +87,7 @@ describe("relatório do Chromium com defeito plantado", () => {
   it("reprova uma tentativa interrompida mesmo depois de uma falha registrada", () => {
     const raw = report([outcome("unexpected", "failed", "interrupted")], { unexpected: 1 });
 
-    expect(inspectSabotageReport(raw, 1)).toMatchObject({
+    expect(inspectSabotageReport(raw, 1, scenario)).toMatchObject({
       caught: false,
       selected: 1,
       executed: 0,
@@ -71,17 +97,52 @@ describe("relatório do Chromium com defeito plantado", () => {
   it("reprova seleção vazia e cenário sem falha detectada", () => {
     const clean = report([outcome("expected", "passed")], { expected: 1 });
 
-    expect(inspectSabotageReport(report([]), 1)).toMatchObject({ caught: false, selected: 0 });
-    expect(inspectSabotageReport(clean, 0)).toMatchObject({ caught: false, selected: 1 });
+    expect(inspectSabotageReport(report([]), 1, scenario)).toMatchObject({ caught: false, selected: 0 });
+    expect(inspectSabotageReport(clean, 0, scenario)).toMatchObject({ caught: false, selected: 1 });
     const unexpectedlyPassed = report([outcome("unexpected", "passed")], { unexpected: 1 });
-    expect(inspectSabotageReport(unexpectedlyPassed, 1)).toMatchObject({
+    expect(inspectSabotageReport(unexpectedlyPassed, 1, scenario)).toMatchObject({
       caught: false,
       failed: 0,
     });
   });
 
+  it.each([
+    { name: "falha de setup", result: withError("browserType.launch: navegador indisponível") },
+    {
+      name: "marcador de outro defeito",
+      result: withError("[sabotage:contrast-dark]\n\nexpect(received).toEqual(expected)"),
+    },
+    {
+      name: "marcador dentro da mensagem de um erro genérico",
+      result: withError("erro de fixture\n[sabotage:contrast-light]\n\nquadro de código"),
+    },
+    {
+      name: "erro extra no teardown",
+      result: withError("[sabotage:contrast-light]\n\nexpect(received).toEqual(expected)", 1),
+    },
+    { name: "timeout do teste", result: outcome("unexpected", "timedOut") },
+    { name: "projeto fora do cenário", result: { ...failed, projectName: "mobile" } },
+    { name: "falha em teste com falha esperada", result: { ...failed, expectedStatus: "failed" } },
+  ])("reprova $name mesmo com outra falha atribuída", ({ result }) => {
+    const raw = report([failed, result], { unexpected: 2 });
+
+    expect(inspectSabotageReport(raw, 1, scenario)).toMatchObject({
+      caught: false,
+      attributed: 1,
+    });
+  });
+
+  it("reprova relatório de outra spec", () => {
+    const raw = report([failed], { unexpected: 1 });
+
+    expect(inspectSabotageReport(raw, 1, { ...scenario, spec: "focus.spec.ts" })).toMatchObject({
+      caught: false,
+      attributed: 0,
+    });
+  });
+
   it("reprova inconsistência entre os testes e a estatística", () => {
-    expect(() => inspectSabotageReport(report([failed]), 1)).toThrow(/contagem inconsistente/);
+    expect(() => inspectSabotageReport(report([failed]), 1, scenario)).toThrow(/contagem inconsistente/);
   });
 
   it("reprova erro global, processo interrompido ou resultado instável", () => {
@@ -92,8 +153,8 @@ describe("relatório do Chromium com defeito plantado", () => {
       flaky: 1,
     });
 
-    expect(inspectSabotageReport(withError, 1)).toMatchObject({ caught: false, errors: 1 });
-    expect(inspectSabotageReport(withFailure, null)).toMatchObject({ caught: false });
-    expect(inspectSabotageReport(flaky, 1)).toMatchObject({ caught: false, flaky: 1 });
+    expect(inspectSabotageReport(withError, 1, scenario)).toMatchObject({ caught: false, errors: 1 });
+    expect(inspectSabotageReport(withFailure, null, scenario)).toMatchObject({ caught: false });
+    expect(inspectSabotageReport(flaky, 1, scenario)).toMatchObject({ caught: false, flaky: 1 });
   });
 });

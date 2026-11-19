@@ -45,6 +45,10 @@ test("Carregar mais traz a página seguinte e anuncia quantas chegaram @fake-api
   await historico.open();
   await expect(historico.rows()).toHaveCount(PAGE_SIZE);
 
+  await expect(
+    page.getByRole("button", { name: "Carregar mais" }),
+    "[sabotage:history-load-more-visible]",
+  ).toBeVisible();
   await historico.loadMore();
   await expect(historico.rows()).toHaveCount(total);
   await expect(
@@ -72,6 +76,7 @@ test("na última página, o foco segue para a primeira linha nova e o fim da lis
       .rows()
       .nth(PAGE_SIZE)
       .getByRole("link", { name: /, criada em / }),
+    "[sabotage:history-load-more-focus]",
   ).toBeFocused();
   await expect(
     page.getByRole("status").filter({
@@ -90,7 +95,7 @@ test("filtrar por estado vai para a URL, sobrevive ao reload e só lista esse es
   await expect(historico.rows()).toHaveCount(seeded);
 
   await historico.filterByStatus("Falhou");
-  await expect(page).toHaveURL(/\/historico\?estado=failed$/);
+  await expect(page, "[sabotage:history-filter-url]").toHaveURL(/\/historico\?estado=failed$/);
   await expect(historico.rows()).toHaveCount(1);
   await expect(historico.rows().first()).toContainText("Falhou");
 

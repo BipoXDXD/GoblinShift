@@ -31,7 +31,7 @@ test("Bancada a 320 px: o nome longo aparece inteiro e a página não rola para 
 
   const name = bancada.entry(LONG_NAME).getByText(LONG_NAME, { exact: true });
   await expect(name).toBeVisible();
-  expect(await isClipped(name), "nome cortado na Bancada").toBe(false);
+  expect(await isClipped(name), "[sabotage:bench-name-clipping]").toBe(false);
   await expectFitsDeviceWidth(page, "rolagem lateral na Bancada");
 });
 
@@ -49,6 +49,6 @@ test("Execução a 320 px: o link Baixar com nome longo quebra linha, sem rolage
   const link = page.getByRole("link", { name: `Baixar ${LONG_NAME}` });
   await expect(link).toBeVisible();
   await expect(link).toHaveText(`Baixar ${LONG_NAME}`);
-  expect(await isClipped(link), "link cortado na Execução").toBe(false);
+  expect(await isClipped(link), "[sabotage:run-name-clipping]").toBe(false);
   await expectFitsDeviceWidth(page, "rolagem lateral na Execução");
 });

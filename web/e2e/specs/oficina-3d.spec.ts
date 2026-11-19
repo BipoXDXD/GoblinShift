@@ -434,8 +434,8 @@ test.describe("com GPU", () => {
     );
     expect(boxes).toHaveLength(4);
     for (const box of boxes) {
-      expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.width, "[sabotage:scene-touch-target]").toBeGreaterThanOrEqual(44);
+      expect(box.height, "[sabotage:scene-touch-target]").toBeGreaterThanOrEqual(44);
     }
     // Linha = mesmo topo, com 1 px de folga para o arredondamento subpixel.
     const rows = new Map<number, number>();
