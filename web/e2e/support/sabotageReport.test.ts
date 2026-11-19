@@ -39,7 +39,9 @@ function report(tests: readonly unknown[], stats = {}, errors: unknown[] = []) {
   };
 }
 
-const failed = failureWithMessage("Error: [sabotage:contrast-light]\n\nexpect(received).toEqual(expected)");
+const failed = failureWithMessage(
+  "Error: [sabotage:contrast-light]\n\nexpect(received).toEqual(expected)",
+);
 
 describe("relatório do Chromium com defeito plantado", () => {
   it("confirma o defeito com todos os testes executados e uma falha", () => {
@@ -98,7 +100,10 @@ describe("relatório do Chromium com defeito plantado", () => {
   it("reprova seleção vazia e cenário sem falha detectada", () => {
     const clean = report([outcome("expected", "passed")], { expected: 1 });
 
-    expect(inspectSabotageReport(report([]), 1, scenario)).toMatchObject({ caught: false, selected: 0 });
+    expect(inspectSabotageReport(report([]), 1, scenario)).toMatchObject({
+      caught: false,
+      selected: 0,
+    });
     expect(inspectSabotageReport(clean, 0, scenario)).toMatchObject({ caught: false, selected: 1 });
     const unexpectedlyPassed = report([outcome("unexpected", "passed")], { unexpected: 1 });
     expect(inspectSabotageReport(unexpectedlyPassed, 1, scenario)).toMatchObject({
@@ -108,18 +113,28 @@ describe("relatório do Chromium com defeito plantado", () => {
   });
 
   it.each([
-    { name: "falha de setup", result: failureWithMessage("Error: browserType.launch: navegador indisponível") },
+    {
+      name: "falha de setup",
+      result: failureWithMessage("Error: browserType.launch: navegador indisponível"),
+    },
     {
       name: "marcador de outro defeito",
-      result: failureWithMessage("Error: [sabotage:contrast-dark]\n\nexpect(received).toEqual(expected)"),
+      result: failureWithMessage(
+        "Error: [sabotage:contrast-dark]\n\nexpect(received).toEqual(expected)",
+      ),
     },
     {
       name: "marcador dentro da mensagem de um erro genérico",
-      result: failureWithMessage("Error: erro de fixture\nError: [sabotage:contrast-light]\n\nquadro de código"),
+      result: failureWithMessage(
+        "Error: erro de fixture\nError: [sabotage:contrast-light]\n\nquadro de código",
+      ),
     },
     {
       name: "erro extra no teardown",
-      result: failureWithMessage("Error: [sabotage:contrast-light]\n\nexpect(received).toEqual(expected)", 1),
+      result: failureWithMessage(
+        "Error: [sabotage:contrast-light]\n\nexpect(received).toEqual(expected)",
+        1,
+      ),
     },
     { name: "timeout do teste", result: outcome("unexpected", "timedOut") },
     { name: "projeto fora do cenário", result: { ...failed, projectName: "mobile" } },
@@ -143,7 +158,9 @@ describe("relatório do Chromium com defeito plantado", () => {
   });
 
   it("reprova inconsistência entre os testes e a estatística", () => {
-    expect(() => inspectSabotageReport(report([failed]), 1, scenario)).toThrow(/contagem inconsistente/);
+    expect(() => inspectSabotageReport(report([failed]), 1, scenario)).toThrow(
+      /contagem inconsistente/,
+    );
   });
 
   it("reprova erro global, processo interrompido ou resultado instável", () => {
@@ -154,7 +171,10 @@ describe("relatório do Chromium com defeito plantado", () => {
       flaky: 1,
     });
 
-    expect(inspectSabotageReport(withError, 1, scenario)).toMatchObject({ caught: false, errors: 1 });
+    expect(inspectSabotageReport(withError, 1, scenario)).toMatchObject({
+      caught: false,
+      errors: 1,
+    });
     expect(inspectSabotageReport(withFailure, null, scenario)).toMatchObject({ caught: false });
     expect(inspectSabotageReport(flaky, 1, scenario)).toMatchObject({ caught: false, flaky: 1 });
   });

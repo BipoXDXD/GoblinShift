@@ -282,5 +282,12 @@ async function readFocusStop(deviceWidth: number): Promise<FocusStop | null> {
   const name = (focused.getAttribute("aria-label") ?? label?.textContent ?? childText)
     .replace(/\s+/g, " ")
     .trim();
-  return { name, ring, background, inViewport, obscured, filePicker: element.matches(".file-picker") };
+  return {
+    name,
+    ring,
+    background,
+    inViewport,
+    obscured,
+    filePicker: element.matches(".file-picker"),
+  };
 }

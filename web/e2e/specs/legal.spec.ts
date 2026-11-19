@@ -95,7 +95,9 @@ test("/termos: o item do sumário leva a seção com folga acima do título e o 
   // Primeiro o teto: o salto pode chegar depois do clique, com o título ainda embaixo.
   await expect.poll(top).toBeLessThan(ANCHOR_BREATHING_PX * 2);
   // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
-  expect(await top(), "[sabotage:legal-anchor-gap]").toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
+  expect(await top(), "[sabotage:legal-anchor-gap]").toBeGreaterThanOrEqual(
+    ANCHOR_BREATHING_PX - 1,
+  );
   // WCAG 2.4.3: o Tab seguinte parte da seção escolhida, não do sumário.
   await expect(section).toBeFocused();
 });

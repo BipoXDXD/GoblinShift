@@ -219,7 +219,7 @@ const CASES: readonly Case[] = [
   {
     name: "reflow: nome longo da Execução sem quebra dentro da palavra",
     spec: ["reflow.spec.ts", "-g", "Execução"],
-    assertions: ["run-name-clipping"],
+    assertions: ["run-name-reflow"],
     plant: (dist) => {
       addStylesheet(dist, ".wrap-anywhere { overflow-wrap: normal; }");
     },

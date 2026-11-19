@@ -25,7 +25,9 @@ for (const theme of THEMES) {
       );
       expect(ranContrast, "a regra color-contrast avaliou algum elemento").toBe(true);
       expect(
-        results.violations.filter((violation) => violation.id === "color-contrast").map(describeViolation),
+        results.violations
+          .filter((violation) => violation.id === "color-contrast")
+          .map(describeViolation),
         `[sabotage:contrast-${theme}]`,
       ).toEqual([]);
       expect(results.violations.map(describeViolation)).toEqual([]);
