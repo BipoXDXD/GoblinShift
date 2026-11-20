@@ -70,7 +70,7 @@ class PartialPublicationTests(unittest.TestCase):
 
     def attempt(self, number: int, changed: str = "") -> tuple[Path, dict[str, str]]:
         runner = self.root / f"runner-{number}"
-        images = {}
+        images: dict[str, dict[str, str]] = {}
         for i, role in enumerate(ROLES, 1):
             layout = runner / "ci-oci" / f"gs-oci-{role}-{number}"
             blobs = layout / "blobs" / "sha256"
@@ -89,9 +89,10 @@ class PartialPublicationTests(unittest.TestCase):
             raw = json.dumps(index).encode()
             digest = hashlib.sha256(raw).hexdigest()
             (blobs / digest).write_bytes(raw)
-            descriptor = {"mediaType": INDEX, "size": len(raw), "digest": f"sha256:{digest}"}
+            oci_digest = f"sha256:{digest}"
+            descriptor = {"mediaType": INDEX, "size": len(raw), "digest": oci_digest}
             (layout / "index.json").write_text(json.dumps({"manifests": [descriptor]}))
-            images[role] = {"artifact": str(10 * number + i), "digest": descriptor["digest"]}
+            images[role] = {"artifact": str(10 * number + i), "digest": oci_digest}
         receipt = runner / "oci-receipt" / "oci-receipt.json"
         receipt.parent.mkdir()
         receipt.write_text(json.dumps({"images": images}))
