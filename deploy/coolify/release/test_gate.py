@@ -72,18 +72,111 @@ class GoblinShiftGateTests(unittest.TestCase):
             "conclusion": "success",
         }
         self.jobs = [
-            *(
-                {"name": name, "status": "completed", "conclusion": "success"}
-                for name in gate.REQUIRED["goblinshift"]
-            ),
-            *(
-                {"name": name, "status": "completed", "conclusion": "skipped"}
-                for name in gate.LEGACY_SKIPS
-            ),
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in gate.REQUIRED["goblinshift"]
         ]
 
     def test_all_jobs_with_browser_journeys_under_gvisor_succeed(self) -> None:
         self.assertEqual(gate.validate(self.ci_run, self.jobs, "goblinshift", SHA), SHA)
+
+    def test_release_requires_real_results_from_both_legacy_contexts(self) -> None:
+        migrated = {"Deploy na VPS", "Jornadas na VPS (pós-deploy)"}
+        self.assertEqual(gate.validate(self.ci_run, self.jobs, "goblinshift", SHA), SHA)
+        for name in migrated:
+            for conclusion in ("skipped", "cancelled", "failure"):
+                jobs = [
+                    {**job, "conclusion": conclusion} if job["name"] == name else job
+                    for job in self.jobs
+                ]
+                with self.subTest(name=name, conclusion=conclusion), self.assertRaises(ValueError):
+                    gate.validate(self.ci_run, jobs, "goblinshift", SHA)
+
+    def test_workflow_run_requires_attempt_and_refuses_a_newer_attempt(self) -> None:
+        env = {
+            "RELEASE_PROJECT": "goblinshift",
+            "GITHUB_REPOSITORY": "BipoXDXD/GoblinShift",
+            "RELEASE_COMMIT": SHA,
+            "GITHUB_EVENT_NAME": "workflow_run",
+            "CI_RUN_ID": "44",
+        }
+        for attempt, error in [
+            ("", "Workflow run requires an exact CI run and attempt"),
+            ("1", "CI attempt changed after OCI artifact admission"),
+        ]:
+            with (
+                self.subTest(attempt=attempt),
+                patch.dict(os.environ, {**env, "CI_RUN_ATTEMPT": attempt}, clear=True),
+                patch.object(gate, "current_main", return_value=True),
+                patch.object(
+                    gate, "api", return_value={**self.ci_run, "id": 44, "run_attempt": 2}
+                ) as api,
+                self.assertRaisesRegex(ValueError, error),
+            ):
+                try:
+                    gate.main()
+                finally:
+                    self.assertEqual(api.call_count, int(bool(attempt)))
+
+    def test_exact_attempt_is_used_in_jobs_query_and_receipt(self) -> None:
+        run = {**self.ci_run, "id": 44, "run_attempt": 2}
+        jobs = {"total_count": len(self.jobs), "jobs": self.jobs}
+        for event in ("workflow_run", "workflow_dispatch"):
+            with self.subTest(event=event), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / "output"
+                env = {
+                    "RELEASE_PROJECT": "goblinshift",
+                    "GITHUB_REPOSITORY": "BipoXDXD/GoblinShift",
+                    "RELEASE_COMMIT": SHA,
+                    "GITHUB_EVENT_NAME": event,
+                    "GITHUB_OUTPUT": str(output),
+                }
+                if event == "workflow_run":
+                    env.update(CI_RUN_ID="44", CI_RUN_ATTEMPT="2")
+                    run_result = run
+                else:
+                    run_result = {"workflow_runs": [run]}
+                with (
+                    patch.dict(os.environ, env, clear=True),
+                    patch.object(gate, "current_main", return_value=True),
+                    patch.object(gate, "api", side_effect=[run_result, jobs]) as api,
+                ):
+                    gate.main()
+                self.assertEqual(
+                    api.call_args.args[0],
+                    "repos/BipoXDXD/GoblinShift/actions/runs/44/attempts/2/jobs?per_page=100",
+                )
+                self.assertIn("ci_run=44\nci_attempt=2\n", output.read_text())
+
+    def test_manual_recovery_pins_the_historical_successful_ci_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            env = {
+                "RELEASE_PROJECT": "goblinshift",
+                "GITHUB_REPOSITORY": "BipoXDXD/GoblinShift",
+                "RELEASE_COMMIT": SHA,
+                "GITHUB_EVENT_NAME": "workflow_dispatch",
+                "RESUME_CI_RUN_ID": "44",
+                "RESUME_CI_RUN_ATTEMPT": "1",
+                "GITHUB_OUTPUT": str(output),
+            }
+            attempt = {**self.ci_run, "id": 44, "run_attempt": 1}
+            jobs = {"total_count": len(self.jobs), "jobs": self.jobs}
+            endpoint = "repos/BipoXDXD/GoblinShift/actions/runs/44/attempts/1"
+
+            def api(path: str) -> dict[str, object]:
+                if path == endpoint:
+                    return attempt
+                if path == f"{endpoint}/jobs?per_page=100":
+                    return jobs
+                self.fail(f"Recovery queried a different CI attempt: {path}")
+
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch.object(gate, "current_main", return_value=True),
+                patch.object(gate, "api", side_effect=api),
+            ):
+                gate.main()
+            self.assertIn("ci_run=44\nci_attempt=1\n", output.read_text())
 
     def test_browser_journeys_under_gvisor_cannot_be_missing_or_skipped(self) -> None:
         others = [job for job in self.jobs if job["name"] != self.GVISOR_JOURNEYS]

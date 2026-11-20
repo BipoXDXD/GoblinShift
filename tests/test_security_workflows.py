@@ -49,7 +49,7 @@ def test_jobs_do_ci_sao_exatamente_os_que_o_gate_da_release_exige() -> None:
     gate = gate_module()
     names = {job["name"] for job in load(WORKFLOWS / "ci.yml")["jobs"].values()}
 
-    assert names == gate.REQUIRED["goblinshift"] | gate.LEGACY_SKIPS
+    assert names == gate.REQUIRED["goblinshift"]
 
 
 @pytest.mark.parametrize("path", [AUDIT, CODEQL], ids=["pip-audit", "codeql"])

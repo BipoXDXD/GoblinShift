@@ -44,8 +44,11 @@ test("a escolha persiste no reload e numa navegação nova", async ({ page }) =>
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/");
   await chooseTheme(page, "Escuro");
+  await expect(html(page)).toHaveAttribute("data-theme", "dark");
 
   await page.reload();
+  const saved = await page.evaluate(() => localStorage.getItem("gs-theme"));
+  expect(saved, "[sabotage:theme-persistence]").toBe("dark");
   await expect(html(page)).toHaveAttribute("data-theme", "dark");
   await page.getByText("Tema", { exact: true }).click();
   await expect(page.getByRole("radio", { name: "Escuro", exact: true })).toBeChecked();
@@ -76,7 +79,9 @@ for (const { stored, system, expected } of [
       });
     }, stored);
     await page.goto("/");
-    await expect(html(page)).toHaveAttribute("data-first-frame-theme", expected);
+    await expect(html(page)).toHaveAttribute("data-first-frame-theme", /.+/);
+    const firstTheme = await html(page).getAttribute("data-first-frame-theme");
+    expect(firstTheme, "[sabotage:theme-first-frame]").toBe(expected);
 
     // E o fundo pintado é o do tema final, não o de um tema trocado depois pelo bundle.
     const finalBackground = await html(page).evaluate(
@@ -132,7 +137,7 @@ test("Esc fecha o seletor e devolve o foco ao resumo @keyboard", async ({ page }
 
   await page.keyboard.press("Escape");
 
-  await expect(switcher(page)).not.toHaveAttribute("open");
+  expect(await switcher(page).getAttribute("open"), "[sabotage:theme-close-escape]").toBeNull();
   await expect(switcher(page).locator("summary")).toBeFocused();
 });
 
@@ -148,7 +153,11 @@ test("no celular, sair do seletor com Tab fecha o painel e o foco não fica cobe
   // Os radios formam um grupo: um Tab sai dele.
   await page.keyboard.press("Tab");
 
-  await expect(switcher(page)).not.toHaveAttribute("open");
+  expect(
+    await switcher(page).evaluate((element) => element.contains(document.activeElement)),
+    "o Tab saiu do seletor",
+  ).toBe(false);
+  expect(await switcher(page).getAttribute("open"), "[sabotage:theme-close-tab]").toBeNull();
   const obscured = await page.evaluate(() => {
     const focused = document.activeElement;
     if (!(focused instanceof HTMLElement) || focused === document.body) {

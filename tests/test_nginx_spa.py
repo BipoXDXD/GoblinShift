@@ -116,16 +116,17 @@ def test_compose_constroi_o_nginx_com_a_spa_e_sem_montar_o_template() -> None:
     assert "volumes" not in nginx
 
 
-def test_ci_publica_a_imagem_web_antes_do_deploy() -> None:
+def test_ci_valida_a_imagem_web_antes_do_contrato_de_deploy() -> None:
     jobs = _yaml(ROOT / ".github" / "workflows" / "ci.yml")["jobs"]
-    publish = next(
-        step for step in jobs["web-image"]["steps"] if step.get("uses", "").startswith("docker/b")
+    job = jobs["web-image"]
+    build = next(
+        step for step in job["steps"] if step.get("uses", "").startswith("docker/build-push")
     )
-    assert publish["with"]["file"] == "docker/web.Dockerfile"
-    assert "ghcr.io/bipoxdxd/goblinshift-web:${{ steps.vars.outputs.tag }}" in publish["with"][
-        "tags"
-    ].split("\n")
-    assert "web-image" in jobs["deploy"]["needs"]
+    assert build["with"]["file"] == "docker/web.Dockerfile"
+    assert build["with"]["outputs"].startswith("type=oci,")
+    assert "push" not in build["with"]
+    assert "web-image" in jobs["tag-main"]["needs"]
+    assert "web-image" in jobs["vps-smoke"]["needs"]
 
 
 def test_gzip_so_para_tipos_de_texto() -> None:

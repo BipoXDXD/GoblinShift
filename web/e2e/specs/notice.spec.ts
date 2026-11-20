@@ -49,10 +49,21 @@ test("Fechar aviso esconde o aviso, e ele continua fechado depois de recarregar"
   page,
 }) => {
   await page.goto("/historico");
-  await notice(page).getByRole("button", { name: "Fechar aviso" }).click();
-  await expect(notice(page)).toHaveCount(0);
+  const title = page.getByRole("heading", { level: 1, name: "Histórico" });
+  const band = notice(page);
+  await expect(title).toBeVisible();
+  await expect(band.getByRole("button")).toBeVisible();
+  const close = band.getByRole("button", { name: "Fechar aviso", exact: true });
+  expect(await close.count(), "[sabotage:notice-close-name]").toBe(1);
+  await close.click();
+  await expect(band).toHaveCount(0);
   // O botão sumiu com a faixa: o foco vai ao título da tela, não ao <body> (WCAG 2.4.3).
-  await expect(page.getByRole("heading", { level: 1, name: "Histórico" })).toBeFocused();
+  // A leitura pode falhar se o navegador fechar; só a comparação recebe o marcador.
+  await expect
+    .poll(() => title.evaluate((element) => element === document.activeElement), {
+      message: "[sabotage:notice-close-focus]",
+    })
+    .toBe(true);
 
   await page.reload();
 

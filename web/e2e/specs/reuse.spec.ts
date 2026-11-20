@@ -68,7 +68,7 @@ test("o aviso de origem entra numa região viva que já existia antes de a execu
   ).toHaveCount(1);
   // O parágrafo visível não é região viva: nasceria já com o texto e não seria lido. Busca pela
   // tag, não pelo papel: com role="status" ele deixaria de ser "paragraph" e sumiria da busca.
-  await expect(
-    page.locator("p").filter({ hasText: /^Parâmetros da execução de / }),
-  ).not.toHaveAttribute("role", "status");
+  const origin = page.locator("p").filter({ hasText: /^Parâmetros da execução de / });
+  await expect(origin).toBeVisible();
+  expect(await origin.getAttribute("role"), "[sabotage:reuse-live-region]").not.toBe("status");
 });

@@ -1,10 +1,10 @@
-"""send.sh and the workflow scan step tell an OCI index from a single image by jq's exit status.
+"""Exercise the shared sender's classification and GoblinShift's digest-bound scan.
 
-Only status 1 on exactly one JSON object means "not an index". Any other failure must stop the
-release instead of falling through to `crane digest`, and jq's own diagnostics must stay out of
-the log. Registry and transport commands are stubs; jq and bash are real.
+The sender still supports both indexes and single images. The GoblinShift scan requires the
+approved multiarch index and only pulls its AMD64 manifest. Registry and transport are stubs.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -19,7 +19,6 @@ from pathlib import Path
 RELEASE_DIR = Path(__file__).resolve().parent
 SEND_SCRIPT = RELEASE_DIR / "send.sh"
 WORKFLOW = RELEASE_DIR.parents[2] / ".github" / "workflows" / "coolify.yml"
-SCAN_STEP_HEADER = "      - name: Scan exact published images"
 RUN_HEADER = "        run: |"
 RUN_BODY_INDENT = " " * 10
 SCRIPT_TIMEOUT_S = 30
@@ -71,6 +70,10 @@ set -eu
 printf 'crane %s\\n' "$*" >> "$STUB_DIR/calls.log"
 case "$1" in
   manifest)
+    if [[ "$2" == *:sha-* && -f "$STUB_DIR/moved-tag" ]]; then
+      cat "$STUB_DIR/moved-tag"
+      exit 0
+    fi
     call=$(cat "$STUB_DIR/manifest-calls")
     printf '%s' "$((call + 1))" > "$STUB_DIR/manifest-calls"
     if [ -e "$STUB_DIR/manifests/$call.absent" ]; then
@@ -129,9 +132,9 @@ class Outcome:
         return sum(" pull " in call and f"@{digest}" in call for call in self.calls)
 
 
-def extract_scan_step() -> str:
+def extract_run_step(header: str) -> str:
     lines = WORKFLOW.read_text().splitlines()
-    step = lines.index(SCAN_STEP_HEADER)
+    step = lines.index(f"      - name: {header}")
     start = lines.index(RUN_HEADER, step) + 1
     body = []
     for line in lines[start:]:
@@ -147,13 +150,13 @@ def send_script_command(stub_dir: Path) -> list[str]:
 
 def scan_step_command(stub_dir: Path) -> list[str]:
     step = stub_dir / "scan-step.sh"
-    step.write_text(extract_scan_step())
+    step.write_text(extract_run_step("Scan exact published images"))
     # `defaults.run.shell: bash` makes GitHub run each step with exactly these options.
     return ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(step)]
 
 
 Target = Callable[[Path], list[str]]
-TARGETS: tuple[Target, ...] = (send_script_command, scan_step_command)
+TARGETS: tuple[Target, ...] = (send_script_command,)
 
 
 def install_stub(bin_dir: Path, name: str, content: str) -> None:
@@ -200,6 +203,8 @@ def run_target(
     manifests: list[str | None],
     search_path: SearchPath = search_path_with_jq,
     single_digest: str = SINGLE_DIGEST,
+    approved_index: str | None = None,
+    moved_tag: str | None = None,
 ) -> Outcome:
     with tempfile.TemporaryDirectory() as raw_root:
         root = Path(raw_root)
@@ -211,7 +216,10 @@ def run_target(
         install_stub(bin_dir, "crane", CRANE_STUB)
         install_stub(bin_dir, "docker", DOCKER_STUB)
         install_stub(bin_dir, "ssh", SSH_STUB)
-        install_stub(bin_dir, "python3", PYTHON_STUB)
+        if target is send_script_command:
+            install_stub(bin_dir, "python3", PYTHON_STUB)
+        if moved_tag is not None:
+            (stub_dir / "moved-tag").write_text(moved_tag)
         install_mktemp_shim(bin_dir)
         write_manifests(stub_dir / "manifests", manifests)
         (stub_dir / "manifest-calls").write_text("0")
@@ -230,8 +238,13 @@ def run_target(
             "DEPLOY_KNOWN_HOSTS": str(stub_dir / "known_hosts"),
             "TRIVY_IMAGE": "trivy-stub",
         }
+        if approved_index is not None:
+            environment.update(
+                dict.fromkeys(("APP_INDEX", "WEB_INDEX", "EXECUTOR_INDEX"), approved_index)
+            )
         completed = subprocess.run(  # noqa: S603 - argv fixo do teste, sem shell
             target(stub_dir),
+            cwd=RELEASE_DIR.parents[2],
             env=environment,
             capture_output=True,
             text=True,
@@ -240,6 +253,59 @@ def run_target(
         )
         calls = tuple((stub_dir / "calls.log").read_text().splitlines())
     return Outcome(completed.returncode, completed.stdout, completed.stderr, calls)
+
+
+class ImmutableScanTests(unittest.TestCase):
+    def test_moved_sha_tag_cannot_choose_the_scanned_image(self) -> None:
+        manifest = json.dumps({"schemaVersion": 2, **json.loads(INDEX_MANIFEST)})
+        approved_index = "sha256:" + hashlib.sha256(manifest.encode()).hexdigest()
+        moved = manifest.replace(INDEX_DIGEST, SINGLE_DIGEST)
+        outcome = run_target(
+            scan_step_command,
+            [manifest] * ROLE_COUNT,
+            approved_index=approved_index,
+            moved_tag=moved,
+        )
+        self.assertEqual(outcome.returncode, 0, outcome.stderr)
+        self.assertEqual(len(outcome.called("crane manifest")), ROLE_COUNT)
+        self.assertTrue(
+            all(call.endswith(f"@{approved_index}") for call in outcome.called("crane manifest"))
+        )
+        self.assertEqual(outcome.pulls_of(INDEX_DIGEST), ROLE_COUNT)
+        self.assertEqual(outcome.pulls_of(SINGLE_DIGEST), 0)
+
+    def test_scan_rejects_unapproved_bytes_or_missing_runtime_platform(self) -> None:
+        index = {"schemaVersion": 2, **json.loads(INDEX_MANIFEST)}
+        manifest = json.dumps(index)
+        digest = "sha256:" + hashlib.sha256(manifest.encode()).hexdigest()
+        incomplete = {
+            "schemaVersion": 2,
+            "manifests": [index["manifests"][0]],
+        }
+        incomparable = {
+            "schemaVersion": 2,
+            "manifests": [*index["manifests"], index["manifests"][0]],
+        }
+        invalid_child = {
+            "schemaVersion": 2,
+            "manifests": [
+                {**index["manifests"][0], "digest": "sha256:invalid"},
+                index["manifests"][1],
+            ],
+        }
+        for body, approved in [
+            (manifest + " ", digest),
+            *(
+                (raw, "sha256:" + hashlib.sha256(raw.encode()).hexdigest())
+                for raw in map(json.dumps, (incomplete, incomparable, invalid_child))
+            ),
+        ]:
+            with self.subTest(body=body, approved=approved):
+                outcome = run_target(scan_step_command, [body], approved_index=approved)
+                self.assertNotEqual(outcome.returncode, 0)
+                self.assertEqual(outcome.called("docker"), ())
+                self.assertEqual(outcome.called("crane digest"), ())
+                self.assertEqual(outcome.called("ssh"), ())
 
 
 class ManifestClassificationTests(unittest.TestCase):
