@@ -95,7 +95,9 @@ test("/termos: o item do sumário leva a seção com folga acima do título e o 
   // Primeiro o teto: o salto pode chegar depois do clique, com o título ainda embaixo.
   await expect.poll(top).toBeLessThan(ANCHOR_BREATHING_PX * 2);
   // Com o salto feito, o piso. 1 px de tolerância para o arredondamento subpixel.
-  expect(await top()).toBeGreaterThanOrEqual(ANCHOR_BREATHING_PX - 1);
+  expect(await top(), "[sabotage:legal-anchor-gap]").toBeGreaterThanOrEqual(
+    ANCHOR_BREATHING_PX - 1,
+  );
   // WCAG 2.4.3: o Tab seguinte parte da seção escolhida, não do sumário.
   await expect(section).toBeFocused();
 });
@@ -113,6 +115,6 @@ for (const path of ["/termos", "/privacidade", "/creditos"]) {
     const device = page.viewportSize();
     expect(device).not.toBeNull();
     const content = await page.evaluate(() => document.documentElement.scrollWidth);
-    expect(content).toBeLessThanOrEqual(device?.width ?? 0);
+    expect(content, "[sabotage:legal-page-width]").toBeLessThanOrEqual(device?.width ?? 0);
   });
 }

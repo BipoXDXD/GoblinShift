@@ -33,7 +33,7 @@ test("a chave nova aparece uma vez, copia, e o segredo não fica em storage, coo
   const stored = await page.evaluate(() =>
     JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), location.href]),
   );
-  expect(stored).not.toContain(canary);
+  expect(stored.includes(canary), "[sabotage:api-key-in-storage]").toBe(false);
   expect(JSON.stringify(await context.cookies())).not.toContain(canary);
   expect(consoleTexts.join("\n")).not.toContain(canary);
 
