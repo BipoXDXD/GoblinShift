@@ -474,152 +474,221 @@ jobs:
 
   image:
     name: Imagem
-    # O contrato também: publicar uma API que dá 500 ou foge da spec quebraria os clientes gerados.
-    needs: [checks, contract, secrets]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 30
     outputs:
-      tag: ${{ steps.vars.outputs.tag }}
       digest: ${{ steps.build.outputs.digest }}
+      artifact: ${{ steps.layout.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: vars
         run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-      # O executor/Python precisa executar etapas de ARM64 no runner AMD64. Só no runner efêmero.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/app.Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
+          outputs: type=oci,dest=${{ runner.temp }}/oci-app,tar=false
           build-args: GS_SERVICE_VERSION=${{ steps.vars.outputs.tag }}
-          tags: |
-            ghcr.io/bipoxdxd/goblinshift:${{ steps.vars.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Verificar ARM64 e AMD64 na imagem publicada
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Install pinned OCI transport
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+      - name: Verificar e escanear os manifests AMD64 e ARM64 no registro descartável
         env:
-          IMAGE_REF: ghcr.io/bipoxdxd/goblinshift@${{ steps.build.outputs.digest }}
-        run: scripts/docker-build.sh published "$IMAGE_REF"
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          scripts/ci-oci.sh registry
+          scripts/ci-oci.sh stage app "$INDEX_DIGEST" "$RUNNER_TEMP/oci-app"
+          scripts/ci-oci.sh scan app "$INDEX_DIGEST"
+      - id: layout
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gs-oci-app-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oci-app/
+          if-no-files-found: error
+          compression-level: 0
 
   executor-image:
     name: Imagem do executor
-    needs: [checks, secrets]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      artifact: ${{ steps.layout.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: vars
-        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-      # O executor/Python precisa executar etapas de ARM64 no runner AMD64. Só no runner efêmero.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/executor.Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          # Mesma tag da imagem da aplicação: o deploy resolve o digest do executor por ela.
-          tags: |
-            ghcr.io/bipoxdxd/goblinshift-executor:${{ steps.vars.outputs.tag }}
-          # Escopo próprio, para não disputar o cache da imagem da aplicação.
+          outputs: type=oci,dest=${{ runner.temp }}/oci-executor,tar=false
           cache-from: type=gha,scope=executor
           cache-to: type=gha,scope=executor,mode=max
-
-      - name: Verificar ARM64 e AMD64 na imagem publicada
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Install pinned OCI transport
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+      - name: Verificar e escanear os manifests AMD64 e ARM64 no registro descartável
         env:
-          IMAGE_REF: ghcr.io/bipoxdxd/goblinshift-executor@${{ steps.build.outputs.digest }}
-        run: scripts/docker-build.sh published "$IMAGE_REF"
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          scripts/ci-oci.sh registry
+          scripts/ci-oci.sh stage executor "$INDEX_DIGEST" "$RUNNER_TEMP/oci-executor"
+          scripts/ci-oci.sh scan executor "$INDEX_DIGEST"
+      - id: layout
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gs-oci-executor-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oci-executor/
+          if-no-files-found: error
+          compression-level: 0
 
   web-image:
     name: Imagem do Nginx com a SPA
-    # O job web garante tipos, lint, testes e build da SPA, e o e2e, que ela funciona no navegador
-    # com a CSP de produção, antes de publicar o que ela gera.
-    needs: [checks, web, e2e, secrets]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 30
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      artifact: ${{ steps.layout.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: vars
-        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-      # O executor/Python precisa executar etapas de ARM64 no runner AMD64. Só no runner efêmero.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/web.Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          # Mesma tag da imagem da aplicação: o Compose do deploy referencia as duas por ela.
-          tags: |
-            ghcr.io/bipoxdxd/goblinshift-web:${{ steps.vars.outputs.tag }}
+          outputs: type=oci,dest=${{ runner.temp }}/oci-web,tar=false
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
-
-      - name: Verificar ARM64 e AMD64 na imagem publicada
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Install pinned OCI transport
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+      - name: Verificar e escanear os manifests AMD64 e ARM64 no registro descartável
         env:
-          IMAGE_REF: ghcr.io/bipoxdxd/goblinshift-web@${{ steps.build.outputs.digest }}
-        run: scripts/docker-build.sh published "$IMAGE_REF"
+          INDEX_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          scripts/ci-oci.sh registry
+          scripts/ci-oci.sh stage web "$INDEX_DIGEST" "$RUNNER_TEMP/oci-web"
+          scripts/ci-oci.sh scan web "$INDEX_DIGEST"
+      - id: layout
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gs-oci-web-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oci-web/
+          if-no-files-found: error
+          compression-level: 0
+
+  deploy:
+    name: Deploy na VPS
+    # Conserva o contrato de recusa legado e executa os testes reais do receptor contra fixtures.
+    # O único ingresso de produção está no workflow Coolify release.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Recusa do ingresso SSH legado
+        run: |
+          rc=0
+          deploy/deploy.sh "$GITHUB_SHA" "sha-${GITHUB_SHA:0:12}" || rc=$?
+          test "$rc" -eq 64
+      - name: Contrato de admissão, receptor e preservação de mídias
+        run: |
+          python3 -m unittest discover -s deploy/coolify/release -v
+          python3 deploy/coolify/release/assets.py
+
+  vps-smoke:
+    name: Jornadas na VPS (pós-deploy)
+    # Mesmas jornadas de leitura da VPS, com as imagens do CI e uma conta efêmera local.
+    needs: [deploy, image, web-image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Install pinned OCI transport
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.image.outputs.artifact }},${{ needs.web-image.outputs.artifact }}
+          path: ${{ runner.temp }}/ci-oci
+      - name: Restaurar exatamente as duas imagens verificadas pelo CI
+        env:
+          APP_DIGEST: ${{ needs.image.outputs.digest }}
+          WEB_DIGEST: ${{ needs.web-image.outputs.digest }}
+        run: |
+          scripts/ci-oci.sh registry
+          scripts/ci-oci.sh stage app "$APP_DIGEST" "$RUNNER_TEMP/ci-oci/gs-oci-app-"*
+          scripts/ci-oci.sh stage web "$WEB_DIGEST" "$RUNNER_TEMP/ci-oci/gs-oci-web-"*
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Chromium, Firefox e dependências
+        timeout-minutes: 10
+        working-directory: web
+        env:
+          DEBS: ${{ runner.temp }}/apt-debs
+        run: |
+          lista=$(../scripts/ci-playwright-pacotes.sh chromium firefox)
+          if [[ -n $lista ]]; then
+            mapfile -t pacotes <<<"$lista"
+            ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
+          fi
+          npx playwright install chromium firefox
+      - name: Borda e jornadas de leitura com a pilha descartável
+        env:
+          CI_APP_IMAGE: 127.0.0.1:5000/goblinshift@${{ needs.image.outputs.digest }}
+          CI_WEB_IMAGE: 127.0.0.1:5000/goblinshift-web@${{ needs.web-image.outputs.digest }}
+        run: scripts/e2e-ci-release.sh
 
   tag-main:
     name: Imagem e componentes com tag main
-    # As tags sha-* saem assim que cada imagem fica pronta, e a publicação pelo Coolify confere o
-    # CI inteiro antes de usá-las. A `:main` só passa a apontar para o commit depois de todos os
-    # portões: quem puxa `:main` nunca recebe uma imagem que reprovou em algum job.
+    # Exercita a promoção por digest para as três imagens. Só o workflow Coolify escreve no GHCR.
     needs:
       - checks
       - host-python
@@ -633,101 +702,42 @@ jobs:
       - image
       - executor-image
       - web-image
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - deploy
+      - vps-smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 20
     steps:
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apontar a main para as imagens deste commit
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Install pinned OCI transport
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.image.outputs.artifact }},${{ needs.executor-image.outputs.artifact }},${{ needs.web-image.outputs.artifact }}
+          path: ${{ runner.temp }}/ci-oci
+      - name: Promover os três índices no registro descartável e selar o recibo
         env:
-          GH_TOKEN: ${{ github.token }}
           APP_DIGEST: ${{ needs.image.outputs.digest }}
           EXECUTOR_DIGEST: ${{ needs.executor-image.outputs.digest }}
           WEB_DIGEST: ${{ needs.web-image.outputs.digest }}
-        shell: bash
-        # Com uma fonte só, o imagetools copia o índice multiplataforma como está; o digest
-        # conferido no fim prova isso. Um push novo na main cancela esta execução (concorrência
-        # do workflow) e pode deixar as imagens em commits diferentes até a próxima execução que
-        # passar nos portões, que realinha as três; enquanto isso, todas já passaram nos portões.
+          APP_ARTIFACT: ${{ needs.image.outputs.artifact }}
+          EXECUTOR_ARTIFACT: ${{ needs.executor-image.outputs.artifact }}
+          WEB_ARTIFACT: ${{ needs.web-image.outputs.artifact }}
         run: |
-          ponta=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
-          if [ "$ponta" != "$GITHUB_SHA" ]; then
-            echo "A main avançou. As tags ficam para o CI do commit atual."
-            exit 0
-          fi
-          images=(goblinshift goblinshift-executor goblinshift-web)
-          digests=("$APP_DIGEST" "$EXECUTOR_DIGEST" "$WEB_DIGEST")
-          for digest in "${digests[@]}"; do
-            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-              echo '::error::Digest ausente ou inválido nos outputs dos builds'
-              exit 1
-            fi
+          scripts/ci-oci.sh registry
+          for role in app executor web; do
+            variable="${role^^}_DIGEST"
+            scripts/ci-oci.sh stage "$role" "${!variable}" "$RUNNER_TEMP/ci-oci/gs-oci-$role-"*
+            scripts/ci-oci.sh promote "$role" "${!variable}"
           done
-          for index in "${!images[@]}"; do
-            image="ghcr.io/bipoxdxd/${images[index]}"
-            esperado="${digests[index]}"
-            docker buildx imagetools create --tag "$image:main" "$image@$esperado"
-            obtido=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:main")
-            if [ "$obtido" != "$esperado" ]; then
-              echo "::error::$image:main aponta para $obtido, e não para $esperado"
-              exit 1
-            fi
-          done
-
-  deploy:
-    name: Deploy na VPS
-    # O sandbox real (gVisor) também precisa passar: implantar com o executor quebrado deixaria
-    # execuções aceitas sem ter onde rodar.
-    needs: [image, executor-image, web-image, gvisor, openobserve, host-python]
-    # Coolify é o único ingresso automático de publicação. O legado fica desativado na fonte,
-    # independentemente de variáveis administrativas. Manter este job pulado e seu dependente
-    # preserva os dois resultados skipped que o gate de release exige antes de enviar imagens.
-    if: "false"
-    runs-on: ubuntu-24.04
-    # Os segredos VPS_SSH_KEY e VPS_KNOWN_HOSTS moram só neste environment, cuja política de
-    # branches é "só main" (configuração do GitHub, ADR 033): nenhum outro ref lê a chave da VPS.
-    environment: production
-    # O job não usa o GITHUB_TOKEN (sem checkout nem API): nenhuma permissão.
-    permissions: {}
-    steps:
-      - name: Configurar SSH
-        env:
-          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Deploy
-        env:
-          VPS_TARGET: ${{ vars.VPS_USER }}@${{ vars.VPS_HOST }}
-          IMAGE_TAG: ${{ needs.image.outputs.tag }}
-        # Legado: o job nunca roda (`if: "false"`), e o deploy/deploy.sh, único comando que a chave
-        # da CI pode executar na VPS (forced command), hoje só recusa.
-        run: |
-          # SC2029: expandir aqui é o objetivo; a VPS recebe o SHA e a tag já resolvidos.
-          # shellcheck disable=SC2029
-          ssh "$VPS_TARGET" "deploy $GITHUB_SHA $IMAGE_TAG"
-
-  vps-smoke:
-    name: Jornadas na VPS (pós-deploy)
-    # A borda e as jornadas de leitura contra o site recém-implantado, no Chromium e no Firefox.
-    # Pulado junto com o deploy.
-    needs: [deploy]
-    # Fica `./` e não `$/` (audit self-repository do zizmor): em jobs.<id>.uses o `./` já resolve
-    # para o mesmo commit do workflow que chama, sem ler o disco do runner, que é o risco do audit.
-    # O `$/` ainda quebra o actionlint 1.7.12 (rhysd/actionlint#711); trocar quando ele aceitar.
-    uses: ./.github/workflows/e2e-vps.yml # zizmor: ignore[self-repository]
-    # Nada de `secrets: inherit`: o reutilizável não precisa da chave SSH da VPS. Dentro dele, o
-    # job no environment production lê o E2E_VPS_API_KEY do environment, que vence este.
-    secrets:
-      E2E_VPS_API_KEY: ${{ secrets.E2E_VPS_API_KEY }}
+          python3 deploy/coolify/release/ci_oci.py record "$RUNNER_TEMP/oci-receipt.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gs-validated-oci-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oci-receipt.json
+          if-no-files-found: error
