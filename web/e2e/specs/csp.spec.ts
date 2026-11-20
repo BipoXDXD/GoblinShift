@@ -12,6 +12,9 @@ test("o documento e os assets chegam com a CSP do snippet de produção", async 
   const csp = productionCsp();
   // A política proíbe o que o build não precisa; se o snippet afrouxar, esta spec vira inútil.
   // 'wasm-unsafe-eval' é permitido (decoder Meshopt do GLB, ADR 030): só compila WASM, não JS.
+  const styleSource = csp.split(";").find((directive) => directive.trim().startsWith("style-src "));
+  expect(styleSource, "CSP com diretiva style-src").toBeDefined();
+  expect(styleSource?.includes("'unsafe-inline'"), "[sabotage:csp-snippet]").toBe(false);
   expect(csp).not.toMatch(/unsafe-inline|(?<!wasm-)unsafe-eval|\*/);
 
   const assetCsps = new Map<string, string | undefined>();
@@ -39,7 +42,12 @@ for (const theme of THEMES) {
       const violations = await watchCsp(page);
       await useTheme(page, theme);
       await screen.open(page, fakeApi);
-      expect(await violations()).toEqual([]);
+      const recorded = await violations();
+      expect(
+        recorded.filter((violation) => /^style-src(?:-attr)?: inline(?:\s|$)/.test(violation)),
+        "[sabotage:csp-inline-style]",
+      ).toEqual([]);
+      expect(recorded).toEqual([]);
     });
   }
 }

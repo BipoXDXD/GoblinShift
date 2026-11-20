@@ -43,9 +43,15 @@ for (const screen of SCREENS) {
     await screen.open(page, fakeApi);
 
     // Sem isso, uma folha que deixou de valer passaria em silêncio.
-    expect(await applyTextSpacing(page), "word-spacing aplicado ao body").not.toBe("0px");
+    const wordSpacing = await applyTextSpacing(page);
+    expect(wordSpacing, "[sabotage:text-word-spacing]").not.toBe("0px");
     const clips = await clippedTexts(page, ROUNDING_PX);
-    expect(clips.map((clip) => clip.description)).toEqual([]);
+    const descriptions = clips.map((clip) => clip.description);
+    expect(
+      descriptions.filter((description) => description.startsWith("h1.")),
+      "[sabotage:text-heading-clipping]",
+    ).toEqual([]);
+    expect(descriptions).toEqual([]);
   });
 }
 

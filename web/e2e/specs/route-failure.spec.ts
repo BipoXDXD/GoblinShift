@@ -17,9 +17,14 @@ test("pedaço da tela que não carrega mostra o erro com foco e recarregar abre 
     .getByRole("link", { name: "Histórico" })
     .click();
 
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Não foi possível abrir esta tela" }),
-  ).toBeFocused();
+  const title = page.getByRole("heading", { level: 1, name: "Não foi possível abrir esta tela" });
+  await expect(title).toBeVisible();
+  // A leitura pode falhar se o navegador fechar; só a comparação recebe o marcador.
+  await expect
+    .poll(() => title.evaluate((element) => element === document.activeElement), {
+      message: "[sabotage:route-error-focus]",
+    })
+    .toBe(true);
   await expect(page).toHaveTitle("Erro ao abrir a tela · GoblinShift");
   await expect(page.getByRole("link", { name: "Voltar à Oficina" })).toHaveAttribute("href", "/");
 

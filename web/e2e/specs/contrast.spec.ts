@@ -24,6 +24,12 @@ for (const theme of THEMES) {
         (rule) => rule.id === "color-contrast",
       );
       expect(ranContrast, "a regra color-contrast avaliou algum elemento").toBe(true);
+      expect(
+        results.violations
+          .filter((violation) => violation.id === "color-contrast")
+          .map(describeViolation),
+        `[sabotage:contrast-${theme}]`,
+      ).toEqual([]);
       expect(results.violations.map(describeViolation)).toEqual([]);
     });
   }
