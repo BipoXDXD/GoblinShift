@@ -37,7 +37,12 @@ interface E2EEnv {
 
 function readEnv(): E2EEnv {
   const remoteUrl = process.env["E2E_BASE_URL"];
-  const vps = process.env["E2E_VPS"] === "1";
+  const productionRead = process.env["E2E_VPS"] === "1";
+  const ciRead = process.env["E2E_CI_READ"] === "1";
+  if (ciRead && (productionRead || remoteUrl !== "http://localhost")) {
+    throw new Error("E2E_CI_READ exige somente a pilha descartável em http://localhost.");
+  }
+  const vps = productionRead || ciRead;
   if (remoteUrl === undefined || remoteUrl === "") {
     if (vps) {
       throw new Error("E2E_VPS=1 exige E2E_BASE_URL com o endereço da VPS.");
@@ -54,6 +59,9 @@ function readEnv(): E2EEnv {
     };
   }
   const apiKey = process.env["GS_E2E_API_KEY"] ?? "";
+  if (ciRead && apiKey === "") {
+    throw new Error("E2E_CI_READ exige a conta descartável para executar todas as jornadas.");
+  }
   const specKeys = vps ? new Map<string, string>() : parseSpecKeys(process.env["GS_E2E_API_KEYS"]);
   if (apiKey === "" && specKeys.size === 0 && !vps) {
     throw new Error(
@@ -64,7 +72,7 @@ function readEnv(): E2EEnv {
     assertLocalWriteTarget(remoteUrl);
   }
   // A chave da conta de teste da VPS só vai para a produção, nunca para um host apontado à mão.
-  if (vps && apiKey !== "" && new URL(remoteUrl).origin !== PRODUCTION_ORIGIN) {
+  if (productionRead && apiKey !== "" && new URL(remoteUrl).origin !== PRODUCTION_ORIGIN) {
     throw new Error(`Com chave, E2E_VPS=1 só roda contra ${PRODUCTION_ORIGIN}.`);
   }
   return {

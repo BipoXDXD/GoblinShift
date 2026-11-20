@@ -63,7 +63,7 @@ def test_o_gate_conhece_exatamente_os_jobs_do_workflow() -> None:
 
     names = {definition["name"] for definition in jobs().values()}
 
-    assert names == gate.REQUIRED["goblinshift"] | gate.LEGACY_SKIPS
+    assert names == gate.REQUIRED["goblinshift"]
 
 
 def test_o_job_e_obrigatorio_para_publicar() -> None:
