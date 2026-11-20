@@ -58,7 +58,12 @@ test("Fechar aviso esconde o aviso, e ele continua fechado depois de recarregar"
   await close.click();
   await expect(band).toHaveCount(0);
   // O botão sumiu com a faixa: o foco vai ao título da tela, não ao <body> (WCAG 2.4.3).
-  await expect(title, "[sabotage:notice-close-focus]").toBeFocused();
+  // A leitura pode falhar se o navegador fechar; só a comparação recebe o marcador.
+  await expect
+    .poll(() => title.evaluate((element) => element === document.activeElement), {
+      message: "[sabotage:notice-close-focus]",
+    })
+    .toBe(true);
 
   await page.reload();
 

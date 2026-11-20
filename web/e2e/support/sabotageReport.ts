@@ -9,8 +9,9 @@ const testSchema = z.object({
   results: z.array(
     z.object({
       status: resultStatus,
+      retry: z.number().int().nonnegative(),
       error: z.object({ message: z.string().optional(), stack: z.string().optional() }).optional(),
-      errors: z.array(z.unknown()),
+      errors: z.array(z.object({ message: z.string() })),
     }),
   ),
 });
@@ -51,6 +52,11 @@ type SabotageReport = z.infer<typeof reportSchema>["stats"] & {
   readonly caught: boolean;
 };
 
+function assertionMarker(message: string | undefined): string | undefined {
+  const [marker, separator] = message?.split(/\r?\n/, 2) ?? [];
+  return separator === "" ? marker : undefined;
+}
+
 export function inspectSabotageReport(
   raw: unknown,
   exitCode: number | null,
@@ -70,14 +76,19 @@ export function inspectSabotageReport(
         selected++;
         counts[test.status]++;
         const matchesScenario =
-          spec.file.split("/").at(-1) === expected.spec && test.projectName === expected.project;
+          spec.file === expected.spec && test.projectName === expected.project;
         selection.mismatch ||= !matchesScenario || test.expectedStatus !== "passed";
 
-        if (
-          test.results.length > 0 &&
-          test.results.every(({ status }) => status === "passed" || status === "failed")
-        ) {
+        const [attempt] = test.results;
+        const singleAttempt = test.results.length === 1 && attempt?.retry === 0;
+        if (singleAttempt && (attempt.status === "passed" || attempt.status === "failed")) {
           executed++;
+        }
+        if (test.status === "expected") {
+          selection.mismatch ||=
+            attempt?.status !== "passed" ||
+            attempt.error !== undefined ||
+            attempt.errors.length !== 0;
         }
         if (
           test.status !== "unexpected" ||
@@ -86,15 +97,16 @@ export function inspectSabotageReport(
           continue;
         }
         counts.failed++;
+        const marker = assertionMarker(attempt?.error?.message);
         if (
           matchesScenario &&
           test.expectedStatus === "passed" &&
-          test.results.every(({ status, error, errors }) => {
-            const [marker = "", separator] = error?.message?.split(/\r?\n/, 2) ?? [];
-            return (
-              status === "failed" && errors.length === 1 && separator === "" && markers.has(marker)
-            );
-          })
+          singleAttempt &&
+          attempt.status === "failed" &&
+          attempt.errors.length === 1 &&
+          marker !== undefined &&
+          markers.has(marker) &&
+          assertionMarker(attempt.errors[0]?.message) === marker
         ) {
           counts.attributed++;
         } else {

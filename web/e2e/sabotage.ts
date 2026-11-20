@@ -550,6 +550,7 @@ function runCase(sabotage: Case, port: number): boolean {
         "--config=e2e/playwright.config.ts",
         `--project=${project}`,
         "--reporter=json",
+        "--retries=0",
         "--output",
         join(work, "test-results"),
         ...sabotage.spec,

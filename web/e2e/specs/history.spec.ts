@@ -45,10 +45,10 @@ test("Carregar mais traz a página seguinte e anuncia quantas chegaram @fake-api
   await historico.open();
   await expect(historico.rows()).toHaveCount(PAGE_SIZE);
 
-  await expect(
-    page.getByRole("button", { name: "Carregar mais" }),
-    "[sabotage:history-load-more-visible]",
-  ).toBeVisible();
+  const loadMore = page.getByRole("button", { name: "Carregar mais" });
+  await expect
+    .poll(() => loadMore.isVisible(), { message: "[sabotage:history-load-more-visible]" })
+    .toBe(true);
   await historico.loadMore();
   await expect(historico.rows()).toHaveCount(total);
   await expect(
@@ -71,13 +71,15 @@ test("na última página, o foco segue para a primeira linha nova e o fim da lis
   await page.keyboard.press("Enter");
 
   await expect(historico.rows()).toHaveCount(total);
-  await expect(
-    historico
-      .rows()
-      .nth(PAGE_SIZE)
-      .getByRole("link", { name: /, criada em / }),
-    "[sabotage:history-load-more-focus]",
-  ).toBeFocused();
+  const firstNewLink = historico
+    .rows()
+    .nth(PAGE_SIZE)
+    .getByRole("link", { name: /, criada em / });
+  await expect
+    .poll(() => firstNewLink.evaluate((link) => link === document.activeElement), {
+      message: "[sabotage:history-load-more-focus]",
+    })
+    .toBe(true);
   await expect(
     page.getByRole("status").filter({
       hasText: `Mais ${String(total - PAGE_SIZE)} execuções na lista. Fim da lista.`,
@@ -95,7 +97,9 @@ test("filtrar por estado vai para a URL, sobrevive ao reload e só lista esse es
   await expect(historico.rows()).toHaveCount(seeded);
 
   await historico.filterByStatus("Falhou");
-  await expect(page, "[sabotage:history-filter-url]").toHaveURL(/\/historico\?estado=failed$/);
+  await expect
+    .poll(() => page.evaluate(() => location.href), { message: "[sabotage:history-filter-url]" })
+    .toMatch(/\/historico\?estado=failed$/);
   await expect(historico.rows()).toHaveCount(1);
   await expect(historico.rows().first()).toContainText("Falhou");
 

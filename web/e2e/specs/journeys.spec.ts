@@ -94,10 +94,10 @@ for (const journey of JOURNEYS) {
     await bancada.open(journey.recipeId);
 
     await bancada.addFiles(journey.files);
-    await expect(
-      page.getByRole("button", { name: `Mover para cima ${second.name}` }),
-      "[sabotage:reorder-buttons-visible]",
-    ).toBeVisible();
+    const moveUp = page.getByRole("button", { name: `Mover para cima ${second.name}` });
+    await expect
+      .poll(() => moveUp.isVisible(), { message: "[sabotage:reorder-buttons-visible]" })
+      .toBe(true);
     expect(await bancada.order()).toEqual([first.name, second.name]);
 
     await bancada.moveUp(second.name);

@@ -13,7 +13,7 @@ function outcome(status: string, ...results: string[]) {
     status,
     expectedStatus: "passed",
     projectName: "desktop",
-    results: results.map((result) => ({ status: result, errors: [] })),
+    results: results.map((result) => ({ status: result, retry: 0, errors: [] })),
   };
 }
 
@@ -24,6 +24,7 @@ function failureWithMessage(message: string, extraErrors = 0) {
     results: [
       {
         status: "failed",
+        retry: 0,
         error,
         errors: [error, ...Array.from({ length: extraErrors }, () => ({ message: "teardown" }))],
       },
@@ -146,6 +147,61 @@ describe("relatório do Chromium com defeito plantado", () => {
       caught: false,
       attributed: 1,
     });
+  });
+
+  it.each([
+    { name: "falha rotulada como esperada", results: failed.results },
+    {
+      name: "erro num resultado rotulado como sucesso",
+      results: failed.results.map((result) => ({ ...result, status: "passed" })),
+    },
+    {
+      name: "falha seguida de sucesso sem status flaky",
+      results: [...failed.results, { status: "passed", retry: 1, errors: [] }],
+    },
+  ])("reprova $name mesmo com outra falha atribuída", ({ results }) => {
+    const raw = report([failed, { ...outcome("expected"), results }], {
+      unexpected: 1,
+      expected: 1,
+    });
+
+    expect(inspectSabotageReport(raw, 1, scenario).caught).toBe(false);
+  });
+
+  it("reprova duas tentativas mesmo quando ambas têm o marcador", () => {
+    const results = [
+      ...failed.results,
+      ...failed.results.map((result) => ({ ...result, retry: 1 })),
+    ];
+    const raw = report([{ ...failed, results }], { unexpected: 1 });
+
+    expect(inspectSabotageReport(raw, 1, scenario).caught).toBe(false);
+  });
+
+  it("reprova relatório com retry sem a primeira tentativa", () => {
+    const results = failed.results.map((result) => ({ ...result, retry: 1 }));
+    const raw = report([{ ...failed, results }], { unexpected: 1 });
+
+    expect(inspectSabotageReport(raw, 1, scenario).caught).toBe(false);
+  });
+
+  it("reprova quando o erro formatado diverge do erro primário", () => {
+    const results = failed.results.map((result) => ({
+      ...result,
+      errors: [{ message: "Error: erro de fixture" }],
+    }));
+    const raw = report([{ ...failed, results }], { unexpected: 1 });
+
+    expect(inspectSabotageReport(raw, 1, scenario).caught).toBe(false);
+  });
+
+  it("reprova spec homônima em outro diretório", () => {
+    const raw = {
+      ...report([failed], { unexpected: 1 }),
+      suites: [{ specs: [{ file: "outro/contrast.spec.ts", tests: [failed] }] }],
+    };
+
+    expect(inspectSabotageReport(raw, 1, scenario).caught).toBe(false);
   });
 
   it("reprova relatório de outra spec", () => {
