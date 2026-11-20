@@ -24,6 +24,7 @@ interface FocusStop {
   readonly background: string;
   readonly inViewport: boolean;
   readonly obscured: boolean;
+  readonly filePicker: boolean;
 }
 
 // Mapeia para sRGB pelo algoritmo do CSS Color 4 (via OKLCH), como o navegador pinta.
@@ -49,6 +50,28 @@ for (const theme of THEMES) {
 
       const stops = await tabThrough(page);
       expect(stops.length, "a tela tem algo focável por Tab").toBeGreaterThan(0);
+      const missing = stops.filter((stop) => stop.ring === null);
+      expect(
+        missing.filter(({ filePicker }) => !filePicker).map(({ name }) => name),
+        "[sabotage:focus-ring-missing]",
+      ).toEqual([]);
+      expect(
+        missing.filter(({ filePicker }) => filePicker).map(({ name }) => name),
+        "[sabotage:focus-file-picker]",
+      ).toEqual([]);
+      const rings = stops.flatMap(({ ring, name, background }) =>
+        ring === null ? [] : [{ ...ring, name, background }],
+      );
+      expect(
+        rings.filter(({ widthPx }) => widthPx < MIN_RING_PX).map(({ name }) => name),
+        "[sabotage:focus-ring-width]",
+      ).toEqual([]);
+      expect(
+        rings
+          .filter(({ color, background }) => contrast(color, background) < MIN_RING_CONTRAST)
+          .map(({ name }) => name),
+        "[sabotage:focus-ring-contrast]",
+      ).toEqual([]);
       const problems = stops.flatMap((stop) => ringProblems(stop));
       expect(problems).toEqual([]);
     });
@@ -114,9 +137,9 @@ test("Bancada: arquivos → lista → parâmetros → Executar, e o foco segue o
   ];
   const positions = order.map((name) => names.indexOf(name));
   expect(positions, `paradas: ${names.join(" | ")}`).not.toContain(-1);
-  expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  expect(positions, "[sabotage:run-tab-order]").toEqual([...positions].sort((a, b) => a - b));
   // Executar fecha o conteúdo; depois dele, só os links do rodapé.
-  expect(names.slice(-4), "Executar é a última parada do conteúdo").toEqual([
+  expect(names.slice(-4), "[sabotage:run-tab-order]").toEqual([
     "Executar",
     "Termos de Uso",
     "Aviso de Privacidade",
@@ -259,5 +282,12 @@ async function readFocusStop(deviceWidth: number): Promise<FocusStop | null> {
   const name = (focused.getAttribute("aria-label") ?? label?.textContent ?? childText)
     .replace(/\s+/g, " ")
     .trim();
-  return { name, ring, background, inViewport, obscured };
+  return {
+    name,
+    ring,
+    background,
+    inViewport,
+    obscured,
+    filePicker: element.matches(".file-picker"),
+  };
 }

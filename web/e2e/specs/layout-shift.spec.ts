@@ -61,12 +61,12 @@ test.beforeEach(async ({ page }) => {
 test("Oficina: CLS abaixo de 0,05 até as fontes carregarem", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: /CSV Janitor/ })).toBeVisible();
-  expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+  expect(await cumulativeLayoutShift(page), "[sabotage:cls-regression]").toBeLessThan(MAX_CLS);
 });
 
 test("Bancada: CLS abaixo de 0,05 do carregamento do catálogo ao formulário", async ({ page }) => {
   await new BancadaPage(page).open("csv-janitor");
-  expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+  expect(await cumulativeLayoutShift(page), "[sabotage:cls-regression]").toBeLessThan(MAX_CLS);
 });
 
 /** Uma tela aberta sem esperar o `load` e o elemento que diz que ela está pintada. */
@@ -116,7 +116,7 @@ test("Bancada: CLS abaixo de 0,05 com a fonte do texto chegando depois da primei
   page,
 }) => {
   await openWithLateFont(page, BANCADA, TEXT_FONT);
-  expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+  expect(await cumulativeLayoutShift(page), "[sabotage:cls-late-text]").toBeLessThan(MAX_CLS);
 });
 
 // A do título segue em swap (ADR 040): os títulos ocupam poucas linhas e a troca quase não mexe
@@ -129,7 +129,7 @@ for (const [name, screen] of [
     page,
   }) => {
     await openWithLateFont(page, screen, TITLE_FONT);
-    expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+    expect(await cumulativeLayoutShift(page), "[sabotage:cls-regression]").toBeLessThan(MAX_CLS);
   });
 }
 
@@ -140,5 +140,5 @@ test("Execução: CLS abaixo de 0,05 do carregamento aos resultados @fake-api", 
   const execucao = new ExecucaoPage(page);
   await execucao.open(fakeApi.seedRun({ status: "succeeded" }));
   await expect(page.getByRole("link", { name: /^Baixar csv-janitor\.zip/ })).toBeVisible();
-  expect(await cumulativeLayoutShift(page)).toBeLessThan(MAX_CLS);
+  expect(await cumulativeLayoutShift(page), "[sabotage:cls-regression]").toBeLessThan(MAX_CLS);
 });
