@@ -16,7 +16,8 @@ const html =
 for (const trigger of ["reflection", "axe"] as const) {
   const browser = await firefox.launch(executablePath ? { executablePath } : {});
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
     await page.setContent(html);
     if (trigger === "axe") {
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
