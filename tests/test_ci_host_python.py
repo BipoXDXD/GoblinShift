@@ -57,13 +57,10 @@ NOT_HOST_PYTHON = {
     "tests/openobserve/test_scheduler_round.py": "importa os cenários de integração do agendador",
     "tests/openobserve/test_sql.py": "integração de SQL com OpenObserve e Collector reais",
 }
-# Jobs que não são portão da `:main`: o deploy legado, que nunca roda, e o que depende dele.
-NOT_GATES = {"deploy", "vps-smoke", TAG_JOB}
-MAIN_TAG = re.compile(r":main\b")
 IMAGE_JOBS = [
-    ("image", "goblinshift", "APP_DIGEST"),
-    ("executor-image", "goblinshift-executor", "EXECUTOR_DIGEST"),
-    ("web-image", "goblinshift-web", "WEB_DIGEST"),
+    ("image", "app", "APP_DIGEST"),
+    ("executor-image", "executor", "EXECUTOR_DIGEST"),
+    ("web-image", "web", "WEB_DIGEST"),
 ]
 
 
@@ -164,65 +161,104 @@ def test_excecoes_apontam_para_modulos_que_existem() -> None:
     assert set(NOT_HOST_PYTHON) <= set(_host_test_modules())
 
 
-def test_tag_main_so_no_job_que_espera_os_portoes() -> None:
-    jobs = _jobs()
-    with_main = {job_id for job_id, job in jobs.items() if MAIN_TAG.search(yaml.safe_dump(job))}
-
-    assert with_main == {TAG_JOB}
-
-
 def test_tag_main_espera_todos_os_portoes() -> None:
     jobs = _jobs()
-
-    assert set(jobs[TAG_JOB]["needs"]) == set(jobs) - NOT_GATES
-
-
-def test_tag_main_so_no_push_da_main() -> None:
-    assert _jobs()[TAG_JOB]["if"] == (
-        "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-    )
+    assert set(jobs[TAG_JOB]["needs"]) == set(jobs) - {TAG_JOB}
+    assert "if" not in jobs[TAG_JOB]
 
 
-@pytest.mark.parametrize(("job", "image", "env_var"), IMAGE_JOBS)
-def test_tag_main_publica_os_digests_verificados_por_cada_build(
-    job: str, image: str, env_var: str
+@pytest.mark.parametrize(("job", "role", "env_var"), IMAGE_JOBS)
+def test_tag_main_promove_os_digests_verificados_por_cada_build(
+    job: str, role: str, env_var: str
 ) -> None:
     jobs = _jobs()
     image_job = jobs[job]
+    assert "if" not in image_job
     assert image_job["outputs"]["digest"] == "${{ steps.build.outputs.digest }}"
-    verify_step = next(
+    verify = next(
+        step for step in image_job["steps"] if "scripts/ci-oci.sh stage" in step.get("run", "")
+    )
+    assert verify["env"]["INDEX_DIGEST"] == "${{ steps.build.outputs.digest }}"
+    assert f'scripts/ci-oci.sh scan {role} "$INDEX_DIGEST"' in verify["run"]
+    step = next(
         step
-        for step in image_job["steps"]
-        if "scripts/docker-build.sh published" in step.get("run", "")
+        for step in jobs[TAG_JOB]["steps"]
+        if "scripts/ci-oci.sh promote" in step.get("run", "")
     )
-    assert verify_step["env"]["IMAGE_REF"] == (
-        f"ghcr.io/bipoxdxd/{image}@${{{{ steps.build.outputs.digest }}}}"
-    )
-
-    step = next(step for step in jobs[TAG_JOB]["steps"] if "run" in step)
     assert step["env"][env_var] == f"${{{{ needs.{job}.outputs.digest }}}}"
-    assert image in step["run"]
-    assert f'"${env_var}"' in step["run"]
-    assert 'imagetools create --tag "$image:main" "$image@$esperado"' in step["run"]
+    assert "ci_oci.py record" in step["run"]
 
 
-def test_tag_main_confere_digests_antes_e_depois_da_promocao() -> None:
-    runs = _runs(TAG_JOB)
-    check = 'if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then'
-    assert runs.index(check) < runs.index("exit 1") < runs.index("imagetools create")
-    assert 'esperado="${digests[index]}"' in runs
-    inspect = "docker buildx imagetools inspect --format '{{.Manifest.Digest}}'"
-    assert f'obtido=$({inspect} "$image:main")' in runs
-    mismatch = 'if [ "$obtido" != "$esperado" ]; then'
-    assert runs.index("imagetools create") < runs.index(mismatch) < runs.rindex("exit 1")
+def test_promocao_real_espera_ci_da_main_e_confere_origem_dos_artefatos() -> None:
+    release = yaml.safe_load(CI.with_name("coolify.yml").read_text())
+    assert set(release[True]) == {"workflow_run", "workflow_dispatch"}
+    assert set(release[True]["workflow_dispatch"]["inputs"]) == {"commit", "ci_run", "ci_attempt"}
+    assert release["env"]["RESUME_CI_RUN_ID"] == "${{ inputs.ci_run }}"
+    assert release["env"]["RESUME_CI_RUN_ATTEMPT"] == "${{ inputs.ci_attempt }}"
+    jobs = release["jobs"]
+    assert "github.event.workflow_run.event == 'push'" in jobs["gates"]["if"]
+    assert (
+        "github.event.workflow_run.head_repository.full_name == github.repository"
+        in jobs["gates"]["if"]
+    )
+    gate_step = next(step for step in jobs["gates"]["steps"] if step.get("id") == "gates")
+    assert gate_step["env"]["CI_RUN_ATTEMPT"] == "${{ github.event.workflow_run.run_attempt }}"
+    publish = jobs["publish-images"]
+    assert publish["needs"] == "gates"
+    assert publish["if"] == "needs.gates.outputs.eligible == 'true'"
+    assert publish["permissions"] == {"contents": "read", "actions": "read", "packages": "write"}
+    assert "publish-images" in jobs["deploy"]["needs"]
+    steps = {step["name"]: step for step in publish["steps"] if "name" in step}
+    receipt = steps["Fetch the exact CI attempt receipt"]["with"]
+    assert receipt["run-id"] == "${{ needs.gates.outputs.ci_run }}"
+    assert receipt["name"] == "gs-validated-oci-${{ needs.gates.outputs.ci_attempt }}"
+    assert steps["Fetch the OCI data admitted by the CI receipt"]["with"]["artifact-ids"] == (
+        "${{ steps.receipt.outputs.ids }}"
+    )
+    sha = steps["Publish exactly the three already verified sha tags"]
+    promote = steps["Promote the three indexes by digest and verify the tags"]
+    assert sha["run"].index("publish-check") < sha["run"].index("publish-sha")
+    assert sha["if"] == "steps.publishable.outputs.eligible == 'true'"
+    assert promote["if"] == "steps.promotable.outputs.eligible == 'true'"
+
+    scan = next(
+        step
+        for step in jobs["deploy"]["steps"]
+        if step.get("name") == "Scan exact published images"
+    )
+    for role in ("app", "executor", "web"):
+        assert (
+            publish["outputs"][f"{role}_index"] == f"${{{{ steps.receipt.outputs.{role}_index }}}}"
+        )
+        assert (
+            scan["env"][f"{role.upper()}_INDEX"]
+            == f"${{{{ needs.publish-images.outputs.{role}_index }}}}"
+        )
+    assert 'crane manifest "$repository@$index"' in scan["run"]
+    assert "ci_oci.py amd64" in scan["run"]
 
 
-def test_tag_main_confere_a_ponta_antes_de_publicar() -> None:
-    runs = _runs(TAG_JOB)
-    assert 'gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main"' in runs
-    stale = 'if [ "$ponta" != "$GITHUB_SHA" ]; then'
-    assert runs.index(stale) < runs.index("exit 0") < runs.index("imagetools create")
+def test_artefatos_oci_de_tentativas_anteriores_conservam_seus_ids() -> None:
+    jobs = _jobs()
+    for job, role, _ in IMAGE_JOBS:
+        upload = next(step for step in jobs[job]["steps"] if step.get("id") == "layout")
+        assert upload["with"]["name"] == f"gs-oci-{role}-${{{{ github.run_attempt }}}}"
+        assert "overwrite" not in upload["with"]
+    receipt = next(
+        step for step in jobs[TAG_JOB]["steps"] if "upload-artifact" in step.get("uses", "")
+    )
+    assert receipt["with"]["name"] == "gs-validated-oci-${{ github.run_attempt }}"
+    assert "overwrite" not in receipt["with"]
 
 
-def test_tag_main_so_pode_escrever_pacotes() -> None:
-    assert _jobs()[TAG_JOB]["permissions"] == {"contents": "read", "packages": "write"}
+def test_helper_de_publicacao_tem_o_mesmo_codeowner_dos_workflows() -> None:
+    owners = (ROOT / ".github" / "CODEOWNERS").read_text().splitlines()
+    rules = dict(line.split(maxsplit=1) for line in owners if line.startswith("/"))
+    assert rules["/scripts/ci-oci.sh"] == rules["/.github/workflows/"]
+
+
+def test_promocao_exige_o_digest_antes_e_depois_de_mover_a_tag() -> None:
+    script = (ROOT / "scripts" / "ci-oci.sh").read_text()
+    expected = 'verify_tag "sha-${commit:0:12}"'
+    promotion = 'tag "$repository@$digest" main'
+    assert script.index(expected) < script.index(promotion) < script.index("verify_tag main")
