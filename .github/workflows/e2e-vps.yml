@@ -64,6 +64,11 @@ jobs:
           fi
           npx playwright install chromium firefox
         working-directory: web
+      - name: Firefox oficial r1575 verificado
+        run: python3 scripts/ci_firefox.py
+      - name: Regressão ARIA com o Firefox corrigido
+        working-directory: web
+        run: node scripts/check-firefox-aria.ts
       - name: Conta de teste
         env:
           KEY: ${{ secrets.E2E_VPS_API_KEY }}
@@ -97,3 +102,6 @@ jobs:
           name: playwright-report-vps
           path: web/playwright-report/
           retention-days: 7
+      - name: Remover o Firefox temporário
+        if: always()
+        run: python3 scripts/ci_firefox.py --cleanup

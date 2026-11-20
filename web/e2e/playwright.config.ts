@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import { E2E, LOCAL_PORT, NOTICE_BUILD } from "./support/env";
+import { firefoxLaunchOptions } from "./support/firefox";
 import {
   ACCOUNT_TAG,
   FAKE_API_TAG,
@@ -47,6 +48,10 @@ const VPS_PROJECTS = [
     name: "firefox",
     use: {
       ...devices["Desktop Firefox"],
+      launchOptions: firefoxLaunchOptions(
+        process.env["GS_FIREFOX_EXECUTABLE"],
+        Boolean(process.env["CI"]) && E2E.vps,
+      ),
       viewport: { width: 1280, height: 800 },
     },
     ...VPS_EXCLUDED,

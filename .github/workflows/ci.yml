@@ -680,11 +680,22 @@ jobs:
             ../scripts/ci-apt-instalar.sh "$DEBS" "${pacotes[@]}"
           fi
           npx playwright install chromium firefox
+      - name: Controle negativo ARIA do Firefox empacotado r1572
+        working-directory: web
+        run: node scripts/check-firefox-aria.ts --expect-crash
+      - name: Firefox oficial r1575 verificado
+        run: python3 scripts/ci_firefox.py
+      - name: Regressão ARIA com o Firefox corrigido
+        working-directory: web
+        run: node scripts/check-firefox-aria.ts
       - name: Borda e jornadas de leitura com a pilha descartável
         env:
           CI_APP_IMAGE: 127.0.0.1:5000/goblinshift@${{ needs.image.outputs.digest }}
           CI_WEB_IMAGE: 127.0.0.1:5000/goblinshift-web@${{ needs.web-image.outputs.digest }}
         run: scripts/e2e-ci-release.sh
+      - name: Remover o Firefox temporário
+        if: always()
+        run: python3 scripts/ci_firefox.py --cleanup
 
   tag-main:
     name: Imagem e componentes com tag main
