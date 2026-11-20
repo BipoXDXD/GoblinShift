@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { ApiProblem } from "./problem";
 import { ApiError, type ApiFailure } from "./response";
-import { shouldRetryQuery } from "./queryRetry";
+import { queryRetryDelay, shouldRetryQuery } from "./queryRetry";
 
-function problem(status: number, code: ApiProblem["code"]): ApiFailure {
+function problem(
+  status: number,
+  code: ApiProblem["code"],
+): Extract<ApiFailure, { kind: "problem" }> {
   return {
     kind: "problem",
     status,
@@ -57,7 +60,45 @@ describe("shouldRetryQuery", () => {
     expect(shouldRetryQuery(3, failure)).toBe(false);
   });
 
+  it("permite só uma tentativa a mais em caso de timeout", () => {
+    const failure = new ApiError({ kind: "timeout" });
+    expect(shouldRetryQuery(0, failure)).toBe(true);
+    expect(shouldRetryQuery(1, failure)).toBe(false);
+  });
+
   it("defeito da interface (erro que não veio da API) não tenta de novo", () => {
     expect(shouldRetryQuery(0, new TypeError("x is undefined"))).toBe(false);
+  });
+});
+
+describe("queryRetryDelay", () => {
+  it.each<ApiFailure>([
+    { ...problem(503, "SERVICE_UNAVAILABLE"), retryAfterMs: 30_000 },
+    { kind: "unexpected-response", status: 503, retryAfterMs: 30_000 },
+  ])("respeita Retry-After de 30 s com resposta $kind", (failure) => {
+    expect(queryRetryDelay(0, new ApiError(failure))).toBe(30_000);
+  });
+
+  it("aumenta o atraso exponencial e sorteia uma folga mesmo sem Retry-After", () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    onTestFinished(() => {
+      random.mockRestore();
+    });
+    const failure = new ApiError(problem(503, "SERVICE_UNAVAILABLE"));
+    expect([0, 1, 2].map((attempt) => queryRetryDelay(attempt, failure))).toEqual([
+      1_000, 2_000, 4_000,
+    ]);
+
+    random.mockReturnValue(0.5);
+    expect(queryRetryDelay(1, failure)).toBe(2_500);
+  });
+
+  it("mantém o backoff quando Retry-After fica abaixo da espera local", () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    onTestFinished(() => {
+      random.mockRestore();
+    });
+    const failure = new ApiError({ kind: "unexpected-response", status: 503, retryAfterMs: 500 });
+    expect(queryRetryDelay(0, failure)).toBe(1_000);
   });
 });
