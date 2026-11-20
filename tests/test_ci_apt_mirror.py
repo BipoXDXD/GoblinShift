@@ -26,7 +26,13 @@ MIRROR_SCRIPT = "scripts/ci-apt-sem-azure.sh"
 PLAYWRIGHT_PACKAGES_SCRIPT = "scripts/ci-playwright-pacotes.sh"
 PLAYWRIGHT_INSTALL = "npx playwright install "
 PLAYWRIGHT_APT = ("--with-deps", "install-deps")
-PLAYWRIGHT_WORKFLOWS = ("ci.yml", "e2e-vps.yml", "e2e-webkit.yml")
+PLAYWRIGHT_CONSUMERS = {
+    "ci.yml:e2e": "--only-shell chromium",
+    "ci.yml:e2e-gvisor": "--only-shell chromium",
+    "ci.yml:vps-smoke": "chromium firefox",
+    "e2e-vps.yml:vps": "chromium firefox",
+    "e2e-webkit.yml:sabotagem": "--only-shell chromium",
+}
 SINGLE_SOURCE = "Dir::Etc::sourceparts=-"
 WORKFLOWS_WITH_UBUNTU_PACKAGES = ("ci.yml", "restore-check.yml", "e2e-producao.yml")
 CACHE_RESTORE = "actions/cache/restore@"
@@ -133,11 +139,6 @@ def _playwright_steps() -> list[tuple[str, Step]]:
     ]
 
 
-@pytest.mark.parametrize("workflow", PLAYWRIGHT_WORKFLOWS)
-def test_workflow_instala_navegador_do_playwright(workflow: str) -> None:
-    assert any(where.startswith(f"{workflow}:") for where, _ in _playwright_steps())
-
-
 def test_playwright_nunca_chama_o_apt() -> None:
     for where, step in _all_steps():
         run = step.get("run", "")
@@ -202,30 +203,30 @@ def _run_playwright_step(step: Step, tmp_path: Path, lista: str) -> list[str]:
     return log.read_text().splitlines()
 
 
-@pytest.mark.parametrize("index", [0, 1, 2, 3])
-def test_passo_do_playwright_sem_falta_nao_chama_o_apt(index: int, tmp_path: Path) -> None:
-    _, step = _playwright_steps()[index]
-
-    calls = _run_playwright_step(step, tmp_path, lista="")
-
-    assert not any(c.startswith("ci-apt-instalar.sh") for c in calls)
-    assert calls[-1].startswith("npx playwright install ")
+def _playwright_step(where: str) -> Step:
+    steps = [step for consumer, step in _playwright_steps() if consumer == where]
+    assert len(steps) == 1, where
+    return steps[0]
 
 
-@pytest.mark.parametrize("index", [0, 1, 2, 3])
-def test_passo_do_playwright_instala_exatamente_o_que_falta(index: int, tmp_path: Path) -> None:
-    _, step = _playwright_steps()[index]
+@pytest.mark.parametrize("where", PLAYWRIGHT_CONSUMERS)
+@pytest.mark.parametrize("lista", ["", "libnss3\nxvfb\n"], ids=["sem-falta", "com-falta"])
+def test_passo_do_playwright_respeita_a_politica_de_instalacao(
+    where: str, lista: str, tmp_path: Path
+) -> None:
+    browser_args = PLAYWRIGHT_CONSUMERS[where]
+    packages = browser_args.removeprefix("--only-shell ")
+    expected = [f"ci-playwright-pacotes.sh {packages}"]
+    if lista:
+        expected.append(f"ci-apt-instalar.sh /tmp/debs {' '.join(lista.split())}")
+    expected.append(f"npx playwright install {browser_args}")
 
-    calls = _run_playwright_step(step, tmp_path, lista="libnss3\nxvfb\n")
-
-    assert "ci-apt-instalar.sh /tmp/debs libnss3 xvfb" in calls
-    assert calls[-1].startswith("npx playwright install ")
+    assert _run_playwright_step(_playwright_step(where), tmp_path, lista) == expected
 
 
-def test_os_quatro_passos_do_playwright_estao_cobertos() -> None:
-    # Dois no ci.yml (job e2e e job e2e-gvisor), um no e2e-vps.yml e um no e2e-webkit.yml (job
-    # sabotagem; o do WebKit roda no macOS, sem apt).
-    assert len(_playwright_steps()) == 4
+def test_todos_os_consumidores_do_playwright_no_ubuntu_estao_cobertos() -> None:
+    # Há outro instalador no job WebKit do macOS, que não usa apt.
+    assert sorted(where for where, _ in _playwright_steps()) == sorted(PLAYWRIGHT_CONSUMERS)
 
 
 @pytest.mark.parametrize(("workflow", "job_id"), _install_jobs())
