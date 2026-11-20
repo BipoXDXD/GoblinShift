@@ -163,7 +163,7 @@ class GoblinShiftGateTests(unittest.TestCase):
             jobs = {"total_count": len(self.jobs), "jobs": self.jobs}
             endpoint = "repos/BipoXDXD/GoblinShift/actions/runs/44/attempts/1"
 
-            def api(path: str):
+            def api(path: str) -> dict[str, object]:
                 if path == endpoint:
                     return attempt
                 if path == f"{endpoint}/jobs?per_page=100":
