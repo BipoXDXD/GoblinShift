@@ -94,6 +94,7 @@ def test_o_ci_usa_duas_imagens_do_mesmo_run_e_leitura_local_sem_segredos() -> No
     assert "E2E_CI_READ=1" in script
     assert "GS_E2E_API_KEY=" in script
     assert "scripts/check-spa-edge.sh" in script
+    assert "playwright test -c e2e --trace off --retries=0 --workers=1" in script
     assert "e2e:check-skips" in script
     assert "playwright install chromium firefox" in yaml.safe_dump(job)
 
