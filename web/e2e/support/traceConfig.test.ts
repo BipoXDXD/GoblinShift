@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // `route.fallback({ headers })` (apiKey.ts): trace com chave real vira credencial em artefato.
 // Só o modo local, com a chave canário gerada pela própria suíte, pode gravar trace: qualquer chave
 // no ambiente (GS_E2E_API_KEY ou GS_E2E_API_KEYS), com ou sem E2E_BASE_URL, desliga (fail-closed).
-const SCOPED_VARIABLES = ["E2E_BASE_URL", "E2E_VPS", "GS_E2E_API_KEY", "GS_E2E_API_KEYS"];
+const SCOPED_VARIABLES = [
+  "GS_FIREFOX_EXECUTABLE",
+  "E2E_BASE_URL",
+  "E2E_VPS",
+  "GS_E2E_API_KEY",
+  "GS_E2E_API_KEYS",
+];
 const REMOTE_ENV = { E2E_BASE_URL: "http://127.0.0.1:18080", CI: "1" };
 
 async function loadTraceMode(env: Readonly<Record<string, string>>): Promise<unknown> {
@@ -51,7 +57,13 @@ describe("trace do Playwright", () => {
   });
 
   it("fica desligado contra a VPS", async () => {
-    const env = { ...REMOTE_ENV, E2E_BASE_URL: "https://goblinshift.dev", E2E_VPS: "1" };
+    // Config-only fixture. No browser is launched with this executable.
+    const env = {
+      ...REMOTE_ENV,
+      E2E_BASE_URL: "https://goblinshift.dev",
+      E2E_VPS: "1",
+      GS_FIREFOX_EXECUTABLE: process.execPath,
+    };
 
     expect(await loadTraceMode(env)).toBe("off");
   });

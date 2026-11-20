@@ -13,6 +13,7 @@ import {
 // Caso que não pode rodar num projeto sai dele pela config (grep/grepInvert por tag no título), em
 // vez de `test.skip` em runtime: assim o guard de pulados (check-no-skips.ts) não tem exceção.
 const SCOPED_VARIABLES = [
+  "GS_FIREFOX_EXECUTABLE",
   "E2E_BASE_URL",
   "E2E_VPS",
   "E2E_PHASE",
@@ -24,7 +25,13 @@ const REMOTE_ENV = {
   GS_E2E_API_KEY: "gs_chave-de-teste",
   CI: "1",
 };
-const VPS_ENV = { E2E_BASE_URL: "https://goblinshift.dev", E2E_VPS: "1", CI: "1" };
+// These tests inspect config only. Node supplies a valid executable without launching Firefox.
+const VPS_ENV = {
+  E2E_BASE_URL: "https://goblinshift.dev",
+  E2E_VPS: "1",
+  CI: "1",
+  GS_FIREFOX_EXECUTABLE: process.execPath,
+};
 
 type Config = "main" | "webkit";
 type Project = NonNullable<PlaywrightTestConfig["projects"]>[number];
