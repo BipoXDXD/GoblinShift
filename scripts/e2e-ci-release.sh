@@ -23,8 +23,9 @@ key=$(compose exec -T api gs-admin issue-key --user "$user" --days 1 \
 echo "::add-mask::$key"
 (
   cd web
+  # A conta é compartilhada e a pilha usa os recursos do mesmo runner que os navegadores.
   E2E_CI_READ=1 E2E_BASE_URL="$base_url" GS_E2E_API_KEY="$key" \
-    npx playwright test -c e2e --trace off --retries=0
+    npx playwright test -c e2e --trace off --retries=0 --workers=1
   npm run e2e:check-skips -- e2e-results/all.json
   python3 ../scripts/verificar_artefatos_sem_chave.py playwright-report
 )
