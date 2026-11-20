@@ -83,12 +83,19 @@ def test_so_le_o_conteudo_do_repositorio() -> None:
     assert load("e2e-vps.yml")["permissions"] == {"contents": "read"}
 
 
-def test_o_ci_chama_depois_do_deploy_sem_herdar_os_segredos() -> None:
+def test_o_ci_usa_duas_imagens_do_mesmo_run_e_leitura_local_sem_segredos() -> None:
     job = load("ci.yml")["jobs"]["vps-smoke"]
-
-    assert job["needs"] == ["deploy"]
-    assert job["uses"] == "./.github/workflows/e2e-vps.yml"
-    assert job["secrets"] == {"E2E_VPS_API_KEY": "${{ secrets.E2E_VPS_API_KEY }}"}
+    assert set(job["needs"]) == {"deploy", "image", "web-image"}
+    assert "environment" not in job
+    assert "secrets" not in job
+    journeys = next(step for step in job["steps"] if step.get("run") == "scripts/e2e-ci-release.sh")
+    assert all(reference.startswith("127.0.0.1:5000/") for reference in journeys["env"].values())
+    script = (ROOT / "scripts" / "e2e-ci-release.sh").read_text()
+    assert "E2E_CI_READ=1" in script
+    assert "GS_E2E_API_KEY=" in script
+    assert "scripts/check-spa-edge.sh" in script
+    assert "e2e:check-skips" in script
+    assert "playwright install chromium firefox" in yaml.safe_dump(job)
 
 
 # --- Depois da release (e2e-vps-pos-release.yml) ------------------------------------------------
@@ -104,8 +111,7 @@ def after_release_job() -> dict[str, Any]:
 
 
 def test_as_jornadas_rodam_depois_de_cada_release_do_coolify() -> None:
-    # O `vps-smoke` do ci.yml depende do `deploy`, pulado de propósito: sem este gatilho, a borda e
-    # as jornadas de leitura não rodam em release nenhuma, e a CI segue verde.
+    # Só este gatilho roda a borda e jornadas contra a produção após release.
     triggers = after_release()[True]
 
     assert set(triggers) == {"workflow_run"}

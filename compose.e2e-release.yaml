@@ -1,0 +1,12 @@
+# Real CI images and test-only credentials on the isolated hosted runner.
+services:
+  migrate:
+    image: ${CI_APP_IMAGE:?CI app digest required}
+  storage-init:
+    image: ${CI_APP_IMAGE:?CI app digest required}
+  api:
+    image: ${CI_APP_IMAGE:?CI app digest required}
+  nginx:
+    image: ${CI_WEB_IMAGE:?CI web digest required}
+    ports:
+      - "127.0.0.1:80:80"

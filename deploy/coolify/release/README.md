@@ -21,7 +21,7 @@ novamente o push da main deste repositório, SHA e tentativa exatos, e exige tod
 Eventos de PR/fork, tags, CI incompleta ou com falha não liberam produção. A execução manual exige
 um SHA completo e aprovado.
 
-Checks de PR têm fila independente. Produção preserva pendências com queue:max e mantém
+Checks de PR executam no workflow `CI`. Produção preserva pendências com queue:max e mantém
 cancel-in-progress:false. Um SHA superado encerra com eligible=false antes de preparar o envio
 ou antes de transmiti-lo à VPS; não publica e não gera falha artificial. O novo SHA tem sua própria
 execução após o CI aprovado. Cancelamentos administrativos e o limite de100 pendências continuam possíveis.
@@ -29,13 +29,27 @@ execução após o CI aprovado. Cancelamentos administrativos e o limite de100 p
 O uso de workflow_run tem risco de execução privilegiada e foi revisado explicitamente.
 A única exceção inline dangerous-triggers cobre esse gatilho: o job aceita apenas sucesso
 de push da main do mesmo repositório, faz checkout da main confiável e confirma pela API
-SHA, tentativa e jobs obrigatórios. Não executa código nem consome artefatos de PR/fork;
+SHA, tentativa do evento e jobs obrigatórios. Não executa código nem consome artefatos de PR/fork;
 as credenciais de produção só são utilizadas depois de eligible=true. O scanner zizmor
 permanece fixado e ativo para todos os workflows, sem desativação global de regra.
 
-As imagens deste projeto já são publicadas pela CI. Repetições reutilizam as referências do commit;
-não dependem do número da tentativa do workflow de release. Digests, plataforma, scanners e assets
-continuam sujeitos às validações existentes. Não há artefato intermediário do Duora a copiar aqui.
+Em PR e no push da `main`, os três jobs constroem OCI AMD64 e ARM64, verificam os índices e
+executam Trivy nas duas plataformas em registro descartável. O check `Deploy na VPS` exercita em
+fixtures o receptor e a recusa do comando legado. `Jornadas na VPS (pós-deploy)` roda as mesmas
+jornadas de leitura com uma conta descartável e as imagens do CI. A produção continua a usar a
+jornada pós-release com a origem e o environment restritos.
+
+O check de promoção espera os demais jobs e verifica as três tags locais. O recibo liga os
+digests validados aos IDs dos artefatos do run e à tentativa. Após o CI da `main`, somente o job
+`publish-images` tem permissão `packages: write`. Ele baixa os três layouts pelos IDs do recibo
+validado, confere os índices e compara as três tags `sha-*` existentes antes da primeira escrita.
+A publicação reutiliza as tags com digest idêntico, cria as ausentes e move `:main` por digest.
+Se um novo CI gerar digests incompatíveis após publicação parcial, o despacho manual aceita
+`commit`, `ci_run` e `ci_attempt` para retomar com o recibo da tentativa original bem-sucedida.
+Os layouts de cada tentativa conservam seus próprios IDs e precisam continuar disponíveis.
+O deploy consulta por digest os índices do recibo validado, confere os bytes e as duas
+plataformas e usa o manifesto AMD64 resultante no scan e no envio. A conferência de mídia e o
+receptor permanecem no caminho de publicação.
 
 A aplicação usa o recurso nativo do Coolify. O receptor verifica propriedade e imagem executada,
 sem fixar a etiqueta informativa coolify.version; o executor de observador do Duora não se aplica.

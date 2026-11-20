@@ -50,9 +50,10 @@ REQUIRED = {
         "Imagem do Nginx com a SPA",
         "Scripts do host (Python 3.12)",
         "Imagem e componentes com tag main",
+        "Deploy na VPS",
+        "Jornadas na VPS (pós-deploy)",
     },
 }
-LEGACY_SKIPS = {"Deploy na VPS", "Jornadas na VPS (pós-deploy)"}
 
 
 def validate(run: Any, jobs: Any, project: Any, commit: Any) -> Any:
@@ -69,16 +70,13 @@ def validate(run: Any, jobs: Any, project: Any, commit: Any) -> Any:
     ):
         raise ValueError("Only successful CI main push from this repository qualifies")
     names = [job.get("name") for job in jobs]
-    allowed = REQUIRED[project] | (LEGACY_SKIPS if project == "goblinshift" else set())
-    if len(names) != len(set(names)) or set(names) != allowed:
+    if len(names) != len(set(names)) or set(names) != REQUIRED[project]:
         raise ValueError("Missing, extra or duplicated CI gate")
     for job in jobs:
         if job.get("status") != "completed":
             raise ValueError("CI gate still running")
-        if job["name"] in REQUIRED[project] and job.get("conclusion") != "success":
+        if job.get("conclusion") != "success":
             raise ValueError("Required gate did not succeed")
-        if job["name"] not in REQUIRED[project] and job.get("conclusion") != "skipped":
-            raise ValueError("Legacy deploy must remain disabled")
     return commit
 
 
@@ -125,12 +123,33 @@ def main() -> None:
     if not current_main(repository, commit):
         return
     run_id = os.environ.get("CI_RUN_ID", "")
+    expected_attempt = os.environ.get("CI_RUN_ATTEMPT", "")
+    event = os.environ.get("GITHUB_EVENT_NAME")
+    resume_run = os.environ.get("RESUME_CI_RUN_ID", "")
+    resume_attempt = os.environ.get("RESUME_CI_RUN_ATTEMPT", "")
+    if resume_run or resume_attempt:
+        if (
+            event != "workflow_dispatch"
+            or not re.fullmatch(r"[1-9][0-9]*", resume_run)
+            or not re.fullmatch(r"[1-9][0-9]*", resume_attempt)
+            or (run_id and run_id != resume_run)
+            or (expected_attempt and expected_attempt != resume_attempt)
+        ):
+            raise ValueError("Recovery requires an exact CI run and attempt on manual dispatch")
+        run_id, expected_attempt = resume_run, resume_attempt
+    if event == "workflow_run" and not (run_id and expected_attempt):
+        raise ValueError("Workflow run requires an exact CI run and attempt")
+    if expected_attempt and (not run_id or not re.fullmatch(r"[1-9][0-9]*", expected_attempt)):
+        raise ValueError("Invalid CI attempt binding")
     deadline = time.monotonic() + (1800 if os.environ.get("WAIT_FOR_CI") == "true" else 0)
     while True:
         if run_id:
             if not run_id.isdigit():
                 raise ValueError("Invalid CI run id")
-            run = api(f"repos/{repository}/actions/runs/{run_id}")
+            run_path = f"repos/{repository}/actions/runs/{run_id}"
+            if resume_attempt:
+                run_path += f"/attempts/{resume_attempt}"
+            run = api(run_path)
         else:
             runs = api(
                 f"repos/{repository}/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha={commit}&per_page=100"
@@ -141,6 +160,10 @@ def main() -> None:
         if time.monotonic() >= deadline:
             raise ValueError("CI did not finish before release timeout")
         time.sleep(10)
+    if (run_id and str(run["id"]) != run_id) or (
+        expected_attempt and str(run["run_attempt"]) != expected_attempt
+    ):
+        raise ValueError("CI attempt changed after OCI artifact admission")
     result = api(
         f"repos/{repository}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100"
     )

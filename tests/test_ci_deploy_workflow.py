@@ -1,7 +1,6 @@
 """A publicação legada fica desativada; Coolify é o único ingresso automático."""
 
 import os
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -12,8 +11,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LEGACY_DEPLOY_SCRIPT = ROOT / "deploy" / "deploy.sh"
-DEPLOY_SECRETS = {"VPS_SSH_KEY", "VPS_KNOWN_HOSTS"}
-SECRET_REFERENCE = re.compile(r"secrets\.([A-Za-z0-9_]+)")
 
 
 def ci_workflow() -> dict[str, Any]:
@@ -26,39 +23,33 @@ def deploy_job() -> dict[str, Any]:
     return job
 
 
-def test_deploy_legado_fica_desativado_independentemente_de_variaveis() -> None:
-    assert deploy_job()["if"] == "false"
-
-
-def test_deploy_roda_no_environment_production() -> None:
-    assert deploy_job()["environment"] == "production"
-
-
-def test_deploy_nao_pede_permissao_ao_github_token() -> None:
-    """Sem checkout nem chamada à API: o GITHUB_TOKEN não precisa de escopo nenhum."""
-    assert deploy_job()["permissions"] == {}
-
-
-def test_deploy_le_os_segredos_da_vps_por_secrets() -> None:
-    referenced = set(SECRET_REFERENCE.findall(yaml.safe_dump(deploy_job())))
-
-    assert referenced == DEPLOY_SECRETS
-
-
-def test_so_o_job_de_deploy_toca_nos_segredos_da_vps() -> None:
-    for name, job in ci_workflow()["jobs"].items():
-        if name == "deploy":
-            continue
-        referenced = set(SECRET_REFERENCE.findall(yaml.safe_dump(job)))
-        assert not referenced & DEPLOY_SECRETS, name
-
-
-def test_jornadas_legadas_dependem_do_deploy_desativado() -> None:
-    job = ci_workflow()["jobs"]["vps-smoke"]
-
-    assert job["needs"] == ["deploy"]
+def test_deploy_legado_prova_recusa_e_exercita_o_receptor_nos_dois_eventos() -> None:
+    job = deploy_job()
     assert "if" not in job
-    assert job["uses"] == "./.github/workflows/e2e-vps.yml"
+    assert "environment" not in job
+    run = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "deploy/deploy.sh" in run
+    assert 'test "$rc" -eq 64' in run
+    assert "python3 -m unittest discover -s deploy/coolify/release -v" in run
+    assert "python3 deploy/coolify/release/assets.py" in run
+
+
+def test_ci_nao_tem_acesso_a_publicacao_e_a_segredos_da_vps() -> None:
+    ci = ci_workflow()
+    assert ci["permissions"] == {"contents": "read"}
+    for name, job in ci["jobs"].items():
+        assert "environment" not in job, name
+        assert "secrets" not in job, name
+        assert "secrets." not in yaml.safe_dump(job), name
+        assert "write" not in job.get("permissions", {}).values(), name
+
+
+def test_as_jornadas_locais_rodam_apos_o_contrato_do_receptor() -> None:
+    job = ci_workflow()["jobs"]["vps-smoke"]
+    assert "deploy" in job["needs"]
+    assert "if" not in job
+    assert "uses" not in job
+    assert any(step.get("run") == "scripts/e2e-ci-release.sh" for step in job["steps"])
 
 
 COMMIT = "a" * 40
