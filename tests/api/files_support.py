@@ -34,17 +34,19 @@ OPEN_FAILURES = [
 STORAGE_RETRY_AFTER = "60"
 
 
-def fail_object_open(monkeypatch: pytest.MonkeyPatch, storage: FileStorage, code: int) -> None:
-    """Faz o `os.open` de objetos sob a raiz do storage levantar `OSError(code)`.
+def fail_object_open(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    """Faz o `os.open` de objetos do storage levantar `OSError(code)`.
 
-    Só a abertura de leitura com `O_NOFOLLOW` que `FileStorage.open` faz é afetada: o resto do
-    processo (driver do banco, gravação, fsync de diretório) segue com o `os.open` real.
+    Só a abertura de leitura do objeto que `FileStorage.open` faz (com `O_NOFOLLOW`, relativa ao
+    descritor do diretório) é afetada: o resto do processo (driver do banco, diretórios do
+    storage, gravação) segue com o `os.open` real.
     """
     real_open = os.open
-    root = str(storage.root)
+    skipped = os.O_WRONLY | os.O_DIRECTORY
 
     def open_with_failure(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
-        if str(path).startswith(root) and flags & os.O_NOFOLLOW and not flags & os.O_WRONLY:
+        relative = kwargs.get("dir_fd") is not None
+        if relative and flags & os.O_NOFOLLOW and not flags & skipped:
             raise OSError(code, os.strerror(code), str(path))
         return real_open(path, flags, *args, **kwargs)
 

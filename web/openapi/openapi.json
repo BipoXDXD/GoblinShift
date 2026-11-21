@@ -6858,7 +6858,8 @@
                 "type": "null"
               }
             ],
-            "title": "Active Run Id"
+            "title": "Active Run Id",
+            "description": "A execução não terminal da conta; nulo sem ela ou sem o escopo `runs:read`."
           },
           "daily_quota_resets_at": {
             "anyOf": [

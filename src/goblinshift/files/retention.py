@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import (
     ColumnElement,
     Row,
+    and_,
     delete,
     exists,
     func,
@@ -39,7 +40,7 @@ from goblinshift.files.objects import (
     select_purgeable,
 )
 from goblinshift.files.states import ObjectState, UploadState
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, ObjectTamperedError
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.platform.sql import skip_locked_batch
 
@@ -76,11 +77,11 @@ def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     """Apaga o arquivo de uma linha já confirmada; `False` se ele ficou no disco.
 
     Nada repete a remoção depois do commit: a falha vira alerta com a chave e não impede
-    que o resto do lote saia do disco.
+    que o resto do lote saia do disco. Um diretório adulterado no caminho é uma dessas falhas.
     """
     try:
         storage.delete(key)
-    except OSError:
+    except OSError, ObjectTamperedError:
         logger.warning(
             "arquivo não removido do disco",
             exc_info=True,
@@ -94,8 +95,10 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> Incompl
     """Remove linha e objeto de uploads incompletos vencidos ou excluídos (1.7: "1 hora").
 
     Upload incompleto nunca chegou a uma execução nem tem conteúdo confirmado, então não há
-    histórico a preservar. Um escritor ainda transferindo perde a vez na conclusão condicional e
-    apaga o próprio arquivo. A reserva da intenção é liberada na mesma transação.
+    histórico a preservar. A reserva da intenção é liberada na mesma transação. Upload
+    `receiving` excluído não sai antes do vencimento: o arquivo do escritor ainda ocupa disco, e
+    liberar a reserva deixaria a conta reservar de novo esse espaço. O escritor perde a vez na
+    conclusão condicional, apaga o próprio arquivo e só então libera a reserva (`failed`).
     """
     with session.begin():
         rows = session.execute(
@@ -103,7 +106,13 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> Incompl
             .join(stored_object, stored_object.c.id == upload.c.object_id)
             .where(
                 upload.c.state != UploadState.READY,
-                or_(upload.c.expires_at <= func.now(), upload.c.deleted_at.is_not(None)),
+                or_(
+                    upload.c.expires_at <= func.now(),
+                    and_(
+                        upload.c.deleted_at.is_not(None),
+                        upload.c.state != UploadState.RECEIVING,
+                    ),
+                ),
             )
             .order_by(upload.c.expires_at, upload.c.id)
             .limit(EXPIRY_BATCH_SIZE)

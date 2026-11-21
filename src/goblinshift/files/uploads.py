@@ -7,10 +7,11 @@ Prazos usam o relógio do banco (`now()`), o mesmo para API, worker e manutenç�
 
 import logging
 import re
+import time
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, NamedTuple, NoReturn
 
 from sqlalchemy import ColumnElement, Row, func, insert, select, update
@@ -32,6 +33,7 @@ from goblinshift.files.limits import (
     MAX_BATCH_BYTES,
     MAX_BATCH_FILES,
     MAX_NAME_CHARS,
+    MIN_INTENT_RESERVED_BYTES,
     READY_UPLOAD_TTL,
     max_file_bytes_for,
 )
@@ -84,6 +86,13 @@ class UploadIntent(NamedTuple):
     expected_size: int
 
 
+class _WriterClaim(NamedTuple):
+    storage_key: str
+    expected_size: int
+    # Do claim até o vencimento do upload, pelo relógio do banco.
+    time_left: timedelta
+
+
 @dataclass(frozen=True)
 class UploadView:
     id: uuid.UUID
@@ -115,8 +124,9 @@ def create_intents(
 ) -> list[UploadView]:
     """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
 
-    Reserva o tamanho declarado de cada intenção (detentor `upload`), tudo ou nada: acima do teto
-    levanta `AccountCapacityExceededError` ou `GlobalCapacityExceededError`, e quem chama desfaz.
+    Reserva o tamanho declarado de cada intenção, no mínimo `MIN_INTENT_RESERVED_BYTES` (detentor
+    `upload`), tudo ou nada: acima do teto levanta `AccountCapacityExceededError` ou
+    `GlobalCapacityExceededError`, e quem chama desfaz.
     """
     intents = _parse_intents(items)
     object_ids = session.execute(
@@ -142,7 +152,7 @@ def create_intents(
         owner_id=owner_id,
         holder=capacity.HolderKind.UPLOAD,
         resource=capacity.Resource.STORAGE_BYTES,
-        amounts={row.id: row.expected_size for row in rows},
+        amounts={row.id: max(row.expected_size, MIN_INTENT_RESERVED_BYTES) for row in rows},
     )
     return [
         _view(row, size_bytes=None, sha256=None, availability=Availability.AVAILABLE)
@@ -156,17 +166,31 @@ def receive_content(
     owner_id: uuid.UUID,
     upload_id: uuid.UUID,
     chunks: Iterable[bytes],
+    *,
+    clock: Callable[[], float] = time.monotonic,
 ) -> UploadView:
     """Grava o conteúdo de um upload `created` e o deixa `ready`.
 
     Uma transação curta reserva o único escritor (`created → receiving`), a transferência para o
     storage acontece sem transação aberta, e outra transação curta conclui. Qualquer falha no
-    caminho deixa o upload `failed`, sem reabri-lo, e nenhum arquivo sob a chave.
+    caminho, inclusive perder a vez para a exclusão, apaga o que chegou ao disco e deixa o upload
+    `failed`, sem reabri-lo. Se nem apagar der certo, ele segue `receiving`, com a reserva, até a
+    retenção vencê-lo.
+
+    O prazo total da transferência é o vencimento do upload: passou dele, o escritor para antes do
+    bloco seguinte e falha com `UploadGoneError`, porque a retenção já pode ter liberado a reserva.
+    `clock` (segundos, monotônico) mede esse prazo a partir de antes do claim, então o escritor
+    não inicia bloco depois do vencimento visto pelo banco.
     """
+    started = clock()
     with session.begin():
-        storage_key, expected_size = _claim_writer(session, owner_id, upload_id)
+        claim = _claim_writer(session, owner_id, upload_id)
+    storage_key, expected_size = claim.storage_key, claim.expected_size
+    deadline = started + claim.time_left.total_seconds()
     try:
-        sha256, size = storage.create_exclusive(storage_key, chunks, max_bytes=expected_size)
+        sha256, size = storage.create_exclusive(
+            storage_key, _until_expiry(chunks, deadline, clock), max_bytes=expected_size
+        )
     except ContentTooLargeError:
         _fail(session, storage, owner_id, upload_id, storage_key)
         raise UploadContentTooLargeError(expected_size) from None
@@ -180,7 +204,7 @@ def receive_content(
         completed = _complete(session, owner_id, upload_id, sha256, size)
     if not completed:
         # Excluído ou expirado durante a transferência: o arquivo novo não tem dono.
-        storage.delete(storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key)
         with session.begin():
             _raise_unavailable(session, owner_id, upload_id)
     with session.begin():
@@ -325,7 +349,7 @@ def _new_upload_key() -> str:
     return f"{_UPLOAD_KEY_PREFIX}/{uuid.uuid4().hex}"
 
 
-def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> tuple[str, int]:
+def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> _WriterClaim:
     """`created → receiving` por atualização condicional: só um escritor passa."""
     row = session.execute(
         update(upload)
@@ -338,11 +362,25 @@ def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -
             stored_object.c.id == upload.c.object_id,
         )
         .values(state=UploadState.RECEIVING, expires_at=func.now() + INCOMPLETE_UPLOAD_TTL)
-        .returning(stored_object.c.storage_key, upload.c.expected_size)
+        .returning(
+            stored_object.c.storage_key,
+            upload.c.expected_size,
+            (upload.c.expires_at - func.now()).label("time_left"),
+        )
     ).one_or_none()
     if row is None:
         _raise_unavailable(session, owner_id, upload_id)
-    return row.storage_key, row.expected_size
+    return _WriterClaim(row.storage_key, row.expected_size, row.time_left)
+
+
+def _until_expiry(
+    chunks: Iterable[bytes], deadline: float, clock: Callable[[], float]
+) -> Iterator[bytes]:
+    """Repassa os blocos ao storage enquanto o upload não venceu; depois, o escritor perde a vez."""
+    for chunk in chunks:
+        if clock() >= deadline:
+            raise UploadGoneError
+        yield chunk
 
 
 def _complete(
@@ -350,7 +388,8 @@ def _complete(
 ) -> bool:
     """`receiving → ready` e objeto `committed`, na mesma transação; `False` se perdeu a vez.
 
-    A reserva da intenção passa para o objeto pelo tamanho real, que é o declarado.
+    A reserva da intenção passa para o objeto pelo tamanho real, que é o declarado; a sobra do
+    mínimo por intenção volta para a cota.
     """
     object_id = session.execute(
         update(upload)
@@ -400,6 +439,10 @@ def _move_reservation_to_object(
             "upload sem reserva de capacidade",
             extra={"fields": {"alert": "upload_without_reservation", "upload_id": str(upload_id)}},
         )
+    else:
+        # Sobra do mínimo por intenção. Se a reserva era só o tamanho real (intenção criada antes
+        # do mínimo, ou declarada acima dele), o `transfer` já a encerrou e liberar devolve 0.
+        capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
 
 
 def _fail(
@@ -409,10 +452,13 @@ def _fail(
     upload_id: uuid.UUID,
     storage_key: str,
 ) -> None:
-    """`receiving → failed`, libera a reserva e remove o que tiver chegado ao disco.
+    """Remove o que tiver chegado ao disco e só então faz `receiving → failed` e libera a reserva.
 
-    O objeto segue `pending` até a retenção remover linha e objeto.
+    A reserva cobre o arquivo enquanto ele existir: se a remoção falhar, a exceção sobe com o
+    upload ainda `receiving` e reservado, e a retenção leva os dois no vencimento. O objeto segue
+    `pending` até a retenção remover linha e objeto.
     """
+    storage.delete(storage_key)
     with session.begin():
         failed = session.execute(
             update(upload)
@@ -426,7 +472,6 @@ def _fail(
         ).scalar_one_or_none()
         if failed is not None:
             capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
-    storage.delete(storage_key)
 
 
 def _raise_unavailable(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> NoReturn:

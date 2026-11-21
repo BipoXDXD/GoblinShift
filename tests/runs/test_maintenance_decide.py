@@ -30,7 +30,7 @@ from goblinshift.runs.lifecycle import (
     decide_transition,
 )
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
-from goblinshift.runs.store import LoadedRun, load_run
+from goblinshift.runs.store import LoadedRun, load_run_any_owner
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.runner import ExecutorStatus, LocalRunner
 from tests.runs.worker_support import (
@@ -275,9 +275,9 @@ def _lose_run_on_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def losing(session: Session, run_id: uuid.UUID, skip_locked: bool = False) -> LoadedRun | None:
         # Só a releitura da confirmação (sem SKIP LOCKED) não acha a Run.
-        return load_run(session, run_id, skip_locked=True) if skip_locked else None
+        return load_run_any_owner(session, run_id, skip_locked=True) if skip_locked else None
 
-    monkeypatch.setattr(f"{MAINTENANCE_MODULE}.load_run", losing)
+    monkeypatch.setattr(f"{MAINTENANCE_MODULE}.load_run_any_owner", losing)
 
 
 @pytest.mark.parametrize(
