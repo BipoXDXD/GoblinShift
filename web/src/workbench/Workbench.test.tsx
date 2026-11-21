@@ -439,6 +439,35 @@ describe("Bancada", () => {
     expect(screen.getByLabelText("Escolher arquivos")).toHaveFocus();
   });
 
+  it("Enviar de novo leva o foco ao Remover do item", async () => {
+    const { user, pending } = await setup({ autoResolve: false });
+    await chooseFiles(user, ["a.csv"]);
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+
+    act(() => {
+      pending[0]?.reject(new Error("falhou"));
+    });
+    await user.click(await screen.findByRole("button", { name: "Enviar de novo a.csv" }));
+
+    // O botão clicado some com o novo envio; sem levar o foco adiante, ele cairia no <body>.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Remover a.csv" })).toHaveFocus();
+    });
+  });
+
+  it("não tem violações do axe com o diálogo de remover arquivo aberto", async () => {
+    const { user } = await setup();
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Remover a.csv" }));
+
+    expect(screen.getByRole("dialog", { name: "Remover a.csv?" })).toBeVisible();
+    expect(await axeViolations(document.body)).toEqual([]);
+  });
+
   it("remover exclui o upload no servidor, com o CSRF de qualquer mutação", async () => {
     const { user, api } = await setup();
     await chooseFiles(user, ["a.csv"]);

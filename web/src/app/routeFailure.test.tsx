@@ -9,9 +9,10 @@ import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
 
-const { CHUNK_CANARY, RENDER_CANARY } = vi.hoisted(() => ({
+const { CHUNK_CANARY, RENDER_CANARY, SECRET_CANARY } = vi.hoisted(() => ({
   CHUNK_CANARY: "CANARY-chunk-ausente",
   RENDER_CANARY: "CANARY-defeito-da-tela",
+  SECRET_CANARY: "CANARY-segredo-do-erro",
 }));
 const LOG_LABEL = "Falha ao abrir a tela:";
 /** Trecho de toda linha da stack destes erros: o caminho deste arquivo. */
@@ -25,10 +26,10 @@ vi.mock("../history/HistoryPage", () => ({
   },
 }));
 
-// A tela quebra ao renderizar.
+// A tela quebra ao renderizar, com um erro que carrega um dado que não pode ir ao console.
 vi.mock("../legal/CreditsPage", () => ({
   CreditsPage: () => {
-    throw new Error(RENDER_CANARY);
+    throw Object.assign(new Error(RENDER_CANARY), { segredo: SECRET_CANARY });
   },
 }));
 
@@ -37,9 +38,12 @@ const SCREENS = [
   { path: "/creditos", canary: RENDER_CANARY },
 ];
 
-function setup(path: string): MockInstance<typeof console.error> {
+function setup(
+  path: string,
+  onError: (label: unknown, value: unknown) => void = () => undefined,
+): MockInstance<typeof console.error> {
   // O React e o router registram o erro no console; aqui ele é o cenário, não um defeito.
-  const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const consoleError = vi.spyOn(console, "error").mockImplementation(onError);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const api = fakeApi({ "GET /api/v1/me": () => jsonResponse(meBody()) });
   renderRoutes({ routes: appRoutes(api.client), path, client: api.client });
@@ -112,4 +116,24 @@ describe("falha ao abrir uma tela", () => {
     },
     10_000,
   );
+
+  it("/creditos registra só os campos permitidos do erro, sem o próprio erro", async () => {
+    // Os parâmetros de console.error são any[]; guardar o que sai com o rótulo como unknown.
+    const logged: unknown[] = [];
+    setup("/creditos", (label, value) => {
+      if (label === LOG_LABEL) {
+        logged.push(value);
+      }
+    });
+
+    await screen.findByRole("alert");
+
+    await waitFor(() => {
+      expect(logged.length).toBeGreaterThan(0);
+    });
+    for (const value of logged) {
+      expect(value).not.toBeInstanceOf(Error);
+      expect(JSON.stringify(value)).not.toContain(SECRET_CANARY);
+    }
+  }, 10_000);
 });
