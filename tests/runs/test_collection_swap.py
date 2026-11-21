@@ -11,14 +11,23 @@ from typing import Any
 
 import pytest
 
-from goblinshift.runs.worker import collection
+from goblinshift.runs.worker import collection, package_check
 from goblinshift.runs.worker.collection import (
     CollectionError,
     FileIdentity,
     collect_outputs,
     open_collected,
 )
-from tests.runs.collection_support import RECIPE, ok_item, write_out
+from tests.runs.collection_support import (
+    PACKAGE,
+    RECIPE,
+    entry,
+    ok_item,
+    package_entries,
+    rewrite_package,
+    write_out,
+    write_package,
+)
 
 
 def _open_fd_count() -> int:
@@ -140,4 +149,51 @@ def test_open_collected_recusa_saida_trocada_depois_da_coleta(tmp_path: Path) ->
     with pytest.raises(CollectionError, match="mudou"):
         open_collected(collected.outputs[0])
 
+    assert _open_fd_count() == before
+
+
+def test_pacote_trocado_e_devolvido_durante_a_verificacao_e_recusado(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A (fora do contrato) é o pacote da varredura; assim que a coleta o abre, o sandbox põe um B
+    # válido no lugar e só devolve A (mesmo inode) depois da verificação. Verificar o que estiver
+    # no caminho aprovaria B, e a cópia de A ainda bateria com o hash coletado: o hash e a
+    # verificação precisam ler o mesmo A já aberto.
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "a.csv")], {"a.csv": b"nome\r\nAna\r\n"})
+    write_package(out)
+    package = out / PACKAGE
+    valid = package.read_bytes()
+    entries = package_entries(out)
+    entries[0] = entry("a.csv", b"nome\r\nBia\r\n")
+    rewrite_package(out, entries)
+    aside = tmp_path / "a-guardado.zip"
+    swaps: list[str] = []
+    real_open_found = collection._open_found
+    real_verify = package_check.verify_zip
+
+    def open_then_swap(found: Any) -> Any:
+        source = real_open_found(found)
+        if found.name == PACKAGE and not swaps:
+            package.rename(aside)
+            package.write_bytes(valid)
+            swaps.append("B")
+        return source
+
+    def verify_then_restore(*args: Any, **kwargs: Any) -> None:
+        try:
+            real_verify(*args, **kwargs)
+        finally:
+            package.unlink()
+            aside.rename(package)
+            swaps.append("A")
+
+    monkeypatch.setattr(collection, "_open_found", open_then_swap)
+    monkeypatch.setattr(collection, "verify_zip", verify_then_restore)
+    before = _open_fd_count()
+
+    with pytest.raises(CollectionError, match="conteúdo diferente"):
+        collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert swaps == ["B", "A"]
     assert _open_fd_count() == before

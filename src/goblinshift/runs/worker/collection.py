@@ -272,13 +272,28 @@ def collect_outputs(
         return Collected(outputs, report_file, report, previews=previews)
     manifest_data = _read_no_follow(manifest, limits.manifest_max_bytes)
     manifest_file = _from_bytes(manifest, manifest_data)
-    package_file = _digested(package, heartbeat)
     try:
         verify_manifest(manifest_data, outputs, _manifest_inputs(report), recipe_id)
-        verify_zip(package.path, [*outputs, manifest_file, report_file], heartbeat)
+        package_file = _verified_package(package, [*outputs, manifest_file, report_file], heartbeat)
     except PackageError as error:
         raise CollectionError(str(error)) from error
     return Collected(outputs, report_file, report, manifest_file, package_file, previews)
+
+
+def _verified_package(
+    package: _Found, expected: list[OutputFile], heartbeat: Callable[[], None]
+) -> OutputFile:
+    """SHA-256 e verificação do ZIP no mesmo descritor, aberto uma vez pelo caminho seguro.
+
+    O hash é o que a cópia para o storage confere: se a verificação reabrisse pelo caminho, o
+    sandbox poria um B válido no lugar só durante ela e devolveria o A (mesmo inode) para a cópia.
+    Reescrever o próprio inode entre o hash e a verificação ainda escaparia; o executor já terminou
+    aqui, e isto é defesa em profundidade.
+    """
+    with _open_found(package) as source:
+        package_file = _digest_open(package, source, heartbeat)
+        verify_zip(source, expected, heartbeat)
+    return package_file
 
 
 def _checked_preview(found: _Found) -> OutputFile:
@@ -339,13 +354,18 @@ def _status_of(item: ReportItem) -> str:
 
 def _digested(found: _Found, heartbeat: Callable[[], None]) -> OutputFile:
     """Lê o arquivo sem seguir symlink, calculando o SHA-256; nunca além do tamanho do `lstat`."""
+    with _open_found(found) as source:
+        return _digest_open(found, source, heartbeat)
+
+
+def _digest_open(found: _Found, source: BinaryIO, heartbeat: Callable[[], None]) -> OutputFile:
+    """SHA-256 de `source`, já aberto por `_open_found`, do byte em que está até o fim."""
     digest = hashlib.sha256()
     size = 0
-    with _open_found(found) as source:
-        while size <= found.size and (chunk := source.read(READ_CHUNK_BYTES)):
-            heartbeat()
-            size += len(chunk)
-            digest.update(chunk)
+    while size <= found.size and (chunk := source.read(READ_CHUNK_BYTES)):
+        heartbeat()
+        size += len(chunk)
+        digest.update(chunk)
     if size != found.size:
         raise CollectionError(f"out/ mudou durante a coleta: {found.name!r}")
     return OutputFile(found.name, found.path, size, digest.digest(), found.identity)

@@ -37,12 +37,10 @@ import zipfile
 import zlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from goblinshift.processing.output_dir import MAX_PATH_BYTES
 from goblinshift.processing.packaging import MANIFEST_SCHEMA_VERSION, compression_for
-from goblinshift.processing.regular_file import NotRegularFileError, open_regular
 from goblinshift.runs.worker.strict_json import parse_strict_json
 
 READ_CHUNK_BYTES = 1024 * 1024
@@ -167,23 +165,22 @@ def _listed_input(raw: object) -> tuple[object, ...] | None:
     )
 
 
-def verify_zip(path: Path, expected: Sequence[DigestedFile], heartbeat: Callable[[], None]) -> None:
+def verify_zip(
+    source: BinaryIO, expected: Sequence[DigestedFile], heartbeat: Callable[[], None]
+) -> None:
     """O ZIP tem exatamente as entradas `expected`, na ordem, com o mesmo conteúdo.
 
-    `heartbeat` é chamado a cada bloco lido, para quem chama renovar o lease.
+    `source` é o pacote já aberto por quem chama, o mesmo descritor de que saiu o SHA-256 a
+    publicar: abrir de novo pelo caminho verificaria o arquivo que o sandbox pusesse lá agora,
+    não o coletado. A leitura é por posição absoluta, venha `source` onde vier; quem chama o
+    fecha. `heartbeat` é chamado a cada bloco lido, para quem chama renovar o lease.
     """
+    _require_canonical_layout(source, expected)
     try:
-        source = open_regular(path)
-    except NotRegularFileError:
-        # O sandbox trocou o pacote por outra coisa depois do `lstat` da coleta.
-        raise PackageError("pacote não é arquivo regular") from None
-    with source:
-        _require_canonical_layout(source, expected)
-        try:
-            with zipfile.ZipFile(source) as archive:
-                _verify_entries(archive, expected, heartbeat)
-        except _MALFORMED as error:
-            raise PackageError(f"pacote malformado: {type(error).__name__}") from None
+        with zipfile.ZipFile(source) as archive:
+            _verify_entries(archive, expected, heartbeat)
+    except _MALFORMED as error:
+        raise PackageError(f"pacote malformado: {type(error).__name__}") from None
 
 
 @dataclass(frozen=True)
