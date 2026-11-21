@@ -1,8 +1,10 @@
 """Do arquivo à imagem pronta para redimensionar (docs/GoblinShiftPlan.md, 1.2).
 
-Ordem: cabeçalho → validação → `load()` → orientação EXIF → modo → perfil de cor. Tudo o que o
-decodificador pode recusar acontece aqui e vira `ImageRejected`; a gravação fica fora, para um
-erro de disco ou de teto de saída nunca virar rejeição silenciosa (1.1).
+Ordem: cabeçalho → validação → `load()` → orientação EXIF → modo → perfil de cor. Só a
+decodificação (até a orientação, com a leitura do EXIF e do ICC) traduz os erros do Pillow em
+`ImageRejected`; a normalização de modo e de cor fica fora, para um bug nosso propagar em vez de
+virar imagem recusada. A gravação também fica fora, para um erro de disco ou de teto de saída
+nunca virar rejeição silenciosa (1.1).
 
 Os avisos do Pillow durante a decodificação viram erro e recusa: um EXIF corrompido, por
 exemplo, só gera `UserWarning`, e seguir em frente seria adivinhar a orientação.
@@ -19,6 +21,7 @@ from PIL import ExifTags, Image, UnidentifiedImageError
 from goblinshift.processing.image_forge.color import ColorProfile, to_srgb
 from goblinshift.processing.image_forge.inspection import (
     MPO,
+    Header,
     header_prefix,
     open_image,
     read_header,
@@ -61,12 +64,22 @@ class Prepared:
     frames_discarded: int  # quadros do MPO além do principal
 
 
+@dataclass(frozen=True)
+class _Decoded:
+    image: Image.Image  # já orientada, cópia independente do arquivo
+    header: Header
+    orientation: int
+    icc: bytes | None
+    exif_color_space: int | None
+    declares_srgb: bool
+
+
 def prepare(path: Path, limits: Limits) -> Prepared:
     """Imagem pronta para redimensionar, ou `ImageRejected`."""
     with path.open("rb") as source:
         try:
             with warnings.catch_warnings(action="error"):
-                return _prepare(source, limits)
+                decoded = _decode(source, limits)
         except _BOMB as error:
             raise ImageRejected(
                 RejectionCode.IMAGE_TOO_LARGE, "imagem acima do limite de pixels"
@@ -81,9 +94,23 @@ def prepare(path: Path, limits: Limits) -> Prepared:
             raise ImageRejected(
                 RejectionCode.UNSUPPORTED_FORMAT, "imagem corrompida ou ilegível"
             ) from error
+    srgb, color_profile = to_srgb(
+        _normalized_mode(decoded.image),
+        decoded.icc,
+        decoded.exif_color_space,
+        decoded.declares_srgb,
+    )
+    header = decoded.header
+    return Prepared(
+        image=srgb,
+        source_format=header.image_format.lower(),
+        orientation=decoded.orientation,
+        color_profile=color_profile,
+        frames_discarded=header.frames - 1 if header.image_format == MPO else 0,
+    )
 
 
-def _prepare(source: BinaryIO, limits: Limits) -> Prepared:
+def _decode(source: BinaryIO, limits: Limits) -> _Decoded:
     prefix = header_prefix(source)
     with open_image(source) as opened:
         header = read_header(opened, prefix)
@@ -93,22 +120,15 @@ def _prepare(source: BinaryIO, limits: Limits) -> Prepared:
         exif = opened.getexif()
         orientation = _orientation(exif)
         icc = opened.info.get("icc_profile")
-        declares_srgb = "srgb" in opened.info
         # Cópia antes de sair do `with`: fechar o arquivo do Pillow descarta a imagem aberta.
-        image = _normalized_mode(_oriented(opened, orientation))
-    srgb, color_profile = to_srgb(
-        image,
-        icc if isinstance(icc, bytes) else None,
-        exif.get_ifd(ExifTags.IFD.Exif).get(ExifTags.Base.ColorSpace),
-        declares_srgb,
-    )
-    return Prepared(
-        image=srgb,
-        source_format=header.image_format.lower(),
-        orientation=orientation,
-        color_profile=color_profile,
-        frames_discarded=header.frames - 1 if header.image_format == MPO else 0,
-    )
+        return _Decoded(
+            image=_oriented(opened, orientation),
+            header=header,
+            orientation=orientation,
+            icc=icc if isinstance(icc, bytes) else None,
+            exif_color_space=exif.get_ifd(ExifTags.IFD.Exif).get(ExifTags.Base.ColorSpace),
+            declares_srgb="srgb" in opened.info,
+        )
 
 
 def _orientation(exif: Image.Exif) -> int:

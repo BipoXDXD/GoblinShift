@@ -2,10 +2,12 @@
 
 import struct
 import warnings
+from typing import NoReturn
 
 import pytest
 from PIL import Image
 
+from goblinshift.processing.image_forge import preparation
 from goblinshift.processing.image_forge.inspection import configure_pillow
 from goblinshift.processing.recipe import ItemOk, ItemRejected, Report
 from tests.image_forge import media
@@ -124,6 +126,22 @@ def test_jpeg_truncado(work: Workspace) -> None:
     noise = Image.effect_noise((64, 64), 50).convert("RGB")
     truncated = media.jpeg(noise)[:-200]
     assert code_for(work, truncated, "cortado.jpg") == "UNSUPPORTED_FORMAT"
+
+
+@pytest.mark.parametrize(
+    ("name", "error"), [("_normalized_mode", ValueError), ("to_srgb", struct.error)]
+)
+def test_bug_depois_da_decodificacao_propaga_em_vez_de_recusar_a_imagem(
+    work: Workspace, monkeypatch: pytest.MonkeyPatch, name: str, error: type[Exception]
+) -> None:
+    def broken(*_: object) -> NoReturn:
+        raise error("bug de propósito")
+
+    monkeypatch.setattr(preparation, name, broken)
+    work.add("a.png", media.png(media.solid("RGB", (4, 4), (1, 2, 3))))
+
+    with pytest.raises(error, match="bug de propósito"):
+        work.run()
 
 
 def test_png_animado_e_recusado(work: Workspace) -> None:
