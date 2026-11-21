@@ -5,7 +5,7 @@ alerta de capacidade do ambiente perto do teto.
 """
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select, update
@@ -19,6 +19,7 @@ from goblinshift.capacity import (
     delete_released_reservations,
     global_usage,
     release,
+    released_backlog,
 )
 from goblinshift.capacity.tables import resource_reservation
 from goblinshift.platform.db import unit_of_work
@@ -38,6 +39,21 @@ def released_at(factory: sessionmaker[Session], holder_id: uuid.UUID, age: timed
             .where(resource_reservation.c.holder_id == holder_id)
             .values(released_at=func.now() - age)
         )
+
+
+def released_on(factory: sessionmaker[Session], holder_id: uuid.UUID, when: datetime) -> None:
+    with unit_of_work(factory) as session:
+        release(session, holder=HolderKind.UPLOAD, holder_id=holder_id)
+        session.execute(
+            update(resource_reservation)
+            .where(resource_reservation.c.holder_id == holder_id)
+            .values(released_at=when)
+        )
+
+
+def now_of(factory: sessionmaker[Session]) -> datetime:
+    with factory() as session:
+        return db_now(session)
 
 
 def reservations(factory: sessionmaker[Session]) -> int:
@@ -73,6 +89,36 @@ def test_limpeza_do_livro_razao_respeita_o_lote(factory: sessionmaker[Session]) 
         second = delete_released_reservations(session, db_now(session), limit=2)
 
     assert (first, second) == (2, 1)
+
+
+def test_reservas_liberadas_ha_90_dias_entram_no_acumulo(factory: sessionmaker[Session]) -> None:
+    owner = new_owner(factory)
+    now = now_of(factory)
+    released_on(factory, reserve_now(factory, owner, 10), now - timedelta(days=91))
+    released_on(factory, reserve_now(factory, owner, 10), now - timedelta(days=89))
+    reserve_now(factory, owner, 10)  # viva
+
+    with factory() as session:
+        backlog = released_backlog(session, now)
+
+    assert backlog == 1
+
+
+@pytest.mark.parametrize(
+    ("age", "expected"),
+    [(timedelta(days=89), 0), (RELEASED_RETENTION - SECOND, 0), (RELEASED_RETENTION, 1)],
+    ids=["89_dias", "um_segundo_antes", "90_dias"],
+)
+def test_acumulo_do_livro_razao_comeca_aos_90_dias(
+    factory: sessionmaker[Session], age: timedelta, expected: int
+) -> None:
+    now = now_of(factory)
+    released_on(factory, reserve_now(factory, new_owner(factory), 10), now - age)
+
+    with factory() as session:
+        backlog = released_backlog(session, now)
+
+    assert backlog == expected
 
 
 def test_uso_global_soma_as_reservas_vivas_sob_o_teto(factory: sessionmaker[Session]) -> None:
