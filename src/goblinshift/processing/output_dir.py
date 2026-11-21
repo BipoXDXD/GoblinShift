@@ -160,7 +160,11 @@ class _ByteBudget:
 
 
 class _MeteredWriter(io.BufferedWriter):
-    """Arquivo novo e exclusivo que só aceita bytes dentro do orçamento da execução."""
+    """Arquivo novo e exclusivo que só aceita bytes dentro do orçamento da execução.
+
+    Todo byte passa por `write()`: o descritor não é exposto, para nenhuma biblioteca gravar
+    direto no arquivo por fora do orçamento.
+    """
 
     def __init__(self, path: Path, budget: _ByteBudget) -> None:
         # "xb" abre com O_CREAT | O_EXCL: um arquivo, ou symlink, já existente nunca é reescrito.
@@ -171,3 +175,8 @@ class _MeteredWriter(io.BufferedWriter):
         # Conferido antes de bufferizar, para o excesso nunca chegar ao disco.
         self._budget.spend(memoryview(data).nbytes)
         return super().write(data)
+
+    def fileno(self) -> int:
+        # O Pillow grava o JPEG direto no descritor (`ImageFile._save`) e, sem ele, cai no
+        # `write()`. Expor o descritor deixaria o encode passar por cima do teto de bytes.
+        raise io.UnsupportedOperation("a saída só aceita bytes por write(), dentro do orçamento")

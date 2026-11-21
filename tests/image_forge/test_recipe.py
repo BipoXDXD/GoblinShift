@@ -42,6 +42,13 @@ def noise_jpeg() -> bytes:
     return media.jpeg(Image.effect_noise((64, 64), 60).convert("RGB"))
 
 
+def noise_png(size: tuple[int, int]) -> bytes:
+    return media.png(Image.effect_noise(size, 60).convert("RGB"))
+
+
+JPEG = Params(output_format=OutputFormat.JPEG)
+
+
 # --- Ajuste e exemplos de 1.2.
 
 
@@ -276,13 +283,45 @@ def test_acima_do_limite_de_entradas_e_fora_do_contrato(work: Workspace) -> None
 
 
 def test_estouro_do_teto_de_saida_derruba_a_execucao(work: Workspace) -> None:
-    work.add("a.png", media.png(Image.effect_noise((64, 64), 60).convert("RGB")))
+    work.add("a.png", noise_png((64, 64)))
     tiny = FileSystemOutputDir(work.out_dir, max_bytes=100)
 
     with pytest.raises(RecipeFailure) as caught:
         ImageForgeV1().run(Params(), work.inputs, tiny, work.progress)
 
     assert caught.value.code == "OUTPUT_LIMIT_EXCEEDED"
+
+
+def test_estouro_do_teto_de_saida_em_jpeg_derruba_a_execucao(work: Workspace) -> None:
+    work.add("a.png", noise_png((1024, 1024)))
+    tiny = FileSystemOutputDir(work.out_dir, max_bytes=10_000)
+
+    with pytest.raises(RecipeFailure) as caught:
+        ImageForgeV1().run(JPEG, work.inputs, tiny, work.progress)
+
+    assert caught.value.code == "OUTPUT_LIMIT_EXCEEDED"
+    assert sum(p.stat().st_size for p in work.out_dir.rglob("*") if p.is_file()) <= 10_000
+
+
+@pytest.mark.parametrize(("slack", "fits"), [(0, True), (-1, False)])
+def test_jpeg_no_teto_exato_sai_e_um_byte_a_menos_falha(
+    work: Workspace, slack: int, fits: bool
+) -> None:
+    work.add("a.png", noise_png((256, 256)))
+    only_ok(work.run(JPEG))
+    size = len(work.output("images/a.jpg"))
+    fresh = work.out_dir.parent / "out-teto"
+    fresh.mkdir()
+    out = FileSystemOutputDir(fresh, max_bytes=size + slack)
+
+    if fits:
+        report = ImageForgeV1().run(JPEG, work.inputs, out, work.progress)
+        assert only_ok(report).previews == ()  # o preview não coube e fica de fora
+        assert (fresh / "images" / "a.jpg").stat().st_size == size
+    else:
+        with pytest.raises(RecipeFailure) as caught:
+            ImageForgeV1().run(JPEG, work.inputs, out, work.progress)
+        assert caught.value.code == "OUTPUT_LIMIT_EXCEEDED"
 
 
 def test_falha_de_leitura_da_entrada_e_infraestrutura(work: Workspace) -> None:
