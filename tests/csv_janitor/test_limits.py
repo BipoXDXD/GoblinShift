@@ -165,3 +165,34 @@ def test_limite_de_registro_na_saida_conta_as_aspas_acrescentadas() -> None:
     assert rejected("a\r\nx;y\r\n", params, Limits(record_bytes=6)).code is (
         RejectionCode.FIELD_LIMIT_EXCEEDED
     )
+
+
+# Saída maior que a entrada: o prefixo tab soma 3 bytes ("\t" e as aspas) a cada "=1".
+GROWING_TABLE = "a\r\n=1\r\n=2\r\n"
+GROWING_PARAMS = Params(formula_guard=FormulaGuard.TAB_PREFIX)
+
+
+def test_tabela_que_cresce_alem_do_limite_na_saida_rejeita() -> None:
+    limits = Limits(table_bytes=len(GROWING_TABLE))
+
+    rejection = rejected(GROWING_TABLE, GROWING_PARAMS, limits)
+
+    assert rejection.code is RejectionCode.FIELD_LIMIT_EXCEEDED
+    assert rejection.reason == (f"na saída, a tabela passa de {len(GROWING_TABLE)} bytes")
+
+
+def test_tabela_que_cresce_ate_o_limite_exato_na_saida_passa() -> None:
+    size = len(cleaned(GROWING_TABLE, GROWING_PARAMS).content)
+
+    result = cleaned(GROWING_TABLE, GROWING_PARAMS, Limits(table_bytes=size))
+
+    assert len(result.content) == size > len(GROWING_TABLE)
+
+
+def test_troca_de_delimitador_que_obriga_aspas_conta_no_limite_da_tabela() -> None:
+    table = "a\r\nx;y\r\nz;w\r\n"
+    params = Params(output_delimiter=Delimiter.SEMICOLON)
+
+    rejection = rejected(table, params, Limits(table_bytes=len(table)))
+
+    assert rejection.code is RejectionCode.FIELD_LIMIT_EXCEEDED

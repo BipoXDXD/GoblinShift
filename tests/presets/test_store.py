@@ -1,6 +1,5 @@
 """Presets privados com revisão, com PostgreSQL real (1.6, 1.7 e 3.3)."""
 
-import threading
 from collections.abc import Callable
 from functools import partial
 from uuid import UUID, uuid4
@@ -27,6 +26,7 @@ from goblinshift.presets import (
 )
 from goblinshift.presets.tables import preset
 from tests.identity.support import new_user
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -102,28 +102,20 @@ def test_ate_100_presets_por_conta(factory: sessionmaker[Session]) -> None:
     assert count_presets(factory, owner) == 100
 
 
-def test_limite_vale_com_criacoes_simultaneas(factory: sessionmaker[Session]) -> None:
+def test_criacao_concorrente_espera_a_trava_e_ve_o_centesimo(
+    factory: sessionmaker[Session],
+) -> None:
     owner = new_user(factory)
     for index in range(MAX_PRESETS_PER_ACCOUNT - 1):
         create(factory, owner, f"p{index}")
-    barrier = threading.Barrier(4)
-    outcomes: list[str] = []
 
-    def attempt(name: str) -> None:
-        barrier.wait()
-        try:
-            create(factory, owner, name)
-            outcomes.append("criado")
-        except PresetLimitReachedError:
-            outcomes.append("recusado")
+    with factory() as first, first.begin():
+        create_preset(first, owner, draft("centesimo"))
+        second = in_thread(lambda: create(factory, owner, "excedente"))
+        wait_until_someone_waits_for_a_lock(factory, "a segunda criação")
 
-    threads = [threading.Thread(target=attempt, args=(f"corrida{i}",)) for i in range(4)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert sorted(outcomes) == ["criado", "recusado", "recusado", "recusado"]
+    with pytest.raises(PresetLimitReachedError):
+        second.result()
     assert count_presets(factory, owner) == MAX_PRESETS_PER_ACCOUNT
 
 

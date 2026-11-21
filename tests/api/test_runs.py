@@ -19,6 +19,7 @@ from goblinshift.catalog.versions import CSV_JANITOR_V1
 from goblinshift.entrypoints.api import runs as runs_route
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.dependencies import current_time
+from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, stored_object
@@ -193,6 +194,31 @@ def test_mesma_chave_com_outro_comando_responde_422(
     assert_problem(response, 422, "IDEMPOTENCY_KEY_REUSED")
 
 
+def test_mesma_chave_em_outra_conta_cria_outra_execucao(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A chave vale por conta: a de outra conta não é replay nem "chave reusada".
+    key = str(uuid.uuid4())
+    first = create_run_with_key(client, factory, storage, Account(factory), key)
+
+    second = create_run_with_key(client, factory, storage, Account(factory), key)
+
+    assert second.status_code == 202, second.text
+    assert "idempotency-replayed" not in second.headers
+    assert second.json()["id"] != first.json()["id"]
+    assert count_rows(factory)["run"] == 2
+
+
+def create_run_with_key(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    account: Account,
+    key: str,
+) -> httpx.Response:
+    return post_run(client, account, body(ready_inputs(factory, storage, account.id)), key)
+
+
 @pytest.mark.parametrize("key", [None, "a" * 15, "a" * 65, "chave com espaco!"])
 def test_chave_ausente_ou_invalida_responde_400(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage, key: str | None
@@ -291,6 +317,36 @@ def test_ate_cinco_tabelas(
     assert response.status_code == status, response.text
 
 
+def image_forge_body(upload_ids: list[uuid.UUID]) -> dict[str, Any]:
+    # image-forge aceita 100 entradas, o mesmo teto do lote: só ela chega à borda do schema.
+    return {**body(upload_ids), "recipe_id": "image-forge"}
+
+
+def test_lote_no_teto_passa_pelo_schema(client: TestClient, factory: sessionmaker[Session]) -> None:
+    account = Account(factory)
+    inputs = [uuid.uuid4() for _ in range(MAX_BATCH_FILES)]
+
+    response = post_run(client, account, image_forge_body(inputs), None, "?validate_only=true")
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["input_upload_ids"]) == MAX_BATCH_FILES
+
+
+def test_lote_acima_do_teto_e_recusado_pelo_schema(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    inputs = [uuid.uuid4() for _ in range(MAX_BATCH_FILES + 1)]
+
+    response = post_run(client, account, image_forge_body(inputs), None, "?validate_only=true")
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    # `too_long` é do schema; o teto da receita sairia como `value_error`.
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
+        ("body.input_upload_ids", "too_long")
+    ]
+
+
 def test_parametro_invalido_responde_422_com_o_campo(
     client: TestClient, factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
@@ -303,16 +359,23 @@ def test_parametro_invalido_responde_422_com_o_campo(
     assert [e["field"] for e in problem["errors"]] == ["body.parameters.formula_guard"]
 
 
-def test_campo_desconhecido_no_corpo_responde_422(
-    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+@pytest.mark.parametrize("field", ["owner_id", "status"])
+def test_campo_do_servidor_no_corpo_responde_422_sem_gravar_nada(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage, field: str
 ) -> None:
     account = Account(factory)
-    payload = {**body(ready_inputs(factory, storage, account.id)), "status": "succeeded"}
+    other = Account(factory)
+    values = {"owner_id": str(other.id), "status": "succeeded"}
+    payload = {**body(ready_inputs(factory, storage, account.id)), field: values[field]}
+    before = count_rows(factory)
 
     response = post_run(client, account, payload, str(uuid.uuid4()))
 
-    assert_problem(response, 422, "VALIDATION_FAILED")
-    assert count_rows(factory)["run"] == 0
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
+        (f"body.{field}", "extra_forbidden")
+    ]
+    assert count_rows(factory) == before
 
 
 def test_versao_retirada_responde_422(
@@ -889,6 +952,32 @@ def test_limit_entre_1_e_100(
     response = client.get(f"{RUNS}?limit={limit}", headers=account.headers)
 
     assert response.status_code == status
+
+
+def test_cursor_no_teto_de_tamanho_chega_a_decodificacao(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    cursor = "A" * runs_route.MAX_CURSOR_CHARS
+
+    response = client.get(f"{RUNS}?cursor={cursor}", headers=account.headers)
+
+    # Passou pelo teto do schema: o 400 é do cursor que não decodifica.
+    assert_problem(response, 400, "BAD_REQUEST")
+
+
+def test_cursor_acima_do_teto_de_tamanho_responde_422(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    cursor = "A" * (runs_route.MAX_CURSOR_CHARS + 1)
+
+    response = client.get(f"{RUNS}?cursor={cursor}", headers=account.headers)
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
+        ("query.cursor", "string_too_long")
+    ]
 
 
 def test_cursor_adulterado_responde_400(client: TestClient, factory: sessionmaker[Session]) -> None:

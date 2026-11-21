@@ -7,9 +7,11 @@ nesse momento (`scope="function"`), então o encerramento abre a sua pela factor
 """
 
 import logging
+import os
 from datetime import datetime
 from functools import partial
 from pathlib import PurePosixPath
+from typing import BinaryIO
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
@@ -116,6 +118,7 @@ def download_artifact(
     finish = partial(_finish_download, factory, ticket, slot_id)
     try:
         file = storage.open(ticket.storage_key)
+        same_size = _has_registered_size(file, ticket)
     except ObjectMissingError:
         # Sem gravar `missing`: só a varredura da manutenção marca, com a sentinela de montagem e
         # o limitador (files/missing.py); daqui, um storage desmontado marcaria objetos válidos.
@@ -130,6 +133,16 @@ def download_artifact(
     except BaseException:
         finish()
         raise
+    if not same_size:
+        # O `Content-Length` sai do banco: com outro tamanho no disco, a resposta quebraria no
+        # meio. O objeto gravado é imutável; é adulteração, com a mesma resposta e sem `missing`.
+        logger.error(
+            "download: objeto do artefato %s adulterado no storage: tamanho diferente",
+            artifact_id,
+        )
+        file.close()
+        finish()
+        raise _artifact_problem(ArtifactGoneError())
     return DownloadResponse(
         file,
         size=ticket.size_bytes,
@@ -188,13 +201,26 @@ def get_artifact_preview(
         with unit_of_work(factory) as finishing:
             finish_download(finishing, ticket)
     if len(content) != ticket.size_bytes:
-        raise RuntimeError(f"preview {ticket.artifact_id} com tamanho diferente do registrado")
+        logger.error(
+            "preview: objeto do artefato %s adulterado no storage: tamanho diferente",
+            ticket.artifact_id,
+        )
+        raise _artifact_problem(ArtifactGoneError())
     name = PurePosixPath(ticket.file_name).name
     return Response(
         content=content,
         media_type=JPEG_MEDIA_TYPE if name.endswith(_JPEG_SUFFIX) else OCTET_STREAM,
         headers={"Content-Disposition": content_disposition(name), **DOWNLOAD_PROTECTION_HEADERS},
     )
+
+
+def _has_registered_size(file: BinaryIO, ticket: DownloadTicket) -> bool:
+    """O tamanho no disco confere com o do banco; fecha o arquivo se a consulta falhar."""
+    try:
+        return os.fstat(file.fileno()).st_size == ticket.size_bytes
+    except BaseException:
+        file.close()
+        raise
 
 
 def _finish_download(factory: sessionmaker[Session], ticket: DownloadTicket, slot_id: UUID) -> None:

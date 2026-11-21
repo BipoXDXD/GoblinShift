@@ -24,7 +24,7 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
-    load_run,
+    load_owned_run,
     run_transaction,
 )
 
@@ -57,7 +57,7 @@ def cancel_run(
     on_finished: RunFinishedHook | None = None,
 ) -> CancelResult:
     def cancel(session: Session) -> tuple[CancelResult, Applied | None]:
-        loaded = load_run(session, run_id, owner_id=owner_id)
+        loaded = load_owned_run(session, owner_id, run_id)
         if loaded is None:
             raise RunNotFoundError
         decision = decide_transition(loaded.state, CancelRequested())
