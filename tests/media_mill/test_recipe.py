@@ -456,6 +456,9 @@ def test_texto_disfarcado_de_mp4_e_recusado_sem_chamar_o_ffmpeg(
         pytest.param("mp4_301s", "MEDIA_TOO_LARGE", id="301s"),
         pytest.param("mp4_six_channels", "AUDIO_LIMIT_EXCEEDED", id="6-canais"),
         pytest.param("mp4_96khz", "AUDIO_LIMIT_EXCEEDED", id="96khz"),
+        pytest.param(
+            "webm_audio_beyond_duration", "MEDIA_TOO_LARGE", id="audio-alem-da-duracao-declarada"
+        ),
     ],
 )
 def test_video_hostil_ou_fora_dos_limites_e_recusado(

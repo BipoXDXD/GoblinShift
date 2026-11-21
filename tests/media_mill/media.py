@@ -10,7 +10,9 @@ tamanho (4K, 301 s) usam o mínimo de quadros que ainda prova o limite.
 """
 
 import shutil
+import struct
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,6 +152,11 @@ CLIPS: dict[str, Clip] = {
         inputs=(video_source(duration=1.0), tone(rate=48000, duration=3.0)),
         output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
     ),
+    # Base do WebM que mente a duração (`DERIVED`): vídeo de 2 s e Opus de 30 s, sem `-shortest`.
+    "webm_2s_audio_30s": Clip(
+        inputs=(video_source(duration=2.0), tone(rate=48000, duration=30.0)),
+        output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
+    ),
     # Hostis e fora da allowlist.
     "mp4_mpeg4": Clip(
         inputs=(video_source(), tone()), output=("-c:v", "mpeg4", *AAC, "-shortest", *MP4)
@@ -203,6 +210,31 @@ def rotated(source: Path, target: Path, degrees: int) -> Path:
     ]
     subprocess.run(argv, check=True, capture_output=True)  # noqa: S603 - argv do próprio teste
     return target
+
+
+# ID do elemento `Duration` do Segment Info do Matroska seguido do tamanho (8 bytes, um float64).
+_MATROSKA_DURATION = b"\x44\x89\x88"
+
+
+def with_declared_duration(source: Path, target: Path, duration_ms: float) -> Path:
+    """Mesmo WebM, com o `Duration` do Segment Info trocado: o ffprobe passa a relatar o falso."""
+    data = source.read_bytes()
+    assert data.count(_MATROSKA_DURATION) == 1
+    start = data.index(_MATROSKA_DURATION) + len(_MATROSKA_DURATION)
+    target.write_bytes(data[:start] + struct.pack(">d", duration_ms) + data[start + 8 :])
+    return target
+
+
+def _audio_beyond_duration(root: Path) -> Path:
+    """Declara 2 s, a duração do vídeo, com 30 s de Opus: o probe aceita e o áudio sairia 15x."""
+    base = generate(CLIPS["webm_2s_audio_30s"], root / "webm_2s_audio_30s.webm")
+    return with_declared_duration(base, root / "webm_audio_beyond_duration.webm", 2000.0)
+
+
+# Vídeos derivados de um clipe gerado: recebem o diretório da biblioteca e devolvem o arquivo.
+DERIVED: dict[str, Callable[[Path], Path]] = {
+    "webm_audio_beyond_duration": _audio_beyond_duration,
+}
 
 
 def truncated(data: bytes) -> bytes:

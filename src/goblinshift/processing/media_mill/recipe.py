@@ -63,6 +63,9 @@ AUDIO_BIT_DEPTH = 16
 COPY_CHUNK_BYTES = 1024 * 1024
 # A saída do ffprobe descreve no máximo 16 faixas: alguns KiB. Acima disto, não é vídeo comum.
 PROBE_OUTPUT_MAX_BYTES = 1024 * 1024
+# O áudio sai cortado na duração aceita mais esta margem: um quadro que começa depois da duração
+# aceita recusa o vídeo, e a margem garante que, se a faixa passa dela, o corte ainda o registra.
+AUDIO_CUT_MARGIN_S = 1.0
 MS_PER_S = 1000
 # 1.5: uma miniatura em 10% da duração; três em 10%, 50% e 90%.
 THUMBNAIL_POINTS = {
@@ -232,11 +235,20 @@ class _Mill:
             sample_rate=audio.sample_rate,
             channels=audio.channels,
             audio_format=self._params.audio_format,
+            cut_at_s=media.duration_s + AUDIO_CUT_MARGIN_S,
             target=target,
         )
         outcome = self._runner.run(argv, cap_s=self._timeouts.audio_s, name="audio")
-        if not outcome.succeeded or read_log(outcome.log).has_errors or not _non_empty(target):
+        log = read_log(outcome.log)
+        if not outcome.succeeded or log.has_errors or not _non_empty(target):
             raise _damaged("a faixa de áudio está danificada ou truncada")
+        # Compara o início do último quadro, não o fim: AAC (priming) e Opus (pre-skip) legítimos
+        # terminam alguns ms depois da duração do contêiner.
+        if log.last_audio_s is not None and log.last_audio_s > media.duration_s:
+            raise MediaRejected(
+                RejectionCode.MEDIA_TOO_LARGE,
+                "a faixa de áudio passa da duração declarada do vídeo",
+            )
         return target
 
     def _thumbnail(self, source: Source, media: Inspected, point: Fraction, box: Box) -> _Thumbnail:

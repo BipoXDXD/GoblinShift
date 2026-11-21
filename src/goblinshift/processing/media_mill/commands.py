@@ -15,8 +15,13 @@ Na saída, `-map_metadata -1` e `-map_chapters -1` descartam os metadados do ví
 gravação, aparelho) e `+bitexact` tira a versão do encoder do arquivo, para a mesma entrada dar os
 mesmos bytes. `-n` recusa sobrescrever: cada saída vai para um caminho novo no rascunho.
 
+O áudio sai cortado por `-t` (a duração aceita mais uma margem, decidida pela receita): um
+contêiner que declara 2 s com horas de áudio não gera horas de WAV. O filtro `ashowinfo` registra
+cada quadro de áudio, para a receita saber se a faixa passava da duração aceita.
+
 `-loglevel level+…` prefixa cada linha do stderr com o nível (`[error]`, `[info]`), e
-`read_log` separa o que é erro de decodificação e os instantes informados pelo filtro `showinfo`.
+`read_log` separa o que é erro de decodificação e os instantes informados pelos filtros
+`showinfo` (vídeo) e `ashowinfo` (áudio).
 """
 
 import re
@@ -31,6 +36,7 @@ JPEG_QUALITY = 3  # escala -q:v do mjpeg: 2 (melhor) a 31; 3 fica perto de quali
 _ERROR_LEVELS = (b"[error]", b"[fatal]", b"[panic]")
 _PTS_TIME = re.compile(rb"\bpts_time:(-?[0-9]+(?:\.[0-9]+)?)")
 _SHOWINFO = b"Parsed_showinfo"
+_ASHOWINFO = b"Parsed_ashowinfo"
 _AUDIO_ENCODERS = {
     AudioFormat.WAV: ("-c:a", "pcm_s16le", "-f", "wav"),
     # O FLAC aceita 16 e 32 bits; a amostra é fixada em 16 bits (1.5).
@@ -96,11 +102,15 @@ def audio_argv(
     sample_rate: int,
     channels: int,
     audio_format: AudioFormat,
+    cut_at_s: float,
     target: Path,
 ) -> list[str]:
-    """Uma faixa de áudio, na taxa e nos canais de origem (sem resample nem downmix), 16 bits."""
+    """Uma faixa de áudio, na taxa e nos canais de origem (sem resample nem downmix), 16 bits.
+
+    Grava no máximo `cut_at_s` segundos; o `ashowinfo` registra o instante de cada quadro lido.
+    """
     return [
-        *_ffmpeg_head(ffmpeg, "error"),
+        *_ffmpeg_head(ffmpeg, "info"),
         *source.input_options(),
         "-i",
         source.url,
@@ -110,6 +120,10 @@ def audio_argv(
         "-sn",
         "-dn",
         *_no_metadata(),
+        "-af",
+        "ashowinfo",
+        "-t",
+        _seconds(cut_at_s),
         "-ar",
         str(sample_rate),
         "-ac",
@@ -163,6 +177,8 @@ class LogSummary:
     # Instantes (s) dos quadros que passaram pelo `showinfo`, relativos ao início da leitura.
     first_frame_s: float | None
     last_frame_s: float | None
+    # Início (s) do último quadro de áudio que passou pelo `ashowinfo`.
+    last_audio_s: float | None
 
 
 def read_log(path: Path) -> LogSummary:
@@ -170,13 +186,19 @@ def read_log(path: Path) -> LogSummary:
     has_errors = False
     first: float | None = None
     last: float | None = None
+    last_audio: float | None = None
     for line in _lines(path):
         has_errors = has_errors or any(level in line for level in _ERROR_LEVELS)
-        frame_s = _frame_time(line)
+        frame_s = _frame_time(line, _SHOWINFO)
         if frame_s is not None:
             first = frame_s if first is None else first
             last = frame_s
-    return LogSummary(has_errors, first, last)
+        audio_s = _frame_time(line, _ASHOWINFO)
+        if audio_s is not None:
+            last_audio = audio_s
+    return LogSummary(
+        has_errors=has_errors, first_frame_s=first, last_frame_s=last, last_audio_s=last_audio
+    )
 
 
 def _ffmpeg_head(ffmpeg: Path, level: str) -> list[str]:
@@ -238,8 +260,8 @@ def _lines(path: Path) -> Iterator[bytes]:
         yield from log
 
 
-def _frame_time(line: bytes) -> float | None:
-    if _SHOWINFO not in line:
+def _frame_time(line: bytes, filter_name: bytes) -> float | None:
+    if filter_name not in line:
         return None
     match = _PTS_TIME.search(line)
     return float(match.group(1)) if match else None

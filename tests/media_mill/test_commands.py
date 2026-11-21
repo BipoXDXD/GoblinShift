@@ -34,6 +34,7 @@ def all_commands(container: Container) -> dict[str, list[str]]:
             sample_rate=48000,
             channels=2,
             audio_format=AudioFormat.FLAC,
+            cut_at_s=3.0,
             target=TARGET,
         ),
         "thumbnail": thumbnail_argv(FFMPEG, source, at_s=1.5, box=box, target=TARGET),
@@ -109,10 +110,31 @@ def test_wav_e_pcm_de_16_bits() -> None:
         sample_rate=44100,
         channels=1,
         audio_format=AudioFormat.WAV,
+        cut_at_s=3.0,
         target=TARGET,
     )
 
     assert (option(argv, "-c:a"), argv[argv.index("-c:a") + 3]) == ("pcm_s16le", "wav")
+
+
+def test_audio_corta_um_segundo_depois_da_duracao_aceita_e_registra_os_quadros() -> None:
+    argv = audio_argv(
+        FFMPEG,
+        Source(INPUT, Container.MOV),
+        stream_order=0,
+        sample_rate=48000,
+        channels=2,
+        audio_format=AudioFormat.WAV,
+        cut_at_s=12.5,
+        target=TARGET,
+    )
+
+    assert option(argv, "-t") == "12.500000"
+    assert option(argv, "-af") == "ashowinfo"
+    # Nível `info`: é nele que o `ashowinfo` escreve cada quadro.
+    assert option(argv, "-loglevel") == "level+info"
+    assert argv.index("-i") < argv.index("-t") < argv.index("-n")
+    assert argv.index("-i") < argv.index("-af") < argv.index("-n")
 
 
 def test_miniatura_busca_o_alvo_e_grava_um_jpeg_na_caixa() -> None:
@@ -171,6 +193,25 @@ def test_log_sem_quadros(tmp_path: Path) -> None:
     summary = read_log(log)
 
     assert (summary.has_errors, summary.first_frame_s, summary.last_frame_s) == (False, None, None)
+
+
+def test_log_guarda_o_instante_do_ultimo_quadro_de_audio(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:0 pts:0 pts_time:0 fmt:s16\n"
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:1 pts:1024 pts_time:2.98 fmt:s16\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.last_audio_s, summary.first_frame_s) == (2.98, None)
+
+
+def test_log_sem_quadros_de_audio(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(b"[Parsed_showinfo_0 @ 0x2] [info] n:   0 pts:  15360 pts_time:1\n")
+
+    assert read_log(log).last_audio_s is None
 
 
 def test_pts_time_fora_do_showinfo_e_ignorado(tmp_path: Path) -> None:
