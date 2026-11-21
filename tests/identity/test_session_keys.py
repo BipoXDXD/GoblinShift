@@ -1,6 +1,5 @@
 """Chaves emitidas, listadas e revogadas pela sessão web (GoblinShiftPlan.md, 3.6; Frente C)."""
 
-import threading
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
@@ -25,6 +24,7 @@ from goblinshift.identity.accounts import MAX_LISTED_KEYS
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_user
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -121,30 +121,20 @@ def test_um_segundo_antes_de_vencer_ainda_conta(factory: sessionmaker[Session]) 
         issue(factory, owner)
 
 
-def test_duas_emissoes_simultaneas_com_quatro_ativas_nao_passam_de_cinco(
+def test_emissao_concorrente_espera_a_trava_e_ve_a_quinta_chave(
     factory: sessionmaker[Session],
 ) -> None:
     owner = new_user(factory)
     for _ in range(MAX_ACTIVE_KEYS - 1):
         issue(factory, owner)
-    barrier = threading.Barrier(2)
-    outcomes: list[str] = []
 
-    def contend() -> None:
-        barrier.wait()
-        try:
-            issue(factory, owner)
-            outcomes.append("emitida")
-        except ActiveKeyLimitError:
-            outcomes.append("recusada")
+    with factory() as first, first.begin():
+        issue_key_for_session(first, owner_id=owner, scopes=READ, days=30, now=NOW)
+        second = in_thread(lambda: issue(factory, owner))
+        wait_until_someone_waits_for_a_lock(factory, "a segunda emissão")
 
-    threads = [threading.Thread(target=contend) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=30)
-
-    assert sorted(outcomes) == ["emitida", "recusada"]
+    with pytest.raises(ActiveKeyLimitError):
+        second.result()
     assert active_count(factory, owner) == MAX_ACTIVE_KEYS
 
 

@@ -29,6 +29,7 @@ READYZ_ALLOWED_AT_ONCE = 11
 # bem menos de meio segundo, então passa de 10 só se o limite estiver errado.
 REFILL_TOLERANCE = 10
 RETRY_AFTER_SECONDS = "1"
+INSTANCE_CANARY_QUERY = f"CANARY-{uuid.uuid4()}"
 # Separador que não aparece em cabeçalho nem no corpo problem+json; tab seria espaço para o `read`.
 SEPARATOR = "|"
 
@@ -117,7 +118,7 @@ def test_api_deixa_passar_a_rajada_e_recusa_o_excesso(stack: NginxLogs) -> None:
 
 
 def test_429_da_api_e_problem_json_com_retry_after(stack: NginxLogs) -> None:
-    hits = _burst(stack, "/api/v1/runs", 80, "198.51.100.61")
+    hits = _burst(stack, f"/api/v1/runs?token={INSTANCE_CANARY_QUERY}", 80, "198.51.100.61")
 
     limited = next(hit for hit in hits if hit.status == HTTP_TOO_MANY_REQUESTS)
     assert limited.retry_after == RETRY_AFTER_SECONDS
@@ -126,8 +127,11 @@ def test_429_da_api_e_problem_json_com_retry_after(stack: NginxLogs) -> None:
     assert problem["type"] == "https://goblinshift.dev/problems/rate-limited"
     assert problem["status"] == HTTP_TOO_MANY_REQUESTS
     assert problem["code"] == "RATE_LIMITED"
-    assert problem["request_id"]
-    assert set(problem) == {"type", "title", "status", "detail", "code", "request_id"}
+    # Só o caminho, como na API: a query string pode carregar dados.
+    assert problem["instance"] == "/api/v1/runs"
+    assert INSTANCE_CANARY_QUERY not in limited.body
+    assert str(uuid.UUID(problem["request_id"])) == problem["request_id"]
+    assert set(problem) == {"type", "title", "status", "detail", "instance", "code", "request_id"}
 
 
 def test_limite_da_api_vale_por_cliente(stack: NginxLogs) -> None:

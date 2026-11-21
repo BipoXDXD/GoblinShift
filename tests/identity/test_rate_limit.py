@@ -25,6 +25,7 @@ from goblinshift.identity.rate_limit import (
 from goblinshift.identity.tables import request_window
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_user
+from tests.lock_support import InThread, in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -204,6 +205,39 @@ def test_requisicoes_simultaneas_nao_passam_do_limite(
     refused = [outcome for outcome in outcomes if outcome is not None]
     assert all(isinstance(error, RequestLimitExceededError) for error in refused)
     assert stored_count(factory, owner, RequestClass.RUN_CREATE) == 10
+
+
+def count_while_first_holds(factory: sessionmaker[Session], owner: UUID) -> InThread[None]:
+    """A segunda contagem começa com a primeira sem commit e espera por ela."""
+    with factory() as first, first.begin():
+        count_request(first, owner, RequestClass.RUN_CREATE, NOW)
+        second = in_thread(lambda: count(factory, owner, RequestClass.RUN_CREATE))
+        wait_until_someone_waits_for_a_lock(factory, "a segunda contagem")
+    return second
+
+
+def test_contagem_concorrente_na_fronteira_espera_e_ve_a_decima(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = new_user(factory)
+    count_many(factory, owner, RequestClass.RUN_CREATE, 9)
+
+    second = count_while_first_holds(factory, owner)
+
+    with pytest.raises(RequestLimitExceededError):
+        second.result()
+
+    assert stored_count(factory, owner, RequestClass.RUN_CREATE) == 10
+
+
+def test_contagem_concorrente_em_janela_nova_espera_a_insercao_e_soma(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = new_user(factory)
+
+    count_while_first_holds(factory, owner).result()
+
+    assert stored_count(factory, owner, RequestClass.RUN_CREATE) == 2
 
 
 def insert_window(factory: sessionmaker[Session], owner: UUID, start: datetime) -> None:
