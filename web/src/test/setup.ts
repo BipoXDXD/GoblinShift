@@ -52,9 +52,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
-  window.localStorage.clear();
-  delete document.documentElement.dataset["theme"];
-  // Por último, depois do cleanup(): o aviso que um componente dá ao desmontar conta para o teste.
-  reportConsoleViolations(stopConsoleGuard());
+  try {
+    cleanup();
+    window.localStorage.clear();
+    delete document.documentElement.dataset["theme"];
+  } finally {
+    // Por último, depois do cleanup(): o aviso que um componente dá ao desmontar conta para o teste.
+    // No finally, o guard para e relata mesmo se o cleanup() lançar; o erro dele segue adiante.
+    reportConsoleViolations(stopConsoleGuard());
+  }
 });

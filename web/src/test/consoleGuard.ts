@@ -128,6 +128,10 @@ export function allowConsole(method: GuardedMethod, pattern: RegExp, reason: str
   if (reason.trim() === "") {
     throw new Error("allowConsole precisa de um motivo não vazio");
   }
+  // Com a flag y a regex só casa no índice 0 da mensagem, o que surpreende quem lê a liberação.
+  if (pattern.sticky) {
+    throw new Error(`allowConsole não aceita regex sticky (flag y): ${String(pattern)}`);
+  }
   allowances.push({ method, pattern, reason, used: false });
 }
 

@@ -88,6 +88,12 @@ describe("guard de console", () => {
     }).toThrow(/motivo/);
   });
 
+  it("regex sticky (flag y) é recusada", () => {
+    expect(() => {
+      allowConsole("error", /x/y, "prova do guard");
+    }).toThrow(/sticky/);
+  });
+
   it("Error e objeto entram na mensagem montada", () => {
     allowConsole("error", /Falha: TypeError: quebrou \{"id":1\}/, "prova do guard");
     console.error("Falha:", new TypeError("quebrou"), { id: 1 });
