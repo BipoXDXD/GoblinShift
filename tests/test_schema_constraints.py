@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Connection, Engine, Table, insert, inspect, update
+from sqlalchemy import Connection, Engine, Table, insert, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 
 # Importar os módulos registra as tabelas no MetaData comum.
@@ -193,7 +193,12 @@ def test_upload_aponta_para_objeto_da_mesma_conta(conn: Connection) -> None:
     alice = criar_conta(conn, "alice")
     objeto = criar_objeto_unico(conn, alice, "uploads/alice/1")
 
-    assert inserir_upload(conn, alice, objeto) is not None
+    upload_id = inserir_upload(conn, alice, objeto)
+
+    gravado = conn.execute(
+        select(upload.c.owner_id, upload.c.object_id).where(upload.c.id == upload_id)
+    ).one()
+    assert tuple(gravado) == (alice, objeto)
 
 
 def test_upload_nao_aponta_para_objeto_de_outra_conta(conn: Connection) -> None:
