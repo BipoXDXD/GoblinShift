@@ -28,7 +28,7 @@ docker compose up --build     # postgres, migrate, api, worker, maintenance, ngi
 curl http://localhost/readyz
 ```
 
-A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/livez` e `/readyz` vão para a API, `robots.txt` e os assets do build são arquivos de verdade (o que faltar é 404), e qualquer outra rota cai no `index.html`. Texto (HTML, CSS, JS, JSON, SVG, manifest) sai com gzip. `/docs` (Swagger UI servido pela própria API, sem CDN e com CSP própria) e `/openapi.json` também vão para a API. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), em `/api/` de 20 por segundo (rajada de 40) e em `/readyz` de 5 por segundo (rajada de 10), contados pelo IP real que só a borda pode informar (ADR 014); o excesso recebe `429` problem+json com `Retry-After`. A API atende até 29 conexões simultâneas e responde `503` `text/plain`, sem `Retry-After`, a partir da 30ª (`--limit-concurrency 30`, o dobro do pool do banco, comparado com `>=` contando a conexão atual) e guarda o resultado do `/readyz` por 1 s. Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
+A interface fica em `http://localhost/`. O Nginx sai da imagem `docker/web.Dockerfile`, que constrói a SPA num estágio Node e a serve com CSP estrita e os cabeçalhos de segurança de [3.6](docs/GoblinShiftPlan.md#s3-6); `/api/`, `/auth/`, `/livez` e `/readyz` vão para a API, `robots.txt` e os assets do build são arquivos de verdade (o que faltar é 404), e qualquer outra rota cai no `index.html`. Texto estático (HTML, CSS, JS, SVG, manifest) sai com gzip; JSON da API fica fora da compactação para não comprimir respostas com segredos refletidos. `/docs` (Swagger UI servido pela própria API, sem CDN e com CSP própria) e `/openapi.json` também vão para a API. Em `/auth/*` vale um `limit_req` de 10 por minuto por cliente (rajada de 10), em `/api/` de 20 por segundo (rajada de 40) e em `/readyz` de 5 por segundo (rajada de 10), contados pelo IP real que só a borda pode informar (ADR 014); o excesso recebe `429` problem+json com `Retry-After`. A API atende até 29 conexões simultâneas e responde `503` `text/plain`, sem `Retry-After`, a partir da 30ª (`--limit-concurrency 30`, o dobro do pool do banco, comparado com `>=` contando a conexão atual) e guarda o resultado do `/readyz` por 1 s. Depois de mudar `web/` ou `docker/nginx/`, `docker compose up --build` reconstrói a imagem.
 
 O worker local usa uma imagem própria, `goblinshift-worker-dev` ([`docker/worker-dev.Dockerfile`](docker/worker-dev.Dockerfile)): a imagem da aplicação mais o `ffmpeg` e o `ffprobe` copiados do estágio `ffmpeg` de `docker/executor.Dockerfile`, os mesmos binários da produção (FFmpeg 8.1.2 mínimo, só `mov`/`matroska` e `file`/`pipe`; [ADR 036](docs/adr/036-media-mill-ffmpeg-minimo-no-executor.md)), para o Media Mill rodar com o `docker compose up` puro. O estágio vira o serviço `ffmpeg-minimo`, com zero réplicas: o Compose o constrói, mas não o executa. Sem cache, o primeiro `--build` compila o FFmpeg (alguns minutos); depois o cache do BuildKit, o mesmo da imagem do executor, resolve em segundos. A imagem de produção da aplicação continua sem FFmpeg (`tests/test_compose_dev_ffmpeg.py`).
 
@@ -88,6 +88,34 @@ npm run e2e:sabotage                           # Devil's Advocate: planta um def
 E2E_BASE_URL=http://localhost GS_E2E_API_KEY=... npm run e2e          # contra o Compose, com a API real (uma conta só)
 E2E_VPS=1 E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   # contra a VPS, só leitura
 ```
+
+As jornadas de leitura `E2E_VPS=1` também selecionam Firefox. Nos workflows CI e de leitura na VPS, o cliente Playwright 1.65.1 usa o **Firefox oficial r1575**, que corrige a regressão ARIA do bundle r1572. O instalador [`scripts/ci_firefox.py`](scripts/ci_firefox.py) admite somente **Ubuntu 24.04 AMD64**, verifica o SHA-256 antes de extrair e mantém o browser em diretório próprio, sem alterar `browsers.json` nem sobrescrever o cache do Playwright. Os workflows CI e de leitura na VPS já fazem instalação, controles de regressão e cleanup.
+
+Para executar as jornadas manualmente com esse Firefox na plataforma suportada, defina `E2E_BASE_URL` e `GS_E2E_API_KEY` no ambiente e execute da raiz do repositório. O subshell mantém as variáveis temporárias isoladas e limpa o browser também se a instalação ou as jornadas falharem:
+
+```bash
+(
+  set -e
+  : "${E2E_BASE_URL:?Defina a origem da API}"
+  : "${GS_E2E_API_KEY:?Defina a chave da conta de teste}"
+  export RUNNER_TEMP="$(mktemp -d)"
+  export GITHUB_ENV="$RUNNER_TEMP/firefox.env"
+  unset GS_FIREFOX_EXECUTABLE
+  cleanup_firefox() {
+    python3 scripts/ci_firefox.py --cleanup
+    rm -f "$GITHUB_ENV"
+    rmdir "$RUNNER_TEMP"
+  }
+  trap cleanup_firefox EXIT
+  python3 scripts/ci_firefox.py
+  set -a
+  . "$GITHUB_ENV"
+  set +a
+  (cd web && E2E_VPS=1 npm run e2e)
+)
+```
+
+`GS_FIREFOX_EXECUTABLE` deve ser um caminho absoluto para um arquivo executável. A configuração recusa um override inválido e exige o override nas jornadas `CI` + `E2E_VPS`. Fora do CI, `E2E_VPS` sem esse override usa o Firefox padrão do Playwright; portanto prepare o pin explicitamente como acima. Não há pin r1575 homologado por este instalador para macOS, ARM64 ou outra distribuição; o Chromium local continua disponível, mas não substitui a validação das jornadas Firefox no Ubuntu suportado.
 
 No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado, o CLS da Execução e a jornada do Media Mill, cujos MP4 de fixture são falsos) são puladas, e a suíte roda com um worker: a conta tem uma execução ativa por vez. Contra o Compose, a conta sai do `gs-admin` com `create-user` e `issue-key`, com todos os escopos (`--scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write`). Cada rodada consome 12 das 30 execuções diárias da conta; para repetir mais vezes na mesma conta local, use `gs-admin set-limits --user <id> --runs-per-24h <n>`.
 
