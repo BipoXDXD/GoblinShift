@@ -92,3 +92,14 @@ def test_tab_prefix_poe_o_tab_dentro_de_aspas_so_nas_celulas_suspeitas() -> None
 
 def test_sem_celulas_suspeitas_nao_ha_aviso() -> None:
     assert cleaned("a\r\n1\r\n").warnings == ()
+
+
+def test_aviso_de_formula_corta_cada_nome_de_coluna_em_120_caracteres() -> None:
+    name = "=" + "x" * 10_000
+    result = cleaned(f"{name},b\r\n=1,=2\r\n")
+
+    assert result.formula_header == (name,)
+    assert result.formula_cells == {name: 1, "b": 1}
+    shortened = repr(name[:119] + "…")
+    assert [w.detail.count(shortened) for w in result.warnings] == [1, 1]
+    assert all(len(w.detail) < 500 for w in result.warnings)
