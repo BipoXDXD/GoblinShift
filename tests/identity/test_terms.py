@@ -4,9 +4,7 @@ A conta guarda a versão aceita e a data do aceite. Aceitar de novo a mesma vers
 data; uma versão nova exige novo aceite. Contas do operador (`gs-admin`) não passam pelo aceite.
 """
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from threading import Barrier
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,6 +22,7 @@ from goblinshift.identity import (
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import new_user
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -133,20 +132,15 @@ def test_aceite_de_conta_inexistente_e_erro(factory: sessionmaker[Session]) -> N
         accept(factory, uuid4(), CURRENT_TERMS_VERSION, NOW)
 
 
-def test_dois_aceites_simultaneos_gravam_um_so_aceite(factory: sessionmaker[Session]) -> None:
+def test_aceite_concorrente_espera_o_primeiro_e_nao_regrava_a_data(
+    factory: sessionmaker[Session],
+) -> None:
     owner = external_account(factory)
-    barrier = Barrier(2)
 
-    def accept_at(now: datetime) -> bool:
-        with unit_of_work(factory) as session:
-            barrier.wait()
-            return accept_terms(
-                session, owner, version=CURRENT_TERMS_VERSION, now=now
-            ).newly_accepted
+    with factory() as first, first.begin():
+        accept_terms(first, owner, version=CURRENT_TERMS_VERSION, now=NOW)
+        second = in_thread(lambda: accept(factory, owner, CURRENT_TERMS_VERSION, LATER))
+        wait_until_someone_waits_for_a_lock(factory, "o segundo aceite")
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(accept_at, [NOW, LATER]))
-
-    assert sorted(results) == [False, True]
-    _, accepted_at = stored_terms(factory, owner)
-    assert accepted_at in {NOW, LATER}
+    assert second.result() == (CURRENT_TERMS_VERSION, NOW, False)
+    assert stored_terms(factory, owner) == (CURRENT_TERMS_VERSION, NOW)

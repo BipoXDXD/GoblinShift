@@ -5,7 +5,8 @@ clientes: um no papel do proxy de borda (o único de quem o X-Forwarded-For vale
 dela. A API é um Nginx mínimo que responde 204 (ou 404, o eco do X-Forwarded-For e uma conexão
 fechada sem resposta, nos caminhos dos outros testes). As requisições vão a `/api/`, que o Nginx
 encaminha a ela, e não à SPA. O log de acesso é provado com respostas da API; o log de erro, com
-o 413 do teto de corpo e com os 502 de upstream (conexão fechada, porta recusada, API fora do DNS).
+o 413 do teto de corpo e com os 502 de upstream (conexão fechada, porta recusada, API fora do DNS),
+que o cliente recebe como 503.
 """
 
 import json
@@ -285,6 +286,8 @@ def test_log_de_acesso_traz_so_os_campos_de_diagnostico(nginx_logs: Captured) ->
 # O log de erro do Nginx grava `client:` (IP completo) e `request:` (com a query) no 413 do teto de
 # corpo e em toda falha de upstream. Ele fica só com o que é crítico (default.conf); o diagnóstico
 # desses casos vem do log de acesso, que trunca o IP, descarta a query e traz o status do upstream.
+# Em /api/ o 502 do upstream chega ao cliente como 503 SERVICE_UNAVAILABLE (default.conf); o log de
+# acesso guarda o 502 em `upstream_status`.
 ERROR_CANARY_QUERY = f"CANARY-{uuid.uuid4()}"
 # Acima dos 64k de `client_max_body_size` em /api/.
 LARGE_BODY_BYTES = 70_000
@@ -292,7 +295,7 @@ LARGE_BODY_BYTES = 70_000
 # API resolvida de novo, e não com o IP que o Nginx guardou de antes da troca.
 RESOLVER_WINDOW_REQUESTS = 16
 HTTP_PAYLOAD_TOO_LARGE = 413
-HTTP_BAD_GATEWAY = 502
+HTTP_SERVICE_UNAVAILABLE = 503
 
 
 @dataclass(frozen=True)
@@ -368,9 +371,9 @@ def error_logs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[ErrorRun]:
     ("case", "status"),
     [
         (LARGE_BODY, HTTP_PAYLOAD_TOO_LARGE),
-        (UPSTREAM_CLOSED, HTTP_BAD_GATEWAY),
-        (PORT_CLOSED, HTTP_BAD_GATEWAY),
-        (API_GONE, HTTP_BAD_GATEWAY),
+        (UPSTREAM_CLOSED, HTTP_SERVICE_UNAVAILABLE),
+        (PORT_CLOSED, HTTP_SERVICE_UNAVAILABLE),
+        (API_GONE, HTTP_SERVICE_UNAVAILABLE),
     ],
 )
 def test_caminho_de_erro_responde_com_o_status_esperado(
@@ -401,7 +404,7 @@ def test_log_de_acesso_registra_o_413_sem_upstream(error_logs: ErrorRun) -> None
 
 def test_log_de_acesso_mostra_o_502_do_upstream_que_fechou_a_conexao(error_logs: ErrorRun) -> None:
     entry = _access_entries(error_logs.stdout)[UPSTREAM_CLOSED.path]
-    assert entry["status"] == HTTP_BAD_GATEWAY
+    assert entry["status"] == HTTP_SERVICE_UNAVAILABLE
     assert entry["upstream_status"] == "502"
     # Conectou: o tempo de conexão diferencia este caso da porta recusada.
     assert entry["upstream_connect_time"] not in {"", "-"}
@@ -409,15 +412,15 @@ def test_log_de_acesso_mostra_o_502_do_upstream_que_fechou_a_conexao(error_logs:
 
 def test_log_de_acesso_mostra_o_502_da_porta_recusada(error_logs: ErrorRun) -> None:
     entry = _access_entries(error_logs.stdout)[PORT_CLOSED.path]
-    assert entry["status"] == HTTP_BAD_GATEWAY
+    assert entry["status"] == HTTP_SERVICE_UNAVAILABLE
     assert entry["upstream_status"] == "502"
     assert entry["upstream_connect_time"] == "-"
 
 
-def test_log_de_acesso_mostra_o_502_sem_upstream_quando_a_api_sai_do_dns(
+def test_log_de_acesso_mostra_a_falha_sem_upstream_quando_a_api_sai_do_dns(
     error_logs: ErrorRun,
 ) -> None:
     # Sem resolver o nome, o Nginx não contata upstream nenhum: status do upstream vazio.
     entry = _access_entries(error_logs.stdout)[API_GONE.path]
-    assert entry["status"] == HTTP_BAD_GATEWAY
+    assert entry["status"] == HTTP_SERVICE_UNAVAILABLE
     assert entry["upstream_status"] == ""
