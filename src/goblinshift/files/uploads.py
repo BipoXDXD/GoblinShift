@@ -161,7 +161,9 @@ def receive_content(
 
     Uma transação curta reserva o único escritor (`created → receiving`), a transferência para o
     storage acontece sem transação aberta, e outra transação curta conclui. Qualquer falha no
-    caminho deixa o upload `failed`, sem reabri-lo, e nenhum arquivo sob a chave.
+    caminho, inclusive perder a vez para a exclusão, apaga o que chegou ao disco e deixa o upload
+    `failed`, sem reabri-lo. Se nem apagar der certo, ele segue `receiving`, com a reserva, até a
+    retenção vencê-lo.
     """
     with session.begin():
         storage_key, expected_size = _claim_writer(session, owner_id, upload_id)
@@ -180,7 +182,7 @@ def receive_content(
         completed = _complete(session, owner_id, upload_id, sha256, size)
     if not completed:
         # Excluído ou expirado durante a transferência: o arquivo novo não tem dono.
-        storage.delete(storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key)
         with session.begin():
             _raise_unavailable(session, owner_id, upload_id)
     with session.begin():
@@ -409,10 +411,13 @@ def _fail(
     upload_id: uuid.UUID,
     storage_key: str,
 ) -> None:
-    """`receiving → failed`, libera a reserva e remove o que tiver chegado ao disco.
+    """Remove o que tiver chegado ao disco e só então faz `receiving → failed` e libera a reserva.
 
-    O objeto segue `pending` até a retenção remover linha e objeto.
+    A reserva cobre o arquivo enquanto ele existir: se a remoção falhar, a exceção sobe com o
+    upload ainda `receiving` e reservado, e a retenção leva os dois no vencimento. O objeto segue
+    `pending` até a retenção remover linha e objeto.
     """
+    storage.delete(storage_key)
     with session.begin():
         failed = session.execute(
             update(upload)
@@ -426,7 +431,6 @@ def _fail(
         ).scalar_one_or_none()
         if failed is not None:
             capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
-    storage.delete(storage_key)
 
 
 def _raise_unavailable(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> NoReturn:

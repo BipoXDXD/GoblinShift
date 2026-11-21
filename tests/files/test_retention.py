@@ -1,16 +1,22 @@
 """Expiração em lote e remoção física com limitador (1.7 e 3.4)."""
 
+import errno
 import logging
+import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import Table, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.files import retention
 from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
-from goblinshift.files.errors import UploadNotFoundError
+from goblinshift.files.errors import UploadGoneError, UploadNotFoundError
 from goblinshift.files.objects import hold, release
 from goblinshift.files.retention import (
     expire_artifacts,
@@ -26,9 +32,11 @@ from goblinshift.files.uploads import (
     UploadView,
     get_upload,
     lock_ready_uploads,
+    receive_content,
     request_deletion,
 )
 from goblinshift.platform.db import unit_of_work
+from tests.capacity.support import account_reserved, live_amount
 from tests.files.support import (
     create_intent,
     create_user,
@@ -153,6 +161,144 @@ def test_upload_incompleto_excluido_sai_sem_esperar_o_prazo(
         assert expire_incomplete_uploads(session, storage).uploads == 1
 
     assert object_states(factory) == {}
+
+
+# Dois blocos de 2500 bytes: o escritor fica preso entre eles, com o primeiro já no disco.
+HALF_CONTENT_BYTES = 2500
+CONTENT_BYTES = 2 * HALF_CONTENT_BYTES
+WRITER_TIMEOUT_S = 10
+
+
+@dataclass
+class BlockedWriter:
+    first_chunk_sent: threading.Event = field(default_factory=threading.Event)
+    release: threading.Event = field(default_factory=threading.Event)
+    thread: threading.Thread | None = None
+    error: BaseException | None = None
+
+
+@contextmanager
+def blocked_writer(
+    factory: sessionmaker[Session], storage: FileStorage, owner: uuid.UUID, upload_id: uuid.UUID
+) -> Iterator[BlockedWriter]:
+    """Escritor numa thread, preso no meio da transferência até o bloco `with` terminar."""
+    writer = BlockedWriter()
+
+    def chunks() -> Iterator[bytes]:
+        yield b"a" * HALF_CONTENT_BYTES
+        writer.first_chunk_sent.set()
+        writer.release.wait(timeout=WRITER_TIMEOUT_S)
+        yield b"b" * HALF_CONTENT_BYTES
+
+    def write() -> None:
+        try:
+            with factory() as session:
+                receive_content(session, storage, owner, upload_id, chunks())
+        except BaseException as error:  # conferida pelo teste em `writer.error`
+            writer.error = error
+
+    writer.thread = threading.Thread(target=write, daemon=True)
+    writer.thread.start()
+    try:
+        assert writer.first_chunk_sent.wait(timeout=WRITER_TIMEOUT_S)
+        yield writer
+    finally:
+        writer.release.set()
+        writer.thread.join(timeout=WRITER_TIMEOUT_S)
+    assert not writer.thread.is_alive(), "o escritor não terminou"
+
+
+def upload_state(factory: sessionmaker[Session], upload_id: uuid.UUID) -> str:
+    with factory() as session:
+        state: str = session.execute(
+            select(upload.c.state).where(upload.c.id == upload_id)
+        ).scalar_one()
+    return state
+
+
+def test_upload_recebendo_excluido_mantem_linha_e_reserva_ate_o_escritor_terminar(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=CONTENT_BYTES)
+
+    with blocked_writer(factory, storage, owner, intent.id) as writer:
+        with unit_of_work(factory) as session:
+            request_deletion(session, owner, intent.id)
+        with factory() as session:
+            assert expire_incomplete_uploads(session, storage).uploads == 0
+        assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
+
+    assert isinstance(writer.error, UploadGoneError)
+
+
+def test_escritor_que_perde_a_vez_apaga_o_arquivo_marca_failed_e_libera_a_reserva(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=CONTENT_BYTES)
+    _, storage_key = object_of(factory, intent.id)
+
+    with blocked_writer(factory, storage, owner, intent.id), unit_of_work(factory) as session:
+        request_deletion(session, owner, intent.id)
+
+    assert upload_state(factory, intent.id) == "failed"
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) is None
+    assert account_reserved(factory, owner) == 0
+    with pytest.raises(ObjectMissingError):
+        storage.stat(storage_key)
+    with factory() as session:
+        assert expire_incomplete_uploads(session, storage).uploads == 1
+
+
+def test_upload_recebendo_vencido_sai_pela_retencao_mesmo_com_escritor_preso(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=CONTENT_BYTES)
+    _, storage_key = object_of(factory, intent.id)
+
+    with blocked_writer(factory, storage, owner, intent.id) as writer:
+        expire_row(factory, upload, intent.id)
+        with factory() as session:
+            assert expire_incomplete_uploads(session, storage).uploads == 1
+        assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) is None
+
+    assert isinstance(writer.error, UploadNotFoundError)
+    # A linha já tinha saído: o arquivo que o escritor terminou de gravar sai com ele.
+    with pytest.raises(ObjectMissingError):
+        storage.stat(storage_key)
+
+
+def test_falha_ao_apagar_no_escritor_mantem_a_reserva_ate_o_vencimento(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=CONTENT_BYTES)
+    _, storage_key = object_of(factory, intent.id)
+    delete_from_disk = storage.delete
+
+    with blocked_writer(factory, storage, owner, intent.id) as writer:
+        with unit_of_work(factory) as session:
+            request_deletion(session, owner, intent.id)
+
+        def refuse_in_writer(key: str) -> None:
+            if threading.current_thread() is writer.thread:
+                raise OSError(errno.EIO, "disco recusou")
+            delete_from_disk(key)
+
+        monkeypatch.setattr(storage, "delete", refuse_in_writer)
+
+    assert isinstance(writer.error, OSError)
+    assert upload_state(factory, intent.id) == "receiving"
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
+    # O arquivo segue ocupando disco com a reserva; a retenção leva os dois no vencimento.
+    expire_row(factory, upload, intent.id)
+    with factory() as session:
+        assert expire_incomplete_uploads(session, storage).uploads == 1
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) is None
+    with pytest.raises(ObjectMissingError):
+        storage.stat(storage_key)
 
 
 # --- Uploads prontos sem uso ------------------------------------------------------------------
