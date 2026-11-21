@@ -73,6 +73,13 @@ def test_ffmpeg_sem_stdin_numa_thread_sem_metadados_e_sem_sobrescrever(command: 
     assert argv[-2:] == ["-n", str(TARGET)]
 
 
+@pytest.mark.parametrize("command", ["probe", "audio", "thumbnail", "before"])
+def test_toda_leitura_decodifica_numa_thread(command: str) -> None:
+    argv = all_commands(Container.MOV)[command]
+    assert option(argv, "-threads") == "1"
+    assert argv.index("-threads") < argv.index("-i")
+
+
 def test_mov_nao_segue_referencias_a_outros_arquivos() -> None:
     for argv in all_commands(Container.MOV).values():
         assert option(argv, "-enable_drefs") == "0"

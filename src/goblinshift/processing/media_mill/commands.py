@@ -77,6 +77,8 @@ def probe_argv(ffprobe: Path, source: Source) -> list[str]:
         "-loglevel",
         "error",
         *source.input_options(),
+        "-threads",
+        "1",
         "-show_entries",
         PROBE_ENTRIES,
         "-of",
