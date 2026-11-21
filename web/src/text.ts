@@ -337,7 +337,7 @@ export const TEXT = {
         FIELD_LIMIT_EXCEEDED:
           "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
         MEDIA_TOO_LARGE:
-          "O vídeo passa de 300 s, de 1920 × 1080 ou de 60 fps, ou demorou demais para processar.",
+          "O vídeo passa de 300 s, de 1920 × 1080 ou de 60 fps, tem áudio mais longo que o vídeo, gera arquivo grande demais ou demorou demais para processar.",
         AUDIO_LIMIT_EXCEEDED: "A faixa de áudio passa de 48 kHz ou de 2 canais.",
         AUDIO_STREAM_NOT_FOUND: "O vídeo não tem a faixa de áudio pedida.",
       },
