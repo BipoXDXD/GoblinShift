@@ -8,11 +8,12 @@ limite (nem forjar o IP da auditoria) trocando o valor a cada pedido. Em IPv6 o 
 """
 
 import json
+import re
 from collections.abc import Iterator
 
 import pytest
 
-from tests.test_nginx_logs import API_ECHO, NginxLogs
+from tests.test_nginx_logs import API_ECHO, TEMPLATES, NginxLogs
 
 pytestmark = pytest.mark.nginx
 
@@ -22,6 +23,7 @@ HTTP_NO_CONTENT = 204
 HTTP_TOO_MANY_REQUESTS = 429
 # Um pedido a cada 6 s repõe a cota (10 por minuto).
 RETRY_AFTER_SECONDS = "6"
+AUTH_LIMIT = re.compile(r"limit_req zone=auth(?: |$)")
 
 
 @pytest.fixture(scope="module")
@@ -194,3 +196,54 @@ def test_limite_de_auth_nao_afeta_a_api(stack: NginxLogs) -> None:
     _statuses(stack, stack.edge, "/auth/login/google", AUTH_ALLOWED_IN_A_ROW + 1, header)
 
     assert _statuses(stack, stack.edge, "/api/v1/me", 1, header) == [HTTP_NO_CONTENT]
+
+
+# --- configuração, sem Docker -----------------------------------------------------------------
+
+
+def _location_directives(config: str) -> dict[str, list[str]]:
+    """Diretivas simples de cada `location`, pelo cabeçalho normalizado (`location /auth/`).
+
+    Lê o arquivo caractere a caractere, como o Nginx: `;` fecha a diretiva, `{` e `}` abrem e
+    fecham bloco, `#` fora de aspas comenta até o fim da linha e o texto entre aspas (o JSON dos
+    `return 429`) não conta. Não depende de quebras de linha nem de onde ficam as chaves.
+    """
+    blocks: dict[str, list[str]] = {}
+    stack: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    comment = False
+    for char in config:
+        if comment:
+            comment = char != "\n"
+        elif quote is not None:
+            buffer.append(char)
+            quote = None if char == quote else quote
+        elif char in "'\"":
+            buffer.append(char)
+            quote = char
+        elif char == "#":
+            comment = True
+        elif char in "{;}":
+            statement = " ".join("".join(buffer).split())
+            buffer.clear()
+            if char == "{":
+                stack.append(statement)
+                blocks.setdefault(statement, [])
+            elif char == ";" and stack:
+                blocks[stack[-1]].append(statement)
+            elif char == "}":
+                stack.pop()
+        else:
+            buffer.append(char)
+    return {name: body for name, body in blocks.items() if name.startswith("location ")}
+
+
+def test_location_de_auth_aplica_o_limite_da_zona_auth() -> None:
+    """Sem Docker: o login anônimo só tem o limite do proxy, já que a API conta por conta."""
+    locations = _location_directives((TEMPLATES / "default.conf.template").read_text())
+
+    limits = [line for line in locations["location /auth/"] if line.startswith("limit_req ")]
+
+    assert len(limits) == 1
+    assert AUTH_LIMIT.match(limits[0])
