@@ -91,13 +91,12 @@ E2E_VPS=1 E2E_BASE_URL=https://goblinshift.dev GS_E2E_API_KEY=... npm run e2e   
 
 As jornadas de leitura `E2E_VPS=1` também selecionam Firefox. Nos workflows CI e de leitura na VPS, o cliente Playwright 1.65.1 usa o **Firefox oficial r1575**, que corrige a regressão ARIA do bundle r1572. O instalador [`scripts/ci_firefox.py`](scripts/ci_firefox.py) admite somente **Ubuntu 24.04 AMD64**, verifica o SHA-256 antes de extrair e mantém o browser em diretório próprio, sem alterar `browsers.json` nem sobrescrever o cache do Playwright. Os workflows CI e de leitura na VPS já fazem instalação, controles de regressão e cleanup.
 
-Para executar as jornadas manualmente com esse Firefox na plataforma suportada, defina `E2E_BASE_URL` e `GS_E2E_API_KEY` no ambiente e execute da raiz do repositório. O subshell mantém as variáveis temporárias isoladas e limpa o browser também se a instalação ou as jornadas falharem:
+Para executar as jornadas manualmente com esse Firefox na plataforma suportada, defina `E2E_BASE_URL` com a origem do site e execute da raiz do repositório. Sem `GS_E2E_API_KEY` rodam só as jornadas anônimas; com a chave da conta de teste, `E2E_VPS=1` só aceita `https://goblinshift.dev`. O subshell mantém as variáveis temporárias isoladas e limpa o browser também se a instalação ou as jornadas falharem:
 
 ```bash
 (
   set -e
-  : "${E2E_BASE_URL:?Defina a origem da API}"
-  : "${GS_E2E_API_KEY:?Defina a chave da conta de teste}"
+  : "${E2E_BASE_URL:?Defina a origem do site}"
   export RUNNER_TEMP="$(mktemp -d)"
   export GITHUB_ENV="$RUNNER_TEMP/firefox.env"
   unset GS_FIREFOX_EXECUTABLE
@@ -115,7 +114,7 @@ Para executar as jornadas manualmente com esse Firefox na plataforma suportada, 
 )
 ```
 
-`GS_FIREFOX_EXECUTABLE` deve ser um caminho absoluto para um arquivo executável. A configuração recusa um override inválido e exige o override nas jornadas `CI` + `E2E_VPS`. Fora do CI, `E2E_VPS` sem esse override usa o Firefox padrão do Playwright; portanto prepare o pin explicitamente como acima. Não há pin r1575 homologado por este instalador para macOS, ARM64 ou outra distribuição; o Chromium local continua disponível, mas não substitui a validação das jornadas Firefox no Ubuntu suportado.
+`GS_FIREFOX_EXECUTABLE` deve ser um caminho absoluto para um arquivo executável. A configuração recusa um override inválido e exige o override quando `CI` está definido e a leitura é remota (`E2E_VPS=1` no workflow da VPS, `E2E_CI_READ=1` na pilha descartável do CI). Fora do CI, `E2E_VPS=1` sem esse override usa o Firefox padrão do Playwright; portanto prepare o pin explicitamente como acima. Não há pin r1575 homologado por este instalador para macOS, ARM64 ou outra distribuição; o Chromium local continua disponível, mas não substitui a validação das jornadas Firefox no Ubuntu suportado.
 
 No modo remoto, as specs que dependem de estado forçado na API falsa (as matrizes de telas por estado, o CLS da Execução e a jornada do Media Mill, cujos MP4 de fixture são falsos) são puladas, e a suíte roda com um worker: a conta tem uma execução ativa por vez. Contra o Compose, a conta sai do `gs-admin` com `create-user` e `issue-key`, com todos os escopos (`--scopes files:read,files:write,runs:read,runs:write,presets:read,presets:write`). Cada rodada consome 12 das 30 execuções diárias da conta; para repetir mais vezes na mesma conta local, use `gs-admin set-limits --user <id> --runs-per-24h <n>`.
 
