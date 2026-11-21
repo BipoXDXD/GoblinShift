@@ -1,5 +1,6 @@
 """Receita pdf-press v1 sobre o contrato de 3.2 (docs/GoblinShiftPlan.md, 1.5 e 1.7; ADR 035)."""
 
+import io
 import json
 
 import pikepdf
@@ -84,6 +85,59 @@ def test_split_de_nomes_iguais_nao_sobrescreve(work: Workspace) -> None:
         "previews/a-p001_1.json",
     ]
     assert samples.markers(work.read("a-p001_1.pdf")) == ["b:1"]
+
+
+def private_keys(data: bytes) -> list[str]:
+    """Chaves privadas em todo dicionário alcançável do trailer, direto ou indireto."""
+    found: list[str] = []
+    with pikepdf.open(io.BytesIO(data)) as pdf:
+        seen: set[tuple[int, int]] = set()
+        stack: list[object] = [pdf.trailer]
+        while stack:
+            node = stack.pop()
+            if not isinstance(node, pikepdf.Array | pikepdf.Dictionary | pikepdf.Stream):
+                continue
+            if node.is_indirect:
+                if node.objgen in seen:
+                    continue
+                seen.add(node.objgen)
+            if isinstance(node, pikepdf.Array):
+                stack.extend(node)
+            else:
+                found += [k for k in ("/Metadata", "/PieceInfo", "/LastModified") if k in node]
+                stack.extend(node.values())
+    return found
+
+
+def xml_streams(data: bytes) -> int:
+    with pikepdf.open(io.BytesIO(data)) as pdf:
+        return sum(
+            isinstance(o, pikepdf.Stream) and o.get("/Subtype") == pikepdf.Name.XML
+            for o in pdf.objects
+        )
+
+
+def test_saida_sai_sem_metadados_privados_de_pagina_e_xobject(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", mutate=samples.private_metadata))
+
+    work.run()
+
+    merged = work.read("merged.pdf")
+    assert private_keys(merged) == []
+    assert xml_streams(merged) == 0
+    assert samples.markers(merged) == ["a:1"]
+    with pikepdf.open(io.BytesIO(merged)) as pdf:
+        assert list(pdf.pages[0].Resources.XObject.keys()) == ["/Fm0"]
+
+
+def test_split_tira_os_metadados_de_cada_parte(work: Workspace) -> None:
+    work.add("a.pdf", samples.document("a", pages=2, mutate=samples.private_metadata))
+
+    work.run(Params(operation=Operation.SPLIT, pages_per_document=1))
+
+    for name in ("a-p001.pdf", "a-p002.pdf"):
+        assert private_keys(work.read(name)) == []
+        assert xml_streams(work.read(name)) == 0
 
 
 def test_select_preserva_ordem_e_repeticoes(work: Workspace) -> None:

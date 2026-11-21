@@ -1,8 +1,11 @@
 """Do arquivo à imagem pronta para redimensionar (docs/GoblinShiftPlan.md, 1.2).
 
-Ordem: cabeçalho → validação → `load()` → orientação EXIF → modo → perfil de cor. Tudo o que o
-decodificador pode recusar acontece aqui e vira `ImageRejected`; a gravação fica fora, para um
-erro de disco ou de teto de saída nunca virar rejeição silenciosa (1.1).
+Ordem: cabeçalho → validação → `load()` → orientação EXIF → modo → perfil de cor. Só as
+chamadas do Pillow traduzem os erros dele em `ImageRejected`: a decodificação inteira (até a
+orientação, com a leitura do EXIF e do ICC) e, na normalização de modo, o `convert()`, que é onde
+um `tRNS` maior que a paleta estoura. O resto da normalização de modo e de cor fica fora, para um
+bug nosso propagar em vez de virar imagem recusada. A gravação também fica fora, para um erro de
+disco ou de teto de saída nunca virar rejeição silenciosa (1.1).
 
 Os avisos do Pillow durante a decodificação viram erro e recusa: um EXIF corrompido, por
 exemplo, só gera `UserWarning`, e seguir em frente seria adivinhar a orientação.
@@ -12,13 +15,14 @@ import struct
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, NoReturn
 
 from PIL import ExifTags, Image, UnidentifiedImageError
 
 from goblinshift.processing.image_forge.color import ColorProfile, to_srgb
 from goblinshift.processing.image_forge.inspection import (
     MPO,
+    Header,
     header_prefix,
     open_image,
     read_header,
@@ -61,12 +65,22 @@ class Prepared:
     frames_discarded: int  # quadros do MPO além do principal
 
 
+@dataclass(frozen=True)
+class _Decoded:
+    image: Image.Image  # já orientada, cópia independente do arquivo
+    header: Header
+    orientation: int
+    icc: bytes | None
+    exif_color_space: int | None
+    declares_srgb: bool
+
+
 def prepare(path: Path, limits: Limits) -> Prepared:
     """Imagem pronta para redimensionar, ou `ImageRejected`."""
     with path.open("rb") as source:
         try:
             with warnings.catch_warnings(action="error"):
-                return _prepare(source, limits)
+                decoded = _decode(source, limits)
         except _BOMB as error:
             raise ImageRejected(
                 RejectionCode.IMAGE_TOO_LARGE, "imagem acima do limite de pixels"
@@ -76,14 +90,33 @@ def prepare(path: Path, limits: Limits) -> Prepared:
                 RejectionCode.UNSUPPORTED_FORMAT, "não é um JPEG nem um PNG reconhecível"
             ) from error
         except _DECODER_ERRORS as error:
-            if isinstance(error, OSError) and error.errno is not None:
-                raise
-            raise ImageRejected(
-                RejectionCode.UNSUPPORTED_FORMAT, "imagem corrompida ou ilegível"
-            ) from error
+            _reject_unreadable(error)
+    srgb, color_profile = to_srgb(
+        _normalized_mode(decoded.image),
+        decoded.icc,
+        decoded.exif_color_space,
+        decoded.declares_srgb,
+    )
+    header = decoded.header
+    return Prepared(
+        image=srgb,
+        source_format=header.image_format.lower(),
+        orientation=decoded.orientation,
+        color_profile=color_profile,
+        frames_discarded=header.frames - 1 if header.image_format == MPO else 0,
+    )
 
 
-def _prepare(source: BinaryIO, limits: Limits) -> Prepared:
+def _reject_unreadable(error: Exception) -> NoReturn:
+    """Erro do Pillow vira recusa; `OSError` com errno é falha real de leitura e propaga."""
+    if isinstance(error, OSError) and error.errno is not None:
+        raise error
+    raise ImageRejected(
+        RejectionCode.UNSUPPORTED_FORMAT, "imagem corrompida ou ilegível"
+    ) from error
+
+
+def _decode(source: BinaryIO, limits: Limits) -> _Decoded:
     prefix = header_prefix(source)
     with open_image(source) as opened:
         header = read_header(opened, prefix)
@@ -93,22 +126,15 @@ def _prepare(source: BinaryIO, limits: Limits) -> Prepared:
         exif = opened.getexif()
         orientation = _orientation(exif)
         icc = opened.info.get("icc_profile")
-        declares_srgb = "srgb" in opened.info
         # Cópia antes de sair do `with`: fechar o arquivo do Pillow descarta a imagem aberta.
-        image = _normalized_mode(_oriented(opened, orientation))
-    srgb, color_profile = to_srgb(
-        image,
-        icc if isinstance(icc, bytes) else None,
-        exif.get_ifd(ExifTags.IFD.Exif).get(ExifTags.Base.ColorSpace),
-        declares_srgb,
-    )
-    return Prepared(
-        image=srgb,
-        source_format=header.image_format.lower(),
-        orientation=orientation,
-        color_profile=color_profile,
-        frames_discarded=header.frames - 1 if header.image_format == MPO else 0,
-    )
+        return _Decoded(
+            image=_oriented(opened, orientation),
+            header=header,
+            orientation=orientation,
+            icc=icc if isinstance(icc, bytes) else None,
+            exif_color_space=exif.get_ifd(ExifTags.IFD.Exif).get(ExifTags.Base.ColorSpace),
+            declares_srgb="srgb" in opened.info,
+        )
 
 
 def _orientation(exif: Image.Exif) -> int:
@@ -134,12 +160,19 @@ def _normalized_mode(image: Image.Image) -> Image.Image:
     transparent = "transparency" in image.info
     match image.mode:
         case "1":
-            return image.convert("L")
+            return _converted(image, "L")
         case "P":
-            return image.convert("RGBA" if transparent else "RGB")
+            return _converted(image, "RGBA" if transparent else "RGB")
         case "RGB" if transparent:
-            return image.convert("RGBA")
+            return _converted(image, "RGBA")
         case "L" if transparent:
-            return image.convert("LA")
+            return _converted(image, "LA")
         case _:
             return image
+
+
+def _converted(image: Image.Image, mode: str) -> Image.Image:
+    try:
+        return image.convert(mode)
+    except _DECODER_ERRORS as error:
+        _reject_unreadable(error)

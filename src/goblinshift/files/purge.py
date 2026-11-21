@@ -56,7 +56,8 @@ def attempts_with_pending_outputs(session: Session, attempt_ids: Collection[UUID
 def _request_deletion_batch(session: Session, owner_id: UUID, limit: int) -> bool:
     """Exclui uploads e artefatos e pede a exclusão dos objetos sem referência; True se marcou.
 
-    Upload incompleto excluído sai com o próprio objeto pendente em `expire_incomplete_uploads`.
+    Upload incompleto excluído sai com o próprio objeto pendente em `expire_incomplete_uploads`;
+    o `receiving` espera o vencimento, porque o arquivo do escritor ainda ocupa disco.
     """
     upload_objects = _mark_deleted(session, upload, owner_id, limit)
     artifact_objects = _mark_deleted(session, artifact, owner_id, limit)

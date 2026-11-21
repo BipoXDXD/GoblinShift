@@ -278,6 +278,166 @@ def test_consultar_chave_que_e_diretorio_falha_como_adulteracao(storage: FileSto
         storage.stat("uploads/alvo")
 
 
+# --- Diretórios do meio adulterados ------------------------------------------------------------
+# O `O_NOFOLLOW` só protege o último nome do caminho: um symlink em `uploads/` ou `runs/<run>/`
+# desviava leitura, gravação e remoção para fora da raiz. O storage desce nível a nível sem seguir
+# link, e um diretório do meio que não é diretório comum é adulteração, como o objeto trocado.
+
+
+def plant_in_the_middle(storage: FileStorage, tmp_path: Path, planted: str) -> Path:
+    """Troca `uploads/` por symlink para um diretório fora da raiz, ou por arquivo comum.
+
+    Devolve o diretório de fora, que já tem um `alvo` com conteúdo.
+    """
+    outside = tmp_path / "CANARY-fora-da-raiz"
+    outside.mkdir()
+    (outside / "alvo").write_bytes(b"segredo")
+    storage.root.mkdir(parents=True)
+    middle = storage.root / "uploads"
+    if planted == "symlink":
+        middle.symlink_to(outside, target_is_directory=True)
+    else:
+        middle.write_bytes(b"x")
+    return outside
+
+
+MIDDLE_PLANTS = ["symlink", "arquivo"]
+
+
+@pytest.mark.parametrize("planted", MIDDLE_PLANTS)
+def test_abrir_com_diretorio_do_meio_adulterado_falha_sem_ler_fora_da_raiz(
+    storage: FileStorage, tmp_path: Path, planted: str
+) -> None:
+    plant_in_the_middle(storage, tmp_path, planted)
+
+    with pytest.raises(ObjectTamperedError) as raised:
+        storage.open("uploads/alvo")
+
+    assert str(storage.root) not in str(raised.value)
+    assert "CANARY" not in str(raised.value)
+
+
+@pytest.mark.parametrize("planted", MIDDLE_PLANTS)
+def test_consultar_com_diretorio_do_meio_adulterado_falha_como_adulteracao(
+    storage: FileStorage, tmp_path: Path, planted: str
+) -> None:
+    plant_in_the_middle(storage, tmp_path, planted)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.stat("uploads/alvo")
+
+
+@pytest.mark.parametrize("planted", MIDDLE_PLANTS)
+def test_excluir_com_diretorio_do_meio_adulterado_falha_sem_apagar_fora_da_raiz(
+    storage: FileStorage, tmp_path: Path, planted: str
+) -> None:
+    outside = plant_in_the_middle(storage, tmp_path, planted)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.delete("uploads/alvo")
+
+    assert (outside / "alvo").read_bytes() == b"segredo"
+
+
+@pytest.mark.parametrize("planted", MIDDLE_PLANTS)
+def test_gravar_com_diretorio_do_meio_adulterado_falha_sem_gravar_fora_da_raiz(
+    storage: FileStorage, tmp_path: Path, planted: str
+) -> None:
+    outside = plant_in_the_middle(storage, tmp_path, planted)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.create_exclusive("uploads/novo", [b"intruso"], max_bytes=100)
+
+    assert sorted(path.name for path in outside.iterdir()) == ["alvo"]
+    assert list((storage.root / ".tmp").glob("*")) == []
+
+
+def test_gravar_nao_cria_diretorios_sob_symlink_do_meio(
+    storage: FileStorage, tmp_path: Path
+) -> None:
+    # Os níveis que faltam abaixo do link (`runs/<run>/g1`) nasceriam fora da raiz.
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    storage.root.mkdir(parents=True)
+    (storage.root / "runs").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.create_exclusive("runs/r1/g1/saida", [b"x"], max_bytes=1)
+
+    assert list(outside.iterdir()) == []
+
+
+def test_gravar_com_diretorio_de_temporarios_trocado_por_symlink_nao_grava_fora_da_raiz(
+    storage: FileStorage, tmp_path: Path
+) -> None:
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    storage.root.mkdir(parents=True)
+    (storage.root / ".tmp").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.create_exclusive("uploads/novo", [b"intruso"], max_bytes=100)
+
+    assert list(outside.iterdir()) == []
+    with pytest.raises(ObjectMissingError):
+        storage.stat("uploads/novo")
+
+
+def test_operacoes_com_diretorio_do_meio_adulterado_nao_vazam_descritor(
+    storage: FileStorage, tmp_path: Path
+) -> None:
+    plant_in_the_middle(storage, tmp_path, "symlink")
+    before = _open_fd_count()
+
+    for _ in range(10):
+        with pytest.raises(ObjectTamperedError):
+            storage.open("uploads/alvo")
+        with pytest.raises(ObjectTamperedError):
+            storage.stat("uploads/alvo")
+        with pytest.raises(ObjectTamperedError):
+            storage.delete("uploads/alvo")
+        with pytest.raises(ObjectTamperedError):
+            storage.create_exclusive("uploads/novo", [b"x"], max_bytes=1)
+
+    assert _open_fd_count() == before
+
+
+def test_operacoes_comuns_nao_vazam_descritor(storage: FileStorage) -> None:
+    storage.create_exclusive("runs/r1/g1/a", [b"abc"], max_bytes=10)
+    before = _open_fd_count()
+
+    for index in range(10):
+        storage.create_exclusive(f"runs/r1/g{index + 2}/b", [b"abc"], max_bytes=10)
+        assert storage.stat("runs/r1/g1/a").size_bytes == 3
+        with storage.open("runs/r1/g1/a") as file:
+            assert file.read() == b"abc"
+        storage.delete(f"runs/r1/g{index + 2}/b")
+        storage.delete("runs/nunca/g1/existiu")
+
+    assert _open_fd_count() == before
+
+
+def test_gravacoes_concorrentes_no_mesmo_diretorio_novo_criam_os_dois_objetos(
+    storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Outro processo cria o diretório entre a tentativa de abrir e a de criar: o `EEXIST` do
+    # `mkdir` não é erro, e o diretório criado pelo outro é aberto e usado.
+    real_mkdir = os.mkdir
+
+    def racing_mkdir(path: str, mode: int = 0o777, *, dir_fd: int | None = None) -> None:
+        if path == "r1":
+            real_mkdir(path, mode, dir_fd=dir_fd)
+        real_mkdir(path, mode, dir_fd=dir_fd)
+
+    storage.create_exclusive("runs/r0/g1/a", [b"a"], max_bytes=1)
+    monkeypatch.setattr(os, "mkdir", racing_mkdir)
+
+    storage.create_exclusive("runs/r1/g1/b", [b"b"], max_bytes=1)
+
+    with storage.open("runs/r1/g1/b") as file:
+        assert file.read() == b"b"
+
+
 def test_diretorios_e_arquivos_sao_privados_do_dono(storage: FileStorage) -> None:
     storage.create_exclusive("runs/r1/g1/saida", [b"x"], max_bytes=1)
 

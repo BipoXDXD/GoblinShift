@@ -163,12 +163,30 @@ def run_transaction[T](
     raise RuntimeError("laço de retentativa terminou sem resultado")  # inalcançável
 
 
-def load_run(
+def load_owned_run(session: Session, owner_id: uuid.UUID, run_id: uuid.UUID) -> LoadedRun | None:
+    """Lê e trava a Run de `owner_id`, para quem atende a requisição de uma conta.
+
+    A Run de outra conta volta `None`, igual à inexistente. As rotas usam só esta.
+    """
+    return _load_run(session, run_id, owner_id=owner_id, skip_locked=False)
+
+
+def load_run_any_owner(
+    session: Session, run_id: uuid.UUID, *, skip_locked: bool = False
+) -> LoadedRun | None:
+    """Lê e trava a Run de qualquer conta: só para a manutenção e o worker.
+
+    Nenhuma rota pode chamá-la (`tests/security/test_run_loader_fitness.py`).
+    """
+    return _load_run(session, run_id, owner_id=None, skip_locked=skip_locked)
+
+
+def _load_run(
     session: Session,
     run_id: uuid.UUID,
     *,
-    owner_id: uuid.UUID | None = None,
-    skip_locked: bool = False,
+    owner_id: uuid.UUID | None,
+    skip_locked: bool,
 ) -> LoadedRun | None:
     """Lê e trava a Run (`FOR UPDATE`, ou `SKIP LOCKED` na manutenção) como `RunState`.
 
@@ -266,7 +284,7 @@ def lock_fenced(session: Session, fence: Fence, statuses: Collection[Status]) ->
     O lock vale até o commit: entre esta leitura e as escritas da mesma transação, nenhum claim
     muda a geração. Qualquer divergência é `LostFencing`.
     """
-    loaded = load_run(session, fence.run_id)
+    loaded = load_run_any_owner(session, fence.run_id)
     if loaded is None:
         raise LostFencing(f"execução {fence.run_id} não existe")
     state = loaded.state

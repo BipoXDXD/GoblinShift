@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from typing import assert_never
 
-from goblinshift.processing.csv_janitor.janitor import clean_table
+from goblinshift.processing.csv_janitor.janitor import clean_table, shortened_column_name
 from goblinshift.processing.csv_janitor.limits import Limits
 from goblinshift.processing.csv_janitor.params import Params
 from goblinshift.processing.csv_janitor.preview import table_preview
@@ -87,7 +87,9 @@ class CsvJanitorV1:
 
 def _report_warning(warning: TableWarning, cleaned: TableCleaned) -> ReportWarning:
     columns = (
-        tuple(cleaned.formula_cells.items()) if warning.code is WarningCode.FORMULA_CELLS else ()
+        tuple((shortened_column_name(name), count) for name, count in cleaned.formula_cells.items())
+        if warning.code is WarningCode.FORMULA_CELLS
+        else ()
     )
     return ReportWarning(warning.code, warning.detail, columns)
 

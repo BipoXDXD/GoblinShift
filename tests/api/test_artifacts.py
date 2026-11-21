@@ -1,6 +1,7 @@
 """Rotas de artefato: metadados e download protegido (1.6, 1.7 e 3.6)."""
 
 import hashlib
+import os
 import stat
 import uuid
 from datetime import timedelta
@@ -273,6 +274,27 @@ def test_objeto_trocado_por_symlink_responde_410_sem_expor_nada_e_sem_gravar_mis
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 
+@pytest.mark.parametrize("size_on_disk", [3, 20])
+def test_objeto_com_tamanho_diferente_do_registrado_responde_410_e_libera_tudo(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], size_on_disk: int
+) -> None:
+    # O `Content-Length` sai do banco: com o arquivo truncado ou crescido no disco, a resposta
+    # saía 200 e quebrava no meio. Objeto gravado é imutável; tamanho diferente é adulteração.
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"conteudo")
+    key = storage_key_of(factory, artifact_id)
+    storage = storage_of(app)
+    os.truncate(storage.root / key, size_on_disk)
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "Traceback"):
+        assert leaked not in response.text
+    assert object_state_of(factory, artifact_id) == "committed"
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
+
+
 @pytest.mark.parametrize(("code", "status", "problem"), OPEN_FAILURES)
 def test_erro_ao_abrir_o_objeto_no_download_responde_503_ou_410_e_libera_tudo(
     app: FastAPI,
@@ -286,7 +308,7 @@ def test_erro_ao_abrir_o_objeto_no_download_responde_503_ou_410_e_libera_tudo(
     owner, auth = new_account(factory)
     artifact_id = publish(app, owner, b"x")
     storage = storage_of(app)
-    fail_object_open(monkeypatch, storage, code)
+    fail_object_open(monkeypatch, code)
 
     response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
 

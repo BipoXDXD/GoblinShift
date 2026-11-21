@@ -1,5 +1,6 @@
 """Nomes e tetos das saídas (docs/GoblinShiftPlan.md, 3.6 e 1.7)."""
 
+import io
 import unicodedata
 from pathlib import Path
 
@@ -185,6 +186,13 @@ def test_um_byte_acima_do_teto_falha_sem_gravar_o_excesso(tmp_path: Path) -> Non
     assert (tmp_path / "b.csv").read_bytes() == b""
 
 
+def test_saida_nao_entrega_o_descritor_para_nao_escapar_do_teto(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    with out.create("a.bin", CONTENT, 0).stream as stream, pytest.raises(io.UnsupportedOperation):
+        stream.fileno()
+
+
 # --- Grupos: um nível de subpasta, de lista fechada (ADR 019) ---------------------------------
 
 IMAGES = OutputGroup.IMAGES
@@ -327,7 +335,8 @@ def test_o_maior_grupo_com_o_maior_componente_cabe_no_teto_de_caminho(tmp_path: 
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        pytest.param("a.", "a_1.", id="ponto-final-fica-depois-do-sufixo"),
+        pytest.param("a.", "a_1", id="ponto-final-sai-antes-do-sufixo"),
+        pytest.param("a.csv.", "a_1.csv", id="ponto-final-sai-antes-de-achar-a-extensao"),
         pytest.param(".config", ".config_1", id="ponto-inicial-nao-e-extensao"),
         pytest.param("a.tar.gz", "a.tar_1.gz", id="so-o-ultimo-ponto"),
         pytest.param("sem-extensao", "sem-extensao_1", id="sem-ponto"),
@@ -340,6 +349,71 @@ def test_sufixo_de_colisao_entra_antes_da_ultima_extensao(
     write(out, name, 0)
 
     assert write(out, name, 1) == expected
+
+
+# --- Nomes portáveis: o ZIP precisa extrair no Windows sem erro nem colisão --------------------
+
+
+def test_nome_com_caractere_proibido_no_windows_e_trocado(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    assert write(out, "a:b?.csv", 0) == "a_b_.csv"
+    assert (tmp_path / "a_b_.csv").read_bytes() == b"x"
+    assert out.created == (("a_b_.csv", CONTENT),)
+
+
+def test_nome_reservado_do_dos_recebe_sufixo(tmp_path: Path) -> None:
+    assert write(FileSystemOutputDir(tmp_path), "CON.csv", 0) == "CON_.csv"
+
+
+def test_nome_reservado_do_dos_vale_dentro_do_grupo(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    assert write_in(out, THUMBNAILS, "aux.jpg", 0) == "thumbnails/aux_.jpg"
+    assert (tmp_path / "thumbnails" / "aux_.jpg").read_bytes() == b"x"
+
+
+def test_nomes_iguais_depois_da_troca_colidem(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    assert write(out, "a:b.csv", 0) == "a_b.csv"
+    assert write(out, "a_b.csv", 1) == "a_b_1.csv"
+
+
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        (["manifest.json."], ["manifest_3.json"]),
+        (["CON.csv", "CON.csv"], ["CON_.csv", "CON__3.csv"]),
+    ],
+)
+def test_nome_que_so_vira_reservado_pela_regra_colide_e_nao_sobrescreve(
+    tmp_path: Path, names: list[str], expected: list[str]
+) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    written = [write(out, name, 3, f"{index}".encode()) for index, name in enumerate(names)]
+
+    assert written == expected
+    assert [(tmp_path / name).read_bytes() for name in written] == [
+        f"{index}".encode() for index in range(len(names))
+    ]
+    assert not (tmp_path / "manifest.json").exists()
+
+
+def test_truncamento_nao_deixa_espaco_no_fim(tmp_path: Path) -> None:
+    assert write(FileSystemOutputDir(tmp_path), "a" + " " * 179 + "b", 0) == "a"
+
+
+def test_truncamento_que_sobra_nome_reservado_recebe_sufixo(tmp_path: Path) -> None:
+    assert write(FileSystemOutputDir(tmp_path), "CON" + " " * 177 + "x", 0) == "CON_"
+
+
+def test_sufixo_de_nome_reservado_exposto_pelo_corte_ainda_cabe_no_teto(tmp_path: Path) -> None:
+    name = write(FileSystemOutputDir(tmp_path), "CON" + " " * 177 + "x.csv", 0)
+
+    assert name == "CON" + " " * 172 + "_.csv"
+    assert len(name.encode()) == MAX_COMPONENT_BYTES
 
 
 # --- Espaço para saídas opcionais (previews): consultado antes de criar, nunca estoura o teto ----
