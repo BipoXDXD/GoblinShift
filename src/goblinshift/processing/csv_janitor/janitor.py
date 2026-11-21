@@ -235,4 +235,7 @@ def shortened_column_name(name: str) -> str:
     """Nome de coluna como os avisos o citam: no máximo `WARNING_COLUMN_NAME_CHARS` caracteres."""
     if len(name) <= WARNING_COLUMN_NAME_CHARS:
         return name
+    if not name.strip():
+        # Só espaços continua só espaços: vazio tem rótulo próprio na tela (runs/formula_cells.py).
+        return name[:WARNING_COLUMN_NAME_CHARS]
     return name[: WARNING_COLUMN_NAME_CHARS - len(_ELLIPSIS)] + _ELLIPSIS
