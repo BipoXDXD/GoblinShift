@@ -71,23 +71,29 @@ def restore_capacity_seed(conn: Connection) -> None:
     )
 
 
-def run_migrations(settings: Settings, target: str) -> None:
+# Os downgrades que apagariam linha abortam sem esta licença (#442, 47c). O container é da sessão
+# e outros testes deixam linhas commitadas, então os helpers a dão por padrão; só os testes da
+# guarda passam `allow_lossy=False`.
+LOSSY_DOWNGRADE_ENV = "GS_ALLOW_LOSSY_DOWNGRADE"
+
+
+def run_migrations(settings: Settings, target: str, *, allow_lossy: bool = True) -> None:
     """Roda o Alembic com as mesmas variáveis GS_* que a aplicação usa."""
-    with _alembic_env(settings):
+    with _alembic_env(settings, allow_lossy=allow_lossy):
         if target == "base":
             command.downgrade(Config("alembic.ini"), "base")
         else:
             command.upgrade(Config("alembic.ini"), target)
 
 
-def downgrade_migrations(settings: Settings, target: str) -> None:
+def downgrade_migrations(settings: Settings, target: str, *, allow_lossy: bool = True) -> None:
     """Desce o schema até `target`, como `run_migrations` faz com "base"."""
-    with _alembic_env(settings):
+    with _alembic_env(settings, allow_lossy=allow_lossy):
         command.downgrade(Config("alembic.ini"), target)
 
 
 @contextmanager
-def _alembic_env(settings: Settings) -> Iterator[None]:
+def _alembic_env(settings: Settings, *, allow_lossy: bool = True) -> Iterator[None]:
     env = {
         "GS_DB_HOST": settings.db_host,
         "GS_DB_PORT": str(settings.db_port),
@@ -98,4 +104,9 @@ def _alembic_env(settings: Settings) -> Iterator[None]:
     with pytest.MonkeyPatch.context() as mp:
         for key, value in env.items():
             mp.setenv(key, value)
+        if allow_lossy:
+            mp.setenv(LOSSY_DOWNGRADE_ENV, "1")
+        else:
+            # Sem herdar a licença do shell de quem roda os testes.
+            mp.delenv(LOSSY_DOWNGRADE_ENV, raising=False)
         yield

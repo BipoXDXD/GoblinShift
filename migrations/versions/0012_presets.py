@@ -9,8 +9,12 @@ default: o código anterior não as conhece e continua funcionando. A FK sobre a
 não precisa de `NOT VALID`: com `preset_id` nulo em todas as linhas, a verificação é imediata.
 O índice parcial atende à FK quando um preset é excluído; a tabela de Runs é pequena (retenção de
 90 dias), então criá-lo na transação, sem `CONCURRENTLY`, basta.
+
+O downgrade apaga os presets e a ligação das Runs a eles (`run.preset_id`) e só roda com
+`GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas. Sem preset, nenhuma Run aponta para um (FK).
 """
 
+import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -78,6 +82,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM preset) "
+            "THEN RAISE EXCEPTION 'o downgrade da 0012 apagaria os presets; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     op.drop_index("run_preset_id_idx", table_name="run")
     op.drop_constraint(_RUN_PRESET_FK, "run", type_="foreignkey")
     op.drop_column("run", "preset_id")

@@ -8,8 +8,12 @@ Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Tabela nova; o código
 lê e segue com os limites fixos de 1.7. NULL numa coluna é "sem override": vale o padrão das
 settings. FK com CASCADE, exceção à regra do RESTRICT (3.3): a linha é configuração da conta,
 sem histórico próprio, e sai com ela na purga do `DELETE /me`.
+
+O downgrade apaga os overrides de cota (`account_quota`) e só roda com
+`GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas.
 """
 
+import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -45,4 +49,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM account_quota) "
+            "THEN RAISE EXCEPTION 'o downgrade da 0011 apagaria os overrides de cota; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     op.drop_table("account_quota")

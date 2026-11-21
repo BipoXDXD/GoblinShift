@@ -24,9 +24,12 @@ leva milissegundos. O `env.py` usa o `make_engine`, com `lock_timeout` de 2 s: s
 longa segurar a tabela, a migração falha alto em vez de enfileirar logins e requisições atrás do
 `ACCESS EXCLUSIVE`, e basta rodá-la de novo.
 
-O downgrade apaga os eventos do tipo novo, que o CHECK antigo recusaria, e depois a coluna.
+O downgrade apaga os eventos `ACCOUNT_LIMITS_CHANGED` com o seu detalhe e só roda com
+`GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas: o CHECK antigo recusaria o tipo novo. Depois
+dos eventos sai a coluna.
 """
 
+import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -66,6 +69,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS "
+            "(SELECT FROM audit_event WHERE event_type = 'ACCOUNT_LIMITS_CHANGED') "
+            "THEN RAISE EXCEPTION 'o downgrade da 0016 apagaria os eventos de mudança de limites; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     op.execute("DELETE FROM audit_event WHERE event_type = 'ACCOUNT_LIMITS_CHANGED'")
     op.drop_constraint(op.f(_DETAILS_CHECK), "audit_event", type_="check")
     op.drop_column("audit_event", "details")

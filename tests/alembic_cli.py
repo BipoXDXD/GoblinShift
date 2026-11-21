@@ -39,10 +39,15 @@ def alembic_command(*args: str) -> list[str]:
 
 
 def alembic_env(settings: Settings, environment: str = "production") -> dict[str, str]:
-    """As variáveis GS_* do serviço `migrate`, com a senha em arquivo."""
+    """As variáveis GS_* do serviço `migrate`, com a senha em arquivo.
+
+    Leva a licença dos downgrades com perda, como `tests.conftest._alembic_env`: o banco é da
+    sessão, e outros testes deixam linhas que a guarda da 0018 recusaria apagar.
+    """
     password_file = settings.db_password_file
     assert password_file is not None
     return {
+        "GS_ALLOW_LOSSY_DOWNGRADE": "1",
         "PATH": os.environ["PATH"],
         "GS_ENVIRONMENT": environment,
         "GS_DB_HOST": settings.db_host,

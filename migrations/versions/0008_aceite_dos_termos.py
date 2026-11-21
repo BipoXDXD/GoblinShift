@@ -6,10 +6,13 @@ Create Date: 2026-10-14 23:00:00.000000
 
 Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. As colunas `terms_version` e
 `terms_accepted_at` já existem desde a 0006; aqui só o CHECK do tipo de evento ganha um valor,
-que o código anterior nunca grava (ADR 029). O downgrade apaga esses eventos, que o CHECK antigo
-recusaria; a versão aceita continua na conta.
+que o código anterior nunca grava (ADR 029).
+
+O downgrade apaga os eventos `TERMS_ACCEPTED` e só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1` se
+houver linhas: o CHECK antigo os recusaria. A versão aceita continua na conta.
 """
 
+import os
 from collections.abc import Sequence
 
 from alembic import op
@@ -33,6 +36,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM audit_event WHERE event_type = 'TERMS_ACCEPTED') "
+            "THEN RAISE EXCEPTION 'o downgrade da 0008 apagaria os aceites dos Termos; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     op.execute("DELETE FROM audit_event WHERE event_type = 'TERMS_ACCEPTED'")
     _replace_event_type_check(_TYPES_0006)
 

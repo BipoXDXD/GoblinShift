@@ -52,7 +52,8 @@ def test_cada_revisao_sobe_desce_e_sobe_sem_mudar_o_schema(
     for revisao in _revisoes_em_ordem():
         run_migrations(db_settings, revisao.revision)
         depois = _retrato(engine)
-        downgrade_migrations(db_settings, _anterior(revisao))
+        # Sem licença: no banco vazio do laço a guarda dos downgrades com perda não acha linha.
+        downgrade_migrations(db_settings, _anterior(revisao), allow_lossy=False)
         assert _retrato(engine) == antes, f"downgrade da {revisao.revision}"
         run_migrations(db_settings, revisao.revision)
         assert _retrato(engine) == depois, f"upgrade repetido da {revisao.revision}"

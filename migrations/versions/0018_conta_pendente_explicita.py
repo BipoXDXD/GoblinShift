@@ -13,8 +13,12 @@ Expand/contract: a coluna é `NOT NULL DEFAULT false` (no PG 11+ só muda o cat�
 reescrever a tabela), e o código anterior nunca a lê. O backfill reproduz o critério antigo e
 tira as contas com `ACCOUNT_BLOCKED` na auditoria: as bloqueadas por abuso cujas sessões já
 saíram, até onde os 90 dias de auditoria alcançam. Nada a contrair.
+
+O downgrade apaga a marca `awaiting_approval`, que o upgrade só reconstrói por heurística, e
+só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas.
 """
 
+import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -48,4 +52,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM app_user WHERE awaiting_approval) "
+            "THEN RAISE EXCEPTION 'o downgrade da 0018 apagaria a marca de conta pendente; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     op.drop_column("app_user", "awaiting_approval")

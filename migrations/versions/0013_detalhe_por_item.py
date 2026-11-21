@@ -8,8 +8,12 @@ Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Coluna anulável e sem
 worker anterior não a escreve, e as Runs antigas ficam sem detalhe (a API responde listas vazias).
 O CHECK só exige objeto; o conteúdo é validado pela coleta do worker antes de ser gravado (3.6).
 Como os nomes e os parâmetros, é detalhe por item com retenção de 30 dias (1.7).
+
+O downgrade apaga o detalhe por item (`run_input.details`) e só roda com
+`GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas.
 """
 
+import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -35,5 +39,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT FROM run_input WHERE details IS NOT NULL) "
+            "THEN RAISE EXCEPTION 'o downgrade da 0013 apagaria o detalhe por item; "
+            "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
+        )
     op.drop_constraint(op.f("run_input_details_check"), "run_input", type_="check")
     op.drop_column("run_input", "details")
