@@ -8,6 +8,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 SECURITY_TXT = ROOT / "web" / "public" / ".well-known" / "security.txt"
 SECURITY_MD = ROOT / "SECURITY.md"
@@ -20,6 +22,8 @@ POLICY_URL = "https://github.com/BipoXDXD/GoblinShift/blob/main/SECURITY.md"
 # renovar e implantar antes de o arquivo vencer.
 MAX_VALIDITY = timedelta(days=366)
 RENEWAL_NOTICE = timedelta(days=30)
+# Instante fixo das regras: o relógio real fica só no lembrete `real_clock`.
+NOW = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
 
 
 def _fields() -> list[tuple[str, str]]:
@@ -47,22 +51,43 @@ def test_contatos_sao_o_advisory_do_github_e_depois_o_email_de_seguranca() -> No
     assert _values("contact") == [ADVISORY_URL, f"mailto:{SECURITY_EMAIL}"]
 
 
-def test_expires_e_unico_em_utc_e_a_menos_de_um_ano() -> None:
+def _expires_problems(expires: datetime, now: datetime) -> list[str]:
+    """Uma frase por regra do Expires violada em `now`; vazia quando o arquivo está em dia."""
+    restante = expires - now
+    problems = []
+    if restante < RENEWAL_NOTICE:
+        problems.append(f"vence em {restante.days} dias: renove o Expires em {SECURITY_TXT}")
+    if restante > MAX_VALIDITY:
+        problems.append(f"Expires a mais de {MAX_VALIDITY.days} dias")
+    return problems
+
+
+def test_expires_e_unico_em_utc() -> None:
     expires = _expires()
 
     assert expires.utcoffset() == timedelta(0)
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", _values("expires")[0])
-    assert expires - datetime.now(UTC) <= MAX_VALIDITY
 
 
-def test_expires_nao_esta_a_menos_de_30_dias_de_vencer() -> None:
-    # Lembrete de renovação com o relógio real de propósito: o que importa é a data de hoje.
-    # Para renovar, adiantar o Expires em até um ano e implantar.
-    restante = _expires() - datetime.now(UTC)
+@pytest.mark.parametrize(
+    ("restante", "ok"),
+    [
+        (RENEWAL_NOTICE, True),
+        (RENEWAL_NOTICE - timedelta(seconds=1), False),
+        (MAX_VALIDITY, True),
+        (MAX_VALIDITY + timedelta(seconds=1), False),
+    ],
+)
+def test_regra_do_expires_nas_fronteiras(restante: timedelta, ok: bool) -> None:
+    assert (_expires_problems(NOW + restante, NOW) == []) is ok
 
-    assert restante >= RENEWAL_NOTICE, (
-        f"security.txt vence em {restante.days} dias: renove o Expires em {SECURITY_TXT}"
-    )
+
+@pytest.mark.real_clock
+def test_security_txt_publicado_nao_esta_perto_de_vencer() -> None:
+    # Lembrete de renovação com o relógio real de propósito: o que importa é a data de hoje. Roda
+    # no workflow agendado security-txt.yml, não na CI de PR. Para renovar, adiantar o Expires em
+    # até um ano e implantar.
+    assert _expires_problems(_expires(), datetime.now(UTC)) == []
 
 
 def test_idiomas_preferidos_sao_portugues_e_ingles() -> None:
