@@ -162,8 +162,9 @@ class _ByteBudget:
 class _MeteredWriter(io.BufferedWriter):
     """Arquivo novo e exclusivo que só aceita bytes dentro do orçamento da execução.
 
-    Todo byte passa por `write()`: o descritor não é exposto, para nenhuma biblioteca gravar
-    direto no arquivo por fora do orçamento.
+    Todo byte passa por `write()`: `fileno()` não é exposto, para nenhuma biblioteca gravar
+    direto no descritor por fora do orçamento. `raw` e `detach()` continuam existindo e ficam
+    proibidos por convenção.
     """
 
     def __init__(self, path: Path, budget: _ByteBudget) -> None:

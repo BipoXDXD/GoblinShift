@@ -2,6 +2,7 @@
 
 import struct
 import warnings
+import zlib
 from typing import NoReturn
 
 import pytest
@@ -126,6 +127,21 @@ def test_jpeg_truncado(work: Workspace) -> None:
     noise = Image.effect_noise((64, 64), 50).convert("RGB")
     truncated = media.jpeg(noise)[:-200]
     assert code_for(work, truncated, "cortado.jpg") == "UNSUPPORTED_FORMAT"
+
+
+def test_png_de_paleta_com_trns_maior_que_a_paleta_e_recusado(work: Workspace) -> None:
+    # O Pillow decodifica sem reclamar e só estoura na conversão de modo (`palette index out
+    # of range`): a recusa tem de vir da normalização, não da decodificação.
+    pixels = zlib.compress(b"\x00\x00\x01" * 2)  # 2x2, filtro 0, índices 0 e 1
+    data = media.raw_png(
+        media.ihdr(2, 2, color_type=3),
+        [
+            media.chunk(b"PLTE", bytes([0, 0, 0, 255, 0, 0])),
+            media.chunk(b"tRNS", bytes(range(256)) + b"\x10" * 44),  # 300 bytes
+            media.chunk(b"IDAT", pixels),
+        ],
+    )
+    assert code_for(work, data) == "UNSUPPORTED_FORMAT"
 
 
 @pytest.mark.parametrize(
