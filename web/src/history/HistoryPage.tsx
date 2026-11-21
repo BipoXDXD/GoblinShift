@@ -17,7 +17,7 @@ import { GoblinIllustration } from "../art/GoblinIllustration";
 import { FocusHeading } from "../components/a11y/FocusHeading";
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
-import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
+import type { DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button, buttonClassName } from "../components/ui/Button";
 import { RECIPE_LIST } from "../recipes/registry";
@@ -188,7 +188,7 @@ function HistoryResults({
             renderExtras={(run) => <RunHistoryExtras run={run} nowMs={nowMs} />}
           />
           {runs.isFetchNextPageError && !isCursorRejected(runs.error) && (
-            <ProblemAlert failure={failureOf(runs.error)} />
+            <FailureNotice error={runs.error} />
           )}
           {runs.hasNextPage && (
             <Button
