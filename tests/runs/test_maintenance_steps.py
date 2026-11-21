@@ -57,6 +57,14 @@ STEPS: dict[str, dict[str, int]] = {
     "mark_missing_objects": {"objects_marked_missing": 9},
     "measure": {"runs_stuck_stopping": 10},
 }
+# Derivados de `STEPS`, para não mudar a cada passo novo. Pulam todos menos dois na falha de
+# conexão do primeiro passo (ele e o de storage rodam) e na parada pedida durante o segundo; na
+# falha de conexão dos usos de execução, os passos de banco que vêm depois deles.
+SKIPPED_BUT_TWO = len(STEPS) - 2
+_AFTER_ORPHAN_HOLDS = list(STEPS)[list(STEPS).index("release_orphan_holds") + 1 :]
+SKIPPED_AFTER_ORPHAN_HOLDS = len(
+    [name for name in _AFTER_ORPHAN_HOLDS if name != STORAGE_ONLY_STEP]
+)
 # Passos que devolvem um número em vez de um dicionário.
 INT_STEPS = {
     "reconcile_expired_leases",
@@ -292,7 +300,7 @@ def test_falha_de_conexao_pula_os_passos_de_banco_restantes(
         "candidates_left_on_disk": 0,
         "purge_files_not_removed": 0,
         STEPS_FAILED: 1,
-        STEPS_SKIPPED: 19,
+        STEPS_SKIPPED: SKIPPED_BUT_TWO,
     }
     [record] = [r for r in caplog.records if r.getMessage() == SKIPPED_AFTER_CONNECTION_MESSAGE]
     assert record.fields == {  # type: ignore[attr-defined]
@@ -337,7 +345,7 @@ def test_falha_de_conexao_no_ultimo_passo_nao_pula_nada(
 
 @pytest.mark.parametrize(
     ("error", "skipped"),
-    [(database_error, 0), (connection_refused, 16)],
+    [(database_error, 0), (connection_refused, SKIPPED_AFTER_ORPHAN_HOLDS)],
     ids=["statement_timeout", "conexao_recusada"],
 )
 def test_falha_nos_usos_de_execucao_mantem_os_downloads_ja_encerrados(
@@ -385,7 +393,7 @@ def test_parada_pedida_no_meio_sai_antes_do_proximo_passo(
         "candidates_left_on_disk": 0,
         "purge_files_not_removed": 0,
         STEPS_FAILED: 0,
-        STEPS_SKIPPED: 19,
+        STEPS_SKIPPED: SKIPPED_BUT_TWO,
     }
     [record] = [r for r in caplog.records if r.getMessage() == SKIPPED_FOR_STOP_MESSAGE]
     assert record.fields == {"skipped": list(STEPS)[2:]}  # type: ignore[attr-defined]
