@@ -7,10 +7,11 @@ Prazos usam o relógio do banco (`now()`), o mesmo para API, worker e manutenç�
 
 import logging
 import re
+import time
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, NamedTuple, NoReturn
 
 from sqlalchemy import ColumnElement, Row, func, insert, select, update
@@ -82,6 +83,13 @@ _VIEW_COLUMNS = (
 class UploadIntent(NamedTuple):
     name: str
     expected_size: int
+
+
+class _WriterClaim(NamedTuple):
+    storage_key: str
+    expected_size: int
+    # Do claim até o vencimento do upload, pelo relógio do banco.
+    time_left: timedelta
 
 
 @dataclass(frozen=True)
@@ -156,6 +164,8 @@ def receive_content(
     owner_id: uuid.UUID,
     upload_id: uuid.UUID,
     chunks: Iterable[bytes],
+    *,
+    clock: Callable[[], float] = time.monotonic,
 ) -> UploadView:
     """Grava o conteúdo de um upload `created` e o deixa `ready`.
 
@@ -164,11 +174,21 @@ def receive_content(
     caminho, inclusive perder a vez para a exclusão, apaga o que chegou ao disco e deixa o upload
     `failed`, sem reabri-lo. Se nem apagar der certo, ele segue `receiving`, com a reserva, até a
     retenção vencê-lo.
+
+    O prazo total da transferência é o vencimento do upload: passou dele, o escritor para antes do
+    bloco seguinte e falha com `UploadGoneError`, porque a retenção já pode ter liberado a reserva.
+    `clock` (segundos, monotônico) mede esse prazo a partir de antes do claim, então o escritor
+    nunca passa do vencimento visto pelo banco.
     """
+    started = clock()
     with session.begin():
-        storage_key, expected_size = _claim_writer(session, owner_id, upload_id)
+        claim = _claim_writer(session, owner_id, upload_id)
+    storage_key, expected_size = claim.storage_key, claim.expected_size
+    deadline = started + claim.time_left.total_seconds()
     try:
-        sha256, size = storage.create_exclusive(storage_key, chunks, max_bytes=expected_size)
+        sha256, size = storage.create_exclusive(
+            storage_key, _until_expiry(chunks, deadline, clock), max_bytes=expected_size
+        )
     except ContentTooLargeError:
         _fail(session, storage, owner_id, upload_id, storage_key)
         raise UploadContentTooLargeError(expected_size) from None
@@ -327,7 +347,7 @@ def _new_upload_key() -> str:
     return f"{_UPLOAD_KEY_PREFIX}/{uuid.uuid4().hex}"
 
 
-def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> tuple[str, int]:
+def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> _WriterClaim:
     """`created → receiving` por atualização condicional: só um escritor passa."""
     row = session.execute(
         update(upload)
@@ -340,11 +360,25 @@ def _claim_writer(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -
             stored_object.c.id == upload.c.object_id,
         )
         .values(state=UploadState.RECEIVING, expires_at=func.now() + INCOMPLETE_UPLOAD_TTL)
-        .returning(stored_object.c.storage_key, upload.c.expected_size)
+        .returning(
+            stored_object.c.storage_key,
+            upload.c.expected_size,
+            (upload.c.expires_at - func.now()).label("time_left"),
+        )
     ).one_or_none()
     if row is None:
         _raise_unavailable(session, owner_id, upload_id)
-    return row.storage_key, row.expected_size
+    return _WriterClaim(row.storage_key, row.expected_size, row.time_left)
+
+
+def _until_expiry(
+    chunks: Iterable[bytes], deadline: float, clock: Callable[[], float]
+) -> Iterator[bytes]:
+    """Repassa os blocos ao storage enquanto o upload não venceu; depois, o escritor perde a vez."""
+    for chunk in chunks:
+        if clock() >= deadline:
+            raise UploadGoneError
+        yield chunk
 
 
 def _complete(

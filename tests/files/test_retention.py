@@ -3,8 +3,9 @@
 import errno
 import logging
 import threading
+import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -17,6 +18,7 @@ from goblinshift import capacity
 from goblinshift.files import retention
 from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
 from goblinshift.files.errors import UploadGoneError, UploadNotFoundError
+from goblinshift.files.limits import INCOMPLETE_UPLOAD_TTL
 from goblinshift.files.objects import hold, release
 from goblinshift.files.retention import (
     expire_artifacts,
@@ -25,7 +27,7 @@ from goblinshift.files.retention import (
     next_storage_release_in,
     purge_deleted_objects,
 )
-from goblinshift.files.states import ArtifactRole, Availability, HolderKind
+from goblinshift.files.states import ArtifactRole, Availability, HolderKind, UploadState
 from goblinshift.files.storage import FileStorage, ObjectMissingError
 from goblinshift.files.tables import artifact, stored_object, upload
 from goblinshift.files.uploads import (
@@ -177,9 +179,26 @@ class BlockedWriter:
     error: BaseException | None = None
 
 
+class FakeClock:
+    """Relógio monotônico do escritor, que só anda quando o teste manda."""
+
+    def __init__(self) -> None:
+        self._now = 0.0
+
+    def __call__(self) -> float:
+        return self._now
+
+    def advance(self, by: timedelta) -> None:
+        self._now += by.total_seconds()
+
+
 @contextmanager
 def blocked_writer(
-    factory: sessionmaker[Session], storage: FileStorage, owner: uuid.UUID, upload_id: uuid.UUID
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    owner: uuid.UUID,
+    upload_id: uuid.UUID,
+    clock: Callable[[], float] = time.monotonic,
 ) -> Iterator[BlockedWriter]:
     """Escritor numa thread, preso no meio da transferência até o bloco `with` terminar."""
     writer = BlockedWriter()
@@ -193,7 +212,7 @@ def blocked_writer(
     def write() -> None:
         try:
             with factory() as session:
-                receive_content(session, storage, owner, upload_id, chunks())
+                receive_content(session, storage, owner, upload_id, chunks(), clock=clock)
         except BaseException as error:  # conferida pelo teste em `writer.error`
             writer.error = error
 
@@ -239,10 +258,14 @@ def test_escritor_que_perde_a_vez_apaga_o_arquivo_marca_failed_e_libera_a_reserv
     intent = create_intent(factory, owner, size=CONTENT_BYTES)
     _, storage_key = object_of(factory, intent.id)
 
-    with blocked_writer(factory, storage, owner, intent.id), unit_of_work(factory) as session:
+    with (
+        blocked_writer(factory, storage, owner, intent.id) as writer,
+        unit_of_work(factory) as session,
+    ):
         request_deletion(session, owner, intent.id)
 
-    assert upload_state(factory, intent.id) == "failed"
+    assert isinstance(writer.error, UploadGoneError)
+    assert upload_state(factory, intent.id) == UploadState.FAILED
     assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) is None
     assert account_reserved(factory, owner) == 0
     with pytest.raises(ObjectMissingError):
@@ -257,17 +280,43 @@ def test_upload_recebendo_vencido_sai_pela_retencao_mesmo_com_escritor_preso(
     owner = create_user(factory, "a")
     intent = create_intent(factory, owner, size=CONTENT_BYTES)
     _, storage_key = object_of(factory, intent.id)
+    clock = FakeClock()
 
-    with blocked_writer(factory, storage, owner, intent.id) as writer:
+    # Escritor preso (ou morto) esperando o cliente: o arquivo parcial não cresce, e o vencimento
+    # é o limite para a reserva dele.
+    with blocked_writer(factory, storage, owner, intent.id, clock) as writer:
         expire_row(factory, upload, intent.id)
+        clock.advance(INCOMPLETE_UPLOAD_TTL)
         with factory() as session:
             assert expire_incomplete_uploads(session, storage).uploads == 1
         assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) is None
 
-    assert isinstance(writer.error, UploadNotFoundError)
-    # A linha já tinha saído: o arquivo que o escritor terminou de gravar sai com ele.
+    # Ao acordar depois do vencimento, ele não grava o bloco seguinte e apaga o parcial.
+    assert isinstance(writer.error, UploadGoneError)
     with pytest.raises(ObjectMissingError):
         storage.stat(storage_key)
+    assert list(storage.root.rglob("*.part")) == []
+
+
+def test_escritor_que_passa_do_vencimento_para_e_so_libera_a_reserva_junto_com_o_arquivo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "a")
+    intent = create_intent(factory, owner, size=CONTENT_BYTES)
+    _, storage_key = object_of(factory, intent.id)
+    clock = FakeClock()
+
+    with blocked_writer(factory, storage, owner, intent.id, clock) as writer:
+        clock.advance(INCOMPLETE_UPLOAD_TTL)
+        assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
+
+    assert isinstance(writer.error, UploadGoneError)
+    assert upload_state(factory, intent.id) == UploadState.FAILED
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) is None
+    assert account_reserved(factory, owner) == 0
+    with pytest.raises(ObjectMissingError):
+        storage.stat(storage_key)
+    assert list(storage.root.rglob("*.part")) == []
 
 
 def test_falha_ao_apagar_no_escritor_mantem_a_reserva_ate_o_vencimento(
@@ -290,7 +339,7 @@ def test_falha_ao_apagar_no_escritor_mantem_a_reserva_ate_o_vencimento(
         monkeypatch.setattr(storage, "delete", refuse_in_writer)
 
     assert isinstance(writer.error, OSError)
-    assert upload_state(factory, intent.id) == "receiving"
+    assert upload_state(factory, intent.id) == UploadState.RECEIVING
     assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
     # O arquivo segue ocupando disco com a reserva; a retenção leva os dois no vencimento.
     expire_row(factory, upload, intent.id)
