@@ -138,17 +138,20 @@ def test_min_age_hours_muda_o_corte(
     assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/de_5h"]
 
 
-def test_min_age_hours_aceita_decimal_e_respeita_a_fronteira(
+def test_min_age_hours_aceita_decimal_e_so_lista_o_mais_velho_que_o_corte(
     capsys: pytest.CaptureFixture[str], storage: FileStorage
 ) -> None:
-    now = time.time()
-    put(storage, "uploads/de_40min", b"a", mtime=now - 40 * 60)
-    put(storage, "uploads/de_20min", b"a", mtime=now - 20 * 60)
+    now = 2_000_000_000.0
+    half_hour = 30 * 60
+    put(storage, "uploads/um_segundo_alem", b"a", mtime=now - half_hour - 1)
+    put(storage, "uploads/no_corte", b"a", mtime=now - half_hour)
+    put(storage, "uploads/um_segundo_antes", b"a", mtime=now - half_hour + 1)
 
-    exit_code, out, _ = run(capsys, "--min-age-hours", "0.5")
+    exit_code = main(["orphan-files", "--min-age-hours", "0.5"], clock=lambda: now)
+    out = capsys.readouterr().out
 
     assert exit_code == EXIT_OK
-    assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/de_40min"]
+    assert [line.split("\t")[0] for line in out.splitlines()] == ["uploads/um_segundo_alem"]
 
 
 def test_limit_trunca_a_listagem_e_avisa_sem_perder_o_total(
