@@ -481,8 +481,11 @@ class Coordinator:
                 _AreaFile(inputs_dir / name) as target,
             ):
                 for chunk in keeper.beating(_chunks(source)):
-                    digest.update(chunk)
                     size += len(chunk)
+                    # Objeto adulterado maior que o registro não chega a encher a área de trabalho.
+                    if size > content.size_bytes:
+                        raise PreparationError(f"entrada {position} passa do tamanho registrado")
+                    digest.update(chunk)
                     target.write(chunk)
         except ObjectTamperedError:
             raise InputTamperedError(position) from None
