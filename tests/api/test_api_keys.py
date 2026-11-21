@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.identity import MAX_ACTIVE_KEYS, authenticate_api_key
+from goblinshift.identity import MAX_ACTIVE_KEYS, MAX_KEY_DAYS, authenticate_api_key
+from goblinshift.identity.keys import MIN_KEY_DAYS
 from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.simulated_session import SimulatedSessions
@@ -88,6 +89,20 @@ def test_post_cria_chave_e_mostra_o_segredo_uma_vez(
     assert body["token"].startswith(f"gsk_{body['public_id']}_")
     assert authenticates(factory, body["token"])
     assert audit_events(factory, owner) == [("KEY_ISSUED", "success")]
+
+
+@pytest.mark.parametrize("days", [MIN_KEY_DAYS, MAX_KEY_DAYS], ids=["minimo", "maximo"])
+def test_post_aceita_as_bordas_da_validade(
+    client: TestClient, factory: sessionmaker[Session], sessions: SimulatedSessions, days: int
+) -> None:
+    owner = new_user(factory)
+    sessions.sign_in(owner)
+
+    response = client.post(KEYS, json={**VALID, "days": days})
+
+    assert response.status_code == 201, response.text
+    assert datetime.fromisoformat(response.json()["expires_at"]) == NOW + timedelta(days=days)
+    assert key_count(factory, owner) == 1
 
 
 def test_get_depois_do_post_nao_traz_segredo_nem_hash(

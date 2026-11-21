@@ -8,14 +8,35 @@ from goblinshift.processing.csv_janitor import (
     Delimiter,
     Filter,
     FilterOp,
+    FormulaGuard,
     Params,
     RejectionCode,
 )
 from tests.csv_janitor.support import cleaned, output, rejected
 
+BOM = b"\xef\xbb\xbf"
+
 
 def test_bom_da_entrada_e_ignorado_e_a_saida_sai_sem_bom() -> None:
     assert output(b"\xef\xbb\xbfa,b\r\n1,2\r\n") == "a,b\r\n1,2\r\n"
+
+
+@pytest.mark.parametrize(("boms", "header"), [(2, "=1+1"), (3, "=1+1"), (2, " =1+1")])
+def test_bom_repetido_nao_esconde_formula_no_cabecalho(boms: int, header: str) -> None:
+    params = Params(formula_guard=FormulaGuard.TAB_PREFIX)
+
+    result = cleaned(BOM * boms + header.encode() + b",b\r\nx,y\r\n", params)
+
+    assert result.formula_header == (header,)
+    assert result.content == f'"\t{header}",b\r\nx,y\r\n'.encode()
+
+
+def test_bom_repetido_antes_de_campo_entre_aspas_le_normalmente() -> None:
+    assert output(BOM * 2 + b'"a",b\r\n1,2\r\n') == "a,b\r\n1,2\r\n"
+
+
+def test_bom_fora_do_comeco_do_arquivo_e_dado() -> None:
+    assert output("a,\ufeffb\r\n1,\ufeff2\r\n") == "a,\ufeffb\r\n1,\ufeff2\r\n"
 
 
 @pytest.mark.parametrize(

@@ -31,6 +31,7 @@ from contextlib import suppress
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import unquote
 
 from .config import Config
 from .docker_cli import ContainerRunningError, ContainerStatus, DockerUnavailableError
@@ -55,7 +56,8 @@ SOCKET_MODE = 0o660
 _BIND_UMASK = 0o177
 
 _ROUTE = re.compile(r"/v1/attempts/(?P<attempt>[^/?#]+)(?P<action>/start|/stop)?")
-# A referência vai crua: seu alfabeto vale numa query, e %XX ou outro parâmetro não casam com ela.
+# A referência chega codificada (%XX) ou crua; decodificada uma vez, outro parâmetro ou um
+# %XX duplo não casam com IMAGE_REFERENCE.
 _IMAGE_ROUTE = re.compile(r"/v1/image\?ref=(?P<ref>.*)")
 _INVALID_IMAGE = "image precisa ser uma referência <nome>@sha256:<64 hex>"
 _ERRORS: tuple[tuple[type[Exception], HTTPStatus, str], ...] = (
@@ -149,9 +151,10 @@ def parse_start_body(raw: bytes) -> str:
 
 
 def parse_image_ref(ref: str) -> str:
-    if not IMAGE_REFERENCE.fullmatch(ref):
+    image = unquote(ref)
+    if not IMAGE_REFERENCE.fullmatch(image):
         raise _invalid(_INVALID_IMAGE)
-    return ref
+    return image
 
 
 def parse_stop_body(raw: bytes) -> int:

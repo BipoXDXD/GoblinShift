@@ -13,12 +13,14 @@ from sqlalchemy import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.capacity import set_account_storage_max
+from goblinshift.identity import Scope
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.acceptance import RUN_OUTPUT_CEILING_BYTES
 from goblinshift.runs.quotas import set_account_quota
 from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import attempt
-from tests.api.files_support import create_upload, new_account, send_content
+from tests.api.files_support import bearer, create_upload, new_account, send_content
+from tests.identity.support import new_key
 from tests.runs.support import insert_finished_run
 
 pytestmark = pytest.mark.integration
@@ -131,6 +133,39 @@ def test_consumo_reflete_uploads_execucoes_e_reservas(
     assert usage["active_run_id"] == accepted.json()["id"]
     resets_at = datetime.fromisoformat(usage["daily_quota_resets_at"])
     assert abs(resets_at - (oldest + timedelta(hours=24))) < timedelta(seconds=1)
+
+
+@pytest.mark.parametrize(
+    ("scopes", "shows_run"),
+    [
+        pytest.param(frozenset({Scope.FILES_READ}), False, id="sem-runs-read"),
+        pytest.param(frozenset({Scope.RUNS_READ}), True, id="com-runs-read"),
+    ],
+)
+def test_execucao_ativa_so_aparece_com_runs_read(
+    client: TestClient, factory: sessionmaker[Session], scopes: frozenset[Scope], shows_run: bool
+) -> None:
+    owner, auth = new_account(factory)
+    upload_id = ready(client, auth, b"a,b\n1,2\n")
+    accepted = client.post(
+        RUNS,
+        json={
+            "recipe_id": "csv-janitor",
+            "recipe_version": 1,
+            "input_upload_ids": [upload_id],
+            "parameters": {},
+        },
+        headers={**auth, "Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert accepted.status_code == 202, accepted.text
+    run_id = accepted.json()["id"]
+    limited = bearer(new_key(factory, owner, scopes=scopes).token)
+
+    response = client.get(ME, headers=limited)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["usage"]["active_run_id"] == (run_id if shows_run else None)
+    assert shows_run or run_id not in response.text
 
 
 def test_consumo_de_outra_conta_nao_aparece(
