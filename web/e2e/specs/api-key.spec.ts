@@ -7,13 +7,22 @@ import { E2E } from "../support/env";
 import { installFakeApi } from "../support/fakeApi";
 import { expect, test } from "../support/test";
 
+/** Maior atraso do primeiro retry em api/queryRetry.ts (1 s mais até 50% de jitter), com folga. */
+const CATALOG_QUIET_MS = 2_000;
+const CATALOG_QUIET_TIMEOUT_MS = 10_000;
+
+interface ServedBody {
+  readonly contentType: string;
+  readonly body: string;
+}
+
 test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", async ({
   page,
   context,
   apiKey,
 }) => {
   // Corpo que não pôde ser lido fica `null` e não conta: a prova precisa ter visto o conteúdo.
-  const bodies: Promise<string | null>[] = [];
+  const bodies: Promise<ServedBody | null>[] = [];
   const credentialsFromPage: string[] = [];
   page.on("request", (request) => {
     // O evento vem antes das rotas: este é o pedido como o bundle o montou.
@@ -24,7 +33,13 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   });
   page.on("response", (response) => {
     if (!new URL(response.url()).pathname.startsWith("/api/")) {
-      bodies.push(response.text().catch(() => null));
+      const contentType = response.headers()["content-type"] ?? "";
+      bodies.push(
+        response.text().then(
+          (body) => ({ contentType, body }),
+          () => null,
+        ),
+      );
     }
   });
 
@@ -33,13 +48,22 @@ test("a chave não aparece no HTML, nos assets, no storage nem nos cookies", asy
   await bancada.addFiles(CSV_FILES);
 
   const served = (await Promise.all(bodies)).filter(
-    (body): body is string => body !== null && body.length > 0,
+    (item): item is ServedBody => item !== null && item.body.length > 0,
   );
   expect(served.length, "HTML, theme-init.js, JS e CSS lidos").toBeGreaterThanOrEqual(4);
+  // Quatro fontes ou imagens não provam nada: a chave escaparia pelo HTML ou pelo bundle.
+  expect(
+    served.some(({ contentType }) => contentType.startsWith("text/html")),
+    "o HTML da página foi lido",
+  ).toBe(true);
+  expect(
+    served.some(({ contentType }) => contentType.includes("javascript")),
+    "algum JavaScript foi lido",
+  ).toBe(true);
   // Booleanos: uma falha imprimiria o valor comparado (corpo, storage, cookies) no relatório HTML,
   // e a chave nunca pode ir parar lá.
   expect(
-    served.some((body) => body.includes(apiKey)),
+    served.some(({ body }) => body.includes(apiKey)),
     "[sabotage:api-key-in-bundle]",
   ).toBe(false);
   const storage = await page.evaluate(() =>
@@ -69,9 +93,20 @@ test("sem a chave do processo de teste, a API recusa e a Bancada convida a entra
   await installFakeApi(context, apiKey, E2E.artifactsDir);
   const page = await context.newPage();
   const catalogStatuses: number[] = [];
+  let catalogRequests = 0;
+  let lastCatalogAt: number | null = null;
+  // A quietude conta do pedido e da resposta: num CI lento, a resposta de um retry pode chegar
+  // depois da janela, mas o pedido não.
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/catalog")) {
+      catalogRequests += 1;
+      lastCatalogAt = Date.now();
+    }
+  });
   page.on("response", (response) => {
     if (response.url().endsWith("/api/v1/catalog")) {
       catalogStatuses.push(response.status());
+      lastCatalogAt = Date.now();
     }
   });
   await page.goto("/bancada/csv-janitor");
@@ -89,9 +124,19 @@ test("sem a chave do processo de teste, a API recusa e a Bancada convida a entra
     "href",
     "/auth/login/google?return_to=%2Fbancada%2Fcsv-janitor",
   );
+  // Um retry chegaria até 1,5 s depois do 401 (1 s mais 50% de jitter, api/queryRetry.ts): só
+  // depois de a leitura do catálogo ficar quieta por mais que isso o retrato abaixo vale. Um novo
+  // pedido reinicia a contagem, então a espera acompanha a rede em vez de um tempo fixo.
+  await expect
+    .poll(() => (lastCatalogAt === null ? 0 : Date.now() - lastCatalogAt), {
+      message: "a leitura do catálogo fica quieta além do backoff de retry",
+      timeout: CATALOG_QUIET_TIMEOUT_MS,
+    })
+    .toBeGreaterThan(CATALOG_QUIET_MS);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("Sua sessão terminou.", { exact: false })).toHaveCount(0);
   // 401 não é falha transitória: a leitura não se repete (api/queryRetry.ts).
+  expect(catalogRequests).toBe(1);
   expect(catalogStatuses).toEqual([401]);
   await context.close();
 });

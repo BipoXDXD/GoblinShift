@@ -11,8 +11,13 @@ sobrescreve, em Linux e macOS.
 
 Queda do processo no meio da gravação deixa o temporário para trás: o `finally` não roda no
 SIGKILL. `sweep_stale_temporaries` é a limpeza que a manutenção faz deles.
+
+Abrir, consultar, gravar e remover descem da raiz um diretório por vez, relativos ao descritor do
+pai e com `O_NOFOLLOW`: um symlink plantado em `uploads/` ou `runs/<run>/` não desvia nada para
+fora da raiz. O caminho inteiro só protegeria o último nome.
 """
 
+import contextlib
 import errno
 import fcntl
 import hashlib
@@ -20,7 +25,7 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
@@ -40,6 +45,7 @@ MOUNT_MARKER = ".goblinshift-storage"
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY
+_SUBDIRECTORY_FLAGS = _DIRECTORY_FLAGS | os.O_NOFOLLOW
 
 
 class StorageError(Exception):
@@ -64,7 +70,8 @@ class ObjectMissingError(StorageError):
 class ObjectTamperedError(StorageError):
     """A chave existe, mas não é um arquivo comum que o storage poderia ter criado.
 
-    Symlink, diretório ou FIFO no lugar do objeto.
+    Symlink, diretório ou FIFO no lugar do objeto, ou symlink ou arquivo no lugar de um dos
+    diretórios do caminho.
 
     Evidência de adulteração, não de perda: não é `ObjectMissingError`, para nenhuma varredura
     tratá-la como ausente. A mensagem leva só a chave lógica, nunca o caminho no disco.
@@ -117,36 +124,59 @@ class FileStorage:
         Garante que nada aparece sob `key` se o conteúdo passar de `max_bytes`, se o iterador
         falhar ou se a chave já existir; o temporário é sempre removido.
         """
-        final_path = self._path_for(key)
-        if final_path.exists():
-            raise ObjectAlreadyExistsError(key)
-        self._make_private_dirs(final_path.parent)
-        self._make_private_dirs(self._tmp_dir)
-        tmp_path = self._tmp_dir / f"{uuid.uuid4().hex}.part"
+        names = _names_of(key)
+        self._make_private_root()
+        parent_fd = self._open_directory(key, names[:-1], create=True)
         try:
-            sha256, size = _write_exclusive(tmp_path, chunks, max_bytes)
+            if _entry_exists(names[-1], parent_fd):
+                raise ObjectAlreadyExistsError(key)
+            sha256, size = self._link_new_object(key, names[-1], parent_fd, chunks, max_bytes)
+            # Persiste a entrada criada pelo link; sem isso uma queda pode perdê-la.
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+        return sha256, size
+
+    def _link_new_object(
+        self, key: str, name: str, parent_fd: int, chunks: Iterable[bytes], max_bytes: int
+    ) -> tuple[bytes, int]:
+        tmp_fd = self._open_directory(key, [_TMP_DIR_NAME], create=True)
+        tmp_name = f"{uuid.uuid4().hex}.part"
+        try:
+            sha256, size = _write_exclusive(tmp_name, tmp_fd, chunks, max_bytes)
             try:
-                os.link(tmp_path, final_path)
+                os.link(
+                    tmp_name,
+                    name,
+                    src_dir_fd=tmp_fd,
+                    dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
             except FileExistsError:
                 raise ObjectAlreadyExistsError(key) from None
         finally:
-            tmp_path.unlink(missing_ok=True)
-        _fsync_dir(final_path.parent)
+            try:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(tmp_name, dir_fd=tmp_fd)
+            finally:
+                os.close(tmp_fd)
         return sha256, size
 
     def open(self, key: str) -> BinaryIO:
-        path = self._path_for(key)
+        parent_fd, name = self._open_parent(key)
         try:
             # O_NOFOLLOW: um symlink plantado sob a raiz não desvia a leitura para fora dela.
             # O_NONBLOCK: um FIFO plantado no lugar do arquivo bloquearia o `open` até aparecer
             # um escritor, antes de qualquer checagem de tipo, e prenderia a thread de quem chama.
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
         except FileNotFoundError:
             raise ObjectMissingError(key) from None
         except OSError as error:
             if error.errno == errno.ELOOP:
                 raise ObjectTamperedError(key) from None
             raise
+        finally:
+            os.close(parent_fd)
         try:
             # O_NOFOLLOW só barra symlink: diretório e FIFO abrem sem erro (o `fdopen` falharia
             # com `IsADirectoryError`, cru e com o descritor aberto). Confere o tipo no próprio fd.
@@ -165,10 +195,13 @@ class FileStorage:
         `lstat` não segue o link, e por isso enxerga um symlink (com ou sem alvo) ou um diretório
         como existentes: sem a checagem de tipo, eles passariam por objeto presente.
         """
+        parent_fd, name = self._open_parent(key)
         try:
-            info = self._path_for(key).stat(follow_symlinks=False)
+            info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         except FileNotFoundError:
             raise ObjectMissingError(key) from None
+        finally:
+            os.close(parent_fd)
         if not S_ISREG(info.st_mode):
             raise ObjectTamperedError(key)
         return ObjectStat(size_bytes=info.st_size)
@@ -190,7 +223,15 @@ class FileStorage:
 
     def delete(self, key: str) -> None:
         """Remove o objeto; remover o que já não existe é sucesso (o estado final é o mesmo)."""
-        self._path_for(key).unlink(missing_ok=True)
+        try:
+            parent_fd, name = self._open_parent(key)
+        except ObjectMissingError:
+            return
+        try:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(name, dir_fd=parent_fd)
+        finally:
+            os.close(parent_fd)
 
     def walk_objects(self) -> Iterator[StoredFile]:
         """Percorre o disco e devolve os arquivos que o storage poderia ter criado.
@@ -284,23 +325,73 @@ class FileStorage:
                 parts.append((entry, info))
         return parts
 
-    def _path_for(self, key: str) -> Path:
-        if not _is_valid_key(key):
-            raise InvalidStorageKeyError(key)
-        return self.root.joinpath(*key.split("/"))
+    def _open_parent(self, key: str) -> tuple[int, str]:
+        """Descritor do diretório do objeto e o nome dele lá dentro; quem chama fecha o descritor.
 
-    def _make_private_dirs(self, directory: Path) -> None:
+        `ObjectMissingError` se a raiz ou um diretório do caminho não existe.
+        """
+        names = _names_of(key)
+        try:
+            return self._open_directory(key, names[:-1], create=False), names[-1]
+        except FileNotFoundError:
+            raise ObjectMissingError(key) from None
+
+    def _open_directory(self, key: str, names: Sequence[str], *, create: bool) -> int:
+        """Abre `names` a partir da raiz, um nível por vez e sem seguir symlink.
+
+        Com `create`, os níveis que faltam nascem privados. Um nível que é symlink ou arquivo é
+        `ObjectTamperedError` de `key`; só um descritor fica aberto por vez, e nenhum sobra em
+        caso de erro.
+        """
+        fd = os.open(self.root, _DIRECTORY_FLAGS)
+        try:
+            for name in names:
+                parent_fd, fd = fd, _open_child_directory(name, fd, create=create)
+                os.close(parent_fd)
+        except OSError as error:
+            os.close(fd)
+            # ELOOP (Linux) ou ENOTDIR (macOS, e arquivo comum em qualquer sistema).
+            if error.errno in (errno.ELOOP, errno.ENOTDIR):
+                raise ObjectTamperedError(key) from None
+            raise
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+    def _make_private_root(self) -> None:
+        # A raiz vem da configuração e pode passar por symlink; abaixo dela, `_open_directory`.
         # `mkdir(parents=True)` ignora `mode` nos pais; cria um nível por vez para que todos
         # nasçam privados.
-        missing = [d for d in [directory, *directory.parents] if not d.exists()]
+        missing = [d for d in [self.root, *self.root.parents] if not d.exists()]
         for path in reversed(missing):
             path.mkdir(mode=_DIR_MODE, exist_ok=True)
+
+
+def _open_child_directory(name: str, parent_fd: int, *, create: bool) -> int:
+    try:
+        return os.open(name, _SUBDIRECTORY_FLAGS, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+    # Outra gravação pode criar o mesmo diretório no meio: o dela serve.
+    with contextlib.suppress(FileExistsError):
+        os.mkdir(name, _DIR_MODE, dir_fd=parent_fd)
+    return os.open(name, _SUBDIRECTORY_FLAGS, dir_fd=parent_fd)
+
+
+def _entry_exists(name: str, parent_fd: int) -> bool:
+    try:
+        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _open_subdirectory(name: str, parent_fd: int) -> int | None:
     """Descritor do subdiretório, ou `None` se ele sumiu ou deixou de ser diretório comum."""
     try:
-        return os.open(name, _DIRECTORY_FLAGS | os.O_NOFOLLOW, dir_fd=parent_fd)
+        return os.open(name, _SUBDIRECTORY_FLAGS, dir_fd=parent_fd)
     except FileNotFoundError:
         return None
     except OSError as error:
@@ -321,16 +412,25 @@ def _unlink_temporary(entry: os.DirEntry[str]) -> bool:
     return True
 
 
+def _names_of(key: str) -> list[str]:
+    if not _is_valid_key(key):
+        raise InvalidStorageKeyError(key)
+    return key.split("/")
+
+
 def _is_valid_key(key: str) -> bool:
     if not key or len(key) > _MAX_KEY_LENGTH:
         return False
     return all(_KEY_SEGMENT.fullmatch(segment) for segment in key.split("/"))
 
 
-def _write_exclusive(path: Path, chunks: Iterable[bytes], max_bytes: int) -> tuple[bytes, int]:
+def _write_exclusive(
+    name: str, directory_fd: int, chunks: Iterable[bytes], max_bytes: int
+) -> tuple[bytes, int]:
     digest = hashlib.sha256()
     size = 0
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, _FILE_MODE)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = os.open(name, flags, _FILE_MODE, dir_fd=directory_fd)
     with os.fdopen(fd, "wb") as out:
         for chunk in chunks:
             size += len(chunk)
@@ -341,12 +441,3 @@ def _write_exclusive(path: Path, chunks: Iterable[bytes], max_bytes: int) -> tup
         out.flush()
         os.fsync(out.fileno())
     return digest.digest(), size
-
-
-def _fsync_dir(directory: Path) -> None:
-    """Persiste a entrada de diretório criada pelo link; sem isso uma queda pode perdê-la."""
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)

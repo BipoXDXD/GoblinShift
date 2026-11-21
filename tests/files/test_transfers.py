@@ -1,6 +1,5 @@
 """Vagas de transferência simultânea entre réplicas (1.7: 2 por conta, 4 no ambiente)."""
 
-import threading
 import uuid
 from datetime import timedelta
 
@@ -15,6 +14,7 @@ from goblinshift.files.tables import transfer_slot
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
 from goblinshift.platform.db import unit_of_work
 from tests.files.support import create_user
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -126,27 +126,17 @@ def test_vaga_dura_mais_que_a_transferencia_mais_longa(factory: sessionmaker[Ses
     assert lease > TRANSFER_MAX_DURATION
 
 
-def test_pedidos_simultaneos_nao_passam_do_limite_da_conta(
+def test_pedido_concorrente_espera_a_trava_e_ve_a_segunda_vaga(
     factory: sessionmaker[Session],
 ) -> None:
     owner = create_user(factory, "a")
-    attempts = 6
-    barrier = threading.Barrier(attempts)
-    granted: list[uuid.UUID] = []
-    refused: list[TransferLimitReachedError] = []
+    acquire(factory, owner)
 
-    def try_acquire() -> None:
-        barrier.wait(timeout=10)
-        try:
-            granted.append(acquire(factory, owner))
-        except TransferLimitReachedError as error:
-            refused.append(error)
+    with factory() as first, first.begin():
+        acquire_transfer_slot(first, owner, UPLOAD)
+        second = in_thread(lambda: acquire(factory, owner))
+        wait_until_someone_waits_for_a_lock(factory, "o segundo pedido de vaga")
 
-    threads = [threading.Thread(target=try_acquire) for _ in range(attempts)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=10)
-
-    assert (len(granted), len(refused)) == (2, 4)
+    with pytest.raises(TransferLimitReachedError):
+        second.result()
     assert slot_count(factory) == 2

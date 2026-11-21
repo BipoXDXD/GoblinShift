@@ -12,6 +12,7 @@ from goblinshift.processing.csv_janitor.janitor import FORMULA_GUARD_PREFIX, loo
 from goblinshift.processing.csv_janitor.limits import Limits
 from goblinshift.processing.csv_janitor.params import Delimiter
 from goblinshift.processing.csv_janitor.reading import read_table
+from goblinshift.processing.csv_janitor.results import TableRejectionError
 from goblinshift.processing.csv_janitor.writing import serialize_record
 
 PREVIEW_MAX_RECORDS = 100
@@ -20,8 +21,15 @@ _PREVIEW_DELIMITER = ","
 
 
 def table_preview(content: bytes, delimiter: Delimiter, limits: Limits) -> bytes | None:
-    """`content` é a saída já limpa; `None` quando nem o cabeçalho cabe no teto."""
-    parsed = read_table(content, delimiter, limits)
+    """`content` é a saída já limpa; `None` quando nem o cabeçalho cabe no teto.
+
+    Também `None` se os limites recusarem a releitura: a tabela já foi aceita e a amostra é
+    acessória, e a exceção derrubaria a execução inteira como falha de infraestrutura.
+    """
+    try:
+        parsed = read_table(content, delimiter, limits)
+    except TableRejectionError:
+        return None
     lines = [_line(parsed.header)]
     size = len(lines[0])
     if size > PREVIEW_MAX_BYTES:

@@ -596,13 +596,19 @@ class Maintenance:
     # Retenção --------------------------------------------------------------------------
 
     def apply_retention(self) -> dict[str, int]:
-        incomplete = expire_incomplete_uploads(self._new_session(), self._storage)
+        with self._factory() as session:
+            incomplete = expire_incomplete_uploads(session, self._storage)
+        with self._factory() as session:
+            unused_uploads_expired = expire_unused_uploads(session)
+        with self._factory() as session:
+            artifacts_expired = expire_artifacts(session)
         counts = {
             "incomplete_uploads_expired": incomplete.uploads,
-            "unused_uploads_expired": expire_unused_uploads(self._new_session()),
-            "artifacts_expired": expire_artifacts(self._new_session()),
+            "unused_uploads_expired": unused_uploads_expired,
+            "artifacts_expired": artifacts_expired,
         }
-        report = purge_deleted_objects(self._new_session(), self._storage)
+        with self._factory() as session:
+            report = purge_deleted_objects(session, self._storage)
         if report.limit_reached:
             # Alerta de causa (3.7): o limitador cortou o expurgo; o administrador investiga.
             logger.warning(
@@ -619,7 +625,8 @@ class Maintenance:
         # Com o banco já confirmado, nada repete a remoção: o alerta de causa lê isto (3.7).
         counts["purge_files_not_removed"] = len(incomplete.failed_keys) + len(report.failed_keys)
         # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
-        reconciled = reconcile_capacity(self._new_session(), limit=self._config.batch_size)
+        with self._factory() as session:
+            reconciled = reconcile_capacity(session, limit=self._config.batch_size)
         counts["capacity_pools_corrected"] = reconciled.pools_corrected
         counts["capacity_objects_adopted"] = reconciled.objects_adopted
         counts["purge_limit_reached"] = int(report.limit_reached)
@@ -664,13 +671,14 @@ class Maintenance:
         novo. Chamada fora do ciclo, ela levanta nesse caso.
         """
         try:
-            sweep = sweep_missing_objects(
-                self._new_session(),
-                self._storage,
-                after=self._missing_resume_after,
-                limit=self._config.missing_sweep_batch_size,
-                max_absent_ratio=self._config.missing_max_absent_ratio,
-            )
+            with self._factory() as session:
+                sweep = sweep_missing_objects(
+                    session,
+                    self._storage,
+                    after=self._missing_resume_after,
+                    limit=self._config.missing_sweep_batch_size,
+                    max_absent_ratio=self._config.missing_max_absent_ratio,
+                )
         except Exception as error:
             # Não engole: registra com o traceback e conta; o cursor fica, e o lote volta.
             logger.exception(
@@ -776,9 +784,6 @@ class Maintenance:
             return step(session, db_now(session))
 
     # Comum -----------------------------------------------------------------------------
-
-    def _new_session(self) -> Session:
-        return self._factory()
 
     def _select_ids(self, condition: ColumnElement[bool]) -> list[uuid.UUID]:
         with self._factory() as session, session.begin():
