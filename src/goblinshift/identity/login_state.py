@@ -11,12 +11,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from anyio import to_thread
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity.tables import login_state
-from goblinshift.platform.sql import skip_locked_batch
 
 # O mesmo prazo do cookie de login (LOGIN_COOKIE_MAX_AGE_S).
 LOGIN_STATE_TTL = timedelta(minutes=10)
@@ -55,18 +54,6 @@ def delete_state(session: Session, key: str) -> None:
     """Apaga o estado; chave inexistente já está no estado final."""
     if _storable_key(key):
         session.execute(delete(login_state).where(login_state.c.key == key))
-
-
-def purge_expired_states(session: Session, now: datetime, *, limit: int) -> int:
-    """Apaga até `limit` estados vencidos (logins abandonados); devolve quantos apagou."""
-    expired = skip_locked_batch(
-        select(login_state.c.key)
-        .where(login_state.c.expires_at <= now)
-        .order_by(login_state.c.expires_at),
-        limit,
-    )
-    statement = delete(login_state).where(login_state.c.key.in_(select(expired.c.key)))
-    return len(session.execute(statement.returning(login_state.c.key)).all())
 
 
 def _storable_key(key: str) -> bool:

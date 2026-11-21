@@ -1,5 +1,6 @@
 """Nomes e tetos das saídas (docs/GoblinShiftPlan.md, 3.6 e 1.7)."""
 
+import io
 import unicodedata
 from pathlib import Path
 
@@ -183,6 +184,13 @@ def test_um_byte_acima_do_teto_falha_sem_gravar_o_excesso(tmp_path: Path) -> Non
 
     assert failure.value.code is FailureCode.OUTPUT_LIMIT_EXCEEDED
     assert (tmp_path / "b.csv").read_bytes() == b""
+
+
+def test_saida_nao_entrega_o_descritor_para_nao_escapar_do_teto(tmp_path: Path) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    with out.create("a.bin", CONTENT, 0).stream as stream, pytest.raises(io.UnsupportedOperation):
+        stream.fileno()
 
 
 # --- Grupos: um nível de subpasta, de lista fechada (ADR 019) ---------------------------------

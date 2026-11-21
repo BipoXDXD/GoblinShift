@@ -38,10 +38,12 @@ from goblinshift.processing.packaging import (
     PackageSpec,
     package,
 )
-from goblinshift.processing.recipe import InputFile, RecipeFailure, Report
+from goblinshift.processing.recipe import FailureCode, InputFile, RecipeFailure, Report
 from goblinshift.processing.registry import RECIPES, RegisteredRecipe
 
 PACKAGE_LIMITS = PackageLimits()
+# Fixo de propósito: a mensagem do MemoryError pode trazer caminhos da área de trabalho.
+MEMORY_EXHAUSTED_DETAIL = "a execução passou do limite de memória"
 
 
 class ExitCode(IntEnum):
@@ -100,6 +102,14 @@ def _run(work: _WorkDir, timings: _PhaseTimer) -> ExitCode:
             return ExitCode.NO_SPACE
         traceback.print_exc()
         return ExitCode.INFRASTRUCTURE
+    except MemoryError:
+        # Limite de memória de 1.6: determinístico, repetir o mesmo job esgotaria de novo.
+        print("executor: memória esgotada", file=sys.stderr)
+        _write_failure(
+            work.failure,
+            RecipeFailure(FailureCode.RESOURCE_LIMIT_EXCEEDED, MEMORY_EXHAUSTED_DETAIL),
+        )
+        return ExitCode.RECIPE_FAILURE
     except Exception:
         # Fronteira do processo: o detalhe vai para o stderr (logs do container) e o worker
         # recebe só a classe da falha.

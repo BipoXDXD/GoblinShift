@@ -81,6 +81,7 @@ Códigos de saída do processo (`ExitCode`)
 -----------------------------------------
 - 0, `SUCCEEDED`: `report.json` escrito, inclusive com rejeições.
 - 3, `RECIPE_FAILURE`: falha determinística; o código está em `failure.json`. Não repetir.
+  `MemoryError` também sai por aqui, com `RESOURCE_LIMIT_EXCEEDED` (o limite de memória de 1.6).
 - 4, `INFRASTRUCTURE`: job fora do contrato (inclusive mais entradas que o `max_inputs` da
   versão), receita desconhecida, `out/` ocupado ou qualquer exceção inesperada (detalhe só no
   stderr).

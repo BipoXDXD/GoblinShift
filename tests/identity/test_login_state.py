@@ -5,13 +5,12 @@ import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity.login_state import (
     LOGIN_STATE_TTL,
     PostgresLoginStateCache,
-    purge_expired_states,
     save_state,
     take_state,
 )
@@ -146,26 +145,3 @@ def test_duas_leituras_simultaneas_so_uma_recebe_o_estado(
         thread.join()
 
     assert sorted(results, key=str) == [None, VALUE]
-
-
-def test_limpeza_remove_so_os_vencidos_e_respeita_o_lote(
-    factory: sessionmaker[Session],
-) -> None:
-    with unit_of_work(factory) as session:
-        for index in range(3):
-            save_state(session, f"vencido-{index}", VALUE, T0 - timedelta(seconds=index))
-        save_state(session, "no-prazo", VALUE, T0)
-        save_state(session, "vivo", VALUE, T0 + timedelta(seconds=1))
-
-    with unit_of_work(factory) as session:
-        assert purge_expired_states(session, T0, limit=2) == 2
-    with unit_of_work(factory) as session:
-        assert purge_expired_states(session, T0, limit=10) == 2
-
-    assert stored_keys(factory) == {"vivo"}
-
-
-def test_limpeza_sem_vencidos_devolve_zero(factory: sessionmaker[Session]) -> None:
-    with unit_of_work(factory) as session:
-        assert purge_expired_states(session, T0, limit=10) == 0
-        assert session.execute(select(func.count()).select_from(login_state)).scalar_one() == 0
