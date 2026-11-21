@@ -189,6 +189,44 @@ def extra_objects(count: int) -> Mutation:
     return mutate
 
 
+# --- metadados privados -----------------------------------------------------------------------
+
+_MODIFIED = String("D:20261121000000Z")
+
+
+def private_metadata(pdf: pikepdf.Pdf) -> None:
+    """XMP, `/PieceInfo` e `/LastModified` em cada página e num Form compartilhado por todas,
+    cuja imagem também traz XMP: a saída precisa tirá-los mesmo fora de `pdf.pages`."""
+    image = pdf.make_stream(
+        b"\x00",
+        Type=Name.XObject,
+        Subtype=Name.Image,
+        Width=1,
+        Height=1,
+        ColorSpace=Name.DeviceGray,
+        BitsPerComponent=8,
+        Metadata=_xmp(pdf),
+    )
+    form = pdf.make_stream(
+        b"",
+        Type=Name.XObject,
+        Subtype=Name.Form,
+        BBox=[0, 0, 1, 1],
+        Resources=Dictionary(XObject=Dictionary(Im0=image)),
+        Metadata=_xmp(pdf),
+        LastModified=_MODIFIED,
+    )
+    for page in pdf.pages:
+        page.obj.Metadata = _xmp(pdf)
+        page.obj.PieceInfo = Dictionary(App=Dictionary(Private=String("x")))
+        page.obj.LastModified = _MODIFIED
+        page.obj.Resources = Dictionary(XObject=Dictionary(Fm0=form))
+
+
+def _xmp(pdf: pikepdf.Pdf) -> pikepdf.Stream:
+    return pdf.make_stream(b"<x:xmpmeta/>", Type=Name.Metadata, Subtype=Name.XML)
+
+
 # --- bytes estragados -------------------------------------------------------------------------
 
 

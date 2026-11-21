@@ -5,6 +5,11 @@ acessibilidade nem formulários da origem (1.5 não promete preservá-los). O qp
 com os recursos que ela usa; referências a páginas que não foram copiadas viram `null`, então um
 link não arrasta para a saída uma página que a pessoa não escolheu.
 
+O documento novo também sai sem XMP (`/Metadata`), `/PieceInfo` e `/LastModified` em qualquer
+dicionário ou stream copiado, de página ou de XObject, inclusive de recurso compartilhado entre
+páginas; a entrada aberta não muda. O `/T` de anotações e as URIs ficam como estão (decisão
+pendente).
+
 Opções de gravação:
 - `stream_decode_level=none`: os streams vão como estão, sem descomprimir; uma bomba de
   descompressão num stream nunca é expandida aqui;
@@ -21,6 +26,8 @@ import pikepdf
 from goblinshift.processing.pdf_press.composition import PlannedDocument
 from goblinshift.processing.pdf_press.inspection import InspectedDocument
 
+_PRIVATE_METADATA_KEYS = ("/Metadata", "/PieceInfo", "/LastModified")
+
 
 def write_document(
     planned: PlannedDocument, sources: Mapping[int, InspectedDocument], sink: BinaryIO
@@ -29,12 +36,22 @@ def write_document(
     with pikepdf.new() as composed:
         for page in planned.pages:
             composed.pages.append(sources[page.position].pdf.pages[page.page_number - 1])
+        _drop_private_metadata(composed)
         composed.save(
             sink,
             min_version=_highest_version(planned, sources),
             stream_decode_level=pikepdf.StreamDecodeLevel.none,
             deterministic_id=True,
         )
+
+
+def _drop_private_metadata(pdf: pikepdf.Pdf) -> None:
+    """Apaga as chaves de `_PRIVATE_METADATA_KEYS` de todo dicionário e stream de `pdf`."""
+    for obj in pdf.objects:
+        if isinstance(obj, pikepdf.Dictionary | pikepdf.Stream):
+            for key in _PRIVATE_METADATA_KEYS:
+                if key in obj:
+                    del obj[key]
 
 
 def _highest_version(planned: PlannedDocument, sources: Mapping[int, InspectedDocument]) -> str:
