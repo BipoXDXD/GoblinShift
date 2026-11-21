@@ -47,7 +47,9 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
     if (!draft.ok || save.isPending) {
       return;
     }
-    const error = nameErrorOf(name);
+    // Uma forma só para o teto local e para o envio: o servidor mede o texto que recebe.
+    const finalName = name.trim().normalize("NFC");
+    const error = nameErrorOf(finalName);
     if (error !== null) {
       // O foco sai do botão para o campo, que o leitor de tela lê com o erro na descrição; o erro
       // entra no DOM antes do foco.
@@ -59,7 +61,7 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
     }
     setNameError(null);
     save.mutate(
-      { name: name.trim(), ...draft.command },
+      { name: finalName, ...draft.command },
       {
         onSuccess: (preset) => {
           setMessage(T.saved(preset.name));
@@ -151,13 +153,13 @@ function useSave() {
   });
 }
 
-function nameErrorOf(name: string): string | null {
-  const trimmed = name.trim();
-  if (trimmed === "") {
+/** Recebe o nome já aparado e em NFC, como vai para a API. */
+function nameErrorOf(finalName: string): string | null {
+  if (finalName === "") {
     return T.nameRequired;
   }
   // Code points, não grafemas: é o que o `len` do Python conta no servidor.
-  const length = Array.from(trimmed.normalize("NFC")).length;
+  const length = Array.from(finalName).length;
   return length > MAX_NAME_LENGTH ? T.nameTooLong : null;
 }
 

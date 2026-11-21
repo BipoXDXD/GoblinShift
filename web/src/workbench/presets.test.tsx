@@ -179,6 +179,22 @@ describe("Bancada: Salvar preset", () => {
     expect(within(dialog).queryByText(/Use até 100 caracteres\./)).toBeNull();
   });
 
+  it("nome colado em NFD vai em NFC, a forma que o servidor mede", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openSaveDialog(user);
+    // 120 code points em NFD (acima do teto de 100 do servidor); 60 depois do NFC.
+    await user.click(within(dialog).getByLabelText("Nome do preset"));
+    await user.paste("é".repeat(60));
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    await waitFor(() => {
+      expect(sent(api.requests, "POST /api/v1/presets")).toHaveLength(1);
+    });
+    const [request] = sent(api.requests, "POST /api/v1/presets");
+    expect(await request?.json()).toMatchObject({ name: "é".repeat(60) });
+  });
+
   it("101 code points são recusados mesmo com menos de 101 unidades por caractere", async () => {
     const { api, user } = setup();
 
