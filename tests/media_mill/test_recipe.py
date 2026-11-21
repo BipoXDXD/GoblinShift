@@ -6,6 +6,8 @@ e arquivo truncado.
 """
 
 import itertools
+import subprocess
+import wave
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -13,7 +15,9 @@ import pytest
 from PIL import Image
 
 from goblinshift.processing.media_mill import AudioFormat, Params
+from goblinshift.processing.media_mill.commands import Source, audio_argv
 from goblinshift.processing.media_mill.recipe import MediaMillV1
+from goblinshift.processing.media_mill.signature import Container
 from goblinshift.processing.media_mill.tools import Tools
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
@@ -459,6 +463,12 @@ def test_texto_disfarcado_de_mp4_e_recusado_sem_chamar_o_ffmpeg(
         pytest.param(
             "webm_audio_beyond_duration", "MEDIA_TOO_LARGE", id="audio-alem-da-duracao-declarada"
         ),
+        # O `pts` do último quadro cabe na duração; as amostras decodificadas, não.
+        pytest.param(
+            "webm_audio_timestamps_compressed",
+            "MEDIA_TOO_LARGE",
+            id="audio-com-instantes-comprimidos",
+        ),
     ],
 )
 def test_video_hostil_ou_fora_dos_limites_e_recusado(
@@ -470,6 +480,29 @@ def test_video_hostil_ou_fora_dos_limites_e_recusado(
 
     assert item.code == code
     assert workspace.files() == []
+
+
+def test_corte_do_audio_conta_amostras_mesmo_com_instantes_comprimidos(
+    clips: ClipLibrary, tmp_path: Path
+) -> None:
+    # 2,8 s de Opus a 48 kHz com instantes de 0 a 1,4 s: um corte por instante (`-t 2`) deixaria
+    # passar tudo; o corte por amostras para em 96.000, 2 s.
+    target = tmp_path / "audio.wav"
+    argv = audio_argv(
+        Tools.discover().ffmpeg,
+        Source(clips.path("webm_audio_timestamps_compressed"), Container.WEBM),
+        stream_order=0,
+        sample_rate=48000,
+        channels=2,
+        audio_format=AudioFormat.WAV,
+        cut_samples=96000,
+        target=target,
+    )
+
+    subprocess.run(argv, check=True, capture_output=True)  # noqa: S603 - argv da receita
+
+    with wave.open(str(target)) as extracted:
+        assert (extracted.getnframes(), extracted.getframerate()) == (96000, 48000)
 
 
 # O cabeçalho cabe no teto e o conteúdo não: vídeos que trocam de 320x240 para 2560x1440 (na

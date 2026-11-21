@@ -232,6 +232,38 @@ def require_observed_frame_rate(frame_count: int, elapsed_s: float, limits: Limi
         )
 
 
+def require_audio_within_duration(
+    duration_s: float,
+    *,
+    last_start_s: float | None,
+    last_start_by_samples_s: float | None,
+    samples: int,
+    cut_samples: int,
+) -> None:
+    """A faixa de áudio decodificada cabe na duração aceita do vídeo; passar dela recusa.
+
+    A folga de priming é a mesma nas duas contas: vale o início do último quadro, não o fim,
+    porque AAC (priming) e Opus (pre-skip) legítimos terminam alguns ms depois da duração do
+    contêiner. O início vem de duas fontes, e basta uma passar da duração:
+
+    - o `pts` do último quadro (`last_start_s`), que pega instantes esticados para a frente;
+    - as amostras decodificadas antes dele (`last_start_by_samples_s`), que pegam instantes
+      comprimidos: 30 s de Opus com `pts` de 0 a 2 s.
+
+    Chegar ao corte (`samples >= cut_samples`) também recusa: o corte fica na duração mais uma
+    margem, e um quadro longo (PCM em blocos de segundos) pode começar antes da duração com a
+    faixa continuando depois do corte. Sem quadros, nada a checar.
+    """
+    if cut_samples <= 0:
+        raise ValueError(f"corte do áudio sem amostras: {cut_samples}")
+    starts = [start for start in (last_start_s, last_start_by_samples_s) if start is not None]
+    if samples >= cut_samples or any(start > duration_s for start in starts):
+        raise MediaRejected(
+            RejectionCode.MEDIA_TOO_LARGE,
+            "a faixa de áudio passa da duração declarada do vídeo",
+        )
+
+
 def _require_size_within(video: VideoStream, limits: Limits) -> None:
     if video.width <= 0 or video.height <= 0:
         raise _unsupported("o vídeo não declara largura e altura")

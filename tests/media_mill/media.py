@@ -158,6 +158,12 @@ CLIPS: dict[str, Clip] = {
         inputs=(video_source(duration=2.0), tone(rate=48000, duration=30.0)),
         output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
     ),
+    # Base do WebM com instantes de áudio comprimidos (`DERIVED`): vídeo de 2 s e Opus de 2,8 s,
+    # menos que a duração mais a margem do corte (3 s), para só a contagem de amostras recusar.
+    "webm_2s_audio_2800ms": Clip(
+        inputs=(video_source(duration=2.0), tone(rate=48000, duration=2.8)),
+        output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
+    ),
     # Trechos do MP4 que troca de resolução (`DERIVED`): o MPEG-TS se emenda byte a byte.
     "ts_320x240": Clip(
         inputs=(video_source(duration=1.0), tone(duration=1.0)),
@@ -265,6 +271,16 @@ def with_declared_frame_duration(source: Path, target: Path) -> Path:
     return target
 
 
+def with_audio_timestamps_divided(source: Path, target: Path, divisor: int) -> Path:
+    """Mesmo WebM, com o `pts` de cada pacote de áudio dividido por `divisor` (filtro `setts`, sem
+    reencodar): as amostras continuam lá, e os instantes passam a caber na duração do vídeo."""
+    ffmpeg, _ = require_ffmpeg()
+    argv = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source)]
+    argv += ["-map", "0", "-c", "copy", "-bsf:a", f"setts=ts=PTS/{divisor}", *WEBM, str(target)]
+    subprocess.run(argv, check=True, capture_output=True)  # noqa: S603 - argv do próprio teste
+    return target
+
+
 def concatenated(parts: Sequence[Path], target: Path) -> Path:
     """MPEG-TS emendados pelo protocolo `concat` e copiados para MP4, sem reencodar: o `moov`
     descreve só o primeiro trecho (largura e altura), e os quadros dos outros seguem como vieram."""
@@ -314,9 +330,17 @@ def _audio_beyond_duration(root: Path) -> Path:
     return with_declared_duration(base, root / "webm_audio_beyond_duration.webm", 2000.0)
 
 
+def _audio_timestamps_compressed(root: Path) -> Path:
+    """Vídeo de 2 s com 2,8 s de Opus em instantes de 0 a 1,4 s: o contêiner declara 2 s, o `pts`
+    do último quadro fica dentro deles e o áudio sairia 0,8 s mais longo que o vídeo."""
+    base = generate(CLIPS["webm_2s_audio_2800ms"], root / "webm_2s_audio_2800ms.webm")
+    return with_audio_timestamps_divided(base, root / "webm_audio_timestamps_compressed.webm", 2)
+
+
 # Vídeos derivados de um clipe gerado: recebem o diretório da biblioteca e devolvem o arquivo.
 DERIVED: dict[str, Callable[[Path], Path]] = {
     "webm_audio_beyond_duration": _audio_beyond_duration,
+    "webm_audio_timestamps_compressed": _audio_timestamps_compressed,
     "mp4_resolution_switch": _resolution_switch,
     "webm_resolution_switch_before_target": _resolution_switch_before_target,
     "webm_fps_beyond_declared": _fps_beyond_declared,

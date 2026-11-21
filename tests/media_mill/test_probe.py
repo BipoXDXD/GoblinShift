@@ -14,6 +14,7 @@ from goblinshift.processing.media_mill import Limits, Params
 from goblinshift.processing.media_mill.probe import (
     inspect,
     parse_probe,
+    require_audio_within_duration,
     require_dimensions_within,
     require_observed_frame_rate,
 )
@@ -463,3 +464,44 @@ def test_taxa_observada_respeita_o_teto_com_um_quadro_de_folga(
 def test_intervalo_negativo_e_defeito_de_quem_chama() -> None:
     with pytest.raises(ValueError, match="negativo"):
         require_observed_frame_rate(2, -0.5, Limits())
+
+
+# Vídeo de 2 s a 48 kHz: o corte fica em 3 s, 144.000 amostras.
+@pytest.mark.parametrize(
+    ("by_pts", "by_samples", "samples", "allowed"),
+    [
+        pytest.param(None, None, 0, True, id="sem-quadros"),
+        pytest.param(1.98, 1.98, 96000, True, id="ultimo-quadro-antes-do-fim"),
+        # Folga de priming: o último quadro começa no fim e termina depois dele.
+        pytest.param(2.0, 2.0, 97000, True, id="ultimo-quadro-comeca-no-fim"),
+        pytest.param(2.001, 1.98, 96000, False, id="pts-passa-do-fim"),
+        pytest.param(1.4, 2.001, 134400, False, id="amostras-passam-do-fim-com-pts-comprimido"),
+        pytest.param(1.0, 1.0, 143999, True, id="uma-amostra-antes-do-corte"),
+        pytest.param(1.0, 1.0, 144000, False, id="chegou-ao-corte"),
+    ],
+)
+def test_audio_cabe_na_duracao_pelo_pts_pelas_amostras_e_antes_do_corte(
+    by_pts: float | None, by_samples: float | None, samples: int, allowed: bool
+) -> None:
+    def check() -> None:
+        require_audio_within_duration(
+            2.0,
+            last_start_s=by_pts,
+            last_start_by_samples_s=by_samples,
+            samples=samples,
+            cut_samples=144000,
+        )
+
+    if allowed:
+        check()
+        return
+    with pytest.raises(MediaRejected) as rejected:
+        check()
+    assert rejected.value.code is RejectionCode.MEDIA_TOO_LARGE
+
+
+def test_corte_sem_amostras_e_defeito_de_quem_chama() -> None:
+    with pytest.raises(ValueError, match="sem amostras"):
+        require_audio_within_duration(
+            2.0, last_start_s=None, last_start_by_samples_s=None, samples=0, cut_samples=0
+        )

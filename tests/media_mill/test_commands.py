@@ -34,7 +34,7 @@ def all_commands(container: Container) -> dict[str, list[str]]:
             sample_rate=48000,
             channels=2,
             audio_format=AudioFormat.FLAC,
-            cut_at_s=3.0,
+            cut_samples=144000,
             target=TARGET,
         ),
         "thumbnail": thumbnail_argv(FFMPEG, source, at_s=1.5, box=box, target=TARGET),
@@ -110,31 +110,42 @@ def test_wav_e_pcm_de_16_bits() -> None:
         sample_rate=44100,
         channels=1,
         audio_format=AudioFormat.WAV,
-        cut_at_s=3.0,
+        cut_samples=132300,
         target=TARGET,
     )
 
     assert (option(argv, "-c:a"), argv[argv.index("-c:a") + 3]) == ("pcm_s16le", "wav")
 
 
-def test_audio_corta_um_segundo_depois_da_duracao_aceita_e_registra_os_quadros() -> None:
-    argv = audio_argv(
+def audio_cut_at(cut_samples: int) -> list[str]:
+    return audio_argv(
         FFMPEG,
         Source(INPUT, Container.MOV),
         stream_order=0,
         sample_rate=48000,
         channels=2,
         audio_format=AudioFormat.WAV,
-        cut_at_s=12.5,
+        cut_samples=cut_samples,
         target=TARGET,
     )
 
-    assert option(argv, "-t") == "12.500000"
-    assert option(argv, "-af") == "ashowinfo"
+
+def test_audio_corta_em_amostras_e_registra_os_quadros_depois_do_corte() -> None:
+    argv = audio_cut_at(600000)
+
+    # O corte conta amostras decodificadas (o `pts` pode mentir), antes do `ashowinfo`, que só
+    # registra o que passou. Nenhum `-t`: o corte por instante seria enganado pelo `pts`.
+    assert option(argv, "-af") == "atrim=end_sample=600000,ashowinfo"
+    assert "-t" not in argv
     # Nível `info`: é nele que o `ashowinfo` escreve cada quadro.
     assert option(argv, "-loglevel") == "level+info"
-    assert argv.index("-i") < argv.index("-t") < argv.index("-n")
     assert argv.index("-i") < argv.index("-af") < argv.index("-n")
+
+
+@pytest.mark.parametrize("cut", [0, -1, 1.5, True, "96000"])
+def test_corte_do_audio_so_aceita_inteiro_positivo(cut: object) -> None:
+    with pytest.raises(ValueError, match="inteiro positivo"):
+        audio_cut_at(cut)  # type: ignore[arg-type]  # o tipo errado é o próprio caso
 
 
 def test_miniatura_busca_o_alvo_e_grava_um_jpeg_na_caixa() -> None:
@@ -209,11 +220,61 @@ def test_log_guarda_o_instante_do_ultimo_quadro_de_audio(tmp_path: Path) -> None
     assert (summary.last_audio_s, summary.first_frame_s) == (2.98, None)
 
 
+def test_log_conta_as_amostras_de_audio_e_o_inicio_do_ultimo_quadro_por_elas(
+    tmp_path: Path,
+) -> None:
+    # Linhas no formato real do `ashowinfo` (FFmpeg 7+), com `pts` comprimido: 1,5 s de amostras
+    # com instantes de 0 a 0,04 s.
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_ashowinfo_1 @ 0x1] [info] n:0 pts:0 pts_time:0 fmt:fltp channels:1 "
+        b"chlayout:mono rate:48000 nb_samples:48000 checksum:769366EF plane_checksums: [ 1 ]\n"
+        b"[Parsed_ashowinfo_1 @ 0x1] [info] n:1 pts:960 pts_time:0.02 fmt:fltp channels:1 "
+        b"chlayout:mono rate:48000 nb_samples:12000 checksum:49901A28 plane_checksums: [ 2 ]\n"
+        b"[Parsed_ashowinfo_1 @ 0x1] [info] n:2 pts:1920 pts_time:0.04 fmt:fltp channels:1 "
+        b"chlayout:mono rate:48000 nb_samples:12000 checksum:DD7801E8 plane_checksums: [ 3 ]\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.audio_samples, summary.last_audio_by_samples_s) == (72000, 1.25)
+    assert summary.last_audio_s == 0.04
+
+
+def test_amostras_em_taxas_diferentes_somam_em_segundos(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:0 pts:0 pts_time:0 rate:44100 nb_samples:44100\n"
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:0 pts:0 pts_time:0 rate:8000 nb_samples:4000\n"
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:1 pts:9 pts_time:0.1 rate:8000 nb_samples:800\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.audio_samples, summary.last_audio_by_samples_s) == (48900, 1.5)
+
+
+def test_amostras_contam_mesmo_sem_pts_no_quadro(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:0 pts:NOPTS pts_time:NOPTS rate:100 nb_samples:50\n"
+        b"[Parsed_ashowinfo_0 @ 0x1] [info] n:1 pts:NOPTS pts_time:NOPTS rate:100 nb_samples:50\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.audio_samples, summary.last_audio_by_samples_s) == (100, 0.5)
+    assert summary.last_audio_s is None
+
+
 def test_log_sem_quadros_de_audio(tmp_path: Path) -> None:
     log = tmp_path / "x.log"
     log.write_bytes(b"[Parsed_showinfo_0 @ 0x2] [info] n:   0 pts:  15360 pts_time:1\n")
 
-    assert read_log(log).last_audio_s is None
+    summary = read_log(log)
+
+    assert (summary.last_audio_s, summary.last_audio_by_samples_s) == (None, None)
+    assert summary.audio_samples == 0
 
 
 def test_pts_time_fora_do_showinfo_e_ignorado(tmp_path: Path) -> None:
@@ -267,14 +328,15 @@ def test_texto_do_usuario_no_log_nao_vira_quadro(tmp_path: Path) -> None:
     log.write_bytes(
         b"[info]     title           : Parsed_showinfo pts_time:7 s:9999x9999\n"
         b"[Parsed_showinfo_0 @ 0x2] [info] n:   0 pts:      0 pts_time:1 s:320x240\n"
-        b"[Parsed_ashowinfo_0 @ 0x3] [info] n:0 pts:0 pts_time:0.1 fmt:s16\n"
-        b"[info]     title           : Parsed_ashowinfo pts_time:0.2\n"
+        b"[Parsed_ashowinfo_0 @ 0x3] [info] n:0 pts:0 pts_time:0.1 fmt:s16 rate:10 nb_samples:5\n"
+        b"[info]     title           : Parsed_ashowinfo pts_time:0.2 rate:1 nb_samples:999\n"
         b"                    : [Parsed_showinfo_0 @ 0x1] [info] n:0 pts_time:8 s:9999x9999\n"
     )
 
     summary = read_log(log)
 
     assert (summary.first_frame_s, summary.last_frame_s, summary.last_audio_s) == (1.0, 1.0, 0.1)
+    assert (summary.audio_samples, summary.last_audio_by_samples_s) == (5, 0.0)
     assert (summary.frame_count, summary.max_long_side_px, summary.max_short_side_px) == (
         1,
         320,

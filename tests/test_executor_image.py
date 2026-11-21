@@ -477,13 +477,15 @@ def media_batch(root: Path) -> list[tuple[str, bytes]]:
 def media_beyond_header_batch(root: Path) -> list[tuple[str, bytes]]:
     """WebM VP9/Opus válido e os que passam do teto só nos quadros decodificados: MP4 que passa a
     2560x1440 no meio, WebM que passa a 2560x1440 só depois do último alvo (último quadro
-    anterior) e WebM de 240 fps que declara ~60. Lote separado: o Media Mill aceita 5 vídeos."""
+    anterior), WebM de 240 fps que declara ~60 e WebM com 2,8 s de Opus em instantes comprimidos
+    num vídeo de 2 s. Lote separado: o Media Mill aceita 5 vídeos."""
     root.mkdir()
     return [
         ("clipe.webm", video.generate(video.CLIPS["webm_vp9_opus"], root / "b.webm").read_bytes()),
         ("troca.mp4", video.DERIVED["mp4_resolution_switch"](root).read_bytes()),
         ("troca.webm", video.DERIVED["webm_resolution_switch_before_target"](root).read_bytes()),
         ("rapido.webm", video.DERIVED["webm_fps_beyond_declared"](root).read_bytes()),
+        ("comprimido.webm", video.DERIVED["webm_audio_timestamps_compressed"](root).read_bytes()),
     ]
 
 
@@ -530,6 +532,7 @@ def test_media_mill_recusa_na_imagem_o_que_passa_do_teto_depois_do_cabecalho(
     statuses = [(item["status"], item.get("code")) for item in report["items"]]
     assert statuses == [
         ("ok", None),
+        ("rejected", "MEDIA_TOO_LARGE"),
         ("rejected", "MEDIA_TOO_LARGE"),
         ("rejected", "MEDIA_TOO_LARGE"),
         ("rejected", "MEDIA_TOO_LARGE"),

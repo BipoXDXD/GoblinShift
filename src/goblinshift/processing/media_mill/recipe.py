@@ -10,6 +10,7 @@ execução inteira (`RESOURCE_LIMIT_EXCEEDED`), e a cópia para `out/` fica fora
 erros: um `ENOSPC` ou `OUTPUT_LIMIT_EXCEEDED` derruba a execução em vez de virar rejeição.
 """
 
+import math
 import shutil
 import tempfile
 import time
@@ -33,6 +34,7 @@ from goblinshift.processing.media_mill.probe import (
     Inspected,
     inspect,
     parse_probe,
+    require_audio_within_duration,
     require_dimensions_within,
     require_observed_frame_rate,
 )
@@ -71,8 +73,9 @@ AUDIO_BIT_DEPTH = 16
 COPY_CHUNK_BYTES = 1024 * 1024
 # A saída do ffprobe descreve no máximo 16 faixas: alguns KiB. Acima disto, não é vídeo comum.
 PROBE_OUTPUT_MAX_BYTES = 1024 * 1024
-# O áudio sai cortado na duração aceita mais esta margem: um quadro que começa depois da duração
-# aceita recusa o vídeo, e a margem garante que, se a faixa passa dela, o corte ainda o registra.
+# O áudio sai cortado, em amostras, na duração aceita mais esta margem: um quadro que começa depois
+# da duração aceita recusa o vídeo, e a margem garante que, se a faixa passa dela, o corte ainda o
+# registra.
 AUDIO_CUT_MARGIN_S = 1.0
 MS_PER_S = 1000
 # 1.5: uma miniatura em 10% da duração; três em 10%, 50% e 90%.
@@ -245,6 +248,8 @@ class _Mill:
         if audio is None:
             raise ValueError("extração sem faixa de áudio escolhida")
         target = self._work / f"audio{_AUDIO_EXTENSIONS[self._params.audio_format]}"
+        # Inteiro calculado de valores já validados (duração e taxa do probe), nunca de texto.
+        cut_samples = math.ceil((media.duration_s + AUDIO_CUT_MARGIN_S) * audio.sample_rate)
         argv = audio_argv(
             self._tools.ffmpeg,
             source,
@@ -252,20 +257,22 @@ class _Mill:
             sample_rate=audio.sample_rate,
             channels=audio.channels,
             audio_format=self._params.audio_format,
-            cut_at_s=media.duration_s + AUDIO_CUT_MARGIN_S,
+            cut_samples=cut_samples,
             target=target,
         )
         outcome = self._runner.run(argv, cap_s=self._timeouts.audio_s, name="audio")
         log = read_log(outcome.log)
         if not outcome.succeeded or log.has_errors or not _non_empty(target):
             raise _damaged("a faixa de áudio está danificada ou truncada")
-        # Compara o início do último quadro, não o fim: AAC (priming) e Opus (pre-skip) legítimos
-        # terminam alguns ms depois da duração do contêiner.
-        if log.last_audio_s is not None and log.last_audio_s > media.duration_s:
-            raise MediaRejected(
-                RejectionCode.MEDIA_TOO_LARGE,
-                "a faixa de áudio passa da duração declarada do vídeo",
-            )
+        # Dano antes de tamanho: o corte termina a leitura, e o que ela leu já é a faixa toda ou
+        # passa da duração (sucesso parcial nunca).
+        require_audio_within_duration(
+            media.duration_s,
+            last_start_s=log.last_audio_s,
+            last_start_by_samples_s=log.last_audio_by_samples_s,
+            samples=log.audio_samples,
+            cut_samples=cut_samples,
+        )
         return target
 
     def _thumbnail(self, source: Source, media: Inspected, point: Fraction, box: Box) -> _Thumbnail:

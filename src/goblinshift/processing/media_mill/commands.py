@@ -15,9 +15,12 @@ Na saída, `-map_metadata -1` e `-map_chapters -1` descartam os metadados do ví
 gravação, aparelho) e `+bitexact` tira a versão do encoder do arquivo, para a mesma entrada dar os
 mesmos bytes. `-n` recusa sobrescrever: cada saída vai para um caminho novo no rascunho.
 
-O áudio sai cortado por `-t` (a duração aceita mais uma margem, decidida pela receita): um
-contêiner que declara 2 s com horas de áudio não gera horas de WAV. O filtro `ashowinfo` registra
-cada quadro de áudio, para a receita saber se a faixa passava da duração aceita.
+O áudio sai cortado pelo `atrim=end_sample=N` (a duração aceita mais uma margem, em amostras,
+decidida pela receita): um contêiner que declara 2 s com horas de áudio não gera horas de WAV. O
+corte conta amostras decodificadas, não instantes: o `pts` vem do arquivo e pode ser comprimido
+(30 s de Opus com instantes de 0 a 2 s), as amostras não. O filtro `ashowinfo`, depois do corte,
+registra cada quadro de áudio (instante, amostras e taxa), para a receita saber se a faixa passava
+da duração aceita.
 
 `-loglevel level+…` prefixa cada linha do stderr com o nível (`[error]`, `[info]`), e
 `read_log` separa o que é erro de decodificação e os instantes informados pelos filtros
@@ -26,8 +29,10 @@ decodificado (`s:LxA`): o cabeçalho que o ffprobe lê pode mentir, os quadros n
 """
 
 import re
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 from goblinshift.processing.media_mill.params import AudioFormat
@@ -36,6 +41,9 @@ from goblinshift.processing.media_mill.signature import Container
 JPEG_QUALITY = 3  # escala -q:v do mjpeg: 2 (melhor) a 31; 3 fica perto de qualidade 90
 _ERROR_LEVELS = (b"[error]", b"[fatal]", b"[panic]")
 _PTS_TIME = re.compile(rb"\bpts_time:(-?[0-9]+(?:\.[0-9]+)?)")
+# `ashowinfo`: `… rate:48000 nb_samples:960 …`. O `\b` evita casar com `sample_rate:`.
+_AUDIO_RATE = re.compile(rb"\brate:([1-9][0-9]*)")
+_AUDIO_SAMPLES = re.compile(rb"\bnb_samples:([0-9]+)")
 _FRAME_SIZE = re.compile(rb"\bs:([0-9]+)x([0-9]+)")
 # Linha de um filtro: `[Parsed_showinfo_0 @ 0x…] [info] n:…`. Ancorado no início da linha, porque
 # texto do arquivo (título da faixa) também aparece no log, sempre depois de `[info]` ou de espaços.
@@ -106,13 +114,16 @@ def audio_argv(
     sample_rate: int,
     channels: int,
     audio_format: AudioFormat,
-    cut_at_s: float,
+    cut_samples: int,
     target: Path,
 ) -> list[str]:
     """Uma faixa de áudio, na taxa e nos canais de origem (sem resample nem downmix), 16 bits.
 
-    Grava no máximo `cut_at_s` segundos; o `ashowinfo` registra o instante de cada quadro lido.
+    Grava no máximo `cut_samples` amostras decodificadas; o `ashowinfo`, depois do corte, registra
+    cada quadro que passou.
     """
+    if isinstance(cut_samples, bool) or not isinstance(cut_samples, int) or cut_samples <= 0:
+        raise ValueError(f"corte do áudio precisa ser um inteiro positivo: {cut_samples!r}")
     return [
         *_ffmpeg_head(ffmpeg, "info"),
         *source.input_options(),
@@ -125,9 +136,7 @@ def audio_argv(
         "-dn",
         *_no_metadata(),
         "-af",
-        "ashowinfo",
-        "-t",
-        _seconds(cut_at_s),
+        f"atrim=end_sample={cut_samples},ashowinfo",
         "-ar",
         str(sample_rate),
         "-ac",
@@ -181,8 +190,13 @@ class LogSummary:
     # Instantes (s) dos quadros que passaram pelo `showinfo`, relativos ao início da leitura.
     first_frame_s: float | None
     last_frame_s: float | None
-    # Início (s) do último quadro de áudio que passou pelo `ashowinfo`.
+    # Início (s) do último quadro de áudio que passou pelo `ashowinfo`, pelo `pts`.
     last_audio_s: float | None
+    # O mesmo início contado pelas amostras decodificadas antes dele (soma de `nb_samples / rate`
+    # dos quadros anteriores): não depende do `pts`, que o arquivo pode comprimir.
+    last_audio_by_samples_s: float | None
+    # Amostras que passaram pelo `ashowinfo`, em qualquer taxa: chegar ao corte é passar dele.
+    audio_samples: int
     # Quadros que passaram pelo `showinfo` e o maior lado maior e lado menor entre eles (0 sem
     # quadros), como foram decodificados, antes da escala da miniatura.
     frame_count: int
@@ -201,6 +215,7 @@ def read_log(path: Path) -> LogSummary:
     last_audio: float | None = None
     frame_count = long_side = short_side = 0
     lowest_s = highest_s = 0.0
+    audio = _AudioCount()
     for line in _lines(path):
         has_errors = has_errors or any(level in line for level in _ERROR_LEVELS)
         frame_s = _frame_time(line, _SHOWINFO)
@@ -216,16 +231,45 @@ def read_log(path: Path) -> LogSummary:
         audio_s = _frame_time(line, _ASHOWINFO)
         if audio_s is not None:
             last_audio = audio_s
+        if line.startswith(_ASHOWINFO):
+            audio.add(line)
     return LogSummary(
         has_errors=has_errors,
         first_frame_s=first,
         last_frame_s=last,
         last_audio_s=last_audio,
+        last_audio_by_samples_s=audio.last_start_s(),
+        audio_samples=audio.samples,
         frame_count=frame_count,
         max_long_side_px=long_side,
         max_short_side_px=short_side,
         frame_span_s=highest_s - lowest_s,
     )
+
+
+class _AudioCount:
+    """Amostras do `ashowinfo` por taxa: a soma em segundos sai exata, sem erro de float."""
+
+    def __init__(self) -> None:
+        self.samples = 0
+        self._by_rate: Counter[int] = Counter()
+        self._last: tuple[int, int] | None = None  # (amostras, taxa) do último quadro
+
+    def add(self, line: bytes) -> None:
+        samples = _AUDIO_SAMPLES.search(line)
+        rate = _AUDIO_RATE.search(line)
+        if samples is None or rate is None:
+            return
+        frame = (int(samples.group(1)), int(rate.group(1)))
+        self.samples += frame[0]
+        self._by_rate[frame[1]] += frame[0]
+        self._last = frame
+
+    def last_start_s(self) -> float | None:
+        if self._last is None:
+            return None
+        total = sum(Fraction(samples, rate) for rate, samples in self._by_rate.items())
+        return float(total - Fraction(*self._last))
 
 
 def _ffmpeg_head(ffmpeg: Path, level: str) -> list[str]:
