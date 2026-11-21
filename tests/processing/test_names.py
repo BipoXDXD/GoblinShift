@@ -10,6 +10,7 @@ from goblinshift.processing.names import (
     MAX_EXTENSION_BYTES,
     extension_of,
     has_unsafe_char,
+    portable_name,
     safe_stem,
 )
 
@@ -151,3 +152,43 @@ def test_radical_e_extensao_nunca_tem_controle_formato_nem_separador(original: s
     assert not has_unsafe_char(pieces)
     assert "/" not in pieces
     assert "\\" not in pieces
+
+
+# --- Nome portável: as regras do Windows valem em todas as plataformas ------------------------
+# Off-points dos dispositivos DOS: COM10, COM0, LPT0, CONSOLE, os sobrescritos (COM¹ a COM³) e
+# CONIN$/CONOUT$ ficam de fora da regra por decisão do dono.
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("CON.csv", "CON_.csv"),
+        ("con.csv", "con_.csv"),
+        ("Com1.txt", "Com1_.txt"),
+        ("LPT9", "LPT9_"),
+        ("NUL.tar.gz", "NUL_.tar.gz"),
+        ("CON .csv", "CON _.csv"),
+        ("CON.", "CON_"),
+        ("CON .", "CON_"),
+        ("COM10.txt", "COM10.txt"),
+        ("COM0.txt", "COM0.txt"),
+        ("LPT0.txt", "LPT0.txt"),
+        ("COM\u00b9.txt", "COM\u00b9.txt"),
+        ("COM\u00b2.txt", "COM\u00b2.txt"),
+        ("COM\u00b3.txt", "COM\u00b3.txt"),
+        ("CONIN$.txt", "CONIN$.txt"),
+        ("CONOUT$.txt", "CONOUT$.txt"),
+        ("CONSOLE.csv", "CONSOLE.csv"),
+        ("a:b?.csv", "a_b_.csv"),
+        ('x<>"|*.txt', "x_____.txt"),
+        ("relatorio.", "relatorio"),
+        ("relatorio. . ", "relatorio"),
+        ("a.csv ", "a.csv"),
+        ("dados .csv", "dados .csv"),
+        ("...", "_"),
+        ("dados.csv", "dados.csv"),
+    ],
+)
+def test_nome_portavel_segue_as_regras_do_windows(name: str, expected: str) -> None:
+    assert portable_name(name) == expected
+    assert portable_name(expected) == expected

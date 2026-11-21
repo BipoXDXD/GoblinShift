@@ -27,7 +27,7 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
-    load_run,
+    load_run_any_owner,
     run_transaction,
 )
 from goblinshift.runs.tables import run, run_input
@@ -92,7 +92,7 @@ def _claim_one(session: Session, lease: timedelta) -> ClaimedAttempt | Applied |
     run_id = session.execute(_next_eligible()).scalar_one_or_none()
     if run_id is None:
         return None
-    loaded = load_run(session, run_id)
+    loaded = load_run_any_owner(session, run_id)
     if loaded is None:
         return None
     decision = decide_transition(loaded.state, Claim(loaded.now))

@@ -57,7 +57,9 @@ class Usage(BaseModel):
     runs_last_24h: int
     input_bytes_last_24h: int
     storage_reserved_bytes: int
-    active_run_id: UUID | None
+    active_run_id: UUID | None = Field(
+        description="A execução não terminal da conta; nulo sem ela ou sem o escopo `runs:read`."
+    )
     # Quando a execução mais antiga sai da janela de 24 h; nulo sem execuções na janela.
     daily_quota_resets_at: datetime | None
     executor_ms_last_24h: int = Field(
@@ -100,7 +102,8 @@ def get_me(
         daily = daily_usage(session, owner_id, now)
         quota = quota_for(session, owner_id, defaults)
         executor_ms = executor_time_ms(session, owner_id, now)
-        active = active_run_id(session, owner_id)
+        # O id de uma Run é dado de `runs`: a chave sem leitura de execuções não o recebe.
+        active = active_run_id(session, owner_id) if Scope.RUNS_READ in principal.scopes else None
     # A conta não é apagada com chave ativa (FK RESTRICT); se sumir entre as duas
     # transações, a credencial deixou de valer.
     if account is None:

@@ -81,7 +81,7 @@ from goblinshift.runs.store import (
     apply_transition,
     complete_after_commit,
     db_now,
-    load_run,
+    load_run_any_owner,
     release_run_holds,
     run_transaction,
 )
@@ -802,7 +802,7 @@ class Maintenance:
         """Decide numa transação com `SKIP LOCKED`; `None` se a linha está ocupada ou mudou."""
 
         def decide(session: Session) -> Applied | None:
-            loaded = load_run(session, run_id, skip_locked=True)
+            loaded = load_run_any_owner(session, run_id, skip_locked=True)
             if loaded is None:
                 return None
             event = event_for(loaded)
@@ -833,7 +833,7 @@ class Maintenance:
         return applied
 
     def _confirm_stopped(self, session: Session, run_id: uuid.UUID, first: Applied) -> Applied:
-        loaded = load_run(session, run_id)
+        loaded = load_run_any_owner(session, run_id)
         if loaded is None:
             raise LostFencing(f"execução {run_id} sumiu durante a reconciliação")
         decision = decide_transition(loaded.state, ExecutorStopped(loaded.state.generation))
@@ -910,6 +910,6 @@ def _sweep_counts(sweep: MissingSweep) -> dict[str, int]:
 
 def _discard_locked(session: Session, run_id: uuid.UUID, attempt_id: uuid.UUID) -> list[str] | None:
     # Ordem de locks: Run → Attempt → arquivos; Run ocupada fica para o próximo ciclo.
-    if load_run(session, run_id, skip_locked=True) is None:
+    if load_run_any_owner(session, run_id, skip_locked=True) is None:
         return None
     return discard_candidates(session, attempt_id)
