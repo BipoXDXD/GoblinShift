@@ -380,6 +380,12 @@ def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileRep
     Durante o deploy da 0006, a API anterior cria uploads e o worker anterior publica artefatos
     sem reserva. Candidatos de uma tentativa ainda sem artefato ficam de fora: a reserva da Run
     os cobre. Numa transação própria e curta.
+
+    Os órfãos ficam travados até a adoção: sem isso, o expurgo (`deleted`) ou a varredura
+    (`missing`) confirmariam entre a leitura e o INSERT, e a reserva nova ficaria presa a um
+    objeto removido. Ordem de travas de 3.4: objetos, depois pools, a mesma do expurgo. Com
+    `SKIP LOCKED`, um objeto que outro já travou fica para o próximo ciclo; e a releitura do
+    READ COMMITTED depois da trava descarta o que mudou de estado entrementes.
     """
     with session.begin():
         orphans = session.execute(
@@ -391,6 +397,7 @@ def reconcile_capacity(session: Session, *, limit: int) -> capacity.ReconcileRep
             )
             .order_by(stored_object.c.id)
             .limit(limit)
+            .with_for_update(of=stored_object, skip_locked=True)
         ).all()
         return capacity.reconcile(
             session,
