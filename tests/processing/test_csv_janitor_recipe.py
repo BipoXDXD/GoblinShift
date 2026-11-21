@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from goblinshift.processing.csv_janitor import Limits, Params
+from goblinshift.processing.csv_janitor import FormulaGuard, Limits, Params
 from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, CsvJanitorV1
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import (
@@ -270,3 +270,19 @@ def test_registro_executa_a_receita_a_partir_dos_parametros_resolvidos(
 
     assert isinstance(report.items[0], ItemOk)
     assert (work.out_dir / "a.csv").read_bytes() == b"nome\r\nana\r\n"
+
+
+def test_tabela_que_cresce_alem_do_limite_na_saida_vira_item_rejeitado(work: Workspace) -> None:
+    # O prefixo tab soma 3 bytes a cada "=1"; a entrada cabe no limite, a saída não.
+    grows = "a\r\n=1\r\n"
+    work.add("cresce.csv", grows)
+    work.add("ok.csv", "b\r\n1\r\n")
+    recipe = CsvJanitorV1(limits=Limits(table_bytes=len(grows)))
+
+    report = work.run(Params(formula_guard=FormulaGuard.TAB_PREFIX), recipe)
+
+    rejected, ok = report.items
+    assert isinstance(rejected, ItemRejected)
+    assert rejected.code == "FIELD_LIMIT_EXCEEDED"
+    assert isinstance(ok, ItemOk)
+    assert work.output_names() == ["ok.csv"]
