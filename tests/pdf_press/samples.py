@@ -195,8 +195,9 @@ _MODIFIED = String("D:20261121000000Z")
 
 
 def private_metadata(pdf: pikepdf.Pdf) -> None:
-    """XMP, `/PieceInfo` e `/LastModified` em cada página e num Form compartilhado por todas,
-    cuja imagem também traz XMP: a saída precisa tirá-los mesmo fora de `pdf.pages`."""
+    """XMP, `/PieceInfo` e `/LastModified` em cada página, numa anotação direta (sem número de
+    objeto) e num Form compartilhado por todas, cuja imagem também traz XMP: a saída precisa
+    tirá-los mesmo fora de `pdf.pages` e fora dos objetos indiretos."""
     image = pdf.make_stream(
         b"\x00",
         Type=Name.XObject,
@@ -221,6 +222,17 @@ def private_metadata(pdf: pikepdf.Pdf) -> None:
         page.obj.PieceInfo = Dictionary(App=Dictionary(Private=String("x")))
         page.obj.LastModified = _MODIFIED
         page.obj.Resources = Dictionary(XObject=Dictionary(Fm0=form))
+        page.obj.Annots = Array([_annotation_with_metadata(pdf)])
+
+
+def _annotation_with_metadata(pdf: pikepdf.Pdf) -> Dictionary:
+    return Dictionary(
+        Type=Name.Annot,
+        Subtype=Name.Square,
+        Rect=[0, 0, 9, 9],
+        Metadata=_xmp(pdf),
+        PieceInfo=Dictionary(App=Dictionary(Private=String("x"))),
+    )
 
 
 def _xmp(pdf: pikepdf.Pdf) -> pikepdf.Stream:

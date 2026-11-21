@@ -46,12 +46,29 @@ def write_document(
 
 
 def _drop_private_metadata(pdf: pikepdf.Pdf) -> None:
-    """Apaga as chaves de `_PRIVATE_METADATA_KEYS` de todo dicionário e stream de `pdf`."""
-    for obj in pdf.objects:
-        if isinstance(obj, pikepdf.Dictionary | pikepdf.Stream):
-            for key in _PRIVATE_METADATA_KEYS:
-                if key in obj:
-                    del obj[key]
+    """Apaga as chaves de `_PRIVATE_METADATA_KEYS` de todo dicionário e stream de `pdf`.
+
+    `pdf.objects` traz só os objetos indiretos; a busca desce por dicionários, streams e arrays
+    a partir de cada um para alcançar também os diretos (uma anotação dentro de `/Annots`, por
+    exemplo). Cada indireto é visitado uma vez, pelo `objgen`, então ciclos não prendem o laço.
+    """
+    visited: set[tuple[int, int]] = set()
+    pending: list[object] = list(pdf.objects)
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, pikepdf.Array | pikepdf.Dictionary | pikepdf.Stream):
+            continue
+        if node.is_indirect:
+            if node.objgen in visited:
+                continue
+            visited.add(node.objgen)
+        if isinstance(node, pikepdf.Array):
+            pending.extend(node)
+            continue
+        for key in _PRIVATE_METADATA_KEYS:
+            if key in node:
+                del node[key]
+        pending.extend(node.values())
 
 
 def _highest_version(planned: PlannedDocument, sources: Mapping[int, InspectedDocument]) -> str:

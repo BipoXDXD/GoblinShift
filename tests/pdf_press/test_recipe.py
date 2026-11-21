@@ -88,14 +88,25 @@ def test_split_de_nomes_iguais_nao_sobrescreve(work: Workspace) -> None:
 
 
 def private_keys(data: bytes) -> list[str]:
+    """Chaves privadas em todo dicionário alcançável do trailer, direto ou indireto."""
+    found: list[str] = []
     with pikepdf.open(io.BytesIO(data)) as pdf:
-        return [
-            key
-            for obj in pdf.objects
-            if isinstance(obj, pikepdf.Dictionary | pikepdf.Stream)
-            for key in ("/Metadata", "/PieceInfo", "/LastModified")
-            if key in obj
-        ]
+        seen: set[tuple[int, int]] = set()
+        stack: list[object] = [pdf.trailer]
+        while stack:
+            node = stack.pop()
+            if not isinstance(node, pikepdf.Array | pikepdf.Dictionary | pikepdf.Stream):
+                continue
+            if node.is_indirect:
+                if node.objgen in seen:
+                    continue
+                seen.add(node.objgen)
+            if isinstance(node, pikepdf.Array):
+                stack.extend(node)
+            else:
+                found += [k for k in ("/Metadata", "/PieceInfo", "/LastModified") if k in node]
+                stack.extend(node.values())
+    return found
 
 
 def xml_streams(data: bytes) -> int:
@@ -124,8 +135,9 @@ def test_split_tira_os_metadados_de_cada_parte(work: Workspace) -> None:
 
     work.run(Params(operation=Operation.SPLIT, pages_per_document=1))
 
-    assert private_keys(work.read("a-p001.pdf")) == []
-    assert private_keys(work.read("a-p002.pdf")) == []
+    for name in ("a-p001.pdf", "a-p002.pdf"):
+        assert private_keys(work.read(name)) == []
+        assert xml_streams(work.read(name)) == 0
 
 
 def test_select_preserva_ordem_e_repeticoes(work: Workspace) -> None:
