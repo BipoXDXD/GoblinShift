@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from goblinshift.capacity import delete_released_reservations
 from goblinshift.files.purge import purge_owner_batch
 from goblinshift.files.retention import HistoryReferences, delete_old_file_rows
-from goblinshift.identity.login_state import purge_expired_states
 from goblinshift.identity.purge import (
     delete_ended_web_sessions,
     delete_expired_login_states,
@@ -71,10 +70,6 @@ BATCHES: dict[str, tuple[Callable[[Session], object], str]] = {
     "identity.web_session": (
         lambda s: delete_ended_web_sessions(s, NOW, LIMIT),
         "DELETE FROM web_session",
-    ),
-    "identity.login_state.purge_expired_states": (
-        lambda s: purge_expired_states(s, NOW, limit=LIMIT),
-        "DELETE FROM login_state",
     ),
     "identity.request_window": (
         lambda s: delete_expired_windows(s, NOW, LIMIT),
