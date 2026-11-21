@@ -101,12 +101,21 @@ def open_action_destination(pdf: pikepdf.Pdf) -> None:
     pdf.Root.OpenAction = Array([pdf.pages[0].obj, Name.Fit])
 
 
-def link_annotation(action: Dictionary) -> Mutation:
+def link_annotation(action: Dictionary, *, key: str = "/A") -> Mutation:
+    """Link com a ação sob `key`; fora de `/A`, ela só é vista por quem olha todo dicionário."""
+
     def mutate(pdf: pikepdf.Pdf) -> None:
-        annotation = Dictionary(Type=Name.Annot, Subtype=Name.Link, Rect=[0, 0, 9, 9], A=action)
+        annotation = Dictionary(Type=Name.Annot, Subtype=Name.Link, Rect=[0, 0, 9, 9])
+        annotation[key] = action
         pdf.pages[0].obj.Annots = Array([pdf.make_indirect(annotation)])
 
     return mutate
+
+
+def transition_and_page_labels(pdf: pikepdf.Pdf) -> None:
+    """`/S` legítimo fora de ação: transição de página e estilo de rótulo de página."""
+    pdf.pages[0].obj.Trans = Dictionary(S=Name.Dissolve)
+    pdf.Root.PageLabels = Dictionary(Nums=Array([0, Dictionary(S=Name.D)]))
 
 
 def annotation(subtype: str) -> Mutation:
