@@ -13,7 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints.api.app import create_app
@@ -21,15 +21,20 @@ from goblinshift.entrypoints.api.cookies import CSRF_COOKIE, CSRF_HEADER
 from goblinshift.identity import Scope, issue_csrf_token
 from goblinshift.identity.tables import audit_event
 from goblinshift.platform.settings import Settings
+from goblinshift.runs.tables import run
+from tests.api.files_support import storage_of
 from tests.api.support import assert_problem
 from tests.identity.support import ALL_SCOPES, new_key, new_user, prepare_database
+from tests.runs.support import ready_inputs
 from tests.security.authz_matrix import (
+    API,
     MATRIX,
     Policy,
     Rule,
     entries,
     fill_path,
 )
+from tests.security.owned_resources import ROUTE_REQUESTS, owned_resource
 
 # HEAD acompanha GET nas rotas do Starlette e não é uma operação à parte.
 _IMPLICIT_METHODS = {"HEAD"}
@@ -188,6 +193,65 @@ def test_chave_sem_escopo_403_insufficient_scope(
     assert_problem(response, 403, "INSUFFICIENT_SCOPE")
     assert _ACCOUNT_NAME not in response.text
     assert _audit_events(factory, owner) == [("ACCESS_DENIED", "failure")]
+
+
+def _owned_mutation_scope_cases() -> list[object]:
+    """Mutações com recurso: a chave sem escopo mira um recurso real da própria conta."""
+    return [
+        pytest.param(method, path, rule, missing, id=f"{method} {path} sem {missing.value}")
+        for method, path, rule in entries(Policy.SCOPE)
+        if method != "GET" and rule.resource_param is not None
+        for missing in sorted(rule.required_scopes)
+    ]
+
+
+# Rota cujo efeito é criar uma Run, não mudar o recurso do caminho.
+_PRESET_RUN = ("POST", f"{API}/presets/{{preset_id}}/runs")
+
+
+def _run_count(factory: sessionmaker[Session], owner_id: UUID) -> int:
+    with factory() as session:
+        count: int = session.execute(
+            select(func.count()).select_from(run).where(run.c.owner_id == owner_id)
+        ).scalar_one()
+    return count
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("method", "path", "rule", "missing"), _owned_mutation_scope_cases())
+def test_chave_sem_escopo_403_e_o_proprio_recurso_fica_intacto(
+    app: FastAPI,
+    client: TestClient,
+    factory: sessionmaker[Session],
+    method: str,
+    path: str,
+    rule: Rule,
+    missing: Scope,
+) -> None:
+    assert rule.resource_param is not None
+    owned = owned_resource(method, path, rule.resource_param)
+    owner = new_user(factory)
+    resource_id = owned.create(app, owner)
+    with factory() as session:
+        before = owned.snapshot(session, resource_id)
+    issued = new_key(factory, owner, scopes=ALL_SCOPES - {missing})
+    build = ROUTE_REQUESTS.get((method, path))
+    extra = build() if build else {}
+    if (method, path) == _PRESET_RUN:
+        # Entrada pronta do próprio dono: sem a checagem de escopo, a Run seria criada de fato.
+        [ready] = ready_inputs(factory, storage_of(app), owner)
+        extra["json"] = {"input_upload_ids": [str(ready)]}
+    headers = {"Authorization": f"Bearer {issued.token}", **extra.pop("headers", {})}
+    runs_before = _run_count(factory, owner)
+
+    response = client.request(
+        method, fill_path(path, str(resource_id)), headers=headers, follow_redirects=False, **extra
+    )
+
+    assert_problem(response, 403, "INSUFFICIENT_SCOPE")
+    with factory() as session:
+        assert owned.snapshot(session, resource_id) == before
+    assert _run_count(factory, owner) == runs_before
 
 
 @pytest.mark.integration

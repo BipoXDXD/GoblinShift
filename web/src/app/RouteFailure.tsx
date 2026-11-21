@@ -6,6 +6,7 @@ import { FocusHeading } from "../components/a11y/FocusHeading";
 import { ProblemAlert } from "../components/feedback/ProblemAlert";
 import { Button } from "../components/ui/Button";
 import { TEXT } from "../text";
+import { loggableError } from "./errorLog";
 import { documentTitle } from "./pageTitle";
 import { reloadPage } from "./reloadPage";
 import { PATHS } from "./paths";
@@ -14,12 +15,13 @@ const T = TEXT.routeFailure;
 
 /**
  * Tela que não abriu, dentro da moldura. O detalhe vai só para o console: um `lazy` rejeitado chega
- * aqui sem passar pelo `componentDidCatch`, e sem este registro não deixaria rastro.
+ * aqui sem passar pelo `componentDidCatch`, e sem este registro não deixaria rastro. Vão só os campos
+ * permitidos do erro, nunca o objeto inteiro.
  */
 export function RouteFailure(): ReactElement {
   const error = useRouteError();
   useEffect(() => {
-    console.error("Falha ao abrir a tela:", error);
+    console.error("Falha ao abrir a tela:", loggableError(error));
   }, [error]);
   // Efeito passivo: roda depois do título da rota (efeito de layout da moldura) e o substitui, para a
   // aba não dizer que a tela abriu (WCAG 2.4.2). Uma navegação nova remonta esta tela.
