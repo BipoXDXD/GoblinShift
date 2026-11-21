@@ -87,7 +87,7 @@ class CandidateWriter:
                     chunks = beating(_chunks(source))
                     written.append(self._storage.create_exclusive(key, chunks, output.size))
         except BaseException:
-            _remove_written(self._storage, keys)
+            _remove_reserved(self._storage, keys)
             raise
 
         def confirm(session: Session) -> None:
@@ -98,7 +98,7 @@ class CandidateWriter:
         try:
             run_transaction(self._factory, confirm)
         except LostFencing:
-            _remove_written(self._storage, keys)
+            _remove_reserved(self._storage, keys)
             raise
         object_ids = reused | {
             index: object_id
@@ -148,7 +148,7 @@ def _preview_sources(collected: Collected) -> dict[str, str]:
     return {preview.file.name: preview.of for preview in collected.previews}
 
 
-def _remove_written(storage: FileStorage, keys: list[str]) -> None:
+def _remove_reserved(storage: FileStorage, keys: list[str]) -> None:
     """Apaga as chaves reservadas; a que não chegou a ser gravada é um `delete` sem efeito.
 
     Todas, não só as das cópias concluídas: assim também sai o arquivo de uma cópia que levante
