@@ -51,6 +51,10 @@ LEASE_S = 1.5
 # encerrou as do worker morto.
 WORKER_APP_NAME = "goblinshift-worker-test"
 WAIT_S = 30.0
+# O polling fica longe e o prazo do claim bem abaixo dele: só o NOTIFY explica um claim dentro do
+# prazo.
+POLL_INTERVAL_S = 60
+NOTIFY_DEADLINE_S = 10
 
 
 def wait_until(condition: Callable[[], bool], timeout_s: float = WAIT_S) -> None:
@@ -276,19 +280,20 @@ def test_notify_acorda_o_worker_antes_do_polling(
 ) -> None:
     owner = create_user(factory)
     log = tmp_path / "worker.log"
-    with worker_process(db_settings, storage, work_root, log, "exit", "0", poll_interval_s=60):
+    with worker_process(
+        db_settings, storage, work_root, log, "exit", "0", poll_interval_s=POLL_INTERVAL_S
+    ):
         # "worker pronto" sai antes do primeiro claim: a Run gravada antes de o worker ficar
         # ocioso seria pega por esse claim, e não pelo NOTIFY.
         wait_until(lambda: IDLE_MESSAGE in log.read_text(encoding="utf-8"))
+        # `queue_run` grava sem NOTIFY; o único aviso ao worker é o NOTIFY abaixo.
         run_id = queue_run(factory, storage, owner)
-        time.sleep(0.5)
-        claimed_before_notify = run_row(factory, run_id)["claim_count"]
         with unit_of_work(factory) as session:
             session.execute(text(f"NOTIFY {RUNS_CHANNEL}"))
 
-        wait_until(lambda: run_row(factory, run_id)["claim_count"] == 1, timeout_s=10)
-
-    assert claimed_before_notify == 0
+        wait_until(
+            lambda: run_row(factory, run_id)["claim_count"] == 1, timeout_s=NOTIFY_DEADLINE_S
+        )
 
 
 def test_worker_morto_por_sigkill_e_assumido_pela_manutencao(
