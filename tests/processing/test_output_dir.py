@@ -372,6 +372,27 @@ def test_nomes_iguais_depois_da_troca_colidem(tmp_path: Path) -> None:
     assert write(out, "a_b.csv", 1) == "a_b_1.csv"
 
 
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        (["manifest.json."], ["manifest_3.json"]),
+        (["CON.csv", "CON.csv"], ["CON_.csv", "CON__3.csv"]),
+    ],
+)
+def test_nome_que_so_vira_reservado_pela_regra_colide_e_nao_sobrescreve(
+    tmp_path: Path, names: list[str], expected: list[str]
+) -> None:
+    out = FileSystemOutputDir(tmp_path)
+
+    written = [write(out, name, 3, f"{index}".encode()) for index, name in enumerate(names)]
+
+    assert written == expected
+    assert [(tmp_path / name).read_bytes() for name in written] == [
+        f"{index}".encode() for index in range(len(names))
+    ]
+    assert not (tmp_path / "manifest.json").exists()
+
+
 def test_truncamento_nao_deixa_espaco_no_fim(tmp_path: Path) -> None:
     assert write(FileSystemOutputDir(tmp_path), "a" + " " * 179 + "b", 0) == "a"
 

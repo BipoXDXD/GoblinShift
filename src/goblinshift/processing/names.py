@@ -46,7 +46,8 @@ def portable_name(name: str) -> str:
     Recebe um componente já em NFC e sem separador nem controle. Nesta ordem: `<>:"|?*` viram
     `_`; ponto e espaço do fim saem (vazio vira `_`); se o trecho antes do primeiro ponto, sem
     espaço no fim e em maiúsculas, é dispositivo do DOS, ganha `_` no fim (`CON.csv` →
-    `CON_.csv`). Tirar o ponto antes de checar o dispositivo é o que faz `CON.` virar `CON_`.
+    `CON_.csv`). Tirar ponto e espaço antes de checar o dispositivo é o que faz `CON .` virar
+    `CON_`; na ordem inversa sairia `CON _`.
     """
     replaced = "".join(_UNSAFE_REPLACEMENT if char in _WINDOWS_FORBIDDEN else char for char in name)
     trimmed = replaced.rstrip(_WINDOWS_TRAILING) or _UNSAFE_REPLACEMENT
