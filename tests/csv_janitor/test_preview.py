@@ -85,3 +85,9 @@ def test_cabecalho_que_parece_formula_sai_escapado() -> None:
     content = b"=A1,nome\r\n1,2\r\n"
 
     assert rows(table_preview(content, Delimiter.COMMA, Limits()))[0] == ["\t=A1", "nome"]
+
+
+def test_saida_que_os_limites_rejeitam_nao_tem_amostra() -> None:
+    content = table(2)
+
+    assert table_preview(content, Delimiter.COMMA, Limits(table_bytes=len(content) - 1)) is None
