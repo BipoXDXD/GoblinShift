@@ -3,8 +3,11 @@
 Regras de nome: NFC, extensão preservada, até 180 bytes por componente, colisão comparada por
 `casefold()` do caminho completo depois do NFC e resolvida com sufixo pelo índice original da
 entrada, nomes reservados na raiz (`manifest.json`, `report.json` e, passado pelo executor, o
-`<recipe_id>.zip`), nunca sobrescrever. Tetos: quantidade de arquivos e bytes somados entre a raiz
-e todos os grupos.
+`<recipe_id>.zip`), nunca sobrescrever. Cada componente sai portável (`names.portable_name`):
+sem `<>:"|?*`, sem ponto ou espaço no fim e sem nome reservado do DOS (`CON`, `COM1`...), porque o
+ZIP tem de extrair no Windows sem erro nem colisão. A regra vale antes da colisão (nomes que viram
+o mesmo colidem) e de novo depois do truncamento, que pode deixar espaço no fim ou um radical
+reservado. Tetos: quantidade de arquivos e bytes somados entre a raiz e todos os grupos.
 
 Grupos (ADR 019): um nível de subpasta, só com os nomes de `OutputGroup`, criado na primeira
 saída do grupo. O caminho mais longo possível (`thumbnails/` + 180 bytes) fica abaixo dos 240
@@ -19,7 +22,7 @@ import unicodedata
 from collections.abc import Buffer, Iterator, Sequence
 from pathlib import Path
 
-from goblinshift.processing.names import has_unsafe_char, split_extension
+from goblinshift.processing.names import has_unsafe_char, portable_name, split_extension
 from goblinshift.processing.recipe import (
     FailureCode,
     OutputFile,
@@ -80,7 +83,7 @@ class FileSystemOutputDir:
                 FailureCode.OUTPUT_LIMIT_EXCEEDED,
                 f"a execução passaria de {self._max_files} arquivos de saída",
             )
-        component = _validated_nfc(logical_name)
+        component = portable_name(_validated_nfc(logical_name))
         prefix = "" if group is None else f"{self._ensure_group(group)}/"
         path = self._claim_unique(prefix, component, position)
         stream = _MeteredWriter(self._root / path, self._budget)
@@ -132,14 +135,17 @@ def _validated_nfc(name: str) -> str:
 
 
 def _fit(stem: str, suffix: str, extension: str) -> str:
-    """Encurta o radical, caractere a caractere, até o nome caber em 180 bytes UTF-8."""
+    """Encurta o radical, caractere a caractere, até o nome caber em 180 bytes UTF-8.
+
+    O corte pode deixar espaço no fim ou um nome reservado; por isso a regra portável volta a valer.
+    """
     tail = suffix + extension
     room = MAX_COMPONENT_BYTES - len(tail.encode())
     if room < 0:
         raise InvalidOutputNameError(f"extensão longa demais: {extension!r}")
     while len(stem.encode()) > room:
         stem = stem[:-1]
-    return stem + tail
+    return portable_name(stem + tail)
 
 
 class _ByteBudget:
