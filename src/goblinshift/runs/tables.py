@@ -1,5 +1,8 @@
 """Tabelas de execuções (docs/GoblinShiftPlan.md, 3.3 a 3.5). A própria `run` é a fila."""
 
+from collections.abc import Iterable
+from enum import StrEnum
+
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -22,8 +25,20 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from goblinshift.files.tables import stored_object
 from goblinshift.platform.db import metadata
+from goblinshift.processing.recipe import ItemRejectionCode
+from goblinshift.runs.lifecycle import ErrorCode
 
 _ACTIVE = "status IN ('queued', 'running', 'stopping')"
+
+
+def _sql_in(column: str, values: Iterable[StrEnum]) -> str:
+    """`<column> IN ('A', 'B', …)` na ordem do enum, para a CHECK de um catálogo fechado.
+
+    A CHECK nasce do enum: um código novo muda o DDL do modelo, e o teste de drift do schema quebra
+    até existir a migração que o acrescenta (as migrações congelam a lista como literal).
+    """
+    return f"{column} IN ({', '.join(f"'{value}'" for value in values)})"
+
 
 run = Table(
     "run",
@@ -91,6 +106,9 @@ run = Table(
         name="finished_at_terminal",
     ),
     CheckConstraint("status <> 'failed' OR error_code IS NOT NULL", name="failed_has_code"),
+    # Código fora do catálogo derrubaria a leitura da Run (`store.py`); NULL passa (migração 0022).
+    CheckConstraint(_sql_in("stop_reason", ErrorCode), name="stop_reason"),
+    CheckConstraint(_sql_in("error_code", ErrorCode), name="error_code"),
     CheckConstraint("generation >= 0 AND claim_count >= 0", name="counters"),
     CheckConstraint(
         "parameters IS NOT NULL OR finished_at IS NOT NULL", name="parameters_until_finished"
@@ -126,6 +144,7 @@ run_input = Table(
     Index(None, "owner_id", "upload_id"),
     CheckConstraint("position >= 0", name="position"),
     CheckConstraint("outcome IN ('ok', 'rejected')", name="outcome"),
+    CheckConstraint(_sql_in("error_code", ItemRejectionCode), name="error_code"),
     CheckConstraint("jsonb_typeof(details) = 'object'", name="details"),
 )
 
@@ -159,6 +178,7 @@ attempt = Table(
     Index("attempt_lease_idx", "lease_expires_at", postgresql_where=text("ended_at IS NULL")),
     # Uma linha por claim; o quinto claim vira INFRA_POISON em vez de nova tentativa (3.4).
     CheckConstraint("number BETWEEN 1 AND 4", name="number"),
+    CheckConstraint(_sql_in("error_code", ErrorCode), name="error_code"),
 )
 
 # Declarada aqui porque `files` não conhece `runs` (as camadas só descem). Composta porque o

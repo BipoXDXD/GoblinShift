@@ -27,6 +27,8 @@ from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import metadata
 from goblinshift.platform.settings import Settings
+from goblinshift.processing.recipe import ItemRejectionCode
+from goblinshift.runs.lifecycle import ErrorCode
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.conftest import run_migrations
 
@@ -743,3 +745,74 @@ def test_purga_da_run_anula_a_tentativa_do_candidato_publicado(conn: Connection)
         )
     ).one() == (None, None)
     assert conn.execute(select(func.count()).where(artifact.c.id == artefato)).scalar_one() == 1
+
+
+# --- 9. Códigos do catálogo -------------------------------------------------------------------
+# Um código fora de `ErrorCode` derruba a leitura da Run (`runs/store.py`); o banco recusa antes.
+
+COLUNAS_DE_CODIGO = [
+    ("run", "error_code", "run_error_code_check"),
+    ("run", "stop_reason", "run_stop_reason_check"),
+    ("attempt", "error_code", "attempt_error_code_check"),
+    ("run_input", "error_code", "run_input_error_code_check"),
+]
+
+
+def gravar_codigo(conn: Connection, tabela: str, coluna: str, valor: str | None) -> None:
+    alice = criar_conta(conn)
+    codigo: dict[str, object] = {coluna: valor}
+    if tabela == "run":
+        criar_run(conn, alice, status="queued", phase=None, **codigo)
+    elif tabela == "attempt":
+        criar_tentativa(conn, criar_run(conn, alice), 1, **codigo)
+    else:
+        conn.execute(
+            insert(run_input).values(
+                run_id=criar_run(conn, alice),
+                position=0,
+                owner_id=alice,
+                upload_id=criar_upload(conn, alice, "uploads/alice/1"),
+                outcome="rejected",
+                **codigo,
+            )
+        )
+
+
+@pytest.mark.parametrize("code", [c.value for c in ErrorCode])
+def test_todo_codigo_do_catalogo_e_aceito_na_run_e_na_tentativa(
+    conn: Connection, code: str
+) -> None:
+    run_id = criar_run(
+        conn,
+        criar_conta(conn),
+        status="failed",
+        error_code=code,
+        stop_reason=code,
+        finished_at=AGORA,
+    )
+    criar_tentativa(conn, run_id, 1, ended_at=AGORA, error_code=code)
+
+
+@pytest.mark.parametrize("code", [c.value for c in ItemRejectionCode])
+def test_todo_codigo_de_rejeicao_do_item_e_aceito(conn: Connection, code: str) -> None:
+    gravar_codigo(conn, "run_input", "error_code", code)
+
+
+@pytest.mark.parametrize(("tabela", "coluna", "constraint"), COLUNAS_DE_CODIGO)
+@pytest.mark.parametrize("valor", ["OUTRO", "infra_poison", ""])
+def test_codigo_fora_do_catalogo_e_recusado(
+    conn: Connection, tabela: str, coluna: str, constraint: str, valor: str
+) -> None:
+    with barrado_por(conn, constraint):
+        gravar_codigo(conn, tabela, coluna, valor)
+
+
+def test_codigo_de_execucao_nao_vale_como_rejeicao_do_item(conn: Connection) -> None:
+    # Os catálogos são distintos: `run_input` só aceita `ItemRejectionCode`.
+    with barrado_por(conn, "run_input_error_code_check"):
+        gravar_codigo(conn, "run_input", "error_code", "INFRA_POISON")
+
+
+@pytest.mark.parametrize(("tabela", "coluna"), [(t, c) for t, c, _ in COLUNAS_DE_CODIGO])
+def test_codigo_ausente_continua_aceito(conn: Connection, tabela: str, coluna: str) -> None:
+    gravar_codigo(conn, tabela, coluna, None)
