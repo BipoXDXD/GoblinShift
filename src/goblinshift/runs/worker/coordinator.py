@@ -576,11 +576,19 @@ class Coordinator:
     def renew_lease(
         self, claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
     ) -> Status:
-        """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status."""
+        """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status.
+
+        Lease já vencido no relógio do banco não se renova: `LostFencing`, e o worker abandona.
+        """
         processed = self._processed_count(claimed)
 
         def renew(session: Session) -> Status:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
+            live = loaded.live_attempt
+            # Vencido é definitivo (3.4): a manutenção pode já ter parado o executor e só decidir
+            # depois; renovar agora tiraria a decisão dela e deixaria a tentativa perdida.
+            if live is not None and live.lease_expires_at < loaded.now:
+                raise LostFencing(f"lease vencido em {live.lease_expires_at.isoformat()}")
             session.execute(
                 update(attempt)
                 .where(attempt.c.id == claimed.attempt_id, attempt.c.ended_at.is_(None))
