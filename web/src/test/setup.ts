@@ -1,7 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
-import { afterEach, beforeEach, vi } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 
+import { startConsoleGuard, stopConsoleGuard, writeConsoleReport } from "./consoleGuard";
 import { installFakeMatchMedia } from "./fakeMatchMedia";
 
 // As telas carregam por rota (lazy): no primeiro teste de cada arquivo, o Vitest ainda transforma
@@ -28,7 +29,21 @@ HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement): voi
   }
 };
 
+// Modo relatório: as violações do guard de console (src/test/consoleGuard.ts) saem no console
+// original com o arquivo e o nome do teste, mas não reprovam o teste.
+function reportConsoleViolations(violations: readonly string[]): void {
+  if (violations.length === 0) {
+    return;
+  }
+  const { testPath, currentTestName } = expect.getState();
+  writeConsoleReport([
+    `[console-guard] ${testPath ?? "?"} > ${currentTestName ?? "?"}`,
+    ...violations,
+  ]);
+}
+
 beforeEach(() => {
+  startConsoleGuard();
   // O cabeçalho do app tem o seletor de tema, que consulta o sistema; o padrão é tema claro.
   installFakeMatchMedia(false);
   // O jsdom não tem canvas: sem isto ele loga "Not implemented" e a home tentaria a cena 3D. Com
@@ -40,4 +55,6 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   delete document.documentElement.dataset["theme"];
+  // Por último, depois do cleanup(): o aviso que um componente dá ao desmontar conta para o teste.
+  reportConsoleViolations(stopConsoleGuard());
 });
