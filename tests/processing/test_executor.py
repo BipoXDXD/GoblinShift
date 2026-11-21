@@ -565,7 +565,10 @@ def exhausted_package(*_: object) -> None:
 
 @pytest.mark.parametrize("phase", ["recipe", "package"])
 def test_memoria_esgotada_e_falha_deterministica_de_recurso(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
 ) -> None:
     if phase == "recipe":
         monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): MemoryHungryRecipe()})
@@ -580,6 +583,9 @@ def test_memoria_esgotada_e_falha_deterministica_de_recurso(
         "code": "RESOURCE_LIMIT_EXCEEDED",
         "detail": "a execução passou do limite de memória",
     }
+    err = capsys.readouterr().err
+    assert "executor: memória esgotada" in err.splitlines()
+    assert "Traceback" not in err
 
 
 def test_falha_ao_gravar_os_tempos_nao_muda_o_codigo_de_saida(tmp_path: Path) -> None:
