@@ -29,7 +29,8 @@ import { FocusHeading } from "../components/a11y/FocusHeading";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { moveItem, ReorderableList } from "../components/a11y/ReorderableList";
 import { EmptyState } from "../components/feedback/EmptyState";
-import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
+import { FailureNotice } from "../components/feedback/FailureNotice";
+import type { DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
@@ -242,7 +243,9 @@ export function Workbench({
             </Card>
             {/* Secundária antes da primária: Executar fecha o conteúdo e a ordem do Tab. */}
             <SavePreset draft={draft} />
-            {failure !== null && serverIssues === null && <ProblemAlert failure={failure} />}
+            {mutation.error !== null && serverIssues === null && (
+              <FailureNotice error={mutation.error} />
+            )}
             <Button
               type="submit"
               variant="primary"

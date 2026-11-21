@@ -1049,7 +1049,10 @@ export interface components {
             input_bytes_last_24h: number;
             /** Storage Reserved Bytes */
             storage_reserved_bytes: number;
-            /** Active Run Id */
+            /**
+             * Active Run Id
+             * @description A execução não terminal da conta; nulo sem ela ou sem o escopo `runs:read`.
+             */
             active_run_id: string | null;
             /** Daily Quota Resets At */
             daily_quota_resets_at: string | null;

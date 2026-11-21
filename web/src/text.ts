@@ -337,7 +337,7 @@ export const TEXT = {
         FIELD_LIMIT_EXCEEDED:
           "A tabela passa do limite de registros, de colunas ou do tamanho de um campo.",
         MEDIA_TOO_LARGE:
-          "O vídeo passa de 300 s, de 1920 × 1080 ou de 60 fps, ou demorou demais para processar.",
+          "O vídeo passa de 300 s, de 1920 × 1080 ou de 60 fps, tem áudio mais longo que o vídeo, gera arquivo grande demais ou demorou demais para processar.",
         AUDIO_LIMIT_EXCEEDED: "A faixa de áudio passa de 48 kHz ou de 2 canais.",
         AUDIO_STREAM_NOT_FOUND: "O vídeo não tem a faixa de áudio pedida.",
       },
@@ -865,6 +865,8 @@ export const TEXT = {
     nameHint: "Até 100 caracteres, diferente dos outros presets da conta.",
     nameRequired: "Dê um nome ao preset.",
     nameTooLong: "Use até 100 caracteres.",
+    // A mensagem do servidor é para quem integra; vazio e tamanho já são conferidos no cliente.
+    nameRejected: "Tire do nome os caracteres invisíveis ou de controle.",
     saving: "Salvando…",
     saved: (name: string) => `Preset ${name} salvo.`,
     saveConflict: "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",

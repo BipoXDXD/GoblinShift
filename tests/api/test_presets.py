@@ -319,6 +319,26 @@ def test_substituir_com_if_match_responde_200_com_a_revisao_nova(
     assert response.headers["etag"] == '"2"'
 
 
+@pytest.mark.parametrize("field", ["owner_id", "status"])
+def test_substituir_com_campo_do_servidor_responde_422_sem_mudar(
+    client: TestClient, factory: sessionmaker[Session], field: str
+) -> None:
+    account = Account(factory)
+    created = create(client, account)
+    values = {"owner_id": str(Account(factory).id), "status": "deleted"}
+
+    response = put(
+        client, account, created["id"], {**preset_body("Novo"), field: values[field]}, '"1"'
+    )
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
+        (f"body.{field}", "extra_forbidden")
+    ]
+    assert stored(factory, created["id"]) == {"name": "Mensal", "revision": 1, "parameters": {}}
+    assert count_presets(factory) == 1
+
+
 @pytest.mark.parametrize("if_match", [None, "", "*"], ids=["ausente", "vazio", "asterisco"])
 def test_substituir_sem_if_match_responde_428_sem_mudar(
     client: TestClient, factory: sessionmaker[Session], if_match: str | None

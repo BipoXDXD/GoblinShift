@@ -1,7 +1,8 @@
 """Reserva de armazenamento dos uploads (docs/GoblinShiftPlan.md, 1.7; plano da fatia 6, Frente D).
 
-Intenção reserva o tamanho declarado (detentor `upload`); o `ready` converte em reserva do objeto
-pelo tamanho real; falha, expiração e purge físico liberam.
+Intenção reserva o tamanho declarado, no mínimo `MIN_INTENT_RESERVED_BYTES` (detentor `upload`); o
+`ready` converte em reserva do objeto pelo tamanho real e libera a sobra; falha, expiração e purge
+físico liberam.
 """
 
 import logging
@@ -22,6 +23,7 @@ from goblinshift.capacity import (
 from goblinshift.capacity.tables import capacity_pool
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object, publish_artifact
 from goblinshift.files.errors import UploadSizeMismatchError
+from goblinshift.files.limits import MIN_INTENT_RESERVED_BYTES as MIN
 from goblinshift.files.retention import (
     expire_incomplete_uploads,
     purge_deleted_objects,
@@ -78,22 +80,47 @@ def test_intencao_reserva_o_tamanho_declarado_de_cada_upload(
 ) -> None:
     owner = create_user(factory, "alice")
 
-    first, second = intents(factory, owner, 10, 20)
+    first, second = intents(factory, owner, MIN + 10, MIN + 20)
 
-    assert live_amount(factory, HolderKind.UPLOAD, first) == 10
-    assert live_amount(factory, HolderKind.UPLOAD, second) == 20
-    assert account_reserved(factory, owner) == 30
-    assert global_reserved(factory) == 30
+    assert live_amount(factory, HolderKind.UPLOAD, first) == 65546
+    assert live_amount(factory, HolderKind.UPLOAD, second) == 65556
+    assert account_reserved(factory, owner) == 131102
+    assert global_reserved(factory) == 131102
+
+
+@pytest.mark.parametrize(
+    ("declared", "reserved"), [(0, MIN), (MIN - 1, MIN), (MIN, MIN), (MIN + 1, 65537)]
+)
+def test_intencao_reserva_o_maior_entre_o_declarado_e_o_minimo(
+    factory: sessionmaker[Session], declared: int, reserved: int
+) -> None:
+    owner = create_user(factory, "alice")
+
+    [upload_id] = intents(factory, owner, declared)
+
+    assert live_amount(factory, HolderKind.UPLOAD, upload_id) == reserved
+    assert account_reserved(factory, owner) == reserved
+
+
+def test_lote_de_intencoes_vazias_acima_da_cota_e_recusado(factory: sessionmaker[Session]) -> None:
+    owner = create_user(factory, "alice")
+    create_account_pool(factory, owner, 2 * MIN - 1)
+
+    with pytest.raises(AccountCapacityExceededError):
+        intents(factory, owner, 0, 0)
+
+    assert count_uploads(factory) == 0
+    assert account_reserved(factory, owner) == 0
 
 
 def test_lote_acima_da_cota_da_conta_e_recusado_sem_criar_nada(
     factory: sessionmaker[Session],
 ) -> None:
     owner = create_user(factory, "alice")
-    create_account_pool(factory, owner, 25)
+    create_account_pool(factory, owner, 2 * MIN + 25)
 
     with pytest.raises(AccountCapacityExceededError):
-        intents(factory, owner, 10, 16)
+        intents(factory, owner, MIN + 10, MIN + 16)
 
     assert count_uploads(factory) == 0
     assert account_reserved(factory, owner) == 0
@@ -101,19 +128,19 @@ def test_lote_acima_da_cota_da_conta_e_recusado_sem_criar_nada(
 
 def test_lote_que_completa_a_cota_da_conta_e_aceito(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "alice")
-    create_account_pool(factory, owner, 25)
+    create_account_pool(factory, owner, 2 * MIN + 25)
 
-    intents(factory, owner, 10, 15)
+    intents(factory, owner, MIN + 10, MIN + 15)
 
-    assert account_reserved(factory, owner) == 25
+    assert account_reserved(factory, owner) == 131097
 
 
 def test_lote_acima_do_teto_do_ambiente_e_recusado(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "alice")
-    set_global_max(factory, 5)
+    set_global_max(factory, MIN)
 
     with pytest.raises(GlobalCapacityExceededError):
-        intents(factory, owner, 6)
+        intents(factory, owner, MIN + 1)
 
     assert count_uploads(factory) == 0
     assert global_reserved(factory) == 0
@@ -122,7 +149,7 @@ def test_lote_acima_do_teto_do_ambiente_e_recusado(factory: sessionmaker[Session
 # --- ready e falha ---------------------------------------------------------------------------
 
 
-def test_upload_pronto_passa_a_reserva_para_o_objeto(
+def test_upload_pequeno_pronto_reserva_so_o_tamanho_real(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "alice")
@@ -132,6 +159,18 @@ def test_upload_pronto_passa_a_reserva_para_o_objeto(
     assert live_amount(factory, HolderKind.UPLOAD, view.id) is None
     assert live_amount(factory, HolderKind.OBJECT, object_of(factory, view.id)) == 4
     assert account_reserved(factory, owner) == 4
+
+
+def test_upload_vazio_pronto_nao_reserva_nada(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    owner = create_user(factory, "alice")
+
+    view = ready_upload(factory, storage, owner, b"")
+
+    assert live_amount(factory, HolderKind.UPLOAD, view.id) is None
+    assert live_amount(factory, HolderKind.OBJECT, object_of(factory, view.id)) == 0
+    assert account_reserved(factory, owner) == 0
 
 
 def test_upload_com_tamanho_errado_libera_a_reserva(

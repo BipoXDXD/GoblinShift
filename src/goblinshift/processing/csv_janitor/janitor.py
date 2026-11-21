@@ -146,7 +146,9 @@ def _count_formula_cells(header: Sequence[str], records: list[_Record]) -> Mappi
 
 
 def looks_like_formula(value: str) -> bool:
-    return value.startswith(FORMULA_PREFIXES)
+    # Planilhas que aparam espaços na importação (LibreOffice com "Trim spaces") avaliam ` =1+1`.
+    # Só `lstrip()` apagaria `\t`, `\r` e `\n`, que também são prefixos; por isso as duas checagens.
+    return value.startswith(FORMULA_PREFIXES) or value.lstrip().startswith(FORMULA_PREFIXES)
 
 
 def _guard(value: str) -> str:

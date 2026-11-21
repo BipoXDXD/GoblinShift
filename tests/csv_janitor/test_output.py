@@ -91,6 +91,25 @@ def test_tab_prefix_poe_o_tab_dentro_de_aspas_so_nas_celulas_suspeitas() -> None
     assert result == 'a,b\r\n"\t=SOMA(1)",ok\r\n'
 
 
+@pytest.mark.parametrize("value", [" =1+1", "   @cmd", " \t=1", "\u00a0=1+1"])
+def test_espaco_antes_do_prefixo_ainda_e_formula(value: str) -> None:
+    result = cleaned(f'a\r\n"{value}"\r\n')
+
+    assert result.formula_cells == {"a": 1}
+    assert [w.code for w in result.warnings] == [WarningCode.FORMULA_CELLS]
+
+
+def test_tab_prefix_protege_a_celula_com_espaco_antes_do_igual() -> None:
+    params = Params(formula_guard=FormulaGuard.TAB_PREFIX)
+
+    assert output("a\r\n =1+1\r\n", params) == 'a\r\n"\t =1+1"\r\n'
+
+
+@pytest.mark.parametrize("value", [" abc", "   ", " 1"])
+def test_espaco_antes_de_texto_comum_nao_e_formula(value: str) -> None:
+    assert cleaned(f'a\r\n"{value}"\r\n').formula_cells == {}
+
+
 def test_sem_celulas_suspeitas_nao_ha_aviso() -> None:
     assert cleaned("a\r\n1\r\n").warnings == ()
 

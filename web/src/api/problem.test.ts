@@ -13,9 +13,25 @@ const problem = {
   request_id: "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a",
 };
 
+// Corpo literal do @rate_limited (docker/nginx/templates/default.conf.template), com o
+// $problem_instance e o $problem_request_id já resolvidos.
+const nginxRateLimited = {
+  type: "https://goblinshift.dev/problems/rate-limited",
+  title: "Muitas requisições",
+  status: 429,
+  detail: "Muitas requisições deste cliente; tente de novo em instantes.",
+  instance: "/api/v1/runs",
+  code: "RATE_LIMITED",
+  request_id: "0b9c3c1e-7f62-4d1c-9a49-0d6f5d0b8f3a",
+};
+
 describe("parseProblem", () => {
   it("aceita o problem+json do catálogo", () => {
     expect(parseProblem(problem)).toEqual(problem);
+  });
+
+  it("aceita o 429 que o próprio Nginx gera", () => {
+    expect(parseProblem(nginxRateLimited)).toEqual(nginxRateLimited);
   });
 
   it("mantém os erros por campo", () => {
@@ -33,6 +49,7 @@ describe("parseProblem", () => {
     ["texto", "erro"],
     ["code fora do catálogo", { ...problem, code: "NOVO_CODIGO" }],
     ["sem request_id", { ...problem, request_id: undefined }],
+    ["sem instance (429 do Nginx antes do #485)", { ...problem, instance: undefined }],
     ["status como texto", { ...problem, status: "429" }],
     ["errors malformado", { ...problem, errors: [{ field: 1 }] }],
   ])("recusa %s", (_label, raw) => {

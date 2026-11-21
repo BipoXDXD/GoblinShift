@@ -101,12 +101,21 @@ def open_action_destination(pdf: pikepdf.Pdf) -> None:
     pdf.Root.OpenAction = Array([pdf.pages[0].obj, Name.Fit])
 
 
-def link_annotation(action: Dictionary) -> Mutation:
+def link_annotation(action: Dictionary, *, key: str = "/A") -> Mutation:
+    """Link com a ação sob `key`; fora de `/A`, ela só é vista por quem olha todo dicionário."""
+
     def mutate(pdf: pikepdf.Pdf) -> None:
-        annotation = Dictionary(Type=Name.Annot, Subtype=Name.Link, Rect=[0, 0, 9, 9], A=action)
+        annotation = Dictionary(Type=Name.Annot, Subtype=Name.Link, Rect=[0, 0, 9, 9])
+        annotation[key] = action
         pdf.pages[0].obj.Annots = Array([pdf.make_indirect(annotation)])
 
     return mutate
+
+
+def transition_and_page_labels(pdf: pikepdf.Pdf) -> None:
+    """`/S` legítimo fora de ação: transição de página e estilo de rótulo de página."""
+    pdf.pages[0].obj.Trans = Dictionary(S=Name.Dissolve)
+    pdf.Root.PageLabels = Dictionary(Nums=Array([0, Dictionary(S=Name.D)]))
 
 
 def annotation(subtype: str) -> Mutation:
@@ -178,6 +187,56 @@ def extra_objects(count: int) -> Mutation:
         pdf.Root.Extra = Array([pdf.make_indirect(Dictionary(N=n)) for n in range(count)])
 
     return mutate
+
+
+# --- metadados privados -----------------------------------------------------------------------
+
+_MODIFIED = String("D:20261121000000Z")
+
+
+def private_metadata(pdf: pikepdf.Pdf) -> None:
+    """XMP, `/PieceInfo` e `/LastModified` em cada página, numa anotação direta (sem número de
+    objeto) e num Form compartilhado por todas, cuja imagem também traz XMP: a saída precisa
+    tirá-los mesmo fora de `pdf.pages` e fora dos objetos indiretos."""
+    image = pdf.make_stream(
+        b"\x00",
+        Type=Name.XObject,
+        Subtype=Name.Image,
+        Width=1,
+        Height=1,
+        ColorSpace=Name.DeviceGray,
+        BitsPerComponent=8,
+        Metadata=_xmp(pdf),
+    )
+    form = pdf.make_stream(
+        b"",
+        Type=Name.XObject,
+        Subtype=Name.Form,
+        BBox=[0, 0, 1, 1],
+        Resources=Dictionary(XObject=Dictionary(Im0=image)),
+        Metadata=_xmp(pdf),
+        LastModified=_MODIFIED,
+    )
+    for page in pdf.pages:
+        page.obj.Metadata = _xmp(pdf)
+        page.obj.PieceInfo = Dictionary(App=Dictionary(Private=String("x")))
+        page.obj.LastModified = _MODIFIED
+        page.obj.Resources = Dictionary(XObject=Dictionary(Fm0=form))
+        page.obj.Annots = Array([_annotation_with_metadata(pdf)])
+
+
+def _annotation_with_metadata(pdf: pikepdf.Pdf) -> Dictionary:
+    return Dictionary(
+        Type=Name.Annot,
+        Subtype=Name.Square,
+        Rect=[0, 0, 9, 9],
+        Metadata=_xmp(pdf),
+        PieceInfo=Dictionary(App=Dictionary(Private=String("x"))),
+    )
+
+
+def _xmp(pdf: pikepdf.Pdf) -> pikepdf.Stream:
+    return pdf.make_stream(b"<x:xmpmeta/>", Type=Name.Metadata, Subtype=Name.XML)
 
 
 # --- bytes estragados -------------------------------------------------------------------------
