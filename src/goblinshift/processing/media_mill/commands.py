@@ -37,8 +37,10 @@ JPEG_QUALITY = 3  # escala -q:v do mjpeg: 2 (melhor) a 31; 3 fica perto de quali
 _ERROR_LEVELS = (b"[error]", b"[fatal]", b"[panic]")
 _PTS_TIME = re.compile(rb"\bpts_time:(-?[0-9]+(?:\.[0-9]+)?)")
 _FRAME_SIZE = re.compile(rb"\bs:([0-9]+)x([0-9]+)")
-_SHOWINFO = b"Parsed_showinfo"
-_ASHOWINFO = b"Parsed_ashowinfo"
+# Linha de um filtro: `[Parsed_showinfo_0 @ 0x…] [info] n:…`. Ancorado no início da linha, porque
+# texto do arquivo (título da faixa) também aparece no log, sempre depois de `[info]` ou de espaços.
+_SHOWINFO = b"[Parsed_showinfo_"
+_ASHOWINFO = b"[Parsed_ashowinfo_"
 _AUDIO_ENCODERS = {
     AudioFormat.WAV: ("-c:a", "pcm_s16le", "-f", "wav"),
     # O FLAC aceita 16 e 32 bits; a amostra é fixada em 16 bits (1.5).
@@ -283,8 +285,8 @@ def _frame_size(line: bytes) -> tuple[int, int]:
     return (int(match.group(1)), int(match.group(2))) if match else (0, 0)
 
 
-def _frame_time(line: bytes, filter_name: bytes) -> float | None:
-    if filter_name not in line:
+def _frame_time(line: bytes, filter_prefix: bytes) -> float | None:
+    if not line.startswith(filter_prefix):
         return None
     match = _PTS_TIME.search(line)
     return float(match.group(1)) if match else None

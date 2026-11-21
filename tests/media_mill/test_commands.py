@@ -257,3 +257,25 @@ def test_so_linhas_de_quadro_do_showinfo_contam(tmp_path: Path) -> None:
         320,
         240,
     )
+
+
+def test_texto_do_usuario_no_log_nao_vira_quadro(tmp_path: Path) -> None:
+    # O título da faixa aparece no log como `[info]   title : ...`, e uma quebra de linha nele
+    # vira linha de continuação com espaços na frente: nenhuma começa com o nome do filtro.
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[info]     title           : Parsed_showinfo pts_time:7 s:9999x9999\n"
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:   0 pts:      0 pts_time:1 s:320x240\n"
+        b"[Parsed_ashowinfo_0 @ 0x3] [info] n:0 pts:0 pts_time:0.1 fmt:s16\n"
+        b"[info]     title           : Parsed_ashowinfo pts_time:0.2\n"
+        b"                    : [Parsed_showinfo_0 @ 0x1] [info] n:0 pts_time:8 s:9999x9999\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.first_frame_s, summary.last_frame_s, summary.last_audio_s) == (1.0, 1.0, 0.1)
+    assert (summary.frame_count, summary.max_long_side_px, summary.max_short_side_px) == (
+        1,
+        320,
+        240,
+    )

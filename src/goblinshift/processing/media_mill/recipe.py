@@ -39,7 +39,9 @@ from goblinshift.processing.media_mill.probe import (
 from goblinshift.processing.media_mill.rejection import MediaRejected, RejectionCode
 from goblinshift.processing.media_mill.signature import HEADER_BYTES, detect_container
 from goblinshift.processing.media_mill.tools import (
+    CHILD_FILE_SIZE_BYTES,
     DEFAULT_BUDGET_S,
+    MIB,
     Outcome,
     TimeBudget,
     Tools,
@@ -169,7 +171,7 @@ class _Runner:
     def run(self, argv: Sequence[str], *, cap_s: float, name: str) -> Outcome:
         timeout_s = self._budget.timeout(cap_s)
         try:
-            return run_tool(argv, timeout_s=timeout_s, scratch=self.work, name=name)
+            outcome = run_tool(argv, timeout_s=timeout_s, scratch=self.work, name=name)
         except ToolTimeoutError:
             if timeout_s < cap_s:
                 raise budget_exhausted() from None
@@ -177,6 +179,15 @@ class _Runner:
                 RejectionCode.MEDIA_TOO_LARGE,
                 f"processar este vídeo passou de {cap_s:g} s numa etapa ({name})",
             ) from None
+        # Saída ou log acima do `RLIMIT_FSIZE` (milhões de quadros minúsculos no `showinfo`) é
+        # tamanho, não dano: a recusa vem antes de quem chamou olhar `succeeded`.
+        if outcome.file_size_exceeded:
+            raise MediaRejected(
+                RejectionCode.MEDIA_TOO_LARGE,
+                f"processar este vídeo gravou mais de {CHILD_FILE_SIZE_BYTES // MIB} MiB "
+                f"numa etapa ({name})",
+            )
+        return outcome
 
 
 class _Mill:
