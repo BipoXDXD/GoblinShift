@@ -153,6 +153,25 @@ test("Bancada: arquivos → lista → parâmetros → Executar, e o foco segue o
   await expect(page.getByRole("button", { name: `Mover para cima ${second.name}` })).toBeFocused();
 });
 
+test("Bancada: Enviar de novo por teclado leva o foco ao Remover do item @keyboard", async ({
+  page,
+}) => {
+  const [file] = CSV_FILES;
+  // O primeiro envio do conteúdo cai na rede; o de novo segue para a API.
+  await page.route("**/api/v1/uploads/*/content", (route) => route.abort(), { times: 1 });
+  const bancada = new BancadaPage(page);
+  await bancada.open("csv-janitor");
+
+  await page.getByLabel("Escolher arquivos").setInputFiles([file]);
+  const retry = page.getByRole("button", { name: `Enviar de novo ${file.name}` });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+
+  // O botão some com o novo envio; sem levar o foco adiante, ele cairia no <body> (WCAG 2.4.3).
+  await expect(retry).toBeHidden();
+  await expect(page.getByRole("button", { name: `Remover ${file.name}` })).toBeFocused();
+});
+
 /**
  * Todas as paradas de Tab da página, do primeiro focável ao último, medidas no navegador.
  *

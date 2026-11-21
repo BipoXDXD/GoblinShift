@@ -5,6 +5,17 @@ import type { RunCommand } from "../api/types";
 import { runSchema } from "./api";
 
 const ACCEPTED = 202;
+// Espelha o CHECK `octet_length(file_name) BETWEEN 1 AND 240` (src/goblinshift/files/tables.py) e o
+// `has_unsafe_char` do backend (processing/names.py): controle, formato invisível ou surrogate solto.
+const MAX_FILE_NAME_BYTES = 240;
+const SAFE_NAME = /^[^\p{Cc}\p{Cf}\p{Cs}]*$/u;
+const utf8 = new TextEncoder();
+
+const fileNameSchema = z
+  .string()
+  .min(1)
+  .regex(SAFE_NAME)
+  .refine((name) => utf8.encode(name).length <= MAX_FILE_NAME_BYTES);
 
 // Espelhos em runtime dos schemas da spec; commands.test.ts trava a igualdade com os tipos gerados.
 const acceptedRunSchema = runSchema.extend({
@@ -15,7 +26,7 @@ const resultReferenceSchema = z.object({
   artifact_id: z.uuid(),
   logical_name: z.string(),
   role: z.enum(["output", "report", "manifest", "package", "preview"]),
-  file_name: z.string(),
+  file_name: fileNameSchema,
   availability: z.enum(["available", "expired", "deleted", "missing"]),
   source_artifact_id: z.uuid().nullable(),
 });
