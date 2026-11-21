@@ -1,5 +1,6 @@
 """Storage em filesystem (docs/GoblinShiftPlan.md, 3.2 e 3.6), sem banco."""
 
+import contextlib
 import errno
 import hashlib
 import logging
@@ -633,6 +634,44 @@ def test_varredura_nao_atinge_o_temporario_de_uma_gravacao_em_curso(tmp_path: Pa
         assert stored.read() == b"primeira partesegunda parte"
 
 
+def test_varredura_com_diretorio_de_temporarios_trocado_por_symlink_nao_apaga_fora_da_raiz(
+    tmp_path: Path,
+) -> None:
+    storage = FileStorage(tmp_path / "raiz")
+    storage.root.mkdir()
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    victim = outside / PART_NAME
+    victim.write_bytes(b"abc")
+    os.utime(victim, (CUTOFF - 10, CUTOFF - 10))
+    (storage.root / ".tmp").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ObjectTamperedError):
+        storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    assert victim.read_bytes() == b"abc"
+
+
+@pytest.mark.parametrize("planted", ["normal", "symlink", "arquivo"])
+def test_varredura_nao_vaza_descritor(tmp_path: Path, planted: str) -> None:
+    storage = FileStorage(tmp_path / "raiz")
+    storage.root.mkdir()
+    tmp_dir = storage.root / ".tmp"
+    if planted == "normal":
+        plant_temporary(storage, PART_NAME, CUTOFF + 10)
+    elif planted == "symlink":
+        tmp_dir.symlink_to(tmp_path, target_is_directory=True)
+    else:
+        tmp_dir.write_bytes(b"")
+    before = _open_fd_count()
+
+    for _ in range(10):
+        with contextlib.suppress(ObjectTamperedError):
+            storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+
+    assert _open_fd_count() == before
+
+
 def fail_unlink(
     monkeypatch: pytest.MonkeyPatch, times: int, error_code: int = errno.EACCES
 ) -> None:
@@ -641,15 +680,15 @@ def fail_unlink(
     `OSError` escolhe a subclasse pelo errno: `EACCES` vira `PermissionError`, e `EROFS`, `EBUSY`
     e `EIO` ficam `OSError` puro.
     """
-    original = Path.unlink
+    original = os.unlink
     denied = iter(range(times))
 
-    def unlink(self: Path, missing_ok: bool = False) -> None:
+    def unlink(path: str, *, dir_fd: int | None = None) -> None:
         if next(denied, None) is not None:
-            raise OSError(error_code, "recusado", str(self))
-        original(self, missing_ok=missing_ok)
+            raise OSError(error_code, "recusado", path)
+        original(path, dir_fd=dir_fd)
 
-    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(os, "unlink", unlink)
 
 
 def plant_stale_parts(storage: FileStorage, content: bytes) -> None:
@@ -733,11 +772,23 @@ def test_tentativas_que_falham_contam_no_teto_da_varredura(
     assert len(list((tmp_path / ".tmp").iterdir())) == 3
 
 
-def test_erro_ao_listar_o_diretorio_de_temporarios_continua_subindo(tmp_path: Path) -> None:
-    # `.tmp` como arquivo: `scandir` levanta `NotADirectoryError` de verdade.
+@pytest.mark.skipif(os.geteuid() == 0, reason="root lê qualquer diretório")
+def test_erro_ao_abrir_o_diretorio_de_temporarios_continua_subindo(tmp_path: Path) -> None:
+    tmp_dir = tmp_path / ".tmp"
+    tmp_dir.mkdir()
+    tmp_dir.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT)
+    finally:
+        tmp_dir.chmod(0o700)
+
+
+def test_diretorio_de_temporarios_trocado_por_arquivo_e_adulteracao(tmp_path: Path) -> None:
+    # `.tmp` como arquivo: a abertura com `O_DIRECTORY` falha com `ENOTDIR` de verdade.
     (tmp_path / ".tmp").write_bytes(b"")
 
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(ObjectTamperedError):
         FileStorage(tmp_path).sweep_stale_temporaries(CUTOFF, NO_LIMIT)
 
 
@@ -746,13 +797,13 @@ def test_temporario_que_some_antes_do_unlink_conta_como_removido_e_nao_como_falh
 ) -> None:
     storage = FileStorage(tmp_path)
     plant_temporary(storage, PART_NAME, CUTOFF - 10)
-    original = Path.unlink
+    original = os.unlink
 
-    def unlink_after_another_process(self: Path, missing_ok: bool = False) -> None:
-        os.unlink(self)
-        original(self, missing_ok=missing_ok)
+    def unlink_after_another_process(path: str, *, dir_fd: int | None = None) -> None:
+        original(path, dir_fd=dir_fd)
+        original(path, dir_fd=dir_fd)
 
-    monkeypatch.setattr(Path, "unlink", unlink_after_another_process)
+    monkeypatch.setattr(os, "unlink", unlink_after_another_process)
 
     with caplog.at_level(logging.WARNING, logger=STORAGE_LOGGER):
         sweep = storage.sweep_stale_temporaries(CUTOFF, NO_LIMIT)
