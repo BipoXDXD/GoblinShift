@@ -77,6 +77,23 @@ describe("cancelRun", () => {
   });
 });
 
+function resultsWithFileName(fileName: string) {
+  return {
+    published: true,
+    expires_at: "2026-10-21T12:00:00Z",
+    artifacts: [
+      {
+        artifact_id: "7d3c2a1e-0000-4000-8000-0000000000aa",
+        logical_name: "clientes",
+        role: "output",
+        file_name: fileName,
+        availability: "available",
+        source_artifact_id: null,
+      },
+    ],
+  };
+}
+
 describe("getRunResults", () => {
   it("lê os artefatos publicados", async () => {
     const results = {
@@ -93,6 +110,40 @@ describe("getRunResults", () => {
         },
       ],
     };
+    const { client } = fakeApi({
+      [`GET /api/v1/runs/${RUN_ID}/results`]: () => jsonResponse(results),
+    });
+
+    expect(await getRunResults(client, RUN_ID)).toEqual(results);
+  });
+
+  // Espelha o CHECK octet_length(file_name) BETWEEN 1 AND 240 e o has_unsafe_char do backend.
+  it.each([
+    ["nome com 241 caracteres", `${"a".repeat(237)}.csv`],
+    ["61 emojis (122 unidades UTF-16, 244 bytes)", "😀".repeat(61)],
+    ["surrogate solto", "a\uD800.csv"],
+    ["quebra de linha", "a\nb.csv"],
+    ["inversão bidi (U+202E)", "a\u202Egpj.exe"],
+    ["nome vazio", ""],
+  ] as const)(
+    "recusa file_name com %s como resposta inesperada",
+    async (_description, fileName) => {
+      const { client } = fakeApi({
+        [`GET /api/v1/runs/${RUN_ID}/results`]: () => jsonResponse(resultsWithFileName(fileName)),
+      });
+
+      await expect(getRunResults(client, RUN_ID)).rejects.toMatchObject({
+        failure: { kind: "unexpected-response", status: 200 },
+      });
+    },
+  );
+
+  it.each([
+    ["nome com 240 caracteres", `${"a".repeat(236)}.csv`],
+    ["60 emojis (240 bytes)", "😀".repeat(60)],
+    ["nome com grupo (/)", "thumbnails/a.png"],
+  ] as const)("aceita file_name com %s", async (_description, fileName) => {
+    const results = resultsWithFileName(fileName);
     const { client } = fakeApi({
       [`GET /api/v1/runs/${RUN_ID}/results`]: () => jsonResponse(results),
     });

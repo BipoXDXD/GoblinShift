@@ -1,5 +1,5 @@
 import { CircleAlert, CircleCheck, Clock, LoaderCircle, Ban, type LucideIcon } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
+import { useRef, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "../components/ui/Button";
 import { describeFailure } from "../components/feedback/ProblemAlert";
@@ -19,6 +19,7 @@ interface UploadEntryViewProps {
 /** Um arquivo da lista: nome, tamanho, estado do envio em texto e as ações possíveis. */
 export function UploadEntryView({ entry, onRetry, onRemove }: UploadEntryViewProps): ReactElement {
   const name = entry.file.name;
+  const removeRef = useRef<HTMLButtonElement>(null);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
@@ -37,12 +38,15 @@ export function UploadEntryView({ entry, onRetry, onRemove }: UploadEntryViewPro
             aria-label={`${T.retry} ${name}`}
             onClick={() => {
               onRetry(entry.localId);
+              // O botão some com o novo envio; sem isto o foco cairia no <body> (WCAG 2.4.3).
+              removeRef.current?.focus();
             }}
           >
             {T.retry}
           </Button>
         )}
         <Button
+          ref={removeRef}
           type="button"
           variant="tertiary"
           aria-label={`${T.remove} ${name}`}
