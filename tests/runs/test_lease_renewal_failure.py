@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -30,7 +30,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
-from goblinshift.runs.store import LostFencing
+from goblinshift.runs.store import LostFencing, lease_expired
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
@@ -238,38 +238,69 @@ def test_renovacao_recusa_lease_vencido(
         assert run_row(factory, run_id)["summary"] is None
 
 
+@pytest.mark.parametrize(
+    ("offset", "expired"),
+    [
+        (timedelta(microseconds=-1), True),
+        (timedelta(0), False),
+        (timedelta(microseconds=1), False),
+    ],
+)
+def test_lease_vence_so_depois_do_instante_marcado(offset: timedelta, expired: bool) -> None:
+    # On point da fronteira, no mesmo corte da reconciliação (`lease_expires_at < now()`).
+    clock = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
+    assert lease_expired(clock + offset, clock) is expired
+
+
+# Folga do lease no começo da transação da renovação; vence enquanto ela espera a trava da Run,
+# bem antes do `lock_timeout` (2 s).
+LEASE_LEFT_AT_BEGIN = timedelta(milliseconds=200)
+
+
+def db_clock_passed(factory: sessionmaker[Session], instant: datetime) -> bool:
+    with factory() as session:
+        passed: bool = session.execute(select(func.clock_timestamp() > instant)).scalar_one()
+    return passed
+
+
 @integration
-def test_lease_que_vence_no_instante_da_renovacao_ainda_renova(
+def test_lease_que_vence_durante_a_espera_pela_trava_nao_renova(
     engine: Engine, factory: sessionmaker[Session], storage: FileStorage, work_root: Path
 ) -> None:
-    # On point da fronteira: vencido é `lease_expires_at < now()`, como na reconciliação. Igual
-    # ao `now()` só se obtém dentro da própria transação da renovação, então a primeira delas
-    # grava o lease nesse instante antes de travar a Run.
+    # O `now()` da transação fica no começo dela: quem compara com ele renova um lease que venceu
+    # enquanto o `FOR UPDATE` esperava a Run. A renovação tem de usar o relógio de depois da trava.
     run_id = queue_run(factory, storage, create_user(factory))
     claimed = claim(factory, storage)
+    before = attempts(factory, run_id)[0]["lease_expires_at"]
     worker_sessions = make_session_factory(engine)
-    pinned: list[bool] = []
+    leases: list[datetime] = []
 
     @event.listens_for(worker_sessions, "after_begin")
-    def lease_expires_now(
+    def lease_alive_at_begin(
         _session: Session, _transaction: SessionTransaction, connection: Connection
     ) -> None:
-        if not pinned:
-            pinned.append(True)
-            connection.execute(
-                update(attempt)
-                .where(attempt.c.id == claimed.attempt_id)
-                .values(lease_expires_at=func.now())
+        if not leases:
+            leases.append(
+                connection.execute(
+                    update(attempt)
+                    .where(attempt.c.id == claimed.attempt_id)
+                    .values(lease_expires_at=func.now() + LEASE_LEFT_AT_BEGIN)
+                    .returning(attempt.c.lease_expires_at)
+                ).scalar_one()
             )
 
     config = CoordinatorConfig(lease=LONG_LEASE, jitter=lambda: MIN_RETRY_JITTER)
     worker = Coordinator(worker_sessions, storage, local_runner(work_root), config)
 
-    with factory() as session:
-        before = session.execute(select(func.now())).scalar_one()
-    assert worker.renew_lease(claimed) is Status.RUNNING
-    assert pinned == [True]
-    assert attempts(factory, run_id)[0]["lease_expires_at"] > before + LONG_LEASE / 2
+    with ThreadPoolExecutor(1) as pool:
+        with run_locked_by_other_session(factory, run_id):
+            renewal = pool.submit(worker.renew_lease, claimed)
+            wait_until(lambda: leases and db_clock_passed(factory, leases[0]))
+        with pytest.raises(LostFencing, match="lease vencido"):
+            renewal.result(timeout=WAIT_S)
+
+    # A recusa desfaz a transação inteira, inclusive o lease gravado no começo dela.
+    assert attempts(factory, run_id)[0]["lease_expires_at"] == before
 
 
 class _RunningUntilRenewed:

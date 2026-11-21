@@ -88,6 +88,8 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
+    db_clock,
+    lease_expired,
     lock_fenced,
     run_transaction,
 )
@@ -586,8 +588,10 @@ class Coordinator:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
             live = loaded.live_attempt
             # Vencido é definitivo (3.4): a manutenção pode já ter parado o executor e só decidir
-            # depois; renovar agora tiraria a decisão dela e deixaria a tentativa perdida.
-            if live is not None and live.lease_expires_at < loaded.now:
+            # depois; renovar agora tiraria a decisão dela e deixaria a tentativa perdida. O
+            # relógio é lido depois da trava: `loaded.now` (o `now()` da transação) não vê a
+            # espera pelo `FOR UPDATE`, e um lease vencido nela passaria por vivo.
+            if live is not None and lease_expired(live.lease_expires_at, db_clock(session)):
                 raise LostFencing(f"lease vencido em {live.lease_expires_at.isoformat()}")
             session.execute(
                 update(attempt)
