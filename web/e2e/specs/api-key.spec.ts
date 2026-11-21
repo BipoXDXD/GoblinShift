@@ -93,7 +93,16 @@ test("sem a chave do processo de teste, a API recusa e a Bancada convida a entra
   await installFakeApi(context, apiKey, E2E.artifactsDir);
   const page = await context.newPage();
   const catalogStatuses: number[] = [];
+  let catalogRequests = 0;
   let lastCatalogAt: number | null = null;
+  // A quietude conta do pedido e da resposta: num CI lento, a resposta de um retry pode chegar
+  // depois da janela, mas o pedido não.
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/catalog")) {
+      catalogRequests += 1;
+      lastCatalogAt = Date.now();
+    }
+  });
   page.on("response", (response) => {
     if (response.url().endsWith("/api/v1/catalog")) {
       catalogStatuses.push(response.status());
@@ -127,6 +136,7 @@ test("sem a chave do processo de teste, a API recusa e a Bancada convida a entra
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("Sua sessão terminou.", { exact: false })).toHaveCount(0);
   // 401 não é falha transitória: a leitura não se repete (api/queryRetry.ts).
+  expect(catalogRequests).toBe(1);
   expect(catalogStatuses).toEqual([401]);
   await context.close();
 });
