@@ -128,7 +128,7 @@ def test_0020_cria_as_constraints_sem_validar_nem_mexer_no_legado(
     }
 
 
-def test_0021_anula_par_orfao_ou_divergente_e_completa_a_geracao(
+def test_0021_anula_par_orfao_e_corrige_a_geracao_pela_tentativa(
     db_settings: Settings, engine: Engine
 ) -> None:
     seeded = seed_legacy(db_settings, engine)
@@ -138,7 +138,7 @@ def test_0021_anula_par_orfao_ou_divergente_e_completa_a_geracao(
     attempt_id = seeded["attempt"]
     assert pairs(engine, [seeded[name] for name in OBJECTS]) == {
         seeded["orphan"]: (None, None),
-        seeded["divergent"]: (None, None),
+        seeded["divergent"]: (attempt_id, 2),
         seeded["no_generation"]: (attempt_id, 2),
         seeded["generation_only"]: (None, None),
         seeded["intact"]: (attempt_id, 2),

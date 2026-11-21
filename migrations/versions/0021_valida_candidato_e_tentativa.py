@@ -8,11 +8,11 @@ Lembrete (docs/GoblinShiftPlan.md, 3.8): expand/contract. Numa transação só, 
 
 1. Candidato que aponta para tentativa inexistente (a purga da Run a apagou antes da FK) perde
    `attempt_id` e `generation`, como o `SET NULL` da FK faria.
-2. Candidato cuja geração diverge da geração da tentativa perde as duas colunas, pela mesma regra:
-   a FK composta não acha a tentativa `(id, generation)`, o mesmo que um órfão.
-3. Candidato com tentativa e sem geração recebe a geração da própria tentativa.
-4. Objeto sem tentativa e com geração perde a geração.
-5. `VALIDATE CONSTRAINT` da FK e da CHECK.
+2. Candidato com tentativa e geração faltante ou divergente recebe a geração da própria tentativa.
+   Ele mantém `attempt_id`: o descarte acha os candidatos pendentes só por ela, e um candidato
+   pendente sem tentativa nunca mais seria apagado.
+3. Objeto sem tentativa e com geração perde a geração.
+4. `VALIDATE CONSTRAINT` da FK e da CHECK.
 
 O reparo fica aqui, e não na 0020, porque só depois da FK de pé nenhuma exclusão de tentativa
 deixa órfão novo entre o reparo e a validação. Os `UPDATE` tomam `ROW EXCLUSIVE` e o `VALIDATE`,
@@ -22,7 +22,8 @@ nem escrita da API. A consulta que conta em produção o que este reparo muda es
 
 O downgrade volta ao catálogo da 0020: remove as duas constraints e as recria `NOT VALID`. O reparo
 não se desfaz: o ponteiro órfão e a geração faltante não têm como voltar, e o estado reparado já é
-o certo para o código atual e para o anterior.
+o certo para o código atual e para o anterior. A geração corrigida não muda a chave do arquivo
+(`runs/{run_id}/g{generation}/…`): a chave é só nome, e o descarte e o expurgo a leem da linha.
 """
 
 from collections.abc import Sequence
@@ -48,24 +49,14 @@ def upgrade() -> None:
            AND NOT EXISTS (SELECT FROM attempt WHERE attempt.id = stored_object.attempt_id)
         """
     )
-    # lock-ok: UPDATE toma ROW EXCLUSIVE, que não bloqueia a API; só a geração divergente muda
-    op.execute(
-        """
-        UPDATE stored_object AS o
-           SET attempt_id = NULL, generation = NULL
-          FROM attempt AS a
-         WHERE o.attempt_id = a.id
-           AND o.generation <> a.generation
-        """
-    )
-    # lock-ok: UPDATE toma ROW EXCLUSIVE, que não bloqueia a API; só os candidatos sem geração
+    # lock-ok: UPDATE toma ROW EXCLUSIVE, que não bloqueia a API; só a geração errada ou faltante
     op.execute(
         """
         UPDATE stored_object AS o
            SET generation = a.generation
           FROM attempt AS a
          WHERE o.attempt_id = a.id
-           AND o.generation IS NULL
+           AND o.generation IS DISTINCT FROM a.generation
         """
     )
     # lock-ok: UPDATE toma ROW EXCLUSIVE, que não bloqueia a API; só a geração sem tentativa

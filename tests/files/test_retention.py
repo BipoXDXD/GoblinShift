@@ -18,6 +18,7 @@ from goblinshift.files.artifacts import (
     open_for_download,
     publish_artifact,
 )
+from goblinshift.files.candidates import discard_candidates
 from goblinshift.files.errors import UploadNotFoundError
 from goblinshift.files.objects import hold, release
 from goblinshift.files.retention import (
@@ -566,3 +567,28 @@ def test_reconciliacao_nao_reserva_de_novo_o_objeto_que_perdeu_a_tentativa(
 
     assert report.objects_adopted == 0
     assert live_amount(factory, capacity.HolderKind.OBJECT, candidate.object_id) == 5
+
+
+def test_candidato_descartado_que_perdeu_a_tentativa_tem_reserva_ate_o_expurgo(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # Descartado, ainda no disco, e a purga da Run anulou `attempt_id`: a reconciliação o adota
+    # como qualquer arquivo que ocupa espaço, e o expurgo libera a reserva junto com o arquivo.
+    owner = create_user(factory, "a")
+    run_id, attempt_id = create_attempt(factory, owner)
+    with unit_of_work(factory) as session:
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
+    sha256, size = storage.create_exclusive(candidate.storage_key, [b"descartada"], max_bytes=100)
+    with unit_of_work(factory) as session:
+        commit_candidate(session, owner, candidate.object_id, sha256, size)
+        discard_candidates(session, attempt_id)
+        session.execute(delete(run).where(run.c.id == run_id))
+
+    adopted = reconcile_capacity(factory(), limit=10).objects_adopted
+    reserved = live_amount(factory, capacity.HolderKind.OBJECT, candidate.object_id)
+    purged = purge_deleted_objects(factory(), storage).objects
+
+    assert (adopted, reserved, purged) == (1, 10, 1)
+    assert live_amount(factory, capacity.HolderKind.OBJECT, candidate.object_id) is None
+    with pytest.raises(ObjectMissingError):
+        storage.open(candidate.storage_key)
