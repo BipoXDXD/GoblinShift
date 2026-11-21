@@ -33,6 +33,7 @@
 - Dois mecanismos de capacidade convivem: o pool para quantidades e as travas atuais para contagens.
 - Uma Run reserva cerca de 1 GiB de teto; com 4 GiB por conta sobram cerca de 3 GiB para uploads enquanto ela roda.
 - Durante o deploy da 0006, a API anterior cria uploads sem reserva; a reconciliação os adota.
+- Cada intenção de upload reserva no mínimo 64 KiB (`MIN_INTENT_RESERVED_BYTES`), para que intenções de 0 B não se acumulem de graça; no `ready` o objeto fica com o tamanho real e a sobra volta à cota, então `GET /me` mostra 64 KiB por intenção aberta até ela ficar pronta ou vencer.
 - A purga da conta chama `capacity.purge_owner` antes de apagar `app_user` (FK `RESTRICT`).
 
 ## Como verificar
