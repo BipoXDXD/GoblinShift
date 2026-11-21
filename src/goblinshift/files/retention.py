@@ -302,7 +302,12 @@ def delete_old_file_rows(
 
 
 def file_backlog(session: Session, now: datetime) -> dict[str, int]:
-    """O que ainda falta anular ou apagar em `files`: a métrica do tamanho do acúmulo."""
+    """O que ainda falta anular, expirar ou apagar em `files`: a métrica do tamanho do acúmulo.
+
+    Os vencidos usam o mesmo predicado dos passos que os expiram; o que sobra depois do ciclo é o
+    que o lote não alcançou. `objects_to_purge` conta todo pedido de exclusão, inclusive o que um
+    download aberto ainda segura.
+    """
     deleted_before = (upload.c.deleted_at.is_not(None),)
     to_anonymize: int = session.execute(
         select(func.count()).where(
@@ -314,7 +319,25 @@ def file_backlog(session: Session, now: datetime) -> dict[str, int]:
     to_delete: int = session.execute(
         select(func.count()).where(*deleted_before, upload.c.created_at <= now - FILE_ROWS_AFTER)
     ).scalar_one()
-    return {"uploads_to_anonymize": to_anonymize, "uploads_to_delete": to_delete}
+    incomplete: int = session.execute(
+        select(func.count()).where(
+            upload.c.state != UploadState.READY,
+            or_(upload.c.expires_at <= now, upload.c.deleted_at.is_not(None)),
+        )
+    ).scalar_one()
+    artifacts: int = session.execute(
+        select(func.count()).where(artifact.c.deleted_at.is_(None), artifact.c.expires_at <= now)
+    ).scalar_one()
+    to_purge: int = session.execute(
+        select(func.count()).where(stored_object.c.state == ObjectState.DELETE_REQUESTED)
+    ).scalar_one()
+    return {
+        "uploads_to_anonymize": to_anonymize,
+        "uploads_to_delete": to_delete,
+        "incomplete_uploads_to_expire": incomplete,
+        "artifacts_to_expire": artifacts,
+        "objects_to_purge": to_purge,
+    }
 
 
 def has_unsettled_candidate(attempt_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:

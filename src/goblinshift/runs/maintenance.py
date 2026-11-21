@@ -816,6 +816,7 @@ class Maintenance:
             return {
                 **history_backlog(session, now),
                 **file_backlog(session, now),
+                "reservations_to_remove": capacity.released_backlog(session, now),
                 "runs_stuck_stopping": stuck,
                 "storage_global_reserved_bytes": storage.storage_reserved_bytes,
                 "storage_global_max_bytes": storage.storage_max_bytes,
