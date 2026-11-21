@@ -33,6 +33,7 @@ from goblinshift.files.limits import (
     MAX_BATCH_BYTES,
     MAX_BATCH_FILES,
     MAX_NAME_CHARS,
+    MIN_INTENT_RESERVED_BYTES,
     READY_UPLOAD_TTL,
     max_file_bytes_for,
 )
@@ -123,8 +124,9 @@ def create_intents(
 ) -> list[UploadView]:
     """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
 
-    Reserva o tamanho declarado de cada intenção (detentor `upload`), tudo ou nada: acima do teto
-    levanta `AccountCapacityExceededError` ou `GlobalCapacityExceededError`, e quem chama desfaz.
+    Reserva o tamanho declarado de cada intenção, no mínimo `MIN_INTENT_RESERVED_BYTES` (detentor
+    `upload`), tudo ou nada: acima do teto levanta `AccountCapacityExceededError` ou
+    `GlobalCapacityExceededError`, e quem chama desfaz.
     """
     intents = _parse_intents(items)
     object_ids = session.execute(
@@ -150,7 +152,7 @@ def create_intents(
         owner_id=owner_id,
         holder=capacity.HolderKind.UPLOAD,
         resource=capacity.Resource.STORAGE_BYTES,
-        amounts={row.id: row.expected_size for row in rows},
+        amounts={row.id: max(row.expected_size, MIN_INTENT_RESERVED_BYTES) for row in rows},
     )
     return [
         _view(row, size_bytes=None, sha256=None, availability=Availability.AVAILABLE)
@@ -386,7 +388,8 @@ def _complete(
 ) -> bool:
     """`receiving → ready` e objeto `committed`, na mesma transação; `False` se perdeu a vez.
 
-    A reserva da intenção passa para o objeto pelo tamanho real, que é o declarado.
+    A reserva da intenção passa para o objeto pelo tamanho real, que é o declarado; a sobra do
+    mínimo por intenção volta para a cota.
     """
     object_id = session.execute(
         update(upload)
@@ -436,6 +439,10 @@ def _move_reservation_to_object(
             "upload sem reserva de capacidade",
             extra={"fields": {"alert": "upload_without_reservation", "upload_id": str(upload_id)}},
         )
+    else:
+        # Sobra do mínimo por intenção. Se a reserva era só o tamanho real (intenção criada antes
+        # do mínimo, ou declarada acima dele), o `transfer` já a encerrou e liberar devolve 0.
+        capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
 
 
 def _fail(

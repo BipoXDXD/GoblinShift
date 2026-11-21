@@ -18,7 +18,7 @@ from goblinshift import capacity
 from goblinshift.files import retention
 from goblinshift.files.artifacts import get_artifact, open_for_download, publish_artifact
 from goblinshift.files.errors import UploadGoneError, UploadNotFoundError
-from goblinshift.files.limits import INCOMPLETE_UPLOAD_TTL
+from goblinshift.files.limits import INCOMPLETE_UPLOAD_TTL, MIN_INTENT_RESERVED_BYTES
 from goblinshift.files.objects import hold, release
 from goblinshift.files.retention import (
     expire_artifacts,
@@ -246,7 +246,9 @@ def test_upload_recebendo_excluido_mantem_linha_e_reserva_ate_o_escritor_termina
             request_deletion(session, owner, intent.id)
         with factory() as session:
             assert expire_incomplete_uploads(session, storage).uploads == 0
-        assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
+        assert (
+            live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == MIN_INTENT_RESERVED_BYTES
+        )
 
     assert isinstance(writer.error, UploadGoneError)
 
@@ -308,7 +310,9 @@ def test_escritor_que_passa_do_vencimento_para_e_so_libera_a_reserva_junto_com_o
 
     with blocked_writer(factory, storage, owner, intent.id, clock) as writer:
         clock.advance(INCOMPLETE_UPLOAD_TTL)
-        assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
+        assert (
+            live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == MIN_INTENT_RESERVED_BYTES
+        )
 
     assert isinstance(writer.error, UploadGoneError)
     assert upload_state(factory, intent.id) == UploadState.FAILED
@@ -340,7 +344,7 @@ def test_falha_ao_apagar_no_escritor_mantem_a_reserva_ate_o_vencimento(
 
     assert isinstance(writer.error, OSError)
     assert upload_state(factory, intent.id) == UploadState.RECEIVING
-    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == CONTENT_BYTES
+    assert live_amount(factory, capacity.HolderKind.UPLOAD, intent.id) == MIN_INTENT_RESERVED_BYTES
     # O arquivo segue ocupando disco com a reserva; a retenção leva os dois no vencimento.
     expire_row(factory, upload, intent.id)
     with factory() as session:
