@@ -29,7 +29,13 @@ from goblinshift.processing.media_mill.commands import (
 )
 from goblinshift.processing.media_mill.limits import MAX_INPUTS, Limits
 from goblinshift.processing.media_mill.params import AudioFormat, Params
-from goblinshift.processing.media_mill.probe import Inspected, inspect, parse_probe
+from goblinshift.processing.media_mill.probe import (
+    Inspected,
+    inspect,
+    parse_probe,
+    require_dimensions_within,
+    require_observed_frame_rate,
+)
 from goblinshift.processing.media_mill.rejection import MediaRejected, RejectionCode
 from goblinshift.processing.media_mill.signature import HEADER_BYTES, detect_container
 from goblinshift.processing.media_mill.tools import (
@@ -261,6 +267,8 @@ class _Mill:
             name=f"thumbnail-{label}",
         )
         log = read_log(outcome.log)
+        # O cabeçalho pode declarar 320x240 e trocar para 4K no meio: vale o quadro decodificado.
+        require_dimensions_within(log.max_long_side_px, log.max_short_side_px, self._limits)
         if outcome.succeeded and log.first_frame_s is not None and _non_empty(at_target):
             if log.has_errors:
                 raise _damaged("o vídeo está danificado perto do ponto da miniatura")
@@ -279,6 +287,11 @@ class _Mill:
             argv, cap_s=self._timeouts.thumbnail_s, name=f"thumbnail-{label}-before"
         )
         log = read_log(outcome.log)
+        require_dimensions_within(log.max_long_side_px, log.max_short_side_px, self._limits)
+        # Esta leitura decodifica do início até o alvo: é onde a taxa declarada pode mentir.
+        if log.first_frame_s is not None and log.last_frame_s is not None:
+            elapsed_s = log.last_frame_s - log.first_frame_s
+            require_observed_frame_rate(log.frame_count, elapsed_s, self._limits)
         if (
             not outcome.succeeded
             or log.has_errors

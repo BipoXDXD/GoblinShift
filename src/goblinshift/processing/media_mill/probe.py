@@ -205,16 +205,35 @@ def _checked_duration(info: MediaInfo, video: VideoStream, limits: Limits) -> fl
     return duration
 
 
-def _require_size_within(video: VideoStream, limits: Limits) -> None:
-    if video.width <= 0 or video.height <= 0:
-        raise _unsupported("o vídeo não declara largura e altura")
-    long_side, short_side = max(video.width, video.height), min(video.width, video.height)
+def require_dimensions_within(width: int, height: int, limits: Limits) -> None:
+    """Lado maior e lado menor no teto, em qualquer ordem: vale do declarado e do decodificado."""
+    long_side, short_side = max(width, height), min(width, height)
     if long_side > limits.max_long_side_px or short_side > limits.max_short_side_px:
         raise MediaRejected(
             RejectionCode.MEDIA_TOO_LARGE,
-            f"{video.width} x {video.height} passa de "
-            f"{limits.max_long_side_px} x {limits.max_short_side_px}",
+            f"{width} x {height} passa de {limits.max_long_side_px} x {limits.max_short_side_px}",
         )
+
+
+def require_observed_frame_rate(frame_count: int, elapsed_s: float, limits: Limits) -> None:
+    """Quadros decodificados num intervalo cabem no teto de fps, com um quadro de folga.
+
+    `frame_count` quadros cobrem `frame_count - 1` intervalos entre o primeiro e o último
+    instante. A folga absorve o arredondamento do `pts_time` (6 casas) de um vídeo legítimo
+    exatamente no teto.
+    """
+    if frame_count - 1 > limits.max_fps * elapsed_s + 1:
+        raise MediaRejected(
+            RejectionCode.MEDIA_TOO_LARGE,
+            f"o vídeo decodifica {frame_count} quadros em {elapsed_s:.3f} s, "
+            f"acima de {limits.max_fps} quadros por segundo",
+        )
+
+
+def _require_size_within(video: VideoStream, limits: Limits) -> None:
+    if video.width <= 0 or video.height <= 0:
+        raise _unsupported("o vídeo não declara largura e altura")
+    require_dimensions_within(video.width, video.height, limits)
 
 
 def _checked_frame_rate(video: VideoStream, limits: Limits) -> Fraction:

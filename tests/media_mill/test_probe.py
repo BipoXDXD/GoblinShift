@@ -11,7 +11,12 @@ from typing import Any
 import pytest
 
 from goblinshift.processing.media_mill import Limits, Params
-from goblinshift.processing.media_mill.probe import inspect, parse_probe
+from goblinshift.processing.media_mill.probe import (
+    inspect,
+    parse_probe,
+    require_dimensions_within,
+    require_observed_frame_rate,
+)
 from goblinshift.processing.media_mill.rejection import MediaRejected, RejectionCode
 from goblinshift.processing.media_mill.signature import Container
 
@@ -411,3 +416,44 @@ def test_video_so_com_taxas_negativas_e_recusado_por_nao_declarar_quadros() -> N
         inspected(data)
 
     assert rejected.value.code is RejectionCode.UNSUPPORTED_FORMAT
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "allowed"),
+    [
+        pytest.param(1920, 1080, True, id="1920x1080"),
+        pytest.param(1921, 1080, False, id="1921x1080"),
+        pytest.param(1920, 1081, False, id="1920x1081"),
+        pytest.param(1080, 1920, True, id="retrato-1080x1920"),
+        pytest.param(1080, 1921, False, id="retrato-1080x1921"),
+    ],
+)
+def test_quadro_observado_acima_do_teto_e_media_too_large(
+    width: int, height: int, allowed: bool
+) -> None:
+    if allowed:
+        require_dimensions_within(width, height, Limits())
+        return
+    with pytest.raises(MediaRejected) as rejected:
+        require_dimensions_within(width, height, Limits())
+    assert rejected.value.code is RejectionCode.MEDIA_TOO_LARGE
+
+
+@pytest.mark.parametrize(
+    ("frames", "elapsed", "allowed"),
+    [
+        pytest.param(1, 0.0, True, id="um-quadro"),
+        pytest.param(62, 1.0, True, id="61-intervalos-em-1s"),
+        pytest.param(63, 1.0, False, id="62-intervalos-em-1s"),
+        pytest.param(3, 0.0, False, id="tres-quadros-no-mesmo-instante"),
+    ],
+)
+def test_taxa_observada_respeita_o_teto_com_um_quadro_de_folga(
+    frames: int, elapsed: float, allowed: bool
+) -> None:
+    if allowed:
+        require_observed_frame_rate(frames, elapsed, Limits())
+        return
+    with pytest.raises(MediaRejected) as rejected:
+        require_observed_frame_rate(frames, elapsed, Limits())
+    assert rejected.value.code is RejectionCode.MEDIA_TOO_LARGE

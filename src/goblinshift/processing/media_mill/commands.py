@@ -21,7 +21,8 @@ cada quadro de áudio, para a receita saber se a faixa passava da duração acei
 
 `-loglevel level+…` prefixa cada linha do stderr com o nível (`[error]`, `[info]`), e
 `read_log` separa o que é erro de decodificação e os instantes informados pelos filtros
-`showinfo` (vídeo) e `ashowinfo` (áudio).
+`showinfo` (vídeo) e `ashowinfo` (áudio). O `showinfo` também informa o tamanho de cada quadro
+decodificado (`s:LxA`): o cabeçalho que o ffprobe lê pode mentir, os quadros não.
 """
 
 import re
@@ -35,6 +36,7 @@ from goblinshift.processing.media_mill.signature import Container
 JPEG_QUALITY = 3  # escala -q:v do mjpeg: 2 (melhor) a 31; 3 fica perto de qualidade 90
 _ERROR_LEVELS = (b"[error]", b"[fatal]", b"[panic]")
 _PTS_TIME = re.compile(rb"\bpts_time:(-?[0-9]+(?:\.[0-9]+)?)")
+_FRAME_SIZE = re.compile(rb"\bs:([0-9]+)x([0-9]+)")
 _SHOWINFO = b"Parsed_showinfo"
 _ASHOWINFO = b"Parsed_ashowinfo"
 _AUDIO_ENCODERS = {
@@ -179,6 +181,11 @@ class LogSummary:
     last_frame_s: float | None
     # Início (s) do último quadro de áudio que passou pelo `ashowinfo`.
     last_audio_s: float | None
+    # Quadros que passaram pelo `showinfo` e o maior lado maior e lado menor entre eles (0 sem
+    # quadros), como foram decodificados, antes da escala da miniatura.
+    frame_count: int
+    max_long_side_px: int
+    max_short_side_px: int
 
 
 def read_log(path: Path) -> LogSummary:
@@ -187,17 +194,28 @@ def read_log(path: Path) -> LogSummary:
     first: float | None = None
     last: float | None = None
     last_audio: float | None = None
+    frame_count = long_side = short_side = 0
     for line in _lines(path):
         has_errors = has_errors or any(level in line for level in _ERROR_LEVELS)
         frame_s = _frame_time(line, _SHOWINFO)
         if frame_s is not None:
             first = frame_s if first is None else first
             last = frame_s
+            frame_count += 1
+            width, height = _frame_size(line)
+            long_side = max(long_side, width, height)
+            short_side = max(short_side, min(width, height))
         audio_s = _frame_time(line, _ASHOWINFO)
         if audio_s is not None:
             last_audio = audio_s
     return LogSummary(
-        has_errors=has_errors, first_frame_s=first, last_frame_s=last, last_audio_s=last_audio
+        has_errors=has_errors,
+        first_frame_s=first,
+        last_frame_s=last,
+        last_audio_s=last_audio,
+        frame_count=frame_count,
+        max_long_side_px=long_side,
+        max_short_side_px=short_side,
     )
 
 
@@ -258,6 +276,11 @@ def _seconds(value: float) -> str:
 def _lines(path: Path) -> Iterator[bytes]:
     with path.open("rb") as log:
         yield from log
+
+
+def _frame_size(line: bytes) -> tuple[int, int]:
+    match = _FRAME_SIZE.search(line)
+    return (int(match.group(1)), int(match.group(2))) if match else (0, 0)
 
 
 def _frame_time(line: bytes, filter_name: bytes) -> float | None:

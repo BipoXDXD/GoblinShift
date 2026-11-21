@@ -472,6 +472,24 @@ def test_video_hostil_ou_fora_dos_limites_e_recusado(
     assert workspace.files() == []
 
 
+# O cabeçalho cabe no teto e o conteúdo não: vídeos que trocam de 320x240 para 2560x1440 (na
+# miniatura do alvo e só no último quadro anterior) e um WebM de 240 fps que declara ~60 fps. Só o
+# `showinfo` das miniaturas vê os quadros de verdade.
+@pytest.mark.parametrize(
+    "clip",
+    ["mp4_resolution_switch", "webm_resolution_switch_before_target", "webm_fps_beyond_declared"],
+)
+def test_video_que_passa_do_teto_depois_do_cabecalho_e_recusado(
+    workspace: Workspace, clips: ClipLibrary, clip: str
+) -> None:
+    workspace.add("video.mp4", clips.bytes(clip))
+
+    item = rejected_item(workspace, params=Params(thumbnail_count=3))
+
+    assert item.code == "MEDIA_TOO_LARGE"
+    assert workspace.files() == []
+
+
 def test_mp4_truncado_sem_moov_e_recusado(workspace: Workspace, clips: ClipLibrary) -> None:
     workspace.add("cortado.mp4", truncated(clips.bytes("mp4")))
 

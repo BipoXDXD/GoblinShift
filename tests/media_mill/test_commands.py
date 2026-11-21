@@ -193,6 +193,7 @@ def test_log_sem_quadros(tmp_path: Path) -> None:
     summary = read_log(log)
 
     assert (summary.has_errors, summary.first_frame_s, summary.last_frame_s) == (False, None, None)
+    assert (summary.frame_count, summary.max_long_side_px, summary.max_short_side_px) == (0, 0, 0)
 
 
 def test_log_guarda_o_instante_do_ultimo_quadro_de_audio(tmp_path: Path) -> None:
@@ -219,3 +220,40 @@ def test_pts_time_fora_do_showinfo_e_ignorado(tmp_path: Path) -> None:
     log.write_bytes(b"[other @ 0x1] [info] pts_time:9\n")
 
     assert read_log(log).first_frame_s is None
+
+
+def test_log_guarda_o_maior_quadro_e_conta_os_quadros(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:0 pts:0 pts_time:0 s:320x240 fmt:yuv420p\n"
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:1 pts:512 pts_time:1 s:1440x2560 fmt:yuv420p\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.frame_count, summary.max_long_side_px, summary.max_short_side_px) == (
+        2,
+        2560,
+        1440,
+    )
+
+
+def test_so_linhas_de_quadro_do_showinfo_contam(tmp_path: Path) -> None:
+    # Formato real do FFmpeg 9: linhas de configuração e de cor do mesmo filtro, sem `pts_time`,
+    # e o `ashowinfo`, que não é quadro de vídeo.
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_showinfo_0 @ 0x2] [info] config in time_base: 1/30, frame_rate: 30/1\n"
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:   0 pts:      0 pts_time:0       duration:      1"
+        b" duration_time:0.0333333 fmt:yuv420p cl:unspecified sar:1/1 s:320x240 i:P iskey:1\n"
+        b"[Parsed_showinfo_0 @ 0x2] [info] color_range:unknown color_space:unknown\n"
+        b"[Parsed_ashowinfo_0 @ 0x3] [info] n:0 pts:0 pts_time:0 fmt:s16 channels:1\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.frame_count, summary.max_long_side_px, summary.max_short_side_px) == (
+        1,
+        320,
+        240,
+    )

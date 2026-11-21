@@ -12,7 +12,7 @@ tamanho (4K, 301 s) usam o mínimo de quadros que ainda prova o limite.
 import shutil
 import struct
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,6 +71,7 @@ AAC = ("-c:a", "aac")
 MP4 = ("-f", "mp4")
 MOV = ("-f", "mov")
 WEBM = ("-f", "webm")
+MPEGTS = ("-f", "mpegts")
 
 
 CLIPS: dict[str, Clip] = {
@@ -157,6 +158,31 @@ CLIPS: dict[str, Clip] = {
         inputs=(video_source(duration=2.0), tone(rate=48000, duration=30.0)),
         output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
     ),
+    # Trechos do MP4 que troca de resolução (`DERIVED`): o MPEG-TS se emenda byte a byte.
+    "ts_320x240": Clip(
+        inputs=(video_source(duration=1.0), tone(duration=1.0)),
+        output=(*H264, *AAC, "-shortest", *MPEGTS),
+    ),
+    "ts_2560x1440": Clip(
+        inputs=(video_source(size="2560x1440", duration=1.0), tone(duration=1.0)),
+        output=(*H264, *AAC, "-shortest", *MPEGTS),
+    ),
+    # Trechos do WebM que troca de resolução depois do último alvo (`DERIVED`): 1 s de vídeo em
+    # 16 s de Opus, então as três miniaturas caem depois do último quadro e leem o vídeo inteiro.
+    "webm_320x240_1s": Clip(
+        inputs=(video_source(duration=1.0), tone(rate=48000, duration=1.0)),
+        output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
+    ),
+    "webm_2560x1440_audio_15s": Clip(
+        inputs=(video_source(size="2560x1440", duration=0.1), tone(rate=48000, duration=15.0)),
+        output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
+    ),
+    # Base do WebM que declara ~60 fps com 240 (`DERIVED`): vídeo de 1 s e Opus de 3 s, para a
+    # miniatura de 50% cair depois do último quadro e ler o vídeo inteiro.
+    "webm_240fps_1s_audio_3s": Clip(
+        inputs=(video_source(rate=240, duration=1.0), tone(rate=48000, duration=3.0)),
+        output=("-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", *WEBM),
+    ),
     # Hostis e fora da allowlist.
     "mp4_mpeg4": Clip(
         inputs=(video_source(), tone()), output=("-c:v", "mpeg4", *AAC, "-shortest", *MP4)
@@ -225,6 +251,63 @@ def with_declared_duration(source: Path, target: Path, duration_ms: float) -> Pa
     return target
 
 
+# ID do `DefaultDuration` da faixa (ns por quadro) seguido do tamanho: 3 bytes no WebM de 240 fps.
+_MATROSKA_DEFAULT_DURATION = b"\x23\xe3\x83\x83"
+
+
+def with_declared_frame_duration(source: Path, target: Path) -> Path:
+    """Mesmo WebM, com o `DefaultDuration` do vídeo no maior valor de 3 bytes (16.777.215 ns):
+    o ffprobe passa a declarar ~59,6 fps, dentro do teto, e os quadros continuam lá."""
+    data = source.read_bytes()
+    assert data.count(_MATROSKA_DEFAULT_DURATION) == 1
+    start = data.index(_MATROSKA_DEFAULT_DURATION) + len(_MATROSKA_DEFAULT_DURATION)
+    target.write_bytes(data[:start] + b"\xff\xff\xff" + data[start + 3 :])
+    return target
+
+
+def concatenated(parts: Sequence[Path], target: Path) -> Path:
+    """MPEG-TS emendados pelo protocolo `concat` e copiados para MP4, sem reencodar: o `moov`
+    descreve só o primeiro trecho (largura e altura), e os quadros dos outros seguem como vieram."""
+    ffmpeg, _ = require_ffmpeg()
+    joined = "concat:" + "|".join(str(part) for part in parts)
+    argv = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", joined]
+    argv += ["-c", "copy", *MP4, str(target)]
+    subprocess.run(argv, check=True, capture_output=True)  # noqa: S603 - argv do próprio teste
+    return target
+
+
+def joined(parts: Sequence[Path], target: Path) -> Path:
+    """WebMs emendados pelo demuxer `concat` e copiados, sem reencodar: a faixa declara a largura
+    e a altura do primeiro, e o VP9 dos outros troca de tamanho no keyframe."""
+    ffmpeg, _ = require_ffmpeg()
+    listing = target.with_suffix(".txt")
+    listing.write_text("".join(f"file '{part}'\n" for part in parts))
+    argv = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat"]
+    argv += ["-safe", "0", "-i", str(listing), "-c", "copy", *WEBM, str(target)]
+    subprocess.run(argv, check=True, capture_output=True)  # noqa: S603 - argv do próprio teste
+    return target
+
+
+def _resolution_switch(root: Path) -> Path:
+    """Declara 320x240 e passa a 2560x1440 em 1 s: a miniatura de 90% sai do trecho grande."""
+    small = generate(CLIPS["ts_320x240"], root / "ts_320x240.ts")
+    large = generate(CLIPS["ts_2560x1440"], root / "ts_2560x1440.ts")
+    return concatenated([small, large], root / "mp4_resolution_switch.mp4")
+
+
+def _resolution_switch_before_target(root: Path) -> Path:
+    """Declara 320x240 e passa a 2560x1440 em 1 s; só o último quadro anterior chega lá."""
+    small = generate(CLIPS["webm_320x240_1s"], root / "webm_320x240_1s.webm")
+    large = generate(CLIPS["webm_2560x1440_audio_15s"], root / "webm_2560x1440_audio_15s.webm")
+    return joined([small, large], root / "webm_resolution_switch_before_target.webm")
+
+
+def _fps_beyond_declared(root: Path) -> Path:
+    """240 quadros em 1 s, declarando ~59,6 fps; a miniatura de 50% lê todos (último anterior)."""
+    base = generate(CLIPS["webm_240fps_1s_audio_3s"], root / "webm_240fps_1s_audio_3s.webm")
+    return with_declared_frame_duration(base, root / "webm_fps_beyond_declared.webm")
+
+
 def _audio_beyond_duration(root: Path) -> Path:
     """Declara 2 s, a duração do vídeo, com 30 s de Opus: o probe aceita e o áudio sairia 15x."""
     base = generate(CLIPS["webm_2s_audio_30s"], root / "webm_2s_audio_30s.webm")
@@ -234,6 +317,9 @@ def _audio_beyond_duration(root: Path) -> Path:
 # Vídeos derivados de um clipe gerado: recebem o diretório da biblioteca e devolvem o arquivo.
 DERIVED: dict[str, Callable[[Path], Path]] = {
     "webm_audio_beyond_duration": _audio_beyond_duration,
+    "mp4_resolution_switch": _resolution_switch,
+    "webm_resolution_switch_before_target": _resolution_switch_before_target,
+    "webm_fps_beyond_declared": _fps_beyond_declared,
 }
 
 

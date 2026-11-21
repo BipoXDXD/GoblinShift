@@ -461,8 +461,8 @@ def test_demuxers_que_abrem_outros_arquivos_nao_existem(image: str, demuxer: str
 
 
 def media_batch(root: Path) -> list[tuple[str, bytes]]:
-    """Celular em pé (rotação 90), WebM VP9/Opus, HLS disfarçado de .mp4, 4K e WebM que declara
-    2 s com 30 s de áudio."""
+    """Celular em pé (rotação 90), WebM VP9/Opus, HLS disfarçado de .mp4, 4K, WebM que declara
+    2 s com 30 s de áudio, MP4 que passa a 2560x1440 no meio e WebM de 240 fps que declara ~60."""
     root.mkdir()
     mp4 = video.generate(video.CLIPS["mp4"], root / "a.mp4")
     return [
@@ -471,6 +471,8 @@ def media_batch(root: Path) -> list[tuple[str, bytes]]:
         ("lista.mp4", video.HLS_PLAYLIST),
         ("grande.mp4", video.generate(video.CLIPS["mp4_4k"], root / "c.mp4").read_bytes()),
         ("longo.webm", video.DERIVED["webm_audio_beyond_duration"](root).read_bytes()),
+        ("troca.mp4", video.DERIVED["mp4_resolution_switch"](root).read_bytes()),
+        ("rapido.webm", video.DERIVED["webm_fps_beyond_declared"](root).read_bytes()),
     ]
 
 
@@ -485,6 +487,8 @@ def test_media_mill_converte_e_recusa_na_imagem(image: str, tmp_path: Path) -> N
         ("ok", None),
         ("ok", None),
         ("rejected", "UNSUPPORTED_FORMAT"),
+        ("rejected", "MEDIA_TOO_LARGE"),
+        ("rejected", "MEDIA_TOO_LARGE"),
         ("rejected", "MEDIA_TOO_LARGE"),
         ("rejected", "MEDIA_TOO_LARGE"),
     ]
