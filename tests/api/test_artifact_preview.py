@@ -1,5 +1,6 @@
 """`GET /artifacts/{id}/preview`: só o derivado do serviço, com os cabeçalhos de 3.6 (1.6, 2.2)."""
 
+import os
 import stat
 import uuid
 from pathlib import Path
@@ -198,6 +199,30 @@ def test_preview_sumido_do_disco_responde_410_sem_gravar_nada(
     assert open_uses(factory) == 0
 
 
+@pytest.mark.parametrize("size_on_disk", [3, 2 * len(JPEG)])
+def test_preview_com_tamanho_diferente_do_registrado_responde_410_e_libera_o_uso(
+    app: FastAPI, client: TestClient, factory: sessionmaker[Session], size_on_disk: int
+) -> None:
+    # Antes, `RuntimeError` e 500. Tamanho diferente do banco é adulteração, como o symlink.
+    owner, auth = new_account(factory)
+    source, preview = with_preview(app, owner, "previews/foto.jpg", JPEG)
+    with factory() as session:
+        key = session.execute(
+            select(stored_object.c.storage_key)
+            .join(artifact, artifact.c.object_id == stored_object.c.id)
+            .where(artifact.c.id == preview)
+        ).scalar_one()
+    storage = storage_of(app)
+    os.truncate(storage.root / key, size_on_disk)
+
+    response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
+
+    assert_problem(response, 410, "GONE")
+    for leaked in (key, str(storage.root), "RuntimeError", "Traceback"):
+        assert leaked not in response.text
+    assert open_uses(factory) == 0
+
+
 @pytest.mark.parametrize(("code", "status", "problem"), OPEN_FAILURES)
 def test_erro_ao_abrir_o_preview_responde_503_ou_410_e_libera_o_uso(
     app: FastAPI,
@@ -211,7 +236,7 @@ def test_erro_ao_abrir_o_preview_responde_503_ou_410_e_libera_o_uso(
     owner, auth = new_account(factory)
     source, _ = with_preview(app, owner, "previews/foto.jpg", JPEG)
     storage = storage_of(app)
-    fail_object_open(monkeypatch, storage, code)
+    fail_object_open(monkeypatch, code)
 
     response = client.get(f"{ARTIFACTS}/{source}/preview", headers=auth)
 

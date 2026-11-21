@@ -3,6 +3,7 @@
 import logging
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import Table, func, insert, select, update
@@ -18,6 +19,7 @@ from goblinshift.files.retention import (
     expire_unused_uploads,
     next_storage_release_in,
     purge_deleted_objects,
+    remove_file_after_commit,
 )
 from goblinshift.files.states import ArtifactRole, Availability, HolderKind
 from goblinshift.files.storage import FileStorage, ObjectMissingError
@@ -345,6 +347,26 @@ def test_falha_ao_apagar_o_arquivo_registra_a_chave_para_o_operador(
     records = [r for r in caplog.records if getattr(r, "fields", {}).get("storage_key") == key]
     assert [r.fields["alert"] for r in records] == ["purge_file_not_removed"]  # type: ignore[attr-defined]
     assert records[0].exc_info is not None
+
+
+def test_diretorio_adulterado_no_caminho_vira_o_mesmo_alerta_sem_parar_a_remocao(
+    storage: FileStorage, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # O storage recusa descer por um symlink do meio (`ObjectTamperedError`, não `OSError`): a
+    # remoção depois do commit registra a chave como nas demais falhas, sem apagar o alvo.
+    outside = tmp_path / "fora"
+    outside.mkdir()
+    (outside / "alvo").write_bytes(b"segredo")
+    storage.root.mkdir(parents=True)
+    (storage.root / "uploads").symlink_to(outside, target_is_directory=True)
+
+    with caplog.at_level(logging.WARNING, logger=retention.__name__):
+        removed = remove_file_after_commit(storage, "uploads/alvo")
+
+    assert not removed
+    records = [r for r in caplog.records if getattr(r, "fields", {}).get("alert")]
+    assert [r.fields["alert"] for r in records] == ["purge_file_not_removed"]  # type: ignore[attr-defined]
+    assert (outside / "alvo").read_bytes() == b"segredo"
 
 
 def test_download_em_andamento_segura_a_remocao_do_artefato_excluido(
