@@ -3,6 +3,7 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactElement } from "
 import { flushSync } from "react-dom";
 
 import { useApiClient } from "../api/ApiClientContext";
+import { ApiError } from "../api/response";
 import { Field } from "../components/a11y/Field";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
@@ -65,6 +66,15 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
           setName("");
           setOpen(false);
         },
+        onError: (saveError) => {
+          if (isNameRejected(saveError)) {
+            // Mesma ordem do erro local: o erro entra no DOM antes do foco.
+            flushSync(() => {
+              setNameError(T.nameRejected);
+            });
+            nameInput.current?.focus();
+          }
+        },
       },
     );
   };
@@ -118,7 +128,7 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
             />
           )}
         </Field>
-        {save.error !== null && (
+        {save.error !== null && !isNameRejected(save.error) && (
           <FailureNotice
             error={save.error}
             headingLevel={3}
@@ -149,4 +159,25 @@ function nameErrorOf(name: string): string | null {
   // Code points, não grafemas: é o que o `len` do Python conta no servidor.
   const length = Array.from(trimmed.normalize("NFC")).length;
   return length > MAX_NAME_LENGTH ? T.nameTooLong : null;
+}
+
+/** O servidor aponta o campo a partir do corpo (presets.py monta `("body", "name")`). */
+const NAME_FIELD = "body.name";
+
+/**
+ * 422 só no nome: o erro vai para o campo. Com erro em outro campo junto, o aviso geral fica, para
+ * não esconder esse outro erro.
+ */
+function isNameRejected(error: Error): boolean {
+  if (!(error instanceof ApiError) || error.failure.kind !== "problem") {
+    return false;
+  }
+  const { code, errors } = error.failure.problem;
+  return (
+    code === "VALIDATION_FAILED" &&
+    errors !== null &&
+    errors !== undefined &&
+    errors.length > 0 &&
+    errors.every((fieldError) => fieldError.field === NAME_FIELD)
+  );
 }

@@ -49,6 +49,17 @@ async function openSaveDialog(user: ReturnType<typeof userEvent.setup>): Promise
   return screen.getByRole("dialog", { name: "Salvar os parâmetros como preset" });
 }
 
+const NAME_REJECTED = (): Response =>
+  problemResponse(422, "VALIDATION_FAILED", {
+    errors: [
+      {
+        field: "body.name",
+        code: "value_error",
+        message: "o nome não aceita caracteres de controle nem de formato invisível",
+      },
+    ],
+  });
+
 describe("Bancada: Salvar preset", () => {
   it("abre o diálogo com o foco no nome e salva nome, receita e parâmetros do formulário", async () => {
     const { api, user } = setup();
@@ -225,6 +236,97 @@ describe("Bancada: Salvar preset", () => {
         "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",
       ),
     ).toBeVisible();
+  });
+
+  it("nome recusado pelo servidor mostra o erro no campo, com foco, sem o alerta geral", async () => {
+    const { user } = setup("/bancada/csv-janitor", { "POST /api/v1/presets": NAME_REJECTED });
+    const dialog = await openSaveDialog(user);
+    const name = within(dialog).getByLabelText("Nome do preset");
+    await user.type(name, "Clientes");
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    await waitFor(() => {
+      expect(name).toHaveFocus();
+    });
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveAccessibleDescription(
+      /Erro: Tire do nome os caracteres invisíveis ou de controle\./,
+    );
+    expect(within(dialog).queryByText(/Confira os erros indicados/)).toBeNull();
+    expect(within(dialog).queryByText(/formato invisível/)).toBeNull();
+  });
+
+  it("422 só em outro campo mantém o aviso geral e o nome sem erro", async () => {
+    const { user } = setup("/bancada/csv-janitor", {
+      "POST /api/v1/presets": () =>
+        problemResponse(422, "VALIDATION_FAILED", {
+          errors: [
+            {
+              field: "body.recipe_version",
+              code: "value_error",
+              message: "versão de receita desconhecida",
+            },
+          ],
+        }),
+    });
+    const dialog = await openSaveDialog(user);
+    await user.type(within(dialog).getByLabelText("Nome do preset"), "Clientes");
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    expect(await within(dialog).findByText(/Confira os erros indicados/)).toBeVisible();
+    expect(within(dialog).getByLabelText("Nome do preset")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
+
+  it("depois do nome recusado, corrigir e salvar fecha o diálogo sem erro velho", async () => {
+    let calls = 0;
+    const { user } = setup("/bancada/csv-janitor", {
+      "POST /api/v1/presets": () =>
+        ++calls === 1 ? NAME_REJECTED() : jsonResponse(presetBody(), 201),
+    });
+    const dialog = await openSaveDialog(user);
+    const name = within(dialog).getByLabelText("Nome do preset");
+    await user.type(name, "Clientes do mês");
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+    await waitFor(() => {
+      expect(name).toHaveAttribute("aria-invalid", "true");
+    });
+
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(calls).toBe(2);
+    expect(await screen.findByText("Preset Clientes do mês salvo.")).toBeInTheDocument();
+    const reopened = await openSaveDialog(user);
+    expect(within(reopened).getByLabelText("Nome do preset")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(within(reopened).queryByText(/Tire do nome/)).toBeNull();
+  });
+
+  it("fechar depois do nome recusado e reabrir mostra o campo sem erro", async () => {
+    const { user } = setup("/bancada/csv-janitor", { "POST /api/v1/presets": NAME_REJECTED });
+    const dialog = await openSaveDialog(user);
+    const name = within(dialog).getByLabelText("Nome do preset");
+    await user.type(name, "Clientes");
+    await user.click(within(dialog).getByRole("button", { name: "Salvar preset" }));
+    await waitFor(() => {
+      expect(name).toHaveAttribute("aria-invalid", "true");
+    });
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    const reopened = await openSaveDialog(user);
+
+    expect(within(reopened).getByLabelText("Nome do preset")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(within(reopened).queryByText(/Tire do nome/)).toBeNull();
   });
 
   it("com parâmetros inválidos, pede a correção em vez de abrir o diálogo", async () => {

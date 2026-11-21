@@ -865,6 +865,8 @@ export const TEXT = {
     nameHint: "Até 100 caracteres, diferente dos outros presets da conta.",
     nameRequired: "Dê um nome ao preset.",
     nameTooLong: "Use até 100 caracteres.",
+    // A mensagem do servidor é para quem integra; vazio e tamanho já são conferidos no cliente.
+    nameRejected: "Tire do nome os caracteres invisíveis ou de controle.",
     saving: "Salvando…",
     saved: (name: string) => `Preset ${name} salvo.`,
     saveConflict: "Já existe um preset com esse nome, ou a conta chegou a 100 presets.",
