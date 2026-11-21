@@ -123,8 +123,9 @@ testpaths = ["tests"]
 # O Schemathesis (grupo `contract`) registra um plugin do pytest ao ser instalado no mesmo
 # ambiente; a suíte não o usa, e sem ele ela roda igual com ou sem o grupo.
 # `needs_root` fica fora por padrão: só roda no passo com sudo do job Verificações. Quem passa
-# outro `-m` (a CI passa sempre) precisa deixá-lo de fora também.
-addopts = "-ra --strict-markers -p no:schemathesis -m 'not needs_root'"
+# outro `-m` (a CI passa sempre) precisa deixá-lo de fora também. `real_clock` (lembrete com a
+# data de hoje) também: roda só no workflow agendado security-txt.yml.
+addopts = "-ra --strict-markers -p no:schemathesis -m 'not needs_root and not real_clock'"
 # O executor-ctl é um pacote do host em deploy/, fora de src/ (roda no Python do sistema).
 # src/ vem antes do editable da .venv, que pode apontar para o src de outro checkout.
 pythonpath = ["src", "deploy"]
@@ -142,6 +143,7 @@ markers = [
     "needs_root: precisa de root no Linux; roda só no passo com sudo do job Verificações (CI)",
     "host_installer: instaladores de deploy/ como root num container Debian (precisa de Docker)",
     "host_python: roda também no Python do host (3.12), só com stdlib, pytest, PyYAML, cryptography, vermin e mypy",
+    "real_clock: lembrete que depende da data de hoje; fora da CI de PR, roda no workflow security-txt.yml",
 ]
 
 # Fitness functions da arquitetura (docs/GoblinShiftPlan.md, seção 3.2).
