@@ -21,14 +21,14 @@ def test_bom_da_entrada_e_ignorado_e_a_saida_sai_sem_bom() -> None:
     assert output(b"\xef\xbb\xbfa,b\r\n1,2\r\n") == "a,b\r\n1,2\r\n"
 
 
-@pytest.mark.parametrize("boms", [2, 3])
-def test_bom_repetido_nao_esconde_formula_no_cabecalho(boms: int) -> None:
+@pytest.mark.parametrize(("boms", "header"), [(2, "=1+1"), (3, "=1+1"), (2, " =1+1")])
+def test_bom_repetido_nao_esconde_formula_no_cabecalho(boms: int, header: str) -> None:
     params = Params(formula_guard=FormulaGuard.TAB_PREFIX)
 
-    result = cleaned(BOM * boms + b"=1+1,b\r\nx,y\r\n", params)
+    result = cleaned(BOM * boms + header.encode() + b",b\r\nx,y\r\n", params)
 
-    assert result.formula_header == ("=1+1",)
-    assert result.content == b'"\t=1+1",b\r\nx,y\r\n'
+    assert result.formula_header == (header,)
+    assert result.content == f'"\t{header}",b\r\nx,y\r\n'.encode()
 
 
 def test_bom_repetido_antes_de_campo_entre_aspas_le_normalmente() -> None:
