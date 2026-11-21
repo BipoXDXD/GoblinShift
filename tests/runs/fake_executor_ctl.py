@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 _ROUTE = re.compile(r"^/v1/attempts/(?P<id>[^/]+)(?P<action>/start|/stop)?$")
@@ -130,7 +131,7 @@ class FakeExecutorCtl:
             time.sleep(self.response_delay_s)
         image_route = _IMAGE_ROUTE.match(path)
         if image_route is not None:
-            return self._image(method, image_route["ref"])
+            return self._image(method, unquote(image_route["ref"]))
         match = _ROUTE.match(path)
         if match is None:
             return 404, _error("not_found")
