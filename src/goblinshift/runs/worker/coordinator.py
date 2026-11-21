@@ -703,7 +703,7 @@ class Coordinator:
             return self.fail_transiently(claimed)
         try:
             stored = self.store_candidates(claimed, collected)
-        except (StorageError, OSError) as error:
+        except (StorageError, OSError, CollectionError) as error:
             logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
         attempt_event.record(
