@@ -3,7 +3,7 @@
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import timedelta
 
@@ -16,6 +16,7 @@ from goblinshift.catalog.versions import CSV_JANITOR_V1
 from goblinshift.files.errors import InputNotAvailableError
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use
+from goblinshift.files.uploads import ReadyUpload, lock_ready_uploads
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import LOCAL_EXECUTOR_IMAGE, Settings
 from goblinshift.runs import acceptance
@@ -36,6 +37,7 @@ from goblinshift.runs.acceptance import (
     validate_run,
 )
 from goblinshift.runs.tables import idempotency_record, run, run_input
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 from tests.runs.support import (
     count_rows,
     finish_run,
@@ -507,6 +509,40 @@ def test_duas_requisicoes_simultaneas_nao_passam_da_decima_vaga(
     with factory() as session:
         queued = session.execute(select(func.count()).where(run.c.status == "queued")).scalar_one()
     assert queued == MAX_QUEUED_RUNS
+
+
+def test_aceitacao_concorrente_espera_a_trava_da_fila_e_ve_a_decima(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A primeira aceitação para depois de gravar a décima Run, com a trava da fila e sem commit."""
+    for _ in range(MAX_QUEUED_RUNS - 1):
+        queue_run(factory, storage)
+    first_owner, second_owner = new_owner(factory), new_owner(factory)
+    first_command = run_command(ready_inputs(factory, storage, first_owner))
+    second_command = run_command(ready_inputs(factory, storage, second_owner))
+    holding, release = threading.Event(), threading.Event()
+
+    def lock_then_hold(
+        session: Session, owner_id: uuid.UUID, upload_ids: Sequence[uuid.UUID]
+    ) -> list[ReadyUpload]:
+        uploads = lock_ready_uploads(session, owner_id, upload_ids)
+        if owner_id == first_owner:
+            holding.set()
+            release.wait(WAIT_DEADLINE_SECONDS)
+        return uploads
+
+    monkeypatch.setattr(acceptance, "lock_ready_uploads", lock_then_hold)
+    first = in_thread(lambda: accept(factory, first_owner, first_command))
+    try:
+        assert holding.wait(WAIT_DEADLINE_SECONDS), "a primeira aceitação não chegou à pausa"
+        second = in_thread(lambda: accept(factory, second_owner, second_command))
+        wait_until_someone_waits_for_a_lock(factory, "a segunda aceitação")
+    finally:
+        release.set()
+
+    assert first.result().replayed is False
+    with pytest.raises(QueueFullError):
+        second.result()
 
 
 def test_fila_travada_alem_do_lock_timeout_responde_fila_cheia(

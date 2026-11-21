@@ -1,8 +1,9 @@
 """Reservas simultâneas no limite (docs/GoblinShiftPlan.md, 1.7; regras de dados 3 e 4).
 
-Cada thread abre a própria conexão e espera numa barreira antes de reservar, para que todas
-disputem o mesmo pool ao mesmo tempo. O teto vale pelo `UPDATE` condicional: passam exatamente as
-reservas que cabem, e a soma nunca ultrapassa o máximo.
+Nos testes de carga, cada thread abre a própria conexão e espera numa barreira antes de reservar,
+para que todas disputem o mesmo pool ao mesmo tempo. O teto vale pelo `UPDATE` condicional: passam
+exatamente as reservas que cabem, e a soma nunca ultrapassa o máximo. O caso de duas reservas
+comprova a espera: a segunda fica parada na linha do pool global até o commit da primeira.
 """
 
 import threading
@@ -18,9 +19,11 @@ from goblinshift.capacity import (
     GlobalCapacityExceededError,
     HolderKind,
     release,
+    reserve,
 )
 from goblinshift.platform.db import unit_of_work
 from tests.capacity.support import (
+    STORAGE,
     account_reserved,
     create_account_pool,
     global_reserved,
@@ -29,6 +32,7 @@ from tests.capacity.support import (
     reserve_now,
     set_global_max,
 )
+from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
 
@@ -73,6 +77,30 @@ def test_reservas_simultaneas_no_teto_da_conta_passam_so_as_que_cabem(
     assert all(isinstance(error, AccountCapacityExceededError) for error in refused)
     assert account_reserved(factory, owner) == 300 == live_sum(factory, owner)
     assert global_reserved(factory) == 300
+
+
+def test_reserva_concorrente_espera_a_linha_do_pool_global_e_ve_o_teto(
+    factory: sessionmaker[Session],
+) -> None:
+    set_global_max(factory, 200)
+    first_owner, second_owner = new_owner(factory), new_owner(factory)
+    reserve_now(factory, new_owner(factory), 100)
+
+    with factory() as first, first.begin():
+        reserve(
+            first,
+            owner_id=first_owner,
+            holder=HolderKind.UPLOAD,
+            holder_id=uuid.uuid4(),
+            resource=STORAGE,
+            amount=100,
+        )
+        second = in_thread(lambda: reserve_now(factory, second_owner, 100))
+        wait_until_someone_waits_for_a_lock(factory, "a segunda reserva")
+
+    with pytest.raises(GlobalCapacityExceededError):
+        second.result()
+    assert global_reserved(factory) == 200 == live_sum(factory)
 
 
 def test_reservas_simultaneas_de_contas_diferentes_no_teto_global(
