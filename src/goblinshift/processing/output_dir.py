@@ -138,6 +138,8 @@ def _fit(stem: str, suffix: str, extension: str) -> str:
     """Encurta o radical, caractere a caractere, até o nome caber em 180 bytes UTF-8.
 
     O corte pode deixar espaço no fim ou um nome reservado; por isso a regra portável volta a valer.
+    O `_` que ela põe depois de um nome reservado pode passar do teto: aí o radical perde mais um
+    caractere.
     """
     tail = suffix + extension
     room = MAX_COMPONENT_BYTES - len(tail.encode())
@@ -145,7 +147,11 @@ def _fit(stem: str, suffix: str, extension: str) -> str:
         raise InvalidOutputNameError(f"extensão longa demais: {extension!r}")
     while len(stem.encode()) > room:
         stem = stem[:-1]
-    return portable_name(stem + tail)
+    fitted = portable_name(stem + tail)
+    while len(fitted.encode()) > MAX_COMPONENT_BYTES:
+        stem = stem[:-1]
+        fitted = portable_name(stem + tail)
+    return fitted
 
 
 class _ByteBudget:

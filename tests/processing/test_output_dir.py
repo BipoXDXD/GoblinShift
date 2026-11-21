@@ -380,6 +380,13 @@ def test_truncamento_que_sobra_nome_reservado_recebe_sufixo(tmp_path: Path) -> N
     assert write(FileSystemOutputDir(tmp_path), "CON" + " " * 177 + "x", 0) == "CON_"
 
 
+def test_sufixo_de_nome_reservado_exposto_pelo_corte_ainda_cabe_no_teto(tmp_path: Path) -> None:
+    name = write(FileSystemOutputDir(tmp_path), "CON" + " " * 177 + "x.csv", 0)
+
+    assert name == "CON" + " " * 172 + "_.csv"
+    assert len(name.encode()) == MAX_COMPONENT_BYTES
+
+
 # --- Espaço para saídas opcionais (previews): consultado antes de criar, nunca estoura o teto ----
 
 
