@@ -5,7 +5,6 @@ import { Link, useParams } from "react-router";
 import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
-import { ApiError } from "../api/response";
 import { NotFoundPage } from "../app/NotFoundPage";
 import { workbenchPath } from "../app/paths";
 import { GoblinIllustration, type GoblinState } from "../art/GoblinIllustration";
@@ -17,7 +16,6 @@ import {
   guidanceAnnouncement,
   isGuidance,
 } from "../components/feedback/FailureNotice";
-import { ProblemAlert, type DisplayableFailure } from "../components/feedback/ProblemAlert";
 import { buttonClassName } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { StatusBadge } from "../components/ui/StatusBadge";
@@ -243,7 +241,11 @@ function RunResults({ runId }: { readonly runId: string }): ReactElement {
       {results.isPending && <p className="min-h-24 text-fg-muted">{T.results.loading}</p>}
       {results.error !== null && (
         // 404 aqui é a execução que sumiu: o texto geral manda conferir uma lista que a tela não tem.
-        <ProblemAlert failure={failureOf(results.error)} messages={{ NOT_FOUND: T.notFound }} />
+        <FailureNotice
+          error={results.error}
+          headingLevel={3}
+          messages={{ NOT_FOUND: T.notFound }}
+        />
       )}
       {results.data !== undefined && (
         <ResultsAvailability
@@ -398,8 +400,4 @@ function NewRunLink({ recipeId }: { readonly recipeId: string }): ReactElement |
       </Link>
     </p>
   );
-}
-
-function failureOf(error: Error): DisplayableFailure {
-  return error instanceof ApiError ? error.failure : { kind: "internal" };
 }
