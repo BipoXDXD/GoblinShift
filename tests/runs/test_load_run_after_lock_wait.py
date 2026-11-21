@@ -1,4 +1,4 @@
-"""`load_run` depois de esperar a trava da Run, em READ COMMITTED (3.4 e 3.5 do plano).
+"""`load_run_any_owner` depois de esperar a trava da Run, em READ COMMITTED (3.4 e 3.5 do plano).
 
 Quem espera a trava precisa enxergar a Attempt que a transação anterior encerrou. Se a Run voltar
 nova com a Attempt velha, o cancelamento concorrente dá erro interno e o fencing aprova uma
@@ -34,7 +34,7 @@ from goblinshift.runs.store import (
     LoadedRun,
     LostFencing,
     apply_transition,
-    load_run,
+    load_run_any_owner,
     lock_fenced,
 )
 from tests.runs.worker_support import claim, coordinator, create_user, local_runner, queue_run
@@ -111,7 +111,7 @@ def test_fencing_recusa_tentativa_encerrada_enquanto_esperava_a_trava(
 
     with ThreadPoolExecutor(1) as pool:
         with factory() as session, session.begin():
-            loaded = load_run(session, run_id)
+            loaded = load_run_any_owner(session, run_id)
             assert loaded is not None
             apply_decision(
                 session,
@@ -130,6 +130,6 @@ def test_skip_locked_pula_a_run_travada_sem_esperar(
     run_id = queue_run(factory, storage, create_user(factory))
 
     with factory() as holder, holder.begin():
-        assert load_run(holder, run_id) is not None
+        assert load_run_any_owner(holder, run_id) is not None
         with factory() as other, other.begin():
-            assert load_run(other, run_id, skip_locked=True) is None
+            assert load_run_any_owner(other, run_id, skip_locked=True) is None
