@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.capacity import HolderKind as CapacityHolder
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use, upload
 from goblinshift.files.uploads import request_deletion
@@ -14,6 +15,7 @@ from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.acceptance import RunCommand
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import idempotency_record, run, run_input
+from tests.capacity.support import create_account_pool, reserve_now
 from tests.files.support import create_intent, create_user, ready_upload
 
 RECIPE_ID = "csv-janitor"
@@ -104,6 +106,16 @@ def insert_finished_run(
             )
             .returning(run.c.id)
         ).scalar_one()
+    return run_id
+
+
+def finished_run_with_live_reservation(
+    factory: sessionmaker[Session], owner_id: uuid.UUID, created_at: datetime, amount: int
+) -> uuid.UUID:
+    """Run terminada cuja reserva `RUN` continua viva: o processo caiu antes de liberá-la."""
+    create_account_pool(factory, owner_id, 10 * amount)
+    run_id = insert_finished_run(factory, owner_id, created_at)
+    reserve_now(factory, owner_id, amount, CapacityHolder.RUN, run_id)
     return run_id
 
 

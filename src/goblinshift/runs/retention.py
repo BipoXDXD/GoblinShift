@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import ColumnElement, Select, delete, exists, func, null, or_, select, update
 from sqlalchemy.orm import Session
 
+from goblinshift import capacity
 from goblinshift.files.objects import release_many
 from goblinshift.files.retention import HistoryReferences, has_unsettled_candidate
 from goblinshift.files.states import HolderKind
@@ -139,8 +140,10 @@ def delete_old_runs(session: Session, now: datetime, limit: int) -> int:
             .with_for_update(skip_locked=True)
         ).scalars()
     )
-    # Uso que ficou aberto numa Run terminal prenderia o objeto para sempre sem a Run.
+    # Uso ou reserva que ficou aberto numa Run terminal (queda antes de `release_run_holds`)
+    # prenderia o objeto e o espaço da conta para sempre sem a Run; os dois saem junto com ela.
     release_many(session, HolderKind.RUN, chosen)
+    capacity.release_many(session, holder=capacity.HolderKind.RUN, holder_ids=chosen)
     if chosen:
         session.execute(delete(run).where(run.c.id.in_(chosen)))
     return len(chosen)

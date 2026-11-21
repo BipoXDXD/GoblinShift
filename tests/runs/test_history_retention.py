@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.capacity import HolderKind as CapacityHolder
 from goblinshift.files.artifacts import (
     CandidateObject,
     commit_candidate,
@@ -35,7 +36,13 @@ from goblinshift.runs.retention import (
 )
 from goblinshift.runs.store import db_now
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
-from tests.runs.support import insert_finished_run, new_owner, ready_inputs
+from tests.capacity.support import account_reserved, live_amount
+from tests.runs.support import (
+    finished_run_with_live_reservation,
+    insert_finished_run,
+    new_owner,
+    ready_inputs,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -368,6 +375,24 @@ def test_run_terminada_ha_90_dias_sai_com_tentativas_entradas_e_idempotencia(
     assert exists(factory, recent)
     assert (count(factory, "attempt"), count(factory, "run_input")) == (1, 2)
     assert count(factory, "idempotency") == 1
+
+
+def test_run_antiga_com_reserva_viva_sai_com_a_reserva_liberada(
+    factory: sessionmaker[Session],
+) -> None:
+    # O processo caiu entre o término e `release_run_holds`: a reserva ficou sem detentor.
+    now = now_of(factory)
+    owner = new_owner(factory)
+    run_id = finished_run_with_live_reservation(
+        factory, owner, now - DELETE_AFTER - timedelta(minutes=1), amount=1000
+    )
+
+    with unit_of_work(factory) as session:
+        assert delete_old_runs(session, now, LIMIT) == 1
+
+    assert not exists(factory, run_id)
+    assert live_amount(factory, CapacityHolder.RUN, run_id) is None
+    assert account_reserved(factory, owner) == 0
 
 
 def test_run_ativa_nunca_e_removida(factory: sessionmaker[Session], storage: FileStorage) -> None:

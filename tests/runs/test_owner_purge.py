@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import Table, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.files.artifacts import create_candidate_object
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import object_use, stored_object
@@ -15,7 +16,8 @@ from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.purge import cancel_active_run, purge_owner_batch
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
-from tests.runs.support import insert_finished_run
+from tests.capacity.support import account_reserved, live_amount
+from tests.runs.support import finished_run_with_live_reservation, insert_finished_run
 from tests.runs.worker_support import claim, coordinator, create_user, local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -108,6 +110,22 @@ def test_libera_usos_que_ficaram_abertos_na_execucao_terminal(
             .where(object_use.c.holder_id == run_id, object_use.c.ended_at.is_(None))
         ).scalar_one()
     assert open_uses == 0
+
+
+def test_purga_da_conta_com_reserva_de_run_viva_termina(factory: sessionmaker[Session]) -> None:
+    # O processo caiu entre o término e `release_run_holds`: sem liberar a reserva junto, a
+    # purga do livro-razão da conta levantaria em todo ciclo.
+    owner = create_user(factory)
+    run_id = finished_run_with_live_reservation(factory, owner, CREATED, amount=1000)
+
+    assert purge_batch(factory, owner) is True
+
+    assert count(factory, run, owner) == 0
+    assert live_amount(factory, capacity.HolderKind.RUN, run_id) is None
+    assert account_reserved(factory, owner) == 0
+    with unit_of_work(factory) as session:
+        capacity.purge_owner(session, owner)
+    assert account_reserved(factory, owner) is None
 
 
 def test_execucao_nao_terminal_nao_e_apagada(
