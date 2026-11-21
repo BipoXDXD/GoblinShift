@@ -1,5 +1,5 @@
-// Ponto de extensão da fatia 6: o cookie e o header de CSRF entram com o login por sessão. Até lá
-// o cookie não existe e nenhuma mutação leva o header.
+// Double-submit assinado: o servidor grava `__Host-gs_csrf` no login (legível pela SPA, sem
+// HttpOnly) e toda mutação devolve o valor em `X-CSRF-Token`; o servidor confere o par e o HMAC.
 const CSRF_COOKIE = "__Host-gs_csrf";
 export const CSRF_HEADER = "X-CSRF-Token";
 

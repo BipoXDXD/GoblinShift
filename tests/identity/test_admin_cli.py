@@ -101,11 +101,11 @@ def test_chave_emitida_pela_cli_autentica_ate_ser_revogada(
     assert token not in err
     with unit_of_work(factory) as session:
         principal = authenticate_api_key(session, token, datetime.now(UTC))
-        expires_at = session.execute(select(api_key.c.expires_at)).scalar_one()
+        row = session.execute(select(api_key.c.created_at, api_key.c.expires_at)).one()
     assert principal is not None
     assert principal.owner_id == UUID(user_id)
     assert principal.scopes == {Scope.FILES_READ, Scope.RUNS_WRITE}
-    assert timedelta(days=6) < expires_at - datetime.now(UTC) <= timedelta(days=7)
+    assert row.expires_at - row.created_at == timedelta(days=7)
 
     exit_code, _, _ = run(capsys, "revoke-key", "--key", public_id)
 
