@@ -62,10 +62,12 @@ def purge_owner_batch(session: Session, owner_id: UUID, limit: int) -> bool:
     deletable = [run_id for run_id in chosen if run_id not in waiting]
     # Uso ou reserva que ficou aberto numa Run terminal (queda antes de `release_run_holds`)
     # prenderia o objeto e o espaço da conta para sempre sem a Run; os dois saem junto com ela.
+    # Ordem das travas: Run, o que o DELETE cascateia (tentativas e objetos), reservas, pools;
+    # a mesma da reconciliação (objetos, depois pools). A reserva não tem FK para a Run.
     release_many(session, HolderKind.RUN, deletable)
-    capacity.release_many(session, holder=capacity.HolderKind.RUN, holder_ids=deletable)
     if deletable:
         session.execute(delete(run).where(run.c.id.in_(deletable)))
+    capacity.release_many(session, holder=capacity.HolderKind.RUN, holder_ids=deletable)
     remaining = session.execute(select(exists().where(run.c.owner_id == owner_id))).scalar_one()
     return not remaining
 

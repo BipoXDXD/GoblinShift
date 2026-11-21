@@ -142,10 +142,12 @@ def delete_old_runs(session: Session, now: datetime, limit: int) -> int:
     )
     # Uso ou reserva que ficou aberto numa Run terminal (queda antes de `release_run_holds`)
     # prenderia o objeto e o espaço da conta para sempre sem a Run; os dois saem junto com ela.
+    # Ordem das travas: Run, o que o DELETE cascateia (tentativas e objetos), reservas, pools;
+    # a mesma da reconciliação (objetos, depois pools). A reserva não tem FK para a Run.
     release_many(session, HolderKind.RUN, chosen)
-    capacity.release_many(session, holder=capacity.HolderKind.RUN, holder_ids=chosen)
     if chosen:
         session.execute(delete(run).where(run.c.id.in_(chosen)))
+    capacity.release_many(session, holder=capacity.HolderKind.RUN, holder_ids=chosen)
     return len(chosen)
 
 

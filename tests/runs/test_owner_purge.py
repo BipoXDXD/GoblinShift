@@ -17,7 +17,11 @@ from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.purge import cancel_active_run, purge_owner_batch
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.capacity.support import account_reserved, live_amount
-from tests.runs.support import finished_run_with_live_reservation, insert_finished_run
+from tests.runs.support import (
+    finished_run_with_live_reservation,
+    insert_finished_run,
+    tables_written_before_waiting_for_the_pool,
+)
 from tests.runs.worker_support import claim, coordinator, create_user, local_runner, queue_run
 
 pytestmark = pytest.mark.integration
@@ -126,6 +130,21 @@ def test_purga_da_conta_com_reserva_de_run_viva_termina(factory: sessionmaker[Se
     with unit_of_work(factory) as session:
         capacity.purge_owner(session, owner)
     assert account_reserved(factory, owner) is None
+
+
+def test_purga_apaga_a_run_antes_de_travar_o_pool(factory: sessionmaker[Session]) -> None:
+    # O DELETE da Run cascateia para tentativas (e, com a FK do #503, para `stored_object`): ele
+    # vem antes dos pools, na ordem da reconciliação (objetos, depois pools), ou há deadlock.
+    owner = create_user(factory)
+    finished_run_with_live_reservation(factory, owner, CREATED, amount=1000)
+
+    written = tables_written_before_waiting_for_the_pool(
+        factory, owner, lambda: purge_batch(factory, owner)
+    )
+
+    assert "run" in written
+    assert count(factory, run, owner) == 0
+    assert account_reserved(factory, owner) == 0
 
 
 def test_execucao_nao_terminal_nao_e_apagada(

@@ -42,6 +42,7 @@ from tests.runs.support import (
     insert_finished_run,
     new_owner,
     ready_inputs,
+    tables_written_before_waiting_for_the_pool,
 )
 
 pytestmark = pytest.mark.integration
@@ -375,6 +376,24 @@ def test_run_terminada_ha_90_dias_sai_com_tentativas_entradas_e_idempotencia(
     assert exists(factory, recent)
     assert (count(factory, "attempt"), count(factory, "run_input")) == (1, 2)
     assert count(factory, "idempotency") == 1
+
+
+def test_retencao_apaga_a_run_antes_de_travar_o_pool(factory: sessionmaker[Session]) -> None:
+    # O DELETE da Run cascateia para tentativas (e, com a FK do #503, para `stored_object`): ele
+    # vem antes dos pools, na ordem da reconciliação (objetos, depois pools), ou há deadlock.
+    now = now_of(factory)
+    owner = new_owner(factory)
+    run_id = finished_run_with_live_reservation(
+        factory, owner, now - DELETE_AFTER - timedelta(minutes=1), amount=1000
+    )
+
+    def purge() -> int:
+        with unit_of_work(factory) as session:
+            return delete_old_runs(session, now, LIMIT)
+
+    assert "run" in tables_written_before_waiting_for_the_pool(factory, owner, purge)
+    assert not exists(factory, run_id)
+    assert account_reserved(factory, owner) == 0
 
 
 def test_run_antiga_com_reserva_viva_sai_com_a_reserva_liberada(

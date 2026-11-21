@@ -302,6 +302,14 @@ def mark_deleted_with_lock_timeout(factory: sessionmaker[Session], object_id: uu
         )
 
 
+def object_state(factory: sessionmaker[Session], object_id: uuid.UUID) -> ObjectState:
+    with factory() as session:
+        state: str = session.execute(
+            select(stored_object.c.state).where(stored_object.c.id == object_id)
+        ).scalar_one()
+    return ObjectState(state)
+
+
 def live_reservations_on_removed_objects(factory: sessionmaker[Session]) -> list[uuid.UUID]:
     with factory() as session:
         return list(
@@ -331,18 +339,21 @@ def test_objeto_removido_durante_a_reconciliacao_nao_ganha_reserva(
     def removed_meanwhile(
         session: Session, *, limit: int, unreserved: Sequence[Unreserved] = ()
     ) -> ReconcileReport:
-        # Entre a leitura dos órfãos e a adoção, outra conexão tenta remover o objeto.
-        try:
+        # Entre a leitura dos órfãos e a adoção, outra conexão tenta remover o objeto: a trava
+        # da reconciliação a faz desistir (55P03) em vez de confirmar a remoção.
+        with pytest.raises(OperationalError) as blocked:
             mark_deleted_with_lock_timeout(factory, object_id)
-        except OperationalError as error:
-            assert getattr(error.orig, "sqlstate", None) == "55P03"
+        assert getattr(blocked.value.orig, "sqlstate", None) == "55P03"
         return real_reconcile(session, limit=limit, unreserved=unreserved)
 
     # `reconcile_capacity` chama `capacity.reconcile` pelo módulo: o dublê entra no meio dela.
     monkeypatch.setattr(capacity, "reconcile", removed_meanwhile)
 
-    reconcile_capacity(factory(), limit=10)
+    report = reconcile_capacity(factory(), limit=10)
 
+    assert report.objects_adopted == 1
+    assert object_state(factory, object_id) == ObjectState.COMMITTED
+    assert live_amount(factory, HolderKind.OBJECT, object_id) == 5
     assert live_reservations_on_removed_objects(factory) == []
 
 
