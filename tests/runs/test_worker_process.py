@@ -55,6 +55,9 @@ WAIT_S = 30.0
 # prazo.
 POLL_INTERVAL_S = 60
 NOTIFY_DEADLINE_S = 10
+assert NOTIFY_DEADLINE_S * 3 < POLL_INTERVAL_S, (
+    "prazo perto do polling: o claim não provaria o NOTIFY"
+)
 
 
 def wait_until(condition: Callable[[], bool], timeout_s: float = WAIT_S) -> None:
@@ -283,8 +286,9 @@ def test_notify_acorda_o_worker_antes_do_polling(
     with worker_process(
         db_settings, storage, work_root, log, "exit", "0", poll_interval_s=POLL_INTERVAL_S
     ):
-        # "worker pronto" sai antes do primeiro claim: a Run gravada antes de o worker ficar
-        # ocioso seria pega por esse claim, e não pelo NOTIFY.
+        # "worker pronto" sai antes do primeiro claim; `IDLE_MESSAGE` (debug) sai depois do claim
+        # vazio, já com o LISTEN aberto. Uma Run gravada antes dela seria pega pelo claim inicial,
+        # e não pelo NOTIFY.
         wait_until(lambda: IDLE_MESSAGE in log.read_text(encoding="utf-8"))
         # `queue_run` grava sem NOTIFY; o único aviso ao worker é o NOTIFY abaixo.
         run_id = queue_run(factory, storage, owner)

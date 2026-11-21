@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from goblinshift.entrypoints.openapi_export import render_openapi
@@ -96,12 +97,30 @@ def test_as_demais_chamadas_com_marcador_excluem_os_testes_de_root() -> None:
 
 
 def _only_negations(command: str) -> bool:
-    """O `-m` do comando só exclui marcadores (`not a and not b`), sem selecionar nenhum."""
-    match = MARKER_SELECTOR.search(command)
-    if match is None:
+    """O `-m` do comando só exclui marcadores (`not a and not b`), sem selecionar nenhum.
+
+    Vale o último `-m`: o primeiro pode ser o `-m pytest` de `python -m pytest`.
+    """
+    matches = list(MARKER_SELECTOR.finditer(command))
+    if not matches:
         return False
-    expression = next(group for group in match.groups() if group is not None)
+    expression = next(group for group in matches[-1].groups() if group is not None)
     return all(term.startswith(NEGATION_PREFIX) for term in expression.split(AND_SEPARATOR))
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ('python -m pytest -m "not x"', True),
+        ('.venv/bin/pytest -m "not x and not y"', True),
+        ('python -m pytest -m "x and not y"', False),
+        ("python -m pytest tests", False),
+    ],
+)
+def test_so_negacoes_le_o_seletor_de_marcadores_e_nao_o_modulo(
+    command: str, expected: bool
+) -> None:
+    assert _only_negations(command) is expected
 
 
 def test_chamadas_da_ci_que_so_excluem_marcadores_excluem_o_relogio_real() -> None:
