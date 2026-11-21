@@ -143,16 +143,17 @@ _SECONDS_PER_HOUR = 3600
 class _Context:
     factory: sessionmaker[Session]
     settings: Settings
+    clock: Callable[[], float]
 
 
 type Command = Callable[[argparse.Namespace, _Context], int]
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, clock: Callable[[], float] = time.time) -> int:
     args = _argument_parser().parse_args(argv)
     with _stderr_logging():
         try:
-            return _run_command(args)
+            return _run_command(args, clock)
         except MissingSecretError as error:
             return _fail(EXIT_MISSING_SECRET, str(error))
         except KeyboardInterrupt:
@@ -190,12 +191,12 @@ class _OneLineFormatter(logging.Formatter):
         return f"{line} ({_type_and_sqlstate(exception)})"
 
 
-def _run_command(args: argparse.Namespace) -> int:
+def _run_command(args: argparse.Namespace, clock: Callable[[], float]) -> int:
     command: Command = args.command
     settings = Settings()
     engine = make_engine(settings)
     try:
-        return command(args, _Context(make_session_factory(engine), settings))
+        return command(args, _Context(make_session_factory(engine), settings, clock))
     finally:
         engine.dispose()
 
@@ -495,7 +496,7 @@ def _positive_hours(text: str) -> float:
 
 def _orphan_files(args: argparse.Namespace, context: _Context) -> int:
     storage = FileStorage(context.settings.storage_root)
-    modified_before = time.time() - args.min_age_hours * _SECONDS_PER_HOUR
+    modified_before = context.clock() - args.min_age_hours * _SECONDS_PER_HOUR
     try:
         with context.factory() as session:
             report = find_orphan_files(

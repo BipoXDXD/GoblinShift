@@ -374,7 +374,9 @@ def test_quinto_envio_simultaneo_do_ambiente_responde_429(
     response = client.put(item["content"]["url"], content=b"abc", headers={**auth, **OCTET_STREAM})
 
     assert_problem(response, 429, "RATE_LIMITED")
-    assert "retry-after" in response.headers
+    assert int(response.headers["retry-after"]) > 0
+    assert client.get(upload_url(item), headers=auth).json()["state"] == "created"
+    assert slot_count(factory) == 4
 
 
 def test_downloads_em_andamento_nao_bloqueiam_envios(

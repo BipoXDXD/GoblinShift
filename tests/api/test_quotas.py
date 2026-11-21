@@ -55,6 +55,23 @@ def ready(client: TestClient, auth: dict[str, str], content: bytes = b"a,b\n1,2\
     return upload_id
 
 
+def fill_account_pool_releasing_in_two_hours(
+    factory: sessionmaker[Session], owner: uuid.UUID, upload_id: str
+) -> None:
+    """Esgota a cota da conta; a próxima liberação conhecida é o upload, que expira em 2 h."""
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == uuid.UUID(upload_id))
+            .values(expires_at=func.now() + timedelta(hours=2))
+        )
+        session.execute(
+            update(capacity_pool)
+            .where(capacity_pool.c.owner_id == owner)
+            .values(max_amount=capacity_pool.c.reserved)
+        )
+
+
 def test_upload_acima_da_cota_da_conta_429_quota_exceeded(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
@@ -83,17 +100,7 @@ def test_retry_after_da_conta_aponta_a_proxima_expiracao(
 ) -> None:
     owner, auth = new_account(factory)
     upload_id = ready(client, auth)
-    with unit_of_work(factory) as session:
-        session.execute(
-            update(upload)
-            .where(upload.c.id == uuid.UUID(upload_id))
-            .values(expires_at=func.now() + timedelta(hours=2))
-        )
-        session.execute(
-            update(capacity_pool)
-            .where(capacity_pool.c.owner_id == owner)
-            .values(max_amount=capacity_pool.c.reserved)
-        )
+    fill_account_pool_releasing_in_two_hours(factory, owner, upload_id)
 
     response = upload_batch(client, auth, 1)
 
@@ -136,17 +143,13 @@ def test_execucao_sem_espaco_para_o_teto_de_saida_429(
 ) -> None:
     owner, auth = new_account(factory)
     upload_id = ready(client, auth)
-    with unit_of_work(factory) as session:
-        session.execute(
-            update(capacity_pool)
-            .where(capacity_pool.c.owner_id == owner)
-            .values(max_amount=capacity_pool.c.reserved)
-        )
+    fill_account_pool_releasing_in_two_hours(factory, owner, upload_id)
 
     response = new_run(client, auth, upload_id)
 
     assert_problem(response, 429, "QUOTA_EXCEEDED")
-    assert int(response.headers["Retry-After"]) >= MIN_RETRY_AFTER_S
+    retry_after = int(response.headers["Retry-After"])
+    assert 7200 - 60 <= retry_after <= 7200
 
 
 def test_execucao_sem_espaco_no_ambiente_503(

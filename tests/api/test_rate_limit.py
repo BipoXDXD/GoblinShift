@@ -53,22 +53,26 @@ def create_run(client: TestClient, auth: dict[str, str]) -> httpx.Response:
     )
 
 
-def send_many(client: TestClient, auth: dict[str, str], send: Send, times: int) -> None:
+def send_many(
+    client: TestClient, auth: dict[str, str], send: Send, times: int, accepted: int = 200
+) -> None:
+    """Dentro do limite, cada requisição recebe a resposta normal da rota, não só "não 429"."""
     for _ in range(times):
         response = send(client, auth)
-        assert response.status_code != 429, response.text
+        assert response.status_code == accepted, response.text
 
 
 @pytest.mark.parametrize(
-    ("send", "limit"),
-    [(read, 120), (command, 60), (create_run, 10)],
+    ("send", "limit", "accepted"),
+    # O comando cancela uma execução inexistente: a resposta normal é 404.
+    [(read, 120, 200), (command, 60, 404), (create_run, 10, 200)],
     ids=["leitura", "comando", "criacao_de_execucao"],
 )
 def test_requisicao_acima_do_limite_429_rate_limited_com_retry_after(
-    client: TestClient, factory: sessionmaker[Session], send: Send, limit: int
+    client: TestClient, factory: sessionmaker[Session], send: Send, limit: int, accepted: int
 ) -> None:
     owner, auth = new_account(factory)
-    send_many(client, auth, send, limit)
+    send_many(client, auth, send, limit, accepted)
 
     response = send(client, auth)
 
@@ -100,7 +104,7 @@ def test_outra_conta_no_mesmo_ip_nao_e_limitada(
 
     response = create_run(client, other)
 
-    assert response.status_code != 429
+    assert response.status_code == 200, response.text
 
 
 def test_limite_de_uma_classe_nao_bloqueia_as_outras(
@@ -150,7 +154,7 @@ def test_depois_do_retry_after_a_conta_volta_a_ser_atendida(
     later = NOW + timedelta(seconds=int(refused.headers["Retry-After"]))
     app.dependency_overrides[current_time] = lambda: later
 
-    assert create_run(client, auth).status_code != 429
+    assert create_run(client, auth).status_code == 200
 
 
 def test_requisicao_sem_credencial_nao_conta(
