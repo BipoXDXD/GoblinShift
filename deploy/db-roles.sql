@@ -49,6 +49,12 @@ ALTER ROLE gs_app LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATIO
 ALTER ROLE gs_maintenance LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
   NOBYPASSRLS;
 GRANT gs_runtime TO gs_app, gs_maintenance;
+-- Timeouts da aplicação (3.2) no próprio papel: valem para qualquer sessão, inclusive um `psql`
+-- esquecido em BEGIN; as `options` da aplicação continuam por cima. Em ms.
+ALTER ROLE gs_app SET lock_timeout = 2000;
+ALTER ROLE gs_app SET idle_in_transaction_session_timeout = 30000;
+ALTER ROLE gs_maintenance SET lock_timeout = 2000;
+ALTER ROLE gs_maintenance SET idle_in_transaction_session_timeout = 30000;
 -- Parte do zero: um privilégio dado antes (versão anterior do script ou à mão) não sobrevive;
 -- os GRANTs abaixo reconstroem o estado pretendido.
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM gs_runtime, gs_app, gs_maintenance;

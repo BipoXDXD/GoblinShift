@@ -34,7 +34,8 @@ stored_object = Table(
     # Conhecidos só depois que o conteúdo foi gravado inteiro.
     Column("sha256", LargeBinary(32)),
     Column("size_bytes", BigInteger),
-    # Candidatos (saídas antes da publicação) guardam a tentativa e a geração que os criou.
+    # Candidatos (saídas antes da publicação) guardam a tentativa e a geração que os criou. A FK
+    # composta para `attempt` fica em `runs/tables.py`: `files` não conhece `runs` (migração 0020).
     Column("attempt_id", Uuid),
     Column("generation", Integer),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
@@ -61,6 +62,8 @@ stored_object = Table(
     ),
     CheckConstraint("size_bytes >= 0", name="size_bytes"),
     CheckConstraint("octet_length(sha256) = 32", name="sha256"),
+    # Um candidato sem geração quebra o fencing da publicação.
+    CheckConstraint("(attempt_id IS NULL) = (generation IS NULL)", name="attempt_generation"),
 )
 
 upload = Table(

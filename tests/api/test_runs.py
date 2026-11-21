@@ -1504,12 +1504,14 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
         "original_name": "salarios-ana.csv",
         "formula_cells": {"columns": [{"name": "Ana", "cells": "7"}], "more_columns": 0},
     }
+    # O `error_code` do item fora do catálogo o próprio banco recusa (migração 0022; teste em
+    # `test_schema_constraints.py`); aqui só os detalhes chegam adulterados.
     with_items(
         factory,
         storage,
         account.id,
         run_id,
-        [{"outcome": "rejected", "error_code": "ana@x.com", "details": tampered}],
+        [{"outcome": "rejected", "error_code": "CSV_STRUCTURE_INVALID", "details": tampered}],
     )
 
     response = client.get(f"{RUNS}/{run_id}", headers=account.headers)
@@ -1518,7 +1520,7 @@ def test_detalhe_ignora_codigos_e_contagens_fora_da_allowlist(
     assert item["warnings"] == ["CSV_FORMULA_CELLS"]
     assert item["notices"] == []
     assert item["counts"] == {"records_read": 1}
-    assert item["error_code"] is None
+    assert item["error_code"] == "CSV_STRUCTURE_INVALID"
     assert item["formula_cells"] is None
     assert "ana" not in response.text.lower()
 

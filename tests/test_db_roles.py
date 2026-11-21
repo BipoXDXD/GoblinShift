@@ -16,7 +16,7 @@ from uuid import UUID
 import psycopg
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 from testcontainers.community.postgres import PostgresContainer
@@ -93,6 +93,36 @@ def test_script_e_uma_transacao_so() -> None:
 
     assert body.startswith("BEGIN;")
     assert body.endswith("COMMIT;")
+
+
+# Timeouts próprios dos papéis (69b): valem para qualquer sessão, inclusive um `psql` à mão.
+ROLE_TIMEOUT = re.compile(
+    r"ALTER ROLE (\w+) SET (lock_timeout|idle_in_transaction_session_timeout) = (\d+);"
+)
+# Os mesmos da aplicação (3.2), em ms, escritos à mão.
+APP_TIMEOUTS_MS = (("lock_timeout", 2000), ("idle_in_transaction_session_timeout", 30000))
+
+
+def test_timeouts_dos_papeis_sao_os_da_aplicacao() -> None:
+    found = {
+        (role, name): int(value) for role, name, value in ROLE_TIMEOUT.findall(SCRIPT.read_text())
+    }
+
+    assert found == {
+        (role, name): value for role in RUNTIME_LOGINS for name, value in APP_TIMEOUTS_MS
+    }
+
+
+def test_timeouts_esperados_dos_papeis_sao_os_defaults_da_aplicacao() -> None:
+    # Mudar o default de um lado quebra aqui até o script acompanhar.
+    defaults = {
+        "lock_timeout": Settings.model_fields["db_lock_timeout_ms"].default,
+        "idle_in_transaction_session_timeout": Settings.model_fields[
+            "db_idle_in_transaction_timeout_ms"
+        ].default,
+    }
+
+    assert defaults == dict(APP_TIMEOUTS_MS)
 
 
 # Integração com PostgreSQL real -------------------------------------------------------------
@@ -191,6 +221,25 @@ def test_papel_de_runtime_nao_tem_atributo_especial(owner: Engine, role: str) ->
         attributes = connection.execute(query, {"role": role}).one()
 
     assert tuple(attributes) == (False, False, False, False, False)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("role", RUNTIME_LOGINS)
+def test_papel_conectado_sem_options_tem_os_timeouts(
+    roles_postgres: PostgresContainer, owner: Engine, role: str
+) -> None:
+    # Sem o `make_engine`, que manda os timeouts nas `options`: como um `psql` como o papel.
+    engine = create_engine(_settings(roles_postgres, role, TEST_PASSWORD).database_url)
+    try:
+        with engine.connect() as connection:
+            shown = {
+                name: connection.exec_driver_sql(f"SHOW {name}").scalar_one()
+                for name in ("lock_timeout", "idle_in_transaction_session_timeout")
+            }
+    finally:
+        engine.dispose()
+
+    assert shown == {"lock_timeout": "2s", "idle_in_transaction_session_timeout": "30s"}
 
 
 @pytest.mark.integration

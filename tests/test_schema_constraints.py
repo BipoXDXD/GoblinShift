@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Connection, Engine, Table, insert, inspect, update
+from sqlalchemy import Connection, Engine, Table, delete, func, insert, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 
 # Importar os módulos registra as tabelas no MetaData comum.
@@ -25,8 +25,10 @@ import goblinshift.capacity.tables  # noqa: F401
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.identity.tables import api_key, app_user
-from goblinshift.platform.db import make_engine, metadata
+from goblinshift.platform.db import metadata
 from goblinshift.platform.settings import Settings
+from goblinshift.processing.recipe import ItemRejectionCode
+from goblinshift.runs.lifecycle import ErrorCode
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.conftest import run_migrations
 
@@ -46,14 +48,6 @@ TABELAS_DO_MODELO = frozenset(metadata.tables)
 
 
 # --- Fixtures ---------------------------------------------------------------------------------
-
-
-@pytest.fixture
-def engine(db_settings: Settings) -> Iterator[Engine]:
-    run_migrations(db_settings, "head")
-    engine = make_engine(db_settings)
-    yield engine
-    engine.dispose()
 
 
 @pytest.fixture
@@ -672,3 +666,153 @@ def test_id_nasce_como_uuid_versao_7_e_cresce_no_tempo(conn: Connection) -> None
 
     assert (primeiro.version, segundo.version) == (7, 7)
     assert primeiro < segundo
+
+
+# --- 8. Candidato amarrado à tentativa --------------------------------------------------------
+
+
+def criar_candidato(
+    conn: Connection, owner_id: UUID, attempt_id: UUID | None, generation: int | None
+) -> UUID:
+    """Saída já confirmada de uma tentativa, ainda sem artefato."""
+    return _insert_returning_id(
+        conn,
+        stored_object,
+        owner_id=owner_id,
+        storage_key=f"runs/{uuid4()}",
+        state="committed",
+        sha256=SHA256,
+        size_bytes=10,
+        attempt_id=attempt_id,
+        generation=generation,
+    )
+
+
+def test_candidato_de_tentativa_inexistente_e_recusado(conn: Connection) -> None:
+    alice = criar_conta(conn)
+    tentativa = criar_tentativa(conn, criar_run_terminal(conn, alice), 1, ended_at=AGORA)
+
+    with barrado_por(conn, "stored_object_attempt_id_fkey"):
+        criar_candidato(conn, alice, uuid4(), 1)
+
+    criar_candidato(conn, alice, tentativa, 1)
+
+
+def test_candidato_com_geracao_diferente_da_tentativa_e_recusado(conn: Connection) -> None:
+    # O fencing da publicação supõe que a geração do candidato é a da tentativa que o criou.
+    alice = criar_conta(conn)
+    tentativa = criar_tentativa(conn, criar_run_terminal(conn, alice), 1, ended_at=AGORA)
+
+    with barrado_por(conn, "stored_object_attempt_id_fkey"):
+        criar_candidato(conn, alice, tentativa, 2)
+
+
+@pytest.mark.parametrize(
+    ("com_tentativa", "generation"),
+    [(True, None), (False, 1)],
+    ids=["sem-geracao", "geracao-sem-tentativa"],
+)
+def test_tentativa_e_geracao_vem_juntas(
+    conn: Connection, com_tentativa: bool, generation: int | None
+) -> None:
+    alice = criar_conta(conn)
+    tentativa = criar_tentativa(conn, criar_run_terminal(conn, alice), 1, ended_at=AGORA)
+
+    with barrado_por(conn, "stored_object_attempt_generation_check"):
+        criar_candidato(conn, alice, tentativa if com_tentativa else None, generation)
+
+
+def test_purga_da_run_anula_a_tentativa_do_candidato_publicado(conn: Connection) -> None:
+    alice = criar_conta(conn)
+    run_id = criar_run_terminal(conn, alice)
+    tentativa = criar_tentativa(conn, run_id, 1, ended_at=AGORA)
+    objeto = criar_candidato(conn, alice, tentativa, 1)
+    artefato = _insert_returning_id(
+        conn,
+        artifact,
+        owner_id=alice,
+        object_id=objeto,
+        role="output",
+        file_name="saida.csv",
+        expires_at=UMA_HORA_DEPOIS,
+    )
+
+    conn.execute(delete(run).where(run.c.id == run_id))
+
+    assert conn.execute(
+        select(stored_object.c.attempt_id, stored_object.c.generation).where(
+            stored_object.c.id == objeto
+        )
+    ).one() == (None, None)
+    assert conn.execute(select(func.count()).where(artifact.c.id == artefato)).scalar_one() == 1
+
+
+# --- 9. Códigos do catálogo -------------------------------------------------------------------
+# Um código fora de `ErrorCode` derruba a leitura da Run (`runs/store.py`); o banco recusa antes.
+
+COLUNAS_DE_CODIGO = [
+    ("run", "error_code", "run_error_code_check"),
+    ("run", "stop_reason", "run_stop_reason_check"),
+    ("attempt", "error_code", "attempt_error_code_check"),
+    ("run_input", "error_code", "run_input_error_code_check"),
+]
+
+
+def gravar_codigo(conn: Connection, tabela: str, coluna: str, valor: str | None) -> None:
+    alice = criar_conta(conn)
+    codigo: dict[str, object] = {coluna: valor}
+    if tabela == "run":
+        criar_run(conn, alice, status="queued", phase=None, **codigo)
+    elif tabela == "attempt":
+        criar_tentativa(conn, criar_run(conn, alice), 1, **codigo)
+    else:
+        conn.execute(
+            insert(run_input).values(
+                run_id=criar_run(conn, alice),
+                position=0,
+                owner_id=alice,
+                upload_id=criar_upload(conn, alice, "uploads/alice/1"),
+                outcome="rejected",
+                **codigo,
+            )
+        )
+
+
+@pytest.mark.parametrize("code", [c.value for c in ErrorCode])
+def test_todo_codigo_do_catalogo_e_aceito_na_run_e_na_tentativa(
+    conn: Connection, code: str
+) -> None:
+    run_id = criar_run(
+        conn,
+        criar_conta(conn),
+        status="failed",
+        error_code=code,
+        stop_reason=code,
+        finished_at=AGORA,
+    )
+    criar_tentativa(conn, run_id, 1, ended_at=AGORA, error_code=code)
+
+
+@pytest.mark.parametrize("code", [c.value for c in ItemRejectionCode])
+def test_todo_codigo_de_rejeicao_do_item_e_aceito(conn: Connection, code: str) -> None:
+    gravar_codigo(conn, "run_input", "error_code", code)
+
+
+@pytest.mark.parametrize(("tabela", "coluna", "constraint"), COLUNAS_DE_CODIGO)
+@pytest.mark.parametrize("valor", ["OUTRO", "infra_poison", ""])
+def test_codigo_fora_do_catalogo_e_recusado(
+    conn: Connection, tabela: str, coluna: str, constraint: str, valor: str
+) -> None:
+    with barrado_por(conn, constraint):
+        gravar_codigo(conn, tabela, coluna, valor)
+
+
+def test_codigo_de_execucao_nao_vale_como_rejeicao_do_item(conn: Connection) -> None:
+    # Os catálogos são distintos: `run_input` só aceita `ItemRejectionCode`.
+    with barrado_por(conn, "run_input_error_code_check"):
+        gravar_codigo(conn, "run_input", "error_code", "INFRA_POISON")
+
+
+@pytest.mark.parametrize(("tabela", "coluna"), [(t, c) for t, c, _ in COLUNAS_DE_CODIGO])
+def test_codigo_ausente_continua_aceito(conn: Connection, tabela: str, coluna: str) -> None:
+    gravar_codigo(conn, tabela, coluna, None)
