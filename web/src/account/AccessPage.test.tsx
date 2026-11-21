@@ -326,6 +326,17 @@ describe("Acesso: chaves de API", () => {
     expect(sent(api.requests, `DELETE /api/v1/api-keys/${KEY_ID}`)).toEqual([]);
   });
 
+  it("não tem violações do axe com o diálogo de revogar chave aberto", async () => {
+    const { user } = setup({
+      "GET /api/v1/api-keys": () => jsonResponse({ data: [apiKeyBody()] }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Revogar a chave gsk_7Hq2" }));
+
+    expect(screen.getByRole("dialog", { name: "Revogar a chave gsk_7Hq2?" })).toBeVisible();
+    expect(await axeViolations(document.body)).toEqual([]);
+  });
+
   it("revogar confirmado chama o DELETE com o CSRF, anuncia e relê a lista", async () => {
     let revoked = false;
     const { api, user } = setup({

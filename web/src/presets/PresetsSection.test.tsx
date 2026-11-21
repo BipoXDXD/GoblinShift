@@ -234,6 +234,18 @@ describe("Oficina: presets", () => {
     expect(remove).toHaveFocus();
   });
 
+  it("não tem violações do axe com o diálogo de excluir preset aberto", async () => {
+    const { user } = setup();
+
+    const section = await presetsSection();
+    await user.click(
+      await within(section).findByRole("button", { name: "Excluir o preset Clientes do mês" }),
+    );
+
+    expect(screen.getByRole("dialog", { name: "Excluir o preset Clientes do mês?" })).toBeVisible();
+    expect(await axeViolations(document.body)).toEqual([]);
+  });
+
   it("cancelar a exclusão não chama a API", async () => {
     const { api, user } = setup();
 

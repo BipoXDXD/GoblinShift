@@ -35,6 +35,33 @@ for (const theme of THEMES) {
   }
 }
 
+// O painel do seletor de tema abre por cima do conteúdo: as telas acima o medem fechado.
+for (const theme of THEMES) {
+  test(`Menu de tema aberto, tema ${theme}: zero violações do axe, contraste incluído`, async ({
+    page,
+  }) => {
+    await useTheme(page, theme);
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await page.getByText("Tema", { exact: true }).click();
+    await expect(page.getByRole("radio", { name: "Sistema", exact: true })).toBeVisible();
+
+    const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA).analyze();
+
+    const ranContrast = [...results.passes, ...results.violations].some(
+      (rule) => rule.id === "color-contrast",
+    );
+    expect(ranContrast, "a regra color-contrast avaliou algum elemento").toBe(true);
+    expect(
+      results.violations
+        .filter((violation) => violation.id === "color-contrast")
+        .map(describeViolation),
+      `[sabotage:contrast-${theme}]`,
+    ).toEqual([]);
+    expect(results.violations.map(describeViolation)).toEqual([]);
+  });
+}
+
 function describeViolation(violation: {
   id: string;
   nodes: { target: unknown; failureSummary?: string | undefined }[];
