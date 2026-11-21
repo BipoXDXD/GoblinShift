@@ -10,6 +10,12 @@ O `migrate` de uma imagem anterior encontra o banco numa revisão que ela não c
 um rollback do app. Pela política expand/contract (docs/GoblinShiftPlan.md, 3.8) essa imagem
 tolera o schema mais novo, então o `upgrade` para o head avisa e termina com sucesso, sem
 migrar. Em produção o único destino aceito é o head: descer o schema é restauração de backup.
+
+Os downgrades que apagariam linhas abortam numa guarda SQL sem `GS_ALLOW_LOSSY_DOWNGRADE=1`. No
+modo offline (`--sql`) a licença vale na hora de gerar o script: gerado com ela, o script sai
+sem a guarda. Aplique o script com `psql -v ON_ERROR_STOP=1`: cada revisão vem na sua transação
+(`transaction_per_migration`), e sem essa opção o psql desfaz só a revisão que abortou e segue
+para as seguintes.
 """
 
 import logging

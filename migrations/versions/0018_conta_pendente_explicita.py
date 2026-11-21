@@ -15,7 +15,9 @@ tira as contas com `ACCOUNT_BLOCKED` na auditoria: as bloqueadas por abuso cujas
 saíram, até onde os 90 dias de auditoria alcançam. Nada a contrair.
 
 O downgrade apaga a marca `awaiting_approval`, que o upgrade só reconstrói por heurística, e
-só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas.
+só roda com `GS_ALLOW_LOSSY_DOWNGRADE=1` se houver linhas: contas pendentes ou bloqueadas. A
+bloqueada também perde dado: sem sessão e sem `ACCOUNT_BLOCKED` nos 90 dias, o backfill do
+re-upgrade a remarcaria pendente.
 """
 
 import os
@@ -54,7 +56,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     if os.environ.get("GS_ALLOW_LOSSY_DOWNGRADE") != "1":
         op.execute(
-            "DO $$ BEGIN IF EXISTS (SELECT FROM app_user WHERE awaiting_approval) "
+            "DO $$ BEGIN IF EXISTS "
+            "(SELECT FROM app_user WHERE awaiting_approval OR status = 'blocked') "
             "THEN RAISE EXCEPTION 'o downgrade da 0018 apagaria a marca de conta pendente; "
             "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda'; END IF; END $$"
         )

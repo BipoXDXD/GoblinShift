@@ -32,6 +32,7 @@ class Caso(NamedTuple):
     anterior: str
     semear: Callable[[Connection], Chave]
     contar: Callable[[Connection, Chave], int]
+    rotulo: str | None = None
 
 
 @pytest.fixture
@@ -172,6 +173,18 @@ def semear_pendente(conn: Connection) -> Chave:
     )
 
 
+def semear_bloqueada(conn: Connection) -> Chave:
+    # Bloqueada, sem sessão e sem ACCOUNT_BLOCKED: o backfill do re-upgrade a marcaria pendente.
+    # Sem nenhuma conta pendente no banco, a guarda só pode abortar pela bloqueada; os outros
+    # testes da sessão deixam contas pendentes commitadas.
+    conn.execute(text("UPDATE app_user SET awaiting_approval = false WHERE awaiting_approval"))
+    return _escalar(
+        conn,
+        "INSERT INTO app_user (issuer, subject, display_name, status, awaiting_approval) "
+        "VALUES ('teste', gen_random_uuid()::text, 'Ana', 'blocked', false) RETURNING id",
+    )
+
+
 CASOS = [
     Caso(
         "0008",
@@ -234,8 +247,20 @@ CASOS = [
             conn, "SELECT count(*) FROM app_user WHERE id = :chave AND awaiting_approval", chave
         ),
     ),
+    Caso(
+        "0018",
+        "0017",
+        semear_bloqueada,
+        lambda conn, chave: _contar(
+            conn,
+            "SELECT count(*) FROM app_user "
+            "WHERE id = :chave AND status = 'blocked' AND NOT awaiting_approval",
+            chave,
+        ),
+        rotulo="0018-bloqueada",
+    ),
 ]
-IDS = [caso.revisao for caso in CASOS]
+IDS = [caso.rotulo or caso.revisao for caso in CASOS]
 
 
 @pytest.mark.parametrize("caso", CASOS, ids=IDS)
@@ -283,7 +308,17 @@ def test_script_offline_do_downgrade_leva_a_guarda(
 ) -> None:
     with _alembic_env(db_settings, allow_lossy=False):
         command.downgrade(Config("alembic.ini"), "0016:0015", sql=True)
+    sem_licenca = capsys.readouterr().out
+    with _alembic_env(db_settings, allow_lossy=True):
+        command.downgrade(Config("alembic.ini"), "0016:0015", sql=True)
+    com_licenca = capsys.readouterr().out
 
-    script = capsys.readouterr().out
-    assert "RAISE EXCEPTION" in script
-    assert "GS_ALLOW_LOSSY_DOWNGRADE" in script
+    guarda = sem_licenca.find("RAISE EXCEPTION")
+    assert guarda != -1
+    assert "GS_ALLOW_LOSSY_DOWNGRADE=1 aceita a perda" in sem_licenca
+    # A guarda vem antes de qualquer perda: aplicado o script, ela aborta antes do DELETE e do DROP.
+    assert guarda < sem_licenca.index("DELETE FROM audit_event")
+    assert guarda < sem_licenca.index("DROP")
+    # A licença vale na geração: o script gerado com ela sai sem a guarda.
+    assert "RAISE EXCEPTION" not in com_licenca
+    assert "DELETE FROM audit_event" in com_licenca
