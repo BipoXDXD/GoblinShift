@@ -25,7 +25,7 @@ import goblinshift.capacity.tables  # noqa: F401
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.identity.tables import api_key, app_user
-from goblinshift.platform.db import make_engine, metadata
+from goblinshift.platform.db import metadata
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.tables import attempt, idempotency_record, run, run_input, run_output
 from tests.conftest import run_migrations
@@ -46,14 +46,6 @@ TABELAS_DO_MODELO = frozenset(metadata.tables)
 
 
 # --- Fixtures ---------------------------------------------------------------------------------
-
-
-@pytest.fixture
-def engine(db_settings: Settings) -> Iterator[Engine]:
-    run_migrations(db_settings, "head")
-    engine = make_engine(db_settings)
-    yield engine
-    engine.dispose()
 
 
 @pytest.fixture

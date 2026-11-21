@@ -6,8 +6,6 @@ parcial e `ON DELETE` das FKs. As migrações são o que produção tem: um drif
 `tables.py` ou com migração nova, nunca editando uma migração já aplicada.
 """
 
-from collections.abc import Iterator
-
 import pytest
 from sqlalchemy import Engine
 
@@ -17,20 +15,10 @@ import goblinshift.files.tables
 import goblinshift.identity.tables
 import goblinshift.presets.tables
 import goblinshift.runs.tables  # noqa: F401
-from goblinshift.platform.db import make_engine, metadata
-from goblinshift.platform.settings import Settings
-from tests.conftest import run_migrations
+from goblinshift.platform.db import metadata
 from tests.schema_snapshot import schema_snapshot
 
 pytestmark = pytest.mark.integration
-
-
-@pytest.fixture
-def engine(db_settings: Settings) -> Iterator[Engine]:
-    run_migrations(db_settings, "head")
-    engine = make_engine(db_settings)
-    yield engine
-    engine.dispose()
 
 
 def test_banco_migrado_tem_o_mesmo_ddl_do_metadata(engine: Engine) -> None:

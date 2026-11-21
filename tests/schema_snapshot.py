@@ -42,7 +42,7 @@ _COLUMNS = text(
 
 _CONSTRAINTS = text(
     """
-    SELECT t.relname, c.conname, pg_get_constraintdef(c.oid)
+    SELECT t.relname, c.conname, pg_get_constraintdef(c.oid), c.convalidated
     FROM pg_constraint c
     JOIN pg_class t ON t.oid = c.conrelid
     JOIN pg_namespace n ON n.oid = t.relnamespace
@@ -55,7 +55,8 @@ _CONSTRAINTS = text(
 _INDEXES = text(
     """
     SELECT t.relname, i.relname,
-           replace(pg_get_indexdef(i.oid), ' ON ' || quote_ident(n.nspname) || '.', ' ON ')
+           replace(pg_get_indexdef(i.oid), ' ON ' || quote_ident(n.nspname) || '.', ' ON '),
+           x.indisvalid
     FROM pg_index x
     JOIN pg_class i ON i.oid = x.indexrelid
     JOIN pg_class t ON t.oid = x.indrelid
@@ -73,13 +74,15 @@ class SchemaSnapshot:
 
     `columns`: tipo (`format_type`), NOT NULL (`attnotnull`) e default (`pg_get_expr`; numa coluna
     identity, `GENERATED ALWAYS|BY DEFAULT AS IDENTITY`). `constraints`: `pg_get_constraintdef`,
-    que inclui CHECK, FK com `ON DELETE`, UNIQUE, PK e, no PostgreSQL 18, os NOT NULL nomeados.
-    `indexes`: `pg_get_indexdef`, com colunas, método, UNIQUE e o predicado do índice parcial.
+    que inclui CHECK, FK com `ON DELETE`, UNIQUE, PK e, no PostgreSQL 18, os NOT NULL nomeados, mais
+    `convalidated` (falso numa constraint deixada `NOT VALID`). `indexes`: `pg_get_indexdef`, com
+    colunas, método, UNIQUE e o predicado do índice parcial, mais `indisvalid` (falso num índice
+    `CONCURRENTLY` que falhou no meio e ficou inválido, que o `pg_get_indexdef` não mostra).
     """
 
     columns: dict[tuple[str, str], tuple[str, bool, str | None]]
-    constraints: dict[tuple[str, str], str]
-    indexes: dict[tuple[str, str], str]
+    constraints: dict[tuple[str, str], tuple[str, bool]]
+    indexes: dict[tuple[str, str], tuple[str, bool]]
 
 
 def schema_snapshot(conn: Connection, schema: str) -> SchemaSnapshot:
@@ -96,9 +99,11 @@ def schema_snapshot(conn: Connection, schema: str) -> SchemaSnapshot:
         for table, column, type_, not_null, default in conn.execute(_COLUMNS, params)
     }
     constraints = {
-        (table, name): definition for table, name, definition in conn.execute(_CONSTRAINTS, params)
+        (table, name): (definition, validated)
+        for table, name, definition, validated in conn.execute(_CONSTRAINTS, params)
     }
     indexes = {
-        (table, name): definition for table, name, definition in conn.execute(_INDEXES, params)
+        (table, name): (definition, valid)
+        for table, name, definition, valid in conn.execute(_INDEXES, params)
     }
     return SchemaSnapshot(columns=columns, constraints=constraints, indexes=indexes)

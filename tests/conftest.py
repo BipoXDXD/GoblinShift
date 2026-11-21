@@ -7,12 +7,13 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from pydantic import SecretStr
-from sqlalchemy import Connection
+from sqlalchemy import Connection, Engine
 from sqlalchemy.dialects.postgresql import insert
 from testcontainers.community.postgres import PostgresContainer
 
 from goblinshift.capacity import GLOBAL_STORAGE_MAX_BYTES, Resource
 from goblinshift.capacity.tables import capacity_pool
+from goblinshift.platform.db import make_engine
 from goblinshift.platform.settings import Settings
 from tests.skip_guard import pytest_addoption, pytest_configure  # noqa: F401 (hooks do guard)
 
@@ -46,6 +47,15 @@ def db_settings(postgres: PostgresContainer) -> Settings:
         db_password=SecretStr(postgres.password),
         db_name=postgres.dbname,
     )
+
+
+@pytest.fixture
+def engine(db_settings: Settings) -> Iterator[Engine]:
+    """Engine num banco já migrado até o head; quem desce o schema volta ao head no fim."""
+    run_migrations(db_settings, "head")
+    engine = make_engine(db_settings)
+    yield engine
+    engine.dispose()
 
 
 def restore_capacity_seed(conn: Connection) -> None:
