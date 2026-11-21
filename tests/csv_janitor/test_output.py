@@ -3,6 +3,7 @@
 import pytest
 
 from goblinshift.processing.csv_janitor import Delimiter, FormulaGuard, Params, WarningCode
+from goblinshift.processing.csv_janitor.janitor import shortened_column_name
 from tests.csv_janitor.support import cleaned, output
 
 
@@ -111,3 +112,19 @@ def test_espaco_antes_de_texto_comum_nao_e_formula(value: str) -> None:
 
 def test_sem_celulas_suspeitas_nao_ha_aviso() -> None:
     assert cleaned("a\r\n1\r\n").warnings == ()
+
+
+def test_aviso_de_formula_corta_cada_nome_de_coluna_em_120_caracteres() -> None:
+    name = "=" + "x" * 10_000
+    result = cleaned(f"{name},b\r\n=1,=2\r\n")
+
+    assert result.formula_header == (name,)
+    assert result.formula_cells == {name: 1, "b": 1}
+    shortened = repr(name[:119] + "…")
+    assert [w.detail.count(shortened) for w in result.warnings] == [1, 1]
+    assert all(len(w.detail) < 500 for w in result.warnings)
+
+
+def test_nome_de_coluna_so_de_espacos_continua_vazio_depois_do_corte() -> None:
+    # Vazio é rótulo próprio na tela (runs/formula_cells.py); reticências o transformariam em nome.
+    assert shortened_column_name(" " * 500) == " " * 120

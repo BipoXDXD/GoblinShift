@@ -25,6 +25,10 @@ from goblinshift.processing.csv_janitor.writing import serialize_record
 # de = + - @ (U+FF1D, U+FF0B, U+FF0D, U+FF20), escritas por escape para não se confundirem.
 FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n", "\uff1d", "\uff0b", "\uff0d", "\uff20")
 FORMULA_GUARD_PREFIX = "\t"
+# Teto de cada nome de coluna citado nos avisos, o mesmo de `runs/formula_cells.py`, que este
+# pacote não pode importar (import-linter): sem ele, cabeçalhos longos estouram o relatório.
+WARNING_COLUMN_NAME_CHARS = 120
+_ELLIPSIS = "…"
 
 _CASE: Mapping[CaseMode, Callable[[str], str]] = {
     # Operações Unicode do Python fixado, sem depender do locale do servidor.
@@ -156,7 +160,13 @@ def _serialize(
 ) -> bytes:
     lines = [_encode(header, "o cabeçalho", params, limits)]
     lines += [_encode(r.fields, f"o registro {r.position}", params, limits) for r in records]
-    return b"".join(lines)
+    content = b"".join(lines)
+    if len(content) > limits.table_bytes:
+        raise TableRejectionError(
+            RejectionCode.FIELD_LIMIT_EXCEEDED,
+            f"na saída, a tabela passa de {limits.table_bytes} bytes",
+        )
+    return content
 
 
 def _encode(fields: Sequence[str], position: str, params: Params, limits: Limits) -> bytes:
@@ -203,11 +213,11 @@ def _formula_warnings(
             TableWarning(
                 WarningCode.FORMULA_HEADER,
                 f"nomes de coluna que uma planilha pode interpretar como fórmula "
-                f"({', '.join(map(repr, formula_header))}) {treatment}.",
+                f"({', '.join(map(_quoted, formula_header))}) {treatment}.",
             )
         )
     if formula_cells:
-        per_column = ", ".join(f"{name!r}: {count}" for name, count in formula_cells.items())
+        per_column = ", ".join(f"{_quoted(name)}: {count}" for name, count in formula_cells.items())
         warnings.append(
             TableWarning(
                 WarningCode.FORMULA_CELLS,
@@ -217,3 +227,17 @@ def _formula_warnings(
             )
         )
     return tuple(warnings)
+
+
+def _quoted(name: str) -> str:
+    return repr(shortened_column_name(name))
+
+
+def shortened_column_name(name: str) -> str:
+    """Nome de coluna como os avisos o citam: no máximo `WARNING_COLUMN_NAME_CHARS` caracteres."""
+    if len(name) <= WARNING_COLUMN_NAME_CHARS:
+        return name
+    if not name.strip():
+        # Só espaços continua só espaços: vazio tem rótulo próprio na tela (runs/formula_cells.py).
+        return name[:WARNING_COLUMN_NAME_CHARS]
+    return name[: WARNING_COLUMN_NAME_CHARS - len(_ELLIPSIS)] + _ELLIPSIS
