@@ -69,6 +69,13 @@ def test_expires_e_unico_em_utc() -> None:
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", _values("expires")[0])
 
 
+def test_expires_publicado_esta_a_menos_de_um_ano() -> None:
+    # Relógio real sem falso positivo: com o tempo o restante só diminui, então este teste só fica
+    # vermelho quando alguém muda o Expires para além do teto. A folga de 30 dias, que vence
+    # sozinha, fica no lembrete `real_clock`.
+    assert _expires() - datetime.now(UTC) <= MAX_VALIDITY
+
+
 @pytest.mark.parametrize(
     ("restante", "ok"),
     [

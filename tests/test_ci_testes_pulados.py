@@ -19,6 +19,12 @@ from goblinshift.entrypoints.openapi_export import render_openapi
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
+SECURITY_TXT_WORKFLOW = WORKFLOWS / "security-txt.yml"
+REAL_CLOCK_SELECTOR = "-m real_clock"
+REAL_CLOCK_EXCLUSION = "not real_clock"
+MARKER_SELECTOR = re.compile(r"""-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))""")
+NEGATION_PREFIX = "not "
+AND_SEPARATOR = " and "
 CHECKS_JOB = "checks"
 PYTEST_COMMAND = re.compile(r"\bpytest\b")
 ROOT_STEP_COMMAND = (
@@ -57,11 +63,11 @@ def _playwright_jobs() -> list[tuple[str, list[dict[str, Any]]]]:
     ]
 
 
-def _pytest_commands() -> list[tuple[str, str]]:
-    """Cada `run` da CI que chama o pytest, com o job em que está."""
+def _pytest_commands(workflow: Path = CI) -> list[tuple[str, str]]:
+    """Cada `run` do workflow (padrão: a CI) que chama o pytest, com o job em que está."""
     return [
         (job_name, step["run"])
-        for job_name, job in _jobs().items()
+        for job_name, job in _jobs(workflow).items()
         for step in job.get("steps", [])
         if PYTEST_COMMAND.search(step.get("run", ""))
     ]
@@ -87,6 +93,32 @@ def test_as_demais_chamadas_com_marcador_excluem_os_testes_de_root() -> None:
     others = [command for _, command in _pytest_commands() if "-m needs_root" not in command]
 
     assert all("not needs_root" in command for command in others), others
+
+
+def _only_negations(command: str) -> bool:
+    """O `-m` do comando só exclui marcadores (`not a and not b`), sem selecionar nenhum."""
+    match = MARKER_SELECTOR.search(command)
+    if match is None:
+        return False
+    expression = next(group for group in match.groups() if group is not None)
+    return all(term.startswith(NEGATION_PREFIX) for term in expression.split(AND_SEPARATOR))
+
+
+def test_chamadas_da_ci_que_so_excluem_marcadores_excluem_o_relogio_real() -> None:
+    # O lembrete `real_clock` reprovaria PRs sem relação 30 dias antes do vencimento do
+    # security.txt; um `-m` só de negações substitui o do `addopts` e precisa repetir a exclusão.
+    negations = [command for _, command in _pytest_commands() if _only_negations(command)]
+
+    assert negations, _pytest_commands()
+    assert all(REAL_CLOCK_EXCLUSION in command for command in negations), negations
+
+
+def test_workflow_do_security_txt_roda_o_lembrete_e_reprova_se_pulado() -> None:
+    commands = [command for _, command in _pytest_commands(SECURITY_TXT_WORKFLOW)]
+
+    assert len(commands) == 1, commands
+    assert "--fail-on-skip" in commands[0]
+    assert REAL_CLOCK_SELECTOR in commands[0]
 
 
 def test_teste_de_root_fora_de_root_falha_em_vez_de_pular() -> None:

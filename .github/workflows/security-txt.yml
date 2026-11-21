@@ -2,8 +2,8 @@ name: Vencimento do security.txt
 
 # Toda segunda, o lembrete com o relógio real (marcador `real_clock`): reprova quando faltam
 # menos de 30 dias para o Expires de web/public/.well-known/security.txt. Fica fora da CI de PR
-# para não travar merges sem relação; aqui a falha chega por e-mail ao dono, com quatro avisos
-# semanais dentro da folga de 30 dias. Para renovar, adiantar o Expires em até um ano e implantar.
+# para não travar merges sem relação; aqui a falha abre uma issue (ou comenta na aberta), com
+# quatro avisos semanais dentro da folga de 30 dias. Para renovar, adiantar o Expires em até um ano e implantar.
 on:
   schedule:
     - cron: "29 9 * * 1"
@@ -11,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: security-txt
+  cancel-in-progress: false
 
 env:
   # Mesmo motivo do ci.yml: o Python vem do setup-python, nunca de um download do uv.
@@ -36,3 +40,30 @@ jobs:
         # Sem nenhum teste selecionado o pytest sai com 5 e o job falha de propósito;
         # `--fail-on-skip` reprova se o lembrete terminar pulado.
         run: uv run pytest --fail-on-skip -q -p no:cacheprovider -m real_clock tests/test_security_policy.py
+
+  # Job separado para só ele ter `issues: write`; a conferência continua só com leitura. Roda
+  # também quando o job falha por outro motivo (uv, timeout): o lembrete se perdeu do mesmo jeito.
+  alerta:
+    name: Abrir issue se o lembrete falhar
+    needs: [check]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # abrir a issue de alerta ou comentar nela
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EXECUCAO: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TITULO: "security.txt: Expires perto de vencer ou lembrete falhou"
+    steps:
+      - name: Abrir issue ou comentar na aberta
+        run: |
+          aberta=$(gh issue list --state open --limit 200 --json number,title |
+            jq -r --arg t "$TITULO" '[.[] | select(.title == $t)][0].number // empty')
+          corpo="O lembrete semanal do security.txt falhou: $EXECUCAO. Se o log mostra \"vence em N dias\", adiante o Expires de web/public/.well-known/security.txt em até um ano e implante."
+          if [ -n "$aberta" ]; then
+            gh issue comment "$aberta" --body "$corpo"
+          else
+            gh issue create --title "$TITULO" --body "$corpo"
+          fi
