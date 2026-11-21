@@ -69,13 +69,13 @@ def test_cabecalho_maior_que_o_teto_nao_tem_amostra() -> None:
         ("\uff1d1", "\t\uff1d1"),
         ("\r=1", "\t\r=1"),
         ("\t=1", "\t=1"),
-        (" =1", " =1"),
+        (" =1", "\t =1"),
         ("texto", "texto"),
     ],
     ids=["mais", "menos", "arroba", "igual", "igual-largo", "cr", "ja-com-tab", "espaco", "texto"],
 )
 def test_escape_de_formula_por_prefixo(value: str, escaped: str) -> None:
-    # O espaço inicial não está na lista de prefixos do Janitor (planilhas não avaliam " =1").
+    # Espaço antes do prefixo também conta: planilhas que aparam espaços avaliam " =1".
     content = serialize_record(["a"], ",").encode() + serialize_record([value], ",").encode()
 
     assert rows(table_preview(content, Delimiter.COMMA, Limits()))[1] == [escaped]
