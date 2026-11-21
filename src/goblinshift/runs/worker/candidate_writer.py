@@ -8,7 +8,11 @@ estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos").
 
 Quem chama decide o fencing e o lease: `lock_running` abre cada transação travando a Run, e
 `beating` envolve a cópia para renovar o lease entre blocos. O que eles levantarem (fencing
-perdido, parada pedida) atravessa a gravação sem ser tratado aqui.
+perdido, parada pedida) atravessa a gravação; antes, o escritor apaga do disco as chaves que
+reservou. A manutenção pode ter descartado as linhas `pending` enquanto o worker pausava, antes
+de o arquivo existir: depois disso nada mais veria o arquivo. Erro do `confirm` que não é
+`LostFencing` não apaga nada: o commit pode ter acontecido sem a resposta chegar, e a linha que
+seguir `pending` vai para o descarte da manutenção com a chave.
 """
 
 import uuid
@@ -20,10 +24,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object
 from goblinshift.files.candidates import held_input_contents
+from goblinshift.files.retention import remove_file_after_commit
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
 from goblinshift.processing.regular_file import open_regular
-from goblinshift.runs.store import run_transaction
+from goblinshift.runs.store import LostFencing, run_transaction
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import Collected, OutputFile
 
@@ -74,18 +79,27 @@ class CandidateWriter:
             return reserved
 
         reserved = run_transaction(self._factory, reserve)
-        written = []
-        for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
-            with open_regular(output.path) as source:
-                chunks = beating(_chunks(source))
-                written.append(self._storage.create_exclusive(key, chunks, output.size))
+        keys = [key for _object_id, key in reserved]
+        try:
+            written = []
+            for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
+                with open_regular(output.path) as source:
+                    chunks = beating(_chunks(source))
+                    written.append(self._storage.create_exclusive(key, chunks, output.size))
+        except BaseException:
+            _remove_written(self._storage, keys)
+            raise
 
         def confirm(session: Session) -> None:
             lock_running(session)
             for (object_id, _key), (sha256, size) in zip(reserved, written, strict=True):
                 commit_candidate(session, claimed.owner_id, object_id, sha256, size)
 
-        run_transaction(self._factory, confirm)
+        try:
+            run_transaction(self._factory, confirm)
+        except LostFencing:
+            _remove_written(self._storage, keys)
+            raise
         object_ids = reused | {
             index: object_id
             for (index, _output), (object_id, _key) in zip(to_write, reserved, strict=True)
@@ -132,6 +146,17 @@ def _files_to_publish(collected: Collected) -> list[tuple[OutputFile, ArtifactRo
 
 def _preview_sources(collected: Collected) -> dict[str, str]:
     return {preview.file.name: preview.of for preview in collected.previews}
+
+
+def _remove_written(storage: FileStorage, keys: list[str]) -> None:
+    """Apaga as chaves reservadas; a que não chegou a ser gravada é um `delete` sem efeito.
+
+    Todas, não só as das cópias concluídas: assim também sai o arquivo de uma cópia que levante
+    depois do `create_exclusive`, como uma conferência do conteúdo gravado. A falha de uma vira
+    alerta com a chave (`purge_file_not_removed`) e não encobre o erro que levou à limpeza.
+    """
+    for key in keys:
+        remove_file_after_commit(storage, key)
 
 
 def _chunks(source: BinaryIO) -> Iterator[bytes]:
