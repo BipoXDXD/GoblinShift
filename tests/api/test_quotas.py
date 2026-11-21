@@ -77,9 +77,9 @@ def test_upload_acima_da_cota_da_conta_429_quota_exceeded(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     owner, auth = new_account(factory)
-    create_account_pool(factory, owner, 10)
+    create_account_pool(factory, owner, MIN)
 
-    response = upload_batch(client, auth, 11)
+    response = upload_batch(client, auth, MIN + 1)
 
     assert_problem(response, 429, "QUOTA_EXCEEDED")
     assert int(response.headers["Retry-After"]) == MIN_RETRY_AFTER_S
@@ -139,9 +139,9 @@ def test_upload_acima_do_teto_do_ambiente_503_com_retry_after(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     _, auth = new_account(factory)
-    set_global_max(factory, 10)
+    set_global_max(factory, MIN)
 
-    response = upload_batch(client, auth, 11)
+    response = upload_batch(client, auth, MIN + 1)
 
     assert_problem(response, 503, "SERVICE_UNAVAILABLE")
     assert response.headers["Retry-After"] == str(ENVIRONMENT_RETRY_AFTER_S)
@@ -202,9 +202,9 @@ def test_recusa_de_cota_nao_traz_dados_de_outra_conta(
     _, other_auth = new_account(factory)
     other_upload = ready(client, other_auth)
     owner, auth = new_account(factory)
-    create_account_pool(factory, owner, 10)
+    create_account_pool(factory, owner, MIN)
 
-    response = upload_batch(client, auth, 11)
+    response = upload_batch(client, auth, MIN + 1)
 
     assert response.status_code == 429
     assert other_upload not in response.text

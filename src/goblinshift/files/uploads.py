@@ -180,7 +180,7 @@ def receive_content(
     O prazo total da transferência é o vencimento do upload: passou dele, o escritor para antes do
     bloco seguinte e falha com `UploadGoneError`, porque a retenção já pode ter liberado a reserva.
     `clock` (segundos, monotônico) mede esse prazo a partir de antes do claim, então o escritor
-    nunca passa do vencimento visto pelo banco.
+    não inicia bloco depois do vencimento visto pelo banco.
     """
     started = clock()
     with session.begin():

@@ -137,10 +137,10 @@ def test_lote_que_completa_a_cota_da_conta_e_aceito(factory: sessionmaker[Sessio
 
 def test_lote_acima_do_teto_do_ambiente_e_recusado(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "alice")
-    set_global_max(factory, 5)
+    set_global_max(factory, MIN)
 
     with pytest.raises(GlobalCapacityExceededError):
-        intents(factory, owner, 6)
+        intents(factory, owner, MIN + 1)
 
     assert count_uploads(factory) == 0
     assert global_reserved(factory) == 0
@@ -169,6 +169,7 @@ def test_upload_vazio_pronto_nao_reserva_nada(
     view = ready_upload(factory, storage, owner, b"")
 
     assert live_amount(factory, HolderKind.UPLOAD, view.id) is None
+    assert live_amount(factory, HolderKind.OBJECT, object_of(factory, view.id)) == 0
     assert account_reserved(factory, owner) == 0
 
 
