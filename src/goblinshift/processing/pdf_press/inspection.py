@@ -6,7 +6,8 @@ Recusa, falhando a execução inteira:
   (truncado, xref quebrado), documento sem páginas e qualquer aviso estrutural do qpdf, inclusive
   os que só aparecem ao ler os bytes de cada stream: `PDF_INVALID`;
 - senha, criptografia, JavaScript, ações que não sejam `GoTo` ou `URI` (inclusive em `/OpenAction`
-  e encadeadas em `/Next`), ações automáticas (`/AA`), formulários (AcroForm, XFA, widgets),
+  e encadeadas em `/Next`), ações perigosas conhecidas em qualquer dicionário (mesmo fora dessas
+  chaves, como `/PA`), ações automáticas (`/AA`), formulários (AcroForm, XFA, widgets),
   assinaturas, anexos, multimídia e portfólios: `PDF_UNSUPPORTED_FEATURE`;
 - páginas acima do que resta do teto da execução e objetos acima do teto por documento:
   `INPUT_LIMIT_EXCEEDED`.
@@ -38,6 +39,23 @@ MAX_PAGE_TREE_DEPTH = 32
 _ALLOWED_ACTIONS = frozenset({"/GoTo", "/URI"})
 # Onde um dicionário guarda uma ação; `/AA` é recusado inteiro, por disparar sozinho.
 _ACTION_KEYS = ("/A", "/OpenAction", "/Next")
+# Fora de `_ACTION_KEYS`, `/S` também nomeia transição, rótulo de página, estrutura, grupo e
+# máscara: uma allowlist geral recusaria PDFs comuns. Por isso, em qualquer dicionário, vale a
+# lista negra dos tipos de ação que executam, abrem, enviam ou escondem algo (ISO 32000, 12.6.4).
+_DANGEROUS_ACTIONS = frozenset(
+    {
+        "/Launch",
+        "/GoToR",
+        "/GoToE",
+        "/SubmitForm",
+        "/ImportData",
+        "/JavaScript",
+        "/Rendition",
+        "/Hide",
+        "/SetOCGState",
+        "/RichMediaExecute",
+    }
+)
 _MULTIMEDIA_SUBTYPES = frozenset({"/Movie", "/Sound", "/Screen", "/RichMedia", "/3D"})
 _SIGNATURE_KEYS = frozenset({"/Perms", "/ByteRange", "/SigFlags"})
 _SIGNATURE_TYPES = frozenset({"/Sig", "/DocTimeStamp"})
@@ -241,6 +259,9 @@ def _reasons_of(node: pikepdf.Object) -> Iterator[str]:
         yield "multimídia"
     if "/Collection" in keys:
         yield "portfólio de PDFs"
+    action_kind = str(node.get("/S", ""))
+    if action_kind in _DANGEROUS_ACTIONS:
+        yield f"ação {action_kind}"
     for key in _ACTION_KEYS:
         if key in keys:
             yield from (f"ação {kind}" for kind in _disallowed_actions(node[key]))

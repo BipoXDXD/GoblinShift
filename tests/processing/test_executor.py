@@ -14,7 +14,7 @@ import sys
 import tempfile
 import warnings
 import zipfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,8 +23,8 @@ import pytest
 from PIL import Image
 
 from goblinshift.processing import image_forge
-from goblinshift.processing.csv_janitor import Limits
-from goblinshift.processing.csv_janitor.recipe import MAX_TABLES
+from goblinshift.processing.csv_janitor import Limits, params_from_mapping
+from goblinshift.processing.csv_janitor.recipe import MAX_TABLES, CsvJanitorV1
 from goblinshift.processing.executor import execution
 from goblinshift.processing.executor.execution import ExitCode, main
 from goblinshift.processing.packaging import PackageLimits
@@ -34,6 +34,7 @@ from goblinshift.processing.recipe import (
     ItemOk,
     OutputDir,
     OutputRole,
+    Progress,
     RecipeFailure,
     Report,
 )
@@ -554,9 +555,108 @@ def test_outro_erro_de_disco_continua_infraestrutura(
     assert main([str(work)]) == ExitCode.INFRASTRUCTURE
 
 
+class MemoryHungryRecipe:
+    def execute(self, *_: object) -> Report:
+        raise MemoryError("/srv/area/tmp/segredo.pdf")
+
+
+def exhausted_package(*_: object) -> None:
+    raise MemoryError
+
+
+@pytest.mark.parametrize("phase", ["recipe", "package"])
+def test_memoria_esgotada_e_falha_deterministica_de_recurso(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+) -> None:
+    if phase == "recipe":
+        monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): MemoryHungryRecipe()})
+    else:
+        monkeypatch.setattr(execution, "package", exhausted_package)
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+
+    assert main([str(work)]) == ExitCode.RECIPE_FAILURE
+
+    failure = json.loads((work / "failure.json").read_text(encoding="utf-8"))
+    assert failure == {
+        "code": "RESOURCE_LIMIT_EXCEEDED",
+        "detail": "a execução passou do limite de memória",
+    }
+    err = capsys.readouterr().err
+    assert "executor: memória esgotada" in err.splitlines()
+    assert "Traceback" not in err
+
+
 def test_falha_ao_gravar_os_tempos_nao_muda_o_codigo_de_saida(tmp_path: Path) -> None:
     work = make_work_dir(tmp_path, [("clientes.csv", VALID)])
     # Criação exclusiva: um diretório no lugar do arquivo faz a gravação falhar.
     (work / "telemetry.json").mkdir()
 
     assert main([str(work)]) == ExitCode.SUCCEEDED
+
+
+class SmallTablesCsvJanitor:
+    """csv-janitor com teto de tabela pequeno: os 8 MiB reais custariam caro em cada caso."""
+
+    def __init__(self, table_bytes: int) -> None:
+        self._recipe = CsvJanitorV1(limits=Limits(table_bytes=table_bytes))
+
+    def execute(
+        self,
+        raw_params: Mapping[str, object],
+        inputs: Sequence[InputFile],
+        out: OutputDir,
+        progress: Progress,
+    ) -> Report:
+        return self._recipe.run(params_from_mapping(raw_params), inputs, out, progress)
+
+
+def test_tabela_que_cresce_alem_do_limite_na_saida_nao_e_falha_de_infraestrutura(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    grows = b"a\r\n=1\r\n"  # o prefixo tab soma 3 bytes na saída
+    monkeypatch.setattr(
+        execution, "RECIPES", {("csv-janitor", 1): SmallTablesCsvJanitor(len(grows))}
+    )
+    work = make_work_dir(
+        tmp_path,
+        [("cresce.csv", grows), ("ok.csv", b"b\r\n1\r\n")],
+        {"formula_guard": "tab_prefix"},
+    )
+
+    assert main([str(work)]) == ExitCode.SUCCEEDED
+
+    report = json.loads((work / "out" / "report.json").read_text(encoding="utf-8"))
+    assert [item["status"] for item in report["items"]] == ["rejected", "ok"]
+    assert report["items"][0]["code"] == "FIELD_LIMIT_EXCEEDED"
+
+
+def test_cabecalhos_de_formula_longos_em_todas_as_tabelas_cabem_no_relatorio(
+    tmp_path: Path,
+) -> None:
+    # 100 nomes de ~10 KiB que começam com "=": sem o corte dos nomes nos avisos, o relatório
+    # passaria de 8 MiB e o lote inteiro falharia com REPORT_LIMIT_EXCEEDED.
+    header = ",".join(f"={column:03}" + "x" * 10_000 for column in range(100))
+    table = f"{header}\r\n{','.join(['=1'] * 100)}\r\n".encode()
+    work = make_work_dir(tmp_path, [(f"t{i}.csv", table) for i in range(MAX_TABLES)])
+
+    assert main([str(work)]) == ExitCode.SUCCEEDED
+
+    report = json.loads((work / "out" / "report.json").read_text(encoding="utf-8"))
+    assert report["summary"]["ok"] == MAX_TABLES
+
+
+def test_nomes_longos_na_contagem_por_coluna_cabem_no_relatorio(tmp_path: Path) -> None:
+    # Cada controle vira "\u0001" no JSON (6 bytes): com os nomes inteiros nas colunas do aviso,
+    # duas tabelas de ~1 MiB passariam de 8 MiB e o lote falharia com REPORT_LIMIT_EXCEEDED.
+    header = ",".join(f"={column:03}" + "\x01" * 10_000 for column in range(100))
+    table = f"{header}\r\n{','.join(['=1'] * 100)}\r\n".encode()
+    work = make_work_dir(tmp_path, [("a.csv", table), ("b.csv", table)])
+
+    assert main([str(work)]) == ExitCode.SUCCEEDED
+
+    report = json.loads((work / "out" / "report.json").read_text(encoding="utf-8"))
+    [cells] = [w for w in report["items"][0]["warnings"] if w["code"] == "CSV_FORMULA_CELLS"]
+    assert {len(column["name"]) for column in cells["columns"]} == {120}
