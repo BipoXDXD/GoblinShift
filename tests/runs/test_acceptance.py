@@ -541,8 +541,12 @@ def test_aceitacao_concorrente_espera_a_trava_da_fila_e_ve_a_decima(
         release.set()
 
     assert first.result().replayed is False
-    with pytest.raises(QueueFullError):
+    # "cheia", e não "ocupada": a recusa vem da contagem relida, não do lock_timeout.
+    with pytest.raises(QueueFullError, match="cheia"):
         second.result()
+    with factory() as session:
+        queued = session.execute(select(func.count()).where(run.c.status == "queued")).scalar_one()
+    assert queued == MAX_QUEUED_RUNS
 
 
 def test_fila_travada_alem_do_lock_timeout_responde_fila_cheia(
