@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Connection, Engine, Table, insert, inspect, update
+from sqlalchemy import Connection, Engine, Table, delete, func, insert, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 
 # Importar os módulos registra as tabelas no MetaData comum.
@@ -664,3 +664,82 @@ def test_id_nasce_como_uuid_versao_7_e_cresce_no_tempo(conn: Connection) -> None
 
     assert (primeiro.version, segundo.version) == (7, 7)
     assert primeiro < segundo
+
+
+# --- 8. Candidato amarrado à tentativa --------------------------------------------------------
+
+
+def criar_candidato(
+    conn: Connection, owner_id: UUID, attempt_id: UUID | None, generation: int | None
+) -> UUID:
+    """Saída já confirmada de uma tentativa, ainda sem artefato."""
+    return _insert_returning_id(
+        conn,
+        stored_object,
+        owner_id=owner_id,
+        storage_key=f"runs/{uuid4()}",
+        state="committed",
+        sha256=SHA256,
+        size_bytes=10,
+        attempt_id=attempt_id,
+        generation=generation,
+    )
+
+
+def test_candidato_de_tentativa_inexistente_e_recusado(conn: Connection) -> None:
+    alice = criar_conta(conn)
+    tentativa = criar_tentativa(conn, criar_run_terminal(conn, alice), 1, ended_at=AGORA)
+
+    with barrado_por(conn, "stored_object_attempt_id_fkey"):
+        criar_candidato(conn, alice, uuid4(), 1)
+
+    criar_candidato(conn, alice, tentativa, 1)
+
+
+def test_candidato_com_geracao_diferente_da_tentativa_e_recusado(conn: Connection) -> None:
+    # O fencing da publicação supõe que a geração do candidato é a da tentativa que o criou.
+    alice = criar_conta(conn)
+    tentativa = criar_tentativa(conn, criar_run_terminal(conn, alice), 1, ended_at=AGORA)
+
+    with barrado_por(conn, "stored_object_attempt_id_fkey"):
+        criar_candidato(conn, alice, tentativa, 2)
+
+
+@pytest.mark.parametrize(
+    ("com_tentativa", "generation"),
+    [(True, None), (False, 1)],
+    ids=["sem-geracao", "geracao-sem-tentativa"],
+)
+def test_tentativa_e_geracao_vem_juntas(
+    conn: Connection, com_tentativa: bool, generation: int | None
+) -> None:
+    alice = criar_conta(conn)
+    tentativa = criar_tentativa(conn, criar_run_terminal(conn, alice), 1, ended_at=AGORA)
+
+    with barrado_por(conn, "stored_object_attempt_generation_check"):
+        criar_candidato(conn, alice, tentativa if com_tentativa else None, generation)
+
+
+def test_purga_da_run_anula_a_tentativa_do_candidato_publicado(conn: Connection) -> None:
+    alice = criar_conta(conn)
+    run_id = criar_run_terminal(conn, alice)
+    tentativa = criar_tentativa(conn, run_id, 1, ended_at=AGORA)
+    objeto = criar_candidato(conn, alice, tentativa, 1)
+    artefato = _insert_returning_id(
+        conn,
+        artifact,
+        owner_id=alice,
+        object_id=objeto,
+        role="output",
+        file_name="saida.csv",
+        expires_at=UMA_HORA_DEPOIS,
+    )
+
+    conn.execute(delete(run).where(run.c.id == run_id))
+
+    assert conn.execute(
+        select(stored_object.c.attempt_id, stored_object.c.generation).where(
+            stored_object.c.id == objeto
+        )
+    ).one() == (None, None)
+    assert conn.execute(select(func.count()).where(artifact.c.id == artefato)).scalar_one() == 1

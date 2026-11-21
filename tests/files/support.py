@@ -1,4 +1,8 @@
-"""Construtores de dados dos testes de `files`, sempre pela API pública do módulo."""
+"""Construtores de dados dos testes de `files`, pela API pública do módulo.
+
+A exceção é `create_attempt`: a tentativa é de `runs`, e o candidato só precisa que ela exista
+(FK `stored_object_attempt_id_fkey`), então a Run e a tentativa entram direto nas tabelas.
+"""
 
 import uuid
 from datetime import timedelta
@@ -12,6 +16,7 @@ from goblinshift.files.uploads import UploadIntent, UploadView, create_intents, 
 from goblinshift.identity import CURRENT_TERMS_VERSION
 from goblinshift.identity.tables import app_user
 from goblinshift.platform.db import unit_of_work
+from goblinshift.runs.tables import attempt, run
 
 
 def create_user(factory: sessionmaker[Session], subject: str) -> uuid.UUID:
@@ -67,3 +72,41 @@ def mark_mounted(storage: FileStorage) -> None:
     """A sentinela que o `storage-mark` grava no filesystem montado (deploy/storage-mark.sh)."""
     storage.root.mkdir(parents=True, exist_ok=True)
     (storage.root / MOUNT_MARKER).touch()
+
+
+def create_attempt(
+    factory: sessionmaker[Session], owner: uuid.UUID, generation: int = 1
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Run terminal com uma tentativa encerrada, que os candidatos podem referenciar.
+
+    Terminal para não ocupar a vaga de Run ativa da conta. Devolve `(run_id, attempt_id)`.
+    """
+    with unit_of_work(factory) as session:
+        run_id: uuid.UUID = session.execute(
+            insert(run)
+            .values(
+                owner_id=owner,
+                recipe_id="csv-janitor",
+                recipe_version=1,
+                executor_digest="sha256:" + "0" * 64,
+                limits={},
+                status="failed",
+                error_code="INFRA_POISON",
+                queue_expires_at=func.now(),
+                finished_at=func.now(),
+            )
+            .returning(run.c.id)
+        ).scalar_one()
+        attempt_id: uuid.UUID = session.execute(
+            insert(attempt)
+            .values(
+                run_id=run_id,
+                number=1,
+                generation=generation,
+                container_name=f"gs-exec-{run_id}-1",
+                lease_expires_at=func.now(),
+                ended_at=func.now(),
+            )
+            .returning(attempt.c.id)
+        ).scalar_one()
+    return run_id, attempt_id

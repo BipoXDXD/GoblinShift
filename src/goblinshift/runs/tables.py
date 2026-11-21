@@ -20,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
+from goblinshift.files.tables import stored_object
 from goblinshift.platform.db import metadata
 
 _ACTIVE = "status IN ('queued', 'running', 'stopping')"
@@ -145,6 +146,9 @@ attempt = Table(
     Column("error_code", Text),
     UniqueConstraint("run_id", "number"),
     UniqueConstraint("run_id", "generation"),
+    # Trivialmente única (`id` é a PK): existe para a FK composta do candidato (migração 0020). O
+    # índice dela é o próprio da constraint, criado CONCURRENTLY e promovido com USING INDEX.
+    UniqueConstraint("id", "generation", name="attempt_id_generation_key"),
     # Nunca duas tentativas vivas por execução, mesmo diante de um bug (3.4).
     Index(
         "attempt_one_alive_per_run_idx",
@@ -155,6 +159,19 @@ attempt = Table(
     Index("attempt_lease_idx", "lease_expires_at", postgresql_where=text("ended_at IS NULL")),
     # Uma linha por claim; o quinto claim vira INFRA_POISON em vez de nova tentativa (3.4).
     CheckConstraint("number BETWEEN 1 AND 4", name="number"),
+)
+
+# Declarada aqui porque `files` não conhece `runs` (as camadas só descem). Composta porque o
+# PostgreSQL só anula no `SET NULL` colunas da própria FK: a purga da Run apaga a tentativa e anula
+# as duas colunas do candidato juntas, sem violar a CHECK do par em `files/tables.py`. De quebra, a
+# geração do candidato é sempre a da tentativa (migrações 0020 e 0021).
+stored_object.append_constraint(
+    ForeignKeyConstraint(
+        [stored_object.c.attempt_id, stored_object.c.generation],
+        [attempt.c.id, attempt.c.generation],
+        name="stored_object_attempt_id_fkey",
+        ondelete="SET NULL",
+    )
 )
 
 run_output = Table(

@@ -30,7 +30,7 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.files.tables import artifact, object_use, upload
 from goblinshift.files.uploads import get_upload, lock_ready_uploads, request_deletion
 from goblinshift.platform.db import unit_of_work
-from tests.files.support import create_intent, create_user, ready_upload
+from tests.files.support import create_attempt, create_intent, create_user, ready_upload
 from tests.sql_capture import captured_sql
 
 pytestmark = pytest.mark.integration
@@ -47,7 +47,7 @@ def open_uses(factory: sessionmaker[Session]) -> int:
 def published_artifact(
     factory: sessionmaker[Session], storage: FileStorage, owner: uuid.UUID, content: bytes
 ) -> uuid.UUID:
-    run_id, attempt_id = uuid.uuid4(), uuid.uuid4()
+    run_id, attempt_id = create_attempt(factory, owner)
     with unit_of_work(factory) as session:
         candidate = create_candidate_object(session, owner, run_id, attempt_id, generation=1)
     sha256, size = storage.create_exclusive(candidate.storage_key, [content], max_bytes=100)
@@ -323,10 +323,10 @@ def test_hold_em_objeto_com_exclusao_pedida_e_recusado(
 
 def test_candidato_usa_chave_da_execucao_e_da_geracao(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "a")
-    run_id = uuid.uuid4()
+    run_id, attempt_id = create_attempt(factory, owner, generation=3)
 
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner, run_id, uuid.uuid4(), generation=3)
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, generation=3)
 
     assert candidate.storage_key.startswith(f"runs/{run_id}/g3/")
 
@@ -335,9 +335,9 @@ def test_artefato_publicado_expira_em_48_horas(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
     owner = create_user(factory, "a")
-    run_id = uuid.uuid4()
+    run_id, attempt_id = create_attempt(factory, owner)
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner, run_id, uuid.uuid4(), generation=1)
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, generation=1)
     sha256, size = storage.create_exclusive(candidate.storage_key, [b"saida"], max_bytes=100)
 
     with unit_of_work(factory) as session:
@@ -353,8 +353,9 @@ def test_artefato_publicado_expira_em_48_horas(
 
 def test_publicar_objeto_ainda_pendente_e_recusado(factory: sessionmaker[Session]) -> None:
     owner = create_user(factory, "a")
+    run_id, attempt_id = create_attempt(factory, owner)
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner, uuid.uuid4(), uuid.uuid4(), 1)
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
 
     with pytest.raises(ObjectNotAvailableError), unit_of_work(factory) as session:
         publish_artifact(session, owner, candidate.object_id, ArtifactRole.OUTPUT, "saida.csv")

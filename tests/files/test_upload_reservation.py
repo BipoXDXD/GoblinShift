@@ -44,7 +44,7 @@ from tests.capacity.support import (
     live_amount,
     set_global_max,
 )
-from tests.files.support import create_intent, create_user, ready_upload
+from tests.files.support import create_attempt, create_intent, create_user, ready_upload
 
 pytestmark = pytest.mark.integration
 
@@ -289,9 +289,9 @@ def test_reconciliacao_corrige_pool_divergente(
 
 def candidate_object(factory: sessionmaker[Session], owner: uuid.UUID, size: int) -> uuid.UUID:
     """Objeto `committed` de uma tentativa, ainda candidato (sem artefato)."""
-    attempt_id = uuid.uuid4()
+    run_id, attempt_id = create_attempt(factory, owner)
     with unit_of_work(factory) as session:
-        candidate = create_candidate_object(session, owner, uuid.uuid4(), attempt_id, 1)
+        candidate = create_candidate_object(session, owner, run_id, attempt_id, 1)
         commit_candidate(session, owner, candidate.object_id, b"\x01" * 32, size)
         state = session.execute(
             select(stored_object.c.state).where(stored_object.c.id == candidate.object_id)
