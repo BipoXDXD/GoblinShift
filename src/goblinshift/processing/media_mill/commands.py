@@ -188,6 +188,9 @@ class LogSummary:
     frame_count: int
     max_long_side_px: int
     max_short_side_px: int
+    # Do menor ao maior instante entre esses quadros (0 sem quadros): não fica negativo se o
+    # `pts` de um arquivo hostil andar para trás.
+    frame_span_s: float
 
 
 def read_log(path: Path) -> LogSummary:
@@ -197,10 +200,13 @@ def read_log(path: Path) -> LogSummary:
     last: float | None = None
     last_audio: float | None = None
     frame_count = long_side = short_side = 0
+    lowest_s = highest_s = 0.0
     for line in _lines(path):
         has_errors = has_errors or any(level in line for level in _ERROR_LEVELS)
         frame_s = _frame_time(line, _SHOWINFO)
         if frame_s is not None:
+            lowest_s = frame_s if first is None else min(lowest_s, frame_s)
+            highest_s = frame_s if first is None else max(highest_s, frame_s)
             first = frame_s if first is None else first
             last = frame_s
             frame_count += 1
@@ -218,6 +224,7 @@ def read_log(path: Path) -> LogSummary:
         frame_count=frame_count,
         max_long_side_px=long_side,
         max_short_side_px=short_side,
+        frame_span_s=highest_s - lowest_s,
     )
 
 

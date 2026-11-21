@@ -220,8 +220,10 @@ def require_observed_frame_rate(frame_count: int, elapsed_s: float, limits: Limi
 
     `frame_count` quadros cobrem `frame_count - 1` intervalos entre o primeiro e o último
     instante. A folga absorve o arredondamento do `pts_time` (6 casas) de um vídeo legítimo
-    exatamente no teto.
+    exatamente no teto. Sem quadros, nada a checar.
     """
+    if elapsed_s < 0:
+        raise ValueError(f"intervalo negativo entre quadros: {elapsed_s}")
     if frame_count - 1 > limits.max_fps * elapsed_s + 1:
         raise MediaRejected(
             RejectionCode.MEDIA_TOO_LARGE,

@@ -300,9 +300,7 @@ class _Mill:
         log = read_log(outcome.log)
         require_dimensions_within(log.max_long_side_px, log.max_short_side_px, self._limits)
         # Esta leitura decodifica do início até o alvo: é onde a taxa declarada pode mentir.
-        if log.first_frame_s is not None and log.last_frame_s is not None:
-            elapsed_s = log.last_frame_s - log.first_frame_s
-            require_observed_frame_rate(log.frame_count, elapsed_s, self._limits)
+        require_observed_frame_rate(log.frame_count, log.frame_span_s, self._limits)
         if (
             not outcome.succeeded
             or log.has_errors

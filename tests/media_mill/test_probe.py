@@ -442,6 +442,7 @@ def test_quadro_observado_acima_do_teto_e_media_too_large(
 @pytest.mark.parametrize(
     ("frames", "elapsed", "allowed"),
     [
+        pytest.param(0, 0.0, True, id="sem-quadros"),
         pytest.param(1, 0.0, True, id="um-quadro"),
         pytest.param(62, 1.0, True, id="61-intervalos-em-1s"),
         pytest.param(63, 1.0, False, id="62-intervalos-em-1s"),
@@ -457,3 +458,8 @@ def test_taxa_observada_respeita_o_teto_com_um_quadro_de_folga(
     with pytest.raises(MediaRejected) as rejected:
         require_observed_frame_rate(frames, elapsed, Limits())
     assert rejected.value.code is RejectionCode.MEDIA_TOO_LARGE
+
+
+def test_intervalo_negativo_e_defeito_de_quem_chama() -> None:
+    with pytest.raises(ValueError, match="negativo"):
+        require_observed_frame_rate(2, -0.5, Limits())

@@ -194,6 +194,7 @@ def test_log_sem_quadros(tmp_path: Path) -> None:
 
     assert (summary.has_errors, summary.first_frame_s, summary.last_frame_s) == (False, None, None)
     assert (summary.frame_count, summary.max_long_side_px, summary.max_short_side_px) == (0, 0, 0)
+    assert summary.frame_span_s == 0.0
 
 
 def test_log_guarda_o_instante_do_ultimo_quadro_de_audio(tmp_path: Path) -> None:
@@ -279,3 +280,25 @@ def test_texto_do_usuario_no_log_nao_vira_quadro(tmp_path: Path) -> None:
         320,
         240,
     )
+
+
+def test_intervalo_dos_quadros_vai_do_menor_ao_maior_instante_mesmo_com_pts_voltando(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:0 pts:512 pts_time:2 s:320x240\n"
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:1 pts:1024 pts_time:5 s:320x240\n"
+        b"[Parsed_showinfo_0 @ 0x2] [info] n:2 pts:0 pts_time:0.5 s:320x240\n"
+    )
+
+    summary = read_log(log)
+
+    assert (summary.first_frame_s, summary.last_frame_s, summary.frame_span_s) == (2.0, 0.5, 4.5)
+
+
+def test_um_quadro_so_tem_intervalo_zero(tmp_path: Path) -> None:
+    log = tmp_path / "x.log"
+    log.write_bytes(b"[Parsed_showinfo_0 @ 0x2] [info] n:0 pts:512 pts_time:2 s:320x240\n")
+
+    assert read_log(log).frame_span_s == 0.0
