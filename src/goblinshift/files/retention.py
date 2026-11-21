@@ -39,7 +39,7 @@ from goblinshift.files.objects import (
     select_purgeable,
 )
 from goblinshift.files.states import ObjectState, UploadState
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, ObjectTamperedError
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.platform.sql import skip_locked_batch
 
@@ -76,11 +76,11 @@ def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     """Apaga o arquivo de uma linha já confirmada; `False` se ele ficou no disco.
 
     Nada repete a remoção depois do commit: a falha vira alerta com a chave e não impede
-    que o resto do lote saia do disco.
+    que o resto do lote saia do disco. Um diretório adulterado no caminho é uma dessas falhas.
     """
     try:
         storage.delete(key)
-    except OSError:
+    except OSError, ObjectTamperedError:
         logger.warning(
             "arquivo não removido do disco",
             exc_info=True,

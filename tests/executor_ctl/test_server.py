@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 
@@ -362,6 +363,21 @@ def test_sonda_responde_200_com_so_o_booleano_presente_ou_ausente(
 
 
 @pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_sonda_aceita_a_ref_codificada_e_entrega_ao_docker_a_ref_decodificada(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    docker, calls = recording_docker(tmp_path)
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+
+    with running_server(config, docker) as socket:
+        response = call(socket, "GET", image_path(quote(ALLOWED, safe="")))
+
+    assert response.status == 200
+    assert response.body == {"present": True}
+    assert json.loads(calls.read_text()) == ["image", "inspect", "--format={{.Id}}", ALLOWED]
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
 @pytest.mark.parametrize(
     "ref",
     [
@@ -412,8 +428,9 @@ def test_sonda_com_docker_ausente_da_503_e_nunca_diz_ausente(
         "-x@sha256:" + "a" * 64,
         ALLOWED + "&ref=" + OTHER_IMAGE,
         ALLOWED + "#x",
-        ALLOWED.replace("@", "%40"),
         ALLOWED + "%20--privileged",
+        quote(ALLOWED + "&ref=" + OTHER_IMAGE, safe=""),
+        ALLOWED.replace("@", "%2540"),
     ],
 )
 def test_sonda_com_ref_malformada_da_400_sem_devolver_a_ref(ctl_socket: Path, ref: str) -> None:
