@@ -23,7 +23,8 @@ export function EmptyState({
 }: EmptyStateProps): ReactElement {
   return (
     <div className="flex flex-col items-center gap-2 rounded-lg bg-surface px-6 py-8 text-center text-fg-muted shadow-card">
-      {illustration}
+      {/* 24 px até o título: a goblin é um grupo à parte, não uma linha do texto (RUI cap. 3). */}
+      {illustration !== undefined && <div className="mb-4">{illustration}</div>}
       <Heading level={headingLevel} className="text-lg font-semibold text-fg">
         {title}
       </Heading>
