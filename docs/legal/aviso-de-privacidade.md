@@ -165,7 +165,7 @@ de taxa são regras fixas e públicas, aplicadas igualmente a todas as contas.
 | Registros de idempotência (proteção contra pedido repetido) | 24 horas | Registro apagado |
 | Telemetria | 30 dias | Expiração automática no servidor de telemetria |
 | Logs técnicos dos serviços da aplicação | Até 50 MiB por serviço (5 arquivos de 10 MiB), o que cobre cerca de 14 dias no volume previsto; com pouco tráfego, uma linha pode durar mais. Os logs também somem sempre que o serviço é recriado, o que acontece a cada atualização | Rotação por tamanho |
-| Mensagens técnicas do proxy de borda do nosso servidor | Sem teto de tamanho nem prazo fixo: ficam até o proxy ser recriado. Ele não grava registro de acesso, mas uma mensagem de erro pode trazer o endereço e o caminho da requisição | Recriação do proxy |
+| Mensagens técnicas do proxy de borda do nosso servidor | Sem teto de tamanho nem prazo fixo: ficam até o proxy ser recriado. Ele não grava registro de acesso, mas uma mensagem de erro pode trazer o endereço IP truncado e o caminho da requisição sem a query string | Recriação do proxy |
 | Backup cifrado do banco de dados | Até 31 dias: cada cópia fica imutável por 30 dias, é ocultada nesse prazo e apagada 1 dia depois | Expiração automática no provedor do backup |
 | Mensagens que você nos envia por e-mail (item 3.6) | 12 meses depois do fim da conversa | Mensagens apagadas da caixa de e-mail |
 | Registros preservados em caso de abuso sexual infantil (item 7 dos Termos de Uso) | O prazo que a autoridade indicar; sem indicação, 6 meses a partir da comunicação | Registros apagados |
