@@ -28,7 +28,7 @@ const LIMITS_KB = {
    */
   threeDModel: 8192,
   /**
-   * ADR 038 (revisto em 2026-11-22): cada uma das outras goblins do elenco, na mesma configuração
+   * ADR 030 (revisto em 2026-11-22): cada uma das outras goblins do elenco, na mesma configuração
    * da Rúbia, mede de 5292 KB (Ferrugem) a 5621 KB (Fagulha); só baixa quando a pessoa a escolhe
    * no seletor.
    */
@@ -64,8 +64,9 @@ const ILLUSTRATION_LIMITS: WidthLimits = [
   [1280, 180],
 ];
 /**
- * Imagem estática do 3D (e miniatura do seletor): a de 960 px é a que a abertura mostra. Medido
- * em 2026-11-22, o maior arquivo é da Rúbia em WebP: 45 KB (640) e 71 KB (960).
+ * Imagem estática do 3D (e miniatura do seletor). Hoje a abertura usa até 640 px; a de 960 px é a
+ * do palco maior (PR C), e o teto já a reserva. Medido em 2026-11-22, o maior arquivo é da Rúbia
+ * em WebP: 45 KB (640) e 71 KB (960).
  */
 const POSTER_LIMITS: WidthLimits = [
   [640, 90],
