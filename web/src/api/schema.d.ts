@@ -742,6 +742,8 @@ export interface components {
             request_id: string;
             /** Errors */
             errors?: components["schemas"]["FieldError"][] | null;
+            /** Errors Truncated */
+            errors_truncated?: true | null;
         };
         /** Progress */
         Progress: {

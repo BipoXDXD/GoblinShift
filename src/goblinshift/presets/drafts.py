@@ -12,7 +12,7 @@ de novo, e os resolvidos nem sempre passam por uma segunda validação (o Detox 
 
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from goblinshift.catalog import (
     CATALOG,
@@ -33,7 +33,7 @@ class InvalidPresetError(ValueError):
 
     def __init__(self, errors: Iterable[FieldError]) -> None:
         self.errors = tuple(errors)
-        super().__init__("; ".join(f"{e.location}: {e.message}" for e in self.errors))
+        super().__init__("; ".join(map(str, self.errors)))
 
 
 @dataclass(frozen=True)
@@ -54,12 +54,12 @@ def parse_draft(
     normalized_name = unicodedata.normalize("NFC", name).strip()
     name_error = _name_error(normalized_name)
     if name_error is not None:
-        errors.append(FieldError("name", name_error))
+        errors.append(FieldError(("name",), name_error))
     try:
         recipe = CATALOG.get_version(recipe_id, recipe_version)
     except UnknownRecipeVersionError:
         raise InvalidPresetError(
-            [*errors, FieldError("recipe_version", "versão de receita desconhecida")]
+            [*errors, FieldError(("recipe_version",), "versão de receita desconhecida")]
         ) from None
     if recipe.status is VersionStatus.RETIRED:
         raise RecipeVersionRetiredError(f"{recipe.recipe_id} v{recipe.version}")
@@ -75,8 +75,7 @@ def parse_draft(
 
 
 def _under_parameters(error: FieldError) -> FieldError:
-    location = f"parameters.{error.location}" if error.location else "parameters"
-    return FieldError(location, error.message)
+    return replace(error, location=("parameters", *error.location))
 
 
 def _name_error(name: str) -> str | None:

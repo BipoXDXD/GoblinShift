@@ -576,7 +576,7 @@ def test_upload_repetido_e_recusado(factory: sessionmaker[Session], storage: Fil
     with pytest.raises(InvalidRunCommandError) as caught:
         accept(factory, owner, run_command([upload_id, upload_id]))
 
-    assert [e.location for e in caught.value.errors] == ["input_upload_ids"]
+    assert [e.location for e in caught.value.errors] == [("input_upload_ids",)]
 
 
 def test_cinco_tabelas_sao_aceitas(factory: sessionmaker[Session], storage: FileStorage) -> None:
@@ -596,7 +596,7 @@ def test_seis_tabelas_sao_recusadas(factory: sessionmaker[Session], storage: Fil
     with pytest.raises(InvalidRunCommandError) as caught:
         accept(factory, owner, run_command(inputs))
 
-    assert [e.location for e in caught.value.errors] == ["input_upload_ids"]
+    assert [e.location for e in caught.value.errors] == [("input_upload_ids",)]
     assert count_rows(factory)["run"] == 0
 
 
@@ -606,7 +606,7 @@ def test_lista_vazia_de_uploads_e_recusada(factory: sessionmaker[Session]) -> No
     with pytest.raises(InvalidRunCommandError) as caught:
         accept(factory, owner, run_command([]))
 
-    assert [e.location for e in caught.value.errors] == ["input_upload_ids"]
+    assert [e.location for e in caught.value.errors] == [("input_upload_ids",)]
 
 
 @pytest.mark.parametrize("reason", ["inexistente", "alheio", "nao-pronto", "excluido", "vencido"])
@@ -633,14 +633,14 @@ def test_parametro_invalido_aponta_o_campo_dentro_de_parameters(
     with pytest.raises(InvalidRunCommandError) as caught:
         accept(factory, owner, run_command(inputs, {"formula_guard": "talvez"}))
 
-    assert [e.location for e in caught.value.errors] == ["parameters.formula_guard"]
+    assert [e.location for e in caught.value.errors] == [("parameters", "formula_guard")]
 
 
 def test_campo_desconhecido_nos_parametros_e_recusado() -> None:
     with pytest.raises(InvalidRunCommandError) as caught:
         validate_run(run_command([], {"desconhecido": 1}))
 
-    assert [e.location for e in caught.value.errors] == ["parameters.desconhecido"]
+    assert [e.location for e in caught.value.errors] == [("parameters", "desconhecido")]
 
 
 def test_versao_desconhecida_e_recusada() -> None:
@@ -649,7 +649,7 @@ def test_versao_desconhecida_e_recusada() -> None:
     with pytest.raises(InvalidRunCommandError) as caught:
         validate_run(command)
 
-    assert [e.location for e in caught.value.errors] == ["recipe_version"]
+    assert [e.location for e in caught.value.errors] == [("recipe_version",)]
 
 
 def test_versao_retirada_e_recusada(monkeypatch: pytest.MonkeyPatch) -> None:

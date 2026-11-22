@@ -25,10 +25,13 @@ from goblinshift.processing.csv_janitor.params import MAX_FILTERS
 
 # Uma configuração não referencia mais colunas distintas do que uma tabela pode ter (1.7).
 MAX_COLUMNS = Limits().columns
+# Tetos dos textos livres (decisão D2 do #442), folgados para qualquer cabeçalho ou valor real.
+MAX_COLUMN_NAME_CHARS = 1024
+MAX_FILTER_VALUE_CHARS = 4096
 
 _STRICT = ConfigDict(extra="forbid", strict=True, frozen=True)
 
-type ColumnName = Annotated[str, Field(min_length=1)]
+type ColumnName = Annotated[str, Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)]
 # Enums chegam como o texto do JSON; o modo estrito do Pydantic só aceitaria a instância.
 type DelimiterOption = Annotated[Delimiter, Strict(False)]
 
@@ -48,7 +51,7 @@ class FilterParameters(BaseModel):
 
     column: ColumnName
     op: Annotated[FilterOp, Strict(False)]
-    value: str | None = None
+    value: Annotated[str, Field(max_length=MAX_FILTER_VALUE_CHARS)] | None = None
 
     @model_validator(mode="after")
     def _value_matches_operator(self) -> Self:

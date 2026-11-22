@@ -360,18 +360,15 @@ function fieldIssuesOf(failure: DisplayableFailure, recipe: RecipeModule): FormI
 }
 
 const SERVER_FIELD_ERRORS: Readonly<Record<string, string>> = TEXT.workbench.serverFieldErrors;
-const VALUE_ERROR_PREFIX = "Value error, ";
 
 /**
  * Texto de um erro por campo. `value_error` traz a regra de negócio escrita pelo próprio GoblinShift
- * (pt-BR, sem eco da entrada além dos nomes de coluna da pessoa), sem o prefixo do Pydantic; os
- * outros códigos são do Pydantic, em inglês, e ganham texto próprio.
+ * (pt-BR, só com a opção e a regra, sem eco da entrada); os outros códigos são do Pydantic, em
+ * inglês, e ganham texto próprio.
  */
 function fieldErrorText(code: string, message: string): string {
   if (code === "value_error") {
-    return message.startsWith(VALUE_ERROR_PREFIX)
-      ? message.slice(VALUE_ERROR_PREFIX.length)
-      : message;
+    return message;
   }
   const known = Object.hasOwn(SERVER_FIELD_ERRORS, code) ? SERVER_FIELD_ERRORS[code] : undefined;
   return known ?? TEXT.workbench.serverFieldErrors.fallback;

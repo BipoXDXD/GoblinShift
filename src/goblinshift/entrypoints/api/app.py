@@ -11,7 +11,7 @@ from functools import partial
 from importlib.metadata import version
 from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from opentelemetry.sdk.trace.export import SpanExporter
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -42,6 +42,7 @@ from goblinshift.entrypoints.api.problems import (
     install_problem_handlers,
     normalize_problem_responses,
 )
+from goblinshift.entrypoints.api.query_guard import reject_unknown_query
 from goblinshift.entrypoints.api.saturation import saturation_reporting
 from goblinshift.entrypoints.api.security_headers import SecurityHeadersMiddleware
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
@@ -162,7 +163,11 @@ def create_app(
     app.include_router(api_docs.router)
     app.include_router(auth_login.router)
     app.include_router(auth_session.router)
-    api = APIRouter(prefix=API_PREFIX, responses=PROBLEM_RESPONSES)
+    api = APIRouter(
+        prefix=API_PREFIX,
+        responses=PROBLEM_RESPONSES,
+        dependencies=[Depends(reject_unknown_query)],
+    )
     api.include_router(catalog.router)
     api.include_router(me.router)
     api.include_router(me_delete.router)

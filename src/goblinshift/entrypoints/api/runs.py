@@ -25,11 +25,17 @@ from goblinshift.entrypoints.api.capacity_problems import (
 from goblinshift.entrypoints.api.catalog import (
     MAX_RECIPE_ID_CHARS,
     RECIPE_ID_PATTERN,
+    RecipeIdField,
+    RecipeVersionField,
     deprecation_headers,
     recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
-from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
+from goblinshift.entrypoints.api.json_command import (
+    JSON_MEDIA_TYPE,
+    body_validation_error,
+    json_command,
+)
 from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
@@ -62,7 +68,7 @@ from goblinshift.runs.acceptance import (
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
-from goblinshift.runs.formula_cells import MAX_COLUMN_NAME_CHARS, MAX_COLUMNS, FormulaCells
+from goblinshift.runs.formula_cells import MAX_COLUMNS, MAX_REPORTED_COLUMN_NAME_CHARS, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, Phase, Status
 from goblinshift.runs.queries import (
     DEFAULT_PAGE_SIZE,
@@ -129,8 +135,8 @@ class NewRun(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    recipe_id: str = Field(min_length=1, max_length=MAX_RECIPE_ID_CHARS)
-    recipe_version: int = Field(ge=1)
+    recipe_id: RecipeIdField
+    recipe_version: RecipeVersionField
     input_upload_ids: list[UUID] = Field(default_factory=list, max_length=MAX_BATCH_FILES)
     parameters: dict[str, Any]
 
@@ -178,7 +184,7 @@ class RunSummaryResponse(BaseModel):
 class FormulaColumnResponse(BaseModel):
     # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto. Nulo
     # quando o cabeçalho é vazio ou só de espaços (a tela dá o rótulo).
-    name: str | None = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
+    name: str | None = Field(min_length=1, max_length=MAX_REPORTED_COLUMN_NAME_CHARS)
     cells: int = Field(ge=1)
 
 
@@ -621,16 +627,7 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
                 "Envie Idempotency-Key com 16 a 64 caracteres [A-Za-z0-9_-].",
             )
         case InvalidRunCommandError():
-            return RequestValidationError(
-                [
-                    {
-                        "loc": ("body", *field_error.location.split(".")),
-                        "type": "value_error",
-                        "msg": field_error.message,
-                    }
-                    for field_error in error.errors
-                ]
-            )
+            return body_validation_error(error.errors)
         case RecipeVersionRetiredError():
             return ApiProblem(
                 ProblemCode.RECIPE_VERSION_RETIRED, "A versão da receita foi retirada."

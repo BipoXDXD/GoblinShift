@@ -332,9 +332,7 @@ def test_substituir_com_campo_do_servidor_responde_422_sem_mudar(
     )
 
     problem = assert_problem(response, 422, "VALIDATION_FAILED")
-    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
-        (f"body.{field}", "extra_forbidden")
-    ]
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [("body", "extra_forbidden")]
     assert stored(factory, created["id"]) == {"name": "Mensal", "revision": 1, "parameters": {}}
     assert count_presets(factory) == 1
 

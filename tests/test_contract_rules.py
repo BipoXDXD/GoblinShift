@@ -373,7 +373,7 @@ def test_413_sem_corpo_realmente_grande_continua_falha(
 
 @pytest.mark.parametrize("operation", [CREATE_PRESET, REPLACE_PRESET, CREATE_RUN, RUN_PRESET])
 def test_aceita_413_de_comando_acima_do_teto_na_recusa_de_dado_valido(operation: str) -> None:
-    """Sem `maxLength` nos nomes de coluna, a spec permite um comando maior que o teto de bytes."""
+    """Mesmo com `maxLength` nos nomes de coluna, a spec permite um comando acima do teto."""
     rejection = _rejection(
         operation,
         413,

@@ -171,7 +171,7 @@ def test_comando_json_recusa_campo_que_o_cliente_nao_define(
 
     problem = assert_problem(response, 422, "VALIDATION_FAILED")
     errors = [(error["field"], error["code"]) for error in problem["errors"]]
-    assert (f"body.{extra}", "extra_forbidden") in errors
+    assert ("body", "extra_forbidden") in errors
 
 
 def test_nenhum_modelo_publicado_traz_campo_interno() -> None:

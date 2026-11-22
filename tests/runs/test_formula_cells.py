@@ -3,8 +3,8 @@
 import pytest
 
 from goblinshift.runs.formula_cells import (
-    MAX_COLUMN_NAME_CHARS,
     MAX_COLUMNS,
+    MAX_REPORTED_COLUMN_NAME_CHARS,
     ColumnCells,
     FormulaCells,
 )
@@ -34,14 +34,14 @@ def test_onze_colunas_guardam_dez_e_contam_a_que_ficou_de_fora() -> None:
 
 
 def test_nome_no_teto_fica_intacto_e_um_acima_e_cortado_com_reticencias() -> None:
-    at_limit = "x" * MAX_COLUMN_NAME_CHARS
-    above = "y" * (MAX_COLUMN_NAME_CHARS + 1)
+    at_limit = "x" * MAX_REPORTED_COLUMN_NAME_CHARS
+    above = "y" * (MAX_REPORTED_COLUMN_NAME_CHARS + 1)
 
     summary = FormulaCells.of([(at_limit, 2), (above, 1)])
 
-    assert MAX_COLUMN_NAME_CHARS == 120
+    assert MAX_REPORTED_COLUMN_NAME_CHARS == 120
     assert summary.columns[0].name == at_limit
-    assert summary.columns[1].name == "y" * (MAX_COLUMN_NAME_CHARS - 1) + "…"
+    assert summary.columns[1].name == "y" * (MAX_REPORTED_COLUMN_NAME_CHARS - 1) + "…"
 
 
 @pytest.mark.parametrize("char", ["\x00", "\t", "\u202e", "\u200b", "\ud800", "\udfff"])
