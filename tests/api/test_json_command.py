@@ -5,10 +5,12 @@ decodificado) mostram o uso das duas formas da dependência.
 """
 
 import json
+import uuid
 from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import Message, Scope
 
 from goblinshift.entrypoints.api.json_command import (
@@ -18,10 +20,17 @@ from goblinshift.entrypoints.api.json_command import (
 )
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 from tests.api.support import assert_problem
+from tests.identity.support import new_key
+from tests.runs.support import new_owner
 
 ECHO = "/api/v1/_test/echo"
 RAW = "/api/v1/_test/raw"
 JSON_HEADERS = {"Content-Type": "application/json"}
+# Em bytes: o `json=` do httpx não codifica um surrogate solto.
+SURROGATE_BODY = (
+    b'{"recipe_id":"csv-janitor","recipe_version":1,'
+    b'"parameters":{"filters":[{"column":"a","op":"equals","value":"x\\ud800"}]}}'
+)
 
 
 def echo_body_of_size(size: int) -> bytes:
@@ -115,6 +124,67 @@ def test_nul_em_texto_responde_400(offline_client: TestClient, body: bytes) -> N
 
     body_json = assert_problem(response, 400, "JSON_INVALID")
     assert "NUL" in body_json["detail"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b'{"text": "a\\ud800b"}', id="valor-alto"),
+        pytest.param(b'{"text": "a\\udfffb"}', id="valor-baixo"),
+        pytest.param(b'{"x": [{"a\\udc00": 1}]}', id="chave-aninhada"),
+        pytest.param(b'{"x": ["ok", ["\\ud800"]]}', id="lista-aninhada"),
+    ],
+)
+def test_surrogate_solto_em_texto_responde_400(offline_client: TestClient, body: bytes) -> None:
+    # Surrogate solto não existe em UTF-8: passava pela decodificação e quebrava com 500 ao
+    # calcular o hash canônico dos parâmetros da Run.
+    response = offline_client.post(RAW, content=body, headers=JSON_HEADERS)
+
+    body_json = assert_problem(response, 400, "JSON_INVALID")
+    assert "surrogate" in body_json["detail"]
+
+
+def test_par_de_surrogates_valido_e_aceito(offline_client: TestClient) -> None:
+    assert post_raw(offline_client, b'{"text": "\\ud83d\\ude00"}') == {
+        "value": {"text": "\U0001f600"}
+    }
+
+
+def test_surrogate_em_chave_do_json_e_400() -> None:
+    with pytest.raises(ApiProblem) as refused:
+        decode_json_command(b'{"parameters":{"\\udc00":1}}')
+
+    assert refused.value.code is ProblemCode.JSON_INVALID
+
+
+def test_nul_tem_prioridade_sobre_surrogate_na_mensagem() -> None:
+    with pytest.raises(ApiProblem) as refused:
+        decode_json_command(b'{"a": "\\ud800", "b": "\\u0000"}')
+
+    assert "NUL" in refused.value.detail
+
+
+@pytest.fixture
+def auth(factory: sessionmaker[Session]) -> dict[str, str]:
+    return {"Authorization": f"Bearer {new_key(factory, new_owner(factory)).token}"}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "path", ["/api/v1/runs", "/api/v1/runs?validate_only=true", "/api/v1/presets"]
+)
+def test_surrogate_solto_no_corpo_e_400(
+    client: TestClient, auth: dict[str, str], path: str
+) -> None:
+    body = SURROGATE_BODY
+    if "presets" in path:
+        body = SURROGATE_BODY.replace(b'{"recipe_id"', b'{"name":"p","recipe_id"')
+    # Em POST /runs a Idempotency-Key vai junto: o 400 sai antes da aceitação.
+    headers = {**auth, **JSON_HEADERS, "Idempotency-Key": uuid.uuid4().hex}
+
+    response = client.post(path, content=body, headers=headers)
+
+    assert_problem(response, 400, "JSON_INVALID")
 
 
 @pytest.mark.parametrize("literal", [b"NaN", b"Infinity", b"-Infinity", b"1e400", b"-1e400"])

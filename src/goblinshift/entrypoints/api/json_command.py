@@ -9,7 +9,8 @@ profundidade. Por isso as rotas de comando recebem o corpo por esta dependência
    confiar em `Content-Length`;
 3. UTF-8 estrito, sem chave duplicada, sem `NaN`/`Infinity` nem número que estoura para
    infinito, sem NUL (`\u0000`) em texto, que o PostgreSQL não guarda em `text` nem em `jsonb`,
-   e profundidade de no máximo 16 → senão 400 `JSON_INVALID`;
+   sem surrogate solto (U+D800 a U+DFFF sem par), que não tem forma em UTF-8, e
+   profundidade de no máximo 16 → senão 400 `JSON_INVALID`;
 4. só então o Pydantic valida em modo estrito, com campos extras proibidos pelo modelo (422).
 
 Uso numa rota, com o schema publicado no OpenAPI por `command_openapi` (3.6):
@@ -20,7 +21,8 @@ Uso numa rota, com o schema publicado no OpenAPI por `command_openapi` (3.6):
 
 import json
 import math
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
 from fastapi import Request
@@ -34,6 +36,11 @@ MAX_COMMAND_BYTES = 64 * 1024
 MAX_COMMAND_DEPTH = 16
 JSON_MEDIA_TYPE = "application/json"
 _DEFS_PREFIX = "#/$defs/"
+_NUL_MESSAGE = "O JSON tem o caractere NUL (\\u0000), que não é aceito."
+_SURROGATE_MESSAGE = "O JSON tem um surrogate solto (\\ud800\N{EN DASH}\\udfff), que não é aceito."
+# O `json` junta um par válido (`\ud83d\ude00`) num só caractere; o que sobra nesta faixa é
+# metade de par, que não tem forma em UTF-8 e quebra quem codifica o texto depois.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 class _JsonRejectedError(ValueError):
@@ -115,10 +122,9 @@ def decode_json_command(body: bytes) -> object:
         raise _too_deep() from None
     if _depth(value) > MAX_COMMAND_DEPTH:
         raise _too_deep()
-    if _has_nul(value):
-        raise ApiProblem(
-            ProblemCode.JSON_INVALID, "O JSON tem o caractere NUL (\\u0000), que não é aceito."
-        )
+    forbidden = _forbidden_char(value)
+    if forbidden is not None:
+        raise ApiProblem(ProblemCode.JSON_INVALID, forbidden)
     return value
 
 
@@ -166,15 +172,30 @@ def _depth(value: object) -> int:
     return deepest
 
 
-def _has_nul(value: object) -> bool:
-    """NUL em algum texto ou chave; só depois do teto de profundidade, que limita a pilha."""
+def _forbidden_char(value: object) -> str | None:
+    """Mensagem do caractere proibido em algum texto ou chave, com o NUL antes do surrogate.
+
+    Só depois do teto de profundidade, que limita a pilha de `_texts`.
+    """
+    texts = list(_texts(value))
+    if any("\0" in text for text in texts):
+        return _NUL_MESSAGE
+    if any(_LONE_SURROGATE.search(text) for text in texts):
+        return _SURROGATE_MESSAGE
+    return None
+
+
+def _texts(value: object) -> Iterator[str]:
+    """Todo texto do JSON: valores e chaves, em qualquer nível."""
     if isinstance(value, str):
-        return "\0" in value
-    if isinstance(value, dict):
-        return any(_has_nul(key) or _has_nul(item) for key, item in value.items())
-    if isinstance(value, list):
-        return any(_has_nul(item) for item in value)
-    return False
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _texts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _texts(item)
 
 
 def _inline_refs(node: Any, definitions: dict[str, Any]) -> Any:

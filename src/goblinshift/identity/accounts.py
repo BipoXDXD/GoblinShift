@@ -36,6 +36,7 @@ from goblinshift.identity.keys import (
 )
 from goblinshift.identity.principal import InvalidScopesError, Principal, Scope
 from goblinshift.identity.tables import api_key, app_user
+from goblinshift.processing.names import has_unsafe_char
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,10 @@ def create_admin_user(session: Session, display_name: str) -> UUID:
     name = display_name.strip()
     if not 1 <= len(name) <= MAX_DISPLAY_NAME_CHARS:
         raise InvalidDisplayNameError(f"o nome deve ter de 1 a {MAX_DISPLAY_NAME_CHARS} caracteres")
+    if has_unsafe_char(name):
+        raise InvalidDisplayNameError(
+            "o nome não aceita caracteres de controle nem de formato invisível"
+        )
     # Sem identidade externa, o sujeito é um identificador gerado e nunca reaproveitado.
     statement = (
         insert(app_user)
