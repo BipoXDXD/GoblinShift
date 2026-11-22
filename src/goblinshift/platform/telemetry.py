@@ -4,6 +4,7 @@ Os traces só são exportados quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definid
 endpoint, o nome do serviço e os headers seguem as variáveis padrão do OpenTelemetry.
 """
 
+import errno
 import hashlib
 import hmac
 import ipaddress
@@ -117,13 +118,18 @@ def omit_exception_detail(record: logging.LogRecord) -> bool:
 def exception_fields(error: BaseException) -> dict[str, str]:
     """Campos de evento que descrevem uma exceção sem a mensagem dela.
 
-    O tipo, o SQLSTATE do banco e o `code` de contrato (`ExecutorCtlError.code`) quando ele tem
-    a forma de identificador: um `code` com outra forma pode trazer texto livre e fica de fora.
+    O tipo, o SQLSTATE do banco, o nome do `errno` (`ENOSPC`, `EIO`) e o `code` de contrato
+    (`ExecutorCtlError.code`) quando ele tem a forma de identificador: um `code` com outra forma
+    pode trazer texto livre e fica de fora.
     """
     fields = {"error_type": type(error).__name__}
     sqlstate = database_sqlstate(error)
     if sqlstate is not None:
         fields[_SQLSTATE_ATTRIBUTE] = sqlstate
+    number = getattr(error, "errno", None)
+    errno_name = errno.errorcode.get(number) if isinstance(number, int) else None
+    if errno_name is not None:
+        fields["errno"] = errno_name
     code = getattr(error, "code", None)
     if isinstance(code, str) and _ERROR_REASON.fullmatch(code):
         fields["error_reason"] = code

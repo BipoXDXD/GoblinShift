@@ -33,7 +33,7 @@ from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
 from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
-from goblinshift.platform.telemetry import UserHasher, configure_logging
+from goblinshift.platform.telemetry import UserHasher, configure_logging, exception_fields
 from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.maintenance import (
@@ -339,7 +339,7 @@ class ExecutorImageProbe:
             # Docker ou serviço fora, ou recusa: o código diz qual, sem um traceback a cada 30 s.
             logger.warning(
                 _PROBE_FAILED_MESSAGE,
-                extra={"fields": {**_PROBE_FAILED_EVENT, "error_reason": error.code}},
+                extra={"fields": {**_PROBE_FAILED_EVENT, **exception_fields(error)}},
             )
             return _image_counts(probe_failed=1)
         except Exception:

@@ -434,8 +434,10 @@ def test_area_de_trabalho_que_nao_e_criada_dispara_o_alerta_do_executor(
         "generation",
         "attempt.number",
         "error_type",
+        "errno",
         "alert",
     }
+    assert fields["errno"] == "EACCES"
 
 
 def test_sem_tracer_o_coordenador_funciona_igual(

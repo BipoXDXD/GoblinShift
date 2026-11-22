@@ -5,6 +5,7 @@ usuário. Cada teste semeia um canário nela e lê a saída inteira do handler d
 `JsonFormatter` com o filtro que `configure_logging` liga.
 """
 
+import errno
 import io
 import json
 import logging
@@ -31,6 +32,7 @@ from goblinshift.platform.telemetry import (
 from goblinshift.runs import finished as finished_module
 from goblinshift.runs import maintenance as maintenance_module
 from goblinshift.runs.finished import RunFinishedReporter
+from goblinshift.runs.worker.coordinator import PreparationError
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError
 
 UNIQUE_VIOLATION = "23505"
@@ -194,6 +196,31 @@ def test_exception_fields_leva_o_sqlstate_do_banco(canary: str) -> None:
     fields = exception_fields(pg_errors.UniqueViolation(canary))
 
     assert fields == {"error_type": "UniqueViolation", "sqlstate": UNIQUE_VIOLATION}
+
+
+@pytest.mark.parametrize(
+    ("make", "expected"),
+    [
+        (
+            lambda canary: OSError(errno.ENOSPC, canary, f"/srv/{canary}"),
+            {"error_type": "OSError", "errno": "ENOSPC"},
+        ),
+        (
+            lambda canary: PreparationError(canary, errno=errno.EIO),
+            {"error_type": "PreparationError", "errno": "EIO"},
+        ),
+        (lambda canary: OSError(canary), {"error_type": "OSError"}),
+        (lambda canary: OSError(99999, canary), {"error_type": "OSError"}),
+        (lambda canary: PreparationError(canary), {"error_type": "PreparationError"}),
+    ],
+    ids=["oserror", "preparacao", "sem-errno", "errno-desconhecido", "preparacao-sem-errno"],
+)
+def test_exception_fields_leva_o_nome_do_errno(
+    canary: str, make: Callable[[str], BaseException], expected: dict[str, str]
+) -> None:
+    # O nome (ENOSPC, EIO, ENOENT) separa disco cheio de E/S e de montagem; a mensagem traz o
+    # caminho e fica de fora.
+    assert exception_fields(make(canary)) == expected
 
 
 @pytest.fixture

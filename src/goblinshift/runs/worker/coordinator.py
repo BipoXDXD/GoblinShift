@@ -165,12 +165,14 @@ class CoordinatorConfig:
 class PreparationError(Exception):
     """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura.
 
-    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta.
+    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta. `errno` é o
+    da `OSError` de origem, que o log leva pelo nome: a mensagem dela traz o caminho e fica de fora.
     """
 
-    def __init__(self, message: str, *, alert: str | None = None) -> None:
+    def __init__(self, message: str, *, alert: str | None = None, errno: int | None = None) -> None:
         super().__init__(message)
         self.alert = alert
+        self.errno = errno
 
 
 class InputTamperedError(Exception):
@@ -224,7 +226,9 @@ class _AreaFile:
 
 
 def _area_write_failed(error: OSError) -> PreparationError:
-    return PreparationError(f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED)
+    return PreparationError(
+        f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED, errno=error.errno
+    )
 
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
@@ -437,14 +441,14 @@ class Coordinator:
             # A área do host que não aceita a tentativa (montagem perdida, sem escrita) perde a Run
             # como o start recusado, e nenhuma outra causa avisa: conta no mesmo alerta.
             raise PreparationError(
-                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED
+                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED, errno=error.errno
             ) from error
         try:
             self._fill_work_area(work_dir, claimed, contents, self._lease_keeper(claimed))
         except OSError as error:
             # Só chega aqui a `OSError` da leitura do storage, que não é a área do host e fica sem
             # alerta: a escrita local vira `PreparationError` com alerta em `_AreaFile`.
-            raise PreparationError(f"área de trabalho: {error}") from error
+            raise PreparationError(f"área de trabalho: {error}", errno=error.errno) from error
 
     def _fill_work_area(
         self,

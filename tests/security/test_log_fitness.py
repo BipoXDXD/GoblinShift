@@ -7,6 +7,10 @@ exceção está em escopo, ela só chega ao log por um redutor que devolve tipo 
 
 O executor-ctl (`deploy/executor_ctl`) fica fora do escopo: ele é tratado na Tarefa 6 do plano
 `2026-11-21-logs-telemetria`.
+
+Limites do verificador: um alias (`failure = error`, e depois `failure` no log) não é rastreado; e
+`getattr(error, "orig", error)` cai na própria exceção quando não há `orig`, o que só é seguro
+porque o `orig` só é aceito como objeto de um atributo seguro (`getattr(…, "sqlstate", None)`).
 """
 
 import ast
@@ -22,11 +26,13 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints import maintenance as maintenance_entrypoint
 from goblinshift.files.storage import FileStorage
 from goblinshift.platform.telemetry import _MESSAGE_SAFE_ERRORS
 from goblinshift.runs.worker import coordinator as coordinator_module
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
+from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError
 from goblinshift.runs.worker.runner import Runner, RunnerError
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,8 +54,9 @@ REDUCERS = frozenset(
         "_describe_failure",
     }
 )
-# Atributos que guardam código ou posição, montados pelo próprio GoblinShift.
-SAFE_ATTRIBUTES = frozenset({"errno", "code", "position", "alert", "sqlstate"})
+# Atributos que guardam número, código ou posição, montados pelo próprio GoblinShift. O `code` não
+# entra: o do executor-ctl vem do corpo da resposta e só sai pelo filtro de `exception_fields`.
+SAFE_ATTRIBUTES = frozenset({"errno", "position", "alert", "sqlstate"})
 EXCEPTION_BASE = "BaseException"
 EXCEPTION_SUFFIXES = ("Error", "Exception")
 
@@ -164,7 +171,11 @@ def _raw_uses(node: ast.AST, name: str) -> Iterator[int]:
 
 
 def _is_reduced(node: ast.AST) -> bool:
-    """Chamada a redutor, atributo de código (`error.errno`, `error.orig.sqlstate`) ou `getattr`."""
+    """Chamada a redutor ou atributo seguro, direto ou por `getattr`.
+
+    O `orig` (a exceção do DBAPI) não é redutor: só passa como objeto de um atributo seguro, como
+    em `getattr(getattr(error, "orig", None), "sqlstate", None)`, que é reduzido por fora.
+    """
     match node:
         case ast.Call(func=ast.Name(id=function) | ast.Attribute(attr=function)) if (
             function in REDUCERS
@@ -173,8 +184,7 @@ def _is_reduced(node: ast.AST) -> bool:
         case ast.Call(
             func=ast.Name(id="getattr"), args=[_, ast.Constant(value=str(attribute)), *_]
         ):
-            # `orig` é a exceção do DBAPI, que sai do log só pelo `sqlstate` lido dela.
-            return attribute in SAFE_ATTRIBUTES or attribute == "orig"
+            return attribute in SAFE_ATTRIBUTES
         case ast.Attribute(attr=attribute):
             return attribute in SAFE_ATTRIBUTES
     return False
@@ -196,6 +206,9 @@ def _handler(body: str, caught: str = "OSError") -> str:
         _handler("fields = _ids(claimed, error)"),
         _handler("fields.update(e=str(error))"),
         _handler('logger.error("x: %s", error)', caught="(MissingSecretError, OSError)"),
+        _handler('fields = {"orig": str(getattr(error, "orig", None))}'),
+        _handler('logger.warning("x: %s", getattr(error, "orig", None))'),
+        _handler('logger.warning("x", extra={"fields": {"reason": error.code}})'),
         'def _ids(error: Exception | None) -> None:\n    fields["error"] = str(error)\n',
         'async def f(failure: RunnerError) -> None:\n    logger.info("x", failure.detail)\n',
     ],
@@ -208,6 +221,9 @@ def _handler(body: str, caught: str = "OSError") -> str:
         "repassada-a-funcao",
         "update-de-fields",
         "except-misto",
+        "str-do-orig",
+        "orig-no-log",
+        "code-cru",
         "parametro-anotado",
         "atributo-livre",
     ],
@@ -312,3 +328,22 @@ def test_exception_fields_no_worker_nao_leva_o_canario(
     assert entry["error_type"] == "RunnerError"
     assert entry["attempt_id"] == str(claimed.attempt_id)
     assert "error" not in entry
+
+
+def test_codigo_do_executor_ctl_fora_do_contrato_nao_vai_para_o_log(
+    listen: Callable[[logging.Logger], io.StringIO], canary: str
+) -> None:
+    stream = listen(maintenance_entrypoint.logger)
+
+    def refuse(_image: str) -> bool:
+        # O `code` vem do corpo da resposta do executor-ctl: qualquer texto chega até aqui.
+        raise ExecutorCtlError(canary, canary)
+
+    maintenance_entrypoint.ExecutorImageProbe(refuse, "executor@sha256:" + "0" * 64).run_cycle()
+
+    output = stream.getvalue()
+    assert canary not in output
+    [line] = output.splitlines()
+    entry: dict[str, Any] = json.loads(line)
+    assert entry["error_type"] == "ExecutorCtlError"
+    assert "error_reason" not in entry
