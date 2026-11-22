@@ -413,17 +413,21 @@ def _live_uploads_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
 
 
 def _until_expired(session: Session, owner_id: uuid.UUID, count: int) -> timedelta:
-    """Quanto falta para vencerem os `count` uploads vivos mais antigos da conta."""
+    """Quanto falta para vencerem os `count` uploads vivos mais antigos da conta.
+
+    Outra instrução, outro snapshot: se os vivos vencem ou são excluídos depois da contagem, não
+    há o `count`-ésimo, e a espera fica em zero; quem chama aplica o piso.
+    """
     if count == 0:
         return timedelta(0)
-    wait: timedelta = session.execute(
+    wait: timedelta | None = session.execute(
         select(upload.c.expires_at - func.now())
         .where(*_live_uploads_of(owner_id))
         .order_by(upload.c.expires_at)
         .offset(count - 1)
         .limit(1)
-    ).scalar_one()
-    return wait
+    ).scalar_one_or_none()
+    return wait or timedelta(0)
 
 
 def _request_columns(request: IdempotentRequest | None, index: int) -> dict[str, object]:

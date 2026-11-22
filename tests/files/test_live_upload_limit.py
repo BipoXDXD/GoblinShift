@@ -169,3 +169,21 @@ def test_replay_do_lote_no_teto_nao_conta_de_novo(
     assert was_replay
     assert [view.id for view in replayed] == [view.id for view in created]
     assert count_uploads(factory, owner) == CAP
+
+
+def test_espera_sem_os_vivos_que_sumiram_depois_da_contagem_fica_em_zero(
+    factory: sessionmaker[Session], owner: uuid.UUID
+) -> None:
+    """Entre a contagem e a leitura da espera, os vivos podem vencer ou ser excluídos.
+
+    A espera pede mais vivos do que restam, como se a contagem tivesse visto os que sumiram: em
+    vez de um 500, fica em zero, e a borda HTTP aplica o piso do `Retry-After`.
+    """
+    [upload_id] = create_batch(factory, owner, 1)
+    with unit_of_work(factory) as session:
+        request_deletion(session, owner, upload_id)
+
+    with unit_of_work(factory) as session:
+        wait = uploads_module._until_expired(session, owner, 1)
+
+    assert wait == timedelta(0)
