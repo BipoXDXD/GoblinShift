@@ -46,6 +46,7 @@ from goblinshift.files.objects import holders_with_open_uses, release_expired_do
 from goblinshift.files.retention import file_backlog, remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
+from goblinshift.platform.telemetry import exception_fields
 from goblinshift.runs import retention as run_retention
 from goblinshift.runs.lifecycle import (
     TERMINAL_STATUSES,
@@ -389,7 +390,7 @@ class Maintenance:
         except RunnerError as error:
             logger.warning(
                 "executor sem inspeção; execução fica para o próximo ciclo",
-                extra={"fields": {**fields, "error": str(error)}},
+                extra={"fields": {**fields, **exception_fields(error)}},
             )
             return None
         if status.is_running:
@@ -406,7 +407,7 @@ class Maintenance:
         except RunnerError as error:
             logger.warning(
                 "área de trabalho não removida; a limpeza tenta de novo",
-                extra={"fields": {"attempt_id": str(attempt_id), "error": str(error)}},
+                extra={"fields": {"attempt_id": str(attempt_id), **exception_fields(error)}},
             )
             return False
         return True
@@ -582,7 +583,7 @@ class Maintenance:
         try:
             present = self._runner.list_work()[: self._config.batch_size]
         except OSError as error:
-            logger.warning("área de trabalho ilegível", extra={"fields": {"error": str(error)}})
+            logger.warning("área de trabalho ilegível", extra={"fields": exception_fields(error)})
             return 0
         if not present:
             return 0
@@ -667,8 +668,10 @@ class Maintenance:
             sweep = self._storage.sweep_stale_temporaries(
                 modified_before, self._config.retention_batch_size
             )
-        except OSError, ObjectTamperedError:
-            logger.exception("limpeza de temporários falhou")
+        except (OSError, ObjectTamperedError) as error:
+            logger.exception(
+                "limpeza de temporários falhou", extra={"fields": exception_fields(error)}
+            )
             return {
                 "tmp_parts_removed": 0,
                 "tmp_parts": 0,
@@ -913,8 +916,9 @@ def _lease_expired() -> ColumnElement[bool]:
 def log_step_failure(step: str, error: Exception) -> None:
     """Registra o passo que falhou com o tipo e o SQLSTATE nos campos.
 
-    A mensagem do banco traz host, porta, usuário e valores (3.7): não entra nos campos, e o
-    filtro do processo (`omit_database_error_detail`) tira o texto dela do traceback.
+    A mensagem da exceção pode trazer host, porta, usuário e valores (3.7): não entra nos campos,
+    e o filtro do processo (`omit_exception_detail`) tira o texto dela do traceback, seja ou não
+    erro de banco.
     """
     driver_error = getattr(error, "orig", error)
     fields = {

@@ -104,7 +104,7 @@ from goblinshift.platform.telemetry import (
     UserHasher,
     database_sqlstate,
     is_database_error,
-    omit_database_error_detail,
+    omit_exception_detail,
 )
 from goblinshift.runs.cancellation import CancelResult
 from goblinshift.runs.finished import RunFinishedReporter
@@ -173,7 +173,7 @@ def _stderr_logging() -> Iterator[None]:
     """
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(_OneLineFormatter())
-    handler.addFilter(omit_database_error_detail)
+    handler.addFilter(omit_exception_detail)
     root = logging.getLogger()
     root.addHandler(handler)
     try:

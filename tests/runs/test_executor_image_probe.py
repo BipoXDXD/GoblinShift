@@ -188,7 +188,8 @@ def test_sonda_falha_registra_o_codigo_do_motivo_sem_traceback(
     assert record.exc_info is None
     assert getattr(record, "fields") == {  # noqa: B009
         "alert": "executor_image_probe_failed",
-        "error": "docker_unavailable",
+        "error_type": "ExecutorCtlError",
+        "error_reason": "docker_unavailable",
     }
 
 

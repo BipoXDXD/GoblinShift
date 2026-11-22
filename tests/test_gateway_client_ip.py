@@ -8,11 +8,9 @@ certificado de origem (ADR 043) tem o próprio gateway, com os sites intactos e 
 descartáveis.
 """
 
-import json
 import re
 import socket
 import ssl
-import struct
 import subprocess
 import time
 import uuid
@@ -24,24 +22,29 @@ from typing import Any
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-COOLIFY = ROOT / "deploy" / "coolify"
-GATEWAY = ROOT / "docker" / "gateway"
-SITES = GATEWAY / "sites"
+from tests.gateway_support import (
+    COOLIFY,
+    DOCKER_TIMEOUT_SECONDS,
+    GATEWAY,
+    ORIGIN_CERT_DIR,
+    ORIGIN_CERT_LINE,
+    SITES,
+    SOCKET_TIMEOUT_SECONDS,
+    Gateway,
+    copy_gateway_config,
+    docker,
+    gateway_image,
+    gateway_proxy,
+    proxy_header,
+    without_origin_certificate,
+)
+
 CLOUDFLARE_LIST = SITES / "cloudflare-ips.conf"
 GOBLINSHIFT = "goblinshift.dev"
 STILLON = "stillon.tech"
 SITES_BEHIND_CLOUDFLARE = (GOBLINSHIFT, STILLON)
-DOCKER_TIMEOUT_SECONDS = 60
-SOCKET_TIMEOUT_SECONDS = 5
 READY_TIMEOUT_SECONDS = 30
 READY_POLL_SECONDS = 0.2
-PROXY_V2_SIGNATURE = b"\r\n\r\n\x00\r\nQUIT\n"
-PROXY_V2_PROXY_COMMAND = 0x21
-PROXY_V2_TCP4 = 0x11
-PROXY_V2_TCP6 = 0x21
-HTTPS_PORT = 443
-SOURCE_PORT = 45678
 
 CLOUDFLARE_V4 = "173.245.48.10"
 CLOUDFLARE_V6 = "2400:cb00::10"
@@ -77,95 +80,7 @@ ECHO_CADDYFILE = """\
  respond "xff={header.X-Forwarded-For} cf={header.CF-Connecting-IP}"
 }
 """
-TEST_ISSUER = " local_certs\n skip_install_trust\n"
-ORIGIN_CERT_DIR = "/data/origin-ca"
-ORIGIN_CERT_LINE = re.compile(rf"^ *tls {ORIGIN_CERT_DIR}/.*\n", re.MULTILINE)
 CERT_DAYS = "1"
-
-
-def _docker(*args: str) -> str:
-    result = subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
-        ["docker", *args],  # noqa: S607
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=DOCKER_TIMEOUT_SECONDS,
-    )
-    return result.stdout
-
-
-def _gateway_proxy() -> dict[str, Any]:
-    gateway = json.loads((COOLIFY / "gateway.json").read_text())
-    proxy: dict[str, Any] = gateway["services"]["proxy"]
-    return proxy
-
-
-def _gateway_image() -> str:
-    image: str = _gateway_proxy()["image"]
-    return image
-
-
-def _replace_once(text: str, old: str, new: str) -> str:
-    assert old in text, f"{old!r} não encontrado na configuração"
-    return text.replace(old, new)
-
-
-def _without_origin_certificate(site: str) -> str:
-    return ORIGIN_CERT_LINE.sub("", site)
-
-
-def _copy_gateway_config(target: Path, subnet: str) -> None:
-    """Copia a configuração versionada, adaptada só no que depende do ambiente de teste."""
-    sites = target / "conf.d"
-    sites.mkdir(parents=True)
-    caddyfile = (GATEWAY / "Caddyfile").read_text()
-    caddyfile = _replace_once(
-        caddyfile, " cert_issuer acme {\n  disable_http_challenge\n }\n", TEST_ISSUER
-    )
-    caddyfile = _replace_once(caddyfile, "allow 172.16.1.6/32", f"allow {subnet}")
-    (target / "Caddyfile").write_text(caddyfile)
-    for site in SITES.iterdir():
-        text = re.sub(r"172\.31\.0\.[34]:80", "eco:80", site.read_text())
-        (sites / site.name).write_text(_without_origin_certificate(text))
-
-
-def _proxy_header(source: str) -> bytes:
-    address = ip_address(source)
-    family = PROXY_V2_TCP4 if address.version == 4 else PROXY_V2_TCP6
-    destination = ip_address("192.0.2.1" if address.version == 4 else "2001:db8::1")
-    addresses = address.packed + destination.packed + struct.pack("!HH", SOURCE_PORT, HTTPS_PORT)
-    head = struct.pack("!BBH", PROXY_V2_PROXY_COMMAND, family, len(addresses))
-    return PROXY_V2_SIGNATURE + head + addresses
-
-
-@dataclass(frozen=True)
-class Gateway:
-    container: str
-    port: int
-
-    def request(self, host: str, source: str, *headers: str) -> str:
-        """Faz um pedido vindo de `source` e devolve a resposta inteira do gateway."""
-        lines = ["GET / HTTP/1.1", f"Host: {host}", "Connection: close", *headers, "", ""]
-        # O certificado vem da CA descartável do container de teste, só em 127.0.0.1.
-        context = ssl.create_default_context()
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        with socket.create_connection(("127.0.0.1", self.port), SOCKET_TIMEOUT_SECONDS) as raw:
-            raw.sendall(_proxy_header(source))
-            with context.wrap_socket(raw, server_hostname=host) as tls:
-                tls.sendall("\r\n".join(lines).encode())
-                response = b""
-                while chunk := tls.recv(4096):
-                    response += chunk
-        return response.decode()
-
-    def echo(self, host: str, source: str, *headers: str) -> dict[str, str]:
-        """Faz um pedido vindo de `source` e devolve o que o destino recebeu do gateway."""
-        response = self.request(host, source, *headers)
-        match = re.search(r"xff=(?P<xff>\S*) cf=(?P<cf>.*)$", response)
-        assert match is not None, response
-        return match.groupdict()
 
 
 def _wait_until_ready(gateway: Gateway) -> None:
@@ -189,24 +104,24 @@ def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Gateway]:
     network = f"gs-test-gateway-{suffix}"
     echo = f"gs-test-echo-{suffix}"
     proxy = f"gs-test-proxy-{suffix}"
-    image = _gateway_image()
+    image = gateway_image()
     (workdir / "eco").mkdir()
     (workdir / "eco" / "Caddyfile").write_text(ECHO_CADDYFILE)
-    _docker("network", "create", network)
+    docker("network", "create", network)
     try:
-        subnet = _docker(
+        subnet = docker(
             "network", "inspect", "-f", "{{(index .IPAM.Config 0).Subnet}}", network
         ).strip()
-        _copy_gateway_config(workdir / "caddy", subnet)
-        _docker(
+        copy_gateway_config(workdir / "caddy", subnet)
+        docker(
             "run", "-d", "--name", echo, "--network", network, "--network-alias", "eco",
             "-v", f"{workdir / 'eco'}:/etc/caddy:ro", image,
         )  # fmt: skip
-        _docker(
+        docker(
             "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
             "-v", f"{workdir / 'caddy'}:/etc/caddy:ro", image,
         )  # fmt: skip
-        published = _docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1]
+        published = docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1]
         running = Gateway(proxy, int(published))
         _wait_until_ready(running)
         yield running
@@ -217,7 +132,7 @@ def gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Gateway]:
             check=False,
             timeout=DOCKER_TIMEOUT_SECONDS,
         )
-        _docker("network", "rm", network)
+        docker("network", "rm", network)
 
 
 def _cloudflare_ranges() -> list[Any]:
@@ -271,7 +186,7 @@ def test_site_do_stillon_mantem_destino_tentativas_e_redirect() -> None:
     assert "reverse_proxy 172.31.0.3:80 {\n" in site
     assert "lb_try_duration 5s\n" in site
     assert "lb_try_interval 250ms\n" in site
-    assert _without_origin_certificate(site).endswith(
+    assert without_origin_certificate(site).endswith(
         "www.stillon.tech {\n redir https://stillon.tech{uri} 308\n}\n"
     )
 
@@ -359,7 +274,7 @@ def _served_certificate(port: int, host: str) -> bytes:
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     with socket.create_connection(("127.0.0.1", port), SOCKET_TIMEOUT_SECONDS) as raw:
-        raw.sendall(_proxy_header(CLOUDFLARE_V4))
+        raw.sendall(proxy_header(CLOUDFLARE_V4))
         with context.wrap_socket(raw, server_hostname=host) as tls:
             certificate = tls.getpeercert(binary_form=True)
     assert certificate is not None
@@ -390,7 +305,7 @@ class OriginGateway:
         """Roda o `caddy validate` da configuração num container novo, com estas montagens."""
         command = [
             "docker", "run", "--rm", "--network", "none",
-            "-v", f"{self.config}:/etc/caddy:ro", *mounts, _gateway_image(),
+            "-v", f"{self.config}:/etc/caddy:ro", *mounts, gateway_image(),
             "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile",
         ]  # fmt: skip
         return subprocess.run(  # noqa: S603 - argumentos montados pelo teste, sem shell
@@ -409,20 +324,20 @@ def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginG
     suffix = uuid.uuid4().hex[:8]
     network = f"gs-test-origem-{suffix}"
     proxy = f"gs-test-origem-proxy-{suffix}"
-    _docker("network", "create", network)
+    docker("network", "create", network)
     try:
-        subnet = _docker(
+        subnet = docker(
             "network", "inspect", "-f", "{{(index .IPAM.Config 0).Subnet}}", network
         ).strip()
-        _copy_gateway_config(config, subnet)
+        copy_gateway_config(config, subnet)
         for site in SITES.glob("*.caddy"):
             (config / "conf.d" / site.name).write_text(site.read_text())
-        _docker(
+        docker(
             "run", "-d", "--name", proxy, "--network", network, "-p", "127.0.0.1::443",
             "-v", f"{config}:/etc/caddy:ro",
-            "-v", f"{certificates}:{ORIGIN_CERT_DIR}:ro", _gateway_image(),
+            "-v", f"{certificates}:{ORIGIN_CERT_DIR}:ro", gateway_image(),
         )  # fmt: skip
-        port = int(_docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1])
+        port = int(docker("port", proxy, "443/tcp").splitlines()[0].rsplit(":", 1)[1])
         _wait_for_certificate(port, GOBLINSHIFT)
         yield OriginGateway(port, config, certificates)
     finally:
@@ -432,7 +347,7 @@ def origin_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[OriginG
             check=False,
             timeout=DOCKER_TIMEOUT_SECONDS,
         )
-        _docker("network", "rm", network)
+        docker("network", "rm", network)
 
 
 @pytest.mark.gateway
@@ -569,7 +484,7 @@ def test_www_do_stillon_redireciona_para_o_dominio(gateway: Gateway) -> None:
 
 @pytest.mark.gateway
 def test_healthcheck_do_json_passa_no_gateway_real(gateway: Gateway) -> None:
-    kind, *command = _gateway_proxy()["healthcheck"]["test"]
+    kind, *command = gateway_proxy()["healthcheck"]["test"]
 
     assert kind == "CMD"
-    _docker("exec", gateway.container, *command)
+    docker("exec", gateway.container, *command)

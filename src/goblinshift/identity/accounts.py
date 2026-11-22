@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Literal
 from uuid import UUID, uuid7
 
 from sqlalchemy import (
@@ -36,6 +37,7 @@ from goblinshift.identity.keys import (
 )
 from goblinshift.identity.principal import InvalidScopesError, Principal, Scope
 from goblinshift.identity.tables import api_key, app_user
+from goblinshift.platform.telemetry import UserHasher
 from goblinshift.processing.names import has_unsafe_char
 
 logger = logging.getLogger(__name__)
@@ -160,10 +162,14 @@ def revoke_key(session: Session, public_id: str, now: datetime) -> bool:
     return session.execute(statement).first() is not None
 
 
-def authenticate_api_key(session: Session, token: str, now: datetime) -> Principal | None:
+def authenticate_api_key(
+    session: Session, token: str, now: datetime, *, hasher: UserHasher
+) -> Principal | None:
     """Devolve o Principal da chave, ou None se ela for malformada, desconhecida ou inválida.
 
-    Registrar o uso faz parte de autenticar: é o que alimenta o "último uso" da chave.
+    Registrar o uso faz parte de autenticar: é o que alimenta o "último uso" da chave. A recusa
+    de chave conhecida vai ao log com o `user.hash` do dono e nunca com o `public_id`, a parte
+    estável do token.
     """
     presented = parse_key(token)
     if presented is None:
@@ -185,13 +191,22 @@ def authenticate_api_key(session: Session, token: str, now: datetime) -> Princip
     if row is None or not secret_matches(presented, row.secret_hash):
         return None
     if not key_is_active(expires_at=row.expires_at, revoked_at=row.revoked_at, now=now):
-        logger.info("chave recusada por expiração ou revogação: %s", presented.public_id)
+        _log_refused_key(hasher, row.owner_id, "expired_or_revoked")
         return None
     if row.status != ACTIVE_STATUS or row.deletion_requested_at is not None:
-        logger.info("chave recusada por conta bloqueada ou em exclusão: %s", presented.public_id)
+        _log_refused_key(hasher, row.owner_id, "account_unavailable")
         return None
     _record_use(session, row.id, now)
     return Principal(owner_id=row.owner_id, scopes=_known_scopes(row.scopes), via="api_key")
+
+
+def _log_refused_key(
+    hasher: UserHasher, owner_id: UUID, reason: Literal["expired_or_revoked", "account_unavailable"]
+) -> None:
+    logger.info(
+        "chave de API recusada",
+        extra={"fields": {"user.hash": hasher.hash(owner_id), "reason": reason}},
+    )
 
 
 def find_account(session: Session, owner_id: UUID) -> Account | None:

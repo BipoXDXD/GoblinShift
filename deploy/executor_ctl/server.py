@@ -100,6 +100,14 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         super().server_close()
         _remove_stale_socket(self.socket_path)
 
+    def handle_error(self, request: object, client_address: object) -> None:
+        """Exceção que escapou do handler (cliente que fechou no meio da resposta, por exemplo).
+
+        O padrão imprime o traceback inteiro no stderr, com a mensagem; aqui ele passa pelo
+        formatter do journal, que deixa só tipos e frames.
+        """
+        _log.exception("erro no handler")
+
 
 def bind_server(
     config: Config,
@@ -261,7 +269,9 @@ class ControlHandler(BaseHTTPRequestHandler):
         """O log de cada requisição sai de `_dispatch`, com os campos do protocolo."""
 
     def log_message(self, format: str, *args: object) -> None:
-        _log.warning("http.server", extra={"detail": format % args})
+        # Só o modelo fixo da stdlib: os argumentos (linha de requisição, repr de exceção) vêm
+        # do cliente do socket.
+        _log.warning("http.server", extra={"detail": format})
 
     def _dispatch(self, method: str) -> None:
         started = time.monotonic()

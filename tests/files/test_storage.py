@@ -713,7 +713,11 @@ def test_falha_ao_apagar_um_temporario_nao_impede_os_demais_e_fica_registrada(
     [survivor] = list((tmp_path / ".tmp").iterdir())
     [failure] = removal_failures(caplog)
     assert sweep == TemporarySweep(removed=2, remaining=1, remaining_bytes=2, failed=1)
-    assert failure.__dict__["fields"] == {"tmp_part": survivor.name}
+    assert failure.__dict__["fields"] == {
+        "tmp_part": survivor.name,
+        "error_type": "PermissionError",
+        "errno": "EACCES",
+    }
     assert failure.exc_info is not None
     assert failure.exc_info[0] is PermissionError
 

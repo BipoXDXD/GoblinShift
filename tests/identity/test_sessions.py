@@ -23,7 +23,7 @@ from goblinshift.identity import (
 )
 from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import new_key, new_user
+from tests.identity.support import HASHER, new_key, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -397,8 +397,8 @@ def test_revoke_all_revoga_sessoes_e_chaves_so_da_conta(factory: sessionmaker[Se
         assert _authenticate(factory, issued.token, NOW) is None
     with unit_of_work(factory) as session:
         for key in owner_keys:
-            assert authenticate_api_key(session, key.token, NOW) is None
-        assert authenticate_api_key(session, other_key.token, NOW) is not None
+            assert authenticate_api_key(session, key.token, NOW, hasher=HASHER) is None
+        assert authenticate_api_key(session, other_key.token, NOW, hasher=HASHER) is not None
     assert _authenticate(factory, other_session.token, NOW) is not None
 
 

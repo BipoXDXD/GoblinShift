@@ -4,6 +4,9 @@ STRIDE da fatia 6: CSRF de login, ID token forjado e fixação de sessão.
 """
 
 import hmac
+import io
+import json
+import logging
 import time
 from collections.abc import Callable
 from hashlib import sha256
@@ -19,6 +22,8 @@ from joserfc.jwk import RSAKey
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import auth_login
+from goblinshift.entrypoints.api.problems import REQUEST_ID_HEADER
 from goblinshift.identity import csrf_token_matches
 from goblinshift.identity.providers import GOOGLE_ISSUER, GOOGLE_TOKEN_URL
 from goblinshift.identity.tables import app_user, login_state
@@ -607,6 +612,22 @@ def test_canario_em_code_e_state_nunca_aparece_no_log_nem_na_resposta(
     assert_login_failed(response)
     assert canary not in server_log(caplog)
     assert canary not in str(response.headers)
+
+
+def test_login_recusado_registra_o_mesmo_request_id_do_ref(
+    client: TestClient,
+    fake: FakeProviders,
+    listen: Callable[[logging.Logger], io.StringIO],
+) -> None:
+    log = listen(logging.getLogger(auth_login.__name__))
+    fake.token_failure = httpx.Response(400, json={"error": "invalid_grant"})
+
+    response = login(client, fake, "google")
+
+    ref = str(assert_login_failed(response))
+    lines = [json.loads(line) for line in log.getvalue().splitlines()]
+    [refused] = [line for line in lines if line["message"].startswith("login google recusado")]
+    assert refused["request_id"] == ref == response.headers[REQUEST_ID_HEADER]
 
 
 def test_tokens_do_provedor_nunca_aparecem_no_log(

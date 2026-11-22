@@ -124,6 +124,7 @@ def create_app(
         swagger_ui_oauth2_redirect_url=None,
     )
     app.state.settings = settings
+    app.state.user_hasher = user_hasher
     app.state.executor_image = executor_image
     app.state.quota_defaults = QuotaLimits.from_settings(settings)
     app.state.web_identity = web_identity

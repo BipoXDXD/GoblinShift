@@ -53,7 +53,7 @@ SELECT owner_id, status, recipe_id, created_at FROM run WHERE id = :'id';
 SQL
 ```
 
-**Chave de API vista num log** (só o identificador público, `gsk_<public_id>_…`; nunca peça o segredo):
+**Chave de API vista num log de fora** (denúncia ou vazamento; só o identificador público, `gsk_<public_id>_…`; nunca peça o segredo). Os logs do GoblinShift não registram o `public_id`: a chave recusada sai com o `user.hash` do dono, como acima:
 
 ```bash
 public_id='<16 dígitos hexadecimais>'
