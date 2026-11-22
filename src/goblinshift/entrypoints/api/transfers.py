@@ -103,28 +103,36 @@ def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterato
     O serviço de upload é síncrono e recebe um iterável; cada pedaço é buscado no event loop
     com `from_thread.run`, sem acumular o corpo em memória. Estoura `TransferTimeoutError` se
     um pedaço demorar mais que o prazo sem progresso, se o prazo total acabar ou se a média
-    desde o início da leitura ficar abaixo da vazão mínima: a espera pelo primeiro byte conta.
+    ficar abaixo da vazão mínima.
+
+    A média conta só o tempo à espera do cliente, somado dentro de `next_chunk`, e a espera pelo
+    primeiro byte entra nela: a gravação e o hash entre os pedaços são tempo do servidor e não
+    pesam contra o envio. O `b""` final só marca o fim do corpo, já recebido inteiro, e não é
+    cobrado. O prazo total segue sendo de relógio.
     """
     stream = request.stream()
-    started = anyio.from_thread.run_sync(anyio.current_time)
-    deadline = started + timeouts.total.total_seconds()
+    deadline = anyio.from_thread.run_sync(anyio.current_time) + timeouts.total.total_seconds()
+    waited_s = 0.0
 
     async def next_chunk() -> bytes | None:
-        remaining = deadline - anyio.current_time()
+        nonlocal waited_s
+        asked = anyio.current_time()
         try:
-            with anyio.fail_after(min(timeouts.idle.total_seconds(), remaining)):
+            with anyio.fail_after(min(timeouts.idle.total_seconds(), deadline - asked)):
                 return await anext(stream, None)
         except TimeoutError:
             raise TransferTimeoutError("o envio passou do prazo") from None
+        finally:
+            waited_s += anyio.current_time() - asked
 
     received = 0
     while (chunk := anyio.from_thread.run(next_chunk)) is not None:
+        if not chunk:
+            continue
         received += len(chunk)
-        elapsed_s = anyio.from_thread.run_sync(anyio.current_time) - started
-        if is_below_min_rate(received, elapsed_s, timeouts):
+        if is_below_min_rate(received, waited_s, timeouts):
             raise TransferTimeoutError("o envio ficou abaixo da vazão mínima")
-        if chunk:
-            yield chunk
+        yield chunk
 
 
 def content_disposition(filename: str) -> str:

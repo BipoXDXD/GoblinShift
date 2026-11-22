@@ -1,11 +1,14 @@
 """Peças HTTP das transferências, sem banco: nome do anexo, piso de vazão e fim do download."""
 
 import io
+import time
+from collections.abc import AsyncIterator
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 import anyio
 import pytest
+from fastapi import Request
 from starlette.requests import ClientDisconnect
 from starlette.types import Message
 
@@ -15,6 +18,7 @@ from goblinshift.entrypoints.api.transfers import (
     TransferTimeouts,
     content_disposition,
     is_below_min_rate,
+    request_body_chunks,
 )
 
 GENEROUS = TransferTimeouts(total=timedelta(seconds=10), idle=timedelta(seconds=10))
@@ -64,6 +68,72 @@ def test_piso_de_vazao_vale_so_depois_da_carencia(
     received: int, elapsed_s: float, below: bool
 ) -> None:
     assert is_below_min_rate(received, elapsed_s, FLOOR_1000_AFTER_2S) is below
+
+
+class StreamedRequest:
+    """O que `request_body_chunks` lê da `Request`: o corpo, pedaço a pedaço, como o Starlette.
+
+    O gerador só anda quando a rota pede o próximo pedaço: as pausas dele são a espera pelo
+    cliente, e o `b""` final marca o fim do corpo.
+    """
+
+    def __init__(self, chunks: list[bytes], pause_s: float, pause_before_end_s: float) -> None:
+        self._chunks = chunks
+        self._pause_s = pause_s
+        self._pause_before_end_s = pause_before_end_s
+
+    async def stream(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            await anyio.sleep(self._pause_s)
+            yield chunk
+        await anyio.sleep(self._pause_before_end_s)
+        yield b""
+
+
+async def consume(
+    request: StreamedRequest, timeouts: TransferTimeouts, work_per_chunk_s: float
+) -> int:
+    """Lê o corpo numa worker thread, como `receive_content`, gastando `work_per_chunk_s` em cada
+    pedaço (gravação e hash do servidor)."""
+
+    def read() -> int:
+        received = 0
+        for chunk in request_body_chunks(cast(Request, request), timeouts):
+            time.sleep(work_per_chunk_s)
+            received += len(chunk)
+        return received
+
+    return await anyio.to_thread.run_sync(read)
+
+
+@pytest.mark.anyio
+async def test_piso_de_vazao_nao_cobra_o_tempo_do_servidor_entre_os_pedacos() -> None:
+    # O cliente manda 100 B a cada 10 ms (10 KB/s), cinco vezes o piso; o servidor gasta 100 ms
+    # em cada pedaço, e pelo relógio a média ficaria em ~900 B/s, abaixo do piso.
+    timeouts = TransferTimeouts(
+        total=timedelta(seconds=10),
+        idle=timedelta(seconds=10),
+        min_rate_bytes_per_s=2000,
+        min_rate_grace=timedelta(milliseconds=20),
+    )
+    request = StreamedRequest([b"x" * 100] * 10, pause_s=0.01, pause_before_end_s=0)
+
+    assert await consume(request, timeouts, work_per_chunk_s=0.1) == 1000
+
+
+@pytest.mark.anyio
+async def test_fim_do_corpo_nao_e_cobrado_pelo_piso_de_vazao() -> None:
+    # Os 100 B chegam de uma vez; o `b""` final vem 300 ms depois. Cobrado no fim, ficaria em
+    # ~330 B/s, abaixo do piso, com o corpo inteiro já recebido.
+    timeouts = TransferTimeouts(
+        total=timedelta(seconds=10),
+        idle=timedelta(seconds=10),
+        min_rate_bytes_per_s=1000,
+        min_rate_grace=timedelta(milliseconds=100),
+    )
+    request = StreamedRequest([b"x" * 100], pause_s=0, pause_before_end_s=0.3)
+
+    assert await consume(request, timeouts, work_per_chunk_s=0) == 100
 
 
 class Recorder:

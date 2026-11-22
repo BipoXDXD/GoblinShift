@@ -59,7 +59,8 @@ MAX_TRANSFERS_PER_ACCOUNT = 2
 MAX_TRANSFERS_PER_ENVIRONMENT = 4
 TRANSFER_MAX_DURATION = timedelta(minutes=10)
 TRANSFER_IDLE_TIMEOUT = timedelta(seconds=30)
-# Vazão mínima do envio, cobrada pela média desde o início da leitura depois da carência. Sem ela,
+# Vazão mínima do envio, cobrada pela média sobre o tempo à espera do cliente depois da carência,
+# contada no mesmo tempo; o do servidor entre os pedaços (gravação e hash) não entra. Sem ela,
 # 1 byte a cada 25 s nunca dispara o prazo sem progresso e segura a vaga os 10 min inteiros: duas
 # contas ocupavam as 4 vagas do ambiente. 32 KiB/s (256 kbit/s) depois de 30 s é a decisão D3 do
 # dono; a carência deixa a conexão arrancar sem ser cobrada.
