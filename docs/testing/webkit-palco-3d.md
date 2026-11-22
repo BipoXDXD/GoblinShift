@@ -47,7 +47,7 @@ WebGL adequado, investigar o artefato e o ambiente, sem declarar que os cenário
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Carregamento inicial          | Chunk após `load`, só Rúbia, mesma origem e CSP; entrada termina                                              | Não mede desempenho de iPhone                                                                        |
 | Troca de personagem           | Só GLB escolhido; imagem durante a espera; nome acessível; volta ao mesmo número de geometrias/texturas       | Não é perfil de memória de longo prazo                                                               |
-| Fallback e movimento reduzido | Nenhum chunk/GLB; seleção das cinco imagens sem WebGL; controles 3D ausentes; preferência alterada após carga | Falta de GPU e software são forçados nos casos de fallback                                           |
+| Fallback e movimento reduzido | Nenhum chunk/GLB; seleção das seis imagens sem WebGL ; controles 3D ausentes; preferência alterada após carga | Falta de GPU e software são forçados nos casos de fallback                                           |
 | Inclinação acessível          | Tap, Enter/Espaço, alvos de 44 px, foco visível, ordem de navegação, limites e reset                          | No WebKit/macOS a navegação entre botões usa Option+Tab, respeitando a preferência padrão do sistema |
 | Teclado, mouse e axe          | Setas/Home, arrasto, rotação que para e axe WCAG A/AA                                                         | Axe não substitui VoiceOver                                                                          |
 | Permissão para pan/zoom       | `touch-action` do palco e ancestrais; viewport permite ampliar; `touchmove` com 1–3 dedos não é cancelado     | TouchEvent sintético não executa a pinça nativa                                                      |
@@ -75,7 +75,7 @@ Referências: [Touchscreen](https://playwright.dev/docs/api/class-touchscreen),
 
 Safari/iOS físico precisa confirmar pinça iniciada sobre o palco (amplia e permite ler a página),
 arrasto vertical com um dedo (rola), giro horizontal, retomada após pan/pinça cancelados pelo
-navegador, tap nos botões de inclinação e troca das cinco goblins. Repetir com VoiceOver, movimento
+navegador, tap nos botões de inclinação e troca das seis goblins. Repetir com VoiceOver, movimento
 reduzido e orientação/tamanho de texto alterados; avaliar estabilidade e aquecimento do aparelho.
 Fazer também a conferência Android prevista no ADR 038.
 

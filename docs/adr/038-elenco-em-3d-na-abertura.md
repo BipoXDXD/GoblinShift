@@ -1,6 +1,6 @@
 # ADR 038. Elenco em 3D na abertura: uma goblin por vez, sob demanda, vista de todos os ângulos
 
-- **Estado:** Aceito (2026-10-16)
+- **Estado:** Aceito (2026-10-16). Atualizado pelo [ADR 058](058-lua-volta-e-elenco-hi3d-quality.md) (2026-11-22): a Lua volta e o seletor passa a seis; o pipeline (item 5) e os tetos (item 6) valem como estão no [ADR 030](030-motor-e-asset-do-3d-da-abertura.md) desde 2026-11-22.
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Apresentação), [3.6](../GoblinShiftPlan.md#s3-6) (CSP da SPA)
 - **Relacionado:** complementa o [ADR 030](030-motor-e-asset-do-3d-da-abertura.md) (motor, modelo e arte) e o [ADR 027](027-3d-na-abertura.md) (condições do 3D). Substitui o item 4 do 030 na parte do giro (só horizontal) e do canvas fora do Tab; o resto do 030 e as condições 1 a 4 do 027 continuam valendo.
 
@@ -69,4 +69,4 @@ Dois problemas: **peso**, porque cada GLB pesa de 1,5 a 3,3 MB e a abertura já 
 
 ## Elenco
 
-A Lua saiu do site em 2026-10-16, por decisão do usuário.
+A Lua saiu do site em 2026-10-16, por decisão do usuário, e voltou em 2026-11-22 pelo [ADR 058](058-lua-volta-e-elenco-hi3d-quality.md).

@@ -9,9 +9,29 @@ nem amplia os direitos concedidos.
 
 ## Elenco
 
-Rúbia aparece na cena 3D da abertura, na imagem estática e nos estados de carregamento; Nyx representa
-erros; Ferrugem, sucesso; Jade, o estado vazio; Fagulha alterna com Rúbia no carregamento. As cinco
-aparecem nos créditos. Ada e Lua permanecem excluídas conforme as decisões registradas.
+O elenco tem seis goblins. Rúbia aparece na cena 3D da abertura, na imagem estática e nos estados de
+carregamento; Fagulha alterna com Rúbia no carregamento; Lua e Jade alternam no estado vazio; Nyx
+representa erros; Ferrugem, sucesso. As seis aparecem no seletor da abertura e nos créditos, nesta
+ordem: Rúbia, Fagulha, Ferrugem, Jade, Lua e Nyx. A Lua voltou em 22/11/2026, por decisão do usuário
+([ADR 058](../adr/058-lua-volta-e-elenco-hi3d-quality.md)). Só a Ada permanece excluída, conforme a
+decisão registrada.
+
+Desde 22/11/2026, os modelos 3D das seis são gerações do Hi3D v3.0 em `high_quality`, aprovadas pelo
+usuário nessa data. Cada geração parte do render anterior da própria goblin e cita `source-005` e
+`rights-005`: os direitos são do dono do projeto, por declaração dele. As imagens 2D saem do render
+desses modelos. Origem de cada modelo (task_id do Hi3D):
+
+| Goblin | Geração | task_id |
+|---|---|---|
+| Rúbia | `rubia-3d-quality` | `b831b240f7cd4e4caa0363f370c78662` |
+| Fagulha | `fagulha-3d-quality` | `4e795634d7ee4a49857fb05aff6f8ae2` |
+| Ferrugem | `ferrugem-3d-quality` | `aceeb3d4676f4590898a577f1bcfc799` |
+| Jade | `jade-3d-quality` | `14e21db4788b4e72ba1e0d8de61d5a15` |
+| Lua | `lua-3d-quality` | `4cab2fcdf9934d518e0699801f19eb73` |
+| Nyx | `nyx-3d-quality` | `71091b9b119f4946968b60742ce42ce5` |
+
+Bytes, sha256 e redução de cada modelo estão no
+[ADR 030](../adr/030-motor-e-asset-do-3d-da-abertura.md), seção "Modelos do Hi3D Quality (2026-11-22)".
 
 ## Marca reservada
 
