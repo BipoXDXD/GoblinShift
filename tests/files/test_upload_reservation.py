@@ -7,20 +7,24 @@ físico liberam.
 
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift import capacity
 from goblinshift.capacity import (
     AccountCapacityExceededError,
     GlobalCapacityExceededError,
     HolderKind,
     ReconcileReport,
+    Unreserved,
     release,
 )
-from goblinshift.capacity.tables import capacity_pool
+from goblinshift.capacity.tables import capacity_pool, resource_reservation
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object, publish_artifact
 from goblinshift.files.errors import UploadSizeMismatchError
 from goblinshift.files.limits import MIN_INTENT_RESERVED_BYTES as MIN
@@ -324,6 +328,72 @@ def test_reconciliacao_corrige_pool_divergente(
 
     assert report.pools_corrected == 1
     assert account_reserved(factory, owner) == 3
+
+
+def mark_deleted_with_lock_timeout(factory: sessionmaker[Session], object_id: uuid.UUID) -> None:
+    """Outra conexão marca o objeto `deleted`, desistindo em 200 ms se ele estiver travado."""
+    with factory() as session, session.begin():
+        session.execute(text("SET LOCAL lock_timeout = '200ms'"))
+        session.execute(
+            update(stored_object)
+            .where(stored_object.c.id == object_id)
+            .values(state=ObjectState.DELETED)
+        )
+
+
+def object_state(factory: sessionmaker[Session], object_id: uuid.UUID) -> ObjectState:
+    with factory() as session:
+        state: str = session.execute(
+            select(stored_object.c.state).where(stored_object.c.id == object_id)
+        ).scalar_one()
+    return ObjectState(state)
+
+
+def live_reservations_on_removed_objects(factory: sessionmaker[Session]) -> list[uuid.UUID]:
+    with factory() as session:
+        return list(
+            session.execute(
+                select(stored_object.c.id).where(
+                    stored_object.c.state.in_([ObjectState.DELETED, ObjectState.MISSING]),
+                    select(resource_reservation.c.id)
+                    .where(
+                        resource_reservation.c.holder_kind == HolderKind.OBJECT,
+                        resource_reservation.c.holder_id == stored_object.c.id,
+                        resource_reservation.c.released_at.is_(None),
+                    )
+                    .exists(),
+                )
+            ).scalars()
+        )
+
+
+def test_objeto_removido_durante_a_reconciliacao_nao_ganha_reserva(
+    factory: sessionmaker[Session], storage: FileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = create_user(factory, "alice")
+    object_id = object_of(factory, ready_upload(factory, storage, owner, b"abcde").id)
+    drop_object_reservation(factory, object_id)
+    real_reconcile = capacity.reconcile
+
+    def removed_meanwhile(
+        session: Session, *, limit: int, unreserved: Sequence[Unreserved] = ()
+    ) -> ReconcileReport:
+        # Entre a leitura dos órfãos e a adoção, outra conexão tenta remover o objeto: a trava
+        # da reconciliação a faz desistir (55P03) em vez de confirmar a remoção.
+        with pytest.raises(OperationalError) as blocked:
+            mark_deleted_with_lock_timeout(factory, object_id)
+        assert getattr(blocked.value.orig, "sqlstate", None) == "55P03"
+        return real_reconcile(session, limit=limit, unreserved=unreserved)
+
+    # `reconcile_capacity` chama `capacity.reconcile` pelo módulo: o dublê entra no meio dela.
+    monkeypatch.setattr(capacity, "reconcile", removed_meanwhile)
+
+    report = reconcile_capacity(factory(), limit=10)
+
+    assert report.objects_adopted == 1
+    assert object_state(factory, object_id) == ObjectState.COMMITTED
+    assert live_amount(factory, HolderKind.OBJECT, object_id) == 5
+    assert live_reservations_on_removed_objects(factory) == []
 
 
 def candidate_object(factory: sessionmaker[Session], owner: uuid.UUID, size: int) -> uuid.UUID:

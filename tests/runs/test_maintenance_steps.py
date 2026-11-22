@@ -41,11 +41,30 @@ STEPS: dict[str, dict[str, int]] = {
     "release_orphan_holds": {"holds_released": 4, "download_holds_released": 11},
     "discard_stale_candidates": {"candidates_discarded": 5},
     "sweep_work_areas": {"work_areas_removed": 6},
-    "apply_retention": {"objects_purged": 7},
+    "expire_incomplete_uploads": {"incomplete_uploads_expired": 20},
+    "expire_unused_uploads": {"unused_uploads_expired": 21},
+    "expire_artifacts": {"artifacts_expired": 22},
+    "purge_deleted_objects": {"objects_purged": 7, "bytes_purged": 23, "purge_limit_reached": 1},
+    "reconcile_capacity": {"capacity_pools_corrected": 24, "capacity_objects_adopted": 25},
+    "delete_expired_idempotency_records": {"idempotency_records_removed": 26},
+    "anonymize_finished_runs": {"runs_anonymized": 27},
+    "anonymize_output_names": {"outputs_anonymized": 28},
+    "anonymize_deleted_uploads": {"uploads_anonymized": 29},
+    "delete_old_runs": {"runs_deleted": 30},
+    "delete_old_file_rows": {"file_rows_deleted": 31},
+    "delete_released_reservations": {"reservations_removed": 32},
     "sweep_temporary_parts": {"tmp_parts_removed": 8},
     "mark_missing_objects": {"objects_marked_missing": 9},
     "measure": {"runs_stuck_stopping": 10},
 }
+# Derivados de `STEPS`, para não mudar a cada passo novo. Pulam todos menos dois na falha de
+# conexão do primeiro passo (ele e o de storage rodam) e na parada pedida durante o segundo; na
+# falha de conexão dos usos de execução, os passos de banco que vêm depois deles.
+SKIPPED_BUT_TWO = len(STEPS) - 2
+_AFTER_ORPHAN_HOLDS = list(STEPS)[list(STEPS).index("release_orphan_holds") + 1 :]
+SKIPPED_AFTER_ORPHAN_HOLDS = len(
+    [name for name in _AFTER_ORPHAN_HOLDS if name != STORAGE_ONLY_STEP]
+)
 # Passos que devolvem um número em vez de um dicionário.
 INT_STEPS = {
     "reconcile_expired_leases",
@@ -114,6 +133,7 @@ def test_ciclo_sem_falha_conta_zero_passos_falhos(maintenance: Maintenance) -> N
     assert counts == {
         **_expected_without(),
         "candidates_left_on_disk": 0,
+        "purge_files_not_removed": 0,
         STEPS_FAILED: 0,
         STEPS_SKIPPED: 0,
     }
@@ -130,6 +150,7 @@ def test_passo_que_levanta_nao_impede_os_outros(
     assert counts == {
         **_expected_without(failing),
         "candidates_left_on_disk": 0,
+        "purge_files_not_removed": 0,
         STEPS_FAILED: 1,
         STEPS_SKIPPED: 0,
     }
@@ -142,7 +163,7 @@ def test_cada_passo_que_falha_sobe_o_contador(
     monkeypatch.setattr(
         maintenance, "reconcile_expired_leases", _raising(database_error(UNIQUE_VIOLATION))
     )
-    monkeypatch.setattr(maintenance, "apply_retention", _raising(OSError("disco")))
+    monkeypatch.setattr(maintenance, "purge_deleted_objects", _raising(OSError("disco")))
 
     counts = maintenance.run_cycle()
 
@@ -277,8 +298,9 @@ def test_falha_de_conexao_pula_os_passos_de_banco_restantes(
     assert counts == {
         **STEPS[STORAGE_ONLY_STEP],
         "candidates_left_on_disk": 0,
+        "purge_files_not_removed": 0,
         STEPS_FAILED: 1,
-        STEPS_SKIPPED: 8,
+        STEPS_SKIPPED: SKIPPED_BUT_TWO,
     }
     [record] = [r for r in caplog.records if r.getMessage() == SKIPPED_AFTER_CONNECTION_MESSAGE]
     assert record.fields == {  # type: ignore[attr-defined]
@@ -323,7 +345,7 @@ def test_falha_de_conexao_no_ultimo_passo_nao_pula_nada(
 
 @pytest.mark.parametrize(
     ("error", "skipped"),
-    [(database_error, 0), (connection_refused, 5)],
+    [(database_error, 0), (connection_refused, SKIPPED_AFTER_ORPHAN_HOLDS)],
     ids=["statement_timeout", "conexao_recusada"],
 )
 def test_falha_nos_usos_de_execucao_mantem_os_downloads_ja_encerrados(
@@ -369,8 +391,9 @@ def test_parada_pedida_no_meio_sai_antes_do_proximo_passo(
         **STEPS["reconcile_expired_leases"],
         **STEPS["expire_queue"],
         "candidates_left_on_disk": 0,
+        "purge_files_not_removed": 0,
         STEPS_FAILED: 0,
-        STEPS_SKIPPED: 8,
+        STEPS_SKIPPED: SKIPPED_BUT_TWO,
     }
     [record] = [r for r in caplog.records if r.getMessage() == SKIPPED_FOR_STOP_MESSAGE]
     assert record.fields == {"skipped": list(STEPS)[2:]}  # type: ignore[attr-defined]

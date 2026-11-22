@@ -15,7 +15,6 @@ import pytest
 
 from goblinshift.runs.worker import collection
 from goblinshift.runs.worker.collection import CollectionError, collect_outputs
-from goblinshift.runs.worker.package_check import PackageError, verify_zip
 from tests.fifo_support import fail_if_blocked, make_fifo
 from tests.runs.collection_support import PACKAGE, RECIPE, ok_item, write_out, write_package
 
@@ -46,7 +45,8 @@ def _swap_for_fifo_after_scan(monkeypatch: pytest.MonkeyPatch, target: Path) -> 
     monkeypatch.setattr(collection, "_scan", scan)
 
 
-# a.csv: `_digested`; report.json e manifest.json: `_read_no_follow`; pacote: `_digested`.
+# a.csv: `_digested`; report.json e manifest.json: `_read_no_follow`; pacote: `_verified_package`,
+# que abre uma vez para o hash e a verificação do ZIP.
 @pytest.mark.parametrize("name", ["a.csv", "report.json", "manifest.json", PACKAGE])
 def test_saida_trocada_por_fifo_depois_do_lstat_e_recusada_sem_bloquear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
@@ -74,17 +74,6 @@ def test_preview_trocado_por_fifo_depois_do_lstat_e_recusado_sem_bloquear(
 
     with fail_if_blocked(preview), pytest.raises(CollectionError, match="regular"):
         collect_outputs(out, recipe_id=RECIPE, input_count=1)
-
-
-def test_verificacao_do_zip_recusa_fifo_sem_bloquear(tmp_path: Path) -> None:
-    fifo = tmp_path / PACKAGE
-    make_fifo(fifo)
-    before = _open_fd_count()
-
-    with fail_if_blocked(fifo), pytest.raises(PackageError, match="regular"):
-        verify_zip(fifo, [], lambda: None)
-
-    assert _open_fd_count() == before
 
 
 def test_coleta_le_arquivos_comuns_em_modo_bloqueante(

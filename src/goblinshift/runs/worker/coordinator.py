@@ -88,6 +88,8 @@ from goblinshift.runs.store import (
     RunFinishedHook,
     apply_transition,
     complete_after_commit,
+    db_clock,
+    lease_expired,
     lock_fenced,
     run_transaction,
 )
@@ -481,8 +483,11 @@ class Coordinator:
                 _AreaFile(inputs_dir / name) as target,
             ):
                 for chunk in keeper.beating(_chunks(source)):
-                    digest.update(chunk)
                     size += len(chunk)
+                    # Objeto adulterado maior que o registro não chega a encher a área de trabalho.
+                    if size > content.size_bytes:
+                        raise PreparationError(f"entrada {position} passa do tamanho registrado")
+                    digest.update(chunk)
                     target.write(chunk)
         except ObjectTamperedError:
             raise InputTamperedError(position) from None
@@ -576,11 +581,21 @@ class Coordinator:
     def renew_lease(
         self, claimed: ClaimedAttempt, *, retry_allowed: Callable[[float], bool] | None = None
     ) -> Status:
-        """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status."""
+        """Renova o lease e grava o progresso; aplica o prazo vencido. Devolve o status.
+
+        Lease já vencido no relógio do banco não se renova: `LostFencing`, e o worker abandona.
+        """
         processed = self._processed_count(claimed)
 
         def renew(session: Session) -> Status:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
+            live = loaded.live_attempt
+            # Vencido é definitivo (3.4): a manutenção pode já ter parado o executor e só decidir
+            # depois; renovar agora tiraria a decisão dela e deixaria a tentativa perdida. O
+            # relógio é lido depois da trava: `loaded.now` (o `now()` da transação) não vê a
+            # espera pelo `FOR UPDATE`, e um lease vencido nela passaria por vivo.
+            if live is not None and lease_expired(live.lease_expires_at, db_clock(session)):
+                raise LostFencing(f"lease vencido em {live.lease_expires_at.isoformat()}")
             session.execute(
                 update(attempt)
                 .where(attempt.c.id == claimed.attempt_id, attempt.c.ended_at.is_(None))
@@ -703,7 +718,7 @@ class Coordinator:
             return self.fail_transiently(claimed)
         try:
             stored = self.store_candidates(claimed, collected)
-        except (StorageError, OSError) as error:
+        except (StorageError, OSError, CollectionError) as error:
             logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
             return self.fail_transiently(claimed)
         attempt_event.record(
