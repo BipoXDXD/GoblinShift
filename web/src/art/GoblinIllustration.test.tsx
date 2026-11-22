@@ -61,8 +61,9 @@ describe("goblinOf (rotação estável)", () => {
     expect(new Set(KEYS.map((key) => goblinOf("erro", key).name))).toEqual(new Set(["Nyx"]));
   });
 
-  it("chave vazia ainda escolhe uma goblin do estado", () => {
-    expect(["Lua", "Jade"]).toContain(goblinOf("vazio", "").name);
+  // O FNV-1a da string vazia é a base 0x811c9dc5, ímpar: índice 1 de ["lua", "jade"].
+  it("chave vazia ainda escolhe uma goblin do estado, sempre a mesma", () => {
+    expect(goblinOf("vazio", "").name).toBe("Jade");
   });
 });
 
