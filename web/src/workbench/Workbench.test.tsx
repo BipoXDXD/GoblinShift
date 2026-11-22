@@ -369,7 +369,7 @@ describe("Bancada", () => {
             {
               field: "body.parameters.output_columns",
               code: "value_error",
-              message: "Value error, repete colunas: ['x']",
+              message: "output_columns repete colunas",
             },
           ],
         }),
@@ -383,9 +383,8 @@ describe("Bancada", () => {
     expect(summary).toHaveTextContent(
       "Células que parecem fórmulas de planilha: escolha uma das opções.",
     );
-    expect(summary).toHaveTextContent("Colunas finais, na ordem: repete colunas: ['x']");
+    expect(summary).toHaveTextContent("Colunas finais, na ordem: output_columns repete colunas");
     expect(summary).not.toHaveTextContent("Input should");
-    expect(summary).not.toHaveTextContent("Value error");
   });
 
   it("erro por campo com código sem texto próprio mostra a frase padrão, no resumo e no campo", async () => {

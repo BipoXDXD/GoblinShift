@@ -54,8 +54,16 @@ class RecipeVersionRetiredError(Exception):
 
 @dataclass(frozen=True)
 class FieldError:
-    location: str  # caminho com pontos, como `filters.0.value`; vazio é o objeto inteiro
+    # Uma parte por nível, como `("filters", "0", "value")`; vazio é o objeto inteiro. Partes,
+    # não texto com pontos: uma chave do cliente pode conter ponto.
+    location: tuple[str, ...]
     message: str
+    # Tipo do erro de validação (`extra_forbidden`, `enum`...); regra da própria receita é
+    # `value_error`.
+    code: str = "value_error"
+
+    def __str__(self) -> str:
+        return f"{'.'.join(self.location) or '<raiz>'}: {self.message}"
 
 
 class InvalidParametersError(ValueError):
@@ -63,7 +71,7 @@ class InvalidParametersError(ValueError):
 
     def __init__(self, errors: Iterable[FieldError]) -> None:
         self.errors = tuple(errors)
-        super().__init__("; ".join(f"{e.location or '<raiz>'}: {e.message}" for e in self.errors))
+        super().__init__("; ".join(map(str, self.errors)))
 
 
 @dataclass(frozen=True)
@@ -231,7 +239,7 @@ CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS
 
 def _field_errors(error: ValidationError) -> list[FieldError]:
     return [
-        FieldError(".".join(str(part) for part in detail["loc"]), detail["msg"])
+        FieldError(tuple(str(part) for part in detail["loc"]), detail["msg"], detail["type"])
         for detail in error.errors()
     ]
 

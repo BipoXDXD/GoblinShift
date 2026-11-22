@@ -50,7 +50,7 @@ def resolve(raw: Any) -> dict[str, object]:
 def error_locations(raw: Any) -> list[str]:
     with pytest.raises(InvalidParametersError) as error:
         resolve(raw)
-    return [field.location for field in error.value.errors]
+    return [".".join(field.location) for field in error.value.errors]
 
 
 def test_parametros_vazios_recebem_todos_os_defaults() -> None:
@@ -302,7 +302,7 @@ def test_receita_nova_recusa_campo_desconhecido_no_campo(recipe_id: str) -> None
     with pytest.raises(InvalidParametersError) as error:
         CATALOG.resolve(recipe_id, 1, {"inventado": 1})
 
-    assert [field.location for field in error.value.errors] == ["inventado"]
+    assert [field.location for field in error.value.errors] == [("inventado",)]
 
 
 # Data de desligamento (1.6: `deprecated` aceita por pelo menos 90 dias, com `Sunset`).

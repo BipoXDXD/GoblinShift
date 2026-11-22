@@ -1,13 +1,12 @@
 """Nome original como dado, nunca caminho: radical e extensão seguros para um componente (3.6).
 
-Comum às receitas que derivam o nome da saída do nome enviado (CSV Janitor, Image Forge e
-Downloads Detox). O `OutputDir` ainda aplica NFC, o teto de 180 bytes e as colisões; aqui só
-se garante que nada do nome original vire separador, controle, arquivo oculto ou `..`.
+O `OutputDir` ainda aplica NFC, o teto de 180 bytes e as colisões; aqui só se garante que nada
+do nome original vire separador, controle, arquivo oculto ou `..`.
 
 "Controle" inclui o formato invisível do Unicode (categoria Cf: U+202E, U+200B, U+FEFF no meio,
 os isolates U+2066 a U+2069): ele não aparece na tela, mas reordena ou disfarça o nome exibido
 (`fatura\u202egpj.exe` aparece terminando em `.jpg`). A mesma regra vale onde o nome é recusado
-em vez de trocado (`has_unsafe_char`): `OutputDir`, coleta do worker e `name_prefix` do Detox.
+em vez de trocado (`has_unsafe_char`).
 
 O nome da saída vai para o computador do usuário, que pode ser Windows: lá `<>:"|?*` são
 proibidos, ponto ou espaço no fim somem em silêncio e `CON.csv` abre o console em vez do arquivo.

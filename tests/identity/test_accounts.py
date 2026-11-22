@@ -61,6 +61,21 @@ def test_nome_vazio_ou_longo_demais_e_recusado(factory: sessionmaker[Session], n
         create_admin_user(session, name)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("a\x1bb", id="ESC"),
+        pytest.param("a\u202eb", id="RLO"),
+        pytest.param("a\u200bb", id="largura-zero"),
+    ],
+)
+def test_nome_do_administrador_com_caractere_invisivel_e_recusado(
+    factory: sessionmaker[Session], name: str
+) -> None:
+    with pytest.raises(InvalidDisplayNameError), unit_of_work(factory) as session:
+        create_admin_user(session, name)
+
+
 def test_nome_com_200_caracteres_e_aceito(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         user_id = create_admin_user(session, "x" * 200)

@@ -5,7 +5,8 @@ permitido e exceção inesperada. Os módulos de rota levantam `ApiProblem(code,
 status vem do catálogo, para que um `code` nunca apareça com dois status diferentes.
 
 Campos: `type`, `title`, `status`, `detail`, `instance`, `code`, `request_id` e, na
-validação, `errors` (lista de `{field, code, message}`).
+validação, `errors` (lista de `{field, code, message}`, com no máximo `MAX_PROBLEM_ERRORS` itens
+na ordem recebida; quando há mais, os excedentes caem e `errors_truncated` vem `true`).
 
 - `type` é a URI estável do código: `https://goblinshift.dev/problems/<code-em-kebab>`, por
   exemplo `.../problems/body-too-large`. É um identificador, não precisa ser navegável.
@@ -21,13 +22,13 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
@@ -62,6 +63,9 @@ _STORAGE_UNAVAILABLE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EIO})
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
 REQUEST_ID_HEADER = "X-Request-ID"
+# Teto de `errors`: um corpo de 64 KiB com milhares de chaves extras virava ~300 KB de resposta.
+# Cinquenta cobre qualquer formulário real e mantém o 422 curto (#442).
+MAX_PROBLEM_ERRORS = 50
 
 
 class ProblemCode(StrEnum):
@@ -178,6 +182,10 @@ _FORWARDED_HEADERS = ("Allow", "Retry-After", "WWW-Authenticate")
 _SERVER_ERROR_MIN = 500
 # Candidatos do Allow de um 405, em ordem alfabética.
 _HTTP_METHODS = ("DELETE", "GET", "HEAD", "PATCH", "POST", "PUT")
+_EXTRA_KEY_CODE = "extra_forbidden"
+_EXTRA_KEY_MESSAGE = "campo não aceito"
+# O Pydantic antepõe isto ao texto de um `ValueError` de validador; a regra já é nossa, em pt-BR.
+_PYDANTIC_VALUE_ERROR_PREFIX = "Value error, "
 
 
 class FieldError(BaseModel):
@@ -196,7 +204,9 @@ class ProblemDetails(BaseModel):
     instance: str
     code: ProblemCode
     request_id: str
-    errors: list[FieldError] | None = None
+    errors: Annotated[list[FieldError], Field(max_length=MAX_PROBLEM_ERRORS)] | None = None
+    # Só aparece quando `errors` foi cortado no teto; nunca sai `false`.
+    errors_truncated: Literal[True] | None = None
 
 
 # Todo 429 e todo 503 que a API emite carrega `Retry-After` (capacity_problems, rate limit, banco,
@@ -329,13 +339,20 @@ def problem_response(
         "request_id": request_id,
     }
     if errors is not None:
-        body["errors"] = list(errors)
+        body |= _capped_errors(errors)
     return JSONResponse(
         body,
         status_code=spec.status,
         headers={**(headers or {}), REQUEST_ID_HEADER: request_id},
         media_type=PROBLEM_MEDIA_TYPE,
     )
+
+
+def _capped_errors(errors: Sequence[Mapping[str, str]]) -> dict[str, Any]:
+    envelope: dict[str, Any] = {"errors": list(errors[:MAX_PROBLEM_ERRORS])}
+    if len(errors) > MAX_PROBLEM_ERRORS:
+        envelope["errors_truncated"] = True
+    return envelope
 
 
 class RequestContextMiddleware:
@@ -502,7 +519,7 @@ async def _handle_validation_error(request: Request, exc: RequestValidationError
         detail="A requisição tem campos inválidos; veja `errors`.",
         instance=request.url.path,
         request_id=request_id_of(request),
-        errors=[_field_error(error) for error in exc.errors()],
+        errors=_field_errors(exc.errors()),
     )
 
 
@@ -557,10 +574,23 @@ def code_for_http_status(status: int) -> ProblemCode:
     )
 
 
+def _field_errors(errors: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Um erro por local e regra, na ordem do Pydantic: várias chaves extras no mesmo objeto
+    viram um erro só."""
+    unique = dict.fromkeys(tuple(_field_error(error).items()) for error in errors)
+    return [dict(error) for error in unique]
+
+
 def _field_error(error: Mapping[str, Any]) -> dict[str, str]:
-    # Só local, tipo e mensagem: `input` e `ctx` podem ecoar o que o cliente mandou.
+    # Só local, tipo e mensagem: `input` e `ctx` podem ecoar o que o cliente mandou. A chave
+    # extra é texto do cliente, então o erro aponta o objeto que a recebeu, com texto fixo.
+    code = str(error["type"])
+    location = tuple(error["loc"])
+    message = str(error["msg"]).removeprefix(_PYDANTIC_VALUE_ERROR_PREFIX)
+    if code == _EXTRA_KEY_CODE:
+        location, message = location[:-1], _EXTRA_KEY_MESSAGE
     return {
-        "field": ".".join(str(part) for part in error["loc"]),
-        "code": str(error["type"]),
-        "message": str(error["msg"]),
+        "field": ".".join(str(part) for part in location),
+        "code": code,
+        "message": message,
     }

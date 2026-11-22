@@ -25,7 +25,7 @@ def resolve(raw: Any) -> dict[str, object]:
 def error_locations(raw: Any) -> list[str]:
     with pytest.raises(InvalidParametersError) as error:
         resolve(raw)
-    return [field.location for field in error.value.errors]
+    return [".".join(field.location) for field in error.value.errors]
 
 
 def test_defaults_resolvidos_viram_os_params_da_biblioteca() -> None:

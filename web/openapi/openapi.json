@@ -2181,6 +2181,7 @@
                               "trim_columns": {
                                 "items": {
                                   "type": "string",
+                                  "maxLength": 1024,
                                   "minLength": 1
                                 },
                                 "type": "array",
@@ -2192,6 +2193,7 @@
                                   "properties": {
                                     "column": {
                                       "type": "string",
+                                      "maxLength": 1024,
                                       "minLength": 1
                                     },
                                     "mode": {
@@ -2220,6 +2222,7 @@
                                   "properties": {
                                     "column": {
                                       "type": "string",
+                                      "maxLength": 1024,
                                       "minLength": 1
                                     },
                                     "op": {
@@ -2235,7 +2238,8 @@
                                     "value": {
                                       "anyOf": [
                                         {
-                                          "type": "string"
+                                          "type": "string",
+                                          "maxLength": 4096
                                         },
                                         {
                                           "type": "null"
@@ -2259,6 +2263,7 @@
                               "deduplicate_by": {
                                 "items": {
                                   "type": "string",
+                                  "maxLength": 1024,
                                   "minLength": 1
                                 },
                                 "type": "array",
@@ -2270,6 +2275,7 @@
                                   {
                                     "items": {
                                       "type": "string",
+                                      "maxLength": 1024,
                                       "minLength": 1
                                     },
                                     "type": "array",
@@ -3096,6 +3102,7 @@
                               },
                               "trim_columns": {
                                 "items": {
+                                  "maxLength": 1024,
                                   "minLength": 1,
                                   "type": "string"
                                 },
@@ -3108,6 +3115,7 @@
                                   "additionalProperties": false,
                                   "properties": {
                                     "column": {
+                                      "maxLength": 1024,
                                       "minLength": 1,
                                       "type": "string"
                                     },
@@ -3136,6 +3144,7 @@
                                   "additionalProperties": false,
                                   "properties": {
                                     "column": {
+                                      "maxLength": 1024,
                                       "minLength": 1,
                                       "type": "string"
                                     },
@@ -3152,6 +3161,7 @@
                                     "value": {
                                       "anyOf": [
                                         {
+                                          "maxLength": 4096,
                                           "type": "string"
                                         },
                                         {
@@ -3174,6 +3184,7 @@
                               },
                               "deduplicate_by": {
                                 "items": {
+                                  "maxLength": 1024,
                                   "minLength": 1,
                                   "type": "string"
                                 },
@@ -3185,6 +3196,7 @@
                                 "anyOf": [
                                   {
                                     "items": {
+                                      "maxLength": 1024,
                                       "minLength": 1,
                                       "type": "string"
                                     },
@@ -3872,6 +3884,7 @@
                               },
                               "trim_columns": {
                                 "items": {
+                                  "maxLength": 1024,
                                   "minLength": 1,
                                   "type": "string"
                                 },
@@ -3884,6 +3897,7 @@
                                   "additionalProperties": false,
                                   "properties": {
                                     "column": {
+                                      "maxLength": 1024,
                                       "minLength": 1,
                                       "type": "string"
                                     },
@@ -3912,6 +3926,7 @@
                                   "additionalProperties": false,
                                   "properties": {
                                     "column": {
+                                      "maxLength": 1024,
                                       "minLength": 1,
                                       "type": "string"
                                     },
@@ -3928,6 +3943,7 @@
                                     "value": {
                                       "anyOf": [
                                         {
+                                          "maxLength": 4096,
                                           "type": "string"
                                         },
                                         {
@@ -3950,6 +3966,7 @@
                               },
                               "deduplicate_by": {
                                 "items": {
+                                  "maxLength": 1024,
                                   "minLength": 1,
                                   "type": "string"
                                 },
@@ -3961,6 +3978,7 @@
                                 "anyOf": [
                                   {
                                     "items": {
+                                      "maxLength": 1024,
                                       "minLength": 1,
                                       "type": "string"
                                     },
@@ -6001,13 +6019,26 @@
                 "items": {
                   "$ref": "#/components/schemas/FieldError"
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 50
               },
               {
                 "type": "null"
               }
             ],
             "title": "Errors"
+          },
+          "errors_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "const": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors Truncated"
           }
         },
         "type": "object",

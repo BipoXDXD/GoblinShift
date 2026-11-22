@@ -15,7 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from goblinshift.entrypoints.api.dependencies import require_scope
 from goblinshift.entrypoints.api.json_command import json_command, read_json_command
-from goblinshift.entrypoints.api.problems import PROBLEMS, ProblemCode
+from goblinshift.entrypoints.api.problems import MAX_PROBLEM_ERRORS, PROBLEMS, ProblemCode
 from goblinshift.entrypoints.api.wide_event import QUERY_STARTS_KEY
 from goblinshift.identity import Principal, Scope
 
@@ -86,7 +86,10 @@ def assert_problem(response: httpx.Response, status: int, code: str) -> dict[str
     assert response.status_code == status, response.text
     assert response.headers["content-type"] == "application/problem+json"
     body: dict[str, Any] = response.json()
-    assert PROBLEM_KEYS <= body.keys() <= PROBLEM_KEYS | {"errors"}
+    assert PROBLEM_KEYS <= body.keys() <= PROBLEM_KEYS | {"errors", "errors_truncated"}
+    if "errors_truncated" in body:
+        assert body["errors_truncated"] is True
+        assert len(body["errors"]) == MAX_PROBLEM_ERRORS
     assert body["status"] == status
     assert body["code"] == code
     # Um `code` nunca sai com status diferente do catálogo (1.6).

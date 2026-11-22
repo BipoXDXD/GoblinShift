@@ -31,7 +31,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import NoReturn
 from uuid import UUID
@@ -113,12 +113,12 @@ class IdempotencyKeyInvalidError(AcceptanceError):
 class InvalidRunCommandError(AcceptanceError):
     """Comando semanticamente inválido (→ 422 `VALIDATION_FAILED`), com um erro por campo.
 
-    `location` é o caminho com pontos a partir da raiz do comando, como `parameters.filters.0`.
+    `location` é o caminho a partir da raiz do comando, como `("parameters", "filters", "0")`.
     """
 
     def __init__(self, errors: Sequence[FieldError]) -> None:
         self.errors = tuple(errors)
-        super().__init__("; ".join(f"{e.location}: {e.message}" for e in self.errors))
+        super().__init__("; ".join(map(str, self.errors)))
 
 
 class IdempotencyKeyReusedError(AcceptanceError):
@@ -350,7 +350,7 @@ def _check_upload_references(
         return
     known = set(upload_ids)
     errors = [
-        FieldError(f"parameters.{reference.location}", _NOT_AN_INPUT)
+        FieldError(("parameters", *reference.location), _NOT_AN_INPUT)
         for reference in recipe.upload_references(parameters)
         if reference.upload_id not in known
     ]
@@ -529,9 +529,8 @@ def _record_key(
 
 
 def _under(prefix: str, error: FieldError) -> FieldError:
-    location = f"{prefix}.{error.location}" if error.location else prefix
-    return FieldError(location, error.message)
+    return replace(error, location=(prefix, *error.location))
 
 
 def _refuse(location: str, message: str) -> NoReturn:
-    raise InvalidRunCommandError([FieldError(location, message)])
+    raise InvalidRunCommandError([FieldError((location,), message)])

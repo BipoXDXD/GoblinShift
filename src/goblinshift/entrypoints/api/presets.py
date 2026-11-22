@@ -18,17 +18,21 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
-from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field
 
 from goblinshift.catalog import CATALOG, RecipeVersionRetiredError
 from goblinshift.entrypoints.api.catalog import (
-    MAX_RECIPE_ID_CHARS,
+    RecipeIdField,
+    RecipeVersionField,
     deprecation_headers,
     recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, require_scope
-from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
+from goblinshift.entrypoints.api.json_command import (
+    JSON_MEDIA_TYPE,
+    body_validation_error,
+    json_command,
+)
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.identity import Principal, Scope
 from goblinshift.presets import (
@@ -73,9 +77,11 @@ class PresetCommand(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
-    recipe_id: str = Field(min_length=1, max_length=MAX_RECIPE_ID_CHARS)
-    recipe_version: int = Field(ge=1)
+    # Sem teto aqui: `parse_draft` mede o nome depois do NFC e do strip, como o front o vê; o
+    # `maxLength` publicado vem de `_command_openapi`.
+    name: str = Field(min_length=1)
+    recipe_id: RecipeIdField
+    recipe_version: RecipeVersionField
     parameters: dict[str, Any]
 
 
@@ -239,16 +245,7 @@ def _parse(command: PresetCommand) -> PresetDraft:
             command.name, command.recipe_id, command.recipe_version, command.parameters
         )
     except InvalidPresetError as error:
-        raise RequestValidationError(
-            [
-                {
-                    "loc": ("body", *field_error.location.split(".")),
-                    "type": "value_error",
-                    "msg": field_error.message,
-                }
-                for field_error in error.errors
-            ]
-        ) from None
+        raise body_validation_error(error.errors) from None
     except RecipeVersionRetiredError:
         raise ApiProblem(
             ProblemCode.RECIPE_VERSION_RETIRED, "A versão da receita foi retirada."

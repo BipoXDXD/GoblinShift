@@ -372,9 +372,7 @@ def test_campo_do_servidor_no_corpo_responde_422_sem_gravar_nada(
     response = post_run(client, account, payload, str(uuid.uuid4()))
 
     problem = assert_problem(response, 422, "VALIDATION_FAILED")
-    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
-        (f"body.{field}", "extra_forbidden")
-    ]
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [("body", "extra_forbidden")]
     assert count_rows(factory) == before
 
 
@@ -647,6 +645,38 @@ def test_validate_only_nao_confere_uploads_nem_exige_chave(
     response = post_run(client, account, body([uuid.uuid4()]), None, "?validate_only=true")
 
     assert response.status_code == 200, response.text
+
+
+def test_corpo_com_milhares_de_chaves_extras_devolve_resposta_curta(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    parameters = {f"k{i}": 0 for i in range(3000)}
+
+    response = post_run(
+        client, Account(factory), body([uuid.uuid4()], parameters), None, "?validate_only=true"
+    )
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert problem["errors"] == [
+        {"field": "body.parameters", "code": "extra_forbidden", "message": "campo não aceito"}
+    ]
+    assert len(response.content) < 16 * 1024
+
+
+def test_mais_de_cinquenta_erros_distintos_sao_cortados_com_errors_truncated(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    # Cem colunas que não são texto: cem locais distintos, que a deduplicação não junta.
+    parameters = {"trim_columns": [0] * 100}
+
+    response = post_run(
+        client, Account(factory), body([uuid.uuid4()], parameters), None, "?validate_only=true"
+    )
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert len(problem["errors"]) == 50
+    assert problem["errors"][0]["field"] == "body.parameters.trim_columns.0"
+    assert problem["errors_truncated"] is True
 
 
 def test_nul_nos_parametros_responde_400_sem_consumir_a_chave(
