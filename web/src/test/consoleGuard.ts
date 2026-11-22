@@ -43,6 +43,9 @@ const ORIGINAL: Readonly<Record<ConsoleMethod, ConsoleFn>> = {
 let calls: ConsoleCall[] = [];
 let unallowed: { readonly method: GuardedMethod; readonly message: string }[] = [];
 let allowances: Allowance[] = [];
+// O estado acima é um só no módulo: dois testes ao mesmo tempo (it.concurrent) ou um setup duplicado
+// misturariam as chamadas. `active` deixa o start perceber que o stop anterior não rodou.
+let active = false;
 
 function isGuarded(method: ConsoleMethod): method is GuardedMethod {
   return method === "warn" || method === "error";
@@ -158,7 +161,17 @@ export function consoleCalls(): readonly ConsoleCall[] {
   return calls;
 }
 
-export function startConsoleGuard(): void {
+// Com o guard ainda ativo (o stop anterior não rodou), avisa e recomeça do zero em vez de lançar: um
+// afterEach de arquivo que lança pula o afterEach do setup, e lançar aqui reprovaria em cascata o
+// teste seguinte, que não tem culpa. `warn` existe para o teste do guard ler o aviso.
+export function startConsoleGuard(warn: (message: string) => void = ORIGINAL.warn): void {
+  if (active) {
+    warn(
+      "[console-guard] O guard de console já estava ativo: o stop do teste anterior não rodou " +
+        "(afterEach que lançou?) ou dois testes dividem o guard (it.concurrent?). Recomeça do zero.",
+    );
+  }
+  active = true;
   calls = [];
   unallowed = [];
   allowances = [];
@@ -168,6 +181,7 @@ export function startConsoleGuard(): void {
 }
 
 export function stopConsoleGuard(): readonly string[] {
+  active = false;
   for (const method of METHODS) {
     console[method] = ORIGINAL[method];
   }

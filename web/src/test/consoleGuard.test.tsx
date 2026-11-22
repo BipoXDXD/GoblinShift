@@ -135,6 +135,17 @@ describe("guard de console", () => {
     startConsoleGuard();
   });
 
+  it("start com o guard já ativo avisa e recomeça do zero", () => {
+    console.log("gravado");
+    const warnings: string[] = [];
+    startConsoleGuard((message) => {
+      warnings.push(message);
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/guard de console já estava ativo/);
+    expect(consoleCalls()).toEqual([]);
+  });
+
   it("start zera o que foi gravado antes", () => {
     console.error("antes");
     stopConsoleGuard();
