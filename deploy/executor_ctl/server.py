@@ -261,7 +261,9 @@ class ControlHandler(BaseHTTPRequestHandler):
         """O log de cada requisição sai de `_dispatch`, com os campos do protocolo."""
 
     def log_message(self, format: str, *args: object) -> None:
-        _log.warning("http.server", extra={"detail": format % args})
+        # Só o modelo fixo da stdlib: os argumentos (linha de requisição, repr de exceção) vêm
+        # do cliente do socket.
+        _log.warning("http.server", extra={"detail": format})
 
     def _dispatch(self, method: str) -> None:
         started = time.monotonic()
