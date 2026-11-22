@@ -117,6 +117,7 @@ wide_enough() {
 }
 
 # O elenco entra pelo descritor 3, para o blender e o magick não consumirem as linhas pelo stdin.
+processed=0
 while IFS=$'\t' read -r -u 3 id glb _; do
   [[ -z "$id" || "$id" == \#* ]] && continue
   selected "$id" "$@" || continue
@@ -147,7 +148,14 @@ while IFS=$'\t' read -r -u 3 id glb _; do
     export_sizes "$work/$id.png" "$art/goblins/$id" "${STATE_WIDTHS[@]}"
   fi
   echo "$id: ok"
+  processed=$((processed + 1))
 done 3<"$here/elenco.tsv"
+
+# Um ID digitado errado não pode passar por sucesso sem gerar nada.
+if ((processed == 0)); then
+  echo "nenhum ID do elenco.tsv processado: $*" >&2
+  exit 1
+fi
 
 find "$art/goblins" "$art/oficina-3d" -type f \( -name '*.avif' -o -name '*.webp' \) \
   -exec wc -c {} + | sort -k2

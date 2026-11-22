@@ -103,3 +103,13 @@ def test_erro_do_blender_aparece_no_stderr_com_o_id(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "blender falhou (nyx)" in result.stderr
     assert "Traceback: render_glb.py explodiu" in result.stderr
+
+
+def test_id_fora_do_elenco_falha_sem_processar_nada(tmp_path: Path) -> None:
+    fake_glb = tmp_path / "ninguem.glb"
+    fake_glb.write_bytes(b"glTF")
+
+    result = _gerar(tmp_path, ids=["ninguem"], fonte=fake_glb, alvo="estados")
+
+    assert result.returncode == 1, result.stderr
+    assert "nenhum ID do elenco.tsv processado: ninguem" in result.stderr
