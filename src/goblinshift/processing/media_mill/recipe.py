@@ -10,6 +10,7 @@ execução inteira (`RESOURCE_LIMIT_EXCEEDED`), e a cópia para `out/` fica fora
 erros: um `ENOSPC` ou `OUTPUT_LIMIT_EXCEEDED` derruba a execução em vez de virar rejeição.
 """
 
+import math
 import shutil
 import tempfile
 import time
@@ -29,11 +30,20 @@ from goblinshift.processing.media_mill.commands import (
 )
 from goblinshift.processing.media_mill.limits import MAX_INPUTS, Limits
 from goblinshift.processing.media_mill.params import AudioFormat, Params
-from goblinshift.processing.media_mill.probe import Inspected, inspect, parse_probe
+from goblinshift.processing.media_mill.probe import (
+    Inspected,
+    inspect,
+    parse_probe,
+    require_audio_within_duration,
+    require_dimensions_within,
+    require_observed_frame_rate,
+)
 from goblinshift.processing.media_mill.rejection import MediaRejected, RejectionCode
 from goblinshift.processing.media_mill.signature import HEADER_BYTES, detect_container
 from goblinshift.processing.media_mill.tools import (
+    CHILD_FILE_SIZE_BYTES,
     DEFAULT_BUDGET_S,
+    MIB,
     Outcome,
     TimeBudget,
     Tools,
@@ -63,6 +73,10 @@ AUDIO_BIT_DEPTH = 16
 COPY_CHUNK_BYTES = 1024 * 1024
 # A saída do ffprobe descreve no máximo 16 faixas: alguns KiB. Acima disto, não é vídeo comum.
 PROBE_OUTPUT_MAX_BYTES = 1024 * 1024
+# O áudio sai cortado, em amostras, na duração aceita mais esta margem: um quadro que começa depois
+# da duração aceita recusa o vídeo, e a margem garante que, se a faixa passa dela, o corte ainda o
+# registra.
+AUDIO_CUT_MARGIN_S = 1.0
 MS_PER_S = 1000
 # 1.5: uma miniatura em 10% da duração; três em 10%, 50% e 90%.
 THUMBNAIL_POINTS = {
@@ -160,7 +174,7 @@ class _Runner:
     def run(self, argv: Sequence[str], *, cap_s: float, name: str) -> Outcome:
         timeout_s = self._budget.timeout(cap_s)
         try:
-            return run_tool(argv, timeout_s=timeout_s, scratch=self.work, name=name)
+            outcome = run_tool(argv, timeout_s=timeout_s, scratch=self.work, name=name)
         except ToolTimeoutError:
             if timeout_s < cap_s:
                 raise budget_exhausted() from None
@@ -168,6 +182,15 @@ class _Runner:
                 RejectionCode.MEDIA_TOO_LARGE,
                 f"processar este vídeo passou de {cap_s:g} s numa etapa ({name})",
             ) from None
+        # Saída ou log acima do `RLIMIT_FSIZE` (milhões de quadros minúsculos no `showinfo`) é
+        # tamanho, não dano: a recusa vem antes de quem chamou olhar `succeeded`.
+        if outcome.file_size_exceeded:
+            raise MediaRejected(
+                RejectionCode.MEDIA_TOO_LARGE,
+                f"processar este vídeo gravou mais de {CHILD_FILE_SIZE_BYTES // MIB} MiB "
+                f"numa etapa ({name})",
+            )
+        return outcome
 
 
 class _Mill:
@@ -225,6 +248,8 @@ class _Mill:
         if audio is None:
             raise ValueError("extração sem faixa de áudio escolhida")
         target = self._work / f"audio{_AUDIO_EXTENSIONS[self._params.audio_format]}"
+        # Inteiro calculado de valores já validados (duração e taxa do probe), nunca de texto.
+        cut_samples = math.ceil((media.duration_s + AUDIO_CUT_MARGIN_S) * audio.sample_rate)
         argv = audio_argv(
             self._tools.ffmpeg,
             source,
@@ -232,11 +257,22 @@ class _Mill:
             sample_rate=audio.sample_rate,
             channels=audio.channels,
             audio_format=self._params.audio_format,
+            cut_samples=cut_samples,
             target=target,
         )
         outcome = self._runner.run(argv, cap_s=self._timeouts.audio_s, name="audio")
-        if not outcome.succeeded or read_log(outcome.log).has_errors or not _non_empty(target):
+        log = read_log(outcome.log)
+        if not outcome.succeeded or log.has_errors or not _non_empty(target):
             raise _damaged("a faixa de áudio está danificada ou truncada")
+        # Dano antes de tamanho: o corte termina a leitura, e o que ela leu já é a faixa toda ou
+        # passa da duração (sucesso parcial nunca).
+        require_audio_within_duration(
+            media.duration_s,
+            last_start_s=log.last_audio_s,
+            last_start_by_samples_s=log.last_audio_by_samples_s,
+            samples=log.audio_samples,
+            cut_samples=cut_samples,
+        )
         return target
 
     def _thumbnail(self, source: Source, media: Inspected, point: Fraction, box: Box) -> _Thumbnail:
@@ -249,6 +285,8 @@ class _Mill:
             name=f"thumbnail-{label}",
         )
         log = read_log(outcome.log)
+        # O cabeçalho pode declarar 320x240 e trocar para 4K no meio: vale o quadro decodificado.
+        require_dimensions_within(log.max_long_side_px, log.max_short_side_px, self._limits)
         if outcome.succeeded and log.first_frame_s is not None and _non_empty(at_target):
             if log.has_errors:
                 raise _damaged("o vídeo está danificado perto do ponto da miniatura")
@@ -267,6 +305,9 @@ class _Mill:
             argv, cap_s=self._timeouts.thumbnail_s, name=f"thumbnail-{label}-before"
         )
         log = read_log(outcome.log)
+        require_dimensions_within(log.max_long_side_px, log.max_short_side_px, self._limits)
+        # Esta leitura decodifica do início até o alvo: é onde a taxa declarada pode mentir.
+        require_observed_frame_rate(log.frame_count, log.frame_span_s, self._limits)
         if (
             not outcome.succeeded
             or log.has_errors

@@ -317,6 +317,23 @@ def answer_always(
     monkeypatch.setattr(ctl, "handle", lambda _method, _path, _body: (status, document))
 
 
+def test_sonda_de_imagem_codifica_a_ref_na_query(
+    runner: ExecutorCtlRunner, ctl: FakeExecutorCtl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths: list[str] = []
+
+    def record(_method: str, path: str, _body: bytes) -> tuple[int, dict[str, object]]:
+        paths.append(path)
+        return 200, {"present": True}
+
+    monkeypatch.setattr(ctl, "handle", record)
+
+    assert runner.image_present(IMAGE)
+    assert paths == [
+        "/v1/image?ref=ghcr.io%2Fbipoxdxd%2Fgoblinshift-executor%40sha256%3A" + "a" * 64
+    ]
+
+
 def padded_to(size: int, document: dict[str, object]) -> dict[str, object]:
     """`document` com um campo extra que leva o JSON serializado a exatamente `size` bytes."""
     padded = {**document, "pad": ""}

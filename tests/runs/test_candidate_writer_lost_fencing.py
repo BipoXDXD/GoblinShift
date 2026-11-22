@@ -23,7 +23,7 @@ from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.store import LoadedRun, LostFencing
 from goblinshift.runs.tables import attempt
 from goblinshift.runs.worker.claim import ClaimedAttempt
-from goblinshift.runs.worker.collection import Collected, collect_outputs
+from goblinshift.runs.worker.collection import Collected, CollectionError, collect_outputs
 from goblinshift.runs.worker.coordinator import Coordinator
 from tests.runs.worker_support import (
     VALID,
@@ -188,3 +188,23 @@ def test_falha_na_copia_apaga_os_candidatos_ja_gravados(
     objects = _objects_of(factory, claimed.attempt_id)
     assert {state for state, _key in objects} == {ObjectState.PENDING}
     assert created[0] in {key for _state, key in objects}
+
+
+def test_saida_reescrita_depois_da_coleta_apaga_o_candidato_gravado(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path
+) -> None:
+    """Divergência descoberta só depois da gravação (`CollectionError`) não deixa o arquivo."""
+    worker, claimed, collected = _collected_attempt(factory, storage, work_root)
+    input_keys = _keys_on_disk(storage)
+    output = collected.outputs[0]
+    original = output.path.read_bytes()
+    # Mesmo inode e mesmo tamanho: a abertura sem seguir link aceita, o digest não.
+    with output.path.open("r+b") as rewritten:
+        rewritten.write(bytes([original[0] ^ 0x01]))
+
+    with pytest.raises(CollectionError, match="mudou depois da coleta"):
+        worker.store_candidates(claimed, collected)
+
+    assert _keys_on_disk(storage) == input_keys
+    objects = _objects_of(factory, claimed.attempt_id)
+    assert {state for state, _key in objects} == {ObjectState.PENDING}

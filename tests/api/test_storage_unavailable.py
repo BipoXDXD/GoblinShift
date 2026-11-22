@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.limits import MIN_INTENT_RESERVED_BYTES as MIN
 from goblinshift.files.tables import artifact, stored_object
 from tests.api.files_support import (
     OCTET_STREAM,
@@ -129,7 +130,7 @@ def test_put_do_conteudo_com_disco_indisponivel_responde_503_e_falha_o_upload(
 ) -> None:
     owner, auth = new_account(factory)
     item = create_upload(client, auth, size=3)
-    assert account_reserved(factory, owner) == 3
+    assert account_reserved(factory, owner) == MIN
     monkeypatch.setattr(storage_of(app), "create_exclusive", _failing_storage(code))
 
     with caplog.at_level(logging.INFO, logger=LOGGER):

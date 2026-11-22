@@ -2,7 +2,8 @@
 
 O dano que produz exatamente "quadro com erro" depende do bitstream do encoder do ambiente, então
 aqui o FFmpeg é um dublê: um script que grava a imagem pedida e escreve no stderr o que o FFmpeg
-escreveria. O ffprobe continua o real, sobre um vídeo de verdade.
+escreveria. O ffprobe continua o real, sobre um vídeo de verdade. O mesmo dublê prova o log que
+passa do `RLIMIT_FSIZE`, que um vídeo real só alcança com centenas de MiB de stderr.
 """
 
 import stat
@@ -98,3 +99,40 @@ def test_orcamento_da_execucao_esgotado_numa_chamada_falha_a_execucao(
         )
 
     assert failure.value.code is FailureCode.RESOURCE_LIMIT_EXCEEDED
+
+
+def fake_ffmpeg_over_file_limit(directory: Path) -> Path:
+    """Baixa o próprio `RLIMIT_FSIZE` para 1 KiB e escreve 64 KiB de log: o kernel manda SIGXFSZ,
+    como faria com o FFmpeg real acima dos 256 MiB. O Python ignora o SIGXFSZ; o FFmpeg não."""
+    script = directory / "ffmpeg"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import resource, signal, sys\n"
+        "signal.signal(signal.SIGXFSZ, signal.SIG_DFL)\n"
+        "resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024))\n"
+        "sys.stderr.write('[h264 @ 0x1] [info] frame\\n' * 4000)\n"
+        "sys.stderr.flush()\n"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return script
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param(Params(thumbnail_count=0), id="audio"),
+        pytest.param(Params(extract_audio=False), id="miniatura"),
+    ],
+)
+def test_log_acima_do_teto_de_arquivo_e_media_too_large(
+    workspace: Workspace, clips: ClipLibrary, tmp_path: Path, params: Params
+) -> None:
+    _, ffprobe = require_ffmpeg()
+    workspace.add("clip.mp4", clips.bytes("mp4"))
+    tools = Tools(ffmpeg=fake_ffmpeg_over_file_limit(tmp_path), ffprobe=Path(ffprobe))
+
+    item = workspace.run(params, MediaMillV1(tools=tools)).items[0]
+
+    assert isinstance(item, ItemRejected)
+    assert item.code == "MEDIA_TOO_LARGE"
+    assert workspace.files() == []

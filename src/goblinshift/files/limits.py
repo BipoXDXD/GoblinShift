@@ -2,7 +2,8 @@
 
 from datetime import timedelta
 
-MIB = 1024 * 1024
+KIB = 1024
+MIB = 1024 * KIB
 GIB = 1024 * MIB
 
 MAX_FILE_BYTES = 32 * MIB
@@ -13,6 +14,11 @@ MAX_VIDEO_FILE_BYTES = 256 * MIB
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
 MAX_BATCH_FILES = 100
 MAX_BATCH_BYTES = 512 * MIB
+# Cada intenção reserva ao menos isto na cota até ficar pronta ou vencer. Sem o piso, um lote de
+# intenções de 0 B não reservava nada e as linhas se acumulavam por 1 h cada, limitadas só pelo rate
+# limit; com ele, a cota de 4 GiB comporta 65.536 intenções abertas. No `ready` o objeto fica com o
+# tamanho real e a sobra volta para a cota, então o piso só pesa enquanto a intenção está aberta.
+MIN_INTENT_RESERVED_BYTES = 64 * KIB
 # Igual ao CHECK da coluna `upload.original_name`, contado em caracteres.
 MAX_NAME_CHARS = 255
 

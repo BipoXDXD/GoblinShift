@@ -54,7 +54,7 @@ RUN ./configure --prefix=/opt/ffmpeg \
         --enable-bsf=vp9_superframe_split \
         --enable-encoder=mjpeg,pcm_s16le,flac \
         --enable-muxer=wav,flac,image2 \
-        --enable-filter=scale,format,aformat,aresample,showinfo,transpose,hflip,vflip,null,anull,trim,atrim \
+        --enable-filter=scale,format,aformat,aresample,showinfo,ashowinfo,transpose,hflip,vflip,null,anull,trim,atrim \
  && make -j"$(nproc)" \
  && make install \
  && install -D -m 0644 COPYING.LGPLv2.1 /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 \

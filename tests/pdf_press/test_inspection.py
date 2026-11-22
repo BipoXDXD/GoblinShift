@@ -73,6 +73,54 @@ def test_link_de_navegacao_e_aceito(tmp_path: Path, action: Dictionary) -> None:
         assert document.page_count == 1
 
 
+DANGEROUS = (
+    "Launch",
+    "GoToR",
+    "GoToE",
+    "SubmitForm",
+    "ImportData",
+    "JavaScript",
+    "Rendition",
+    "Hide",
+    "SetOCGState",
+    "RichMediaExecute",
+)
+
+
+@pytest.mark.parametrize("kind", DANGEROUS)
+def test_acao_perigosa_fora_das_chaves_de_acao_e_recusada(tmp_path: Path, kind: str) -> None:
+    # Só `/S`, sem `/JS`: a recusa tem de vir da lista de ações, não das chaves de JavaScript.
+    action = Dictionary(S=Name("/" + kind))
+    data = samples.document(mutate=samples.link_annotation(action, key="/PA"))
+
+    failure = refusal(tmp_path, data)
+
+    assert failure.code is FailureCode.PDF_UNSUPPORTED_FEATURE
+    assert failure.detail == f"entrada 1: ação /{kind}"
+
+
+def test_acao_permitida_sob_pa_e_aceita(tmp_path: Path) -> None:
+    action = Dictionary(S=Name.URI, URI=String("https://example.org"))
+    data = samples.document(mutate=samples.link_annotation(action, key="/PA"))
+
+    with inspected(tmp_path, data) as document:
+        assert document.page_count == 1
+
+
+def test_s_de_transicao_e_de_rotulo_de_pagina_nao_e_acao(tmp_path: Path) -> None:
+    data = samples.document(mutate=samples.transition_and_page_labels)
+
+    with inspected(tmp_path, data) as document:
+        assert document.page_count == 1
+
+
+def test_launch_sob_a_gera_um_motivo_so(tmp_path: Path) -> None:
+    action = Dictionary(S=Name.Launch, F=String("calc.exe"))
+    data = samples.document(mutate=samples.link_annotation(action))
+
+    assert refusal(tmp_path, data).detail == "entrada 1: ação /Launch"
+
+
 def test_documento_no_teto_de_paginas_restantes_e_aceito(tmp_path: Path) -> None:
     with inspected(tmp_path, samples.document(pages=3), page_budget=3) as document:
         assert document.page_count == 3

@@ -9,7 +9,7 @@ from goblinshift.processing.media_mill import Params
 from goblinshift.processing.media_mill.recipe import MediaMillV1
 from goblinshift.processing.output_dir import FileSystemOutputDir
 from goblinshift.processing.recipe import InputFile, Report
-from tests.media_mill.media import CLIPS, generate
+from tests.media_mill.media import CLIPS, DERIVED, generate
 
 
 class RecordedProgress:
@@ -21,7 +21,7 @@ class RecordedProgress:
 
 
 class ClipLibrary:
-    """Gera cada vídeo sintético uma vez por sessão, sob demanda."""
+    """Gera cada vídeo sintético (ou derivado, `DERIVED`) uma vez por sessão, sob demanda."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -29,8 +29,13 @@ class ClipLibrary:
     def path(self, name: str) -> Path:
         target = self._root / f"{name}.bin"
         if not target.exists():
-            generate(CLIPS[name], self._root / f"{name}{_suffix(name)}").rename(target)
+            self._generate(name).rename(target)
         return target
+
+    def _generate(self, name: str) -> Path:
+        if name in DERIVED:
+            return DERIVED[name](self._root)
+        return generate(CLIPS[name], self._root / f"{name}{_suffix(name)}")
 
     def bytes(self, name: str) -> bytes:
         return self.path(name).read_bytes()

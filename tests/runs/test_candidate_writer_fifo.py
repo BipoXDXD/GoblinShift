@@ -67,13 +67,16 @@ def _swap_first_output_for_fifo_after_collect(
 
 
 def _record_opened_fds(monkeypatch: pytest.MonkeyPatch, path: Path) -> list[int]:
-    """Descritores que o código abriu para `path`, para conferir depois que foram fechados."""
+    """Descritores que o código abriu para `path`, para conferir depois que foram fechados.
+
+    A coleta e a cópia abrem o arquivo pelo nome, relativo ao `dir_fd` do diretório.
+    """
     opened: list[int] = []
     real_open = os.open
 
     def spying_open(target: Any, *args: Any, **kwargs: Any) -> int:
         fd = real_open(target, *args, **kwargs)
-        if str(target) == str(path):
+        if str(target) in (str(path), path.name):
             opened.append(fd)
         return fd
 
