@@ -414,6 +414,7 @@ Reservar capacidade com atualização atômica no banco. Considerar arquivos rec
 | `IdempotencyRecord`                            | 24 horas                                          | Linha removida                                    |
 | Estado transitório de login                    | Poucos minutos                                    | Entrada do cache removida                         |
 | Sessões expiradas ou revogadas                 | 7 dias após o fim                                 | Linha removida                                    |
+| Chaves de API revogadas ou vencidas            | 30 dias após o fim; até 100 guardadas por conta   | Linha removida                                    |
 | `AuditEvent`                                   | 90 dias                                           | Linha removida                                    |
 | Containers e área de trabalho do executor      | Até a coleta ser persistida                       | Removidos pelo `executor-ctl`                     |
 | Telemetria (eventos amplos e traces)           | 30 dias                                           | Expiração no backend de telemetria                |

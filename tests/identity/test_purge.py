@@ -6,11 +6,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
 import pytest
-from sqlalchemy import Table, func, insert, select
+from sqlalchemy import Table, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.identity import AuditEventType, AuditOutcome, record_audit_event
-from goblinshift.identity.accounts import request_account_deletion
+from goblinshift.identity.accounts import KEY_RETENTION, request_account_deletion
 from goblinshift.identity.purge import (
     AUDIT_RETENTION,
     WEB_SESSION_RETENTION,
@@ -19,6 +19,7 @@ from goblinshift.identity.purge import (
     count_overdue_deletions,
     delete_ended_web_sessions,
     delete_expired_login_states,
+    delete_inactive_api_keys,
     delete_old_audit_events,
     purge_owner,
 )
@@ -263,6 +264,77 @@ def test_sessao_sai_7_dias_depois_do_fim(factory: sessionmaker[Session]) -> None
         left = set(session.execute(select(web_session.c.id)).scalars())
     assert left == {idle_recent, active}
     assert {revoked_old, idle_old}.isdisjoint(left)
+
+
+def revoked_key(
+    factory: sessionmaker[Session], user_id: UUID, *, issued_at: datetime, revoked_at: datetime
+) -> UUID:
+    issued = new_key(factory, user_id, now=issued_at, days=90)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key).where(api_key.c.id == issued.id).values(revoked_at=revoked_at)
+        )
+    return issued.id
+
+
+def key_ids(factory: sessionmaker[Session]) -> set[UUID]:
+    with factory() as session:
+        return set(session.execute(select(api_key.c.id)).scalars())
+
+
+def test_chave_revogada_ha_30_dias_sai_e_a_de_29_fica(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    issued_at = NOW - timedelta(days=40)
+    # Fim = o primeiro entre revogação e vencimento; "mais de 30 dias" é estrito.
+    revoked_old = revoked_key(
+        factory, user_id, issued_at=issued_at, revoked_at=NOW - timedelta(days=30, seconds=1)
+    )
+    revoked_at_limit = revoked_key(
+        factory, user_id, issued_at=issued_at, revoked_at=NOW - KEY_RETENTION
+    )
+    revoked_recent = revoked_key(
+        factory, user_id, issued_at=issued_at, revoked_at=NOW - timedelta(days=29)
+    )
+    # Venceu há 31 dias e foi revogada depois: conta o vencimento.
+    expired_then_revoked = new_key(factory, user_id, now=NOW - timedelta(days=61), days=30)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key)
+            .where(api_key.c.id == expired_then_revoked.id)
+            .values(revoked_at=NOW - timedelta(days=1))
+        )
+    expired_old = new_key(factory, user_id, now=NOW - timedelta(days=61), days=30).id
+    expired_recent = new_key(factory, user_id, now=NOW - timedelta(days=59), days=30).id
+
+    with unit_of_work(factory) as session:
+        removed = delete_inactive_api_keys(session, NOW, LIMIT)
+
+    assert removed == 3
+    assert key_ids(factory) == {revoked_at_limit, revoked_recent, expired_recent}
+    assert {revoked_old, expired_then_revoked.id, expired_old}.isdisjoint(key_ids(factory))
+
+
+def test_chave_ativa_nunca_sai_pela_retencao(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    # Emitida há 89 dias com validade de 90 e nunca usada: ainda autentica.
+    active = new_key(factory, user_id, now=NOW - timedelta(days=89), days=90).id
+
+    with unit_of_work(factory) as session:
+        removed = delete_inactive_api_keys(session, NOW, LIMIT)
+
+    assert removed == 0
+    assert key_ids(factory) == {active}
+
+
+def test_retencao_de_chaves_respeita_o_tamanho_do_lote(factory: sessionmaker[Session]) -> None:
+    user_id = new_user(factory)
+    for _ in range(3):
+        new_key(factory, user_id, now=NOW - timedelta(days=61), days=30)
+
+    with unit_of_work(factory) as session:
+        assert delete_inactive_api_keys(session, NOW, 2) == 2
+    with unit_of_work(factory) as session:
+        assert delete_inactive_api_keys(session, NOW, 2) == 1
 
 
 def test_auditoria_sai_depois_de_90_dias(factory: sessionmaker[Session]) -> None:

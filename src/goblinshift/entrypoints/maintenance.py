@@ -258,6 +258,10 @@ class AccountJobs:
                 lambda s: identity_purge.delete_ended_web_sessions(s, now, batch),
             ),
             counted(
+                "api_keys_removed",
+                lambda s: identity_purge.delete_inactive_api_keys(s, now, batch),
+            ),
+            counted(
                 "audit_events_removed",
                 lambda s: identity_purge.delete_old_audit_events(s, now, batch),
             ),
