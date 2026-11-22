@@ -13,6 +13,8 @@ RENDER = REPO / "scripts" / "arte" / "render_glb.py"
 
 @pytest.fixture
 def render_glb(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    # O bpy falso é um módulo vazio: anotações como `bpy.types.Scene` só não quebram o import
+    # porque o Python 3.14 adia a avaliação das anotações (PEP 649).
     mathutils = ModuleType("mathutils")
     mathutils.__dict__["Vector"] = tuple
     monkeypatch.setitem(sys.modules, "bpy", ModuleType("bpy"))
