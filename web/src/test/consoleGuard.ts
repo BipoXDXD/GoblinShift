@@ -1,6 +1,6 @@
 // Guard de console dos testes do Vitest. O setup.ts liga o guard antes de cada teste e, no fim,
-// relata os console.warn/console.error que nenhum `allowConsole` liberou e as liberações que não
-// casaram com nada. log/info/debug são gravados e repassados, mas nunca são violação.
+// reprova o teste com os console.warn/console.error que nenhum `allowConsole` liberou e as liberações
+// que não casaram com nada. log/info/debug são gravados e repassados, mas nunca são violação.
 //
 // Os gravadores entram por atribuição direta, sem vi.spyOn: assim o `restoreMocks` do Vitest e o
 // espião que um teste instala em console.error não tiram o guard do lugar no teste seguinte.
@@ -29,7 +29,7 @@ const METHODS = [
   "error",
 ] as const satisfies readonly ConsoleMethod[];
 const MAX_MESSAGE_LENGTH = 300;
-const FORMAT_TOKEN = /%[sdifoOc]/g;
+const FORMAT_TOKEN = /%[sdifoOc%]/g;
 
 // Capturados uma vez, no carregamento: é para eles que o guard repassa e é a eles que restaura.
 const ORIGINAL: Readonly<Record<ConsoleMethod, ConsoleFn>> = {
@@ -49,20 +49,31 @@ function isGuarded(method: ConsoleMethod): method is GuardedMethod {
 }
 
 function formatArg(arg: unknown): string {
-  if (arg instanceof Error) {
+  // O DOMException do jsdom não herda de Error e sairia do JSON como "{}".
+  if (arg instanceof Error || arg instanceof DOMException) {
     return `${arg.name}: ${arg.message}`;
   }
   if (typeof arg === "object" && arg !== null) {
     try {
       return JSON.stringify(arg);
     } catch {
-      // Objeto que o JSON não serializa (circular, BigInt): vale o toString próprio, se houver, e
-      // "[object Object]" basta para o relatório.
-      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- fallback deliberado, ver acima
-      return String(arg);
+      return formatUnserializable(arg);
     }
   }
   return String(arg);
+}
+
+// Objeto que o JSON não serializa (circular, BigInt): vale o toString próprio, se houver, e
+// "[object Object]" basta para o relatório. Sem protótipo, String() lança; aí vale o toString de
+// Object.prototype, que não depende do objeto.
+function formatUnserializable(arg: object): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- fallback deliberado, ver acima
+    return String(arg);
+  } catch {
+    // O `{}` empresta o toString de Object.prototype (tipado como any) sem perder o tipo.
+    return {}.toString.call(arg);
+  }
 }
 
 function formatConsoleArgs(args: readonly unknown[]): string {
@@ -70,8 +81,16 @@ function formatConsoleArgs(args: readonly unknown[]): string {
   if (typeof first !== "string") {
     return args.map(formatArg).join(" ");
   }
+  // Como no util.format: a string sozinha sai como está, e com argumentos o %% vira % sem consumir
+  // nenhum.
+  if (rest.length === 0) {
+    return first;
+  }
   const remaining = [...rest];
   const head = first.replace(FORMAT_TOKEN, (token) => {
+    if (token === "%%") {
+      return "%";
+    }
     if (remaining.length === 0) {
       return token;
     }
@@ -163,8 +182,4 @@ export function stopConsoleGuard(): readonly string[] {
         `liberação sem uso: console.${method} ${String(pattern)} (${reason})`,
     );
   return [...unallowedLines, ...unusedLines];
-}
-
-export function writeConsoleReport(lines: readonly string[]): void {
-  ORIGINAL.warn(lines.join("\n"));
 }

@@ -52,6 +52,12 @@ export default tseslint.config(
             "CallExpression[callee.property.name='setScheduler'] CallExpression[callee.name='setTimeout']",
           message: "Restaure o padrão com notifyManager.setScheduler(defaultScheduler).",
         },
+        {
+          // O espião direto tira o console do guard (src/test/consoleGuard.ts), que já grava tudo.
+          selector:
+            "CallExpression[callee.object.name='vi'][callee.property.name='spyOn'][arguments.0.name='console']",
+          message: "Use allowConsole/consoleCalls de src/test/consoleGuard.ts.",
+        },
       ],
       "no-restricted-properties": [
         "error",
