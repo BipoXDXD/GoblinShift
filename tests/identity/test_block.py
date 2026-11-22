@@ -24,7 +24,7 @@ from goblinshift.identity.accounts import list_accounts, list_pending_accounts
 from goblinshift.identity.purge import WEB_SESSION_RETENTION, delete_ended_web_sessions
 from goblinshift.identity.tables import api_key, app_user, web_session
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import new_key, new_user
+from tests.identity.support import HASHER, new_key, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -86,7 +86,7 @@ def test_bloqueio_marca_a_conta_e_revoga_sessoes_e_chaves(factory: sessionmaker[
     assert account_row(factory, user_id)["status"] == "blocked"
     assert open_credentials(factory, user_id) == (0, 0)
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
 
 
 def test_bloquear_de_novo_e_sucesso(factory: sessionmaker[Session]) -> None:
@@ -117,7 +117,7 @@ def test_bloqueio_nao_toca_outra_conta(factory: sessionmaker[Session]) -> None:
     assert account_row(factory, other)["status"] == "active"
     assert open_credentials(factory, other) == (1, 1)
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is not None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is not None
 
 
 def test_liberar_reativa_a_conta_sem_ressuscitar_chaves(factory: sessionmaker[Session]) -> None:
@@ -132,7 +132,7 @@ def test_liberar_reativa_a_conta_sem_ressuscitar_chaves(factory: sessionmaker[Se
     assert found is True
     assert account_row(factory, user_id)["status"] == "active"
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
 
 
 def test_liberar_conta_pendente_tira_a_marca_de_espera(factory: sessionmaker[Session]) -> None:
@@ -166,7 +166,7 @@ def test_exclusao_pedida_marca_o_instante_e_revoga_sessoes_e_chaves(
     assert account_row(factory, user_id)["deletion_requested_at"] == NOW
     assert open_credentials(factory, user_id) == (0, 0)
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
 
 
 def test_pedir_exclusao_de_novo_mantem_o_primeiro_pedido(factory: sessionmaker[Session]) -> None:
@@ -197,7 +197,7 @@ def test_chave_de_conta_em_exclusao_nao_autentica_mesmo_sem_revogacao(
         )
 
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
 
 
 # --- Login -------------------------------------------------------------------------------------

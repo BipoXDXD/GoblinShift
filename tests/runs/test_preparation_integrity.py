@@ -127,7 +127,8 @@ def test_divergencia_de_hash_loga_a_falha_da_area_sem_alerta_de_adulteracao(
     [record] = [r for r in caplog.records if r.getMessage() == WORK_AREA_FAILED]
     fields = fields_of(record)
     assert "alert" not in fields
-    assert "diverge do hash ou tamanho" in str(fields["error"])
+    assert fields["error_type"] == "PreparationError"
+    assert "error" not in fields
     assert str(storage.root) not in repr(fields)
 
 

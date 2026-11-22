@@ -31,6 +31,8 @@ from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 from typing import BinaryIO
 
+from goblinshift.platform.telemetry import exception_fields
+
 logger = logging.getLogger(__name__)
 
 # Segmentos só com caracteres seguros e sem começar por ponto: barra `.`, `..`, ocultos e o
@@ -419,9 +421,11 @@ def _unlink_temporary(name: str, tmp_fd: int) -> bool:
         os.unlink(name, dir_fd=tmp_fd)
     except FileNotFoundError:
         return True
-    except OSError:
+    except OSError as error:
         logger.warning(
-            "temporário não removido", exc_info=True, extra={"fields": {"tmp_part": name}}
+            "temporário não removido",
+            exc_info=True,
+            extra={"fields": {"tmp_part": name, **exception_fields(error)}},
         )
         return False
     return True

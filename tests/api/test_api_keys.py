@@ -23,7 +23,7 @@ from goblinshift.identity.tables import api_key, app_user, audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
-from tests.identity.support import new_user
+from tests.identity.support import HASHER, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -73,7 +73,7 @@ def audit_events(factory: sessionmaker[Session], owner_id: UUID) -> list[tuple[s
 
 def authenticates(factory: sessionmaker[Session], token: str) -> bool:
     with unit_of_work(factory) as session:
-        return authenticate_api_key(session, token, NOW) is not None
+        return authenticate_api_key(session, token, NOW, hasher=HASHER) is not None
 
 
 # --- Emissão ----------------------------------------------------------------------------------

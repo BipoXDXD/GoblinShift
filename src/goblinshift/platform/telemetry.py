@@ -4,17 +4,21 @@ Os traces só são exportados quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definid
 endpoint, o nome do serviço e os headers seguem as variáveis padrão do OpenTelemetry.
 """
 
+import contextlib
+import errno
 import hashlib
 import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import sys
 import threading
 import traceback
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -36,21 +40,120 @@ from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
+from opentelemetry.trace import (
+    NoOpTracer,
+    Span,
+    Status,
+    StatusCode,
+    Tracer,
+    format_span_id,
+    format_trace_id,
+    get_current_span,
+)
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import (
+    ExecutorConfigError,
+    MissingSecretError,
+    Settings,
+    WebConfigError,
+)
 
 ALERT_ATTRIBUTE_PREFIX = "alert."
 UVICORN_ERROR_LOGGER = "uvicorn.error"
 _DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
+# Erros de configuração cujas mensagens são montadas só com nomes de variável de ambiente: a
+# mensagem diz o que corrigir e não traz entrada do usuário. Toda outra exceção sai sem ela.
+_MESSAGE_SAFE_ERRORS: tuple[type[BaseException], ...] = (
+    MissingSecretError,
+    ExecutorConfigError,
+    WebConfigError,
+)
 _POOL_LOGGER_PREFIX = "sqlalchemy.pool"
 # O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
 _PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
 # Classe (2) e condição (3) do PostgreSQL; o que não casar não vai para o log nem para a tela.
 _SQLSTATE = re.compile(r"[0-9A-Z]{5}")
 _SQLSTATE_ATTRIBUTE = "sqlstate"
+# Motivo de contrato (`image_not_allowed`): identificador curto, nunca texto livre.
+_ERROR_REASON = re.compile(r"[a-z][a-z0-9_]{0,63}")
+# Campos de evento que saem no log com qualquer valor. Cada chave guarda id, contagem, duração,
+# código ou nome escolhido pelo GoblinShift, nunca texto vindo do usuário nem a mensagem de uma
+# exceção: `error` não entra. Chave fora da lista só sai com número ou booleano, que não carregam
+# texto, para as contagens de cada volta (`**counts`) não precisarem ser listadas uma a uma.
+# `tests/security/test_log_fitness.py` acusa chave literal de log que falte aqui.
+LOGGED_FIELDS = frozenset(
+    {
+        "absent",
+        "accounts",
+        "adoptions_refused",
+        "alert",
+        "attempt",
+        "attempt.number",
+        "attempt_id",
+        "attempt_ids",
+        "attempts",
+        "checked",
+        "cycle",
+        "duration_ms",
+        "errno",
+        "errnos",
+        "error.code",
+        "error.type",
+        "error_reason",
+        "error_type",
+        "failed",
+        "failed_step",
+        "failures",
+        "generation",
+        "held_s",
+        "image",
+        "items_left",
+        "limit_s",
+        "live",
+        "main",
+        "objects",
+        "objects_adopted",
+        "outcome",
+        "pause_s",
+        "pools_corrected",
+        "position",
+        "reason",
+        "retry_in_s",
+        "run_id",
+        "runner",
+        "sample",
+        "signal",
+        "skipped",
+        "sqlstate",
+        "step",
+        "storage_key",
+        "tampered",
+        "tmp_part",
+        "unreadable",
+        "upload_id",
+        "user.hash",
+        "user_id",
+    }
+)
+_DROPPED_FIELDS = "dropped_fields"
+# Chave fora de `LOGGED_FIELDS`: o nome também vai ao log, e só um identificador curto passa.
+_FIELD_NAME = re.compile(r"[a-z][a-z0-9_.]{0,63}")
+# Inteiro maior não é contagem nem duração, o OpenObserve guarda 64 bits e, acima de 4300 dígitos,
+# o `json.dumps` levanta e a linha inteira se perde.
+_MAX_INT_BITS = 64
+# Ids de correlação que o filtro `add_correlation_ids` põe no registro e o formatter copia para a
+# linha: o `request_id` liga a linha ao `X-Request-ID` e ao `#ref=` que o usuário reporta; o
+# `trace_id` e o `span_id`, ao trace.
+_CORRELATION_FIELDS = ("request_id", "trace_id", "span_id")
+# Chaves que o próprio formatter escreve: um campo de evento não as sobrescreve. O `sqlstate` não
+# está aqui porque também é campo de evento; o do registro, quando há, vence o do campo.
+_BASE_FIELDS = frozenset(
+    {"time", "level", "logger", "message", "exception", _DROPPED_FIELDS, *_CORRELATION_FIELDS}
+)
+# O `request_id` da requisição em curso; `RequestContextMiddleware` o define em volta da rota.
+_REQUEST_ID: ContextVar[str | None] = ContextVar("goblinshift_request_id", default=None)
 
 logger = logging.getLogger(__name__)
 
@@ -65,23 +168,96 @@ class JsonFormatter(logging.Formatter):
         }
         # Campos do evento estruturado: `logger.info("...", extra={"fields": {...}})`.
         fields = getattr(record, "fields", None)
-        if isinstance(fields, dict):
-            entry.update(fields)
+        dropped = _add_fields(entry, fields) if isinstance(fields, dict) else 0
         sqlstate = getattr(record, _SQLSTATE_ATTRIBUTE, None)
         if sqlstate is not None:
             entry[_SQLSTATE_ATTRIBUTE] = sqlstate
-        if record.exc_info:
-            entry["exception"] = record.exc_text or self.formatException(record.exc_info)
+        for name in _CORRELATION_FIELDS:
+            value = getattr(record, name, None)
+            if value is not None:
+                entry[name] = value
+        exception = record.exc_info[1] if record.exc_info else None
+        if exception is not None:
+            # Reduzida aqui também, sem ler `exc_text`: um registro que não passou pelo filtro, ou
+            # que um handler comum formatou antes, traria nele o traceback com a mensagem.
+            entry["exception"] = _reduced_traceback(exception)
+        if dropped:
+            entry[_DROPPED_FIELDS] = dropped
         return json.dumps(entry, ensure_ascii=False)
 
 
-def omit_database_error_detail(record: logging.LogRecord) -> bool:
-    """Filtro de log: exceção com erro de banco na cadeia sai só com tipos e frames.
+def _add_fields(entry: dict[str, Any], fields: dict[Any, object]) -> int:
+    """Põe em `entry` os campos que podem ir ao log e devolve quantos caíram."""
+    dropped = 0
+    for key, value in fields.items():
+        if _is_loggable(key, value):
+            entry[key] = value
+        else:
+            dropped += 1
+    return dropped
 
-    A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
-    do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
-    `exc_info`: o registro continua com a exceção. O SQLSTATE do PostgreSQL, que é só um código,
-    fica junto do tipo e no atributo `sqlstate` do registro. Qualquer outra exceção sai inteira. As
+
+def _is_loggable(key: object, value: object) -> bool:
+    """A chave de `LOGGED_FIELDS` passa com qualquer valor; a de fora, com nome de identificador e
+    número ou booleano. Nunca passa o que sobrescreveria a própria linha (`message`, `level`, …)
+    nem número que o JSON não representa: `nan`, `inf` ou inteiro fora de 64 bits."""
+    if key in _BASE_FIELDS or not _is_json_number(value):
+        return False
+    if key in LOGGED_FIELDS:
+        return True
+    return (
+        isinstance(key, str)
+        and _FIELD_NAME.fullmatch(key) is not None
+        and isinstance(value, (bool, int, float))
+    )
+
+
+def _is_json_number(value: object) -> bool:
+    """Falso só para número sem representação no log; o que não é número passa."""
+    match value:
+        case bool():
+            return True
+        case int():
+            return value.bit_length() <= _MAX_INT_BITS
+        case float():
+            return math.isfinite(value)
+    return True
+
+
+@contextlib.contextmanager
+def request_id_bound(request_id: str) -> Iterator[None]:
+    """Toda linha de log escrita dentro do bloco leva este `request_id`; ao sair, volta o
+    anterior."""
+    token = _REQUEST_ID.set(request_id)
+    try:
+        yield
+    finally:
+        _REQUEST_ID.reset(token)
+
+
+def add_correlation_ids(record: logging.LogRecord) -> bool:
+    """Filtro de log: põe no registro o `request_id` da requisição e o trace e o span correntes.
+
+    Cada id só entra quando existe; fora de requisição e de span a linha sai sem eles. Os três são
+    sempre reescritos, para um `extra={"request_id": ...}` de quem registra não chegar à linha.
+    """
+    record.request_id = _REQUEST_ID.get()
+    context = get_current_span().get_span_context()
+    record.trace_id = format_trace_id(context.trace_id) if context.is_valid else None
+    record.span_id = format_span_id(context.span_id) if context.is_valid else None
+    return True
+
+
+def omit_exception_detail(record: logging.LogRecord) -> bool:
+    """Filtro de log: toda exceção sai só com tipos e frames, de banco ou não.
+
+    A mensagem de uma exceção pode trazer entrada do usuário: nome de arquivo, valor de parâmetro,
+    trecho de documento e, nos erros do SQLAlchemy e do psycopg, host, SQL e o `DETAIL` do
+    PostgreSQL (3.7). O local da falha vem dos frames, e o tipo de cada exceção da cadeia diz o
+    que houve. O texto vai em `exc_text`, que os formatadores usam no lugar de formatar `exc_info`:
+    o registro continua com a exceção. O SQLSTATE do PostgreSQL, que é só um código, fica junto do
+    tipo e no atributo `sqlstate` do registro. Só os erros de configuração de
+    `_MESSAGE_SAFE_ERRORS`, com mensagens montadas com nomes de variável, saem com a mensagem. As
     mensagens do pool perdem o repr da conexão.
     """
     if record.name.startswith(_POOL_LOGGER_PREFIX):
@@ -90,13 +266,32 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
-    if is_database_error(exception):
-        chain = _exception_chain(exception)
-        record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
-        sqlstate = database_sqlstate(exception)
-        if sqlstate is not None:
-            setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
+    record.exc_text = _reduced_traceback(exception)
+    sqlstate = database_sqlstate(exception)
+    if sqlstate is not None:
+        setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
     return True
+
+
+def exception_fields(error: BaseException) -> dict[str, str]:
+    """Campos de evento que descrevem uma exceção sem a mensagem dela.
+
+    O tipo, o SQLSTATE do banco, o nome do `errno` (`ENOSPC`, `EIO`) e o `code` de contrato
+    (`ExecutorCtlError.code`) quando ele tem a forma de identificador: um `code` com outra forma
+    pode trazer texto livre e fica de fora.
+    """
+    fields = {"error_type": type(error).__name__}
+    sqlstate = database_sqlstate(error)
+    if sqlstate is not None:
+        fields[_SQLSTATE_ATTRIBUTE] = sqlstate
+    number = getattr(error, "errno", None)
+    errno_name = errno.errorcode.get(number) if isinstance(number, int) else None
+    if errno_name is not None:
+        fields["errno"] = errno_name
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and _ERROR_REASON.fullmatch(code):
+        fields["error_reason"] = code
+    return fields
 
 
 def is_database_error(exception: BaseException) -> bool:
@@ -139,15 +334,32 @@ def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
             pending.extend(current.exceptions)
 
 
+def _reduced_traceback(exception: BaseException) -> str:
+    """Tipos e frames de toda a cadeia da exceção, sem mensagens (ver `omit_exception_detail`)."""
+    return "\n\n".join(_type_and_frames(item) for item in _exception_chain(exception))
+
+
 def _type_and_frames(exception: BaseException) -> str:
     frames = "".join(traceback.format_tb(exception.__traceback__))
+    return f"Traceback (most recent call last):\n{frames}{_described(exception)}"
+
+
+def _described(exception: BaseException) -> str:
+    """O tipo da exceção; a mensagem só nos erros de `_MESSAGE_SAFE_ERRORS`.
+
+    Nunca chama `str()` nem lê `__notes__` das outras: as duas coisas podem trazer entrada do
+    usuário, e um `__str__` quebrado não pode derrubar a linha de log.
+    """
+    # Tipo exato: uma subclasse pode montar a mensagem com entrada do usuário.
+    if type(exception) in _MESSAGE_SAFE_ERRORS:
+        return "".join(traceback.format_exception_only(exception)).rstrip("\n")
     kind = type(exception)
     described = f"{kind.__module__}.{kind.__qualname__}"
     if isinstance(exception, psycopg.Error):
         sqlstate = _well_formed_sqlstate(exception)
         if sqlstate is not None:
             described = f"{described} (SQLSTATE {sqlstate})"
-    return f"Traceback (most recent call last):\n{frames}{described}"
+    return described
 
 
 class AlertEventCounter(logging.Handler):
@@ -178,10 +390,13 @@ class AlertEventCounter(logging.Handler):
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
-    handler.addFilter(omit_database_error_detail)
+    handler.addFilter(omit_exception_detail)
+    handler.addFilter(add_correlation_ids)
     logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
     # O Uvicorn escreve por handlers próprios, fora do root (`propagate: False`).
-    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_database_error_detail)
+    uvicorn_error = logging.getLogger(UVICORN_ERROR_LOGGER)
+    uvicorn_error.addFilter(omit_exception_detail)
+    uvicorn_error.addFilter(add_correlation_ids)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a

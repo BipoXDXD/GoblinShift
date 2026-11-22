@@ -31,7 +31,7 @@ from goblinshift.identity.tables import audit_event
 from goblinshift.platform.db import unit_of_work
 from tests.api.session_support import open_session, session_headers
 from tests.api.support import assert_problem
-from tests.identity.support import new_key, new_user
+from tests.identity.support import HASHER, new_key, new_user
 
 ME = "/api/v1/me"
 LOGOUT = "/auth/logout"
@@ -375,8 +375,8 @@ def test_logout_all_revoga_todas_as_sessoes_e_chaves(
         assert_problem(client.get(ME, headers=_cookie_only(issued)), 401, "AUTHENTICATION_REQUIRED")
     now = datetime.now(UTC)
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, owner_key, now) is None
-        assert authenticate_api_key(session, other_key, now) is not None
+        assert authenticate_api_key(session, owner_key, now, hasher=HASHER) is None
+        assert authenticate_api_key(session, other_key, now, hasher=HASHER) is not None
     assert client.get(ME, headers=_cookie_only(other_session)).status_code == 200
     assert _audit_events(factory) == [("LOGOUT_ALL", owner, "success")]
 

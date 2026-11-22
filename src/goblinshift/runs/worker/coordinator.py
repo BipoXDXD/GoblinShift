@@ -58,7 +58,7 @@ from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.storage import FileStorage, ObjectTamperedError, StorageError
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import UserHasher, exception_fields
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
     MAX_RETRY_JITTER,
@@ -167,12 +167,14 @@ class CoordinatorConfig:
 class PreparationError(Exception):
     """A área de trabalho não pôde ser montada (entrada sumida ou divergente): infraestrutura.
 
-    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta.
+    `alert` é o evento `alert=` que o log da falha leva; `None` deixa o log sem alerta. `errno` é o
+    da `OSError` de origem, que o log leva pelo nome: a mensagem dela traz o caminho e fica de fora.
     """
 
-    def __init__(self, message: str, *, alert: str | None = None) -> None:
+    def __init__(self, message: str, *, alert: str | None = None, errno: int | None = None) -> None:
         super().__init__(message)
         self.alert = alert
+        self.errno = errno
 
 
 class InputTamperedError(Exception):
@@ -212,7 +214,8 @@ class _AreaFile:
                 # O corpo já levantou (parada pedida, fencing perdido, leitura do storage): essa é a
                 # exceção que decide o desfecho da Run, e o fechamento falho não a substitui.
                 logger.warning(
-                    "fechamento da área de trabalho falhou", extra={"fields": {"error": str(error)}}
+                    "fechamento da área de trabalho falhou",
+                    extra={"fields": exception_fields(error)},
                 )
                 return
             raise _area_write_failed(error) from error
@@ -225,7 +228,9 @@ class _AreaFile:
 
 
 def _area_write_failed(error: OSError) -> PreparationError:
-    return PreparationError(f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED)
+    return PreparationError(
+        f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED, errno=error.errno
+    )
 
 
 class _StopRequested(Exception):  # noqa: N818 - sinal interno de controle, não erro
@@ -348,9 +353,9 @@ class Coordinator:
         started = time.monotonic()
         try:
             applied = self._drive(claimed)
-        except LostFencing as lost:
+        except LostFencing:
             _record_end(started, "lost_fencing", error=None)
-            _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
+            _log_attempt(claimed, "lost_fencing", started)
             self._abandon(claimed)
             return None
         left_on_disk = complete_after_commit(
@@ -395,7 +400,7 @@ class Coordinator:
             )
             return self.fail_input_tampered(claimed)
         except PreparationError as error:
-            fields = _ids(claimed, error)
+            fields = {**_ids(claimed), **exception_fields(error)}
             if error.alert is not None:
                 fields["alert"] = error.alert
             logger.warning("área de trabalho falhou", extra={"fields": fields})
@@ -412,7 +417,13 @@ class Coordinator:
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
             logger.warning(
                 "executor não iniciou",
-                extra={"fields": {**_ids(claimed, error), "alert": EXECUTOR_START_FAILED}},
+                extra={
+                    "fields": {
+                        **_ids(claimed),
+                        **exception_fields(error),
+                        "alert": EXECUTOR_START_FAILED,
+                    }
+                },
             )
             return self.fail_transiently(claimed)
         self.record_start(claimed)
@@ -432,14 +443,14 @@ class Coordinator:
             # A área do host que não aceita a tentativa (montagem perdida, sem escrita) perde a Run
             # como o start recusado, e nenhuma outra causa avisa: conta no mesmo alerta.
             raise PreparationError(
-                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED
+                f"área de trabalho: {error}", alert=EXECUTOR_START_FAILED, errno=error.errno
             ) from error
         try:
             self._fill_work_area(work_dir, claimed, contents, self._lease_keeper(claimed))
         except OSError as error:
             # Só chega aqui a `OSError` da leitura do storage, que não é a área do host e fica sem
             # alerta: a escrita local vira `PreparationError` com alerta em `_AreaFile`.
-            raise PreparationError(f"área de trabalho: {error}") from error
+            raise PreparationError(f"área de trabalho: {error}", errno=error.errno) from error
 
     def _fill_work_area(
         self,
@@ -568,14 +579,19 @@ class Coordinator:
         try:
             return self._runner.status(claimed.attempt_id)
         except RunnerError as error:
-            logger.warning("executor sem estado", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor sem estado",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
             return None
 
     def _try_stop(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
         try:
             return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
         except RunnerError as error:
-            logger.warning("executor não parou", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor não parou", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
+            )
             return None
 
     def renew_lease(
@@ -714,12 +730,17 @@ class Coordinator:
                 attempt_error=code,
             )
         except (CollectionError, OSError) as error:
-            logger.warning("coleta recusada", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "coleta recusada", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
+            )
             return self.fail_transiently(claimed)
         try:
             stored = self.store_candidates(claimed, collected)
         except (StorageError, OSError, CollectionError) as error:
-            logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "candidatos não gravados",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
             return self.fail_transiently(claimed)
         attempt_event.record(
             {"collect_ms": _elapsed_ms(collect_started), **_output_attributes(collected)}
@@ -859,7 +880,10 @@ class Coordinator:
         try:
             self._runner.remove(claimed.attempt_id)
         except RunnerError as error:
-            logger.warning("área de trabalho não removida", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "área de trabalho não removida",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
 
     def _conclude(
         self,
@@ -973,16 +997,13 @@ def _chunks(source: BinaryIO) -> Iterator[bytes]:
         yield chunk
 
 
-def _ids(claimed: ClaimedAttempt, error: Exception | None = None) -> dict[str, object]:
-    fields: dict[str, object] = {
+def _ids(claimed: ClaimedAttempt) -> dict[str, object]:
+    return {
         "run_id": str(claimed.run_id),
         "attempt_id": str(claimed.attempt_id),
         "generation": claimed.generation,
         "attempt.number": claimed.number,
     }
-    if error is not None:
-        fields["error"] = str(error)
-    return fields
 
 
 def _elapsed_ms(started: float) -> int:
@@ -1034,7 +1055,6 @@ def _log_attempt(
     started: float,
     *,
     error: ErrorCode | None = None,
-    detail: str | None = None,
 ) -> None:
     fields = _ids(claimed)
     fields |= {
@@ -1043,6 +1063,4 @@ def _log_attempt(
         "error.code": error,
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
-    if detail is not None:
-        fields["detail"] = detail
     logger.info("tentativa encerrada", extra={"fields": fields})

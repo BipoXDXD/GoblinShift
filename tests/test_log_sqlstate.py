@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from goblinshift.platform.telemetry import (
     JsonFormatter,
     database_sqlstate,
-    omit_database_error_detail,
+    omit_exception_detail,
 )
 
 UNIQUE_VIOLATION = "23505"
@@ -53,7 +53,7 @@ def log() -> Iterator[tuple[logging.Logger, io.StringIO]]:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(JsonFormatter())
-    handler.addFilter(omit_database_error_detail)
+    handler.addFilter(omit_exception_detail)
     logger = logging.getLogger(f"tests.log_sqlstate.{uuid.uuid4()}")
     logger.propagate = False
     logger.addHandler(handler)
@@ -121,7 +121,7 @@ def test_excecao_que_nao_e_de_banco_sai_sem_sqlstate(
     entry = _log_exception(log, ValueError("valor"))
 
     assert "sqlstate" not in entry
-    assert "ValueError: valor" in entry["exception"]
+    assert entry["exception"].endswith("builtins.ValueError")
 
 
 def test_log_sem_excecao_sai_sem_sqlstate(log: tuple[logging.Logger, io.StringIO]) -> None:

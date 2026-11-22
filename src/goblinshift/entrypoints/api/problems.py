@@ -36,6 +36,7 @@ from starlette.routing import Match
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from goblinshift.entrypoints.api.wide_event import record_error
+from goblinshift.platform.telemetry import request_id_bound
 
 logger = logging.getLogger(__name__)
 
@@ -363,16 +364,18 @@ class RequestContextMiddleware:
                 MutableHeaders(scope=message)[REQUEST_ID_HEADER] = request_id
             await send(message)
 
-        try:
-            await self.app(scope, receive, send_with_request_id)
-        except Exception as exc:
-            # Com a resposta já começada não há como trocar o status; a conexão é cortada.
-            if response_started:
-                logger.exception("erro inesperado na requisição %s", request_id)
-                record_error(ProblemCode.INTERNAL_ERROR.value)
-                raise
-            response = _unhandled_error_response(exc, scope["path"], request_id)
-            await response(scope, receive, send_with_request_id)
+        # Toda linha de log da requisição, da rota ao 500, leva o mesmo `request_id` da resposta.
+        with request_id_bound(request_id):
+            try:
+                await self.app(scope, receive, send_with_request_id)
+            except Exception as exc:
+                # Com a resposta já começada não há como trocar o status; a conexão é cortada.
+                if response_started:
+                    logger.exception("erro inesperado na requisição %s", request_id)
+                    record_error(ProblemCode.INTERNAL_ERROR.value)
+                    raise
+                response = _unhandled_error_response(exc, scope["path"], request_id)
+                await response(scope, receive, send_with_request_id)
 
 
 def _unhandled_error_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:

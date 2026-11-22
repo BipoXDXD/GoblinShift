@@ -53,6 +53,7 @@ from goblinshift.identity import (
     resolve_session,
 )
 from goblinshift.platform.settings import WebIdentityConfig
+from goblinshift.platform.telemetry import UserHasher
 from goblinshift.runs.finished import RunFinishedReporter
 
 BEARER_SCHEME = "bearer"
@@ -164,8 +165,9 @@ def _identify(request: Request, session: Session, now: datetime) -> Principal:
             raise _unauthenticated("A sessão expirou ou foi encerrada; entre de novo.")
         return principal
     token = _bearer_token(request)
+    hasher: UserHasher = request.app.state.user_hasher
     with session.begin():
-        principal = authenticate_api_key(session, token, now)
+        principal = authenticate_api_key(session, token, now, hasher=hasher)
     if principal is None:
         raise _unauthenticated("A chave de API é inválida, expirou ou foi revogada.")
     record_principal(principal.owner_id, principal.via)

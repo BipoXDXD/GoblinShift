@@ -286,11 +286,11 @@ SPAN_CAUSES: tuple[_SpanCause, ...] = (
         "causa-executor-nao-iniciou",
         "Executor não chegou a rodar em três tentativas ou mais nos últimos 10 min: as Runs "
         "terminam em INFRA_POISON. São duas causas, e o log do worker diz qual. O executor-ctl "
-        "recusou o start (log executor não iniciou): leia o motivo no campo error antes de agir; "
-        "work_area_dirty também conta, e a imagem no daemon é a primeira suspeita só com "
+        "recusou o start (log executor não iniciou): leia o motivo no campo error_reason antes de "
+        "agir; work_area_dirty também conta, e a imagem no daemon é a primeira suspeita só com "
         "docker_unavailable. Ou a área de trabalho da tentativa não foi criada antes do start (log "
-        "área de trabalho falhou): confira a montagem de /srv/goblinshift/exec-work, não a imagem. "
-        "Veja o runbook em deploy/openobserve/README.md.",
+        "área de trabalho falhou, com o errno): confira a montagem de /srv/goblinshift/exec-work, "
+        "não a imagem. Veja o runbook em deploy/openobserve/README.md.",
         period_minutes=10,
         silence_minutes=60,
         destination=DestinationKey.URGENT,
