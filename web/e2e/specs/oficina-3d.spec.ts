@@ -23,6 +23,7 @@ import {
   nextFrame,
   prepareGpu,
 } from "../support/oficina3d";
+import { expectFitsDeviceWidth } from "../support/reflow";
 import { expect, test } from "../support/test";
 
 /** Celular estreito, abaixo do `sm` (640 px), onde os botões de passo viram grade 2×2. */
@@ -55,7 +56,7 @@ test("sem WebGL fica a imagem e nada do 3D é pedido", async ({ page, isMobile }
   await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "imagem");
   await expect(heroImage(page)).toBeVisible();
 
-  for (const name of ["Fagulha", "Ferrugem", "Jade", "Nyx", "Rúbia"]) {
+  for (const name of ["Fagulha", "Ferrugem", "Jade", "Lua", "Nyx", "Rúbia"]) {
     if (isMobile) await castButton(page, name).tap();
     else await castButton(page, name).click();
     await expect(heroImage(page, name)).toBeVisible();
@@ -73,6 +74,41 @@ test("WebGL só em software conta como sem WebGL", async ({ page }) => {
 
   await expect(page.locator(HERO)).toHaveAttribute("data-oficina-3d", "imagem");
   expect(requests.map((r) => r.url()).filter((url) => CHUNK_OR_MODEL.test(url))).toEqual([]);
+});
+
+test("a 360 px, o seletor tem as seis goblins em duas linhas de três, com alvo de 44 px", async ({
+  page,
+}) => {
+  await withoutWebGl(page);
+  await page.setViewportSize(PHONE_360);
+  await page.goto("/");
+
+  const group = page.getByRole("group", { name: "Escolha a goblin" });
+  await expect(group.getByRole("button")).toHaveCount(6);
+  const buttons = await group.getByRole("button").all();
+  const boxes = await Promise.all(
+    buttons.map(async (button) => {
+      const box = await button.boundingBox();
+      if (box === null) {
+        throw new Error("botão do seletor sem caixa");
+      }
+      return box;
+    }),
+  );
+  expect(boxes).toHaveLength(6);
+  // WCAG 2.5.8 pede 24 px; o sistema pede 44 px (regra de interação acessível).
+  for (const box of boxes) {
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  }
+  // Linha = mesmo topo, com 1 px de folga para o arredondamento subpixel.
+  const rows = new Map<number, number>();
+  for (const box of boxes) {
+    const top = [...rows.keys()].find((key) => Math.abs(key - box.y) <= 1) ?? box.y;
+    rows.set(top, (rows.get(top) ?? 0) + 1);
+  }
+  expect([...rows.values()]).toEqual([3, 3]);
+  await expectFitsDeviceWidth(page);
 });
 
 test.describe("com GPU", () => {

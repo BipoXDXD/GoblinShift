@@ -85,7 +85,7 @@ const STEP_BUTTONS: readonly {
 ];
 
 /**
- * Palco 3D da abertura (ADR 027, 030 e 038): uma goblin por vez, escolhida numa fileira de cinco
+ * Palco 3D da abertura (ADR 027, 030 e 038): uma goblin por vez, escolhida numa fileira de seis
  * botões. A imagem estática da goblin escolhida aparece com a página e é o fallback; a cena chega
  * depois do `load` e de um momento ocioso, e nunca carrega com movimento reduzido, economia de
  * dados ou sem WebGL 2. Trocar de goblin baixa só o GLB dela, com a imagem dela enquanto carrega.

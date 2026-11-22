@@ -169,6 +169,7 @@ export const TEXT = {
         name: "Rúbia",
         alt: "Rúbia, goblin da oficina, de maria-chiquinhas vermelhas e vestido preto de renda.",
       },
+      lua: { name: "Lua", alt: "Lua, goblin de cabelo preto, com um sininho dourado no pescoço." },
       nyx: { name: "Nyx", alt: "Nyx, goblin de cabelo preto com pontas rosa e vestido preto." },
       ferrugem: {
         name: "Ferrugem",
@@ -988,7 +989,7 @@ export const TEXT = {
     art: {
       cast: {
         before:
-          "Rúbia, Fagulha, Ferrugem, Jade e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no ",
+          "Rúbia, Fagulha, Ferrugem, Jade, Lua e Nyx compõem o elenco da oficina. Os renders, recortes e a otimização usam Blender e glTF Transform. As condições de uso das ilustrações e dos modelos estão no ",
         link: "registro de licenças da arte",
         after: ".",
       },

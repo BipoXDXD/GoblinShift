@@ -110,9 +110,7 @@ test("Execução concluída no celular: o Baixar fica na primeira tela, acima da
   await expect(download).toBeInViewport({ ratio: 1 });
 });
 
-test("Créditos: as cinco goblins do elenco, com nome e imagem carregada", async ({
-  page,
-}, info) => {
+test("Créditos: as seis goblins do elenco, com nome e imagem carregada", async ({ page }, info) => {
   await usePhoneWidth(page, info.project.name);
   await page.goto("/creditos");
 
@@ -122,6 +120,7 @@ test("Créditos: as cinco goblins do elenco, com nome e imagem carregada", async
     "Fagulha",
     "Ferrugem",
     "Jade",
+    "Lua",
     "Nyx",
   ]);
   for (const image of await cast.locator("img").all()) {
