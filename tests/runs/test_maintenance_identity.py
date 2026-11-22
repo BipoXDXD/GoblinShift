@@ -327,6 +327,26 @@ def test_ciclo_aplica_a_retencao_da_identidade(factory: sessionmaker[Session]) -
     assert counts["request_windows"] == 1
 
 
+def test_ciclo_de_contas_conta_api_keys_removed(factory: sessionmaker[Session]) -> None:
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    owner = create_user(factory, "bia")
+    with unit_of_work(factory) as session:
+        # Venceu há 31 dias: passou da retenção. A ativa fica.
+        issue_key(
+            session, owner_id=owner, scopes=frozenset(Scope), now=now - timedelta(days=61), days=30
+        )
+        active = issue_key(session, owner_id=owner, scopes=frozenset(Scope), now=now, days=30)
+
+    counts = AccountJobs(factory, clock=lambda: now).run_cycle()
+
+    assert counts["api_keys_removed"] == 1
+    with factory() as session:
+        left = set(
+            session.execute(select(api_key.c.id).where(api_key.c.owner_id == owner)).scalars()
+        )
+    assert left == {active.id}
+
+
 def test_exclusao_atrasada_gera_alerta(
     factory: sessionmaker[Session], caplog: pytest.LogCaptureFixture
 ) -> None:

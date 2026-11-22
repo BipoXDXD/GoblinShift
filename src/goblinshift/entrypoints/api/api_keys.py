@@ -4,7 +4,8 @@ Só sessão (`SessionPrincipal`); emitir exige autenticação recente (`RecentSe
 Ver docs/GoblinShiftPlan.md, 1.6 e 3.6.
 
 - `POST`: corpo estrito (`scopes`, `days`); o segredo aparece só nesta resposta, com
-  `Cache-Control: no-store`. Acima de `MAX_ACTIVE_KEYS` ativas → 409.
+  `Cache-Control: no-store`. Com `MAX_ACTIVE_KEYS` ativas, ou `MAX_STORED_KEYS` guardadas
+  contando revogadas e vencidas, → 409, cada um com a sua mensagem.
 - `GET`: metadados, nunca o segredo nem o hash.
 - `DELETE`: chave de outra conta ou inexistente → o mesmo 404; revogar de novo → 204.
 """
@@ -27,13 +28,16 @@ from goblinshift.entrypoints.api.json_command import command_openapi, json_comma
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.identity import (
     DEFAULT_KEY_DAYS,
+    KEY_RETENTION,
     MAX_ACTIVE_KEYS,
     MAX_KEY_DAYS,
+    MAX_STORED_KEYS,
     ActiveKeyLimitError,
     AuditEventType,
     AuditOutcome,
     KeySummary,
     Scope,
+    StoredKeyLimitError,
     UnknownAccountError,
     issue_key_for_session,
     list_keys,
@@ -108,6 +112,13 @@ def create_api_key(
         raise ApiProblem(
             ProblemCode.STATE_CONFLICT,
             f"A conta já tem {MAX_ACTIVE_KEYS} chaves ativas; revogue uma antes de criar outra.",
+        ) from None
+    except StoredKeyLimitError:
+        # Revogar não abre vaga: a revogada só sai da tabela com a retenção.
+        raise ApiProblem(
+            ProblemCode.STATE_CONFLICT,
+            f"A conta já tem {MAX_STORED_KEYS} chaves guardadas, contando as revogadas e vencidas;"
+            f" elas saem {KEY_RETENTION.days} dias depois do fim, e então dá para criar outra.",
         ) from None
     except UnknownAccountError:
         # Bloqueio ou exclusão chegou depois da autenticação: a credencial deixou de valer.

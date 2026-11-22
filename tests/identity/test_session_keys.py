@@ -20,11 +20,12 @@ from goblinshift.identity import (
     Scope,
     UnknownAccountError,
     authenticate_api_key,
+    issue_key,
     issue_key_for_session,
     list_keys,
     revoke_owned_key,
 )
-from goblinshift.identity.accounts import MAX_LISTED_KEYS
+from goblinshift.identity.accounts import MAX_LISTED_KEYS, StoredKeyLimitError
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
 from tests.identity.support import HASHER, new_user
@@ -155,6 +156,53 @@ def test_um_segundo_antes_de_vencer_ainda_conta(factory: sessionmaker[Session]) 
         issue(factory, owner)
 
 
+def store_inactive_keys(factory: sessionmaker[Session], owner_id: UUID, count: int) -> None:
+    """Guarda `count` chaves que já não autenticam: metade revogadas, metade vencidas."""
+    with unit_of_work(factory) as session:
+        for index in range(count):
+            if index % 2:
+                issue_key(
+                    session, owner_id=owner_id, scopes=READ, now=NOW - timedelta(days=31), days=30
+                )
+            else:
+                issued = issue_key(session, owner_id=owner_id, scopes=READ, now=NOW)
+                session.execute(
+                    update(api_key)
+                    .where(api_key.c.public_id == issued.public_id)
+                    .values(revoked_at=NOW)
+                )
+
+
+def stored_count(factory: sessionmaker[Session], owner_id: UUID) -> int:
+    with factory() as session:
+        count: int = session.execute(
+            select(func.count()).select_from(api_key).where(api_key.c.owner_id == owner_id)
+        ).scalar_one()
+    return count
+
+
+def test_emissao_com_100_chaves_guardadas_e_recusada(factory: sessionmaker[Session]) -> None:
+    owner = new_user(factory)
+    store_inactive_keys(factory, owner, 99)
+    # Com 99 guardadas a emissão passa e grava a centésima.
+    issue(factory, owner)
+
+    with pytest.raises(StoredKeyLimitError):
+        issue(factory, owner)
+
+    assert stored_count(factory, owner) == 100
+
+
+def test_teto_de_chaves_guardadas_e_por_conta(factory: sessionmaker[Session]) -> None:
+    full = new_user(factory)
+    store_inactive_keys(factory, full, 100)
+    other = new_user(factory)
+
+    issue(factory, other)
+
+    assert stored_count(factory, other) == 1
+
+
 def test_emissao_concorrente_espera_a_trava_e_ve_a_quinta_chave(
     factory: sessionmaker[Session],
 ) -> None:
@@ -234,13 +282,14 @@ def test_listagem_traz_so_as_chaves_da_conta_mais_recentes_primeiro(
 def test_listar_chaves_mostra_ativa_antiga_depois_de_100_revogadas(
     factory: sessionmaker[Session],
 ) -> None:
-    # Revogada nunca sai da tabela: sem priorizar as ativas, 100 chaves mais novas tirariam da
-    # listagem uma chave que ainda autentica, e o dono não teria o id para revogá-la.
+    # O `gs-admin issue-key` não passa pelo teto de `MAX_STORED_KEYS`: sem priorizar as ativas,
+    # 100 chaves mais novas tirariam da listagem uma chave que ainda autentica, e o dono não teria
+    # o id para revogá-la.
     owner = new_user(factory)
     active = issue(factory, owner, NOW - timedelta(days=1))
     with unit_of_work(factory) as session:
         for minute in range(MAX_LISTED_KEYS):
-            issue_key_for_session(
+            issue_key(
                 session, owner_id=owner, scopes=READ, days=30, now=NOW + timedelta(minutes=minute)
             )
             session.execute(

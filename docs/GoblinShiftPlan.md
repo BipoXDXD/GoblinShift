@@ -414,13 +414,14 @@ Reservar capacidade com atualização atômica no banco. Considerar arquivos rec
 | `IdempotencyRecord`                            | 24 horas                                          | Linha removida                                    |
 | Estado transitório de login                    | Poucos minutos                                    | Entrada do cache removida                         |
 | Sessões expiradas ou revogadas                 | 7 dias após o fim                                 | Linha removida                                    |
+| Chaves de API revogadas ou vencidas            | 30 dias após o fim; até 100 guardadas por conta   | Linha removida                                    |
 | `AuditEvent`                                   | 90 dias                                           | Linha removida                                    |
 | Containers e área de trabalho do executor      | Até a coleta ser persistida                       | Removidos pelo `executor-ctl`                     |
 | Telemetria (eventos amplos e traces)           | 30 dias                                           | Expiração no backend de telemetria                |
 | Logs da aplicação e dos containers             | ≥ 14 dias no volume previsto; teto de 50 MiB      | Rotação por tamanho, por serviço, no Compose      |
 | Backups do PostgreSQL                          | Até 31 dias (imutável por 30, apagado 1 dia depois) | Expiração no armazenamento externo ([3.8](#s3-8)) |
 
-Os jobs de expiração rodam no processo `maintenance`, em lotes, com índices parciais sobre as linhas ainda não expiradas.
+Os jobs de expiração rodam no processo `maintenance`, em lotes, com índices parciais sobre as linhas ainda não expiradas. A exceção é a retenção das chaves de API: sem índice próprio, ela varre `api_key`, que a emissão pela sessão limita a 100 chaves por conta.
 
 **Logs dos containers.** O Docker só gira log por tamanho, não por idade, e a regra verificável é o teto: cada serviço do Compose usa o driver `local` com 5 arquivos de 10 MiB, o que cobre 14 dias até cerca de 3,5 MiB de log por dia e serviço (o Nginx grava perto de 250 bytes por requisição, ou uns 15 mil acessos por dia). Com pouco tráfego, uma linha pode durar mais de 14 dias; por isso os logs seguem a mesma minimização dos eventos (3.7) e somem quando o container é recriado, o que acontece a cada deploy da imagem. A rotação fica no Compose, e nunca no `/etc/docker/daemon.json`, que vale para todos os projetos da VPS compartilhada ([3.8](#s3-8)). Os containers do executor, criados fora do Compose, declaram o limite no perfil fixo do `executor-ctl`: um arquivo de 1 MiB, porque o executor só escreve ali o diagnóstico de falha. `tests/test_container_logs.py` confere que todo serviço de produção tem a rotação e que a soma cabe em 512 MiB da raiz. O teste de aceitação confere o limite do executor no `HostConfig.LogConfig`.
 
