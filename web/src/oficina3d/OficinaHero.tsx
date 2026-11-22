@@ -196,8 +196,11 @@ export function OficinaHero({
   // ela é o que fica (sem cena, movimento reduzido ou falha), ganha o halo como as goblins dos
   // estados. Enquanto a troca pode acontecer, a imagem também fica a 93%: a cena enquadra com folga
   // para o giro e mostra a goblin ~7% menor que o recorte rente da imagem (medido nas seis).
+  // Movimento reduzido e economia de dados se sabem já no render, sem esperar o idle; o WebGL 2,
+  // que pede criar um contexto, fica para o idle (`sem-cena`).
+  const sceneRuledOut = reducedMotion || environment.savesData();
   const posterIsFinal =
-    state === "falhou" || mount === "sem-cena" || (mount === "imagem" && reducedMotion);
+    state === "falhou" || mount === "sem-cena" || (mount === "imagem" && sceneRuledOut);
 
   const onStageKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (handle === null) {

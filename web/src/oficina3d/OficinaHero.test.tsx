@@ -228,6 +228,19 @@ describe("OficinaHero", () => {
     expect(screen.getByRole("img", { name: /^Rúbia/ })).not.toHaveClass("scale-93");
   });
 
+  // Sem esperar o idle: economia de dados e movimento reduzido se sabem na hora, e a imagem não
+  // pode abrir a 93% sem halo para depois pular para o tamanho cheio.
+  it.each([
+    ["com economia de dados", { ...READY, savesData: () => true }],
+    ["com movimento reduzido", REDUCED_MOTION],
+  ])("%s, a imagem já abre em escala cheia e com o halo", (_, environment) => {
+    render(<OficinaHero environment={environment} whenPageIdle={never} />);
+
+    const image = screen.getByRole("img", { name: /^Rúbia/ });
+    expect(image).not.toHaveClass("scale-93");
+    expect(image).toHaveClass("goblin-silhouette");
+  });
+
   it("o seletor tem as seis goblins, na ordem do elenco, com a Rúbia escolhida", () => {
     render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
 
