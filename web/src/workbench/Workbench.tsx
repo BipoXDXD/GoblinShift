@@ -158,6 +158,8 @@ export function Workbench({
       {
         onSuccess: (run) => {
           idempotency.rotate();
+          // Os uploads agora são da Run: sair da Bancada não pode excluí-los.
+          batch.consume();
           void navigate(runPath(run.id));
         },
       },

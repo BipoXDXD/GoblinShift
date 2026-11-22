@@ -276,6 +276,9 @@ describe("Bancada", () => {
     expect(body.input_upload_ids).toEqual([uploadIdFor(2), uploadIdFor(1)]);
     expect(body.recipe_id).toBe("csv-janitor");
     expect(body.parameters).toMatchObject({ input_delimiter: ",", output_columns: null });
+    // Os uploads viraram a Run: sair da Bancada não os exclui.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(deleteRequests(api.requests)).toEqual([]);
   });
 
   it("repetir o mesmo comando reusa a Idempotency-Key; mudar o comando gera outra", async () => {

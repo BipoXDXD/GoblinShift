@@ -58,6 +58,7 @@ function fakeApi() {
     missingIntents: number;
   } = { failNextWith: null, deleteStatus: 202, holdIntents: null, missingIntents: 0 };
   const deleted: string[] = [];
+  const created: string[] = [];
   const fetchMock = vi.fn<typeof fetch>((input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
     if (init?.method === "DELETE") {
@@ -87,7 +88,11 @@ function fakeApi() {
     const respond = (): Response =>
       new Response(
         JSON.stringify({
-          items: items.slice(0, items.length - state.missingIntents).map(intentFor),
+          items: items.slice(0, items.length - state.missingIntents).map((item) => {
+            const intent = intentFor(item);
+            created.push(intent.id);
+            return intent;
+          }),
         }),
         {
           status: 201,
@@ -105,7 +110,9 @@ function fakeApi() {
     return Promise.resolve(respond());
   });
   const client = createApiClient({ fetch: fetchMock, csrfToken: () => null, now: Date.now });
-  return { client, fetchMock, state, deleted };
+  /** Intenções que seguem reservando cota: criadas e ainda não excluídas. */
+  const live = (): number => created.filter((id) => !deleted.includes(id)).length;
+  return { client, fetchMock, state, deleted, live };
 }
 
 interface PendingUpload {
@@ -265,7 +272,8 @@ describe("useUploadBatch", () => {
     await waitFor(() => {
       expect(pending).toHaveLength(2);
     });
-    expect(api.fetchMock).toHaveBeenCalledTimes(2);
+    const posts = api.fetchMock.mock.calls.filter(([, init]) => init?.method !== "DELETE");
+    expect(posts).toHaveLength(2);
     expect(pending[1]?.options.content.url).not.toBe(pending[0]?.options.content.url);
   });
 
@@ -555,5 +563,138 @@ describe("useUploadBatch: corridas e contrato do lote", () => {
     expect(api.fetchMock).toHaveBeenCalledTimes(1);
     expect(pending).toHaveLength(1);
     expect(statuses(hook.result.current.entries)).toEqual(["waiting"]);
+  });
+});
+
+describe("useUploadBatch: a intenção não sobra no servidor", () => {
+  function idOf(upload: PendingUpload | undefined): string {
+    return upload?.options.content.url.split("/")[4] ?? "";
+  }
+
+  async function failFirst(setupResult: ReturnType<typeof setup>): Promise<string> {
+    const { pending, hook } = setupResult;
+    act(() => {
+      hook.result.current.add([file("a.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+    act(() => {
+      pending[0]?.reject(new Error("rede"));
+    });
+    await waitFor(() => {
+      expect(statuses(hook.result.current.entries)).toEqual(["failed"]);
+    });
+    return hook.result.current.entries[0]?.localId ?? "";
+  }
+
+  it("refazer apaga a intenção anterior antes de criar outra", async () => {
+    const context = setup();
+    const { api, pending, hook } = context;
+    const localId = await failFirst(context);
+
+    act(() => {
+      hook.result.current.retry(localId);
+    });
+
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(api.deleted).toEqual([idOf(pending[0])]);
+    });
+    expect(api.live()).toBe(1);
+  });
+
+  it("cancelar apaga a intenção no servidor", async () => {
+    const { api, pending, hook } = setup();
+    act(() => {
+      hook.result.current.add([file("a.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+
+    act(() => {
+      hook.result.current.cancel(hook.result.current.entries[0]?.localId ?? "");
+    });
+
+    await waitFor(() => {
+      expect(api.deleted).toEqual([idOf(pending[0])]);
+    });
+    expect(api.live()).toBe(0);
+  });
+
+  it("refazer e cancelar em sequência não mudam a cota", async () => {
+    const context = setup();
+    const { api, pending, hook } = context;
+    const localId = await failFirst(context);
+    act(() => {
+      hook.result.current.retry(localId);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+
+    act(() => {
+      hook.result.current.cancel(localId);
+    });
+
+    await waitFor(() => {
+      expect(api.live()).toBe(0);
+    });
+  });
+
+  it("desmontar sem Run apaga os uploads do lote", async () => {
+    const { api, pending, hook } = setup();
+    act(() => {
+      hook.result.current.add([file("a.csv"), file("b.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(2);
+    });
+    const ready = pending[0];
+    if (ready === undefined) throw new Error("sem envio");
+    act(() => {
+      ready.resolve(receivedFor(ready.options.content));
+    });
+    await waitFor(() => {
+      expect(statuses(hook.result.current.entries)).toEqual(["ready", "waiting"]);
+    });
+
+    hook.unmount();
+
+    await waitFor(() => {
+      expect([...api.deleted].sort()).toEqual([idOf(pending[0]), idOf(pending[1])].sort());
+    });
+    expect(api.live()).toBe(0);
+  });
+
+  it("desmontar depois de consume não apaga nada", async () => {
+    const { api, pending, hook } = setup();
+    act(() => {
+      hook.result.current.add([file("a.csv")]);
+    });
+    await waitFor(() => {
+      expect(pending).toHaveLength(1);
+    });
+    const ready = pending[0];
+    if (ready === undefined) throw new Error("sem envio");
+    act(() => {
+      ready.resolve(receivedFor(ready.options.content));
+    });
+    await waitFor(() => {
+      expect(statuses(hook.result.current.entries)).toEqual(["ready"]);
+    });
+
+    act(() => {
+      hook.result.current.consume();
+    });
+    hook.unmount();
+
+    // O DELETE sairia por uma fila assíncrona: dá tempo a ela antes de afirmar que nada saiu.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(api.deleted).toEqual([]);
+    expect(api.live()).toBe(1);
   });
 });
