@@ -9,8 +9,10 @@ Lease vencido não prova que o executor morreu: antes de reagendar, o Runner é 
 nome; executor vivo recebe `stop`, e só a confirmação do término libera a decisão. Sem
 confirmação, ou com o Runner fora do ar (`executor-ctl` parado), a execução fica como está
 (reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado. O
-`stop` só sai se o lease, relido numa transação curta e sem trava logo antes, ainda estiver
-vencido: um worker pausado que voltou e renovou não perde o executor.
+`stop` só sai se a tentativa, relida numa transação curta e sem trava logo antes, ainda estiver
+aberta e vencida. Lease vencido é definitivo: o worker não o renova (`LostFencing`), e o worker
+pausado que volta abandona a tentativa em vez de disputá-la. A janela entre a releitura e o
+`stop` encolhe, mas não some (ver `_lease_still_expired`).
 
 O executor e a área de trabalho só são removidos depois de a decisão estar no banco. Se a remoção
 falhar, a limpeza das áreas (`sweep_work_areas`) a repete nos ciclos seguintes: o `executor-ctl`
@@ -450,8 +452,12 @@ class Maintenance:
         """Relê a tentativa antes do `stop`: ainda aberta, de Run ativa e com o lease vencido.
 
         Leitura simples, sem `FOR UPDATE`, numa transação que termina antes da chamada ao
-        Runner. Não fecha a janela inteira (o worker pode renovar entre esta leitura e o `stop`),
-        só a encurta; quem decide depois continua sendo o fencing de `_lease_event`.
+        Runner. Lease vencido não se renova (`renew_lease` levanta `LostFencing`), então o
+        worker não desfaz esta releitura renovando. Ela ainda pode ficar falsa antes do `stop`:
+        outra manutenção decide a tentativa, ou o worker grava o desfecho de um executor que
+        terminou sozinho (`Coordinator.supervise` devolve o fim sem renovar).
+        Nos dois casos o `stop` cai num executor já encerrado, e o fencing de `_lease_event`
+        recusa decidir de novo.
 
         A geração não é conferida: ela só sobe no claim, que exige a Run em `queued` ou
         `retry_wait`, e só se chega a `retry_wait` encerrando a tentativa viva; com o índice
@@ -475,7 +481,7 @@ class Maintenance:
             return None
         if loaded.state.status is Status.STOPPING:
             return ExecutorStopped(expired.generation)
-        # Um coordenador vivo pode ter renovado depois da leitura: então o caso é dele.
+        # Defesa: `renew_lease` não renova lease vencido; se este não estiver vencido, não é nosso.
         if live is None or live.lease_expires_at >= loaded.now:
             return None
         return LeaseExpired(expired.generation, loaded.now, status.ran, self._config.jitter())
