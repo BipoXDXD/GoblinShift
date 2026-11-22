@@ -4,9 +4,11 @@
 # web/src/assets/art/oficina-3d/oficina-3d-ID.glb. Todas usam a mesma configuração da Rúbia.
 #
 # Origem dos modelos (desde 22/11): Hi3D Quality, em $ARTE/hi3d-quality-20261122/ (fontes.json com
-# o task_id e os tamanhos). O elenco.tsv aponta para o <id>-site.glb, que já passou por estes
-# passos; reduzir de novo simplificaria duas vezes. Por isso o script recusa fonte terminada em
-# -site.glb: baixe o bruto pelo Hi3D (get_task_outputs com o task_id, sem crédito) e passe FONTE=.
+# o task_id e os tamanhos). O elenco.tsv aponta para o <id>-site.glb, que este script NÃO
+# reproduz: ele saiu de outra receita (erro do simplify, normais e tamanhos de textura próprios),
+# registrada em fontes.json → <id>.site.reducao. Reduzir um -site.glb de novo simplificaria duas
+# vezes, então o script recusa fonte terminada em -site.glb. Para refazer um GLB, baixe o bruto
+# pelo Hi3D (get_task_outputs com o task_id, sem crédito), passe FONTE= e compare com a receita.
 #
 # Passos e porquê:
 #   1. weld (gltf-transform): junta os vértices iguais, para o simplify enxergar as costuras de UV.
@@ -14,13 +16,13 @@
 #      posição, normal e UV, e para onde qualquer um passaria do erro aceito. O simplify comum,
 #      só de posição, achatava a bochecha, apagava a íris do olho esquerdo e esticava o UV da
 #      coxa até amostrar o cabelo (ADR 030, "Defeitos da primeira versão").
-#   3. texturas redimensionadas para TEXTURE_PX e gravadas em WebP (EXT_texture_webp). O fonte externa
-#      entrega 2048 px; contra 1024 px, eles tiram ~40% da diferença para o bruto nos closes, por
-#      ~320 KB. Com uma fonte de textura maior, compare closes contra o bruto antes de subir.
+#   3. texturas redimensionadas para TEXTURE_PX (todas do mesmo tamanho) e gravadas em WebP
+#      (EXT_texture_webp). Os -site.glb de 22/11 usam tamanhos diferentes por textura; veja
+#      fontes.json → site.reducao antes de escolher um valor, e compare closes contra o bruto.
 #   4. Meshopt (EXT_meshopt_compression) sobre a malha quantizada (KHR_mesh_quantization), com UV
 #      em 14 bits: o padrão de 12 bits dá passos de 1 texel numa textura de 4096 px.
 #
-# Uso: FONTE=/caminho/bruto.glb TEXTURE_PX=4096 scripts/arte/otimizar-glb.sh ID   (um ID só, do elenco.tsv)
+# Uso: FONTE=/caminho/bruto.glb [TEXTURE_PX=N] scripts/arte/otimizar-glb.sh ID   (um ID do elenco)
 #      Sem FONTE, lê $ARTE/<fonte do elenco.tsv>, que hoje é sempre um -site.glb e é recusado.
 # Requer: Node e `npm ci` em web/ (o CLI do gltf-transform vem fixado pelo npx).
 set -euo pipefail
