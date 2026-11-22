@@ -1170,7 +1170,7 @@
       "sha256": "26473ab509cafd638358cdfef2218820d2a1a4200ffa624b7db504e909739c2f",
       "derived_from": "fagulha-3d-quality",
       "human_edits": [
-        "redução fora do repositório a partir do bruto do Hi3D: weld, normais suaves por área, simplificação com atributos (posição, normal e UV, pesos 1 e 16, como web/scripts/simplificar-glb.ts) com erro 9e-05 (1.043.142 triângulos), cor em 4096 px e metal/rugosidade em 2048 px em WebP, compressão Meshopt com UV em 14 bits (gltf-transform 4.5.1)"
+        "redução fora do repositório a partir do bruto do Hi3D: weld, normais suaves por área, simplificação com atributos (posição, normal e UV, pesos 1 e 16, como web/scripts/simplificar-glb.ts) com erro 0,00009 (1.043.142 triângulos), cor em 4096 px e metal/rugosidade em 2048 px em WebP, compressão Meshopt com UV em 14 bits (gltf-transform 4.5.1)"
       ]
     },
     {
@@ -1410,7 +1410,7 @@
       "sha256": "0ea8f2b9a8073f9a28ea84f09344f351adecd445e4711cdbd79bd3050b06d909",
       "derived_from": "lua-3d-quality",
       "human_edits": [
-        "redução fora do repositório a partir do bruto do Hi3D: weld, normais suaves por área, simplificação com atributos (posição, normal e UV, pesos 1 e 16, como web/scripts/simplificar-glb.ts) com erro 7,4e-05 (1.042.276 triângulos), cor em 4096 px e metal/rugosidade em 2048 px em WebP, compressão Meshopt com UV em 14 bits (gltf-transform 4.5.1)"
+        "redução fora do repositório a partir do bruto do Hi3D: weld, normais suaves por área, simplificação com atributos (posição, normal e UV, pesos 1 e 16, como web/scripts/simplificar-glb.ts) com erro 0,000074 (1.042.276 triângulos), cor em 4096 px e metal/rugosidade em 2048 px em WebP, compressão Meshopt com UV em 14 bits (gltf-transform 4.5.1)"
       ]
     },
     {
@@ -1490,7 +1490,7 @@
       "sha256": "ebc203296b7e03bc5c4ea8052df219b4c3a6c8ae09ff1d03b41bbe4c28b3bb1d",
       "derived_from": "nyx-3d-quality",
       "human_edits": [
-        "redução fora do repositório a partir do bruto do Hi3D: weld, normais suaves por área, simplificação com atributos (posição, normal e UV, pesos 1 e 16, como web/scripts/simplificar-glb.ts) com erro 9e-05 (999.732 triângulos), cor em 4096 px e metal/rugosidade em 2048 px em WebP, compressão Meshopt com UV em 14 bits (gltf-transform 4.5.1)"
+        "redução fora do repositório a partir do bruto do Hi3D: weld, normais suaves por área, simplificação com atributos (posição, normal e UV, pesos 1 e 16, como web/scripts/simplificar-glb.ts) com erro 0,00009 (999.732 triângulos), cor em 4096 px e metal/rugosidade em 2048 px em WebP, compressão Meshopt com UV em 14 bits (gltf-transform 4.5.1)"
       ]
     },
     {
