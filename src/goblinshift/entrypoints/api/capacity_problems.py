@@ -3,6 +3,8 @@
 - Teto da conta → 429 `QUOTA_EXCEEDED`, com o tempo até a próxima expiração conhecida de um
   upload ou artefato da conta, nunca menos de 60 s (a manutenção ainda precisa remover).
 - Teto do ambiente → 503 `SERVICE_UNAVAILABLE`, com 300 s.
+- Teto de uploads vivos da conta → 429 `QUOTA_EXCEEDED`, com o tempo até vencerem uploads
+  suficientes para o lote caber, também com o piso de 60 s.
 - Cota diária → 429 `QUOTA_EXCEEDED`, com o tempo até a Run mais antiga sair da janela.
 """
 
@@ -27,6 +29,14 @@ def account_storage_problem(session: Session, owner_id: UUID) -> ApiProblem:
         ProblemCode.QUOTA_EXCEEDED,
         "A conta atingiu o limite de armazenamento; espere arquivos expirarem ou exclua alguns.",
         headers=retry_after(max(wait or timedelta(0), STORAGE_MIN_RETRY_AFTER)),
+    )
+
+
+def live_uploads_problem(wait: timedelta) -> ApiProblem:
+    return ApiProblem(
+        ProblemCode.QUOTA_EXCEEDED,
+        "A conta atingiu o limite de uploads ativos; exclua alguns ou espere que expirem.",
+        headers=retry_after(max(wait, STORAGE_MIN_RETRY_AFTER)),
     )
 
 

@@ -4,6 +4,8 @@ Recurso inexistente e recurso de outra conta produzem o mesmo erro, com a mesma 
 não permitir enumeração.
 """
 
+from datetime import timedelta
+
 from goblinshift.files.states import UploadState
 
 
@@ -32,6 +34,18 @@ class UploadRequestInProgressError(FilesError):
 
     def __init__(self) -> None:
         super().__init__("outro pedido com esta chave está em andamento")
+
+
+class LiveUploadLimitError(FilesError):
+    """O lote passaria do teto de uploads vivos da conta (→ 429 `QUOTA_EXCEEDED`).
+
+    `retry_after` é quanto falta, pelo relógio do banco, para vencerem uploads vivos suficientes
+    para o lote caber, ou todos, se nem assim couber (sem nenhum vivo, zero).
+    """
+
+    def __init__(self, retry_after: timedelta) -> None:
+        super().__init__("a conta atingiu o teto de uploads vivos")
+        self.retry_after = retry_after
 
 
 class UploadNotFoundError(FilesError):

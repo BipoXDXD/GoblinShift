@@ -21,6 +21,7 @@ from goblinshift import capacity
 from goblinshift.files.errors import (
     InputNotAvailableError,
     InvalidUploadRequestError,
+    LiveUploadLimitError,
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
@@ -32,6 +33,7 @@ from goblinshift.files.limits import (
     INCOMPLETE_UPLOAD_TTL,
     MAX_BATCH_BYTES,
     MAX_BATCH_FILES,
+    MAX_LIVE_UPLOADS_PER_ACCOUNT,
     MAX_NAME_CHARS,
     MIN_INTENT_RESERVED_BYTES,
     READY_UPLOAD_TTL,
@@ -67,6 +69,11 @@ _FORBIDDEN_NAME_CHAR = re.compile(rf"[{_CONTROL_CHARS}\ud800-\udfff]")
 # plano básico (U+E0001 e afins), que sem a flag `u` o ECMA-262 só escreve como par de
 # surrogates. Todos seguem recusados aqui.
 UPLOAD_NAME_PATTERN = rf"^[^/\\{_CONTROL_CHARS}{_BMP_FORMAT_CHARS}]*$"
+
+_LIVE_STATES = (UploadState.CREATED, UploadState.RECEIVING, UploadState.READY)
+# Classe do advisory lock, ao lado das de `runs.acceptance` (0x6773_0001 e 0x6773_0002) e de
+# `upload_requests` (0x6773_0003).
+ADVISORY_CLASS_LIVE_UPLOADS = 0x6773_0004
 
 # Só o que `_view` lê: uma coluna nova na tabela não entra na projeção sem que alguém a use.
 _VIEW_COLUMNS = (
@@ -135,12 +142,15 @@ def create_intents(
 ) -> list[UploadView]:
     """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
 
-    Reserva o tamanho declarado de cada intenção, no mínimo `MIN_INTENT_RESERVED_BYTES` (detentor
-    `upload`), tudo ou nada: acima do teto levanta `AccountCapacityExceededError` ou
-    `GlobalCapacityExceededError`, e quem chama desfaz. Com `request`, cada linha guarda a chave,
-    o hash do corpo e a própria posição no pedido, para `upload_requests` achar o lote de novo.
+    O lote que passaria de `MAX_LIVE_UPLOADS_PER_ACCOUNT` uploads vivos é recusado inteiro com
+    `LiveUploadLimitError`. Reserva o tamanho declarado de cada intenção, no mínimo
+    `MIN_INTENT_RESERVED_BYTES` (detentor `upload`), tudo ou nada: acima do teto levanta
+    `AccountCapacityExceededError` ou `GlobalCapacityExceededError`, e quem chama desfaz. Com
+    `request`, cada linha guarda a chave, o hash do corpo e a própria posição no pedido, para
+    `upload_requests` achar o lote de novo.
     """
     intents = _parse_intents(items)
+    _ensure_live_upload_room(session, owner_id, len(intents))
     object_ids = session.execute(
         insert(stored_object).returning(stored_object.c.id, sort_by_parameter_order=True),
         [{"owner_id": owner_id, "storage_key": _new_upload_key()} for _ in intents],
@@ -322,6 +332,54 @@ def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
         .where(upload.c.id == upload_id)
         .scalar_subquery()
     )
+
+
+def _ensure_live_upload_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
+    """Recusa, com `LiveUploadLimitError`, o lote que passaria do teto de uploads vivos da conta.
+
+    A trava vale até o fim da transação e serializa só as criações de lote da mesma conta: cada
+    lote conta e insere antes que o próximo conte, então dois lotes paralelos não passam juntos
+    do teto. Ordem das travas: chave do lote (`upload_requests`) → vivos → pools do `capacity`.
+    O objeto da trava é um hash de 32 bits; uma colisão só faz duas contas esperarem uma pela
+    outra.
+    """
+    session.execute(
+        select(
+            func.pg_advisory_xact_lock(ADVISORY_CLASS_LIVE_UPLOADS, func.hashtext(str(owner_id)))
+        )
+    )
+    live = session.execute(select(func.count()).where(*_live_uploads_of(owner_id))).scalar_one()
+    excess = live + batch_size - MAX_LIVE_UPLOADS_PER_ACCOUNT
+    if excess > 0:
+        raise LiveUploadLimitError(_until_expired(session, owner_id, min(excess, live)))
+
+
+def _live_uploads_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
+    """Vivo: ainda pode receber conteúdo ou servir de entrada, pelo relógio do banco.
+
+    `deleted_at IS NULL` sem parâmetro casa com o predicado do índice parcial
+    `upload_owner_id_expires_at_idx`, que limita a varredura às linhas ainda não vencidas da conta.
+    """
+    return (
+        upload.c.owner_id == owner_id,
+        upload.c.deleted_at.is_(None),
+        upload.c.expires_at > func.now(),
+        upload.c.state.in_(_LIVE_STATES),
+    )
+
+
+def _until_expired(session: Session, owner_id: uuid.UUID, count: int) -> timedelta:
+    """Quanto falta para vencerem os `count` uploads vivos mais antigos da conta."""
+    if count == 0:
+        return timedelta(0)
+    wait: timedelta = session.execute(
+        select(upload.c.expires_at - func.now())
+        .where(*_live_uploads_of(owner_id))
+        .order_by(upload.c.expires_at)
+        .offset(count - 1)
+        .limit(1)
+    ).scalar_one()
+    return wait
 
 
 def _request_columns(request: IdempotentRequest | None, index: int) -> dict[str, object]:

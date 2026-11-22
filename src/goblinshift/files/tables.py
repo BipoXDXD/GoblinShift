@@ -93,6 +93,8 @@ upload = Table(
     ),
     Index(None, "owner_id", "created_at"),
     Index(None, "owner_id", "request_key", postgresql_where=text("request_key IS NOT NULL")),
+    # Uploads vivos da conta (teto de `files.uploads`): só as linhas sem exclusão, pelo vencimento.
+    Index(None, "owner_id", "expires_at", postgresql_where=text("deleted_at IS NULL")),
     Index("upload_expires_at_idx", "expires_at", postgresql_where=text("deleted_at IS NULL")),
     CheckConstraint("state IN ('created', 'receiving', 'ready', 'failed')", name="state"),
     CheckConstraint("expected_size >= 0", name="expected_size"),

@@ -22,6 +22,7 @@ from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExc
 from goblinshift.entrypoints.api.capacity_problems import (
     account_storage_problem,
     environment_storage_problem,
+    live_uploads_problem,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage, WriteFiles
 from goblinshift.entrypoints.api.idempotency import (
@@ -45,6 +46,7 @@ from goblinshift.entrypoints.api.transfers import (
 from goblinshift.files.errors import (
     FilesError,
     InvalidUploadRequestError,
+    LiveUploadLimitError,
     TransferLimitReachedError,
     UploadContentTooLargeError,
     UploadGoneError,
@@ -185,6 +187,8 @@ def create_uploads(
         ) from None
     except UploadRequestInProgressError:
         raise in_progress_problem() from None
+    except LiveUploadLimitError as error:
+        raise live_uploads_problem(error.retry_after) from None
     except AccountCapacityExceededError:
         raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
