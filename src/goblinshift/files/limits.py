@@ -39,6 +39,10 @@ INCOMPLETE_UPLOAD_TTL = timedelta(hours=1)
 READY_UPLOAD_TTL = timedelta(hours=24)
 ARTIFACT_TTL = timedelta(hours=48)
 USED_INPUT_TTL = timedelta(hours=48)
+# Chave, hash do corpo e posição de um lote criado com Idempotency-Key (`upload_requests`): o
+# replay só vale enquanto o lote vive (1 h), mas o Aviso de privacidade promete 24 h para os dados
+# de idempotência, então a manutenção os anula depois disso.
+UPLOAD_REQUEST_KEY_TTL = timedelta(hours=24)
 # Temporário de gravação sem modificação há mais que isto foi abandonado por uma queda. Bem acima da
 # transferência mais longa (10 min), para nunca atingir uma gravação viva.
 STALE_TEMPORARY_TTL = INCOMPLETE_UPLOAD_TTL

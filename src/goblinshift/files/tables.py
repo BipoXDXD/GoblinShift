@@ -115,6 +115,12 @@ upload = Table(
         "created_at",
         postgresql_where=text("original_name IS NOT NULL AND deleted_at IS NOT NULL"),
     ),
+    # Lotes com chave de idempotência que a retenção ainda vai anular (24 h).
+    Index(
+        "upload_request_created_at_idx",
+        "created_at",
+        postgresql_where=text("request_key IS NOT NULL"),
+    ),
 )
 
 artifact = Table(

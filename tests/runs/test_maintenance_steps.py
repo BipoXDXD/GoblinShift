@@ -47,6 +47,7 @@ STEPS: dict[str, dict[str, int]] = {
     "purge_deleted_objects": {"objects_purged": 7, "bytes_purged": 23, "purge_limit_reached": 1},
     "reconcile_capacity": {"capacity_pools_corrected": 24, "capacity_objects_adopted": 25},
     "delete_expired_idempotency_records": {"idempotency_records_removed": 26},
+    "forget_upload_request_keys": {"upload_request_keys_forgotten": 33},
     "anonymize_finished_runs": {"runs_anonymized": 27},
     "anonymize_output_names": {"outputs_anonymized": 28},
     "anonymize_deleted_uploads": {"uploads_anonymized": 29},

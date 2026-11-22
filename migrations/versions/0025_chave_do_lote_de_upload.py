@@ -11,8 +11,10 @@ criado com `Idempotency-Key` grava as três em cada linha; sem a chave, as três
 O número pula de 0019 para 0025 porque o rascunho #503 reserva 0020 a 0024; quem entrar depois
 na main só troca o `down_revision`.
 
-Os CHECKs e o índice parcial entram na transação do Alembic, como na 0006 e na 0019: as colunas
-acabaram de nascer nulas em todas as linhas, e `upload` só guarda os uploads da retenção.
+Os CHECKs e os índices parciais entram na transação do Alembic, como na 0006 e na 0019: as colunas
+acabaram de nascer nulas em todas as linhas, e `upload` só guarda os uploads da retenção. O
+segundo índice, por `created_at` nas linhas com chave, guia a manutenção que anula a chave depois
+de 24 h (`files.retention.forget_upload_request_keys`) sem varrer a tabela inteira.
 """
 
 from collections.abc import Sequence
@@ -52,9 +54,17 @@ def upgrade() -> None:
         ["owner_id", "request_key"],
         postgresql_where=sa.text("request_key IS NOT NULL"),
     )
+    # lock-ok: idem, índice parcial sobre coluna nula recém-criada
+    op.create_index(
+        "upload_request_created_at_idx",
+        "upload",
+        ["created_at"],
+        postgresql_where=sa.text("request_key IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("upload_request_created_at_idx", table_name="upload")
     op.drop_index(op.f("upload_owner_id_request_key_idx"), table_name="upload")
     op.drop_constraint(op.f("upload_request_check"), "upload", type_="check")
     op.drop_constraint(op.f("upload_request_hash_check"), "upload", type_="check")

@@ -323,6 +323,7 @@ class Maintenance:
             # A ordem importa: a Run sai antes das linhas de arquivos que o histórico dela
             # referencia, e as linhas de arquivos só saem depois do arquivo no disco.
             _Step("delete_expired_idempotency_records", self.delete_expired_idempotency_records),
+            _Step("forget_upload_request_keys", self.forget_upload_request_keys),
             _Step("anonymize_finished_runs", self.anonymize_finished_runs),
             _Step("anonymize_output_names", self.anonymize_output_names),
             _Step("anonymize_deleted_uploads", self.anonymize_deleted_uploads),
@@ -768,6 +769,13 @@ class Maintenance:
             lambda s, now: run_retention.delete_expired_idempotency_records(s, now, batch)
         )
         return {"idempotency_records_removed": removed}
+
+    def forget_upload_request_keys(self) -> dict[str, int]:
+        batch = self._config.retention_batch_size
+        forgotten = self._at_db_now(
+            lambda s, now: file_retention.forget_upload_request_keys(s, now, batch)
+        )
+        return {"upload_request_keys_forgotten": forgotten}
 
     def anonymize_finished_runs(self) -> dict[str, int]:
         batch = self._config.retention_batch_size
