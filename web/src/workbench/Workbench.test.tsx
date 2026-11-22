@@ -307,6 +307,21 @@ describe("Bancada", () => {
     expect(keys[2]).not.toBe(keys[0]);
   });
 
+  it("sessão que termina ao Executar vira o convite para entrar, sem alerta", async () => {
+    const { user } = await setup({ runs: () => problemResponse(401, "AUTHENTICATION_REQUIRED") });
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+
+    const notice = await screen.findByRole("region", { name: "Entre para continuar" });
+    expect(within(notice).getByRole("link", { name: "Entrar com GitHub" })).toHaveAttribute(
+      "href",
+      "/auth/login/github?return_to=%2Fbancada%2Fcsv-janitor",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("erros por campo do servidor aparecem no campo, com o texto do servidor", async () => {
     const { user } = await setup({
       runs: () =>

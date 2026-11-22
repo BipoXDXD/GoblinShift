@@ -113,6 +113,15 @@ def test_nomes_que_so_diferem_na_caixa_recebem_sufixo_pela_posicao(work: Workspa
     assert work.output_paths() == ["images/Foto.png", "images/foto_1.PNG"]
 
 
+def test_nomes_que_o_windows_nao_aceita_saem_portaveis(work: Workspace) -> None:
+    work.add("CON.png", samples.png(1))
+    work.add("a:b?.png", samples.png(2))
+
+    work.run()
+
+    assert work.output_paths() == ["images/CON_.png", "images/a_b_.png"]
+
+
 def test_nomes_em_nfc_e_nfd_colidem(work: Workspace) -> None:
     work.add("Relatório.txt", samples.text("um"))
     work.add(unicodedata.normalize("NFD", "Relatório.txt"), samples.text("dois"))

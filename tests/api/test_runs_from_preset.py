@@ -10,10 +10,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.storage import FileStorage
 from goblinshift.identity import Scope
 from goblinshift.runs.tables import run
 from tests.api.support import assert_problem
+from tests.api.test_runs import RUN_KEYS
 from tests.identity.support import ALL_SCOPES, new_key
 from tests.runs.support import count_rows, new_owner, ready_inputs
 
@@ -84,6 +86,7 @@ def test_aceita_com_202_e_a_configuracao_do_preset(
 
     assert response.status_code == 202, response.text
     body = response.json()
+    assert body.keys() == RUN_KEYS | {"idempotency_expires_at"}
     assert response.headers["location"] == f"/api/v1/runs/{body['id']}"
     assert (body["recipe_id"], body["recipe_version"]) == ("csv-janitor", 1)
     saved = stored_run(factory, body["id"])
@@ -165,6 +168,55 @@ def test_preset_de_outra_conta_responde_404_sem_criar(
 
     assert_problem(response, 404, "NOT_FOUND")
     assert "segredo" not in response.text
+    assert count_rows(factory)["run"] == 0
+
+
+@pytest.mark.parametrize("own_inputs", [0, 1], ids=["so-alheio", "proprio-e-alheio"])
+def test_upload_de_outra_conta_responde_422_sem_criar(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage, own_inputs: int
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account)
+    [foreign] = ready_inputs(factory, storage, new_owner(factory))
+    inputs = [*ready_inputs(factory, storage, account.id, own_inputs), foreign]
+    before = count_rows(factory)
+
+    response = run_preset(client, account, preset["id"], inputs)
+
+    problem = assert_problem(response, 422, "INPUT_NOT_AVAILABLE")
+    assert str(foreign) not in response.text
+    assert "errors" not in problem
+    assert count_rows(factory) == before
+
+
+def test_lote_no_teto_passa_pelo_schema(client: TestClient, factory: sessionmaker[Session]) -> None:
+    # image-forge aceita 100 entradas, o mesmo teto do lote; os IDs não existem, então a
+    # recusa que vem é a da conferência dos uploads, depois do schema e da receita.
+    account = Account(factory)
+    preset = create_preset(client, account, "image-forge")
+
+    response = run_preset(
+        client, account, preset["id"], [uuid.uuid4() for _ in range(MAX_BATCH_FILES)]
+    )
+
+    assert_problem(response, 422, "INPUT_NOT_AVAILABLE")
+
+
+def test_lote_acima_do_teto_e_recusado_pelo_schema(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    account = Account(factory)
+    preset = create_preset(client, account, "image-forge")
+
+    response = run_preset(
+        client, account, preset["id"], [uuid.uuid4() for _ in range(MAX_BATCH_FILES + 1)]
+    )
+
+    problem = assert_problem(response, 422, "VALIDATION_FAILED")
+    # `too_long` é do schema; o teto da receita sairia como `value_error`.
+    assert [(e["field"], e["code"]) for e in problem["errors"]] == [
+        ("body.input_upload_ids", "too_long")
+    ]
     assert count_rows(factory)["run"] == 0
 
 

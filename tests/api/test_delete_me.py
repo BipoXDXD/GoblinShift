@@ -60,6 +60,8 @@ def test_delete_me_marca_a_exclusao_revoga_tudo_e_limpa_o_navegador(
 
     assert response.status_code == 202, response.text
     assert response.content == b""
+    # Sem corpo e sem tipo: um `Content-Type` de JSON faria o cliente tentar ler um corpo vazio.
+    assert "content-type" not in response.headers
     assert response.headers["clear-site-data"] == '"cookies", "storage"'
     assert deletion_requested_at(factory, owner) == NOW
     with unit_of_work(factory) as session:

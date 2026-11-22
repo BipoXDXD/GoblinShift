@@ -8,6 +8,10 @@ se garante que nada do nome original vire separador, controle, arquivo oculto ou
 os isolates U+2066 a U+2069): ele não aparece na tela, mas reordena ou disfarça o nome exibido
 (`fatura\u202egpj.exe` aparece terminando em `.jpg`). A mesma regra vale onde o nome é recusado
 em vez de trocado (`has_unsafe_char`): `OutputDir`, coleta do worker e `name_prefix` do Detox.
+
+O nome da saída vai para o computador do usuário, que pode ser Windows: lá `<>:"|?*` são
+proibidos, ponto ou espaço no fim somem em silêncio e `CON.csv` abre o console em vez do arquivo.
+`portable_name` aplica essas regras em todas as plataformas, para o mesmo envio dar o mesmo nome.
 """
 
 import unicodedata
@@ -19,11 +23,38 @@ _UNSAFE_REPLACEMENT = "_"
 # Cc: controles (NUL, quebra de linha, DEL); Cf: formato invisível (bidi, largura zero, BOM);
 # Cs: surrogate solto, que não tem representação em UTF-8.
 _UNSAFE_CATEGORIES = frozenset({"Cc", "Cf", "Cs"})
+_WINDOWS_FORBIDDEN = frozenset('<>:"|?*')
+_WINDOWS_TRAILING = ". "
+_SPACE = " "
+# Nomes de dispositivo do DOS, reservados com qualquer extensão. Ficam de fora, por decisão do
+# dono, os que só alguns Windows reservam: COM0, LPT0, COM¹ a COM³, CONIN$ e CONOUT$.
+_DOS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"{port}{number}" for port in ("COM", "LPT") for number in range(1, 10)}
+)
+_DEVICE_SUFFIX = "_"
 
 
 def has_unsafe_char(text: str) -> bool:
     """Se há controle, formato invisível ou surrogate solto: o que um nome nunca pode conter."""
     return any(unicodedata.category(char) in _UNSAFE_CATEGORIES for char in text)
+
+
+def portable_name(name: str) -> str:
+    """Nome que o Windows grava e abre como foi dado; idempotente.
+
+    Recebe um componente já em NFC e sem separador nem controle. Nesta ordem: `<>:"|?*` viram
+    `_`; ponto e espaço do fim saem (vazio vira `_`); se o trecho antes do primeiro ponto, sem
+    espaço no fim e em maiúsculas, é dispositivo do DOS, ganha `_` no fim (`CON.csv` →
+    `CON_.csv`). Tirar ponto e espaço antes de checar o dispositivo é o que faz `CON .` virar
+    `CON_`; na ordem inversa sairia `CON _`.
+    """
+    replaced = "".join(_UNSAFE_REPLACEMENT if char in _WINDOWS_FORBIDDEN else char for char in name)
+    trimmed = replaced.rstrip(_WINDOWS_TRAILING) or _UNSAFE_REPLACEMENT
+    device, dot, rest = trimmed.partition(".")
+    if device.rstrip(_SPACE).upper() in _DOS_DEVICE_NAMES:
+        return f"{device}{_DEVICE_SUFFIX}{dot}{rest}"
+    return trimmed
 
 
 def safe_stem(original_name: str, fallback: str) -> str:

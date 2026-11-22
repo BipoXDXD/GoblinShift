@@ -14,6 +14,8 @@ from goblinshift.processing.csv_janitor.limits import Limits
 from goblinshift.processing.csv_janitor.params import Delimiter
 from goblinshift.processing.csv_janitor.results import RejectionCode, TableRejectionError
 
+_BOM = "\ufeff"
+
 
 @dataclass(frozen=True)
 class Table:
@@ -78,7 +80,8 @@ def _let_record_limit_govern(limits: Limits) -> None:
 
 def _decode(data: bytes) -> str:
     try:
-        return data.decode("utf-8-sig")
+        # O utf-8-sig tira só um BOM; Excel e LibreOffice consomem os seguintes e avaliariam A1.
+        return data.decode("utf-8-sig").lstrip(_BOM)
     except UnicodeDecodeError as error:
         raise TableRejectionError(
             RejectionCode.UNSUPPORTED_FORMAT, f"não é UTF-8 válido (byte {error.start})"
