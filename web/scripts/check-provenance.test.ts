@@ -261,8 +261,8 @@ describe("provenanceViolations", () => {
   });
 
   // O schema aceita geração sem upstream (as de render não têm): sem este teste, uma geração do
-  // Hi3D Quality sem upstream nem direito passaria no CI.
-  it("toda geração do Hi3D Quality declara upstream e direito", () => {
+  // Hi3D Quality sem a fonte e o direito dele (source-005, rights-005) passaria no CI.
+  it("toda geração do Hi3D Quality declara source-005 e rights-005", () => {
     const quality = Object.entries(manifest.generations).filter(([id]) =>
       id.endsWith("-3d-quality"),
     );
@@ -272,8 +272,8 @@ describe("provenanceViolations", () => {
     for (const [, generation] of quality) {
       const fields: Record<string, unknown> = generation;
       expect(fields["task_id"]).toMatch(/^[0-9a-f]{32}$/);
-      expect(typeof fields["upstream"]).toBe("string");
-      expect(typeof fields["rights"]).toBe("string");
+      expect(fields["upstream"]).toBe("source-005");
+      expect(fields["rights"]).toBe("rights-005");
     }
   });
 
