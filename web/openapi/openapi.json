@@ -5996,7 +5996,8 @@
                 "items": {
                   "$ref": "#/components/schemas/FieldError"
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 50
               },
               {
                 "type": "null"
@@ -6007,7 +6008,8 @@
           "errors_truncated": {
             "anyOf": [
               {
-                "type": "boolean"
+                "type": "boolean",
+                "const": true
               },
               {
                 "type": "null"

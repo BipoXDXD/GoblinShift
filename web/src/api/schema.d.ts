@@ -743,7 +743,7 @@ export interface components {
             /** Errors */
             errors?: components["schemas"]["FieldError"][] | null;
             /** Errors Truncated */
-            errors_truncated?: boolean | null;
+            errors_truncated?: true | null;
         };
         /** Progress */
         Progress: {

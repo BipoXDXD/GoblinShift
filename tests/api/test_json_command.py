@@ -136,8 +136,8 @@ def test_nul_em_texto_responde_400(offline_client: TestClient, body: bytes) -> N
     ],
 )
 def test_surrogate_solto_em_texto_responde_400(offline_client: TestClient, body: bytes) -> None:
-    # Surrogate solto não existe em UTF-8: passava pela decodificação e quebrava com 500 ao
-    # calcular o hash canônico dos parâmetros da Run.
+    # Surrogate solto não existe em UTF-8: passava pela decodificação e dava 500 a quem lê o
+    # JSON decodificado; em produção, 422 do parser.
     response = offline_client.post(RAW, content=body, headers=JSON_HEADERS)
 
     body_json = assert_problem(response, 400, "JSON_INVALID")

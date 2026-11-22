@@ -68,7 +68,7 @@ from goblinshift.runs.acceptance import (
     validate_run,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
-from goblinshift.runs.formula_cells import MAX_COLUMN_NAME_CHARS, MAX_COLUMNS, FormulaCells
+from goblinshift.runs.formula_cells import MAX_COLUMNS, MAX_REPORTED_COLUMN_NAME_CHARS, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, Phase, Status
 from goblinshift.runs.queries import (
     DEFAULT_PAGE_SIZE,
@@ -184,7 +184,7 @@ class RunSummaryResponse(BaseModel):
 class FormulaColumnResponse(BaseModel):
     # Nome da coluna de saída como texto puro: é dado do usuário, cortado com "…" no teto. Nulo
     # quando o cabeçalho é vazio ou só de espaços (a tela dá o rótulo).
-    name: str | None = Field(min_length=1, max_length=MAX_COLUMN_NAME_CHARS)
+    name: str | None = Field(min_length=1, max_length=MAX_REPORTED_COLUMN_NAME_CHARS)
     cells: int = Field(ge=1)
 
 

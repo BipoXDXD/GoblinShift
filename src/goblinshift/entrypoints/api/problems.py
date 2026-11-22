@@ -22,13 +22,13 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.datastructures import MutableHeaders
@@ -203,8 +203,9 @@ class ProblemDetails(BaseModel):
     instance: str
     code: ProblemCode
     request_id: str
-    errors: list[FieldError] | None = None
-    errors_truncated: bool | None = None
+    errors: Annotated[list[FieldError], Field(max_length=MAX_PROBLEM_ERRORS)] | None = None
+    # Só aparece quando `errors` foi cortado no teto; nunca sai `false`.
+    errors_truncated: Literal[True] | None = None
 
 
 # Todo 429 e todo 503 que a API emite carrega `Retry-After` (capacity_problems, rate limit, banco,
