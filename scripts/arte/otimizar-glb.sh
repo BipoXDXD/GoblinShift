@@ -6,9 +6,10 @@
 # Origem dos modelos (desde 22/11): Hi3D Quality, em $ARTE/hi3d-quality-20261122/. O task_id, os
 # bytes e o sha256 de cada um estão no ADR 030, seção "Modelos do Hi3D Quality (2026-11-22)". O
 # elenco.tsv aponta para o <id>-site.glb, que este script NÃO reproduz: ele saiu de outra receita
-# (erro do simplify, normais e tamanhos de textura próprios), registrada na mesma seção. Reduzir um -site.glb de novo simplificaria duas
-# vezes, então o script recusa fonte terminada em -site.glb. Para refazer um GLB, baixe o bruto
-# pelo Hi3D (get_task_outputs com o task_id, sem crédito), passe FONTE= e compare com a receita.
+# (erro do simplify, normais e tamanhos de textura próprios), registrada na mesma seção. Reduzir
+# um -site.glb de novo simplificaria duas vezes, então o script recusa fonte terminada em -site.glb.
+# Para refazer um GLB, baixe o bruto pelo Hi3D (get_task_outputs com o task_id, sem crédito), passe
+# FONTE= e compare com a receita.
 #
 # Passos e porquê:
 #   1. weld (gltf-transform): junta os vértices iguais, para o simplify enxergar as costuras de UV.
