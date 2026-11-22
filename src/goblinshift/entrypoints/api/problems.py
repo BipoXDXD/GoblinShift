@@ -41,8 +41,12 @@ from goblinshift.platform.telemetry import request_id_bound
 
 logger = logging.getLogger(__name__)
 
-# Espera sugerida quando o banco ou o pool não atende: da ordem do `pool_timeout` de 5 s.
+# Espera sugerida quando o banco não atende (conexão recusada ou perdida, timeout, banco subindo):
+# da ordem do `connect_timeout` e do `valid` do resolver do Nginx, que também usa 5 s.
 DATABASE_RETRY_AFTER_SECONDS = 5
+# Pool esgotado: a API espera a conexão só meio segundo (`API_DB_POOL_TIMEOUT_S`, app.py) e uma
+# vaga volta assim que uma transação curta termina. O menor prazo que o cabeçalho expressa.
+POOL_EXHAUSTED_RETRY_AFTER_SECONDS = 1
 # Disco cheio ou erro de E/S não se resolve em segundos: um prazo curto convidaria a martelar.
 # Mesmo valor do piso de `capacity_problems.STORAGE_MIN_RETRY_AFTER`, que tem outro significado
 # (espera até a cota liberar) e por isso não é reaproveitado.
@@ -480,7 +484,12 @@ def _database_unavailable_response(exc: Exception, instance: str, request_id: st
         request_id,
         extra={"fields": _database_error_fields(exc)},
     )
-    return _service_unavailable_response(instance, request_id, DATABASE_RETRY_AFTER_SECONDS)
+    retry_after = (
+        POOL_EXHAUSTED_RETRY_AFTER_SECONDS
+        if isinstance(exc, PoolTimeoutError)
+        else DATABASE_RETRY_AFTER_SECONDS
+    )
+    return _service_unavailable_response(instance, request_id, retry_after)
 
 
 def _storage_unavailable_response(exc: Exception, instance: str, request_id: str) -> JSONResponse:

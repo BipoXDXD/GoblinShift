@@ -74,6 +74,13 @@ class _GoblinShiftAPI(FastAPI):
         return schema
 
 
+# Espera máxima por uma conexão do pool numa requisição. A autenticação abre 3 a 4 transações curtas
+# por requisição; com os 5 s das settings, um pool esgotado seguraria o pedido por até 20 s antes do
+# 503. Meio segundo basta para uma vaga voltar com tráfego normal. O worker e a manutenção mantêm o
+# `db_pool_timeout_s` das settings.
+API_DB_POOL_TIMEOUT_S: float = 0.5
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -90,7 +97,7 @@ def create_app(
     executor_image = settings.executor_image_for_runs()
     web_identity = settings.web_identity()
     configure_logging()
-    engine = make_engine(settings)
+    engine = make_engine(settings.model_copy(update={"db_pool_timeout_s": API_DB_POOL_TIMEOUT_S}))
     code_heads, known_revisions = read_code_revisions(str(settings.alembic_ini))
 
     @asynccontextmanager
