@@ -21,10 +21,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import (
     ColumnElement,
     Row,
+    Text,
     and_,
+    bindparam,
     delete,
     exists,
     func,
+    literal,
     or_,
     select,
     union_all,
@@ -51,6 +54,15 @@ logger = logging.getLogger(__name__)
 NAME_AFTER = timedelta(days=30)
 FILE_ROWS_AFTER = timedelta(days=90)
 _GONE_FROM_DISK = (ObjectState.DELETED, ObjectState.MISSING)
+# Os filtros de `state` que casam com um índice parcial (migração 0024) saem como literal no SQL,
+# não como parâmetro: o psycopg prepara a consulta depois de 5 execuções, e o plano genérico só
+# prova o predicado do índice com o valor à vista.
+_NOT_READY = upload.c.state != literal(UploadState.READY.value, Text, literal_execute=True)
+_GONE = stored_object.c.state.in_(
+    bindparam(
+        "gone_states", [s.value for s in _GONE_FROM_DISK], expanding=True, literal_execute=True
+    )
+)
 
 # (id, storage_key, size_bytes), como devolvido por `select_purgeable`.
 type _Candidate = Row[tuple[uuid.UUID, str, int]]
@@ -105,7 +117,7 @@ def expire_incomplete_uploads(session: Session, storage: FileStorage) -> Incompl
             select(upload.c.id, upload.c.object_id, stored_object.c.storage_key)
             .join(stored_object, stored_object.c.id == upload.c.object_id)
             .where(
-                upload.c.state != UploadState.READY,
+                _NOT_READY,
                 or_(
                     upload.c.expires_at <= func.now(),
                     and_(
@@ -291,7 +303,7 @@ def delete_old_file_rows(
         session.execute(
             select(stored_object.c.id)
             .where(
-                stored_object.c.state.in_(_GONE_FROM_DISK),
+                _GONE,
                 # Também o candidato que nunca virou artefato fica os 90 dias, como o resto.
                 stored_object.c.created_at <= cutoff,
                 ~any_use,
