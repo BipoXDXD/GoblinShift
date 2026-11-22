@@ -142,22 +142,29 @@ describe("budgetViolations", () => {
       );
     });
 
-    it("o GLB da Rúbia até 3400 KB (ADR 030) e a imagem estática até 90 KB", () => {
-      const within = [
-        ...WITHIN,
-        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3400 * KB),
-        file("assets/oficina-3d-rubia-640w-x.avif", 90 * KB),
-      ];
-      expect(budgetViolations(within, INDEX)).toEqual([]);
+    it("o GLB da Rúbia até 8192 KB (ADR 030, 2026-11-22)", () => {
+      expect(
+        budgetViolations(
+          [...WITHIN, file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB)],
+          INDEX,
+        ),
+      ).toEqual([]);
+      expect(
+        budgetViolations(
+          [...WITHIN, file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB + 1)],
+          INDEX,
+        ),
+      ).toEqual(["Modelo 3D (assets/oficina-3d-rubia-x.glb): 8192,0 KB passa do teto de 8192 KB"]);
+    });
 
-      const over = [
-        ...WITHIN,
-        file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3400 * KB + 1),
-        file("assets/oficina-3d-poster-x.avif", 91 * KB),
-      ];
-      expect(budgetViolations(over, INDEX)).toEqual([
-        "Modelo 3D (assets/oficina-3d-rubia-x.glb): 3400,0 KB passa do teto de 3400 KB",
-        "Imagem estática do 3D (assets/oficina-3d-poster-x.avif): 91,0 KB passa do teto de 90 KB",
+    it.each([
+      ["assets/oficina-3d-nyx-640w-x.avif", 90],
+      ["assets/oficina-3d-nyx-960w-x.avif", 120],
+      ["assets/oficina-3d-poster-x.avif", 90],
+    ])("imagem estática %s cabe até %i KB e falha um byte acima", (path, kb) => {
+      expect(budgetViolations([...WITHIN, file(path, kb * KB)], INDEX)).toEqual([]);
+      expect(budgetViolations([...WITHIN, file(path, kb * KB + 1)], INDEX)).toEqual([
+        `Imagem estática do 3D (${path}): ${String(kb)},0 KB passa do teto de ${String(kb)} KB`,
       ]);
     });
   });
@@ -165,41 +172,43 @@ describe("budgetViolations", () => {
   describe("elenco em 3D (ADR 038)", () => {
     const RUBIA = file("assets/oficina-3d-rubia-x.glb", 1900 * KB, 3000 * KB);
 
-    it("cada GLB das outras goblins até 2400 KB", () => {
+    it("cada GLB das outras goblins até 6144 KB", () => {
       expect(
         budgetViolations(
-          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 2400 * KB)],
+          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 6144 * KB)],
           INDEX,
         ),
       ).toEqual([]);
       expect(
         budgetViolations(
-          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 2400 * KB + 1)],
+          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 6144 * KB + 1)],
           INDEX,
         ),
-      ).toEqual(["Modelo 3D (assets/oficina-3d-jade-x.glb): 2400,0 KB passa do teto de 2400 KB"]);
+      ).toEqual(["Modelo 3D (assets/oficina-3d-jade-x.glb): 6144,0 KB passa do teto de 6144 KB"]);
     });
 
-    it("o 3D inicial soma o chunk, a Rúbia, a imagem estática dela e as miniaturas, até 3600 KB", () => {
+    it("o 3D inicial soma o chunk, a Rúbia, a imagem estática de 960 px dela e as miniaturas, até 8704 KB", () => {
       const initial = [
         ...WITHIN,
-        file("assets/oficina-3d-x.js", 160 * KB),
-        RUBIA,
-        file("assets/oficina-3d-rubia-640w-x.avif", 40 * KB),
-        file("assets/oficina-3d-rubia-640w-x.webp", 50 * KB),
-        ...["rubia", "fagulha", "ferrugem", "jade", "nyx"].map((id) =>
-          file(`assets/oficina-3d-${id}-192w-x.avif`, 80 * KB),
+        file("assets/oficina-3d-x.js", 170 * KB),
+        file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB),
+        file("assets/oficina-3d-rubia-960w-x.avif", 100 * KB),
+        // As outras imagens estáticas da Rúbia só vêm por srcset no lugar da de 960 px: não contam.
+        file("assets/oficina-3d-rubia-960w-x.webp", 110 * KB),
+        file("assets/oficina-3d-rubia-640w-x.avif", 90 * KB),
+        ...["rubia", "fagulha", "ferrugem", "jade", "lua", "nyx"].map((id) =>
+          file(`assets/oficina-3d-${id}-192w-x.avif`, 40 * KB),
         ),
         // Os modelos das outras goblins só vêm quando a pessoa as escolhe: não contam.
-        file("assets/oficina-3d-nyx-x.glb", 1 * KB, 2000 * KB),
+        file("assets/oficina-3d-nyx-x.glb", 1 * KB, 5000 * KB),
       ];
       expect(budgetViolations(initial, INDEX)).toEqual([]);
 
       const heavier = initial.map((built) =>
-        built.path === "assets/oficina-3d-nyx-192w-x.avif" ? file(built.path, 81 * KB) : built,
+        built.path === "assets/oficina-3d-lua-192w-x.avif" ? file(built.path, 43 * KB) : built,
       );
       expect(budgetViolations(heavier, INDEX)).toEqual([
-        "3D inicial (chunk, Rúbia, imagem estática e miniaturas): 3601,0 KB passa do teto de 3600 KB",
+        "3D inicial (chunk, Rúbia, imagem estática e miniaturas): 8705,0 KB passa do teto de 8704 KB",
       ]);
     });
 
@@ -213,21 +222,18 @@ describe("budgetViolations", () => {
     });
   });
 
-  describe("ilustrações dos estados (ADR 030)", () => {
-    it("cada AVIF ou WebP fora do 3D até 64 KB", () => {
-      expect(
-        budgetViolations(
-          [
-            ...WITHIN,
-            file("assets/jade-768w-x.avif", 64 * KB),
-            file("assets/jade-768w-x.webp", 64 * KB),
-          ],
-          INDEX,
-        ),
-      ).toEqual([]);
-      expect(
-        budgetViolations([...WITHIN, file("assets/nyx-768w-x.webp", 64 * KB + 1)], INDEX),
-      ).toEqual(["Ilustração (assets/nyx-768w-x.webp): 64,0 KB passa do teto de 64 KB"]);
+  describe("ilustrações das goblins, por largura (ADR 030, 2026-11-22)", () => {
+    it.each([
+      ["assets/rubia-768w-x.webp", 64],
+      ["assets/rubia-768w-x.avif", 64],
+      ["assets/rubia-1024w-x.webp", 120],
+      ["assets/rubia-1280w-x.avif", 180],
+      ["assets/rubia-escudo-144h-x.webp", 64],
+    ])("ilustração %s cabe até %i KB e falha um byte acima", (path, kb) => {
+      expect(budgetViolations([...WITHIN, file(path, kb * KB)], INDEX)).toEqual([]);
+      expect(budgetViolations([...WITHIN, file(path, kb * KB + 1)], INDEX)).toEqual([
+        `Ilustração (${path}): ${String(kb)},0 KB passa do teto de ${String(kb)} KB`,
+      ]);
     });
   });
 });

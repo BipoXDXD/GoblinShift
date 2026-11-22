@@ -23,35 +23,71 @@ const LIMITS_KB = {
   latinFonts: 100,
   threeDChunk: 300,
   /**
-   * ADR 030: a Rúbia de 1 milhão de triângulos reduzida a ~240 mil, com texturas de 2048 px em
-   * WebP e Meshopt, mede 3283 KB; reduzir mais já tirava relevo do rosto.
+   * ADR 030 (revisto em 2026-11-22): a Rúbia do Hi3D Quality, com textura de 4096 px, mede
+   * 7309 KB no `-site.glb`; o teto deixa folga até 8 MiB.
    */
-  threeDModel: 3400,
+  threeDModel: 8192,
   /**
-   * ADR 038: cada uma das outras cinco goblins, na mesma configuração da Rúbia, mede de 1492 KB
-   * (Nyx) a 2247 KB (Jade); só baixa quando a pessoa a escolhe no seletor.
+   * ADR 038 (revisto em 2026-11-22): cada uma das outras goblins do elenco, na mesma configuração
+   * da Rúbia, mede até 5621 KB; só baixa quando a pessoa a escolhe no seletor.
    */
-  threeDCastModel: 2400,
+  threeDCastModel: 6144,
   /**
    * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
-   * Rúbia, a maior imagem estática dela em AVIF e as cinco miniaturas do seletor. Medido: ~3530 KB.
+   * Rúbia, a imagem estática de 960 px dela em AVIF e as miniaturas do seletor. Provisório
+   * (8,5 MiB) até a medida do build com os modelos do Hi3D Quality.
    */
-  threeDInitial: 3600,
-  threeDPoster: 90,
-  /**
-   * Goblin de um estado ou do elenco, cada arquivo (AVIF ou WebP, de 256 a 768 px). Era 20 KB
-   * com a caixa de 128×160; em 2026-10-15 o usuário pediu as goblins em destaque (256×320 CSS) e
-   * o arquivo de 768 px, o das telas 3×, tem 9× a área. A maior é a Rúbia em WebP, com 61 KB. O
-   * navegador baixa um só arquivo por goblin (srcset e sizes), e só quando ela aparece (lazy).
-   */
-  illustration: 64,
+  threeDInitial: 8704,
 } as const;
+
+/**
+ * Teto de cada arquivo pela largura no nome (`-<N>w-`): o navegador baixa uma só largura por
+ * imagem (srcset e sizes), e a de 3× tem muito mais área que a de 1×. Cada faixa vale até a
+ * largura dela; acima da última, vale a última. Sem sufixo de largura, vale a primeira.
+ */
+type WidthLimits = readonly (readonly [maxWidth: number, limitKb: number])[];
+
+/**
+ * Goblin de um estado ou do elenco, AVIF ou WebP. Era 64 KB para todas as larguras (a maior,
+ * a Rúbia em WebP de 768 px, tinha 61 KB); a arte do Hi3D Quality ganha 1024 e 1280 px.
+ */
+const ILLUSTRATION_LIMITS: WidthLimits = [
+  [768, 64],
+  [1024, 120],
+  [1280, 180],
+];
+/** Imagem estática do 3D (e miniatura do seletor): a de 960 px é a que a abertura mostra. */
+const POSTER_LIMITS: WidthLimits = [
+  [640, 90],
+  [960, 120],
+];
+
+function limitByWidth(path: string, limits: WidthLimits): number {
+  const [first] = limits;
+  const last = limits.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new Error("faixa de largura vazia");
+  }
+  const width = /-(\d+)w-/.exec(path)?.[1];
+  if (width === undefined) {
+    return first[1];
+  }
+  return (limits.find(([maxWidth]) => Number(width) <= maxWidth) ?? last)[1];
+}
+
+export function illustrationLimitKb(path: string): number {
+  return limitByWidth(path, ILLUSTRATION_LIMITS);
+}
+
+export function posterLimitKb(path: string): number {
+  return limitByWidth(path, POSTER_LIMITS);
+}
 
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */
 const THREE_D_PREFIX = "assets/oficina-3d";
 /** A goblin que abre a página (ADR 038): o modelo dela tem teto próprio e entra no 3D inicial. */
 const FIRST_MODEL = /^assets\/oficina-3d-rubia-[^/]*\.glb$/;
-const FIRST_POSTER = /^assets\/oficina-3d-rubia-640w-[^/]*\.avif$/;
+const FIRST_POSTER = /^assets\/oficina-3d-rubia-960w-[^/]*\.avif$/;
 const THUMBNAIL = /^assets\/oficina-3d-[a-z]+-192w-[^/]*\.avif$/;
 const THREE_D_CHUNK = /^assets\/oficina-3d-[^/]*\.js$/;
 
@@ -133,7 +169,7 @@ function illustrationViolation(file: BuiltFile): string | null {
   return overLimit({
     what: `Ilustração (${file.path})`,
     bytes: file.bytes,
-    limitKb: LIMITS_KB.illustration,
+    limitKb: illustrationLimitKb(file.path),
     unit: "KB",
   });
 }
@@ -169,7 +205,7 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
     overLimit({
       what: `Imagem estática do 3D (${file.path})`,
       bytes: file.bytes,
-      limitKb: LIMITS_KB.threeDPoster,
+      limitKb: posterLimitKb(file.path),
       unit: "KB",
     }),
   ];
