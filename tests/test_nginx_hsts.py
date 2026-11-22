@@ -98,7 +98,7 @@ def _split_locations() -> tuple[list[str], dict[str, list[str]]]:
     return outside, {name: _expand_includes(body) for name, body in blocks.items()}
 
 
-def _location_blocks() -> dict[str, list[str]]:
+def location_blocks() -> dict[str, list[str]]:
     return _split_locations()[1]
 
 
@@ -110,7 +110,7 @@ def test_template_tem_os_locations_esperados() -> None:
         "location /api/",
         "location /auth/",
         "location @auth_rate_limited",
-    } <= set(_location_blocks())
+    } <= set(location_blocks())
 
 
 def test_server_nao_declara_o_hsts() -> None:
@@ -119,9 +119,9 @@ def test_server_nao_declara_o_hsts() -> None:
     assert HSTS_DIRECTIVE not in outside_locations
 
 
-@pytest.mark.parametrize("location", sorted(_location_blocks()))
+@pytest.mark.parametrize("location", sorted(location_blocks()))
 def test_todo_location_emite_um_hsts(location: str) -> None:
-    assert _location_blocks()[location].count(HSTS_DIRECTIVE) == 1
+    assert location_blocks()[location].count(HSTS_DIRECTIVE) == 1
 
 
 @pytest.mark.parametrize("snippet", sorted(path.name for path in SNIPPETS.glob("*.conf")))

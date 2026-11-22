@@ -33,7 +33,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 from goblinshift import capacity
-from goblinshift.files.limits import EXPIRY_BATCH_SIZE, PURGE_MAX_BYTES, PURGE_MAX_OBJECTS
+from goblinshift.files.limits import (
+    EXPIRY_BATCH_SIZE,
+    PURGE_MAX_BYTES,
+    PURGE_MAX_OBJECTS,
+    UPLOAD_REQUEST_KEY_TTL,
+)
 from goblinshift.files.objects import (
     has_valid_reference,
     request_deletion_of_unreferenced,
@@ -247,6 +252,34 @@ def anonymize_deleted_uploads(session: Session, now: datetime, limit: int) -> in
     )
     if chosen:
         session.execute(update(upload).where(upload.c.id.in_(chosen)).values(original_name=None))
+    return len(chosen)
+
+
+def forget_upload_request_keys(session: Session, now: datetime, limit: int) -> int:
+    """Anula a chave de idempotência dos lotes criados há `UPLOAD_REQUEST_KEY_TTL` ou mais.
+
+    As três colunas saem juntas, como o CHECK `upload_request` exige. O replay só alcança o lote
+    vigente (1 h), então anular depois de 24 h não muda resposta nenhuma; o índice parcial
+    `upload_request_created_at_idx` limita a varredura às linhas que ainda têm chave.
+    """
+    chosen = list(
+        session.execute(
+            select(upload.c.id)
+            .where(
+                upload.c.request_key.is_not(None),
+                upload.c.created_at <= now - UPLOAD_REQUEST_KEY_TTL,
+            )
+            .order_by(upload.c.created_at, upload.c.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).scalars()
+    )
+    if chosen:
+        session.execute(
+            update(upload)
+            .where(upload.c.id.in_(chosen))
+            .values(request_key=None, request_hash=None, request_index=None)
+        )
     return len(chosen)
 
 

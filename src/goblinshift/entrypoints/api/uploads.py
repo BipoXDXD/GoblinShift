@@ -8,7 +8,7 @@ Inexistente e de outra conta dão o mesmo 404; expirado ou excluído do próprio
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import anyio
@@ -21,9 +21,18 @@ from starlette.requests import ClientDisconnect
 from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
 from goblinshift.entrypoints.api.capacity_problems import (
     account_storage_problem,
+    daily_uploads_problem,
     environment_storage_problem,
+    live_uploads_problem,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, ReadFiles, Storage, WriteFiles
+from goblinshift.entrypoints.api.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    REPLAYED_HEADER,
+    idempotency_key_parameter,
+    in_progress_problem,
+    key_invalid_problem,
+)
 from goblinshift.entrypoints.api.json_command import command_openapi, json_command
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.entrypoints.api.transfers import (
@@ -36,12 +45,16 @@ from goblinshift.entrypoints.api.transfers import (
     transfer_limit_problem,
 )
 from goblinshift.files.errors import (
+    DailyUploadLimitError,
     FilesError,
     InvalidUploadRequestError,
+    LiveUploadLimitError,
     TransferLimitReachedError,
     UploadContentTooLargeError,
     UploadGoneError,
     UploadNotFoundError,
+    UploadRequestInProgressError,
+    UploadRequestKeyReusedError,
     UploadSizeMismatchError,
     UploadStateConflictError,
 )
@@ -56,6 +69,7 @@ from goblinshift.files.limits import (
 )
 from goblinshift.files.states import Availability, TransferDirection, UploadState
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
+from goblinshift.files.upload_requests import create_intents_once
 from goblinshift.files.uploads import (
     UPLOAD_NAME_PATTERN,
     UploadView,
@@ -64,6 +78,7 @@ from goblinshift.files.uploads import (
     receive_content,
     request_deletion,
 )
+from goblinshift.runs.acceptance import IdempotencyKeyInvalidError, parse_idempotency_key
 
 router = APIRouter(tags=["uploads"])
 
@@ -136,29 +151,54 @@ class UploadDetails(BaseModel):
     expires_at: datetime
 
 
+def _create_uploads_openapi() -> dict[str, Any]:
+    idempotency_key = idempotency_key_parameter(
+        required=False,
+        description="Opcional. Repetida com o mesmo corpo em até 1 h, devolve o mesmo lote.",
+    )
+    return {**command_openapi(CreateUploads), "parameters": [idempotency_key]}
+
+
 @router.post(
     "/uploads",
     status_code=201,
     operation_id="createUploads",
-    responses=problem_responses(400, 413, 415, 429, 503),
-    openapi_extra=command_openapi(CreateUploads),
+    responses=problem_responses(400, 409, 413, 415, 429, 503),
+    openapi_extra=_create_uploads_openapi(),
 )
 def create_uploads(
     principal: WriteFiles,
     command: Annotated[CreateUploads, Depends(json_command(CreateUploads))],
     session: DbSession,
     request: Request,
+    response: Response,
 ) -> CreatedUploads:
+    """Cria o lote; com Idempotency-Key, o replay devolve o mesmo lote no estado atual."""
+    owner_id = principal.owner_id
     items = [(item.name, item.size) for item in command.items]
+    # Lida à mão e publicada em `_create_uploads_openapi` (motivo em `idempotency`).
+    key = _idempotency_key(request)
     try:
         with session.begin():
-            views = create_intents(session, principal.owner_id, items)
+            views, replayed = _create_batch(session, owner_id, items, key)
     except InvalidUploadRequestError as error:
         raise _invalid_request(error) from None
+    except UploadRequestKeyReusedError:
+        raise ApiProblem(
+            ProblemCode.IDEMPOTENCY_KEY_REUSED, "A Idempotency-Key já foi usada com outro lote."
+        ) from None
+    except UploadRequestInProgressError:
+        raise in_progress_problem() from None
+    except LiveUploadLimitError as error:
+        raise live_uploads_problem(error.retry_after) from None
+    except DailyUploadLimitError as error:
+        raise daily_uploads_problem(error.retry_after) from None
     except AccountCapacityExceededError:
-        raise account_storage_problem(session, principal.owner_id) from None
+        raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
         raise environment_storage_problem() from None
+    if replayed:
+        response.headers[REPLAYED_HEADER] = "true"
     return CreatedUploads(items=[_created(view, request) for view in views])
 
 
@@ -242,6 +282,24 @@ def delete_upload(upload_id: UUID, principal: WriteFiles, session: DbSession) ->
     except FilesError as error:
         raise _upload_problem(error) from None
     return Response(status_code=202)
+
+
+def _create_batch(
+    session: Session, owner_id: UUID, items: list[tuple[str, int]], key: str | None
+) -> tuple[list[UploadView], bool]:
+    if key is None:
+        return create_intents(session, owner_id, items), False
+    return create_intents_once(session, owner_id, items, key)
+
+
+def _idempotency_key(request: Request) -> str | None:
+    raw = request.headers.get(IDEMPOTENCY_KEY_HEADER)
+    if raw is None:
+        return None
+    try:
+        return parse_idempotency_key(raw)
+    except IdempotencyKeyInvalidError:
+        raise key_invalid_problem() from None
 
 
 def _created(view: UploadView, request: Request) -> CreatedUpload:

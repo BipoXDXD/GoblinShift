@@ -188,6 +188,14 @@ _RULES = (
     _Rule(
         "POST /api/v1/uploads", _UNPROCESSABLE, "VALIDATION_FAILED", _only_oversized_common_files
     ),
+    # O fuzzer repete a mesma Idempotency-Key com outro corpo: o lote que a chave já criou, não o
+    # schema, decide (como o `If-Match` vencido dos presets).
+    _Rule(
+        "POST /api/v1/uploads",
+        _UNPROCESSABLE,
+        "IDEMPOTENCY_KEY_REUSED",
+        lambda rejection: rejection.has_header("Idempotency-Key"),
+    ),
     # A chave só é exigida sem `validate_only`, e OpenAPI não tem parâmetro condicional. Enviada
     # no formato publicado, a recusa seria defeito.
     _Rule(

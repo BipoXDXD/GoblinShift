@@ -80,7 +80,7 @@ def usage_at(factory: sessionmaker[Session], owner: uuid.UUID, now: datetime) ->
 
 
 def test_conta_sem_execucoes_tem_uso_zero(factory: sessionmaker[Session]) -> None:
-    assert usage_at(factory, new_owner(factory), NOW) == DailyUsage(0, 0, None)
+    assert usage_at(factory, new_owner(factory), NOW) == DailyUsage(0, None, ())
 
 
 def test_conta_execucoes_e_bytes_de_entrada_da_janela(
@@ -99,7 +99,12 @@ def test_conta_execucoes_e_bytes_de_entrada_da_janela(
     usage = usage_at(factory, owner, NOW)
 
     # A mesma entrada processada por duas execuções conta duas vezes.
-    assert usage == DailyUsage(runs=2, input_bytes=207, oldest_run_at=NOW - timedelta(hours=5))
+    assert usage == DailyUsage(
+        runs=2,
+        oldest_run_at=NOW - timedelta(hours=5),
+        input_bytes_by_run=((NOW - timedelta(hours=5), 100), (NOW - timedelta(hours=1), 107)),
+    )
+    assert usage.input_bytes == 207
 
 
 def test_execucao_criada_exatamente_24h_antes_ja_saiu_da_janela(
@@ -118,7 +123,7 @@ def test_execucao_criada_um_segundo_antes_das_24h_ainda_conta(
     created = NOW - timedelta(hours=24) + timedelta(seconds=1)
     insert_finished_run(factory, owner, created)
 
-    assert usage_at(factory, owner, NOW) == DailyUsage(1, 0, created)
+    assert usage_at(factory, owner, NOW) == DailyUsage(1, created, ())
 
 
 def test_execucao_de_25h_atras_nao_conta(factory: sessionmaker[Session]) -> None:
@@ -132,7 +137,7 @@ def test_execucoes_de_outra_conta_nao_contam(factory: sessionmaker[Session]) -> 
     owner = new_owner(factory)
     insert_finished_run(factory, new_owner(factory), NOW - timedelta(hours=1))
 
-    assert usage_at(factory, owner, NOW) == DailyUsage(0, 0, None)
+    assert usage_at(factory, owner, NOW) == DailyUsage(0, None, ())
 
 
 def test_execucao_falha_tambem_conta(factory: sessionmaker[Session]) -> None:
@@ -236,6 +241,27 @@ def test_entrada_que_passa_de_2_gib_em_24h_e_recusada(
 
     assert timedelta(hours=22, minutes=59) <= refused.value.retry_after <= timedelta(hours=23)
     assert count_rows(factory) == before
+
+
+def test_recusa_de_bytes_aponta_a_run_que_libera_o_suficiente(
+    factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    # A Run A, pequena, sai da janela em 1 h sem abrir espaço; só a saída da B, em 22 h, abre.
+    owner = new_owner(factory)
+    small, large, new_input = ready_inputs(factory, storage, owner, 3)
+    now = database_now(factory)
+    run_a = insert_finished_run(factory, owner, now - timedelta(hours=23))
+    run_b = insert_finished_run(factory, owner, now - timedelta(hours=2))
+    link_input(factory, run_a, owner, small)
+    link_input(factory, run_b, owner, large)
+    pretend_size(factory, small, 1024)
+    pretend_size(factory, large, MAX_INPUT_BYTES_PER_WINDOW - 2048)
+    pretend_size(factory, new_input, 4096)
+
+    with pytest.raises(DailyQuotaExceededError) as refused:
+        accept(factory, owner, run_command([new_input]))
+
+    assert timedelta(hours=21, minutes=59) <= refused.value.retry_after <= timedelta(hours=22)
 
 
 def test_entrada_que_completa_2_gib_em_24h_e_aceita(

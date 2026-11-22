@@ -4,6 +4,8 @@ Recurso inexistente e recurso de outra conta produzem o mesmo erro, com a mesma 
 não permitir enumeração.
 """
 
+from datetime import timedelta
+
 from goblinshift.files.states import UploadState
 
 
@@ -18,6 +20,44 @@ class InvalidUploadRequestError(FilesError):
         super().__init__(f"{field}: {reason}")
         self.field = field
         self.reason = reason
+
+
+class UploadRequestKeyReusedError(FilesError):
+    """Mesma chave vigente com outro lote (→ 422 `IDEMPOTENCY_KEY_REUSED`)."""
+
+    def __init__(self) -> None:
+        super().__init__("a chave já foi usada com outro lote")
+
+
+class UploadRequestInProgressError(FilesError):
+    """O pedido original com esta chave ainda está em andamento (→ 409)."""
+
+    def __init__(self) -> None:
+        super().__init__("outro pedido com esta chave está em andamento")
+
+
+class LiveUploadLimitError(FilesError):
+    """O lote passaria do teto de uploads vivos da conta (→ 429 `QUOTA_EXCEEDED`).
+
+    `retry_after` é quanto falta, pelo relógio do banco, para vencerem uploads vivos suficientes
+    para o lote caber, ou todos, se nem assim couber (sem nenhum vivo, zero).
+    """
+
+    def __init__(self, retry_after: timedelta) -> None:
+        super().__init__("a conta atingiu o teto de uploads vivos")
+        self.retry_after = retry_after
+
+
+class DailyUploadLimitError(FilesError):
+    """O lote passaria do teto de uploads criados em 24 h pela conta (→ 429 `QUOTA_EXCEEDED`).
+
+    `retry_after` é quanto falta, pelo relógio do banco, para saírem da janela uploads suficientes
+    para o lote caber (zero se nada da janela sobrar para sair).
+    """
+
+    def __init__(self, retry_after: timedelta) -> None:
+        super().__init__("a conta atingiu o teto de uploads criados em 24 h")
+        self.retry_after = retry_after
 
 
 class UploadNotFoundError(FilesError):

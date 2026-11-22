@@ -117,7 +117,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Uploads */
+        /**
+         * Create Uploads
+         * @description Cria o lote; com Idempotency-Key, o replay devolve o mesmo lote no estado atual.
+         */
         post: operations["createUploads"];
         delete?: never;
         options?: never;
@@ -1844,7 +1847,10 @@ export interface operations {
     createUploads: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Opcional. Repetida com o mesmo corpo em até 1 h, devolve o mesmo lote. */
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1894,6 +1900,15 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -427,3 +427,33 @@ def test_recusa_do_preset_fora_do_select_continua_falha(errors: list[tuple[str, 
     rejection = _rejection(RUN_PRESET, 422, _problem("VALIDATION_FAILED", *errors))
 
     assert not is_expected_rejection(rejection)
+
+
+def test_chave_reutilizada_no_lote_de_uploads_depende_do_estado() -> None:
+    # O fuzzer repete a mesma Idempotency-Key com outro corpo: quem decide é o lote que a chave já
+    # criou, não o schema.
+    assert is_expected_rejection(
+        _rejection(
+            CREATE_UPLOADS,
+            422,
+            _problem("IDEMPOTENCY_KEY_REUSED"),
+            headers={"Idempotency-Key": "k" * 16},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        _rejection(CREATE_UPLOADS, 422, _problem("IDEMPOTENCY_KEY_REUSED")),
+        _rejection(
+            CREATE_RUN,
+            422,
+            _problem("IDEMPOTENCY_KEY_REUSED"),
+            headers={"Idempotency-Key": "k" * 16},
+        ),
+    ],
+    ids=["sem-chave", "fora-dos-uploads"],
+)
+def test_chave_reutilizada_so_vale_com_a_chave_e_nos_uploads(rejection: Rejection) -> None:
+    assert not is_expected_rejection(rejection)

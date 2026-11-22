@@ -73,6 +73,7 @@ STEP_COUNTS: dict[str, str] = {
     "purge_deleted_objects": "objects_purged",
     "reconcile_capacity": "capacity_pools_corrected",
     "delete_expired_idempotency_records": "idempotency_records_removed",
+    "forget_upload_request_keys": "upload_request_keys_forgotten",
     "anonymize_finished_runs": "runs_anonymized",
     "anonymize_output_names": "outputs_anonymized",
     "anonymize_deleted_uploads": "uploads_anonymized",

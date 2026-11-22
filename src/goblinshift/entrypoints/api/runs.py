@@ -31,6 +31,13 @@ from goblinshift.entrypoints.api.catalog import (
     recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
+from goblinshift.entrypoints.api.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    REPLAYED_HEADER,
+    idempotency_key_parameter,
+    in_progress_problem,
+    key_invalid_problem,
+)
 from goblinshift.entrypoints.api.json_command import (
     JSON_MEDIA_TYPE,
     body_validation_error,
@@ -50,7 +57,6 @@ from goblinshift.platform.settings import Settings
 from goblinshift.presets import PresetNotFoundError, get_preset
 from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
 from goblinshift.runs.acceptance import (
-    IDEMPOTENCY_KEY_PATTERN,
     AcceptanceError,
     Accepted,
     ActiveRunLimitError,
@@ -102,13 +108,9 @@ PeriodBound = Annotated[AwareDatetime, BeforeValidator(_reject_unix_timestamp)]
 RUNS_PATH = "/runs"
 # Intervalo de polling esperado enquanto a execução não termina (1.6, "Acompanhamento").
 POLL_RETRY_AFTER_SECONDS = 2
-# A requisição original costuma terminar em milissegundos; um segundo basta para o replay.
-IN_PROGRESS_RETRY_AFTER_SECONDS = 1
 # Uma execução ocupa o executor por minutos (1.7); tentar antes disso só gasta a cota.
 QUEUE_FULL_RETRY_AFTER_SECONDS = 60
 MAX_CURSOR_CHARS = 1024
-_IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
-_REPLAYED_HEADER = "Idempotency-Replayed"
 _ERROR_MESSAGES: dict[str, str] = {
     ErrorCode.NO_VALID_OUTPUTS: "Nenhuma entrada produziu saída válida.",
     ErrorCode.OUTPUT_LIMIT_EXCEEDED: "As saídas passaram do limite da execução.",
@@ -281,13 +283,9 @@ def _create_run_openapi() -> dict[str, Any]:
         },
     }
     schema = recipe_command_schema(common)
-    idempotency_key = {
-        "name": _IDEMPOTENCY_KEY_HEADER,
-        "in": "header",
-        "required": False,
-        "description": "Obrigatória, exceto com validate_only.",
-        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
-    }
+    idempotency_key = idempotency_key_parameter(
+        required=False, description="Obrigatória, exceto com validate_only."
+    )
     return {
         "parameters": [idempotency_key],
         "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
@@ -319,9 +317,8 @@ def create_run(
         input_upload_ids=tuple(command.input_upload_ids),
         parameters=command.parameters,
     )
-    # Lida à mão e publicada em `_create_run_openapi`: declarada como `str | None` na assinatura,
-    # sairia na spec como `anyOf [string, null]`, e o cliente gerado mandaria o texto "null".
-    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    # Lida à mão e publicada em `_create_run_openapi` (motivo em `idempotency`).
+    idempotency_key = request.headers.get(IDEMPOTENCY_KEY_HEADER)
     if validate_only:
         response.status_code = 200
         validated = _validate(run_command, idempotency_key)
@@ -355,12 +352,7 @@ def _preset_run_openapi() -> dict[str, Any]:
         "required": ["input_upload_ids"],
         "additionalProperties": False,
     }
-    idempotency_key = {
-        "name": _IDEMPOTENCY_KEY_HEADER,
-        "in": "header",
-        "required": True,
-        "schema": {"type": "string", "pattern": f"^{IDEMPOTENCY_KEY_PATTERN.pattern}$"},
-    }
+    idempotency_key = idempotency_key_parameter(required=True)
     return {
         "parameters": [idempotency_key],
         "requestBody": {"required": True, "content": {JSON_MEDIA_TYPE: {"schema": schema}}},
@@ -388,7 +380,7 @@ def create_run_from_preset(
     Exige também `presets:read`, porque a configuração do preset passa a aparecer na execução.
     A Run guarda o `preset_id`; editar ou excluir o preset depois não a altera.
     """
-    idempotency_key = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
+    idempotency_key = request.headers.get(IDEMPOTENCY_KEY_HEADER)
     inputs = tuple(command.input_upload_ids)
     try:
         # O replay vem antes de ler o preset: editado ou excluído depois da primeira chamada, o
@@ -457,7 +449,7 @@ def _respond_accepted(
         get_run_route.__name__, run_id=str(accepted.run_id)
     )
     if accepted.replayed:
-        response.headers[_REPLAYED_HEADER] = "true"
+        response.headers[REPLAYED_HEADER] = "true"
     _add_deprecation_headers(response, view.recipe_id, view.recipe_version)
     return AcceptedRunResponse(
         **_run_response(view).model_dump(),
@@ -622,10 +614,7 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
     """Recusa do serviço → problem+json; cada recusa tem um código só (1.6)."""
     match error:
         case IdempotencyKeyInvalidError():
-            return ApiProblem(
-                ProblemCode.IDEMPOTENCY_KEY_INVALID,
-                "Envie Idempotency-Key com 16 a 64 caracteres [A-Za-z0-9_-].",
-            )
+            return key_invalid_problem()
         case InvalidRunCommandError():
             return body_validation_error(error.errors)
         case RecipeVersionRetiredError():
@@ -638,11 +627,7 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
                 "A Idempotency-Key já foi usada com outro comando.",
             )
         case IdempotencyInProgressError():
-            return ApiProblem(
-                ProblemCode.IDEMPOTENCY_IN_PROGRESS,
-                "A requisição original com esta Idempotency-Key ainda está em andamento.",
-                headers={"Retry-After": str(IN_PROGRESS_RETRY_AFTER_SECONDS)},
-            )
+            return in_progress_problem()
         case QueueFullError():
             return ApiProblem(
                 ProblemCode.QUEUE_FULL,

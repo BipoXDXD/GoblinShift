@@ -260,6 +260,10 @@ server {
         error_page 502 504 = @upstream_unavailable;
         client_max_body_size 256m;
         proxy_request_buffering off;
+        # TRANSFER_IDLE_TIMEOUT (files/limits.py) + 5 s de folga. O 408 em problem+json vem da
+        # API, que desiste primeiro; este prazo só cobre uma API travada. Vencido, o Nginx fecha
+        # a conexão sem resposta (nem `error_page 408` roda), por isso ele não pode vencer a API.
+        client_body_timeout 35s;
         include /etc/nginx/snippets/proxy-api.conf;
         proxy_read_timeout 600s;
     }
