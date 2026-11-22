@@ -35,9 +35,10 @@ const LIMITS_KB = {
   threeDCastModel: 6144,
   /**
    * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
-   * Rúbia, a imagem estática de 960 px dela em AVIF e as miniaturas do seletor. Medido em
-   * 2026-11-22: chunk 159 KB gzip + Rúbia 7309 KB + imagem 58 KB + seis miniaturas 48 KB =
-   * 7574 KB. Teto = teto da Rúbia (8192) + 10% sobre o resto (265 KB), arredondado para cima em
+   * Rúbia, a imagem estática dela em AVIF e as miniaturas do seletor. A conta usa a de 960 px, a
+   * maior do `srcset` (oficina3d/cast.ts), que o palco de 384 px baixa em tela 2× (768 px pedem
+   * a de 960). Medido em 2026-11-22: chunk 159 KB gzip + Rúbia 7309 KB + imagem 58 KB + seis
+   * miniaturas 48 KB = 7574 KB. Teto = teto da Rúbia (8192) + 10% sobre o resto (265 KB), arredondado para cima em
    * múltiplos de 64 KB.
    */
   threeDInitial: 8512,
@@ -209,8 +210,8 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
 
 /**
  * O 3D que a abertura baixa sem a pessoa pedir (ADR 038): só vale com modelos no build, e a
- * Rúbia tem de estar entre eles, com a imagem estática de 960 px dela. As outras goblins não
- * contam: o modelo delas vem sob demanda.
+ * Rúbia tem de estar entre eles, com a imagem estática de 960 px dela, a maior do `srcset`. As
+ * outras goblins não contam: o modelo delas vem sob demanda.
  */
 function initialThreeDViolations(files: readonly BuiltFile[]): (string | null)[] {
   if (!files.some((file) => file.path.endsWith(".glb"))) {

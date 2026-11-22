@@ -78,11 +78,12 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       <LiveRegion message={guidanceText ?? announcement} visuallyHidden />
       {run === undefined && query.isPending && <p className="text-fg-muted">{T.loading}</p>}
       {failure !== null && <FailureNotice error={failure} messages={{ NOT_FOUND: T.notFound }} />}
-      {/* No celular, os resultados sobem para antes do cartão de estado e do detalhe por arquivo:
-          a goblin em destaque empurraria o Baixar para fora da primeira tela. A ordem do DOM (e a
-          do Tab, que só passa pelos links dos resultados e pela nova execução) continua a mesma. */}
+      {/* Os resultados sobem para antes do cartão de estado e do detalhe por arquivo: a goblin em
+          destaque empurraria o Baixar para fora da primeira tela, no celular e no notebook de
+          1280×800. A ordem do DOM (e a do Tab, que só passa pelos links dos resultados e pela nova
+          execução) continua a mesma. */}
       {run !== undefined && (
-        <div className="flex flex-col gap-8 max-md:order-1">
+        <div className="order-1 flex flex-col gap-8">
           <RunDetails
             run={run}
             actions={
@@ -99,7 +100,7 @@ function RunView({ runId }: { readonly runId: string }): ReactElement {
       )}
       {run !== undefined && SUCCEEDED.has(run.status) && <RunResults runId={run.id} />}
       {run !== undefined && (
-        <div className="max-md:order-2">
+        <div className="order-2">
           <NewRunLink recipeId={run.recipe_id} />
         </div>
       )}

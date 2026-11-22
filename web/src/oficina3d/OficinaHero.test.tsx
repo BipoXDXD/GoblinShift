@@ -169,6 +169,78 @@ describe("OficinaHero", () => {
     expect(img).not.toHaveAttribute("loading");
   });
 
+  it("a imagem estática oferece até 960 px com sizes do palco", () => {
+    const { container } = render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    const sources = [...container.querySelectorAll("[data-oficina-3d] picture source")];
+    expect(sources).toHaveLength(2);
+    for (const source of sources) {
+      expect(source.getAttribute("srcset")).toMatch(/-960w\.\w+ 960w$/);
+      expect(source).toHaveAttribute(
+        "sizes",
+        "(min-width: 1024px) 384px, (min-width: 768px) 320px, 288px",
+      );
+    }
+  });
+
+  // No tema escuro o token da silhueta põe um halo atrás da goblin. Enquanto a cena pode chegar, a
+  // imagem fica sem ele, para não saltar na troca; quando a imagem é o que fica, ganha o halo.
+  it("com movimento reduzido, a imagem estática ganha a silhueta do tema", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("goblin-silhouette");
+  });
+
+  it.each([
+    ["com economia de dados", { ...READY, savesData: () => true }],
+    ["sem WebGL 2", { ...READY, supportsWebGL2: () => false }],
+  ])("%s, a cena não vem e a imagem estática ganha a silhueta do tema", async (_, environment) => {
+    const loadScene = vi.fn(() => fakeScene().loadScene());
+    const { container } = render(
+      <OficinaHero environment={environment} whenPageIdle={runNow} loadScene={loadScene} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("goblin-silhouette");
+    });
+    expect(loadScene).not.toHaveBeenCalled();
+    expect(heroState(container)).toBe("imagem");
+  });
+
+  it("enquanto a cena pode chegar, a imagem estática fica sem a silhueta", () => {
+    render(<OficinaHero environment={READY} whenPageIdle={never} />);
+
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).not.toHaveClass("goblin-silhouette");
+  });
+
+  // A cena enquadra a goblin com folga para o giro; a imagem, recortada rente, saía ~7% maior
+  // (medido nas seis, de 0,92 a 0,95 da altura). Reduzida enquanto a troca pode acontecer, a
+  // troca não dá salto; quando a imagem é o que fica, volta ao tamanho cheio.
+  it("enquanto a cena pode chegar, a imagem estática fica na escala da cena", () => {
+    render(<OficinaHero environment={READY} whenPageIdle={never} />);
+
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("scale-93");
+  });
+
+  it("quando a imagem é o que fica, ela ocupa a caixa inteira", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).not.toHaveClass("scale-93");
+  });
+
+  // Sem esperar o idle: economia de dados e movimento reduzido se sabem na hora, e a imagem não
+  // pode abrir a 93% sem halo para depois pular para o tamanho cheio.
+  it.each([
+    ["com economia de dados", { ...READY, savesData: () => true }],
+    ["com movimento reduzido", REDUCED_MOTION],
+  ])("%s, a imagem já abre em escala cheia e com o halo", (_, environment) => {
+    render(<OficinaHero environment={environment} whenPageIdle={never} />);
+
+    const image = screen.getByRole("img", { name: /^Rúbia/ });
+    expect(image).not.toHaveClass("scale-93");
+    expect(image).toHaveClass("goblin-silhouette");
+  });
+
   it("o seletor tem as seis goblins, na ordem do elenco, com a Rúbia escolhida", () => {
     render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
 
@@ -382,6 +454,7 @@ describe("OficinaHero", () => {
       expect(heroState(container)).toBe("falhou");
     });
     expect(screen.getByRole("img", { name: /^Rúbia/ })).toBeVisible();
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("goblin-silhouette");
   });
 
   it("se o contexto WebGL se perder, volta para a imagem e some com os controles", async () => {

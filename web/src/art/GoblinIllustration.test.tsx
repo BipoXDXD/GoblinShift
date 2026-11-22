@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAST,
   GOBLIN_STATES,
+  GoblinCast,
   goblinOf,
   GoblinIllustration,
   goblinsOf,
@@ -84,8 +85,8 @@ describe("GoblinIllustration", () => {
 
     const img = screen.getByRole("img");
     // 4:5, como os arquivos: com width e height o navegador reserva a caixa antes de baixar (CLS).
-    expect(img).toHaveAttribute("width", "256");
-    expect(img).toHaveAttribute("height", "320");
+    expect(img).toHaveAttribute("width", "320");
+    expect(img).toHaveAttribute("height", "400");
     expect(img).toHaveAttribute("loading", "lazy");
     expect(img).toHaveAttribute("decoding", "async");
   });
@@ -96,7 +97,7 @@ describe("GoblinIllustration", () => {
     expect(screen.getByRole("img")).toHaveClass("goblin-silhouette");
   });
 
-  it("oferece AVIF antes do WebP, de 256 a 768 px, com sizes da caixa", () => {
+  it("oferece AVIF antes do WebP, de 256 a 1280 px, com sizes da caixa", () => {
     const { container } = render(<GoblinIllustration state="erro" rotationKey="x" />);
 
     const sources = [...container.querySelectorAll("source")];
@@ -106,9 +107,22 @@ describe("GoblinIllustration", () => {
     ]);
     for (const source of sources) {
       expect(source.getAttribute("srcset")).toMatch(
-        /nyx-256w\.\w+ 256w, .*nyx-384w\.\w+ 384w, .*nyx-512w\.\w+ 512w, .*nyx-768w\.\w+ 768w$/,
+        /nyx-256w\.\w+ 256w, .*nyx-384w\.\w+ 384w, .*nyx-512w\.\w+ 512w, .*nyx-768w\.\w+ 768w, .*nyx-1024w\.\w+ 1024w, .*nyx-1280w\.\w+ 1280w$/,
       );
-      expect(source.getAttribute("sizes")).toBe("(min-width: 768px) 256px, 192px");
+      expect(source.getAttribute("sizes")).toBe("(min-width: 768px) 320px, 256px");
+    }
+  });
+});
+
+describe("GoblinCast", () => {
+  it("os créditos mantêm a caixa de 256 x 320", () => {
+    render(<GoblinCast />);
+
+    const images = screen.getAllByRole("presentation");
+    expect(images).toHaveLength(CAST.length);
+    for (const img of images) {
+      expect(img).toHaveAttribute("width", "256");
+      expect(img).toHaveAttribute("height", "320");
     }
   });
 });
