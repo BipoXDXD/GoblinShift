@@ -45,12 +45,15 @@ ENV PATH="/app/.venv/bin:$PATH" \
 USER app
 EXPOSE 8000
 # Sem access log: o evento amplo `main` já registra cada requisição, sem IP completo (plano, 3.7).
-# Teto de 30, o dobro do pool do banco (10 + 5): o uvicorn compara com `>=` contando a conexão
-# atual, então atende até 29 conexões ao mesmo tempo e responde 503 `text/plain`, sem Retry-After,
-# a partir da 30ª, em vez de acumular pedidos à espera de conexão. Na parada, 8 s para terminar os
+# Dois tetos. O da aplicação (ConcurrencyLimitMiddleware, entrypoints/api/concurrency.py) atende 28
+# requisições, perto do dobro do pool do banco (10 + 5), e recusa a 29ª em problem+json com
+# Retry-After. O do uvicorn é a última barreira e responde 503 `text/plain`, sem Retry-After e antes
+# do ASGI: 72 = 28 + a rajada de 40 do /api/ no Nginx (uma conexão por pedido, sem keepalive) + 3
+# sondas isentas (/livez, /readyz) + 1, porque ele compara com `>=` contando a conexão atual. Assim
+# a rajada de um cliente com a API no teto ainda recebe o problem+json, que custa pouco. Na parada, 8 s para terminar os
 # pedidos em curso, mais 2 s para o lifespan fechar o pool: cabe em qualquer carência de 10 s ou
 # mais, que é o padrão do Docker e do Compose (o serviço `api` não declara `stop_grace_period`).
 # tests/test_api_server_limits.py confere as duas contas.
 CMD ["uvicorn", "goblinshift.entrypoints.api.app:create_app", "--factory", \
      "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--no-server-header", \
-     "--no-access-log", "--limit-concurrency", "30", "--timeout-graceful-shutdown", "8"]
+     "--no-access-log", "--limit-concurrency", "72", "--timeout-graceful-shutdown", "8"]

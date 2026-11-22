@@ -204,3 +204,12 @@ async def test_cliente_que_para_de_ler_e_cortado_e_o_download_encerrado() -> Non
         await response_for(b"abc", recorder, timeouts)(HTTP_SCOPE, receive, send)
 
     assert recorder.closed == 1
+
+
+@pytest.mark.anyio
+async def test_download_pede_ao_proxy_que_nao_bufferize() -> None:
+    # Com buffer, o Nginx esvaziaria a API em segundos e a vaga voltaria com o cliente lento ainda
+    # baixando do `proxy_temp`.
+    response = response_for(b"x" * 10, Recorder(), GENEROUS)
+
+    assert (b"x-accel-buffering", b"no") in response.raw_headers
