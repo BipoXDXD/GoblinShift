@@ -18,6 +18,8 @@ from tests.runs.support import new_owner, ready_inputs
 pytestmark = pytest.mark.integration
 
 CANARY = f"CANARY-{uuid.uuid4()}"
+# Com ponto, a chave extra parecia um caminho de dois níveis, e só o fim era cortado.
+EXTRA_KEYS = pytest.mark.parametrize("key", [CANARY, f"{CANARY}.x"], ids=["simples", "com-ponto"])
 NOT_ACCEPTED = "campo não aceito"
 
 type Send = Callable[[dict[str, Any]], httpx.Response]
@@ -73,9 +75,19 @@ def send(
         {"filters": [{"column": CANARY, "op": "eq"}]},
         {"trim_columns": [CANARY, CANARY]},
         {CANARY: 1},
+        {f"{CANARY}.x": 1},
         {"filters": [{"column": "a", "op": "eq", "value": "x", CANARY: 1}]},
+        {"filters": [{"column": "a", "op": "eq", "value": "x", f"{CANARY}.x": 1}]},
     ],
-    ids=["is_empty-com-valor", "eq-sem-valor", "coluna-repetida", "chave-extra", "chave-aninhada"],
+    ids=[
+        "is_empty-com-valor",
+        "eq-sem-valor",
+        "coluna-repetida",
+        "chave-extra",
+        "chave-extra-com-ponto",
+        "chave-aninhada",
+        "chave-aninhada-com-ponto",
+    ],
 )
 def test_422_nao_ecoa_o_que_o_cliente_mandou(send: Send, parameters: dict[str, Any]) -> None:
     response = send(parameters)
@@ -86,16 +98,18 @@ def test_422_nao_ecoa_o_que_o_cliente_mandou(send: Send, parameters: dict[str, A
     assert not any(error["message"].startswith("Value error") for error in body["errors"])
 
 
-def test_chave_extra_vira_o_local_parameters(send: Send) -> None:
-    response = send({CANARY: 1, f"{CANARY}2": 2})
+@EXTRA_KEYS
+def test_chave_extra_vira_o_local_parameters(send: Send, key: str) -> None:
+    response = send({key: 1, f"{key}2": 2})
 
     assert response.json()["errors"] == [
         {"field": "body.parameters", "code": "extra_forbidden", "message": NOT_ACCEPTED}
     ]
 
 
-def test_chave_extra_aninhada_vira_o_caminho_do_objeto(send: Send) -> None:
-    response = send({"filters": [{"column": "a", "op": "eq", "value": "x", CANARY: 1}]})
+@EXTRA_KEYS
+def test_chave_extra_aninhada_vira_o_caminho_do_objeto(send: Send, key: str) -> None:
+    response = send({"filters": [{"column": "a", "op": "eq", "value": "x", key: 1}]})
 
     assert response.json()["errors"] == [
         {"field": "body.parameters.filters.0", "code": "extra_forbidden", "message": NOT_ACCEPTED}

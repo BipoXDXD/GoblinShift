@@ -22,7 +22,7 @@ Uso numa rota, com o schema publicado no OpenAPI por `command_openapi` (3.6):
 import json
 import math
 import re
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from typing import Any
 
 from fastapi import Request
@@ -30,6 +30,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from starlette.requests import ClientDisconnect
 
+from goblinshift.catalog import FieldError
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
 
 MAX_COMMAND_BYTES = 64 * 1024
@@ -63,6 +64,16 @@ def json_command[M: BaseModel](model: type[M]) -> Callable[[Request], Awaitable[
             ) from None
 
     return read_command
+
+
+def body_validation_error(errors: Iterable[FieldError]) -> RequestValidationError:
+    """Recusa por campo do serviço, com local a partir do corpo, como a do Pydantic acima."""
+    return RequestValidationError(
+        [
+            {"loc": ("body", *error.location), "type": error.code, "msg": error.message}
+            for error in errors
+        ]
+    )
 
 
 def command_openapi(model: type[BaseModel]) -> dict[str, Any]:

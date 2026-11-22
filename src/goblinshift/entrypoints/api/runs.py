@@ -31,7 +31,11 @@ from goblinshift.entrypoints.api.catalog import (
     recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, Now, require_scope
-from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
+from goblinshift.entrypoints.api.json_command import (
+    JSON_MEDIA_TYPE,
+    body_validation_error,
+    json_command,
+)
 from goblinshift.entrypoints.api.problems import (
     ApiProblem,
     ProblemCode,
@@ -623,16 +627,7 @@ def _refusal_problem(error: Exception) -> ApiProblem | RequestValidationError:
                 "Envie Idempotency-Key com 16 a 64 caracteres [A-Za-z0-9_-].",
             )
         case InvalidRunCommandError():
-            return RequestValidationError(
-                [
-                    {
-                        "loc": ("body", *field_error.location.split(".")),
-                        "type": field_error.code,
-                        "msg": field_error.message,
-                    }
-                    for field_error in error.errors
-                ]
-            )
+            return body_validation_error(error.errors)
         case RecipeVersionRetiredError():
             return ApiProblem(
                 ProblemCode.RECIPE_VERSION_RETIRED, "A versão da receita foi retirada."

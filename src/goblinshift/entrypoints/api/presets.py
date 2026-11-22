@@ -18,7 +18,6 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
-from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field
 
 from goblinshift.catalog import CATALOG, RecipeVersionRetiredError
@@ -29,7 +28,11 @@ from goblinshift.entrypoints.api.catalog import (
     recipe_command_schema,
 )
 from goblinshift.entrypoints.api.dependencies import DbSession, require_scope
-from goblinshift.entrypoints.api.json_command import JSON_MEDIA_TYPE, json_command
+from goblinshift.entrypoints.api.json_command import (
+    JSON_MEDIA_TYPE,
+    body_validation_error,
+    json_command,
+)
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode, problem_responses
 from goblinshift.identity import Principal, Scope
 from goblinshift.presets import (
@@ -242,16 +245,7 @@ def _parse(command: PresetCommand) -> PresetDraft:
             command.name, command.recipe_id, command.recipe_version, command.parameters
         )
     except InvalidPresetError as error:
-        raise RequestValidationError(
-            [
-                {
-                    "loc": ("body", *field_error.location.split(".")),
-                    "type": field_error.code,
-                    "msg": field_error.message,
-                }
-                for field_error in error.errors
-            ]
-        ) from None
+        raise body_validation_error(error.errors) from None
     except RecipeVersionRetiredError:
         raise ApiProblem(
             ProblemCode.RECIPE_VERSION_RETIRED, "A versão da receita foi retirada."

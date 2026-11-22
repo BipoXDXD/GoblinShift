@@ -9,7 +9,7 @@ from uuid import UUID
 class UploadReference:
     """Upload citado nos parâmetros (o `select` do PDF Press), com o campo que o cita."""
 
-    location: str  # caminho com pontos a partir de `parameters`, como `select.0.upload_id`
+    location: tuple[str, ...]  # caminho a partir de `parameters`: `("select", "0", "upload_id")`
     upload_id: UUID
 
 

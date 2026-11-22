@@ -10,7 +10,7 @@ from goblinshift.presets import drafts as drafts_module
 
 
 def locations(error: pytest.ExceptionInfo[InvalidPresetError]) -> list[str]:
-    return [field.location for field in error.value.errors]
+    return [".".join(field.location) for field in error.value.errors]
 
 
 def test_rascunho_guarda_os_parametros_como_enviados() -> None:
