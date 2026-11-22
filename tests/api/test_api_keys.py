@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from goblinshift.identity import (
     MAX_ACTIVE_KEYS,
     MAX_KEY_DAYS,
+    MAX_STORED_KEYS,
     Scope,
     authenticate_api_key,
     issue_key,
@@ -246,7 +247,7 @@ def test_centesima_primeira_chave_guardada_409_com_mensagem_propria(
     owner = new_user(factory)
     sessions.sign_in(owner)
     with unit_of_work(factory) as session:
-        for _ in range(100):
+        for _ in range(MAX_STORED_KEYS):
             issue_key(session, owner_id=owner, scopes=frozenset({Scope.FILES_READ}), now=NOW)
         session.execute(update(api_key).where(api_key.c.owner_id == owner).values(revoked_at=NOW))
 
@@ -254,8 +255,8 @@ def test_centesima_primeira_chave_guardada_409_com_mensagem_propria(
 
     body = assert_problem(response, 409, "STATE_CONFLICT")
     # Revogar não abre vaga: a mensagem diz que as inativas saem com o tempo.
-    assert "100 chaves guardadas" in body["detail"]
-    assert key_count(factory, owner) == 100
+    assert f"{MAX_STORED_KEYS} chaves guardadas" in body["detail"]
+    assert key_count(factory, owner) == MAX_STORED_KEYS
 
 
 def test_emitir_chave_com_login_de_11_min_401_reauth_required(

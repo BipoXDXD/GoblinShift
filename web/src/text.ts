@@ -796,7 +796,8 @@ export const TEXT = {
       create: "Criar chave",
       creating: "Criando…",
       cancel: "Cancelar",
-      tooMany: "A conta já tem o máximo de chaves ativas. Revogue uma antes de criar outra.",
+      tooMany: (active: number, stored: number, retentionDays: number) =>
+        `A conta chegou ao limite de chaves: ${String(active)} ativas, ou ${String(stored)} guardadas contando as revogadas e vencidas, que saem ${String(retentionDays)} dias depois do fim.`,
       createdHeading: "Chave criada",
       createdWarning: "Copie a chave agora: ela não aparece de novo, nem para nós.",
       tokenLabel: "Chave de API",

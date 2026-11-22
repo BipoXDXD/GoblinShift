@@ -6,6 +6,9 @@ const T = TEXT.account.keys;
 // Faixa da validade de identity/keys.py (MIN_KEY_DAYS, DEFAULT_KEY_DAYS, MAX_KEY_DAYS): a spec só
 // publica o default. O servidor confere de novo e responde 422 fora dela.
 export const KEY_DAYS = { min: 1, initial: 30, max: 90 } as const;
+// Tetos da emissão de identity/accounts.py (MAX_ACTIVE_KEYS, MAX_STORED_KEYS, KEY_RETENTION). O 409
+// não diz qual dos dois estourou, então a mensagem cita ambos.
+export const KEY_LIMITS = { active: 5, stored: 100, retentionDays: 30 } as const;
 const WHOLE_NUMBER = /^\d{1,3}$/;
 
 export type KeyStatus = "active" | "expired" | "revoked";
