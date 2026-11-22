@@ -3,6 +3,11 @@
 # (elenco.tsv) fora do repositório e grava o otimizado em
 # web/src/assets/art/oficina-3d/oficina-3d-ID.glb. Todas usam a mesma configuração da Rúbia.
 #
+# Origem dos modelos (desde 22/11): Hi3D Quality, em $ARTE/hi3d-quality-20261122/ (fontes.json com
+# o task_id e os tamanhos). O elenco.tsv aponta para o <id>-site.glb, que já passou por estes
+# passos; reduzir de novo simplificaria duas vezes. Por isso o script recusa fonte terminada em
+# -site.glb: baixe o bruto pelo Hi3D (get_task_outputs com o task_id, sem crédito) e passe FONTE=.
+#
 # Passos e porquê:
 #   1. weld (gltf-transform): junta os vértices iguais, para o simplify enxergar as costuras de UV.
 #   2. simplify com atributos (web/scripts/simplificar-glb.ts): o meshoptimizer mede o desvio de
@@ -15,13 +20,12 @@
 #   4. Meshopt (EXT_meshopt_compression) sobre a malha quantizada (KHR_mesh_quantization), com UV
 #      em 14 bits: o padrão de 12 bits dá passos de 1 texel numa textura de 4096 px.
 #
-# Uso: ARTE=/caminho/arte RUBIA_SOURCE=/caminho/bruto.glb scripts/arte/otimizar-glb.sh [ID...]
-#      Sem ID, otimiza todas; com IDs do elenco.tsv (como `nyx`), só essas.
-#      FONTE=/caminho/bruto.glb TEXTURE_PX=4096 scripts/arte/otimizar-glb.sh ID   (um ID só)
+# Uso: FONTE=/caminho/bruto.glb TEXTURE_PX=4096 scripts/arte/otimizar-glb.sh ID   (um ID só, do elenco.tsv)
+#      Sem FONTE, lê $ARTE/<fonte do elenco.tsv>, que hoje é sempre um -site.glb e é recusado.
 # Requer: Node e `npm ci` em web/ (o CLI do gltf-transform vem fixado pelo npx).
 set -euo pipefail
 
-ARTE="${ARTE:-$HOME/Documents/GoblinShift-arte}"
+ARTE="${ARTE:-$HOME/Documents/Modelos 3D/GoblinShift}"
 TEXTURE_PX="${TEXTURE_PX:-2048}"
 TEXCOORD_BITS=14
 GLTF_TRANSFORM="@gltf-transform/cli@4.5.1"
@@ -55,6 +59,10 @@ selected() {
 optimize() {
   local src="$1" out="$2"
   [[ -f "$src" ]] || { echo "GLB bruto não encontrado: $src" >&2; exit 1; }
+  if [[ "$src" == *-site.glb ]]; then
+    echo "fonte já otimizada para o site: $src; baixe o bruto pelo Hi3D (get_task_outputs) e passe FONTE=" >&2
+    exit 1
+  fi
   gt weld "$src" "$work/soldada.glb"
   node "$repo/web/scripts/simplificar-glb.ts" "$work/soldada.glb" "$work/simplificada.glb"
   gt resize "$work/simplificada.glb" "$work/redimensionada.glb" \
@@ -72,8 +80,5 @@ while IFS=$'\t' read -r -u 3 id glb _; do
   [[ -z "$id" || "$id" == \#* ]] && continue
   selected "$id" "$@" || continue
   source="${FONTE:-$ARTE/$glb}"
-  if [[ "$id" == "rubia" ]]; then
-    source="${FONTE:-${RUBIA_SOURCE:?Defina FONTE ou RUBIA_SOURCE com o caminho do GLB de origem registrado}}"
-  fi
   optimize "$source" "$out_dir/oficina-3d-$id.glb"
 done 3<"$here/elenco.tsv"

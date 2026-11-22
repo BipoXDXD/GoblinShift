@@ -1,11 +1,14 @@
-# Elenco do site (ADR 030): as cinco goblins publicadas (a Ada saiu em 2026-10-15 e a Lua em
-# 2026-10-16, por decisão do usuário). Uma linha por goblin: id, GLB de origem (caminho a
-# partir de $ARTE; @RUBIA_SOURCE exige caminho absoluto em RUBIA_SOURCE) e o id da registro de origem. A Rúbia vem da regeração com
-# 1 milhão de triângulos (9f030f3c), que o usuário escolheu em 2026-10-15 no lugar da e1c79f67.
+# Elenco do site (ADR 030): as seis goblins publicadas, modelos do Hi3D Quality aprovados pelo
+# usuário em 2026-11-22 (a Ada saiu em 2026-10-15; a Lua volta em 2026-11-22). Uma linha por
+# goblin: id, GLB de origem (caminho a partir de $ARTE) e o task_id do Hi3D.
+# A fonte já é o GLB do site (<id>-site.glb, reduzido e com textura WebP), não o bruto: o bruto
+# pode ser baixado de novo, sem crédito, com get_task_outputs e o task_id. Por isso o
+# otimizar-glb.sh recusa estas fontes e pede FONTE= com o bruto.
 # A Jade e a Fagulha entram por decisão do usuário em 2026-10-15 (exceptions no PROVENANCE.json;
 # docs/art/LICENSE-ART.md).
-rubia	@RUBIA_SOURCE	9f030f3c-868c-4e55-a44e-71d6a3323265
-ferrugem	aprovados-2026-10-15/b-laranja-couro_ec3a728c.glb	ec3a728c-d58f-40f4-a298-a144e6ba668b
-nyx	aprovados-2026-10-15/e-preta-rosa_19a1ddba.glb	19a1ddba-fd13-461e-9136-8f8bea40cfc9
-fagulha	aprovados-2026-10-15/f-espartilho-realista_0d84776f.glb	0d84776f-e99b-47e8-be42-59d78af0a6dd
-jade	aprovados-2026-10-15/j-jeans-realista_3c7aa397.glb	3c7aa397-f83d-44ac-bf1b-bd65b0cb8524
+rubia	hi3d-quality-20261122/rubia-site.glb	b831b240f7cd4e4caa0363f370c78662
+fagulha	hi3d-quality-20261122/fagulha-site.glb	4e795634d7ee4a49857fb05aff6f8ae2
+ferrugem	hi3d-quality-20261122/ferrugem-site.glb	aceeb3d4676f4590898a577f1bcfc799
+jade	hi3d-quality-20261122/jade-site.glb	14e21db4788b4e72ba1e0d8de61d5a15
+lua	hi3d-quality-20261122/lua-site.glb	4cab2fcdf9934d518e0699801f19eb73
+nyx	hi3d-quality-20261122/nyx-site.glb	71091b9b119f4946968b60742ce42ce5
