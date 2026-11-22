@@ -5,6 +5,9 @@ O filtro `omit_exception_detail` tira a mensagem do traceback, mas não vê os c
 PostgreSQL para o log. A regra é verificada pela árvore sintática de `src/goblinshift`: onde uma
 exceção está em escopo, ela só chega ao log por um redutor que devolve tipo ou código.
 
+A segunda regra: toda chave literal de campo de evento está em `LOGGED_FIELDS`, a allowlist do
+`JsonFormatter`. Uma chave que falte nela teria o texto descartado em produção sem aviso.
+
 O executor-ctl (`deploy/executor_ctl`) fica fora do escopo: ele é tratado na Tarefa 6 do plano
 `2026-11-21-logs-telemetria`.
 
@@ -28,7 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import maintenance as maintenance_entrypoint
 from goblinshift.files.storage import FileStorage
-from goblinshift.platform.telemetry import _MESSAGE_SAFE_ERRORS
+from goblinshift.platform.telemetry import _MESSAGE_SAFE_ERRORS, LOGGED_FIELDS
 from goblinshift.runs.worker import coordinator as coordinator_module
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
@@ -277,6 +280,135 @@ def test_nenhum_log_recebe_a_excecao_crua() -> None:
     assert offenders == [], (
         "exceção crua em log ou campos de evento; use `exception_fields(error)`: "
         + ", ".join(offenders)
+    )
+
+
+def logged_keys(source: str) -> Iterator[tuple[str, int]]:
+    """Chaves literais que chegam a `fields` de um evento, com a linha de cada uma.
+
+    Coleta (a) o dict que é valor de `"fields"` em `extra=`; (b) dicts atribuídos (`=`, `|=`,
+    anotado) a nomes que terminam em `fields`; (c) `NOME["k"] = …` com `NOME` terminando em
+    `fields`; (d) o dict devolvido por `_ids` e `*_fields` e as constantes de módulo `*_EVENT`,
+    que são espalhadas em `fields`. Chave montada em tempo de execução não é vista: ela só sai no
+    log com valor numérico.
+    """
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        match node:
+            case ast.keyword(arg="extra", value=ast.Dict() as extra):
+                for extra_key, extra_value in zip(extra.keys, extra.values, strict=True):
+                    if _is_constant(extra_key, "fields") and isinstance(extra_value, ast.Dict):
+                        yield from _dict_keys(extra_value)
+            case ast.Assign(targets=targets, value=ast.Dict() as value) if any(
+                _names_fields(target) for target in targets
+            ):
+                yield from _dict_keys(value)
+            case (
+                ast.AnnAssign(target=target, value=ast.Dict() as value)
+                | ast.AugAssign(target=target, op=ast.BitOr(), value=ast.Dict() as value)
+            ) if _names_fields(target):
+                yield from _dict_keys(value)
+            case ast.Assign(targets=targets):
+                for assigned in targets:
+                    match assigned:
+                        case ast.Subscript(value=base, slice=ast.Constant(value=str(literal))) if (
+                            _names_fields(base)
+                        ):
+                            yield literal, assigned.lineno
+            case ast.FunctionDef(name=name) if name == "_ids" or name.endswith("_fields"):
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Return) and isinstance(inner.value, ast.Dict):
+                        yield from _dict_keys(inner.value)
+    for statement in tree.body:
+        match statement:
+            case ast.Assign(targets=[ast.Name(id=name)], value=ast.Dict() as value) if (
+                name.endswith("_EVENT")
+            ):
+                yield from _dict_keys(value)
+
+
+def _names_fields(target: ast.expr) -> bool:
+    """`fields`, `*_fields` ou `self.fields`, sem subscrito."""
+    match target:
+        case ast.Name(id=name) | ast.Attribute(attr=name):
+            return name.endswith("fields")
+    return False
+
+
+def _is_constant(node: ast.expr | None, value: str) -> bool:
+    return isinstance(node, ast.Constant) and node.value == value
+
+
+def _dict_keys(node: ast.Dict) -> Iterator[tuple[str, int]]:
+    for key in node.keys:
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            yield key.value, key.lineno
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'logger.info("x", extra={"fields": {"k": 1}})',
+        'fields = {"k": 1}',
+        'run_fields: dict[str, object] = {"k": 1}',
+        'self.fields |= {"k": 1}',
+        'fields["k"] = 1',
+        'def _ids(c):\n    return {"k": 1}',
+        'def _error_fields(e):\n    return {"k": 1}',
+        '_PROBE_EVENT = {"k": 1}',
+    ],
+    ids=[
+        "extra",
+        "atribuicao",
+        "anotada",
+        "uniao",
+        "subscrito",
+        "ids",
+        "funcao-fields",
+        "constante-event",
+    ],
+)
+def test_coletor_acha_a_chave(source: str) -> None:
+    assert [key for key, _ in logged_keys(source)] == ["k"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'headers = {"k": 1}',
+        "fields = {**_ids(c)}",
+        "fields[name] = 1",
+        'def _parse(c):\n    return {"k": 1}',
+        'def f():\n    _LOCAL_EVENT = {"k": 1}',
+        'logger.info("x", extra={"other": {"k": 1}})',
+    ],
+    ids=[
+        "outro-nome",
+        "espalhamento",
+        "chave-variavel",
+        "outra-funcao",
+        "event-local",
+        "extra-sem-fields",
+    ],
+)
+def test_coletor_ignora_o_que_nao_e_campo_de_log(source: str) -> None:
+    assert list(logged_keys(source)) == []
+
+
+def test_toda_chave_literal_de_log_esta_na_allowlist() -> None:
+    modules = sorted(SOURCE.rglob("*.py"))
+    assert modules, f"nenhum módulo em {SOURCE}"
+
+    outside = [
+        f"{key} ({module.relative_to(ROOT)}:{line})"
+        for module in modules
+        for key, line in logged_keys(module.read_text(encoding="utf-8"))
+        if key not in LOGGED_FIELDS
+    ]
+
+    assert outside == [], (
+        "chave de log fora de `LOGGED_FIELDS`: o formatter descarta o texto dela. Revise se ela "
+        "nunca carrega texto livre e acrescente-a à allowlist: " + ", ".join(outside)
     )
 
 

@@ -66,6 +66,69 @@ _SQLSTATE = re.compile(r"[0-9A-Z]{5}")
 _SQLSTATE_ATTRIBUTE = "sqlstate"
 # Motivo de contrato (`image_not_allowed`): identificador curto, nunca texto livre.
 _ERROR_REASON = re.compile(r"[a-z][a-z0-9_]{0,63}")
+# Campos de evento que saem no log com qualquer valor. Cada chave guarda id, contagem, duração,
+# código ou nome escolhido pelo GoblinShift, nunca texto vindo do usuário nem a mensagem de uma
+# exceção: `error` não entra. Chave fora da lista só sai com número ou booleano, que não carregam
+# texto, para as contagens de cada volta (`**counts`) não precisarem ser listadas uma a uma.
+# `tests/security/test_log_fitness.py` acusa chave literal de log que falte aqui.
+LOGGED_FIELDS = frozenset(
+    {
+        "absent",
+        "accounts",
+        "adoptions_refused",
+        "alert",
+        "attempt",
+        "attempt.number",
+        "attempt_id",
+        "attempt_ids",
+        "attempts",
+        "checked",
+        "cycle",
+        # `str(LostFencing)`: montado só com ids, gerações e motivos enumerados.
+        "detail",
+        "duration_ms",
+        "errno",
+        "errnos",
+        "error.code",
+        "error.type",
+        "error_reason",
+        "error_type",
+        "failed",
+        "failed_step",
+        "failures",
+        "generation",
+        "held_s",
+        "image",
+        "items_left",
+        "limit_s",
+        "live",
+        "main",
+        "objects",
+        "objects_adopted",
+        "outcome",
+        "pause_s",
+        "pools_corrected",
+        "position",
+        "retry_in_s",
+        "run_id",
+        "runner",
+        "sample",
+        "signal",
+        "skipped",
+        "sqlstate",
+        "step",
+        "storage_key",
+        "tampered",
+        "tmp_part",
+        "unreadable",
+        "upload_id",
+        "user_id",
+    }
+)
+_DROPPED_FIELDS = "dropped_fields"
+# Chaves que o próprio formatter escreve: um campo de evento não as sobrescreve. O `sqlstate` não
+# está aqui porque também é campo de evento; o do registro, quando há, vence o do campo.
+_BASE_FIELDS = frozenset({"time", "level", "logger", "message", "exception", _DROPPED_FIELDS})
 
 logger = logging.getLogger(__name__)
 
@@ -80,14 +143,32 @@ class JsonFormatter(logging.Formatter):
         }
         # Campos do evento estruturado: `logger.info("...", extra={"fields": {...}})`.
         fields = getattr(record, "fields", None)
-        if isinstance(fields, dict):
-            entry.update(fields)
+        dropped = _add_fields(entry, fields) if isinstance(fields, dict) else 0
         sqlstate = getattr(record, _SQLSTATE_ATTRIBUTE, None)
         if sqlstate is not None:
             entry[_SQLSTATE_ATTRIBUTE] = sqlstate
         if record.exc_info:
             entry["exception"] = record.exc_text or self.formatException(record.exc_info)
+        if dropped:
+            entry[_DROPPED_FIELDS] = dropped
         return json.dumps(entry, ensure_ascii=False)
+
+
+def _add_fields(entry: dict[str, Any], fields: dict[Any, object]) -> int:
+    """Põe em `entry` os campos que podem ir ao log e devolve quantos caíram.
+
+    Passa a chave de `LOGGED_FIELDS` com qualquer valor e a de fora com número ou booleano. Cai o
+    resto e o que tentaria sobrescrever uma chave da própria linha (`message`, `level`, …).
+    """
+    dropped = 0
+    for key, value in fields.items():
+        if key in _BASE_FIELDS or (
+            key not in LOGGED_FIELDS and not isinstance(value, (bool, int, float))
+        ):
+            dropped += 1
+        else:
+            entry[key] = value
+    return dropped
 
 
 def omit_exception_detail(record: logging.LogRecord) -> bool:
