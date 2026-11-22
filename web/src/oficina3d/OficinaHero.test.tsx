@@ -140,6 +140,12 @@ async function settle(scene: FakeScene, index: number, error?: Error): Promise<v
 }
 
 /** Monta com a cena falsa e conclui a carga da Rúbia. */
+function castButtons(): HTMLElement[] {
+  return within(screen.getByRole("group", { name: TEXT.art.stage.castLabel })).getAllByRole(
+    "button",
+  );
+}
+
 async function renderReady(scene: FakeScene, environment: Environment3D = READY) {
   const view = render(
     <OficinaHero environment={environment} whenPageIdle={runNow} loadScene={scene.loadScene} />,
@@ -184,6 +190,33 @@ describe("OficinaHero", () => {
       "false",
       "false",
       "false",
+    ]);
+  });
+
+  it("as miniaturas ficam num disco de superfície elevada, com a silhueta do tema", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    for (const button of castButtons()) {
+      expect(button.querySelector("picture")).toHaveClass("bg-surface-raised");
+      expect(button.querySelector("img")).toHaveClass("goblin-silhouette");
+    }
+  });
+
+  it("a miniatura da Lua amplia de mais baixo, para o sininho entrar; as outras, do topo", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    const origins = castButtons().map((button) =>
+      [...(button.querySelector("img")?.classList ?? [])].filter((name) =>
+        name.startsWith("origin-"),
+      ),
+    );
+    expect(origins).toEqual([
+      ["origin-top"],
+      ["origin-top"],
+      ["origin-top"],
+      ["origin-top"],
+      ["origin-bust-low"],
+      ["origin-top"],
     ]);
   });
 

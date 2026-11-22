@@ -69,6 +69,12 @@ const POSTER_HEIGHT_PX = 800;
 const POSTER_SIZES = "(min-width: 768px) 320px, 192px";
 const THUMBNAIL_WIDTH_PX = 192;
 const THUMBNAIL_HEIGHT_PX = 240;
+/**
+ * Ponto de onde a miniatura amplia: o topo mostra o rosto. A Lua desce um pouco, para o sininho e
+ * a gola de bolinhas entrarem no círculo e ela não se confundir com a Nyx a 48 px.
+ */
+const THUMBNAIL_ORIGIN: Readonly<Partial<Record<CastId, string>>> = { lua: "origin-bust-low" };
+const DEFAULT_THUMBNAIL_ORIGIN = "origin-top";
 /** Teto da espera por um momento ocioso; passado isso, a carga começa de qualquer jeito. */
 const IDLE_TIMEOUT_MS = 2_000;
 const RESET_KEY = "Home";
@@ -359,7 +365,8 @@ function CastButton({ goblin, pressed, onChoose }: CastButtonProps): ReactElemen
       className="flex min-h-11 cursor-pointer flex-col items-center gap-1 rounded-lg border-2 border-transparent p-1 text-sm font-semibold text-fg-muted transition hover:bg-surface hover:text-fg aria-pressed:border-primary aria-pressed:bg-surface aria-pressed:text-fg aria-pressed:shadow-card"
     >
       {/* A imagem é de corpo inteiro; o círculo mostra o rosto, ampliado a partir do topo. */}
-      <picture className="block size-12 overflow-hidden rounded-full bg-surface-sunken">
+      {/* O disco usa a superfície elevada: no claro a afundada tem a cor do painel e sumia. */}
+      <picture className="block size-12 overflow-hidden rounded-full bg-surface-raised">
         <source type="image/avif" srcSet={goblin.thumbnail.avif} />
         <img
           src={goblin.thumbnail.webp}
@@ -368,7 +375,7 @@ function CastButton({ goblin, pressed, onChoose }: CastButtonProps): ReactElemen
           height={THUMBNAIL_HEIGHT_PX}
           fetchPriority="low"
           decoding="async"
-          className="size-full origin-top scale-200 object-cover object-top"
+          className={`goblin-silhouette size-full scale-200 object-cover object-top ${THUMBNAIL_ORIGIN[goblin.id] ?? DEFAULT_THUMBNAIL_ORIGIN}`}
         />
       </picture>
       {goblin.name}

@@ -374,3 +374,9 @@
 @utility goblin-silhouette {
   filter: var(--goblin-silhouette);
 }
+
+/* Miniatura do seletor ampliada de um ponto mais baixo que o topo (a Lua, para o sininho entrar
+   no círculo de 48 px). A régua do código não aceita valor arbitrário, então ganha nome. */
+@utility origin-bust-low {
+  transform-origin: 50% 20%;
+}
