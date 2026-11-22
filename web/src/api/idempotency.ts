@@ -46,6 +46,10 @@ export function useIdempotencyKey(intent: string): IdempotencyKey {
       draft: { intent: previous.draft.intent, key: newIdempotencyKey() },
     }));
   }, []);
+  /**
+   * Guarda a chave do comando que vai ser enviado. Passe a intenção do render atual: uma intenção
+   * que não é a atual nem foi enviada antes não tem chave a guardar, e a chamada não faz nada.
+   */
   const markSent = useCallback((sentIntent: string) => {
     setKeys((previous) => {
       const sentKey = keyOf(previous, sentIntent);
