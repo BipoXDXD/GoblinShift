@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
+import { allowConsole } from "../test/consoleGuard";
 import { fakeApi, jsonResponse } from "../test/fakeApi";
 import { meBody } from "../test/account";
 import { expectHeadingFocused } from "../test/focus";
@@ -26,8 +27,13 @@ vi.mock("./reloadPage", () => ({ reloadPage: vi.fn() }));
 
 function setup() {
   broken.credits = true;
-  vi.spyOn(console, "error").mockImplementation(() => undefined);
-  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  // O React, o router e o RouteFailure registram o erro do primeiro render; aqui ele é o cenário.
+  allowConsole("error", /Falha ao abrir a tela:/, "o RouteFailure registra a falha: é o cenário");
+  allowConsole(
+    "error",
+    /CANARY-defeito-passageiro/,
+    "o React e o router registram o erro: é o cenário",
+  );
   const api = fakeApi({ "GET /api/v1/me": () => jsonResponse(meBody()) });
   return {
     ...renderRoutes({ routes: appRoutes(api.client), path: "/creditos", client: api.client }),

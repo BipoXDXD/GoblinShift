@@ -191,8 +191,9 @@ describe("Execução: detalhe por arquivo", () => {
   describe("aviso de fórmulas com a contagem por coluna", () => {
     const NOTE = "Valores que começam com “-”, como números negativos, também entram nesta conta";
 
-    function formulaItem(formulaCells: unknown) {
-      return item(0, { warnings: ["CSV_FORMULA_CELLS"], formula_cells: formulaCells });
+    // A posição é única na execução (chave primária com o run_id): cada item tem a sua.
+    function formulaItem(formulaCells: unknown, position = 0) {
+      return item(position, { warnings: ["CSV_FORMULA_CELLS"], formula_cells: formulaCells });
     }
 
     async function columnsList(): Promise<HTMLElement> {
@@ -320,7 +321,7 @@ describe("Execução: detalhe por arquivo", () => {
     it("sem a contagem (execução antiga ou fora da forma), mostra o aviso e a nota", async () => {
       setup({
         summary,
-        items: [formulaItem(null), formulaItem({ columns: "valor", more_columns: 0 })],
+        items: [formulaItem(null), formulaItem({ columns: "valor", more_columns: 0 }, 1)],
       });
 
       const region = await itemsRegion();
