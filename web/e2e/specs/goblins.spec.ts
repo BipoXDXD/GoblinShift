@@ -153,3 +153,13 @@ test("Créditos: as seis goblins do elenco, com nome e imagem carregada", async 
   }
   await expectFitsDeviceWidth(page);
 });
+
+// O palco grande é `lg:` (448 × 560); no celular de 360 px ele ocupa a coluna (280 × 350).
+test("Oficina: o palco aparece em destaque, sem rolagem lateral", async ({ page }, info) => {
+  await usePhoneWidth(page, info.project.name);
+  await page.goto("/");
+
+  const box = await page.locator("[data-oficina-3d]").boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(info.project.name === "mobile" ? 340 : 540);
+  await expectFitsDeviceWidth(page);
+});

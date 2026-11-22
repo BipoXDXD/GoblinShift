@@ -10,8 +10,9 @@ export const CAST_IDS: readonly CastId[] = ["rubia", "fagulha", "ferrugem", "jad
 /** A Rúbia abre a página: é a única cena que a home carrega sem a pessoa pedir. */
 export const FIRST_ON_STAGE: CastId = "rubia";
 
-/** Larguras geradas por scripts/arte/gerar-imagens.sh para a cena. */
-const WIDTHS = [192, 384, 640] as const;
+/** Larguras geradas por scripts/arte/gerar-imagens.sh para a cena; a de 960 px é a do palco
+ * grande (448 px) em tela 2×. */
+const WIDTHS = [192, 384, 640, 960] as const;
 const FALLBACK_WIDTH = 640;
 const THUMBNAIL_WIDTH = 192;
 

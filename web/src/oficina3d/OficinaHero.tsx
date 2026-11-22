@@ -64,9 +64,11 @@ interface OficinaHeroProps {
   readonly loadScene?: () => Promise<SceneModule>;
 }
 
+/** Só dão a proporção 4:5 da caixa reservada; o tamanho na tela vem das classes do palco. */
 const POSTER_WIDTH_PX = 640;
 const POSTER_HEIGHT_PX = 800;
-const POSTER_SIZES = "(min-width: 768px) 320px, 192px";
+/** Acompanha a largura do palco: 288 px no celular, 320 px a partir de 768 e 448 a partir de 1024. */
+const POSTER_SIZES = "(min-width: 1024px) 448px, (min-width: 768px) 320px, 288px";
 const THUMBNAIL_WIDTH_PX = 192;
 const THUMBNAIL_HEIGHT_PX = 240;
 /**
@@ -188,6 +190,9 @@ export function OficinaHero({
   const state = heroStateOf(mount, model, selected);
   const member = castMember(selected);
   const sceneShown = state === "pronto";
+  // A imagem fica sem o halo do tema enquanto a cena pode chegar, para não saltar na troca; quando
+  // ela é o que fica (movimento reduzido ou falha), ganha o halo como as goblins dos estados.
+  const posterIsFinal = state === "falhou" || (mount === "imagem" && reducedMotion);
 
   const onStageKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (handle === null) {
@@ -208,7 +213,7 @@ export function OficinaHero({
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-xs shrink-0 flex-col items-center gap-4 md:mx-0">
+    <div className="mx-auto flex w-full max-w-72 shrink-0 flex-col items-center gap-4 md:mx-0 md:max-w-xs lg:max-w-md">
       <div
         data-oficina-3d={state}
         data-goblin={selected}
@@ -221,7 +226,7 @@ export function OficinaHero({
               onKeyDown: onStageKey,
             }
           : {})}
-        className="relative aspect-4/5 w-full max-w-48 rounded-lg md:max-w-xs"
+        className="relative aspect-4/5 w-full max-w-72 rounded-lg md:max-w-xs lg:max-w-md"
       >
         <picture>
           <source type="image/avif" srcSet={member.avif} sizes={POSTER_SIZES} />
@@ -233,7 +238,7 @@ export function OficinaHero({
             height={POSTER_HEIGHT_PX}
             fetchPriority="high"
             decoding="async"
-            className={`size-full object-contain motion-safe:transition-opacity ${sceneShown ? "opacity-0" : "opacity-100"}`}
+            className={`size-full object-contain motion-safe:transition-opacity ${sceneShown ? "opacity-0" : "opacity-100"} ${posterIsFinal ? "goblin-silhouette" : ""}`}
           />
         </picture>
         <div
