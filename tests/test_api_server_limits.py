@@ -77,7 +77,7 @@ def test_teto_do_middleware_e_derivado_do_pool_do_banco() -> None:
     overflow_default = fields["db_pool_max_overflow"].default
     pool = pool_default + overflow_default
 
-    assert MAX_CONCURRENT_REQUESTS <= CONCURRENCY_PER_POOL_CONNECTION * pool
+    assert CONCURRENCY_PER_POOL_CONNECTION * pool >= MAX_CONCURRENT_REQUESTS
 
 
 def test_teto_do_uvicorn_cobre_o_middleware_a_rajada_do_nginx_e_as_sondas() -> None:
