@@ -105,32 +105,36 @@ def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterato
     um pedaço demorar mais que o prazo sem progresso, se o prazo total acabar ou se a média
     ficar abaixo da vazão mínima.
 
-    A média conta só o tempo à espera do cliente, somado dentro de `next_chunk`, e a espera pelo
-    primeiro byte entra nela: a gravação e o hash entre os pedaços são tempo do servidor e não
-    pesam contra o envio. O `b""` final só marca o fim do corpo, já recebido inteiro, e não é
-    cobrado. O prazo total segue sendo de relógio.
+    A média é de relógio desde o início da leitura, e a espera pelo primeiro byte entra nela. O
+    tempo do servidor entre os pedaços (gravação e hash) também conta: medida só pela espera, um
+    cliente com pedaços minúsculos esconderia um envio lento atrás desse tempo e seguraria a vaga.
+    O custo é um envio bem na borda do piso, com o disco lento, poder levar 408. O relógio é lido
+    dentro de `next_chunk`, que já roda no event loop. O `b""` final só marca o fim do corpo, já
+    recebido inteiro, e não é cobrado.
     """
     stream = request.stream()
-    deadline = anyio.from_thread.run_sync(anyio.current_time) + timeouts.total.total_seconds()
-    waited_s = 0.0
+    started = anyio.from_thread.run_sync(anyio.current_time)
+    deadline = started + timeouts.total.total_seconds()
+    elapsed_s = 0.0
 
     async def next_chunk() -> bytes | None:
-        nonlocal waited_s
-        asked = anyio.current_time()
+        nonlocal elapsed_s
         try:
-            with anyio.fail_after(min(timeouts.idle.total_seconds(), deadline - asked)):
+            with anyio.fail_after(
+                min(timeouts.idle.total_seconds(), deadline - anyio.current_time())
+            ):
                 return await anext(stream, None)
         except TimeoutError:
             raise TransferTimeoutError("o envio passou do prazo") from None
         finally:
-            waited_s += anyio.current_time() - asked
+            elapsed_s = anyio.current_time() - started
 
     received = 0
     while (chunk := anyio.from_thread.run(next_chunk)) is not None:
         if not chunk:
             continue
         received += len(chunk)
-        if is_below_min_rate(received, waited_s, timeouts):
+        if is_below_min_rate(received, elapsed_s, timeouts):
             raise TransferTimeoutError("o envio ficou abaixo da vazão mínima")
         yield chunk
 

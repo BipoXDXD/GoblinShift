@@ -107,18 +107,20 @@ async def consume(
 
 
 @pytest.mark.anyio
-async def test_piso_de_vazao_nao_cobra_o_tempo_do_servidor_entre_os_pedacos() -> None:
-    # O cliente manda 100 B a cada 10 ms (10 KB/s), cinco vezes o piso; o servidor gasta 100 ms
-    # em cada pedaço, e pelo relógio a média ficaria em ~900 B/s, abaixo do piso.
+async def test_piso_de_vazao_conta_pelo_relogio_e_nao_so_pela_espera_do_cliente() -> None:
+    # O cliente manda 1 B a cada 1 ms e o servidor gasta 10 ms em cada pedaço: pela espera o envio
+    # pareceria ter 1 KB/s, mas pelo relógio entram ~90 B/s, abaixo do piso. Pedaços minúsculos
+    # não podem esconder um envio lento atrás do tempo do servidor e segurar a vaga.
     timeouts = TransferTimeouts(
         total=timedelta(seconds=10),
         idle=timedelta(seconds=10),
-        min_rate_bytes_per_s=2000,
-        min_rate_grace=timedelta(milliseconds=20),
+        min_rate_bytes_per_s=500,
+        min_rate_grace=timedelta(milliseconds=50),
     )
-    request = StreamedRequest([b"x" * 100] * 10, pause_s=0.01, pause_before_end_s=0)
+    request = StreamedRequest([b"x"] * 100, pause_s=0.001, pause_before_end_s=0)
 
-    assert await consume(request, timeouts, work_per_chunk_s=0.1) == 1000
+    with pytest.raises(TransferTimeoutError):
+        await consume(request, timeouts, work_per_chunk_s=0.01)
 
 
 @pytest.mark.anyio
