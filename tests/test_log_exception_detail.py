@@ -25,6 +25,7 @@ from goblinshift.platform.settings import MissingSecretError
 from goblinshift.platform.telemetry import (
     UVICORN_ERROR_LOGGER,
     UserHasher,
+    add_correlation_ids,
     configure_logging,
     exception_fields,
     omit_exception_detail,
@@ -241,6 +242,14 @@ def test_configure_logging_liga_o_filtro_no_root_e_no_uvicorn() -> None:
 
     assert omit_exception_detail in logging.getLogger().handlers[0].filters
     assert omit_exception_detail in logging.getLogger(UVICORN_ERROR_LOGGER).filters
+
+
+@pytest.mark.usefixtures("restore_logging")
+def test_configure_logging_liga_os_ids_de_correlacao_no_root_e_no_uvicorn() -> None:
+    configure_logging()
+
+    assert add_correlation_ids in logging.getLogger().handlers[0].filters
+    assert add_correlation_ids in logging.getLogger(UVICORN_ERROR_LOGGER).filters
 
 
 # Fronteiras que registram exceções fora do banco ---------------------------------------------

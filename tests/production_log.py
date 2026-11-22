@@ -1,7 +1,8 @@
 """O handler de produção dos logs, para testes que leem a saída inteira dele.
 
-`production_handler` monta o que `configure_logging` põe no root (o `JsonFormatter` com o filtro
-`omit_exception_detail`), escrevendo num buffer. As fixtures são registradas em `tests/conftest.py`.
+`production_handler` monta o que `configure_logging` põe no root (o `JsonFormatter` com os filtros
+`omit_exception_detail` e `add_correlation_ids`), escrevendo num buffer. As fixtures são
+registradas em `tests/conftest.py`.
 """
 
 import io
@@ -11,7 +12,11 @@ from collections.abc import Callable, Iterator
 
 import pytest
 
-from goblinshift.platform.telemetry import JsonFormatter, omit_exception_detail
+from goblinshift.platform.telemetry import (
+    JsonFormatter,
+    add_correlation_ids,
+    omit_exception_detail,
+)
 
 
 def production_handler(stream: io.StringIO) -> logging.Handler:
@@ -19,6 +24,7 @@ def production_handler(stream: io.StringIO) -> logging.Handler:
     handler = logging.StreamHandler(stream)
     handler.setFormatter(JsonFormatter())
     handler.addFilter(omit_exception_detail)
+    handler.addFilter(add_correlation_ids)
     return handler
 
 

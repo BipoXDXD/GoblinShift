@@ -4,6 +4,7 @@ Os traces só são exportados quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definid
 endpoint, o nome do serviço e os headers seguem as variáveis padrão do OpenTelemetry.
 """
 
+import contextlib
 import errno
 import hashlib
 import hmac
@@ -17,6 +18,7 @@ import sys
 import threading
 import traceback
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -38,7 +40,16 @@ from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
-from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, get_current_span
+from opentelemetry.trace import (
+    NoOpTracer,
+    Span,
+    Status,
+    StatusCode,
+    Tracer,
+    format_span_id,
+    format_trace_id,
+    get_current_span,
+)
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -130,9 +141,17 @@ _FIELD_NAME = re.compile(r"[a-z][a-z0-9_.]{0,63}")
 # Inteiro maior não é contagem nem duração, o OpenObserve guarda 64 bits e, acima de 4300 dígitos,
 # o `json.dumps` levanta e a linha inteira se perde.
 _MAX_INT_BITS = 64
+# Ids de correlação que o filtro `add_correlation_ids` põe no registro e o formatter copia para a
+# linha: o `request_id` liga a linha ao `X-Request-ID` e ao `#ref=` que o usuário reporta; o
+# `trace_id` e o `span_id`, ao trace.
+_CORRELATION_FIELDS = ("request_id", "trace_id", "span_id")
 # Chaves que o próprio formatter escreve: um campo de evento não as sobrescreve. O `sqlstate` não
 # está aqui porque também é campo de evento; o do registro, quando há, vence o do campo.
-_BASE_FIELDS = frozenset({"time", "level", "logger", "message", "exception", _DROPPED_FIELDS})
+_BASE_FIELDS = frozenset(
+    {"time", "level", "logger", "message", "exception", _DROPPED_FIELDS, *_CORRELATION_FIELDS}
+)
+# O `request_id` da requisição em curso; `RequestContextMiddleware` o define em volta da rota.
+_REQUEST_ID: ContextVar[str | None] = ContextVar("goblinshift_request_id", default=None)
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +170,10 @@ class JsonFormatter(logging.Formatter):
         sqlstate = getattr(record, _SQLSTATE_ATTRIBUTE, None)
         if sqlstate is not None:
             entry[_SQLSTATE_ATTRIBUTE] = sqlstate
+        for name in _CORRELATION_FIELDS:
+            value = getattr(record, name, None)
+            if value is not None:
+                entry[name] = value
         if record.exc_info:
             entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         if dropped:
@@ -193,6 +216,30 @@ def _is_json_number(value: object) -> bool:
             return value.bit_length() <= _MAX_INT_BITS
         case float():
             return math.isfinite(value)
+    return True
+
+
+@contextlib.contextmanager
+def request_id_bound(request_id: str) -> Iterator[None]:
+    """Toda linha de log escrita dentro do bloco leva este `request_id`; ao sair, volta o
+    anterior."""
+    token = _REQUEST_ID.set(request_id)
+    try:
+        yield
+    finally:
+        _REQUEST_ID.reset(token)
+
+
+def add_correlation_ids(record: logging.LogRecord) -> bool:
+    """Filtro de log: põe no registro o `request_id` da requisição e o trace e o span correntes.
+
+    Cada id só entra quando existe; fora de requisição e de span a linha sai sem eles. Os três são
+    sempre reescritos, para um `extra={"request_id": ...}` de quem registra não chegar à linha.
+    """
+    record.request_id = _REQUEST_ID.get()
+    context = get_current_span().get_span_context()
+    record.trace_id = format_trace_id(context.trace_id) if context.is_valid else None
+    record.span_id = format_span_id(context.span_id) if context.is_valid else None
     return True
 
 
@@ -334,9 +381,12 @@ def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     handler.addFilter(omit_exception_detail)
+    handler.addFilter(add_correlation_ids)
     logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
     # O Uvicorn escreve por handlers próprios, fora do root (`propagate: False`).
-    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_exception_detail)
+    uvicorn_error = logging.getLogger(UVICORN_ERROR_LOGGER)
+    uvicorn_error.addFilter(omit_exception_detail)
+    uvicorn_error.addFilter(add_correlation_ids)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a
