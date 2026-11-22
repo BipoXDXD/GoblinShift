@@ -90,6 +90,12 @@ describe("GoblinIllustration", () => {
     expect(img).toHaveAttribute("decoding", "async");
   });
 
+  it("leva a classe da silhueta, que o tema escuro usa para recortar a figura", () => {
+    render(<GoblinIllustration state="erro" rotationKey="x" />);
+
+    expect(screen.getByRole("img")).toHaveClass("goblin-silhouette");
+  });
+
   it("oferece AVIF antes do WebP, de 256 a 768 px, com sizes da caixa", () => {
     const { container } = render(<GoblinIllustration state="erro" rotationKey="x" />);
 

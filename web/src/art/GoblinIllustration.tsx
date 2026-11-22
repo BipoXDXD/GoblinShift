@@ -169,6 +169,10 @@ export function GoblinCast(): ReactElement {
   );
 }
 
+/**
+ * Toda goblin desenhada passa por aqui, com `goblin-silhouette`: no tema escuro o token põe um fio
+ * de luz e um halo atrás da figura, para roupa e cabelo pretos não sumirem no cartão (tokens.css).
+ */
 interface GoblinPictureProps {
   readonly goblin: Goblin;
   readonly alt: string;
@@ -197,7 +201,7 @@ function GoblinPicture({
         height={HEIGHT_PX}
         loading="lazy"
         decoding="async"
-        className={`object-contain ${imgClassName}`}
+        className={`goblin-silhouette object-contain ${imgClassName}`}
       />
     </picture>
   );
