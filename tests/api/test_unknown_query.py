@@ -2,12 +2,14 @@
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
+from fastapi import APIRouter, Depends, FastAPI, Query
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api.query_guard import reject_unknown_query
 from goblinshift.files.storage import FileStorage
 from tests.api.support import assert_problem
 from tests.identity.support import new_key
@@ -42,6 +44,10 @@ def csv_command(
         "input_upload_ids": [str(upload_id) for upload_id in inputs],
         "parameters": {},
     }
+
+
+def page_probe(probe: Annotated[str | None, Query(alias="sonda-de-pagina")] = None) -> str | None:
+    return probe
 
 
 def count_runs(factory: sessionmaker[Session]) -> int:
@@ -95,4 +101,41 @@ def test_nome_da_query_desconhecida_nao_ecoa(client: TestClient, auth: dict[str,
     ],
 )
 def test_query_desconhecida_fora_da_api_nao_e_recusada(client: TestClient, url: str) -> None:
-    assert client.get(url, follow_redirects=False).status_code != 422
+    status = client.get(url, follow_redirects=False).status_code
+
+    assert status != 422
+    assert status < 500
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{}, {"Authorization": "Bearer gs_recusada"}],
+    ids=["sem-credencial", "credencial-recusada"],
+)
+def test_sem_credencial_valida_a_query_desconhecida_recebe_401(
+    client: TestClient, headers: dict[str, str]
+) -> None:
+    # Autenticar antes de validar a entrada: quem não se identificou não aprende o contrato.
+    response = client.get(f"{RUNS}?state=failed", headers=headers)
+
+    assert_problem(response, 401, "AUTHENTICATION_REQUIRED")
+
+
+def test_query_declarada_por_dependencia_da_rota_e_aceita(
+    app: FastAPI, client: TestClient, auth: dict[str, str]
+) -> None:
+    # A rota aceita também as queries das suas dependências, pelo nome público (o alias).
+    router = APIRouter(prefix="/api/v1/_sonda", dependencies=[Depends(reject_unknown_query)])
+
+    @router.get("")
+    def probe_route(probe: Annotated[str | None, Depends(page_probe)]) -> dict[str, str | None]:
+        return {"probe": probe}
+
+    app.include_router(router)
+
+    accepted = client.get("/api/v1/_sonda?sonda-de-pagina=1", headers=auth)
+    refused = client.get("/api/v1/_sonda?probe=1", headers=auth)
+
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {"probe": "1"}
+    assert_problem(refused, 422, "VALIDATION_FAILED")
