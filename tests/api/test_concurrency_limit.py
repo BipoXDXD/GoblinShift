@@ -6,6 +6,7 @@ uvicorn fica como última barreira. A aplicação é a real, sem banco; as rotas
 evento para segurar a vaga o tempo que o teste quiser.
 """
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,7 +16,11 @@ import pytest
 from fastapi import APIRouter
 
 from goblinshift.entrypoints.api.app import create_app
-from goblinshift.entrypoints.api.concurrency import MAX_CONCURRENT_REQUESTS
+from goblinshift.entrypoints.api.concurrency import (
+    MAX_CONCURRENT_REQUESTS,
+    SATURATED_LOG_MESSAGE,
+    SATURATED_LOGGER,
+)
 from goblinshift.platform.settings import Settings
 from tests.api.support import assert_problem
 
@@ -142,3 +147,18 @@ async def test_readyz_responde_pela_propria_sonda_com_a_api_saturada(
 
     assert "simultâneas" not in response.text
     assert response.headers.get("Retry-After") != "1"
+
+
+@pytest.mark.anyio
+async def test_cada_recusa_deixa_uma_linha_para_o_sinal_de_saturacao(
+    client: httpx.AsyncClient, gate: Gate, caplog: pytest.LogCaptureFixture
+) -> None:
+    async with saturated(client, gate):
+        with caplog.at_level(logging.WARNING, logger=SATURATED_LOGGER):
+            await client.get(FAST)
+            await client.get(FAST)
+
+    assert [r.getMessage() for r in caplog.records if r.name == SATURATED_LOGGER] == [
+        SATURATED_LOG_MESSAGE,
+        SATURATED_LOG_MESSAGE,
+    ]

@@ -5,6 +5,8 @@ O uvicorn tem o próprio teto (`--limit-concurrency`, docker/app.Dockerfile), ma
 antes, no formato do contrato; o teto do uvicorn fica como última barreira.
 """
 
+import logging
+
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from goblinshift.entrypoints.api.problems import ProblemCode, problem_response
@@ -17,6 +19,11 @@ SATURATED_RETRY_AFTER_SECONDS = 1
 # As sondas respondem mesmo com a API saturada: saturada não é morta. O /readyz tem cache de 1 s e
 # zona própria no Nginx, então não pesa; recusado, o healthcheck tiraria do ar uma API viva.
 _EXEMPT_PATHS = frozenset({"/livez", "/readyz"})
+# Uma linha por recusa, que o sinal de saturação (saturation.py) soma às recusas do uvicorn: o
+# middleware recusa antes dele, e sem isto o alerta `causa-api-saturada` ficaria cego.
+SATURATED_LOGGER = __name__
+SATURATED_LOG_MESSAGE = "teto de requisições simultâneas atingido"
+logger = logging.getLogger(SATURATED_LOGGER)
 _DETAIL = "A API está no limite de requisições simultâneas; tente de novo depois do Retry-After."
 
 
@@ -38,6 +45,7 @@ class ConcurrencyLimitMiddleware:
             await self.app(scope, receive, send)
             return
         if self.active >= self.limit:
+            logger.warning(SATURATED_LOG_MESSAGE)
             response = problem_response(
                 code=ProblemCode.SERVICE_UNAVAILABLE,
                 detail=_DETAIL,

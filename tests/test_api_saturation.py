@@ -24,6 +24,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import Tracer
 
 from goblinshift.entrypoints.api.app import create_app
+from goblinshift.entrypoints.api.concurrency import SATURATED_LOG_MESSAGE, SATURATED_LOGGER
 from goblinshift.entrypoints.api.saturation import (
     REJECTED_ATTRIBUTE,
     SATURATION_SPAN,
@@ -38,6 +39,7 @@ from goblinshift.platform.settings import Settings
 from goblinshift.platform.telemetry import UVICORN_ERROR_LOGGER
 
 UVICORN_ERROR = logging.getLogger(UVICORN_ERROR_LOGGER)
+CONCURRENCY = logging.getLogger(SATURATED_LOGGER)
 # Bem acima da duração do teste: o lote do `BatchSpanProcessor` só sai pelo encerramento do
 # tracing, nunca pelo relógio do SDK.
 BATCH_DELAY_MS = "600000"
@@ -272,6 +274,19 @@ def test_api_exporta_as_recusas_do_teto_pelo_mesmo_exportador_dos_traces(
         SQLAlchemyInstrumentor().uninstrument()
 
     assert _rejections(exporter) == [1]
+
+
+def test_api_soma_as_recusas_do_proprio_teto_as_do_uvicorn(exporter: InMemorySpanExporter) -> None:
+    # O middleware recusa antes do uvicorn: sem contar as recusas dele, o alerta ficaria cego.
+    app = create_app(Settings(environment="test", db_port=1), span_exporter=exporter)
+    try:
+        with TestClient(app):
+            CONCURRENCY.warning(SATURATED_LOG_MESSAGE)
+            UVICORN_ERROR.warning(UVICORN_CONCURRENCY_MESSAGE)
+    finally:
+        SQLAlchemyInstrumentor().uninstrument()
+
+    assert _rejections(exporter) == [2]
 
 
 def test_parada_da_api_exporta_a_janela_final_antes_de_encerrar_o_tracing(

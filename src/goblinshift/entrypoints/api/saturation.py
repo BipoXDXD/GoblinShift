@@ -1,11 +1,13 @@
-"""Sinal de saturação da API: recusas do teto de concorrência do uvicorn, por janela.
+"""Sinal de saturação da API: recusas dos tetos de concorrência, por janela.
 
-Acima de `--limit-concurrency` (docker/app.Dockerfile), o uvicorn responde 503 antes do ASGI: o
-pedido não abre span, não conta em SLO nenhum e só deixa a linha `Exceeded concurrency limit.` no
-logger `uvicorn.error`, que não é exportado. O contador conta essas linhas no próprio processo, e a
-cada janela a contagem sai num span `api.saturation` com `main = true`, pelo mesmo exportador dos
-traces da API, que o alerta `causa-api-saturada` lê (deploy/openobserve/README.md). A mensagem não
-traz caminho nem cliente, e só a contagem sai.
+São dois tetos. O da aplicação (`ConcurrencyLimitMiddleware`, concurrency.py) recusa primeiro, em
+problem+json, e registra uma linha por recusa no próprio logger. Acima de `--limit-concurrency`
+(docker/app.Dockerfile), o uvicorn responde 503 antes do ASGI: o pedido não abre span, não conta em
+SLO nenhum e só deixa a linha `Exceeded concurrency limit.` no logger `uvicorn.error`, que não é
+exportado. O contador soma as linhas dos dois no próprio processo, e a cada janela a contagem sai
+num span `api.saturation` com `main = true`, pelo mesmo exportador dos traces da API, que o alerta
+`causa-api-saturada` lê (deploy/openobserve/README.md). As mensagens não trazem caminho nem
+cliente, e só a contagem sai.
 """
 
 import asyncio
@@ -17,11 +19,14 @@ from contextlib import asynccontextmanager, suppress
 
 from opentelemetry.trace import Tracer
 
+from goblinshift.entrypoints.api.concurrency import SATURATED_LOG_MESSAGE, SATURATED_LOGGER
 from goblinshift.platform.telemetry import UVICORN_ERROR_LOGGER
 
 # Texto fixo do uvicorn (h11_impl e httptools_impl); não é API pública, e
 # tests/openobserve/test_saturation_runbook.py confere que ainda é o que ele escreve.
 UVICORN_CONCURRENCY_MESSAGE = "Exceeded concurrency limit."
+_REJECTION_MESSAGES = frozenset({UVICORN_CONCURRENCY_MESSAGE, SATURATED_LOG_MESSAGE})
+_COUNTED_LOGGERS = (UVICORN_ERROR_LOGGER, SATURATED_LOGGER)
 SATURATION_SPAN = "api.saturation"
 REJECTED_ATTRIBUTE = "api.saturation.rejected"
 # Uma janela por minuto de relógio: o alerta conta os minutos com recusa, não o volume delas.
@@ -34,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConcurrencyLimitCounter(logging.Handler):
-    """Conta as recusas do teto de concorrência que o uvicorn registra.
+    """Conta as recusas dos tetos de concorrência: as do middleware e as do uvicorn.
 
     O uvicorn registra a recusa na thread do event loop, a mesma do laço que lê o contador
     (`test_recusa_real_do_uvicorn_e_contada`). O lock fica para um registro no `uvicorn.error`
@@ -50,7 +55,7 @@ class ConcurrencyLimitCounter(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            if record.getMessage() != UVICORN_CONCURRENCY_MESSAGE:
+            if record.getMessage() not in _REJECTION_MESSAGES:
                 return
             with self._count_lock:
                 self._rejected += 1
@@ -98,8 +103,9 @@ async def saturation_reporting(
     janela incompleta em vez de perdê-la.
     """
     counter = ConcurrencyLimitCounter()
-    uvicorn_error = logging.getLogger(UVICORN_ERROR_LOGGER)
-    uvicorn_error.addHandler(counter)
+    loggers = [logging.getLogger(name) for name in _COUNTED_LOGGERS]
+    for counted in loggers:
+        counted.addHandler(counter)
     task = asyncio.create_task(_report_every_window(tracer, counter, wait))
     try:
         yield
@@ -107,7 +113,8 @@ async def saturation_reporting(
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
-        uvicorn_error.removeHandler(counter)
+        for counted in loggers:
+            counted.removeHandler(counter)
         _report_safely(tracer, counter)
 
 
