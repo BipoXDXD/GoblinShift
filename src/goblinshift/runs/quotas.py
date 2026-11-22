@@ -120,27 +120,49 @@ class DailyUsage:
     input_bytes: int
     # Criação da Run mais antiga ainda na janela: base do `Retry-After` e de `resets_at`.
     oldest_run_at: datetime | None
+    # (criação, bytes de entrada) de cada Run da janela com entrada, na ordem de criação.
+    input_bytes_by_run: tuple[tuple[datetime, int], ...] = ()
 
     def resets_at(self) -> datetime | None:
         """Quando a Run mais antiga sai da janela e devolve parte da cota."""
         return None if self.oldest_run_at is None else self.oldest_run_at + QUOTA_WINDOW
+
+    def bytes_free_at(self, needed: int) -> datetime | None:
+        """Quando as Runs que saem da janela terão devolvido `needed` bytes; `None` se nunca."""
+        freed = 0
+        for created_at, size in self.input_bytes_by_run:
+            freed += size
+            if freed >= needed:
+                return created_at + QUOTA_WINDOW
+        return None
 
 
 def daily_usage(session: Session, owner_id: UUID, now: datetime) -> DailyUsage:
     """Execuções criadas em `(now - 24 h, now]` e a soma dos bytes das entradas delas.
 
     A mesma entrada usada por duas execuções conta duas vezes: a cota é de entrada processada.
+    Os bytes vêm também por Run, na ordem de criação, para saber quando a janela libera espaço.
     """
     in_window = (run.c.owner_id == owner_id) & (run.c.created_at > now - QUOTA_WINDOW)
     runs, oldest = session.execute(
         select(func.count(), func.min(run.c.created_at)).where(in_window)
     ).one()
-    input_bytes: int = session.execute(
-        select(func.coalesce(func.sum(stored_size_of(run_input.c.upload_id)), 0))
+    rows = session.execute(
+        select(run.c.created_at, func.sum(stored_size_of(run_input.c.upload_id)))
+        .select_from(run_input)
         .join(run, run.c.id == run_input.c.run_id)
         .where(in_window, run_input.c.owner_id == owner_id)
-    ).scalar_one()
-    return DailyUsage(runs=runs, input_bytes=input_bytes, oldest_run_at=oldest)
+        .group_by(run.c.id)
+        .order_by(run.c.created_at, run.c.id)
+    ).all()
+    # `sum` de bigint volta `numeric` do Postgres.
+    by_run = tuple((created_at, int(size)) for created_at, size in rows)
+    return DailyUsage(
+        runs=runs,
+        input_bytes=sum(size for _, size in by_run),
+        oldest_run_at=oldest,
+        input_bytes_by_run=by_run,
+    )
 
 
 def active_run_id(session: Session, owner_id: UUID) -> UUID | None:

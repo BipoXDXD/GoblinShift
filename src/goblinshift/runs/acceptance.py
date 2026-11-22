@@ -140,7 +140,8 @@ class ActiveRunLimitError(AcceptanceError):
 class DailyQuotaExceededError(AcceptanceError):
     """Cota diária de execuções ou de bytes de entrada (→ 429 `QUOTA_EXCEEDED`).
 
-    `retry_after` é o tempo até a Run mais antiga da janela sair dela.
+    `retry_after` é o tempo até a janela devolver o que falta: a saída da Run mais antiga, na
+    cota de execuções; na de bytes, a da Run que, somada às anteriores, libera o excesso.
     """
 
     def __init__(self, message: str, retry_after: timedelta) -> None:
@@ -438,9 +439,10 @@ def _check_input_bytes(
             "input_upload_ids",
             f"as entradas somam mais que a cota diária de {quota.input_bytes_per_24h} bytes",
         )
-    if usage.input_bytes + incoming > quota.input_bytes_per_24h:
+    excess = usage.input_bytes + incoming - quota.input_bytes_per_24h
+    if excess > 0:
         raise DailyQuotaExceededError(
-            "a entrada passa da cota diária de bytes", _until_window_frees(usage, now)
+            "a entrada passa da cota diária de bytes", _until_bytes_free(usage, excess, now)
         )
 
 
@@ -449,6 +451,14 @@ def _until_window_frees(usage: DailyUsage, now: datetime) -> timedelta:
     if resets_at is None:
         raise RuntimeError("cota diária esgotada sem execução na janela")
     return max(resets_at - now, _MIN_RETRY_AFTER)
+
+
+def _until_bytes_free(usage: DailyUsage, needed: int, now: datetime) -> timedelta:
+    free_at = usage.bytes_free_at(needed)
+    if free_at is None:
+        # Impossível: `incoming` já cabe na cota, então a janela guarda ao menos `needed` bytes.
+        raise RuntimeError("cota de bytes esgotada sem Runs que a liberem")
+    return max(free_at - now, _MIN_RETRY_AFTER)
 
 
 def _insert_run(
