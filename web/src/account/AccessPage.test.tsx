@@ -50,6 +50,13 @@ async function section(name: string): Promise<HTMLElement> {
   return screen.findByRole("region", { name });
 }
 
+/** O JSON.stringify de um Error dá "{}": o replacer expõe nome, mensagem e stack. */
+function errorAsJson(_key: string, value: unknown): unknown {
+  return value instanceof Error
+    ? { name: value.name, message: value.message, stack: value.stack }
+    : value;
+}
+
 describe("Acesso: estados da página", () => {
   it("carregando o /me", async () => {
     setup({ "GET /api/v1/me": () => null });
@@ -742,7 +749,11 @@ describe("Acesso: chave nova", () => {
 
     expect(JSON.stringify(Object.entries(localStorage))).not.toContain(CANARY);
     expect(JSON.stringify(Object.entries(sessionStorage))).not.toContain(CANARY);
-    expect(JSON.stringify(consoleCalls().map((call) => call.args))).not.toContain(CANARY);
+    const consoleText = JSON.stringify(
+      consoleCalls().map((call) => call.args),
+      errorAsJson,
+    );
+    expect(consoleText).not.toContain(CANARY);
 
     await user.click(within(reveal).getByRole("button", { name: "Já copiei" }));
     expect(screen.queryByDisplayValue(created.token)).toBeNull();

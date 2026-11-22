@@ -51,7 +51,9 @@ function setup(path: string, canary: string): void {
 /** O que o RouteFailure registrou com o rótulo, como unknown: os parâmetros do console são any[]. */
 function loggedFailures(): unknown[] {
   return consoleCalls()
-    .filter((call) => call.method === "error" && call.args[0] === LOG_LABEL)
+    .filter(
+      (call) => call.method === "error" && call.args.length === 2 && call.args[0] === LOG_LABEL,
+    )
     .map((call) => call.args[1]);
 }
 

@@ -60,7 +60,9 @@ describe("falha na própria moldura", () => {
     // O registro sai num efeito, que pode rodar depois de o aviso aparecer.
     await waitFor(() => {
       const logged = consoleCalls()
-        .filter((call) => call.method === "error" && call.args[0] === LOG_LABEL)
+        .filter(
+          (call) => call.method === "error" && call.args.length === 2 && call.args[0] === LOG_LABEL,
+        )
         .map((call) => call.args[1]);
       expect(logged).toContainEqual(expect.objectContaining({ message: CANARY }));
     });
