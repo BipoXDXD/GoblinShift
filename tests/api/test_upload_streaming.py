@@ -33,6 +33,7 @@ from tests.api.support import assert_problem
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
 WAIT_LIMIT_S = 10
+ME = "/api/v1/me"
 
 
 @pytest.fixture
@@ -89,6 +90,12 @@ async def trickle(data: bytes, interval_s: float) -> AsyncIterator[bytes]:
 def state_of(client: TestClient, auth: dict[str, str], item: dict[str, Any]) -> str:
     state: str = client.get(f"{UPLOADS}/{item['id']}", headers=auth).json()["state"]
     return state
+
+
+def reserved_bytes(client: TestClient, auth: dict[str, str]) -> int:
+    """Bytes que a conta tem reservados na cota de armazenamento, como o `/me` publica."""
+    reserved: int = client.get(ME, headers=auth).json()["usage"]["storage_reserved_bytes"]
+    return reserved
 
 
 async def test_dois_envios_concorrentes_no_mesmo_upload_um_recebe_409(
@@ -200,6 +207,7 @@ async def test_envio_abaixo_do_piso_recebe_408_antes_do_prazo_total_e_libera_a_v
     )
     _, auth = new_account(factory)
     item = create_upload(sync_client, auth, size=100)
+    assert reserved_bytes(sync_client, auth) == 64 * 1024  # o piso de reserva da intenção
 
     with anyio.fail_after(WAIT_LIMIT_S):
         response = await put_content(async_client, auth, item, trickle(b"x" * 100, 0.05))
@@ -207,6 +215,7 @@ async def test_envio_abaixo_do_piso_recebe_408_antes_do_prazo_total_e_libera_a_v
     assert_problem(response, 408, "REQUEST_TIMEOUT")
     assert state_of(sync_client, auth, item) == "failed"
     assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+    assert reserved_bytes(sync_client, auth) == 0
 
 
 async def test_envio_lento_mas_acima_do_piso_passa(
