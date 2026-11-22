@@ -77,7 +77,8 @@ class _GoblinShiftAPI(FastAPI):
 # Espera máxima por uma conexão do pool numa requisição. A autenticação abre 3 a 4 transações curtas
 # por requisição; com os 5 s das settings, um pool esgotado seguraria o pedido por até 20 s antes do
 # 503. Meio segundo basta para uma vaga voltar com tráfego normal. O worker e a manutenção mantêm o
-# `db_pool_timeout_s` das settings.
+# `db_pool_timeout_s` das settings, e as escritas que encerram uma transferência (concluir o envio,
+# devolver a vaga) repetem até ele (`retry_on_pool_timeout`): não podem perder um envio já feito.
 API_DB_POOL_TIMEOUT_S: float = 0.5
 
 

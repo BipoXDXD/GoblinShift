@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from goblinshift.entrypoints.api import artifacts as artifacts_api
+from goblinshift.files.artifacts import finish_download
 from goblinshift.files.missing import mark_missing
 from goblinshift.files.retention import expire_artifacts
 from goblinshift.files.states import TransferDirection
@@ -26,6 +28,7 @@ from tests.api.files_support import (
     occupy_slots,
     open_uses,
     publish,
+    refusing_pool,
     slot_count,
     storage_of,
     without_request_identity,
@@ -196,6 +199,22 @@ def test_download_encerra_o_uso_e_devolve_a_vaga(
 
     client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
 
+    assert (open_uses(factory), slot_count(factory)) == (0, 0)
+
+
+def test_download_encerra_o_uso_e_devolve_a_vaga_mesmo_com_o_pool_recusando(
+    app: FastAPI,
+    client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(artifacts_api, "finish_download", refusing_pool(finish_download))
+    owner, auth = new_account(factory)
+    artifact_id = publish(app, owner, b"resultado")
+
+    response = client.get(f"{ARTIFACTS}/{artifact_id}/download", headers=auth)
+
+    assert response.content == b"resultado"
     assert (open_uses(factory), slot_count(factory)) == (0, 0)
 
 

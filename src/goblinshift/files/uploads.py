@@ -46,6 +46,7 @@ from goblinshift.files.objects import request_deletion_of_unreferenced
 from goblinshift.files.states import Availability, ObjectState, UploadState
 from goblinshift.files.storage import ContentTooLargeError, FileStorage
 from goblinshift.files.tables import stored_object, upload
+from goblinshift.platform.db import retry_on_pool_timeout
 from goblinshift.processing.names import has_unsafe_char
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,7 @@ def receive_content(
     chunks: Iterable[bytes],
     *,
     clock: Callable[[], float] = time.monotonic,
+    pool_patience_s: float = 0.0,
 ) -> UploadView:
     """Grava o conteúdo de um upload `created` e o deixa `ready`.
 
@@ -208,6 +210,10 @@ def receive_content(
     bloco seguinte e falha com `UploadGoneError`, porque a retenção já pode ter liberado a reserva.
     `clock` (segundos, monotônico) mede esse prazo a partir de antes do claim, então o escritor
     não inicia bloco depois do vencimento visto pelo banco.
+
+    As transações depois da transferência (concluir, falhar, ler o resultado) esperam o pool por
+    até `pool_patience_s`: com o conteúdo já no disco, um pico curto de requisições não pode
+    derrubar o envio.
     """
     started = clock()
     with session.begin():
@@ -219,23 +225,30 @@ def receive_content(
             storage_key, _until_expiry(chunks, deadline, clock), max_bytes=expected_size
         )
     except ContentTooLargeError:
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         raise UploadContentTooLargeError(expected_size) from None
     except Exception:
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         raise
     if size != expected_size:
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         raise UploadSizeMismatchError(expected_size)
-    with session.begin():
-        completed = _complete(session, owner_id, upload_id, sha256, size)
-    if not completed:
+
+    def complete() -> bool:
+        with session.begin():
+            return _complete(session, owner_id, upload_id, sha256, size)
+
+    if not retry_on_pool_timeout(complete, patience_s=pool_patience_s):
         # Excluído ou expirado durante a transferência: o arquivo novo não tem dono.
-        _fail(session, storage, owner_id, upload_id, storage_key)
+        _fail(session, storage, owner_id, upload_id, storage_key, pool_patience_s)
         with session.begin():
             _raise_unavailable(session, owner_id, upload_id)
-    with session.begin():
-        return get_upload(session, owner_id, upload_id)
+
+    def current() -> UploadView:
+        with session.begin():
+            return get_upload(session, owner_id, upload_id)
+
+    return retry_on_pool_timeout(current, patience_s=pool_patience_s)
 
 
 def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> UploadView:
@@ -612,6 +625,7 @@ def _fail(
     owner_id: uuid.UUID,
     upload_id: uuid.UUID,
     storage_key: str,
+    pool_patience_s: float,
 ) -> None:
     """Remove o que tiver chegado ao disco e só então faz `receiving → failed` e libera a reserva.
 
@@ -620,19 +634,23 @@ def _fail(
     `pending` até a retenção remover linha e objeto.
     """
     storage.delete(storage_key)
-    with session.begin():
-        failed = session.execute(
-            update(upload)
-            .where(
-                upload.c.id == upload_id,
-                upload.c.owner_id == owner_id,
-                upload.c.state == UploadState.RECEIVING,
-            )
-            .values(state=UploadState.FAILED)
-            .returning(upload.c.id)
-        ).scalar_one_or_none()
-        if failed is not None:
-            capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
+
+    def mark_failed() -> None:
+        with session.begin():
+            failed = session.execute(
+                update(upload)
+                .where(
+                    upload.c.id == upload_id,
+                    upload.c.owner_id == owner_id,
+                    upload.c.state == UploadState.RECEIVING,
+                )
+                .values(state=UploadState.FAILED)
+                .returning(upload.c.id)
+            ).scalar_one_or_none()
+            if failed is not None:
+                capacity.release(session, holder=capacity.HolderKind.UPLOAD, holder_id=upload_id)
+
+    retry_on_pool_timeout(mark_failed, patience_s=pool_patience_s)
 
 
 def _raise_unavailable(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> NoReturn:

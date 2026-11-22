@@ -44,7 +44,7 @@ from goblinshift.files.errors import (
 from goblinshift.files.states import ArtifactRole, Availability, TransferDirection
 from goblinshift.files.storage import ObjectMissingError, ObjectTamperedError
 from goblinshift.files.transfers import acquire_transfer_slot, release_transfer_slot
-from goblinshift.platform.db import unit_of_work
+from goblinshift.platform.db import retry_on_pool_timeout, unit_of_work
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,9 @@ def download_artifact(
         raise _artifact_problem(error) from None
 
     factory: sessionmaker[Session] = request.app.state.session_factory
-    finish = partial(_finish_download, factory, ticket, slot_id)
+    # O fim do download espera o pool pelo prazo das settings, não pelo da API (app.py).
+    patience_s: float = request.app.state.settings.db_pool_timeout_s
+    finish = partial(_finish_download, factory, ticket, slot_id, patience_s)
     try:
         file = storage.open(ticket.storage_key)
         same_size = _has_registered_size(file, ticket)
@@ -223,15 +225,21 @@ def _has_registered_size(file: BinaryIO, ticket: DownloadTicket) -> bool:
         raise
 
 
-def _finish_download(factory: sessionmaker[Session], ticket: DownloadTicket, slot_id: UUID) -> None:
+def _finish_download(
+    factory: sessionmaker[Session], ticket: DownloadTicket, slot_id: UUID, patience_s: float
+) -> None:
     """Encerra o uso e devolve a vaga; repetir é no-op nas duas operações.
 
-    Se o banco falhar aqui, o erro sobe e é registrado com o `request_id`; a vaga vence sozinha
-    e o uso aberto só atrasa a remoção física do objeto.
+    Espera o pool por até `patience_s`. Se o banco falhar aqui, o erro sobe e é registrado com o
+    `request_id`; a vaga vence sozinha e o uso aberto só atrasa a remoção física do objeto.
     """
-    with unit_of_work(factory) as session:
-        finish_download(session, ticket)
-        release_transfer_slot(session, slot_id)
+
+    def finish() -> None:
+        with unit_of_work(factory) as session:
+            finish_download(session, ticket)
+            release_transfer_slot(session, slot_id)
+
+    retry_on_pool_timeout(finish, patience_s=patience_s)
 
 
 def _artifact_problem(error: FilesError) -> ApiProblem:
