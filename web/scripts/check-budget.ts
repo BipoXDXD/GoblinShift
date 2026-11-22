@@ -36,7 +36,7 @@ const LIMITS_KB = {
   /**
    * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
    * Rúbia, a imagem estática dela em AVIF e as miniaturas do seletor. A conta usa a de 960 px, a
-   * maior do `srcset` (oficina3d/cast.ts), que o palco de 448 px baixa em tela 2×. Medido em
+   * maior do `srcset` (oficina3d/cast.ts), que o palco de 384 px baixa em tela 2× (768 px pedem a de 960). Medido em
    * 2026-11-22: chunk 159 KB gzip + Rúbia 7309 KB + imagem 58 KB + seis miniaturas 48 KB =
    * 7574 KB. Teto = teto da Rúbia (8192) + 10% sobre o resto (265 KB), arredondado para cima em
    * múltiplos de 64 KB.

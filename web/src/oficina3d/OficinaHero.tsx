@@ -49,7 +49,8 @@ export interface SceneModule {
 
 /** `imagem` antes e no lugar da cena; `falhou` também mostra a imagem, que é o fallback. */
 type HeroState = "imagem" | "carregando" | "pronto" | "falhou";
-type MountState = "imagem" | "carregando" | "montado" | "falhou";
+/** `sem-cena`: economia de dados, movimento reduzido ou sem WebGL 2 na hora da carga; a imagem fica. */
+type MountState = "imagem" | "sem-cena" | "carregando" | "montado" | "falhou";
 
 /** O resultado da última carga de modelo, de qual goblin. */
 interface ModelResult {
@@ -67,8 +68,8 @@ interface OficinaHeroProps {
 /** Só dão a proporção 4:5 da caixa reservada; o tamanho na tela vem das classes do palco. */
 const POSTER_WIDTH_PX = 640;
 const POSTER_HEIGHT_PX = 800;
-/** Acompanha a largura do palco: 288 px no celular, 320 px a partir de 768 e 448 a partir de 1024. */
-const POSTER_SIZES = "(min-width: 1024px) 448px, (min-width: 768px) 320px, 288px";
+/** Acompanha a largura do palco: 288 px no celular, 320 px a partir de 768 e 384 a partir de 1024. */
+const POSTER_SIZES = "(min-width: 1024px) 384px, (min-width: 768px) 320px, 288px";
 const THUMBNAIL_WIDTH_PX = 192;
 const THUMBNAIL_HEIGHT_PX = 240;
 /**
@@ -125,6 +126,7 @@ export function OficinaHero({
     let mounted: SceneHandle | null = null;
     const start = async (): Promise<void> => {
       if (!shouldLoad3D(environment)) {
+        setMount("sem-cena");
         return;
       }
       setMount("carregando");
@@ -191,8 +193,11 @@ export function OficinaHero({
   const member = castMember(selected);
   const sceneShown = state === "pronto";
   // A imagem fica sem o halo do tema enquanto a cena pode chegar, para não saltar na troca; quando
-  // ela é o que fica (movimento reduzido ou falha), ganha o halo como as goblins dos estados.
-  const posterIsFinal = state === "falhou" || (mount === "imagem" && reducedMotion);
+  // ela é o que fica (sem cena, movimento reduzido ou falha), ganha o halo como as goblins dos
+  // estados. Enquanto a troca pode acontecer, a imagem também fica a 93%: a cena enquadra com folga
+  // para o giro e mostra a goblin ~7% menor que o recorte rente da imagem (medido nas seis).
+  const posterIsFinal =
+    state === "falhou" || mount === "sem-cena" || (mount === "imagem" && reducedMotion);
 
   const onStageKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (handle === null) {
@@ -213,7 +218,7 @@ export function OficinaHero({
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-72 shrink-0 flex-col items-center gap-4 md:mx-0 md:max-w-xs lg:max-w-md">
+    <div className="mx-auto flex w-full max-w-72 shrink-0 flex-col items-center gap-4 md:mx-0 md:max-w-xs lg:max-w-sm">
       <div
         data-oficina-3d={state}
         data-goblin={selected}
@@ -226,7 +231,7 @@ export function OficinaHero({
               onKeyDown: onStageKey,
             }
           : {})}
-        className="relative aspect-4/5 w-full max-w-72 rounded-lg md:max-w-xs lg:max-w-md"
+        className="relative aspect-4/5 w-full max-w-72 rounded-lg md:max-w-xs lg:max-w-sm"
       >
         <picture>
           <source type="image/avif" srcSet={member.avif} sizes={POSTER_SIZES} />
@@ -238,7 +243,7 @@ export function OficinaHero({
             height={POSTER_HEIGHT_PX}
             fetchPriority="high"
             decoding="async"
-            className={`size-full object-contain motion-safe:transition-opacity ${sceneShown ? "opacity-0" : "opacity-100"} ${posterIsFinal ? "goblin-silhouette" : ""}`}
+            className={`size-full object-contain motion-safe:transition-opacity ${sceneShown ? "opacity-0" : "opacity-100"} ${posterIsFinal ? "goblin-silhouette" : "scale-93"}`}
           />
         </picture>
         <div
@@ -348,6 +353,10 @@ function StepButton({ label, Icon, onStep }: StepButtonProps): ReactElement {
 }
 
 function heroStateOf(mount: MountState, model: ModelResult | null, selected: CastId): HeroState {
+  if (mount === "sem-cena") {
+    // Para o E2E e o CSS, é a mesma imagem de antes da carga.
+    return "imagem";
+  }
   if (mount !== "montado") {
     return mount;
   }

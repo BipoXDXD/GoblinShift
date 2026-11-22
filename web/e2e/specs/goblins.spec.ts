@@ -163,12 +163,63 @@ test("Créditos: as seis goblins do elenco, com nome e imagem carregada", async 
   await expectFitsDeviceWidth(page);
 });
 
-// O palco grande é `lg:` (448 × 560); no celular de 360 px ele ocupa a coluna (280 × 350).
+// O palco grande é `lg:` (384 × 480); no celular de 360 px ele ocupa a coluna (280 × 350). O
+// degrau de 448 × 560 saiu: a 1280 × 800 empurrava as receitas 80 px para longe da dobra.
 test("Oficina: o palco aparece em destaque, sem rolagem lateral", async ({ page }, info) => {
   await usePhoneWidth(page, info.project.name);
   await page.goto("/");
 
-  const box = await page.locator("[data-oficina-3d]").boundingBox();
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(info.project.name === "mobile" ? 340 : 540);
+  const height = (await page.locator("[data-oficina-3d]").boundingBox())?.height ?? 0;
+  if (info.project.name === "mobile") {
+    expect(height).toBeGreaterThanOrEqual(340);
+  } else {
+    expect(height).toBeGreaterThanOrEqual(470);
+    expect(height).toBeLessThanOrEqual(490);
+  }
   await expectFitsDeviceWidth(page);
 });
+
+// No desktop o palco é alto: o título começa na altura do topo dele, sem boiar no meio da coluna.
+test("Oficina: o título acompanha o topo do palco", async ({ page }, info) => {
+  await usePhoneWidth(page, info.project.name);
+  await page.goto("/");
+
+  const title = await page.getByRole("heading", { level: 1 }).boundingBox();
+  const stage = await page.locator("[data-oficina-3d]").boundingBox();
+  const titleTop = title?.y ?? Number.NaN;
+  const stageTop = stage?.y ?? Number.NaN;
+  if (info.project.name === "mobile") {
+    expect(titleTop + (title?.height ?? 0)).toBeLessThanOrEqual(stageTop);
+  } else {
+    expect(Math.abs(titleTop - stageTop)).toBeLessThanOrEqual(16);
+  }
+});
+
+// O `sizes` do palco acompanha a caixa: a tela 1× baixa a largura que cobre o palco, e a 2×, o
+// dobro. Com movimento reduzido a cena não vem, e a imagem estática é o que se mede.
+const POSTER_WIDTH = {
+  desktop: { 1: 384, 2: 960 },
+  mobile: { 1: 384, 2: 640 },
+} as const;
+
+for (const scale of [1, 2] as const) {
+  test.describe(`em tela ${String(scale)}×`, () => {
+    test.use({ deviceScaleFactor: scale });
+
+    test("Oficina: a imagem estática baixa a menor largura que cobre o palco", async ({
+      page,
+    }, info) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await usePhoneWidth(page, info.project.name);
+      await page.goto("/");
+
+      const project = info.project.name === "mobile" ? "mobile" : "desktop";
+      const expected = POSTER_WIDTH[project][scale];
+      const image = page.locator("[data-oficina-3d] img");
+      await expect
+        .poll(() => image.evaluate((img: HTMLImageElement) => img.currentSrc))
+        // Sem o prefixo: a de 384 px é idêntica à do estado, e o Vite emite uma só, `rubia-384w`.
+        .toMatch(new RegExp(`rubia-${String(expected)}w-[^/]*\\.(avif|webp)$`));
+    });
+  });
+}

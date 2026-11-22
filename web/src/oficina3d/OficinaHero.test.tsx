@@ -178,7 +178,7 @@ describe("OficinaHero", () => {
       expect(source.getAttribute("srcset")).toMatch(/-960w\.\w+ 960w$/);
       expect(source).toHaveAttribute(
         "sizes",
-        "(min-width: 1024px) 448px, (min-width: 768px) 320px, 288px",
+        "(min-width: 1024px) 384px, (min-width: 768px) 320px, 288px",
       );
     }
   });
@@ -191,10 +191,41 @@ describe("OficinaHero", () => {
     expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("goblin-silhouette");
   });
 
+  it.each([
+    ["com economia de dados", { ...READY, savesData: () => true }],
+    ["sem WebGL 2", { ...READY, supportsWebGL2: () => false }],
+  ])("%s, a cena não vem e a imagem estática ganha a silhueta do tema", async (_, environment) => {
+    const loadScene = vi.fn(() => fakeScene().loadScene());
+    const { container } = render(
+      <OficinaHero environment={environment} whenPageIdle={runNow} loadScene={loadScene} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("goblin-silhouette");
+    });
+    expect(loadScene).not.toHaveBeenCalled();
+    expect(heroState(container)).toBe("imagem");
+  });
+
   it("enquanto a cena pode chegar, a imagem estática fica sem a silhueta", () => {
     render(<OficinaHero environment={READY} whenPageIdle={never} />);
 
     expect(screen.getByRole("img", { name: /^Rúbia/ })).not.toHaveClass("goblin-silhouette");
+  });
+
+  // A cena enquadra a goblin com folga para o giro; a imagem, recortada rente, saía ~7% maior
+  // (medido nas seis, de 0,92 a 0,95 da altura). Reduzida enquanto a troca pode acontecer, a
+  // troca não dá salto; quando a imagem é o que fica, volta ao tamanho cheio.
+  it("enquanto a cena pode chegar, a imagem estática fica na escala da cena", () => {
+    render(<OficinaHero environment={READY} whenPageIdle={never} />);
+
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).toHaveClass("scale-93");
+  });
+
+  it("quando a imagem é o que fica, ela ocupa a caixa inteira", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    expect(screen.getByRole("img", { name: /^Rúbia/ })).not.toHaveClass("scale-93");
   });
 
   it("o seletor tem as seis goblins, na ordem do elenco, com a Rúbia escolhida", () => {
