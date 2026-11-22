@@ -101,7 +101,30 @@ describe("guard de console", () => {
     startConsoleGuard();
   });
 
+  it("objeto circular sem protótipo entra na mensagem sem derrubar o guard", () => {
+    const bare: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+    bare["self"] = bare;
+    console.error("circular:", bare);
+    expect(stopConsoleGuard()).toEqual(["console.error sem liberação: circular: [object Object]"]);
+    startConsoleGuard();
+  });
+
+  it("DOMException entra com nome e mensagem, como Error", () => {
+    console.error(new DOMException("operação abortada", "AbortError"));
+    expect(stopConsoleGuard()).toEqual([
+      "console.error sem liberação: AbortError: operação abortada",
+    ]);
+    startConsoleGuard();
+  });
+
+  it("%% vira % e não consome argumento, como no util.format", () => {
+    console.warn("100%% de %s", "uso");
+    expect(stopConsoleGuard()).toEqual(["console.warn sem liberação: 100% de uso"]);
+    startConsoleGuard();
+  });
+
   it("espião do Vitest restaurado não tira o guard do próximo start", () => {
+    // eslint-disable-next-line no-restricted-syntax -- o espião direto é o cenário sob teste aqui
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.restoreAllMocks();
     stopConsoleGuard();
@@ -110,6 +133,17 @@ describe("guard de console", () => {
     expect(consoleCalls()).toEqual([{ method: "error", args: ["depois do espião"] }]);
     stopConsoleGuard();
     startConsoleGuard();
+  });
+
+  it("start com o guard já ativo avisa e recomeça do zero", () => {
+    console.log("gravado");
+    const warnings: string[] = [];
+    startConsoleGuard((message) => {
+      warnings.push(message);
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/guard de console já estava ativo/);
+    expect(consoleCalls()).toEqual([]);
   });
 
   it("start zera o que foi gravado antes", () => {

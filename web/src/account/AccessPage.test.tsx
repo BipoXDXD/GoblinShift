@@ -1,10 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { apiKeyBody, KEY_ID, meBody, SECOND_KEY_ID } from "../test/account";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
+import { consoleCalls } from "../test/consoleGuard";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { expectHeadingFocused, recordDescriptionOnFocus } from "../test/focus";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
@@ -47,6 +48,13 @@ function sent(requests: readonly Request[], route: string): Request[] {
 
 async function section(name: string): Promise<HTMLElement> {
   return screen.findByRole("region", { name });
+}
+
+/** O JSON.stringify de um Error dá "{}": o replacer expõe nome, mensagem e stack. */
+function errorAsJson(_key: string, value: unknown): unknown {
+  return value instanceof Error
+    ? { name: value.name, message: value.message, stack: value.stack }
+    : value;
 }
 
 describe("Acesso: estados da página", () => {
@@ -723,12 +731,6 @@ describe("Acesso: chave nova", () => {
   });
 
   it("o segredo não vai para o storage nem para o console e some com Já copiei", async () => {
-    const logged: unknown[] = [];
-    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
-      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
-        logged.push(args);
-      });
-    }
     const { user, queryClient } = setup({
       "POST /api/v1/api-keys": () => jsonResponse(created, 201),
     });
@@ -747,7 +749,11 @@ describe("Acesso: chave nova", () => {
 
     expect(JSON.stringify(Object.entries(localStorage))).not.toContain(CANARY);
     expect(JSON.stringify(Object.entries(sessionStorage))).not.toContain(CANARY);
-    expect(JSON.stringify(logged)).not.toContain(CANARY);
+    const consoleText = JSON.stringify(
+      consoleCalls().map((call) => call.args),
+      errorAsJson,
+    );
+    expect(consoleText).not.toContain(CANARY);
 
     await user.click(within(reveal).getByRole("button", { name: "Já copiei" }));
     expect(screen.queryByDisplayValue(created.token)).toBeNull();

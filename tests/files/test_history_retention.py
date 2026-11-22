@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import Table, func, select, update
+from sqlalchemy import Table, func, insert, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.objects import hold, release
@@ -21,14 +21,14 @@ from goblinshift.files.retention import (
     delete_old_file_rows,
     file_backlog,
 )
-from goblinshift.files.states import HolderKind, ObjectState
+from goblinshift.files.states import ArtifactRole, HolderKind, ObjectState
 from goblinshift.files.storage import FileStorage
-from goblinshift.files.tables import object_use, stored_object, upload
+from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.files.uploads import request_deletion
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.retention import HISTORY_REFERENCES
 from goblinshift.runs.store import db_now
-from tests.files.support import create_user, ready_upload
+from tests.files.support import create_intent, create_user, ready_upload
 
 pytestmark = pytest.mark.integration
 
@@ -271,4 +271,95 @@ def test_backlog_de_files(factory: sessionmaker[Session], storage: FileStorage) 
     with factory() as session:
         backlog = file_backlog(session, now)
 
-    assert backlog == {"uploads_to_anonymize": 2, "uploads_to_delete": 1}
+    assert backlog == {
+        "uploads_to_anonymize": 2,
+        "uploads_to_delete": 1,
+        "incomplete_uploads_to_expire": 0,
+        "artifacts_to_expire": 0,
+        "objects_to_purge": 0,
+    }
+
+
+def incomplete_upload(factory: sessionmaker[Session], expires_at: datetime) -> None:
+    view = create_intent(factory, create_user(factory, f"conta-{uuid.uuid4()}"))
+    with unit_of_work(factory) as session:
+        session.execute(update(upload).where(upload.c.id == view.id).values(expires_at=expires_at))
+
+
+def stored(factory: sessionmaker[Session], owner: uuid.UUID, state: ObjectState) -> uuid.UUID:
+    """Objeto com conteúdo conhecido, inserido direto: só a linha importa para a contagem."""
+    with unit_of_work(factory) as session:
+        object_id: uuid.UUID = session.execute(
+            insert(stored_object)
+            .values(
+                owner_id=owner,
+                storage_key=f"objects/{uuid.uuid4()}",
+                state=state,
+                sha256=bytes(32),
+                size_bytes=3,
+            )
+            .returning(stored_object.c.id)
+        ).scalar_one()
+    return object_id
+
+
+def published(
+    factory: sessionmaker[Session], expires_at: datetime, *, deleted: bool = False
+) -> None:
+    owner = create_user(factory, f"conta-{uuid.uuid4()}")
+    object_id = stored(factory, owner, ObjectState.COMMITTED)
+    with unit_of_work(factory) as session:
+        session.execute(
+            insert(artifact).values(
+                owner_id=owner,
+                object_id=object_id,
+                role=ArtifactRole.OUTPUT,
+                file_name="saida.csv",
+                expires_at=expires_at,
+                deleted_at=func.now() if deleted else None,
+            )
+        )
+
+
+def test_backlog_de_files_conta_vencidos_e_pedidos_de_exclusao(
+    factory: sessionmaker[Session],
+) -> None:
+    now = now_of(factory)
+    incomplete_upload(factory, now)  # vence exatamente agora: conta
+    incomplete_upload(factory, now + SECOND)  # ainda no prazo
+    published(factory, now)  # vence exatamente agora: conta
+    published(factory, now + SECOND)  # ainda no prazo
+    published(factory, now - SECOND, deleted=True)  # já expirado pela retenção
+    owner = create_user(factory, f"conta-{uuid.uuid4()}")
+    stored(factory, owner, ObjectState.DELETE_REQUESTED)
+    stored(factory, owner, ObjectState.DELETED)
+
+    with factory() as session:
+        backlog = file_backlog(session, now)
+
+    assert backlog == {
+        "uploads_to_anonymize": 0,
+        "uploads_to_delete": 0,
+        "incomplete_uploads_to_expire": 1,
+        "artifacts_to_expire": 1,
+        "objects_to_purge": 1,
+    }
+
+
+def test_incompleto_cancelado_antes_do_prazo_entra_no_acumulo(
+    factory: sessionmaker[Session],
+) -> None:
+    """A expiração também leva o incompleto que o dono excluiu, mesmo dentro do prazo."""
+    now = now_of(factory)
+    view = create_intent(factory, create_user(factory, f"conta-{uuid.uuid4()}"))
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.id == view.id)
+            .values(expires_at=now + timedelta(hours=1), deleted_at=now)
+        )
+
+    with factory() as session:
+        backlog = file_backlog(session, now)
+
+    assert backlog["incomplete_uploads_to_expire"] == 1

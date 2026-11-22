@@ -9,8 +9,10 @@ Lease vencido não prova que o executor morreu: antes de reagendar, o Runner é 
 nome; executor vivo recebe `stop`, e só a confirmação do término libera a decisão. Sem
 confirmação, ou com o Runner fora do ar (`executor-ctl` parado), a execução fica como está
 (reserva física conservada) até o próximo ciclo: nada é reagendado sem ser inspecionado. O
-`stop` só sai se o lease, relido numa transação curta e sem trava logo antes, ainda estiver
-vencido: um worker pausado que voltou e renovou não perde o executor.
+`stop` só sai se a tentativa, relida numa transação curta e sem trava logo antes, ainda estiver
+aberta e vencida. Lease vencido é definitivo: o worker não o renova (`LostFencing`), e o worker
+pausado que volta abandona a tentativa em vez de disputá-la. A janela entre a releitura e o
+`stop` encolhe, mas não some (ver `_lease_still_expired`).
 
 O executor e a área de trabalho só são removidos depois de a decisão estar no banco. Se a remoção
 falhar, a limpeza das áreas (`sweep_work_areas`) a repete nos ciclos seguintes: o `executor-ctl`
@@ -32,6 +34,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift import capacity
+from goblinshift.files import retention as file_retention
 from goblinshift.files.candidates import attempts_with_loose_candidates, discard_candidates
 from goblinshift.files.limits import EXPIRY_BATCH_SIZE, STALE_TEMPORARY_TTL
 from goblinshift.files.missing import (
@@ -40,19 +43,10 @@ from goblinshift.files.missing import (
     sweep_missing_objects,
 )
 from goblinshift.files.objects import holders_with_open_uses, release_expired_downloads
-from goblinshift.files.retention import (
-    anonymize_deleted_uploads,
-    delete_old_file_rows,
-    expire_artifacts,
-    expire_incomplete_uploads,
-    expire_unused_uploads,
-    file_backlog,
-    purge_deleted_objects,
-    reconcile_capacity,
-    remove_file_after_commit,
-)
+from goblinshift.files.retention import file_backlog, remove_file_after_commit
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
+from goblinshift.runs import retention as run_retention
 from goblinshift.runs.lifecycle import (
     TERMINAL_STATUSES,
     DeadlineExceeded,
@@ -64,14 +58,7 @@ from goblinshift.runs.lifecycle import (
     Status,
     decide_transition,
 )
-from goblinshift.runs.retention import (
-    HISTORY_REFERENCES,
-    anonymize_finished_runs,
-    anonymize_output_names,
-    delete_expired_idempotency_records,
-    delete_old_runs,
-    history_backlog,
-)
+from goblinshift.runs.retention import HISTORY_REFERENCES, history_backlog
 from goblinshift.runs.store import (
     ACTIVE_STATUSES,
     Applied,
@@ -263,6 +250,11 @@ class Maintenance:
         # Candidatos que ficaram no disco no ciclo em curso. Em atributo porque vêm de vários
         # passos, por `_decide`, cujo retorno já é a transição.
         self._candidates_left_on_disk = 0
+        # Arquivos que a retenção tirou de uso e não conseguiu remover do disco no ciclo em curso.
+        # Em atributo porque vêm de dois passos (uploads incompletos e expurgo): a contagem de um
+        # não some se o outro falhar. Com o banco já confirmado, nada repete a remoção: o alerta de
+        # causa lê isto (3.7).
+        self._files_left_on_disk = 0
 
     def run_cycle(self, should_stop: Callable[[], bool] = _never) -> dict[str, int]:
         """Um ciclo completo; devolve as contagens do evento amplo da manutenção (3.7).
@@ -271,6 +263,9 @@ class Maintenance:
         para prazo, retenção, expurgo e medidores; as contagens do passo que falhou ficam fora do
         evento, exceto as que o passo leva em `_StepFailedWithCountsError`: a varredura de
         ausentes, mesmo na perda de conexão, e os downloads já encerrados pelos usos órfãos.
+        Cada sub-etapa da retenção é um passo: um `statement_timeout` que se repete numa delas a
+        cada ciclo não leva as outras junto. Pelo mesmo isolamento, a reconciliação de capacidade
+        roda mesmo com o expurgo falho; quando ele conclui, ela já vê o que ele liberou.
         Falha de conexão (banco inalcançável) pula os passos de banco restantes da volta, que só
         esperariam o `connect_timeout` de novo, mas não a limpeza de temporários, que só usa o
         storage; `should_stop` (a parada pedida por sinal) é conferido antes de cada passo. Os
@@ -283,6 +278,7 @@ class Maintenance:
         """
         started = time.monotonic()
         self._candidates_left_on_disk = 0
+        self._files_left_on_disk = 0
         outcome = _CycleOutcome()
         for step in self._cycle_steps(should_stop):
             if should_stop():
@@ -293,6 +289,7 @@ class Maintenance:
                 outcome.run(step)
         counts = outcome.finish()
         counts["candidates_left_on_disk"] = self._candidates_left_on_disk
+        counts["purge_files_not_removed"] = self._files_left_on_disk
         fields: dict[str, object] = {"main": True, **counts}
         fields["duration_ms"] = round((time.monotonic() - started) * 1000)
         logger.info("ciclo de manutenção", extra={"fields": fields})
@@ -315,7 +312,22 @@ class Maintenance:
                 "sweep_work_areas",
                 lambda: {"work_areas_removed": self.sweep_work_areas(should_stop=should_stop)},
             ),
-            _Step("apply_retention", self.apply_retention),
+            # Retenção (1.7), uma sub-etapa por passo.
+            _Step("expire_incomplete_uploads", self.expire_incomplete_uploads),
+            _Step("expire_unused_uploads", self.expire_unused_uploads),
+            _Step("expire_artifacts", self.expire_artifacts),
+            _Step("purge_deleted_objects", self.purge_deleted_objects),
+            # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
+            _Step("reconcile_capacity", self.reconcile_capacity),
+            # A ordem importa: a Run sai antes das linhas de arquivos que o histórico dela
+            # referencia, e as linhas de arquivos só saem depois do arquivo no disco.
+            _Step("delete_expired_idempotency_records", self.delete_expired_idempotency_records),
+            _Step("anonymize_finished_runs", self.anonymize_finished_runs),
+            _Step("anonymize_output_names", self.anonymize_output_names),
+            _Step("anonymize_deleted_uploads", self.anonymize_deleted_uploads),
+            _Step("delete_old_runs", self.delete_old_runs),
+            _Step("delete_old_file_rows", self.delete_old_file_rows),
+            _Step("delete_released_reservations", self.delete_released_reservations),
             # Só o storage: segue mesmo com o banco fora.
             _Step("sweep_temporary_parts", self.sweep_temporary_parts, uses_database=False),
             _Step("mark_missing_objects", self.mark_missing_objects),
@@ -440,8 +452,12 @@ class Maintenance:
         """Relê a tentativa antes do `stop`: ainda aberta, de Run ativa e com o lease vencido.
 
         Leitura simples, sem `FOR UPDATE`, numa transação que termina antes da chamada ao
-        Runner. Não fecha a janela inteira (o worker pode renovar entre esta leitura e o `stop`),
-        só a encurta; quem decide depois continua sendo o fencing de `_lease_event`.
+        Runner. Lease vencido não se renova (`renew_lease` levanta `LostFencing`), então o
+        worker não desfaz esta releitura renovando. Ela ainda pode ficar falsa antes do `stop`:
+        outra manutenção decide a tentativa, ou o worker grava o desfecho de um executor que
+        terminou sozinho (`Coordinator.supervise` devolve o fim sem renovar).
+        Nos dois casos o `stop` cai num executor já encerrado, e o fencing de `_lease_event`
+        recusa decidir de novo.
 
         A geração não é conferida: ela só sobe no claim, que exige a Run em `queued` ou
         `retry_wait`, e só se chega a `retry_wait` encerrando a tentativa viva; com o índice
@@ -465,7 +481,7 @@ class Maintenance:
             return None
         if loaded.state.status is Status.STOPPING:
             return ExecutorStopped(expired.generation)
-        # Um coordenador vivo pode ter renovado depois da leitura: então o caso é dele.
+        # Defesa: `renew_lease` não renova lease vencido; se este não estiver vencido, não é nosso.
         if live is None or live.lease_expires_at >= loaded.now:
             return None
         return LeaseExpired(expired.generation, loaded.now, status.ran, self._config.jitter())
@@ -595,20 +611,23 @@ class Maintenance:
 
     # Retenção --------------------------------------------------------------------------
 
-    def apply_retention(self) -> dict[str, int]:
+    def expire_incomplete_uploads(self) -> dict[str, int]:
         with self._factory() as session:
-            incomplete = expire_incomplete_uploads(session, self._storage)
+            incomplete = file_retention.expire_incomplete_uploads(session, self._storage)
+        self._files_left_on_disk += len(incomplete.failed_keys)
+        return {"incomplete_uploads_expired": incomplete.uploads}
+
+    def expire_unused_uploads(self) -> dict[str, int]:
         with self._factory() as session:
-            unused_uploads_expired = expire_unused_uploads(session)
+            return {"unused_uploads_expired": file_retention.expire_unused_uploads(session)}
+
+    def expire_artifacts(self) -> dict[str, int]:
         with self._factory() as session:
-            artifacts_expired = expire_artifacts(session)
-        counts = {
-            "incomplete_uploads_expired": incomplete.uploads,
-            "unused_uploads_expired": unused_uploads_expired,
-            "artifacts_expired": artifacts_expired,
-        }
+            return {"artifacts_expired": file_retention.expire_artifacts(session)}
+
+    def purge_deleted_objects(self) -> dict[str, int]:
         with self._factory() as session:
-            report = purge_deleted_objects(session, self._storage)
+            report = file_retention.purge_deleted_objects(session, self._storage)
         if report.limit_reached:
             # Alerta de causa (3.7): o limitador cortou o expurgo; o administrador investiga.
             logger.warning(
@@ -620,17 +639,20 @@ class Maintenance:
                 "arquivos não removidos do disco",
                 extra={"fields": {"failed": len(report.failed_keys)}},
             )
-        counts["objects_purged"] = report.objects
-        counts["bytes_purged"] = report.bytes
-        # Com o banco já confirmado, nada repete a remoção: o alerta de causa lê isto (3.7).
-        counts["purge_files_not_removed"] = len(incomplete.failed_keys) + len(report.failed_keys)
-        # Depois do expurgo: o que acabou de ser liberado já sai das somas dos pools.
+        self._files_left_on_disk += len(report.failed_keys)
+        return {
+            "objects_purged": report.objects,
+            "bytes_purged": report.bytes,
+            "purge_limit_reached": int(report.limit_reached),
+        }
+
+    def reconcile_capacity(self) -> dict[str, int]:
         with self._factory() as session:
-            reconciled = reconcile_capacity(session, limit=self._config.batch_size)
-        counts["capacity_pools_corrected"] = reconciled.pools_corrected
-        counts["capacity_objects_adopted"] = reconciled.objects_adopted
-        counts["purge_limit_reached"] = int(report.limit_reached)
-        return {**counts, **self.apply_history_retention()}
+            reconciled = file_retention.reconcile_capacity(session, limit=self._config.batch_size)
+        return {
+            "capacity_pools_corrected": reconciled.pools_corrected,
+            "capacity_objects_adopted": reconciled.objects_adopted,
+        }
 
     def sweep_temporary_parts(self) -> dict[str, int]:
         """Apaga os temporários que uma queda deixou no storage e mede o que ficou no diretório.
@@ -735,29 +757,55 @@ class Maintenance:
                 extra={"fields": {"alert": "objects_missing", "objects": sweep.marked}},
             )
 
-    def apply_history_retention(self) -> dict[str, int]:
-        """Retenção longa (1.7), cada etapa um lote numa transação própria.
+    # Retenção longa (1.7): cada sub-etapa é um lote numa transação própria, no `now` do banco.
 
-        A ordem importa: a Run sai antes das linhas de arquivos que o histórico dela referencia,
-        e as linhas de arquivos só saem depois do arquivo no disco (`delete_old_file_rows`).
-        """
+    def delete_expired_idempotency_records(self) -> dict[str, int]:
         batch = self._config.retention_batch_size
-        steps: dict[str, Callable[[Session, datetime], int]] = {
-            "idempotency_records_removed": lambda s, now: delete_expired_idempotency_records(
-                s, now, batch
-            ),
-            "runs_anonymized": lambda s, now: anonymize_finished_runs(s, now, batch),
-            "outputs_anonymized": lambda s, now: anonymize_output_names(s, now, batch),
-            "uploads_anonymized": lambda s, now: anonymize_deleted_uploads(s, now, batch),
-            "runs_deleted": lambda s, now: delete_old_runs(s, now, batch),
-            "file_rows_deleted": lambda s, now: delete_old_file_rows(
-                s, now, batch, HISTORY_REFERENCES
-            ),
-            "reservations_removed": lambda s, now: capacity.delete_released_reservations(
-                s, now, batch
-            ),
-        }
-        return {name: self._at_db_now(step) for name, step in steps.items()}
+        removed = self._at_db_now(
+            lambda s, now: run_retention.delete_expired_idempotency_records(s, now, batch)
+        )
+        return {"idempotency_records_removed": removed}
+
+    def anonymize_finished_runs(self) -> dict[str, int]:
+        batch = self._config.retention_batch_size
+        anonymized = self._at_db_now(
+            lambda s, now: run_retention.anonymize_finished_runs(s, now, batch)
+        )
+        return {"runs_anonymized": anonymized}
+
+    def anonymize_output_names(self) -> dict[str, int]:
+        batch = self._config.retention_batch_size
+        anonymized = self._at_db_now(
+            lambda s, now: run_retention.anonymize_output_names(s, now, batch)
+        )
+        return {"outputs_anonymized": anonymized}
+
+    def anonymize_deleted_uploads(self) -> dict[str, int]:
+        batch = self._config.retention_batch_size
+        anonymized = self._at_db_now(
+            lambda s, now: file_retention.anonymize_deleted_uploads(s, now, batch)
+        )
+        return {"uploads_anonymized": anonymized}
+
+    def delete_old_runs(self) -> dict[str, int]:
+        batch = self._config.retention_batch_size
+        deleted = self._at_db_now(lambda s, now: run_retention.delete_old_runs(s, now, batch))
+        return {"runs_deleted": deleted}
+
+    def delete_old_file_rows(self) -> dict[str, int]:
+        """As linhas de arquivos que o histórico já não referencia, depois do arquivo no disco."""
+        batch = self._config.retention_batch_size
+        deleted = self._at_db_now(
+            lambda s, now: file_retention.delete_old_file_rows(s, now, batch, HISTORY_REFERENCES)
+        )
+        return {"file_rows_deleted": deleted}
+
+    def delete_released_reservations(self) -> dict[str, int]:
+        batch = self._config.retention_batch_size
+        removed = self._at_db_now(
+            lambda s, now: capacity.delete_released_reservations(s, now, batch)
+        )
+        return {"reservations_removed": removed}
 
     def measure(self) -> dict[str, int]:
         """Medidores do evento do ciclo: o tamanho do que acumula e o que os alertas leem."""
@@ -774,6 +822,7 @@ class Maintenance:
             return {
                 **history_backlog(session, now),
                 **file_backlog(session, now),
+                "reservations_to_remove": capacity.released_backlog(session, now),
                 "runs_stuck_stopping": stuck,
                 "storage_global_reserved_bytes": storage.storage_reserved_bytes,
                 "storage_global_max_bytes": storage.storage_max_bytes,
