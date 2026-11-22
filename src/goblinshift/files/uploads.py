@@ -111,6 +111,14 @@ class UploadView:
 
 
 @dataclass(frozen=True)
+class IdempotentRequest:
+    """Idempotency-Key do pedido e o SHA-256 do corpo, gravados em cada linha do lote."""
+
+    key: str
+    body_hash: bytes
+
+
+@dataclass(frozen=True)
 class ReadyUpload:
     upload_id: uuid.UUID
     object_id: uuid.UUID
@@ -120,13 +128,17 @@ class ReadyUpload:
 
 
 def create_intents(
-    session: Session, owner_id: uuid.UUID, items: Sequence[tuple[str, int]]
+    session: Session,
+    owner_id: uuid.UUID,
+    items: Sequence[tuple[str, int]],
+    request: IdempotentRequest | None = None,
 ) -> list[UploadView]:
     """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
 
     Reserva o tamanho declarado de cada intenção, no mínimo `MIN_INTENT_RESERVED_BYTES` (detentor
     `upload`), tudo ou nada: acima do teto levanta `AccountCapacityExceededError` ou
-    `GlobalCapacityExceededError`, e quem chama desfaz.
+    `GlobalCapacityExceededError`, e quem chama desfaz. Com `request`, cada linha guarda a chave,
+    o hash do corpo e a própria posição no pedido, para `upload_requests` achar o lote de novo.
     """
     intents = _parse_intents(items)
     object_ids = session.execute(
@@ -143,8 +155,9 @@ def create_intents(
                 "object_id": object_id,
                 "original_name": intent.name,
                 "expected_size": intent.expected_size,
+                **_request_columns(request, index),
             }
-            for intent, object_id in zip(intents, object_ids, strict=True)
+            for index, (intent, object_id) in enumerate(zip(intents, object_ids, strict=True))
         ],
     ).all()
     capacity.reserve_many(
@@ -212,7 +225,17 @@ def receive_content(
 
 
 def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> UploadView:
-    row = session.execute(
+    views = get_uploads(session, owner_id, [upload_id])
+    if not views:
+        raise UploadNotFoundError
+    return views[0]
+
+
+def get_uploads(
+    session: Session, owner_id: uuid.UUID, upload_ids: Sequence[uuid.UUID]
+) -> list[UploadView]:
+    """Estado atual dos uploads do dono, na ordem pedida; os que não existem ficam de fora."""
+    rows = session.execute(
         select(
             *_VIEW_COLUMNS,
             stored_object.c.size_bytes,
@@ -221,21 +244,10 @@ def get_upload(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> U
             (upload.c.expires_at <= func.now()).label("expired"),
         )
         .join(stored_object, stored_object.c.id == upload.c.object_id)
-        .where(upload.c.id == upload_id, upload.c.owner_id == owner_id)
-    ).one_or_none()
-    if row is None:
-        raise UploadNotFoundError
-    return _view(
-        row,
-        size_bytes=row.size_bytes,
-        sha256=row.sha256,
-        availability=Availability.of(
-            deleted_at=row.deleted_at,
-            expires_at=row.expires_at,
-            expired=row.expired,
-            object_missing=row.object_state == ObjectState.MISSING,
-        ),
-    )
+        .where(upload.c.id.in_(upload_ids), upload.c.owner_id == owner_id)
+    ).all()
+    by_id = {row.id: _current_view(row) for row in rows}
+    return [by_id[upload_id] for upload_id in upload_ids if upload_id in by_id]
 
 
 def request_deletion(session: Session, owner_id: uuid.UUID, upload_id: uuid.UUID) -> None:
@@ -309,6 +321,30 @@ def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
         .join(upload, upload.c.object_id == stored_object.c.id)
         .where(upload.c.id == upload_id)
         .scalar_subquery()
+    )
+
+
+def _request_columns(request: IdempotentRequest | None, index: int) -> dict[str, object]:
+    if request is None:
+        return {}
+    return {
+        "request_key": request.key,
+        "request_hash": request.body_hash,
+        "request_index": index,
+    }
+
+
+def _current_view(row: Row[Any, *tuple[Any, ...]]) -> UploadView:
+    return _view(
+        row,
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        availability=Availability.of(
+            deleted_at=row.deleted_at,
+            expires_at=row.expires_at,
+            expired=row.expired,
+            object_missing=row.object_state == ObjectState.MISSING,
+        ),
     )
 
 

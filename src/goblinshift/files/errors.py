@@ -20,6 +20,20 @@ class InvalidUploadRequestError(FilesError):
         self.reason = reason
 
 
+class UploadRequestKeyReusedError(FilesError):
+    """Mesma chave vigente com outro lote (→ 422 `IDEMPOTENCY_KEY_REUSED`)."""
+
+    def __init__(self) -> None:
+        super().__init__("a chave já foi usada com outro lote")
+
+
+class UploadRequestInProgressError(FilesError):
+    """O pedido original com esta chave ainda está em andamento (→ 409)."""
+
+    def __init__(self) -> None:
+        super().__init__("outro pedido com esta chave está em andamento")
+
+
 class UploadNotFoundError(FilesError):
     """Inexistente ou de outra conta (→ 404)."""
 

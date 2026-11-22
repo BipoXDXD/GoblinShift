@@ -1006,55 +1006,8 @@
           "uploads"
         ],
         "summary": "Create Uploads",
+        "description": "Cria o lote; com Idempotency-Key, o replay devolve o mesmo lote no estado atual.",
         "operationId": "createUploads",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "items": {
-                    "items": {
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "maxLength": 255,
-                          "minLength": 1,
-                          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029\\xad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890\\u0891\\u08e2\\u180e\\u200b\\u200e\\u200f\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb]*$",
-                          "title": "Name"
-                        },
-                        "size": {
-                          "type": "integer",
-                          "maximum": 268435456.0,
-                          "minimum": 0.0,
-                          "title": "Size",
-                          "description": "Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB."
-                        }
-                      },
-                      "additionalProperties": false,
-                      "type": "object",
-                      "required": [
-                        "name",
-                        "size"
-                      ],
-                      "title": "UploadItem"
-                    },
-                    "type": "array",
-                    "maxItems": 100,
-                    "minItems": 1,
-                    "title": "Items"
-                  }
-                },
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "items"
-                ],
-                "title": "CreateUploads"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "description": "Successful Response",
@@ -1067,37 +1020,43 @@
             }
           },
           "401": {
-            "description": "Unauthorized",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Forbidden"
           },
           "422": {
-            "description": "Unprocessable Content",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Unprocessable Content"
           },
           "429": {
-            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
             "headers": {
               "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
@@ -1108,26 +1067,26 @@
                 }
               }
             },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Too Many Requests"
           },
           "500": {
-            "description": "Internal Server Error",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Internal Server Error"
           },
           "503": {
-            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
             "headers": {
               "Retry-After": {
                 "description": "Segundos até poder repetir a requisição.",
@@ -1138,45 +1097,109 @@
                 }
               }
             },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
+            "description": "Service Unavailable"
           },
           "400": {
-            "description": "Bad Request",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "413": {
-            "description": "Content Too Large",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
-            }
+            },
+            "description": "Content Too Large"
           },
           "415": {
-            "description": "Unsupported Media Type",
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
+              }
+            },
+            "description": "Unsupported Media Type"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "items": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "maxLength": 255,
+                          "minLength": 1,
+                          "pattern": "^[^/\\\\\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029\\xad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890\\u0891\\u08e2\\u180e\\u200b\\u200e\\u200f\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb]*$",
+                          "title": "Name",
+                          "type": "string"
+                        },
+                        "size": {
+                          "description": "Bytes: até 32 MiB, ou 256 MiB para vídeo (.mp4, .mov, .webm); o lote soma até 512 MiB.",
+                          "maximum": 268435456,
+                          "minimum": 0,
+                          "title": "Size",
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "size"
+                      ],
+                      "title": "UploadItem",
+                      "type": "object"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "title": "Items",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "items"
+                ],
+                "title": "CreateUploads",
+                "type": "object"
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Opcional. Repetida com o mesmo corpo em até 1 h, devolve o mesmo lote.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{16,64}$"
+            }
+          }
+        ]
       }
     },
     "/api/v1/uploads/{upload_id}/content": {
