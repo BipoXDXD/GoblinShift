@@ -17,9 +17,10 @@ ordem: Rúbia, Fagulha, Ferrugem, Jade, Lua e Nyx. A Lua voltou em 22/11/2026, p
 decisão registrada.
 
 Desde 22/11/2026, os modelos 3D das seis são gerações do Hi3D v3.0 em `high_quality`, aprovadas pelo
-usuário nessa data. Cada geração parte do render anterior da própria goblin e cita `source-005` e
-`rights-005`: os direitos são do dono do projeto, por declaração dele. As imagens 2D saem do render
-desses modelos. Origem de cada modelo (task_id do Hi3D):
+usuário nessa data. Cada geração parte da arte anterior da própria goblin (render do modelo antigo;
+a Rúbia, da imagem 2D `rubia-2d`) e cita `source-005` e `rights-005`: os direitos são do dono do
+projeto, por declaração dele. As imagens 2D saem do render desses modelos. Origem de cada modelo
+(task_id do Hi3D):
 
 | Goblin | Geração | task_id |
 |---|---|---|

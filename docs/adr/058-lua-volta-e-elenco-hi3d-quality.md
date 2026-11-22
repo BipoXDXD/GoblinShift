@@ -2,7 +2,7 @@
 
 - **Estado:** Aceito (2026-11-22, por decisão do dono)
 - **Plano:** [2.2](../GoblinShiftPlan.md#s2-2) (Apresentação)
-- **Relacionado:** atualiza o [ADR 030](030-motor-e-asset-do-3d-da-abertura.md) (item 8) e o [ADR 038](038-elenco-em-3d-na-abertura.md) (elenco do seletor); `docs/art/LICENSE-ART.md`; `web/src/assets/art/PROVENANCE.json`; `docs/superpowers/plans/2026-11-22-goblins-grandes-e-elenco.md`
+- **Relacionado:** atualiza o [ADR 030](030-motor-e-asset-do-3d-da-abertura.md) (item 8) e o [ADR 038](038-elenco-em-3d-na-abertura.md) (elenco do seletor); `docs/art/LICENSE-ART.md`; `web/src/assets/art/PROVENANCE.json`
 
 ## Contexto
 
