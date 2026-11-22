@@ -23,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from goblinshift.catalog import CATALOG, RecipeVersionRetiredError
 from goblinshift.entrypoints.api.catalog import (
-    MAX_RECIPE_ID_CHARS,
+    RecipeIdField,
+    RecipeVersionField,
     deprecation_headers,
     recipe_command_schema,
 )
@@ -73,9 +74,11 @@ class PresetCommand(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
-    recipe_id: str = Field(min_length=1, max_length=MAX_RECIPE_ID_CHARS)
-    recipe_version: int = Field(ge=1)
+    # Sem teto aqui: `parse_draft` mede o nome depois do NFC e do strip, como o front o vê; o
+    # `maxLength` publicado vem de `_command_openapi`.
+    name: str = Field(min_length=1)
+    recipe_id: RecipeIdField
+    recipe_version: RecipeVersionField
     parameters: dict[str, Any]
 
 

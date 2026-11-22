@@ -176,7 +176,8 @@ _RULES = (
     # todo texto; o decodificador dos comandos o recusa com 400 (`json_command`).
     _Rule(_ANY_OPERATION, _BAD_REQUEST, "JSON_INVALID", lambda rejection: _has_nul(rejection.body)),
     # O teto do corpo em bytes (`json_command`) é do envelope, não de um campo: o JSON Schema não
-    # tem como limitar o tamanho serializado, e as listas de nomes de coluna não têm `maxLength`.
+    # tem como limitar o tamanho serializado, e as listas de nomes de coluna passam dele mesmo com
+    # o `maxLength` de cada nome.
     _Rule(
         _ANY_OPERATION,
         _CONTENT_TOO_LARGE,

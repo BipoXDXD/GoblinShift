@@ -25,6 +25,8 @@ from goblinshift.entrypoints.api.capacity_problems import (
 from goblinshift.entrypoints.api.catalog import (
     MAX_RECIPE_ID_CHARS,
     RECIPE_ID_PATTERN,
+    RecipeIdField,
+    RecipeVersionField,
     deprecation_headers,
     recipe_command_schema,
 )
@@ -129,8 +131,8 @@ class NewRun(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    recipe_id: str = Field(min_length=1, max_length=MAX_RECIPE_ID_CHARS)
-    recipe_version: int = Field(ge=1)
+    recipe_id: RecipeIdField
+    recipe_version: RecipeVersionField
     input_upload_ids: list[UUID] = Field(default_factory=list, max_length=MAX_BATCH_FILES)
     parameters: dict[str, Any]
 

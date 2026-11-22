@@ -17,7 +17,7 @@ from email.utils import format_datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from goblinshift.catalog import (
     CATALOG,
@@ -40,6 +40,13 @@ MAX_RECIPE_ID_CHARS = 64
 RECIPE_ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 # No máximo duas versões convivem (1.6); o teto só limita a entrada, longe do que existe.
 MAX_RECIPE_VERSION = 999
+
+# Os mesmos tetos no corpo dos comandos (`POST /runs` e presets): o id fora do formato e a versão
+# fora da faixa são recusados no próprio campo, antes da busca no catálogo.
+RecipeIdField = Annotated[
+    str, Field(min_length=1, max_length=MAX_RECIPE_ID_CHARS, pattern=RECIPE_ID_PATTERN)
+]
+RecipeVersionField = Annotated[int, Field(ge=1, le=MAX_RECIPE_VERSION)]
 
 
 class RecipeVersionResponse(BaseModel):
