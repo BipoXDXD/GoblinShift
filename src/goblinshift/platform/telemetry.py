@@ -10,6 +10,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -84,8 +85,6 @@ LOGGED_FIELDS = frozenset(
         "attempts",
         "checked",
         "cycle",
-        # `str(LostFencing)`: montado só com ids, gerações e motivos enumerados.
-        "detail",
         "duration_ms",
         "errno",
         "errnos",
@@ -126,6 +125,11 @@ LOGGED_FIELDS = frozenset(
     }
 )
 _DROPPED_FIELDS = "dropped_fields"
+# Chave fora de `LOGGED_FIELDS`: o nome também vai ao log, e só um identificador curto passa.
+_FIELD_NAME = re.compile(r"[a-z][a-z0-9_.]{0,63}")
+# Inteiro maior não é contagem nem duração, o OpenObserve guarda 64 bits e, acima de 4300 dígitos,
+# o `json.dumps` levanta e a linha inteira se perde.
+_MAX_INT_BITS = 64
 # Chaves que o próprio formatter escreve: um campo de evento não as sobrescreve. O `sqlstate` não
 # está aqui porque também é campo de evento; o do registro, quando há, vence o do campo.
 _BASE_FIELDS = frozenset({"time", "level", "logger", "message", "exception", _DROPPED_FIELDS})
@@ -155,20 +159,41 @@ class JsonFormatter(logging.Formatter):
 
 
 def _add_fields(entry: dict[str, Any], fields: dict[Any, object]) -> int:
-    """Põe em `entry` os campos que podem ir ao log e devolve quantos caíram.
-
-    Passa a chave de `LOGGED_FIELDS` com qualquer valor e a de fora com número ou booleano. Cai o
-    resto e o que tentaria sobrescrever uma chave da própria linha (`message`, `level`, …).
-    """
+    """Põe em `entry` os campos que podem ir ao log e devolve quantos caíram."""
     dropped = 0
     for key, value in fields.items():
-        if key in _BASE_FIELDS or (
-            key not in LOGGED_FIELDS and not isinstance(value, (bool, int, float))
-        ):
-            dropped += 1
-        else:
+        if _is_loggable(key, value):
             entry[key] = value
+        else:
+            dropped += 1
     return dropped
+
+
+def _is_loggable(key: object, value: object) -> bool:
+    """A chave de `LOGGED_FIELDS` passa com qualquer valor; a de fora, com nome de identificador e
+    número ou booleano. Nunca passa o que sobrescreveria a própria linha (`message`, `level`, …)
+    nem número que o JSON não representa: `nan`, `inf` ou inteiro fora de 64 bits."""
+    if key in _BASE_FIELDS or not _is_json_number(value):
+        return False
+    if key in LOGGED_FIELDS:
+        return True
+    return (
+        isinstance(key, str)
+        and _FIELD_NAME.fullmatch(key) is not None
+        and isinstance(value, (bool, int, float))
+    )
+
+
+def _is_json_number(value: object) -> bool:
+    """Falso só para número sem representação no log; o que não é número passa."""
+    match value:
+        case bool():
+            return True
+        case int():
+            return value.bit_length() <= _MAX_INT_BITS
+        case float():
+            return math.isfinite(value)
+    return True
 
 
 def omit_exception_detail(record: logging.LogRecord) -> bool:

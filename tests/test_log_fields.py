@@ -8,8 +8,11 @@ booleano; as outras caem e a linha conta quantas em `dropped_fields`.
 import io
 import json
 import logging
+import math
 import uuid
-from typing import Any
+from typing import Any, cast
+
+import pytest
 
 from goblinshift.platform.telemetry import LOGGED_FIELDS
 
@@ -53,6 +56,53 @@ def test_lista_dict_ou_none_com_chave_desconhecida_cai(
 
     assert {"x", "y", "z"}.isdisjoint(line)
     assert line["dropped_fields"] == 3
+    assert canary not in production_log[1].getvalue()
+
+
+def test_numero_com_texto_livre_no_nome_da_chave_cai(
+    production_log: ProductionLog, canary: str
+) -> None:
+    # O nome da chave também vai ao log: um `{nome_do_arquivo: 1}` levaria o nome adiante.
+    line = _log(production_log, fields={canary: 1, "Maiuscula": 2, "a" * 65: 3, "ok_1.b": 4})
+
+    assert line["ok_1.b"] == 4
+    assert line["dropped_fields"] == 3
+    assert canary not in production_log[1].getvalue()
+
+
+def test_chave_que_nao_e_texto_cai(production_log: ProductionLog) -> None:
+    line = _log(production_log, fields=cast(dict[str, object], {7: 1}))
+
+    assert "7" not in line
+    assert line["dropped_fields"] == 1
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_numero_nao_finito_cai_mesmo_na_allowlist(
+    production_log: ProductionLog, value: float
+) -> None:
+    line = _log(production_log, fields={"ratio": value, "duration_ms": value})
+
+    assert {"ratio", "duration_ms"}.isdisjoint(line)
+    assert line["dropped_fields"] == 2
+
+
+def test_inteiro_fora_de_64_bits_cai_sem_derrubar_a_linha(production_log: ProductionLog) -> None:
+    # Acima de 4300 dígitos o `json.dumps` levanta; acima de 64 bits já não é contagem.
+    line = _log(
+        production_log,
+        fields={
+            "duration_ms": 10**5000,
+            "objects": 2**64,
+            "checked": 2**64 - 1,
+            "absent": -(2**63),
+        },
+    )
+
+    assert {"duration_ms", "objects"}.isdisjoint(line)
+    assert line["checked"] == 2**64 - 1
+    assert line["absent"] == -(2**63)
+    assert line["dropped_fields"] == 2
 
 
 def test_chave_da_allowlist_passa_com_qualquer_valor(production_log: ProductionLog) -> None:
@@ -68,6 +118,7 @@ def test_campo_nao_sobrescreve_a_base(production_log: ProductionLog, canary: str
     assert line["message"] == "evento"
     assert line["level"] == "WARNING"
     assert line["dropped_fields"] == 2
+    assert canary not in production_log[1].getvalue()
 
 
 def test_campo_nao_sobrescreve_a_contagem_de_descartes(

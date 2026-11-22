@@ -286,28 +286,31 @@ def test_nenhum_log_recebe_a_excecao_crua() -> None:
 def logged_keys(source: str) -> Iterator[tuple[str, int]]:
     """Chaves literais que chegam a `fields` de um evento, com a linha de cada uma.
 
-    Coleta (a) o dict que é valor de `"fields"` em `extra=`; (b) dicts atribuídos (`=`, `|=`,
-    anotado) a nomes que terminam em `fields`; (c) `NOME["k"] = …` com `NOME` terminando em
-    `fields`; (d) o dict devolvido por `_ids` e `*_fields` e as constantes de módulo `*_EVENT`,
-    que são espalhadas em `fields`. Chave montada em tempo de execução não é vista: ela só sai no
-    log com valor numérico.
+    Coleta, de dict literal ou de `dict(k=…)`: (a) o valor de `"fields"` em `extra=`; (b) o que
+    se atribui (`=`, `|=`, anotado) a nomes que terminam em `fields`, ou se passa ao `update` deles;
+    (c) `NOME["k"] = …` com `NOME` terminando em `fields`; (d) o que `_ids` e `*_fields` devolvem e
+    as constantes de módulo `*_EVENT`, que são espalhadas em `fields`. Chave montada em tempo de
+    execução, ou dict guardado num nome de outro sufixo, não é vista: o formatter só a deixa sair
+    com nome de identificador e valor numérico.
     """
     tree = ast.parse(source)
     for node in ast.walk(tree):
         match node:
             case ast.keyword(arg="extra", value=ast.Dict() as extra):
                 for extra_key, extra_value in zip(extra.keys, extra.values, strict=True):
-                    if _is_constant(extra_key, "fields") and isinstance(extra_value, ast.Dict):
+                    if _is_constant(extra_key, "fields"):
                         yield from _dict_keys(extra_value)
-            case ast.Assign(targets=targets, value=ast.Dict() as value) if any(
+            case ast.Assign(targets=targets, value=value) if any(
                 _names_fields(target) for target in targets
             ):
                 yield from _dict_keys(value)
             case (
-                ast.AnnAssign(target=target, value=ast.Dict() as value)
-                | ast.AugAssign(target=target, op=ast.BitOr(), value=ast.Dict() as value)
+                ast.AnnAssign(target=target, value=ast.expr() as value)
+                | ast.AugAssign(target=target, op=ast.BitOr(), value=value)
             ) if _names_fields(target):
                 yield from _dict_keys(value)
+            case ast.Call(func=ast.Attribute(value=target, attr="update")) if _names_fields(target):
+                yield from _call_keys(node)
             case ast.Assign(targets=targets):
                 for assigned in targets:
                     match assigned:
@@ -317,13 +320,11 @@ def logged_keys(source: str) -> Iterator[tuple[str, int]]:
                             yield literal, assigned.lineno
             case ast.FunctionDef(name=name) if name == "_ids" or name.endswith("_fields"):
                 for inner in ast.walk(node):
-                    if isinstance(inner, ast.Return) and isinstance(inner.value, ast.Dict):
+                    if isinstance(inner, ast.Return):
                         yield from _dict_keys(inner.value)
     for statement in tree.body:
         match statement:
-            case ast.Assign(targets=[ast.Name(id=name)], value=ast.Dict() as value) if (
-                name.endswith("_EVENT")
-            ):
+            case ast.Assign(targets=[ast.Name(id=name)], value=value) if name.endswith("_EVENT"):
                 yield from _dict_keys(value)
 
 
@@ -339,10 +340,24 @@ def _is_constant(node: ast.expr | None, value: str) -> bool:
     return isinstance(node, ast.Constant) and node.value == value
 
 
-def _dict_keys(node: ast.Dict) -> Iterator[tuple[str, int]]:
-    for key in node.keys:
-        if isinstance(key, ast.Constant) and isinstance(key.value, str):
-            yield key.value, key.lineno
+def _dict_keys(node: ast.expr | None) -> Iterator[tuple[str, int]]:
+    """As chaves literais de `{…}` ou de `dict(…)`; outra expressão não tem chave a ver."""
+    match node:
+        case ast.Dict(keys=keys):
+            for key in keys:
+                if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                    yield key.value, key.lineno
+        case ast.Call(func=ast.Name(id="dict")):
+            yield from _call_keys(node)
+
+
+def _call_keys(call: ast.Call) -> Iterator[tuple[str, int]]:
+    """As chaves de `dict(…)` ou `update(…)`: o dict literal posicional e os argumentos nomeados."""
+    for argument in call.args:
+        yield from _dict_keys(argument)
+    for keyword in call.keywords:
+        if keyword.arg is not None:
+            yield keyword.arg, keyword.lineno
 
 
 @pytest.mark.parametrize(
@@ -356,6 +371,11 @@ def _dict_keys(node: ast.Dict) -> Iterator[tuple[str, int]]:
         'def _ids(c):\n    return {"k": 1}',
         'def _error_fields(e):\n    return {"k": 1}',
         '_PROBE_EVENT = {"k": 1}',
+        'fields.update({"k": 1})',
+        "fields.update(k=1)",
+        "fields = dict(k=1)",
+        'logger.info("x", extra={"fields": dict(k=1)})',
+        "def _ids(c):\n    return dict(k=1)",
     ],
     ids=[
         "extra",
@@ -366,6 +386,11 @@ def _dict_keys(node: ast.Dict) -> Iterator[tuple[str, int]]:
         "ids",
         "funcao-fields",
         "constante-event",
+        "update-com-dict",
+        "update-com-keyword",
+        "dict-com-keyword",
+        "extra-com-dict",
+        "ids-com-dict",
     ],
 )
 def test_coletor_acha_a_chave(source: str) -> None:

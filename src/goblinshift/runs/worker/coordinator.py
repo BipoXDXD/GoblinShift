@@ -351,9 +351,9 @@ class Coordinator:
         started = time.monotonic()
         try:
             applied = self._drive(claimed)
-        except LostFencing as lost:
+        except LostFencing:
             _record_end(started, "lost_fencing", error=None)
-            _log_attempt(claimed, "lost_fencing", started, detail=str(lost))
+            _log_attempt(claimed, "lost_fencing", started)
             self._abandon(claimed)
             return None
         left_on_disk = complete_after_commit(
@@ -1043,7 +1043,6 @@ def _log_attempt(
     started: float,
     *,
     error: ErrorCode | None = None,
-    detail: str | None = None,
 ) -> None:
     fields = _ids(claimed)
     fields |= {
@@ -1052,6 +1051,4 @@ def _log_attempt(
         "error.code": error,
         "duration_ms": round((time.monotonic() - started) * 1000),
     }
-    if detail is not None:
-        fields["detail"] = detail
     logger.info("tentativa encerrada", extra={"fields": fields})
