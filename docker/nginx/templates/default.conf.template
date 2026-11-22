@@ -260,6 +260,9 @@ server {
         error_page 502 504 = @upstream_unavailable;
         client_max_body_size 256m;
         proxy_request_buffering off;
+        # Igual a TRANSFER_IDLE_TIMEOUT (files/limits.py): o padrão de 60 s seguraria a conexão
+        # parada depois de a API já ter desistido do envio.
+        client_body_timeout 30s;
         include /etc/nginx/snippets/proxy-api.conf;
         proxy_read_timeout 600s;
     }

@@ -1,4 +1,4 @@
-"""Peças HTTP das transferências, sem banco: nome do anexo e encerramento do download."""
+"""Peças HTTP das transferências, sem banco: nome do anexo, piso de vazão e fim do download."""
 
 import io
 from datetime import timedelta
@@ -14,6 +14,7 @@ from goblinshift.entrypoints.api.transfers import (
     TransferTimeoutError,
     TransferTimeouts,
     content_disposition,
+    is_below_min_rate,
 )
 
 GENEROUS = TransferTimeouts(total=timedelta(seconds=10), idle=timedelta(seconds=10))
@@ -43,6 +44,26 @@ def anyio_backend() -> str:
 )
 def test_nome_do_anexo_segue_a_rfc_6266(name: str, expected: str) -> None:
     assert content_disposition(name) == expected
+
+
+FLOOR_1000_AFTER_2S = TransferTimeouts(
+    min_rate_bytes_per_s=1000, min_rate_grace=timedelta(seconds=2)
+)
+
+
+@pytest.mark.parametrize(
+    ("received", "elapsed_s", "below"),
+    [
+        (0, 2.0, False),  # na carência, nem o envio parado é cobrado
+        (0, 2.001, True),
+        (3000, 3.0, False),  # exatamente no piso
+        (2999, 3.0, True),
+    ],
+)
+def test_piso_de_vazao_vale_so_depois_da_carencia(
+    received: int, elapsed_s: float, below: bool
+) -> None:
+    assert is_below_min_rate(received, elapsed_s, FLOOR_1000_AFTER_2S) is below
 
 
 class Recorder:

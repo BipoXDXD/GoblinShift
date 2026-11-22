@@ -21,7 +21,12 @@ from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 
 from goblinshift.entrypoints.api.problems import ApiProblem, ProblemCode
-from goblinshift.files.limits import TRANSFER_IDLE_TIMEOUT, TRANSFER_MAX_DURATION
+from goblinshift.files.limits import (
+    TRANSFER_IDLE_TIMEOUT,
+    TRANSFER_MAX_DURATION,
+    TRANSFER_MIN_RATE_BYTES_PER_S,
+    TRANSFER_MIN_RATE_GRACE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +60,21 @@ class TransferTimeouts:
 
     total: timedelta = TRANSFER_MAX_DURATION
     idle: timedelta = TRANSFER_IDLE_TIMEOUT
+    min_rate_bytes_per_s: int = TRANSFER_MIN_RATE_BYTES_PER_S
+    min_rate_grace: timedelta = TRANSFER_MIN_RATE_GRACE
 
 
 class TransferTimeoutError(Exception):
-    """A transferência passou do prazo total ou ficou parada além do prazo sem progresso."""
+    """A transferência passou do prazo total, ficou parada ou ficou abaixo da vazão mínima."""
+
+
+def is_below_min_rate(received: int, elapsed_s: float, timeouts: TransferTimeouts) -> bool:
+    """`True` se, passada a carência, a média do envio ficou abaixo da vazão mínima.
+
+    Único lugar que decide a vazão exigida: quem mudar a regra muda só aqui.
+    """
+    past_grace = elapsed_s > timeouts.min_rate_grace.total_seconds()
+    return past_grace and received < timeouts.min_rate_bytes_per_s * elapsed_s
 
 
 def transfer_limit_problem() -> ApiProblem:
@@ -86,10 +102,12 @@ def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterato
 
     O serviço de upload é síncrono e recebe um iterável; cada pedaço é buscado no event loop
     com `from_thread.run`, sem acumular o corpo em memória. Estoura `TransferTimeoutError` se
-    um pedaço demorar mais que o prazo sem progresso ou se o prazo total acabar.
+    um pedaço demorar mais que o prazo sem progresso, se o prazo total acabar ou se a média
+    desde o início da leitura ficar abaixo da vazão mínima: a espera pelo primeiro byte conta.
     """
     stream = request.stream()
-    deadline = anyio.from_thread.run_sync(anyio.current_time) + timeouts.total.total_seconds()
+    started = anyio.from_thread.run_sync(anyio.current_time)
+    deadline = started + timeouts.total.total_seconds()
 
     async def next_chunk() -> bytes | None:
         remaining = deadline - anyio.current_time()
@@ -99,7 +117,12 @@ def request_body_chunks(request: Request, timeouts: TransferTimeouts) -> Iterato
         except TimeoutError:
             raise TransferTimeoutError("o envio passou do prazo") from None
 
+    received = 0
     while (chunk := anyio.from_thread.run(next_chunk)) is not None:
+        received += len(chunk)
+        elapsed_s = anyio.from_thread.run_sync(anyio.current_time) - started
+        if is_below_min_rate(received, elapsed_s, timeouts):
+            raise TransferTimeoutError("o envio ficou abaixo da vazão mínima")
         if chunk:
             yield chunk
 
