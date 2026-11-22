@@ -153,6 +153,8 @@ export function Workbench({
     if (command === null) {
       return;
     }
+    // Antes do POST: se a resposta se perder e a pessoa voltar a este comando, a chave é a mesma.
+    idempotency.markSent(intent);
     mutation.mutate(
       { command, idempotencyKey: idempotency.key },
       {
