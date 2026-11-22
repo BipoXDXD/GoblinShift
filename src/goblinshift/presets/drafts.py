@@ -12,7 +12,7 @@ de novo, e os resolvidos nem sempre passam por uma segunda validação (o Detox 
 
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from goblinshift.catalog import (
     CATALOG,
@@ -76,7 +76,7 @@ def parse_draft(
 
 def _under_parameters(error: FieldError) -> FieldError:
     location = f"parameters.{error.location}" if error.location else "parameters"
-    return FieldError(location, error.message)
+    return replace(error, location=location)
 
 
 def _name_error(name: str) -> str | None:

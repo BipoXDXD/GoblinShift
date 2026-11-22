@@ -56,6 +56,9 @@ class RecipeVersionRetiredError(Exception):
 class FieldError:
     location: str  # caminho com pontos, como `filters.0.value`; vazio é o objeto inteiro
     message: str
+    # Tipo do erro no Pydantic (`extra_forbidden`, `enum`...); regra da própria receita é
+    # `value_error`. A borda HTTP o publica como `code` e decide o que pode sair de cada tipo.
+    code: str = "value_error"
 
 
 class InvalidParametersError(ValueError):
@@ -231,7 +234,7 @@ CATALOG = Catalog([CSV_JANITOR_V1, IMAGE_FORGE_V1, DOWNLOADS_DETOX_V1, PDF_PRESS
 
 def _field_errors(error: ValidationError) -> list[FieldError]:
     return [
-        FieldError(".".join(str(part) for part in detail["loc"]), detail["msg"])
+        FieldError(".".join(str(part) for part in detail["loc"]), detail["msg"], detail["type"])
         for detail in error.errors()
     ]
 

@@ -31,7 +31,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import NoReturn
 from uuid import UUID
@@ -520,7 +520,7 @@ def _record_key(
 
 def _under(prefix: str, error: FieldError) -> FieldError:
     location = f"{prefix}.{error.location}" if error.location else prefix
-    return FieldError(location, error.message)
+    return replace(error, location=location)
 
 
 def _refuse(location: str, message: str) -> NoReturn:

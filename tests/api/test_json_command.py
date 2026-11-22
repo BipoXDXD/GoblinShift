@@ -211,7 +211,7 @@ def test_campo_desconhecido_responde_422_com_o_campo(offline_client: TestClient)
     response = offline_client.post(ECHO, json={"text": "a", "status": "done"})
 
     body = assert_problem(response, 422, "VALIDATION_FAILED")
-    assert [(e["field"], e["code"]) for e in body["errors"]] == [("body.status", "extra_forbidden")]
+    assert [(e["field"], e["code"]) for e in body["errors"]] == [("body", "extra_forbidden")]
 
 
 def test_validacao_estrita_nao_converte_numero_em_texto(offline_client: TestClient) -> None:

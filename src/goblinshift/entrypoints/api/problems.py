@@ -181,6 +181,10 @@ _FORWARDED_HEADERS = ("Allow", "Retry-After", "WWW-Authenticate")
 _SERVER_ERROR_MIN = 500
 # Candidatos do Allow de um 405, em ordem alfabética.
 _HTTP_METHODS = ("DELETE", "GET", "HEAD", "PATCH", "POST", "PUT")
+_EXTRA_KEY_CODE = "extra_forbidden"
+_EXTRA_KEY_MESSAGE = "campo não aceito"
+# O Pydantic antepõe isto ao texto de um `ValueError` de validador; a regra já é nossa, em pt-BR.
+_PYDANTIC_VALUE_ERROR_PREFIX = "Value error, "
 
 
 class FieldError(BaseModel):
@@ -511,7 +515,7 @@ async def _handle_validation_error(request: Request, exc: RequestValidationError
         detail="A requisição tem campos inválidos; veja `errors`.",
         instance=request.url.path,
         request_id=request_id_of(request),
-        errors=[_field_error(error) for error in exc.errors()],
+        errors=_field_errors(exc.errors()),
     )
 
 
@@ -566,10 +570,23 @@ def code_for_http_status(status: int) -> ProblemCode:
     )
 
 
+def _field_errors(errors: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Um erro por local e regra, na ordem do Pydantic: várias chaves extras no mesmo objeto
+    viram um erro só."""
+    unique = dict.fromkeys(tuple(_field_error(error).items()) for error in errors)
+    return [dict(error) for error in unique]
+
+
 def _field_error(error: Mapping[str, Any]) -> dict[str, str]:
-    # Só local, tipo e mensagem: `input` e `ctx` podem ecoar o que o cliente mandou.
+    # Só local, tipo e mensagem: `input` e `ctx` podem ecoar o que o cliente mandou. A chave
+    # extra é texto do cliente, então o erro aponta o objeto que a recebeu, com texto fixo.
+    code = str(error["type"])
+    location = tuple(error["loc"])
+    message = str(error["msg"]).removeprefix(_PYDANTIC_VALUE_ERROR_PREFIX)
+    if code == _EXTRA_KEY_CODE:
+        location, message = location[:-1], _EXTRA_KEY_MESSAGE
     return {
-        "field": ".".join(str(part) for part in error["loc"]),
-        "code": str(error["type"]),
-        "message": str(error["msg"]),
+        "field": ".".join(str(part) for part in location),
+        "code": code,
+        "message": message,
     }

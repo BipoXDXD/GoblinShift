@@ -243,7 +243,7 @@ def _parse(command: PresetCommand) -> PresetDraft:
             [
                 {
                     "loc": ("body", *field_error.location.split(".")),
-                    "type": "value_error",
+                    "type": field_error.code,
                     "msg": field_error.message,
                 }
                 for field_error in error.errors
