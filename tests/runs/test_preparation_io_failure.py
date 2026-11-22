@@ -265,7 +265,10 @@ def test_erro_na_leitura_do_objeto_no_meio_da_copia_falha_sem_alerta(
 
     [record] = work_area_failures(caplog)
     assert alert_of(record) is None
-    assert "erro de E/S" in str(fields_of(record)["error"])
+    fields = fields_of(record)
+    # Só o tipo: a mensagem da falha de E/S pode trazer o caminho no storage.
+    assert fields["error_type"] == "PreparationError"
+    assert "error" not in fields
 
 
 class _WorkAreaRefused(LocalRunner):

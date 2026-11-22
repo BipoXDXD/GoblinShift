@@ -339,7 +339,7 @@ class ExecutorImageProbe:
             # Docker ou serviço fora, ou recusa: o código diz qual, sem um traceback a cada 30 s.
             logger.warning(
                 _PROBE_FAILED_MESSAGE,
-                extra={"fields": {**_PROBE_FAILED_EVENT, "error": error.code}},
+                extra={"fields": {**_PROBE_FAILED_EVENT, "error_reason": error.code}},
             )
             return _image_counts(probe_failed=1)
         except Exception:

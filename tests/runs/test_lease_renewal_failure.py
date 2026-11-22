@@ -385,7 +385,8 @@ def test_stop_que_falha_mantem_lease_e_tenta_de_novo(
     [record] = _stop_failures(caplog)
     fields = cast(dict[str, object], record.__dict__["fields"])
     assert fields["attempt_id"] == str(claimed.attempt_id)
-    assert fields["error"] == "executor-ctl fora do ar"
+    assert fields["error_type"] == "RunnerError"
+    assert "executor-ctl fora do ar" not in repr(fields)
 
 
 def test_stop_do_teto_da_tentativa_que_falha_tenta_de_novo_e_marca_o_estouro(

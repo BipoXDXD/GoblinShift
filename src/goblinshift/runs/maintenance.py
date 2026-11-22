@@ -53,6 +53,7 @@ from goblinshift.files.retention import (
 )
 from goblinshift.files.states import HolderKind
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
+from goblinshift.platform.telemetry import exception_fields
 from goblinshift.runs.lifecycle import (
     TERMINAL_STATUSES,
     DeadlineExceeded,
@@ -377,7 +378,7 @@ class Maintenance:
         except RunnerError as error:
             logger.warning(
                 "executor sem inspeção; execução fica para o próximo ciclo",
-                extra={"fields": {**fields, "error": str(error)}},
+                extra={"fields": {**fields, **exception_fields(error)}},
             )
             return None
         if status.is_running:
@@ -394,7 +395,7 @@ class Maintenance:
         except RunnerError as error:
             logger.warning(
                 "área de trabalho não removida; a limpeza tenta de novo",
-                extra={"fields": {"attempt_id": str(attempt_id), "error": str(error)}},
+                extra={"fields": {"attempt_id": str(attempt_id), **exception_fields(error)}},
             )
             return False
         return True
@@ -566,7 +567,7 @@ class Maintenance:
         try:
             present = self._runner.list_work()[: self._config.batch_size]
         except OSError as error:
-            logger.warning("área de trabalho ilegível", extra={"fields": {"error": str(error)}})
+            logger.warning("área de trabalho ilegível", extra={"fields": exception_fields(error)})
             return 0
         if not present:
             return 0

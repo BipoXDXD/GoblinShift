@@ -58,7 +58,7 @@ from goblinshift.files.artifacts import publish_artifact
 from goblinshift.files.candidates import HeldContent, HeldContentMissingError, held_input_contents
 from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.storage import FileStorage, ObjectTamperedError, StorageError
-from goblinshift.platform.telemetry import UserHasher
+from goblinshift.platform.telemetry import UserHasher, exception_fields
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
     MAX_RETRY_JITTER,
@@ -210,7 +210,8 @@ class _AreaFile:
                 # O corpo já levantou (parada pedida, fencing perdido, leitura do storage): essa é a
                 # exceção que decide o desfecho da Run, e o fechamento falho não a substitui.
                 logger.warning(
-                    "fechamento da área de trabalho falhou", extra={"fields": {"error": str(error)}}
+                    "fechamento da área de trabalho falhou",
+                    extra={"fields": exception_fields(error)},
                 )
                 return
             raise _area_write_failed(error) from error
@@ -393,7 +394,7 @@ class Coordinator:
             )
             return self.fail_input_tampered(claimed)
         except PreparationError as error:
-            fields = _ids(claimed, error)
+            fields = {**_ids(claimed), **exception_fields(error)}
             if error.alert is not None:
                 fields["alert"] = error.alert
             logger.warning("área de trabalho falhou", extra={"fields": fields})
@@ -410,7 +411,13 @@ class Coordinator:
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
             logger.warning(
                 "executor não iniciou",
-                extra={"fields": {**_ids(claimed, error), "alert": EXECUTOR_START_FAILED}},
+                extra={
+                    "fields": {
+                        **_ids(claimed),
+                        **exception_fields(error),
+                        "alert": EXECUTOR_START_FAILED,
+                    }
+                },
             )
             return self.fail_transiently(claimed)
         self.record_start(claimed)
@@ -566,14 +573,19 @@ class Coordinator:
         try:
             return self._runner.status(claimed.attempt_id)
         except RunnerError as error:
-            logger.warning("executor sem estado", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor sem estado",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
             return None
 
     def _try_stop(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
         try:
             return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
         except RunnerError as error:
-            logger.warning("executor não parou", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "executor não parou", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
+            )
             return None
 
     def renew_lease(
@@ -702,12 +714,17 @@ class Coordinator:
                 attempt_error=code,
             )
         except (CollectionError, OSError) as error:
-            logger.warning("coleta recusada", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "coleta recusada", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
+            )
             return self.fail_transiently(claimed)
         try:
             stored = self.store_candidates(claimed, collected)
         except (StorageError, OSError, CollectionError) as error:
-            logger.warning("candidatos não gravados", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "candidatos não gravados",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
             return self.fail_transiently(claimed)
         attempt_event.record(
             {"collect_ms": _elapsed_ms(collect_started), **_output_attributes(collected)}
@@ -847,7 +864,10 @@ class Coordinator:
         try:
             self._runner.remove(claimed.attempt_id)
         except RunnerError as error:
-            logger.warning("área de trabalho não removida", extra={"fields": _ids(claimed, error)})
+            logger.warning(
+                "área de trabalho não removida",
+                extra={"fields": {**_ids(claimed), **exception_fields(error)}},
+            )
 
     def _conclude(
         self,
@@ -961,16 +981,13 @@ def _chunks(source: BinaryIO) -> Iterator[bytes]:
         yield chunk
 
 
-def _ids(claimed: ClaimedAttempt, error: Exception | None = None) -> dict[str, object]:
-    fields: dict[str, object] = {
+def _ids(claimed: ClaimedAttempt) -> dict[str, object]:
+    return {
         "run_id": str(claimed.run_id),
         "attempt_id": str(claimed.attempt_id),
         "generation": claimed.generation,
         "attempt.number": claimed.number,
     }
-    if error is not None:
-        fields["error"] = str(error)
-    return fields
 
 
 def _elapsed_ms(started: float) -> int:
