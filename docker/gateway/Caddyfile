@@ -20,9 +20,8 @@
   client_ip_headers X-Forwarded-For
  }
  # Não liga log de acesso: filtra o log padrão, onde um erro (502 num deploy) grava o pedido
- # inteiro. Espelha o formato `privacy` do Nginx (docker/nginx/templates/default.conf.template:100):
- # caminho sem a query, IP truncado e sem os cabeçalhos com o IP do cliente ou o Referer. Cookie e
- # Authorization já saem como REDACTED. Vale para os dois sites do gateway.
+ # inteiro. Igual ao formato `privacy` do Nginx (docker/nginx/templates/default.conf.template:100):
+ # caminho sem a query, IP truncado e nenhum cabeçalho do pedido. Vale para os dois sites do gateway.
  log {
   format filter {
    wrap json
@@ -35,9 +34,7 @@
     ipv4 24
     ipv6 48
    }
-   request>headers>Cf-Connecting-Ip delete
-   request>headers>X-Forwarded-For delete
-   request>headers>Referer delete
+   request>headers delete
   }
  }
 }

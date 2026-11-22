@@ -114,6 +114,8 @@ def test_502_do_gateway_nao_registra_query_ip_nem_cabecalhos_de_cliente(
         f"Referer: https://{GOBLINSHIFT}/auth/callback/google?code={canary}",
         f"Cookie: session={canary}",
         f"Authorization: Bearer {canary}",
+        f"User-Agent: {canary}",
+        f"Cf-Ipcountry: {canary}",
         timeout=UPSTREAM_DOWN_TIMEOUT_SECONDS,
     )
 
@@ -122,4 +124,6 @@ def test_502_do_gateway_nao_registra_query_ip_nem_cabecalhos_de_cliente(
     for secret in (canary, CLIENT_V4, CLOUDFLARE_V4):
         assert secret not in logs
     assert '"uri":"/auth/callback/google"' in logs.replace(" ", "")
+    # O `client_ip` é quem conectou pelo PROXY protocol (a borda da Cloudflare, ADR 041): o IP do
+    # cliente só viria nos cabeçalhos, que o filtro apaga. O /24 da borda prova a truncagem.
     assert CLOUDFLARE_V4_MASKED in logs

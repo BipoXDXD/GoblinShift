@@ -310,7 +310,7 @@ Nota operacional: nem `deploy/edge/compose.yaml` nem `deploy/coolify/gateway.jso
 infraestrutura compartilhada, declaram rotação própria de logs. O Caddy da borda não grava log de
 acesso, e o item 5 do Aviso declara as mensagens técnicas dele à parte. O `log` global de
 `docker/gateway/Caddyfile` filtra essas mensagens (#442): IP truncado (/24 e /48), caminho sem a
-query e sem os cabeçalhos `Cf-Connecting-Ip`, `X-Forwarded-For` e `Referer`
+query e nenhum cabeçalho do pedido, como o formato `privacy` do Nginx
 (`tests/test_gateway_logs.py`).
 
 ## Decisões aplicadas em 2026-10-15
