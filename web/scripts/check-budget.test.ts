@@ -195,11 +195,11 @@ describe("budgetViolations", () => {
       ).toEqual(["Modelo 3D (assets/oficina-3d-jade-x.glb): 6144,0 KB passa do teto de 6144 KB"]);
     });
 
-    it("o 3D inicial soma o chunk, a Rúbia, a imagem estática de 960 px dela e as miniaturas, até 8704 KB", () => {
+    it("o 3D inicial soma o chunk, a Rúbia, a imagem estática de 960 px dela e as miniaturas, até 8512 KB", () => {
       const initial = [
         ...WITHIN,
-        file("assets/oficina-3d-x.js", 170 * KB),
-        file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB),
+        file("assets/oficina-3d-x.js", 172 * KB),
+        file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8000 * KB),
         file("assets/oficina-3d-rubia-960w-x.avif", 100 * KB),
         // As outras imagens estáticas da Rúbia só vêm por srcset no lugar da de 960 px: não contam.
         file("assets/oficina-3d-rubia-960w-x.webp", 110 * KB),
@@ -213,10 +213,10 @@ describe("budgetViolations", () => {
       expect(budgetViolations(initial, INDEX)).toEqual([]);
 
       const heavier = initial.map((built) =>
-        built.path === "assets/oficina-3d-lua-192w-x.avif" ? file(built.path, 43 * KB) : built,
+        built.path === "assets/oficina-3d-lua-192w-x.avif" ? file(built.path, 41 * KB) : built,
       );
       expect(budgetViolations(heavier, INDEX)).toEqual([
-        "3D inicial (chunk, Rúbia, imagem estática e miniaturas): 8705,0 KB passa do teto de 8704 KB",
+        "3D inicial (chunk, Rúbia, imagem estática e miniaturas): 8513,0 KB passa do teto de 8512 KB",
       ]);
     });
 

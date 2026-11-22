@@ -250,14 +250,31 @@ describe("provenanceViolations", () => {
 
   it("origem 3D publicada não pode perder seu direito", () => {
     const broken = structuredClone(manifest);
-    const generation: { rights?: string } = broken.generations["rubia-3d-1m"];
+    const generation: { rights?: string } = broken.generations["rubia-3d-quality"];
     delete generation.rights;
     const files = broken.assets.map((asset) => ({ path: asset.file, sha256: asset.sha256 }));
     expect(
       provenanceViolations(files, broken).some((v) =>
-        v.includes('rubia-3d-1m tem upstream "source-001", mas não cita direito'),
+        v.includes('rubia-3d-quality tem upstream "source-005", mas não cita direito'),
       ),
     ).toBe(true);
+  });
+
+  // O schema aceita geração sem upstream (as de render não têm): sem este teste, uma geração do
+  // Hi3D Quality sem upstream nem direito passaria no CI.
+  it("toda geração do Hi3D Quality declara upstream e direito", () => {
+    const quality = Object.entries(manifest.generations).filter(([id]) =>
+      id.endsWith("-3d-quality"),
+    );
+    expect(quality.map(([id]) => id).sort()).toEqual(
+      ["fagulha", "ferrugem", "jade", "lua", "nyx", "rubia"].map((g) => `${g}-3d-quality`),
+    );
+    for (const [, generation] of quality) {
+      const fields: Record<string, unknown> = generation;
+      expect(fields["task_id"]).toMatch(/^[0-9a-f]{32}$/);
+      expect(typeof fields["upstream"]).toBe("string");
+      expect(typeof fields["rights"]).toBe("string");
+    }
   });
 
   it("documento fora do formato é um erro só, sem seguir adiante", () => {

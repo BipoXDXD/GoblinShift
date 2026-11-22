@@ -24,20 +24,23 @@ const LIMITS_KB = {
   threeDChunk: 300,
   /**
    * ADR 030 (revisto em 2026-11-22): a Rúbia do Hi3D Quality, com textura de 4096 px, mede
-   * 7309 KB no `-site.glb`; o teto deixa folga até 8 MiB.
+   * 7309 KB (1,31 milhão de triângulos); o teto deixa folga até 8 MiB.
    */
   threeDModel: 8192,
   /**
    * ADR 038 (revisto em 2026-11-22): cada uma das outras goblins do elenco, na mesma configuração
-   * da Rúbia, mede até 5621 KB; só baixa quando a pessoa a escolhe no seletor.
+   * da Rúbia, mede de 5292 KB (Ferrugem) a 5621 KB (Fagulha); só baixa quando a pessoa a escolhe
+   * no seletor.
    */
   threeDCastModel: 6144,
   /**
    * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
-   * Rúbia, a imagem estática de 960 px dela em AVIF e as miniaturas do seletor. Provisório
-   * (8,5 MiB) até a medida do build com os modelos do Hi3D Quality.
+   * Rúbia, a imagem estática de 960 px dela em AVIF e as miniaturas do seletor. Medido em
+   * 2026-11-22: chunk 159 KB gzip + Rúbia 7309 KB + imagem 58 KB + seis miniaturas 48 KB =
+   * 7574 KB. Teto = teto da Rúbia (8192) + 10% sobre o resto (265 KB), arredondado para cima em
+   * múltiplos de 64 KB.
    */
-  threeDInitial: 8704,
+  threeDInitial: 8512,
 } as const;
 
 /**
@@ -51,14 +54,19 @@ type WidthLimits = readonly [Band, ...Band[]];
 
 /**
  * Goblin de um estado ou do elenco, AVIF ou WebP. Era 64 KB para todas as larguras (a maior,
- * a Rúbia em WebP de 768 px, tinha 61 KB); a arte do Hi3D Quality ganha 1024 e 1280 px.
+ * a Rúbia em WebP de 768 px, tinha 61 KB); a arte do Hi3D Quality ganha 1024 e 1280 px. Medido
+ * em 2026-11-22, o maior arquivo de cada largura é da Rúbia em WebP: 56 KB (768), 77 KB (1024)
+ * e 98 KB (1280).
  */
 const ILLUSTRATION_LIMITS: WidthLimits = [
   [768, 64],
   [1024, 120],
   [1280, 180],
 ];
-/** Imagem estática do 3D (e miniatura do seletor): a de 960 px é a que a abertura mostra. */
+/**
+ * Imagem estática do 3D (e miniatura do seletor): a de 960 px é a que a abertura mostra. Medido
+ * em 2026-11-22, o maior arquivo é da Rúbia em WebP: 45 KB (640) e 71 KB (960).
+ */
 const POSTER_LIMITS: WidthLimits = [
   [640, 90],
   [960, 120],
