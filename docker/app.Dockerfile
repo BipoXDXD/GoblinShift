@@ -47,7 +47,9 @@ EXPOSE 8000
 # Sem access log: o evento amplo `main` já registra cada requisição, sem IP completo (plano, 3.7).
 # Teto de 30, o dobro do pool do banco (10 + 5): o uvicorn compara com `>=` contando a conexão
 # atual, então atende até 29 conexões ao mesmo tempo e responde 503 `text/plain`, sem Retry-After,
-# a partir da 30ª, em vez de acumular pedidos à espera de conexão. Na parada, 8 s para terminar os
+# a partir da 30ª, em vez de acumular pedidos à espera de conexão. É a última barreira: antes dela,
+# o ConcurrencyLimitMiddleware da API recusa a partir da 29ª requisição em problem+json com
+# Retry-After (entrypoints/api/concurrency.py). Na parada, 8 s para terminar os
 # pedidos em curso, mais 2 s para o lifespan fechar o pool: cabe em qualquer carência de 10 s ou
 # mais, que é o padrão do Docker e do Compose (o serviço `api` não declara `stop_grace_period`).
 # tests/test_api_server_limits.py confere as duas contas.

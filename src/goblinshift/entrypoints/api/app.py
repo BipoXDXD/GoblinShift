@@ -32,6 +32,10 @@ from goblinshift.entrypoints.api import (
     runs_cancel,
     uploads,
 )
+from goblinshift.entrypoints.api.concurrency import (
+    MAX_CONCURRENT_REQUESTS,
+    ConcurrencyLimitMiddleware,
+)
 from goblinshift.entrypoints.api.cookies import (
     LOGIN_COOKIE,
     LOGIN_COOKIE_MAX_AGE_S,
@@ -138,6 +142,9 @@ def create_app(
     app.state.transfer_timeouts = TransferTimeouts()
     app.state.terms_version = CURRENT_TERMS_VERSION
 
+    # Antes dos handlers: fica por dentro do `RequestContextMiddleware`, que dá o `request_id` à
+    # recusa, e por fora da rota, que devolve a vaga ao terminar, com sucesso ou exceção.
+    app.add_middleware(ConcurrencyLimitMiddleware, limit=MAX_CONCURRENT_REQUESTS)
     install_problem_handlers(app)
     # Cookie de login (ADR 025): só o marcador do estado do Authlib, cujo conteúdo fica em
     # `login_state`. Middleware ASGI puro, que não toca respostas fora de `/auth`.

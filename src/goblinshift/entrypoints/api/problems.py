@@ -210,8 +210,10 @@ class ProblemDetails(BaseModel):
 
 
 # Todo 429 e todo 503 que a API emite carrega `Retry-After` (capacity_problems, rate limit, banco,
-# storage, fila cheia). O 503 `text/plain` do teto de concorrência do uvicorn sai antes do ASGI,
-# sem o header, e não faz parte do contrato. O header é imposto na construção: cada causa tem o
+# storage, fila cheia, teto de requisições simultâneas). O 503 `text/plain` do teto de
+# concorrência do uvicorn sai antes do ASGI, sem o header, e não faz parte do contrato: é a
+# última barreira, e o ConcurrencyLimitMiddleware (concurrency.py) recusa antes dele com o
+# problem+json. O header é imposto na construção: cada causa tem o
 # próprio prazo (banco, storage, ambiente, fila, cota, janela do rate limit), então não há
 # default, e um 429 ou 503 sem ele é erro de programação de quem o emite.
 _RETRY_AFTER_STATUSES = frozenset({429, 503})

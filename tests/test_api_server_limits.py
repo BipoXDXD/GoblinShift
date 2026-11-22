@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 import yaml
 
+from goblinshift.entrypoints.api.concurrency import MAX_CONCURRENT_REQUESTS
 from goblinshift.platform.settings import Settings
 from tests.test_container_logs import uvicorn_cmd
 
@@ -63,6 +64,12 @@ def test_teto_de_concorrencia_e_derivado_do_pool_do_banco() -> None:
     pool = pool_default + overflow_default
 
     assert _option("--limit-concurrency") == CONCURRENCY_PER_POOL_CONNECTION * pool
+
+
+def test_teto_do_middleware_fica_abaixo_do_uvicorn() -> None:
+    # O uvicorn atende até `--limit-concurrency - 1` conexões; o middleware recusa antes, em
+    # problem+json com Retry-After, e sobra folga para o /livez, que ele não conta.
+    assert _option("--limit-concurrency") - 1 > MAX_CONCURRENT_REQUESTS
 
 
 @pytest.mark.parametrize(
