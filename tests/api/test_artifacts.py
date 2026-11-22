@@ -45,6 +45,8 @@ DOWNLOAD_HEADERS = {
     "cross-origin-resource-policy",
     "cache-control",
     "x-request-id",
+    # Para o Nginx, que o consome e não o repassa ao cliente.
+    "x-accel-buffering",
     # Do middleware de cabeçalhos da aplicação (3.6), que não toca os de proteção acima.
     "referrer-policy",
     "cross-origin-opener-policy",

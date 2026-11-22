@@ -172,6 +172,9 @@ class DownloadResponse(StreamingResponse):
                 "Content-Disposition": content_disposition(filename),
                 # O cliente percebe um download cortado pelo tamanho que faltou.
                 "Content-Length": str(size),
+                # Sem buffer no proxy: o prazo de leitura e a vaga acompanham o cliente real, não
+                # o Nginx, que esvaziaria a API em segundos para o `proxy_temp`.
+                "X-Accel-Buffering": "no",
                 **DOWNLOAD_PROTECTION_HEADERS,
             },
         )

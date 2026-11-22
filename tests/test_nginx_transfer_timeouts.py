@@ -40,3 +40,19 @@ def test_envio_espera_o_corpo_um_pouco_mais_que_a_api() -> None:
 
 def test_envio_passa_pelo_proxy_sem_buffer() -> None:
     assert "proxy_request_buffering off;" in location_directives(UPLOAD_CONTENT)
+
+
+DOWNLOAD = r"~ ^/api/v1/artifacts/[^/]+/download$"
+
+
+def test_download_tem_location_propria_sem_buffer() -> None:
+    directives = location_directives(DOWNLOAD)
+
+    assert {
+        "proxy_buffering off;",
+        "proxy_max_temp_file_size 0;",
+        "limit_req zone=api burst=40 nodelay;",
+        "error_page 429 = @rate_limited;",
+        "error_page 502 504 = @upstream_unavailable;",
+    } <= set(directives)
+    assert f"send_timeout {int(TRANSFER_IDLE_TIMEOUT.total_seconds())}s;" in directives
