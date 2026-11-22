@@ -162,8 +162,7 @@ async def test_readyz_responde_pela_propria_sonda_com_a_api_saturada(
     async with saturated(client, gate):
         response = await client.get("/readyz")
 
-    assert "simultâneas" not in response.text
-    assert response.headers.get("Retry-After") != "1"
+    assert response.json() == {"status": "not_ready"}
 
 
 @pytest.mark.anyio

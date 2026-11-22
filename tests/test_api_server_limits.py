@@ -81,7 +81,8 @@ def test_teto_do_middleware_e_derivado_do_pool_do_banco() -> None:
 
 
 def test_teto_do_uvicorn_cobre_o_middleware_a_rajada_do_nginx_e_as_sondas() -> None:
-    # Uma rajada de um cliente (`burst` do /api/ no Nginx, sem keepalive: uma conexão por pedido)
+    # Uma rajada de um cliente só (`burst` do /api/ no Nginx, sem keepalive: uma conexão por pedido;
+    # as zonas /auth/ e /docs também contam no middleware, mas não somam a rajada da /api/)
     # com a API no teto recebe o 503 problem+json do middleware, e não o `text/plain` do uvicorn.
     # Mudar o middleware, a rajada ou o CMD sem os outros derruba este teste.
     assert _option("--limit-concurrency") == (
