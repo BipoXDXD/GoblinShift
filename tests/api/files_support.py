@@ -2,13 +2,16 @@
 
 import errno
 import os
+import threading
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select, text
+from sqlalchemy import Connection, func, select, text
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.artifacts import commit_candidate, create_candidate_object, publish_artifact
@@ -163,3 +166,47 @@ def upload_storage_key(factory: sessionmaker[Session], upload_id: str) -> str:
 def without_request_identity(body: dict[str, Any]) -> dict[str, Any]:
     """Corpo de erro sem o que muda a cada requisição, para comparar respostas."""
     return {k: v for k, v in body.items() if k not in {"request_id", "instance"}}
+
+
+# Tempo que o pool da API fica esgotado nos testes de encerramento: acima dos 0,5 s que uma
+# requisição espera por conexão e abaixo dos 5 s de `db_pool_timeout_s`.
+POOL_EXHAUSTED_S = 1.5
+
+
+class PoolHog:
+    """Ocupa todas as conexões do pool da API e as devolve `hold_s` depois, de outra thread."""
+
+    def __init__(self, app: FastAPI, hold_s: float = POOL_EXHAUSTED_S) -> None:
+        self._app = app
+        self._hold_s = hold_s
+        self._timer: threading.Timer | None = None
+
+    def take(self) -> None:
+        settings = self._app.state.settings
+        size = settings.db_pool_size + settings.db_pool_max_overflow
+        connections: list[Connection] = [self._app.state.engine.connect() for _ in range(size)]
+
+        def give_back() -> None:
+            for connection in connections:
+                connection.close()
+
+        self._timer = threading.Timer(self._hold_s, give_back)
+        self._timer.start()
+
+    def join(self) -> None:
+        assert self._timer is not None, "o pool não chegou a ser ocupado"
+        self._timer.join()
+
+
+def refusing_pool[**P, R](operation: Callable[P, R], refusals: int = 2) -> Callable[P, R]:
+    """`operation` precedida de `refusals` recusas do pool, como sob um pico de requisições."""
+    remaining = refusals
+
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        nonlocal remaining
+        if remaining:
+            remaining -= 1
+            raise PoolTimeoutError("pool esgotado")
+        return operation(*args, **kwargs)
+
+    return wrapper

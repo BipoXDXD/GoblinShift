@@ -8,6 +8,7 @@ Inexistente e de outra conta dão o mesmo 404; expirado ou excluído do próprio
 """
 
 from datetime import datetime
+from functools import partial
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -78,6 +79,7 @@ from goblinshift.files.uploads import (
     receive_content,
     request_deletion,
 )
+from goblinshift.platform.db import retry_on_pool_timeout
 from goblinshift.runs.acceptance import IdempotencyKeyInvalidError, parse_idempotency_key
 
 router = APIRouter(tags=["uploads"])
@@ -220,11 +222,14 @@ async def put_upload_content(
             ProblemCode.UNSUPPORTED_MEDIA_TYPE, f"Envie o conteúdo como {OCTET_STREAM}."
         )
     owner_id = principal.owner_id
+    # O fim da transferência espera o pool pelo prazo das settings, não pelo da API (app.py).
+    patience_s: float = request.app.state.settings.db_pool_timeout_s
     slot_id = await anyio.to_thread.run_sync(_acquire_upload_slot, session, owner_id)
     try:
         chunks = request_body_chunks(request, timeouts_of(request))
+        receive = partial(receive_content, pool_patience_s=patience_s)
         view = await anyio.to_thread.run_sync(
-            receive_content, session, storage, owner_id, upload_id, chunks
+            receive, session, storage, owner_id, upload_id, chunks
         )
     except FilesError as error:
         raise _upload_problem(error) from None
@@ -238,7 +243,7 @@ async def put_upload_content(
         raise ApiProblem(ProblemCode.BAD_REQUEST, "O envio foi interrompido.") from None
     finally:
         with anyio.CancelScope(shield=True):
-            await anyio.to_thread.run_sync(_release_slot, session, slot_id)
+            await anyio.to_thread.run_sync(_release_slot, session, slot_id, patience_s)
     # `ready` garante tamanho e hash (o serviço só conclui depois de persistir).
     if view.size_bytes is None or view.sha256 is None:
         raise RuntimeError("upload pronto sem tamanho ou hash")
@@ -328,9 +333,12 @@ def _acquire_upload_slot(session: Session, owner_id: UUID) -> UUID:
         raise transfer_limit_problem() from None
 
 
-def _release_slot(session: Session, slot_id: UUID) -> None:
-    with session.begin():
-        release_transfer_slot(session, slot_id)
+def _release_slot(session: Session, slot_id: UUID, patience_s: float) -> None:
+    def release() -> None:
+        with session.begin():
+            release_transfer_slot(session, slot_id)
+
+    retry_on_pool_timeout(release, patience_s=patience_s)
 
 
 def _upload_problem(error: FilesError) -> ApiProblem:

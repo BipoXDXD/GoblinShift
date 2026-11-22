@@ -19,13 +19,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import Message, Scope
 
+from goblinshift.entrypoints.api import uploads as uploads_api
 from goblinshift.entrypoints.api.transfers import TransferTimeouts
+from goblinshift.files.transfers import release_transfer_slot
 from tests.api.files_support import (
     OCTET_STREAM,
     UPLOADS,
+    PoolHog,
     create_upload,
     idle_in_transaction,
     new_account,
+    refusing_pool,
     slot_count,
 )
 from tests.api.support import assert_problem
@@ -304,5 +308,70 @@ async def test_cliente_que_desconecta_no_meio_do_envio_recebe_400_e_o_upload_fal
     body = json.loads(b"".join(message.get("body", b"") for message in sent))
     assert start["status"] == 400
     assert (body["code"], body["detail"]) == ("BAD_REQUEST", "O envio foi interrompido.")
+    assert state_of(sync_client, auth, item) == "failed"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_pool_esgotado_logo_depois_do_envio_ainda_deixa_o_upload_pronto_e_devolve_a_vaga(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # A transferência já terminou: desistir no commit perderia o envio e prenderia a vaga até o
+    # lease vencer. A escrita final espera até o `db_pool_timeout_s` das settings.
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=3)
+    hog = PoolHog(app)
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b"abc"
+        hog.take()
+
+    response = await put_content(async_client, auth, item, body())
+    hog.join()
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "ready"
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_vaga_do_envio_volta_mesmo_com_o_pool_recusando_na_devolucao(
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(uploads_api, "release_transfer_slot", refusing_pool(release_transfer_slot))
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=3)
+
+    response = await put_content(async_client, auth, item, b"abc")
+
+    assert response.status_code == 200, response.text
+    assert await anyio.to_thread.run_sync(slot_count, factory) == 0
+
+
+async def test_pool_esgotado_logo_depois_de_um_envio_curto_ainda_o_marca_falho_e_devolve_a_vaga(
+    app: FastAPI,
+    async_client: httpx.AsyncClient,
+    sync_client: TestClient,
+    factory: sessionmaker[Session],
+) -> None:
+    # A falha também encerra a transferência: sem esperar o pool, o upload ficaria `receiving`,
+    # com a reserva, até a retenção vencê-lo.
+    _, auth = new_account(factory)
+    item = create_upload(sync_client, auth, size=4)
+    hog = PoolHog(app)
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b"abc"
+        hog.take()
+
+    response = await put_content(async_client, auth, item, body())
+    hog.join()
+
+    body_json = assert_problem(response, 422, "VALIDATION_FAILED")
+    assert [(e["field"], e["code"]) for e in body_json["errors"]] == [("body", "size_mismatch")]
     assert state_of(sync_client, auth, item) == "failed"
     assert await anyio.to_thread.run_sync(slot_count, factory) == 0

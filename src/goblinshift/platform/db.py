@@ -1,9 +1,11 @@
 """Engine, sessões e unidade de trabalho (docs/GoblinShiftPlan.md, 3.2)."""
 
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import Engine, MetaData, create_engine
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.platform.settings import Settings
@@ -52,3 +54,25 @@ def unit_of_work(factory: sessionmaker[Session]) -> Iterator[Session]:
     """Abre uma transação; commit no sucesso, rollback em qualquer exceção."""
     with factory() as session, session.begin():
         yield session
+
+
+def retry_on_pool_timeout[T](
+    operation: Callable[[], T],
+    *,
+    patience_s: float,
+    clock: Callable[[], float] = time.monotonic,
+) -> T:
+    """Repete `operation` enquanto o pool não entregar conexão, por até `patience_s` segundos.
+
+    Para as escritas que encerram uma transferência, numa API cujo pool desiste rápido: concluir o
+    envio ou devolver a vaga não pode falhar por um pico curto. Só serve a operações que abrem a
+    própria transação: o `TimeoutError` do pool sai no checkout, antes de qualquer SQL, e nada fica
+    pela metade. Cada tentativa já espera o `pool_timeout` do engine, que faz as vezes de intervalo.
+    """
+    deadline = clock() + patience_s
+    while True:
+        try:
+            return operation()
+        except PoolTimeoutError:
+            if clock() >= deadline:
+                raise
