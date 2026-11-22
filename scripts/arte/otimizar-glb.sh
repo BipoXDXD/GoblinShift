@@ -41,20 +41,12 @@ if [[ -n "${FONTE:-}" && $# -ne 1 ]]; then
   echo "FONTE vale para um ID só" >&2
   exit 1
 fi
+# shellcheck source=scripts/arte/elenco.sh
+source "$here/elenco.sh"
+check_ids "$here/elenco.tsv" "$@"
 mkdir -p "$out_dir"
 
 gt() { npx --yes "$GLTF_TRANSFORM" "$@" >/dev/null; }
-
-# selected ID [PEDIDOS...]: verdadeiro sem pedidos ou se ID está entre eles.
-selected() {
-  local id="$1" wanted
-  shift
-  (($# == 0)) && return 0
-  for wanted in "$@"; do
-    [[ "$wanted" == "$id" ]] && return 0
-  done
-  return 1
-}
 
 optimize() {
   local src="$1" out="$2"

@@ -33,7 +33,8 @@ def test_elenco_tem_as_seis_goblins_do_hi3d_quality() -> None:
     assert all(re.fullmatch(r"[0-9a-f]{32}", r[2]) for r in rows), rows
 
 
-def test_fonte_ja_otimizada_falha_sem_gravar(tmp_path: Path) -> None:
+def _otimizar(tmp_path: Path, ids: list[str]) -> subprocess.CompletedProcess[str]:
+    """Roda uma cópia do script com nyx-site.glb em ARTE e npx/node falsos no PATH."""
     scripts = tmp_path / "scripts" / "arte"
     shutil.copytree(SCRIPTS, scripts)
     (tmp_path / "web" / "node_modules" / "meshoptimizer").mkdir(parents=True)
@@ -45,11 +46,10 @@ def test_fonte_ja_otimizada_falha_sem_gravar(tmp_path: Path) -> None:
     for tool in ("npx", "node"):
         (bin_dir / tool).write_text(FAKE_TOOL)
         (bin_dir / tool).chmod(0o755)
-
-    result = subprocess.run(
-        ["bash", str(scripts / "otimizar-glb.sh"), "nyx"],
+    return subprocess.run(
+        ["bash", str(scripts / "otimizar-glb.sh"), *ids],
         env={
-            **os.environ,
+            **{k: v for k, v in os.environ.items() if k != "FONTE"},
             "ARTE": str(arte),
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         },
@@ -58,7 +58,18 @@ def test_fonte_ja_otimizada_falha_sem_gravar(tmp_path: Path) -> None:
         check=False,
     )
 
+
+def test_fonte_ja_otimizada_falha_sem_gravar(tmp_path: Path) -> None:
+    result = _otimizar(tmp_path, ["nyx"])
+
     assert result.returncode == 1, result.stderr
     assert "fonte já otimizada para o site" in result.stderr
     out = tmp_path / "web" / "src" / "assets" / "art" / "oficina-3d" / "oficina-3d-nyx.glb"
     assert not out.exists()
+
+
+def test_id_fora_do_elenco_ao_lado_de_um_valido_falha(tmp_path: Path) -> None:
+    result = _otimizar(tmp_path, ["nyx", "ninguem"])
+
+    assert result.returncode == 1, result.stderr
+    assert "ID fora do elenco.tsv: ninguem" in result.stderr
