@@ -31,31 +31,34 @@ class JsonFormatter(logging.Formatter):
 def _types_and_frames(exception: BaseException) -> str:
     """O traceback sem mensagens, notas nem texto de grupo: só o tipo e os frames de cada exceção.
 
-    A mensagem pode trazer o que o cliente do socket mandou; o local da falha vem dos frames.
+    A mensagem pode trazer o que o cliente do socket mandou; o local da falha vem dos frames. Cada
+    exceção ligada leva um rótulo fixo que diz a relação: causa, contexto ou membro de grupo.
     """
     return "\n\n".join(
-        "Traceback (most recent call last):\n"
+        (f"[{label}]\n" if label else "")
+        + "Traceback (most recent call last):\n"
         + "".join(traceback.format_tb(item.__traceback__))
         + f"{type(item).__module__}.{type(item).__qualname__}"
-        for item in _exception_chain(exception)
+        for label, item in _exception_chain(exception)
     )
 
 
-def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
-    """A exceção e as que o traceback mostraria: causa, contexto e membros de grupo."""
-    pending = [exception]
+def _exception_chain(exception: BaseException) -> Iterator[tuple[str | None, BaseException]]:
+    """A exceção e as que o traceback mostraria, cada uma com a relação com a anterior."""
+    pending: list[tuple[str | None, BaseException]] = [(None, exception)]
     seen: set[int] = set()
     while pending:
-        current = pending.pop()
+        label, current = pending.pop()
         if id(current) in seen:
             continue
         seen.add(id(current))
-        yield current
-        linked = current.__cause__ if current.__suppress_context__ else current.__context__
-        if linked is not None:
-            pending.append(linked)
+        yield label, current
+        if current.__cause__ is not None:
+            pending.append(("cause", current.__cause__))
+        elif current.__context__ is not None and not current.__suppress_context__:
+            pending.append(("context", current.__context__))
         if isinstance(current, BaseExceptionGroup):
-            pending.extend(current.exceptions)
+            pending.extend(("group member", member) for member in current.exceptions)
 
 
 def configure_logging() -> None:

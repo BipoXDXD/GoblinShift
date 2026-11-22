@@ -100,6 +100,14 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         super().server_close()
         _remove_stale_socket(self.socket_path)
 
+    def handle_error(self, request: object, client_address: object) -> None:
+        """Exceção que escapou do handler (cliente que fechou no meio da resposta, por exemplo).
+
+        O padrão imprime o traceback inteiro no stderr, com a mensagem; aqui ele passa pelo
+        formatter do journal, que deixa só tipos e frames.
+        """
+        _log.exception("erro no handler")
+
 
 def bind_server(
     config: Config,

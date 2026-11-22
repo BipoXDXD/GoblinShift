@@ -16,7 +16,7 @@ import pytest
 from executor_ctl.client import UnixHTTPConnection, call
 from executor_ctl.docker_cli import DockerCli
 from executor_ctl.journal import JsonFormatter
-from executor_ctl.server import MAX_BODY_BYTES, ControlHandler, _error_payload
+from executor_ctl.server import MAX_BODY_BYTES, ControlHandler, ControlServer, _error_payload
 
 from .conftest import make_config, running_server
 
@@ -26,7 +26,7 @@ ATTEMPT = "0193a3f0-7b2c-7def-8a01-23456789abcd"
 ALLOWED = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 OTHER_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "f" * 64
 # Texto de quem fala com o socket: não pode aparecer em nenhuma linha do journal.
-CANARY = f"CANARY-{uuid.uuid4().hex}"
+CANARY = f"CANARY-{uuid.uuid4()}"
 
 
 @pytest.fixture
@@ -531,7 +531,7 @@ def test_log_message_do_http_server_nao_interpola_os_argumentos(
 
     [record] = [r for r in caplog.records if r.getMessage() == "http.server"]
     assert record.__dict__["detail"] == "code %d, message %s"
-    assert CANARY not in caplog.text
+    assert CANARY not in JsonFormatter().format(record)
 
 
 def _raise_with_canary_everywhere() -> None:
@@ -564,3 +564,21 @@ def test_excecao_inesperada_vai_ao_journal_so_com_tipos_e_frames(
     assert "_raise_with_canary_everywhere" in exception
     for kind in ("ExceptionGroup", "KeyError", "ValueError", "OSError"):
         assert f"builtins.{kind}" in exception
+    for label in ("[cause]", "[context]", "[group member]"):
+        assert label in exception
+
+
+def test_excecao_que_escapa_do_handler_vai_ao_journal_so_com_tipos_e_frames(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # O padrão do socketserver imprime o traceback inteiro no stderr, que também vai ao journal.
+    try:
+        raise BrokenPipeError(f"pipe {CANARY}")
+    except BrokenPipeError:
+        ControlServer.handle_error(cast(Any, object()), cast(Any, object()), "")
+
+    assert CANARY not in capsys.readouterr().err
+    [record] = [r for r in caplog.records if r.getMessage() == "erro no handler"]
+    line = JsonFormatter().format(record)
+    assert CANARY not in line
+    assert "builtins.BrokenPipeError" in json.loads(line)["exception"]
