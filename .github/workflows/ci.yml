@@ -74,8 +74,9 @@ jobs:
         # A imagem do executor compila o FFmpeg (ADR 036): os testes dela rodam só no job gvisor,
         # sob runsc, que depende deste; aqui ficariam minutos acima do orçamento.
         # `--fail-on-skip`: teste pulado reprova (tests/skip_guard.py). O que só roda como root fica
-        # fora daqui (`needs_root`) e roda no passo seguinte.
-        run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root and not real_clock"
+        # fora daqui (`needs_root`) e roda no passo seguinte. Os da arte (`arte`) precisam de Blender
+        # e ImageMagick locais e não rodam na CI.
+        run: uv run pytest --fail-on-skip -m "not openobserve and not executor_image and not needs_root and not real_clock and not arte"
       - name: Testes que exigem root (runner descartável, sudo sem senha)
         # Política nativa de imagens e troca de UID na área de trabalho do executor-ctl. O runner
         # hospedado é descartado no fim do job; nada disso roda como root fora dele. Sem bytecode

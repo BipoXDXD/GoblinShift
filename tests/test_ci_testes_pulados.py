@@ -23,6 +23,7 @@ CI = WORKFLOWS / "ci.yml"
 SECURITY_TXT_WORKFLOW = WORKFLOWS / "security-txt.yml"
 REAL_CLOCK_SELECTOR = "-m real_clock"
 REAL_CLOCK_EXCLUSION = "not real_clock"
+ARTE_EXCLUSION = "not arte"
 MARKER_SELECTOR = re.compile(r"""-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))""")
 NEGATION_PREFIX = "not "
 AND_SEPARATOR = " and "
@@ -130,6 +131,15 @@ def test_chamadas_da_ci_que_so_excluem_marcadores_excluem_o_relogio_real() -> No
 
     assert negations, _pytest_commands()
     assert all(REAL_CLOCK_EXCLUSION in command for command in negations), negations
+
+
+def test_chamadas_da_ci_que_so_excluem_marcadores_excluem_a_arte() -> None:
+    # Os testes `arte` precisam de Blender e ImageMagick locais e ficam fora da CI; o `-m` só de
+    # negações substitui o do `addopts` e precisa repetir a exclusão.
+    negations = [command for _, command in _pytest_commands() if _only_negations(command)]
+
+    assert negations, _pytest_commands()
+    assert all(ARTE_EXCLUSION in command for command in negations), negations
 
 
 def test_workflow_do_security_txt_roda_o_lembrete_e_reprova_se_pulado() -> None:
