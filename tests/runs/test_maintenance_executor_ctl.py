@@ -22,6 +22,7 @@ from goblinshift.platform.db import make_engine, make_session_factory, unit_of_w
 from goblinshift.platform.settings import Settings
 from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
 from goblinshift.runs.maintenance import Maintenance, MaintenanceConfig
+from goblinshift.runs.store import LostFencing
 from goblinshift.runs.tables import attempt
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlRunner
@@ -114,7 +115,7 @@ def test_executor_vivo_e_parado_antes_de_reagendar(
     assert not runner.work_dir(attempt_id).exists()
 
 
-def test_lease_renovado_durante_a_consulta_nao_para_o_executor(
+def test_worker_que_volta_com_lease_vencido_durante_a_consulta_nao_renova_e_o_executor_para(
     factory: sessionmaker[Session],
     storage: FileStorage,
     ctl: FakeExecutorCtl,
@@ -123,27 +124,31 @@ def test_lease_renovado_durante_a_consulta_nao_para_o_executor(
     claimed = paused_worker_attempt(factory, storage, runner)
     ctl.containers[str(claimed.attempt_id)] = FakeContainer("running")
     worker = coordinator(factory, storage, runner)
-    renewed: list[Status] = []
+    renewals: list[Status | LostFencing] = []
 
     def worker_wakes_up(_attempt_id: str) -> None:
         # O worker pausado volta entre a leitura do lease vencido e a decisão de parar, com a
         # renovação de verdade (`lock_fenced` + UPDATE), enquanto a manutenção espera o ctl.
-        if not renewed:
-            renewed.append(worker.renew_lease(claimed))
+        if not renewals:
+            try:
+                renewals.append(worker.renew_lease(claimed))
+            except LostFencing as error:
+                renewals.append(error)
 
     ctl.on_status = worker_wakes_up
 
     counts = janitor(factory, storage, runner).run_cycle()
 
-    assert renewed == [Status.RUNNING]
-    assert counts["leases_reconciled"] == 0
-    assert ctl.operations(claimed.attempt_id) == ["status"]
-    assert ctl.containers[str(claimed.attempt_id)].state == "running"
+    # Lease vencido não se renova: a releitura continua vencida e a decisão é da manutenção.
+    [renewal_error] = renewals
+    assert isinstance(renewal_error, LostFencing)
+    assert counts["leases_reconciled"] == 1
+    assert ctl.operations(claimed.attempt_id) == ["status", "stop", "remove"]
     [only] = attempts(factory, claimed.run_id)
-    assert only["ended_at"] is None
+    assert only["ended_at"] is not None
     row = run_row(factory, claimed.run_id)
-    assert (row["status"], row["generation"]) == ("running", claimed.generation)
-    assert runner.work_dir(claimed.attempt_id).exists()
+    assert (row["status"], row["phase"]) == ("running", "retry_wait")
+    assert not runner.work_dir(claimed.attempt_id).exists()
 
 
 def test_tentativa_reconciliada_por_outra_manutencao_nao_e_parada_de_novo(

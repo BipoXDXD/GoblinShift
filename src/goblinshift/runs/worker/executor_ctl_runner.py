@@ -28,6 +28,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from goblinshift.runs.worker.runner import (
     MAX_STOP_GRACE,
@@ -141,7 +142,9 @@ class ExecutorCtlRunner:
 
     def image_present(self, image: str) -> bool:
         """Se o daemon tem a imagem; qualquer outra resposta é erro, nunca "ausente"."""
-        document = self._request("GET", f"/v1/image?ref={image}", None, self._call_timeout)
+        document = self._request(
+            "GET", f"/v1/image?ref={quote(image, safe='')}", None, self._call_timeout
+        )
         match document:
             case {"present": bool(present), **others} if not others:
                 return present
