@@ -23,7 +23,7 @@ from goblinshift.identity import (
 )
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import new_key, new_user
+from tests.identity.support import HASHER, new_key, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +32,7 @@ NOW = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
 
 def authenticate(factory: sessionmaker[Session], token: str, now: datetime) -> Principal | None:
     with unit_of_work(factory) as session:
-        return authenticate_api_key(session, token, now)
+        return authenticate_api_key(session, token, now, hasher=HASHER)
 
 
 def last_used_at(factory: sessionmaker[Session], public_id: str) -> datetime | None:

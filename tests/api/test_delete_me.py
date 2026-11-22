@@ -17,7 +17,7 @@ from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.tables import run
 from tests.api.simulated_session import SimulatedSessions
 from tests.api.support import assert_problem
-from tests.identity.support import new_key, new_user, purge_account
+from tests.identity.support import HASHER, new_key, new_user, purge_account
 from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import queue_run
 
@@ -65,7 +65,7 @@ def test_delete_me_marca_a_exclusao_revoga_tudo_e_limpa_o_navegador(
     assert response.headers["clear-site-data"] == '"cookies", "storage"'
     assert deletion_requested_at(factory, owner) == NOW
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
     assert events_of(factory, owner) == ["ACCOUNT_DELETION_REQUESTED"]
 
 
@@ -151,7 +151,7 @@ def test_delete_me_com_login_de_11_min_401_reauth_required(
     assert_problem(response, 401, "REAUTH_REQUIRED")
     assert deletion_requested_at(factory, owner) is None
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is not None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is not None
 
 
 def test_delete_me_com_login_de_10_min_exatos_aceita(
@@ -179,6 +179,6 @@ def test_delete_me_nao_toca_outra_conta(
 
     assert deletion_requested_at(factory, other) is None
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, other_key.token, NOW) is not None
+        assert authenticate_api_key(session, other_key.token, NOW, hasher=HASHER) is not None
         status = session.execute(select(run.c.status).where(run.c.id == other_run)).scalar_one()
     assert status == Status.QUEUED

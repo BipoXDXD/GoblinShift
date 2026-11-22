@@ -41,7 +41,7 @@ from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.maintenance import Maintenance
 from goblinshift.runs.quotas import QuotaOverride, quota_override
 from goblinshift.runs.tables import run as run_table
-from tests.identity.support import new_user
+from tests.identity.support import HASHER, new_user
 from tests.runs.finished_support import RecordedFinished
 from tests.runs.worker_support import local_runner, queue_run
 
@@ -100,7 +100,7 @@ def test_chave_emitida_pela_cli_autentica_ate_ser_revogada(
     assert public_id in err
     assert token not in err
     with unit_of_work(factory) as session:
-        principal = authenticate_api_key(session, token, datetime.now(UTC))
+        principal = authenticate_api_key(session, token, datetime.now(UTC), hasher=HASHER)
         row = session.execute(select(api_key.c.created_at, api_key.c.expires_at)).one()
     assert principal is not None
     assert principal.owner_id == UUID(user_id)
@@ -111,7 +111,7 @@ def test_chave_emitida_pela_cli_autentica_ate_ser_revogada(
 
     assert exit_code == EXIT_OK
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, token, datetime.now(UTC)) is None
+        assert authenticate_api_key(session, token, datetime.now(UTC), hasher=HASHER) is None
 
 
 def test_validade_padrao_e_de_30_dias(
@@ -236,7 +236,9 @@ def test_block_bloqueia_revoga_chaves_e_cancela_a_execucao(
     assert user_id in err
     assert status_of(factory, user_id) == "blocked"
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, token.strip(), datetime.now(UTC)) is None
+        assert (
+            authenticate_api_key(session, token.strip(), datetime.now(UTC), hasher=HASHER) is None
+        )
         run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
         assert run_status.scalar_one() == Status.CANCELED
     assert audited(factory, user_id) == ["ACCOUNT_BLOCKED"]
@@ -389,7 +391,9 @@ def test_request_deletion_marca_revoga_cancela_e_audita(
     assert user_id in err
     assert deletion_requested_at(factory, user_id) is not None
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, token.strip(), datetime.now(UTC)) is None
+        assert (
+            authenticate_api_key(session, token.strip(), datetime.now(UTC), hasher=HASHER) is None
+        )
         run_status = session.execute(select(run_table.c.status).where(run_table.c.id == run_id))
         assert run_status.scalar_one() == Status.CANCELED
     assert audited(factory, user_id) == ["ACCOUNT_DELETION_REQUESTED"]

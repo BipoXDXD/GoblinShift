@@ -1,5 +1,9 @@
 """Chaves emitidas, listadas e revogadas pela sessão web (GoblinShiftPlan.md, 3.6; Frente C)."""
 
+import io
+import json
+import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
@@ -23,7 +27,7 @@ from goblinshift.identity import (
 from goblinshift.identity.accounts import MAX_LISTED_KEYS
 from goblinshift.identity.tables import api_key, app_user
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import new_user
+from tests.identity.support import HASHER, new_user
 from tests.lock_support import in_thread, wait_until_someone_waits_for_a_lock
 
 pytestmark = pytest.mark.integration
@@ -35,6 +39,36 @@ READ = frozenset({Scope.FILES_READ})
 def issue(factory: sessionmaker[Session], owner_id: UUID, now: datetime = NOW) -> IssuedKey:
     with unit_of_work(factory) as session:
         return issue_key_for_session(session, owner_id=owner_id, scopes=READ, days=30, now=now)
+
+
+def revoke(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key)
+            .where(api_key.c.id == key.id)
+            .values(revoked_at=NOW - timedelta(hours=1))
+        )
+
+
+def expire(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(api_key)
+            .where(api_key.c.id == key.id)
+            .values(created_at=NOW - timedelta(days=30), expires_at=NOW)
+        )
+
+
+def block_account(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(update(app_user).where(app_user.c.id == owner_id).values(status="blocked"))
+
+
+def request_deletion(factory: sessionmaker[Session], owner_id: UUID, key: IssuedKey) -> None:
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(app_user).where(app_user.c.id == owner_id).values(deletion_requested_at=NOW)
+        )
 
 
 def active_count(factory: sessionmaker[Session], owner_id: UUID) -> int:
@@ -58,7 +92,7 @@ def test_chave_emitida_pela_sessao_autentica_com_os_escopos_pedidos(
 
     assert issued.expires_at == NOW + timedelta(days=7)
     with unit_of_work(factory) as session:
-        principal = authenticate_api_key(session, issued.token, NOW)
+        principal = authenticate_api_key(session, issued.token, NOW, hasher=HASHER)
     assert principal is not None
     assert principal.owner_id == owner
     assert principal.scopes == scopes
@@ -265,7 +299,7 @@ def test_dono_revoga_a_propria_chave(factory: sessionmaker[Session]) -> None:
 
     assert found is True
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
         [after] = list_keys(session, owner, NOW)
     assert after.revoked_at == NOW
 
@@ -297,9 +331,43 @@ def test_revogar_chave_alheia_devolve_false_e_nao_a_toca(factory: sessionmaker[S
 
     assert found is False
     with unit_of_work(factory) as session:
-        assert authenticate_api_key(session, issued.token, NOW) is not None
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is not None
 
 
 def test_revogar_chave_inexistente_devolve_false(factory: sessionmaker[Session]) -> None:
     with unit_of_work(factory) as session:
         assert revoke_owned_key(session, new_user(factory), uuid7(), NOW) is False
+
+
+@pytest.mark.parametrize(
+    ("make_refused", "reason"),
+    [
+        (revoke, "expired_or_revoked"),
+        (expire, "expired_or_revoked"),
+        (block_account, "account_unavailable"),
+        (request_deletion, "account_unavailable"),
+    ],
+)
+def test_chave_recusada_registra_user_hash_e_nao_o_public_id(
+    factory: sessionmaker[Session],
+    listen: Callable[[logging.Logger], io.StringIO],
+    caplog: pytest.LogCaptureFixture,
+    make_refused: Callable[[sessionmaker[Session], UUID, IssuedKey], None],
+    reason: str,
+) -> None:
+    owner = new_user(factory)
+    issued = issue(factory, owner)
+    make_refused(factory, owner, issued)
+    # Em produção o root fica em INFO (`configure_logging`); aqui o nível vem do caplog.
+    caplog.set_level(logging.INFO, logger="goblinshift.identity.accounts")
+    stream = listen(logging.getLogger("goblinshift.identity.accounts"))
+
+    with unit_of_work(factory) as session:
+        assert authenticate_api_key(session, issued.token, NOW, hasher=HASHER) is None
+
+    [line] = [json.loads(raw) for raw in stream.getvalue().splitlines()]
+    assert line["message"] == "chave de API recusada"
+    assert line["user.hash"] == HASHER.hash(owner)
+    assert line["reason"] == reason
+    assert "dropped_fields" not in line
+    assert issued.public_id not in stream.getvalue()

@@ -39,7 +39,7 @@ from goblinshift.identity import (
 )
 from goblinshift.identity.tables import app_user, web_session
 from goblinshift.platform.db import unit_of_work
-from tests.identity.support import new_key, new_user
+from tests.identity.support import HASHER, new_key, new_user
 
 pytestmark = pytest.mark.integration
 
@@ -117,7 +117,7 @@ def test_chave_emitida_tem_so_os_escopos_pedidos(factory: sessionmaker[Session])
         )
 
     with unit_of_work(factory) as session:
-        principal = authenticate_api_key(session, issued.token, NOW)
+        principal = authenticate_api_key(session, issued.token, NOW, hasher=HASHER)
 
     assert principal is not None
     assert principal.scopes == frozenset({Scope.FILES_READ})
@@ -160,7 +160,7 @@ def test_chave_e_sessao_aceitam_e_recusam_a_mesma_conta(
     _set_state(factory, user_id, state)
 
     with unit_of_work(factory) as session:
-        by_key = authenticate_api_key(session, key.token, NOW)
+        by_key = authenticate_api_key(session, key.token, NOW, hasher=HASHER)
         by_session = authenticate_session(session, web.token, NOW)
 
     assert (by_key is not None, by_session is not None) == (authenticates, authenticates)

@@ -119,6 +119,7 @@ LOGGED_FIELDS = frozenset(
         "pause_s",
         "pools_corrected",
         "position",
+        "reason",
         "retry_in_s",
         "run_id",
         "runner",
@@ -132,6 +133,7 @@ LOGGED_FIELDS = frozenset(
         "tmp_part",
         "unreadable",
         "upload_id",
+        "user.hash",
         "user_id",
     }
 )
