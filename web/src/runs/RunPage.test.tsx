@@ -186,6 +186,19 @@ describe("Execução", () => {
     expect(alert).not.toHaveTextContent("Não encontramos este item");
   });
 
+  it("sessão que termina ao ler os resultados vira o convite, com título de nível 3", async () => {
+    setup(
+      () => jsonResponse(runBody({ status: "succeeded" })),
+      () => problemResponse(401, "AUTHENTICATION_REQUIRED"),
+    );
+
+    const results = await screen.findByRole("region", { name: "Resultados" });
+    expect(
+      await within(results).findByRole("heading", { level: 3, name: "Entre para continuar" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("oferece uma nova execução na mesma receita", async () => {
     setup(() => jsonResponse(runBody({ status: "succeeded" })));
 

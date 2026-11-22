@@ -54,7 +54,7 @@ from goblinshift.files.retention import (
     remove_file_after_commit,
 )
 from goblinshift.files.states import HolderKind
-from goblinshift.files.storage import FileStorage
+from goblinshift.files.storage import FileStorage, ObjectTamperedError
 from goblinshift.runs.lifecycle import (
     TERMINAL_STATUSES,
     DeadlineExceeded,
@@ -643,7 +643,7 @@ class Maintenance:
 
         Eles ficam fora do livro-razão e do `file_backlog`. Isolada do resto do ciclo, como a
         varredura de ausentes: uma falha de disco, no diretório ou em um arquivo, fica no log e
-        em `tmp_parts_sweep_failed`.
+        em `tmp_parts_sweep_failed`, assim como um `.tmp` trocado por symlink ou arquivo.
         """
         # O `mtime` vem do relógio desta máquina, e não do banco: é com ele que se compara.
         modified_before = time.time() - STALE_TEMPORARY_TTL.total_seconds()
@@ -651,7 +651,7 @@ class Maintenance:
             sweep = self._storage.sweep_stale_temporaries(
                 modified_before, self._config.retention_batch_size
             )
-        except OSError:
+        except OSError, ObjectTamperedError:
             logger.exception("limpeza de temporários falhou")
             return {
                 "tmp_parts_removed": 0,

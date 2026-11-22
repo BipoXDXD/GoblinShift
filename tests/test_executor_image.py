@@ -461,7 +461,8 @@ def test_demuxers_que_abrem_outros_arquivos_nao_existem(image: str, demuxer: str
 
 
 def media_batch(root: Path) -> list[tuple[str, bytes]]:
-    """Celular em pé (rotação 90), WebM VP9/Opus, HLS disfarçado de .mp4 e 4K."""
+    """Celular em pé (rotação 90), WebM VP9/Opus, HLS disfarçado de .mp4, 4K e WebM que declara
+    2 s com 30 s de áudio."""
     root.mkdir()
     mp4 = video.generate(video.CLIPS["mp4"], root / "a.mp4")
     return [
@@ -469,6 +470,22 @@ def media_batch(root: Path) -> list[tuple[str, bytes]]:
         ("clipe.webm", video.generate(video.CLIPS["webm_vp9_opus"], root / "b.webm").read_bytes()),
         ("lista.mp4", video.HLS_PLAYLIST),
         ("grande.mp4", video.generate(video.CLIPS["mp4_4k"], root / "c.mp4").read_bytes()),
+        ("longo.webm", video.DERIVED["webm_audio_beyond_duration"](root).read_bytes()),
+    ]
+
+
+def media_beyond_header_batch(root: Path) -> list[tuple[str, bytes]]:
+    """WebM VP9/Opus válido e os que passam do teto só nos quadros decodificados: MP4 que passa a
+    2560x1440 no meio, WebM que passa a 2560x1440 só depois do último alvo (último quadro
+    anterior), WebM de 240 fps que declara ~60 e WebM com 2,8 s de Opus em instantes comprimidos
+    num vídeo de 2 s. Lote separado: o Media Mill aceita 5 vídeos."""
+    root.mkdir()
+    return [
+        ("clipe.webm", video.generate(video.CLIPS["webm_vp9_opus"], root / "b.webm").read_bytes()),
+        ("troca.mp4", video.DERIVED["mp4_resolution_switch"](root).read_bytes()),
+        ("troca.webm", video.DERIVED["webm_resolution_switch_before_target"](root).read_bytes()),
+        ("rapido.webm", video.DERIVED["webm_fps_beyond_declared"](root).read_bytes()),
+        ("comprimido.webm", video.DERIVED["webm_audio_timestamps_compressed"](root).read_bytes()),
     ]
 
 
@@ -483,6 +500,7 @@ def test_media_mill_converte_e_recusa_na_imagem(image: str, tmp_path: Path) -> N
         ("ok", None),
         ("ok", None),
         ("rejected", "UNSUPPORTED_FORMAT"),
+        ("rejected", "MEDIA_TOO_LARGE"),
         ("rejected", "MEDIA_TOO_LARGE"),
     ]
     with Image.open(out / "thumbnails" / "celular-10pct.jpg") as thumbnail:
@@ -501,6 +519,33 @@ def test_media_mill_converte_e_recusa_na_imagem(image: str, tmp_path: Path) -> N
             "report.json",
         ]
         assert archive.read("audio/clipe.flac").startswith(b"fLaC")
+
+
+def test_media_mill_recusa_na_imagem_o_que_passa_do_teto_depois_do_cabecalho(
+    image: str, tmp_path: Path
+) -> None:
+    batch = media_beyond_header_batch(tmp_path / "videos")
+
+    out = run_recipe(image, tmp_path, batch, "media-mill", thumbnail_count=3)
+
+    report = read_json(out / "report.json")
+    statuses = [(item["status"], item.get("code")) for item in report["items"]]
+    assert statuses == [
+        ("ok", None),
+        ("rejected", "MEDIA_TOO_LARGE"),
+        ("rejected", "MEDIA_TOO_LARGE"),
+        ("rejected", "MEDIA_TOO_LARGE"),
+        ("rejected", "MEDIA_TOO_LARGE"),
+    ]
+    with zipfile.ZipFile(out / "media-mill.zip") as archive:
+        assert archive.namelist() == [
+            "audio/clipe.wav",
+            "thumbnails/clipe-10pct.jpg",
+            "thumbnails/clipe-50pct.jpg",
+            "thumbnails/clipe-90pct.jpg",
+            "manifest.json",
+            "report.json",
+        ]
 
 
 def test_media_mill_gera_o_mesmo_zip_em_duas_execucoes_na_imagem(

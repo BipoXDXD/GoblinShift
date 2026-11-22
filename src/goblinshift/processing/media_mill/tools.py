@@ -11,10 +11,12 @@ Quem monta a linha de comando é `commands`; aqui só se executa, sempre do mesm
   `ToolTimeoutError`; a receita decide se recusa o vídeo ou falha a execução;
 - memória e tamanho de arquivo: `RLIMIT_AS` e `RLIMIT_FSIZE` no filho, abaixo dos 2 GiB do
   container, para um decodificador descontrolado morrer sozinho sem levar o executor junto.
+  Passar do `RLIMIT_FSIZE` mata o filho com `SIGXFSZ` (`Outcome.file_size_exceeded`).
 """
 
 import resource
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -85,6 +87,11 @@ class Outcome:
     @property
     def succeeded(self) -> bool:
         return self.returncode == 0
+
+    @property
+    def file_size_exceeded(self) -> bool:
+        """Morto pelo `RLIMIT_FSIZE`: a saída ou o log do stderr passou de CHILD_FILE_SIZE_BYTES."""
+        return self.returncode == -signal.SIGXFSZ
 
 
 def run_tool(argv: Sequence[str], *, timeout_s: float, scratch: Path, name: str) -> Outcome:

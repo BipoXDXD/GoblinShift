@@ -205,16 +205,69 @@ def _checked_duration(info: MediaInfo, video: VideoStream, limits: Limits) -> fl
     return duration
 
 
-def _require_size_within(video: VideoStream, limits: Limits) -> None:
-    if video.width <= 0 or video.height <= 0:
-        raise _unsupported("o vídeo não declara largura e altura")
-    long_side, short_side = max(video.width, video.height), min(video.width, video.height)
+def require_dimensions_within(width: int, height: int, limits: Limits) -> None:
+    """Lado maior e lado menor no teto, em qualquer ordem: vale do declarado e do decodificado."""
+    long_side, short_side = max(width, height), min(width, height)
     if long_side > limits.max_long_side_px or short_side > limits.max_short_side_px:
         raise MediaRejected(
             RejectionCode.MEDIA_TOO_LARGE,
-            f"{video.width} x {video.height} passa de "
-            f"{limits.max_long_side_px} x {limits.max_short_side_px}",
+            f"{width} x {height} passa de {limits.max_long_side_px} x {limits.max_short_side_px}",
         )
+
+
+def require_observed_frame_rate(frame_count: int, elapsed_s: float, limits: Limits) -> None:
+    """Quadros decodificados num intervalo cabem no teto de fps, com um quadro de folga.
+
+    `frame_count` quadros cobrem `frame_count - 1` intervalos entre o primeiro e o último
+    instante. A folga absorve o arredondamento do `pts_time` (6 casas) de um vídeo legítimo
+    exatamente no teto. Sem quadros, nada a checar.
+    """
+    if elapsed_s < 0:
+        raise ValueError(f"intervalo negativo entre quadros: {elapsed_s}")
+    if frame_count - 1 > limits.max_fps * elapsed_s + 1:
+        raise MediaRejected(
+            RejectionCode.MEDIA_TOO_LARGE,
+            f"o vídeo decodifica {frame_count} quadros em {elapsed_s:.3f} s, "
+            f"acima de {limits.max_fps} quadros por segundo",
+        )
+
+
+def require_audio_within_duration(
+    duration_s: float,
+    *,
+    last_start_s: float | None,
+    last_start_by_samples_s: float | None,
+    samples: int,
+    cut_samples: int,
+) -> None:
+    """A faixa de áudio decodificada cabe na duração aceita do vídeo; passar dela recusa.
+
+    A folga de priming é a mesma nas duas contas: vale o início do último quadro, não o fim,
+    porque AAC (priming) e Opus (pre-skip) legítimos terminam alguns ms depois da duração do
+    contêiner. O início vem de duas fontes, e basta uma passar da duração:
+
+    - o `pts` do último quadro (`last_start_s`), que pega instantes esticados para a frente;
+    - as amostras decodificadas antes dele (`last_start_by_samples_s`), que pegam instantes
+      comprimidos: 30 s de Opus com `pts` de 0 a 2 s.
+
+    Chegar ao corte (`samples >= cut_samples`) também recusa: o corte fica na duração mais uma
+    margem, e um quadro longo (PCM em blocos de segundos) pode começar antes da duração com a
+    faixa continuando depois do corte. Sem quadros, nada a checar.
+    """
+    if cut_samples <= 0:
+        raise ValueError(f"corte do áudio sem amostras: {cut_samples}")
+    starts = [start for start in (last_start_s, last_start_by_samples_s) if start is not None]
+    if samples >= cut_samples or any(start > duration_s for start in starts):
+        raise MediaRejected(
+            RejectionCode.MEDIA_TOO_LARGE,
+            "a faixa de áudio passa da duração declarada do vídeo",
+        )
+
+
+def _require_size_within(video: VideoStream, limits: Limits) -> None:
+    if video.width <= 0 or video.height <= 0:
+        raise _unsupported("o vídeo não declara largura e altura")
+    require_dimensions_within(video.width, video.height, limits)
 
 
 def _checked_frame_rate(video: VideoStream, limits: Limits) -> Fraction:

@@ -6,6 +6,11 @@ transação curta. Saída de conteúdo idêntica a uma entrada da Run, pelo SHA-
 coleta calculou, não é gravada de novo: o artefato aponta para o objeto da entrada enquanto ele
 estiver `committed` (ADR 020; 1.4, "renomear não duplica objetos").
 
+A cópia reabre cada saída como a coleta a leu (`open_collected`: sem seguir link, com o inode da
+varredura) e confere o SHA-256 e o tamanho gravados contra os coletados. O sandbox pode ter
+reescrito a saída depois da coleta, até no mesmo inode: divergência levanta `CollectionError`, e o
+objeto publicado sempre tem o hash que a coleta conferiu contra o manifesto e o pacote.
+
 Quem chama decide o fencing e o lease: `lock_running` abre cada transação travando a Run, e
 `beating` envolve a cópia para renovar o lease entre blocos. O que eles levantarem (fencing
 perdido, parada pedida) atravessa a gravação sem ser tratado aqui.
@@ -22,10 +27,14 @@ from goblinshift.files.artifacts import commit_candidate, create_candidate_objec
 from goblinshift.files.candidates import held_input_contents
 from goblinshift.files.states import ArtifactRole
 from goblinshift.files.storage import FileStorage
-from goblinshift.processing.regular_file import open_regular
 from goblinshift.runs.store import run_transaction
 from goblinshift.runs.worker.claim import ClaimedAttempt
-from goblinshift.runs.worker.collection import Collected, OutputFile
+from goblinshift.runs.worker.collection import (
+    Collected,
+    CollectionError,
+    OutputFile,
+    open_collected,
+)
 
 COPY_CHUNK_BYTES = 1024 * 1024
 
@@ -76,9 +85,12 @@ class CandidateWriter:
         reserved = run_transaction(self._factory, reserve)
         written = []
         for (_index, output), (_object_id, key) in zip(to_write, reserved, strict=True):
-            with open_regular(output.path) as source:
+            with open_collected(output) as source:
                 chunks = beating(_chunks(source))
-                written.append(self._storage.create_exclusive(key, chunks, output.size))
+                stored = self._storage.create_exclusive(key, chunks, output.size)
+            if stored != (output.sha256, output.size):
+                raise CollectionError(f"out/ mudou depois da coleta: {output.name!r}")
+            written.append(stored)
 
         def confirm(session: Session) -> None:
             lock_running(session)
