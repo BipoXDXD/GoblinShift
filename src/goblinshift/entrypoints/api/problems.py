@@ -5,7 +5,8 @@ permitido e exceção inesperada. Os módulos de rota levantam `ApiProblem(code,
 status vem do catálogo, para que um `code` nunca apareça com dois status diferentes.
 
 Campos: `type`, `title`, `status`, `detail`, `instance`, `code`, `request_id` e, na
-validação, `errors` (lista de `{field, code, message}`).
+validação, `errors` (lista de `{field, code, message}`, com no máximo `MAX_PROBLEM_ERRORS` itens
+na ordem recebida; quando há mais, os excedentes caem e `errors_truncated` vem `true`).
 
 - `type` é a URI estável do código: `https://goblinshift.dev/problems/<code-em-kebab>`, por
   exemplo `.../problems/body-too-large`. É um identificador, não precisa ser navegável.
@@ -61,6 +62,9 @@ _STORAGE_UNAVAILABLE_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EIO})
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 PROBLEM_TYPE_BASE = "https://goblinshift.dev/problems/"
 REQUEST_ID_HEADER = "X-Request-ID"
+# Teto de `errors`: um corpo de 64 KiB com milhares de chaves extras virava ~300 KB de resposta.
+# Cinquenta cobre qualquer formulário real e mantém o 422 curto (#442).
+MAX_PROBLEM_ERRORS = 50
 
 
 class ProblemCode(StrEnum):
@@ -196,6 +200,7 @@ class ProblemDetails(BaseModel):
     code: ProblemCode
     request_id: str
     errors: list[FieldError] | None = None
+    errors_truncated: bool | None = None
 
 
 # Todo 429 e todo 503 que a API emite carrega `Retry-After` (capacity_problems, rate limit, banco,
@@ -328,13 +333,20 @@ def problem_response(
         "request_id": request_id,
     }
     if errors is not None:
-        body["errors"] = list(errors)
+        body |= _capped_errors(errors)
     return JSONResponse(
         body,
         status_code=spec.status,
         headers={**(headers or {}), REQUEST_ID_HEADER: request_id},
         media_type=PROBLEM_MEDIA_TYPE,
     )
+
+
+def _capped_errors(errors: Sequence[Mapping[str, str]]) -> dict[str, Any]:
+    fields: dict[str, Any] = {"errors": list(errors[:MAX_PROBLEM_ERRORS])}
+    if len(errors) > MAX_PROBLEM_ERRORS:
+        fields["errors_truncated"] = True
+    return fields
 
 
 class RequestContextMiddleware:

@@ -1,5 +1,6 @@
 """Toda resposta de erro é problem+json (docs/GoblinShiftPlan.md, 1.6 e 2.3)."""
 
+import json
 import logging
 
 import pytest
@@ -82,6 +83,27 @@ def test_resposta_de_status_fora_de_429_e_503_nao_exige_retry_after() -> None:
 
     assert response.status_code == 404
     assert "retry-after" not in response.headers
+
+
+@pytest.mark.parametrize(
+    ("sent", "kept", "truncated"), [(50, 50, None), (51, 50, True), (5000, 50, True)]
+)
+def test_errors_tem_teto(sent: int, kept: int, truncated: bool | None) -> None:
+    # Um corpo com milhares de campos inválidos não pode virar uma resposta de centenas de KB.
+    errors = [{"field": f"f{i}", "code": "c", "message": "m"} for i in range(sent)]
+
+    response = problem_response(
+        code=ProblemCode.VALIDATION_FAILED,
+        detail="d",
+        instance="/x",
+        request_id="r",
+        errors=errors,
+    )
+
+    body = json.loads(response.body)
+    assert len(body["errors"]) == kept
+    assert body["errors"][0]["field"] == "f0"
+    assert body.get("errors_truncated") is truncated
 
 
 def test_tipo_e_uri_estavel_em_kebab_case() -> None:

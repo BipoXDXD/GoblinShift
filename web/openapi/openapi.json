@@ -5985,6 +5985,17 @@
               }
             ],
             "title": "Errors"
+          },
+          "errors_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors Truncated"
           }
         },
         "type": "object",

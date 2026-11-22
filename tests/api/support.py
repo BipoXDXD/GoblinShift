@@ -86,7 +86,7 @@ def assert_problem(response: httpx.Response, status: int, code: str) -> dict[str
     assert response.status_code == status, response.text
     assert response.headers["content-type"] == "application/problem+json"
     body: dict[str, Any] = response.json()
-    assert PROBLEM_KEYS <= body.keys() <= PROBLEM_KEYS | {"errors"}
+    assert PROBLEM_KEYS <= body.keys() <= PROBLEM_KEYS | {"errors", "errors_truncated"}
     assert body["status"] == status
     assert body["code"] == code
     # Um `code` nunca sai com status diferente do catálogo (1.6).
