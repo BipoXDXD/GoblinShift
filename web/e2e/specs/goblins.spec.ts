@@ -1,5 +1,6 @@
-// As goblins em destaque (pedido do usuário em 2026-10-15): a caixa tem ~320 px de altura no
-// desktop e ~240 px no celular de 360 px, a imagem chega de verdade e nada estoura a largura.
+// As goblins em destaque (pedido do usuário em 2026-10-15, maiores em 2026-11-22): a caixa tem
+// 480 px de altura no desktop e 320 px no celular de 360 px, a imagem chega de verdade e nada
+// estoura a largura.
 import type { Page } from "@playwright/test";
 
 import { BancadaPage } from "../pages/BancadaPage";
@@ -11,7 +12,7 @@ import { expect, test } from "../support/test";
 
 /** O celular mais estreito que a interface atende, com a altura de um aparelho comum. */
 const PHONE = { width: 360, height: 740 };
-const MIN_HEIGHT_PX = { desktop: 280, mobile: 200 };
+const MIN_HEIGHT_PX = { desktop: 460, mobile: 300 };
 
 interface GoblinScreen {
   readonly name: string;
@@ -108,6 +109,27 @@ test("Execução concluída no celular: o Baixar fica na primeira tela, acima da
 
   const download = page.getByRole("link", { name: /^Baixar csv-janitor\.zip/ });
   await expect(download).toBeInViewport({ ratio: 1 });
+});
+
+// Um `sizes` errado faz a tela 1× baixar o arquivo de 3× (1280 px). Os dois projetos rodam em DPR 1.
+test("a goblin baixa a menor largura que cobre a caixa @fake-api", async ({
+  page,
+  fakeApi,
+}, info) => {
+  await usePhoneWidth(page, info.project.name);
+  await new ExecucaoPage(page).open(
+    fakeApi.seedRun({
+      status: "failed",
+      error: { code: "INPUT_INVALID", message: "CSV inválido." },
+    }),
+  );
+
+  const image = page.locator("main picture img").first();
+  await image.scrollIntoViewIfNeeded();
+  const expected = info.project.name === "mobile" ? 256 : 384;
+  await expect
+    .poll(() => image.evaluate((img: HTMLImageElement) => img.currentSrc))
+    .toMatch(new RegExp(`-${String(expected)}w-[^/]*\\.(avif|webp)$`));
 });
 
 test("Créditos: as seis goblins do elenco, com nome e imagem carregada", async ({ page }, info) => {

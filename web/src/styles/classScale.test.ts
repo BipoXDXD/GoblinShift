@@ -27,16 +27,20 @@ const SPACING_SCALE = new Set([
 ]);
 /**
  * Fora da escala por motivo listado: alvo de toque de 44 px, a coluna de parâmetros de 448 px e a
- * caixa 4:5 da goblin em destaque (192×240 no celular, 256×320 a partir de 768 px).
+ * caixa 4:5 da goblin em destaque (256×320 no celular, 320×400 a partir de 768 px e 384×480 a
+ * partir de 1024 px).
  */
 const SPACING_EXCEPTIONS = new Set([
   "min-h-11",
   "min-w-11",
   "size-11",
   "w-112",
-  "h-60",
   "h-80",
   "w-64",
+  "h-100",
+  "w-80",
+  "h-120",
+  "w-96",
 ]);
 
 const SPACING_UTILITY =
