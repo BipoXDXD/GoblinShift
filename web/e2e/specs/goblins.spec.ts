@@ -1,6 +1,6 @@
 // As goblins em destaque (pedido do usuário em 2026-10-15, maiores em 2026-11-22): a caixa tem
-// 480 px de altura no desktop e 320 px no celular de 360 px, a imagem chega de verdade e nada
-// estoura a largura.
+// 400 px de altura no desktop e 320 px no celular de 360 px, a imagem chega de verdade e nada
+// estoura a largura. A goblin não passa disso: o Baixar e a ação do vazio ficam na primeira tela.
 import type { Page } from "@playwright/test";
 
 import { BancadaPage } from "../pages/BancadaPage";
@@ -12,7 +12,7 @@ import { expect, test } from "../support/test";
 
 /** O celular mais estreito que a interface atende, com a altura de um aparelho comum. */
 const PHONE = { width: 360, height: 740 };
-const MIN_HEIGHT_PX = { desktop: 460, mobile: 300 };
+const MIN_HEIGHT_PX = { desktop: 380, mobile: 300 };
 
 interface GoblinScreen {
   readonly name: string;
@@ -99,16 +99,25 @@ for (const screen of SCREENS) {
   });
 }
 
-// @mobile: só o celular empilha o cartão de estado; o projeto desktop não coleta o caso.
-test("Execução concluída no celular: o Baixar fica na primeira tela, acima da goblin @mobile @fake-api", async ({
+// No desktop vale o notebook comum, de 1280 × 800 (o viewport do projeto).
+test("Execução concluída: o Baixar fica na primeira tela, acima da goblin @fake-api", async ({
   page,
   fakeApi,
-}) => {
-  await page.setViewportSize(PHONE);
+}, info) => {
+  await usePhoneWidth(page, info.project.name);
   await new ExecucaoPage(page).open(fakeApi.seedRun({ status: "succeeded" }));
 
   const download = page.getByRole("link", { name: /^Baixar csv-janitor\.zip/ });
   await expect(download).toBeInViewport({ ratio: 1 });
+});
+
+test("Histórico vazio: a ação do vazio fica na primeira tela @fake-api", async ({ page }, info) => {
+  await usePhoneWidth(page, info.project.name);
+  await new HistoricoPage(page).open();
+
+  await expect(page.getByRole("link", { name: "Escolher uma receita na Oficina" })).toBeInViewport({
+    ratio: 1,
+  });
 });
 
 // Um `sizes` errado faz a tela 1× baixar o arquivo de 3× (1280 px). Os dois projetos rodam em DPR 1.

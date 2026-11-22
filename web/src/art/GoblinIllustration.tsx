@@ -108,14 +108,15 @@ function stableHash(key: string): number {
 }
 
 /**
- * Caixa do estado em px CSS (4:5, como os arquivos): 256×320 no celular, 320×400 a partir de
- * 768 px e 384×480 a partir de 1024 px. Com width e height no `<img>`, o navegador guarda o lugar
- * antes de baixar (sem CLS); o `sizes` acompanha as classes, para cada tela baixar só a largura que
- * cobre a caixa.
+ * Caixa do estado em px CSS (4:5, como os arquivos): 256×320 no celular e 320×400 a partir de
+ * 768 px. Não cresce mais no desktop: com 480 px a goblin empurrava o Baixar e a ação do vazio
+ * para fora da primeira tela de 1280×800 e virava o assunto do cartão. Com width e height no
+ * `<img>`, o navegador guarda o lugar antes de baixar (sem CLS); o `sizes` acompanha as classes,
+ * para cada tela baixar só a largura que cobre a caixa.
  */
-const STATE_WIDTH_PX = 384;
-const STATE_HEIGHT_PX = 480;
-const STATE_SIZES = "(min-width: 1024px) 384px, (min-width: 768px) 320px, 256px";
+const STATE_WIDTH_PX = 320;
+const STATE_HEIGHT_PX = 400;
+const STATE_SIZES = "(min-width: 768px) 320px, 256px";
 
 /**
  * A goblin de um estado. Reforça o texto e nunca o substitui: o estado continua dito em texto e
@@ -137,7 +138,7 @@ export function GoblinIllustration({ state, rotationKey }: GoblinIllustrationPro
       width={STATE_WIDTH_PX}
       height={STATE_HEIGHT_PX}
       pictureClassName="shrink-0 self-center"
-      imgClassName="h-80 w-64 md:h-100 md:w-80 lg:h-120 lg:w-96"
+      imgClassName="h-80 w-64 md:h-100 md:w-80"
     />
   );
 }

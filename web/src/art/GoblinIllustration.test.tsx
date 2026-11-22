@@ -85,8 +85,8 @@ describe("GoblinIllustration", () => {
 
     const img = screen.getByRole("img");
     // 4:5, como os arquivos: com width e height o navegador reserva a caixa antes de baixar (CLS).
-    expect(img).toHaveAttribute("width", "384");
-    expect(img).toHaveAttribute("height", "480");
+    expect(img).toHaveAttribute("width", "320");
+    expect(img).toHaveAttribute("height", "400");
     expect(img).toHaveAttribute("loading", "lazy");
     expect(img).toHaveAttribute("decoding", "async");
   });
@@ -109,9 +109,7 @@ describe("GoblinIllustration", () => {
       expect(source.getAttribute("srcset")).toMatch(
         /nyx-256w\.\w+ 256w, .*nyx-384w\.\w+ 384w, .*nyx-512w\.\w+ 512w, .*nyx-768w\.\w+ 768w, .*nyx-1024w\.\w+ 1024w, .*nyx-1280w\.\w+ 1280w$/,
       );
-      expect(source.getAttribute("sizes")).toBe(
-        "(min-width: 1024px) 384px, (min-width: 768px) 320px, 256px",
-      );
+      expect(source.getAttribute("sizes")).toBe("(min-width: 768px) 320px, 256px");
     }
   });
 });
