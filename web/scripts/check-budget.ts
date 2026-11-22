@@ -43,9 +43,11 @@ const LIMITS_KB = {
 /**
  * Teto de cada arquivo pela largura no nome (`-<N>w-`): o navegador baixa uma só largura por
  * imagem (srcset e sizes), e a de 3× tem muito mais área que a de 1×. Cada faixa vale até a
- * largura dela; acima da última, vale a última. Sem sufixo de largura, vale a primeira.
+ * largura dela; sem sufixo de largura, vale a primeira. Acima da última não há teto: o arquivo
+ * falha até alguém decidir quanto ele pode pesar.
  */
-type WidthLimits = readonly (readonly [maxWidth: number, limitKb: number])[];
+type Band = readonly [maxWidth: number, limitKb: number];
+type WidthLimits = readonly [Band, ...Band[]];
 
 /**
  * Goblin de um estado ou do elenco, AVIF ou WebP. Era 64 KB para todas as larguras (a maior,
@@ -62,25 +64,22 @@ const POSTER_LIMITS: WidthLimits = [
   [960, 120],
 ];
 
-function limitByWidth(path: string, limits: WidthLimits): number {
-  const [first] = limits;
-  const last = limits.at(-1);
-  if (first === undefined || last === undefined) {
-    throw new Error("faixa de largura vazia");
-  }
+/** O teto em KB, ou `null` quando a largura passa da maior faixa. */
+function limitByWidth(path: string, limits: WidthLimits): number | null {
   const width = /-(\d+)w-/.exec(path)?.[1];
   if (width === undefined) {
-    return first[1];
+    return limits[0][1];
   }
-  return (limits.find(([maxWidth]) => Number(width) <= maxWidth) ?? last)[1];
+  return limits.find(([maxWidth]) => Number(width) <= maxWidth)?.[1] ?? null;
 }
 
-export function illustrationLimitKb(path: string): number {
-  return limitByWidth(path, ILLUSTRATION_LIMITS);
-}
-
-export function posterLimitKb(path: string): number {
-  return limitByWidth(path, POSTER_LIMITS);
+function overWidthLimit(what: string, file: BuiltFile, limits: WidthLimits): string | null {
+  const limitKb = limitByWidth(file.path, limits);
+  if (limitKb === null) {
+    const maxWidth = Math.max(...limits.map(([width]) => width));
+    return `${what}: a largura passa da maior faixa com teto, de ${String(maxWidth)} px`;
+  }
+  return overLimit({ what, bytes: file.bytes, limitKb, unit: "KB" });
 }
 
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */
@@ -166,12 +165,7 @@ function illustrationViolation(file: BuiltFile): string | null {
   if (!/\.(avif|webp)$/.test(file.path) || file.path.startsWith(THREE_D_PREFIX)) {
     return null;
   }
-  return overLimit({
-    what: `Ilustração (${file.path})`,
-    bytes: file.bytes,
-    limitKb: illustrationLimitKb(file.path),
-    unit: "KB",
-  });
+  return overWidthLimit(`Ilustração (${file.path})`, file, ILLUSTRATION_LIMITS);
 }
 
 function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (string | null)[] {
@@ -201,19 +195,13 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
         : null,
     ];
   }
-  return [
-    overLimit({
-      what: `Imagem estática do 3D (${file.path})`,
-      bytes: file.bytes,
-      limitKb: posterLimitKb(file.path),
-      unit: "KB",
-    }),
-  ];
+  return [overWidthLimit(`Imagem estática do 3D (${file.path})`, file, POSTER_LIMITS)];
 }
 
 /**
  * O 3D que a abertura baixa sem a pessoa pedir (ADR 038): só vale com modelos no build, e a
- * Rúbia tem de estar entre eles. As outras goblins não contam: o modelo delas vem sob demanda.
+ * Rúbia tem de estar entre eles, com a imagem estática de 960 px dela. As outras goblins não
+ * contam: o modelo delas vem sob demanda.
  */
 function initialThreeDViolations(files: readonly BuiltFile[]): (string | null)[] {
   if (!files.some((file) => file.path.endsWith(".glb"))) {
@@ -222,6 +210,11 @@ function initialThreeDViolations(files: readonly BuiltFile[]): (string | null)[]
   const firstModel = files.filter((file) => FIRST_MODEL.test(file.path));
   if (firstModel.length === 0) {
     return ["3D inicial: falta o modelo da Rúbia (assets/oficina-3d-rubia-*.glb)"];
+  }
+  if (!files.some((file) => FIRST_POSTER.test(file.path))) {
+    return [
+      "3D inicial: falta a imagem estática de 960 px da Rúbia (assets/oficina-3d-rubia-960w-*.avif)",
+    ];
   }
   const bytes = (pattern: RegExp, field: "bytes" | "gzipBytes"): number =>
     files.filter((file) => pattern.test(file.path)).reduce((total, file) => total + file[field], 0);

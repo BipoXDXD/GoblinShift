@@ -14,6 +14,9 @@ function file(path: string, gzipBytes: number, bytes = gzipBytes): BuiltFile {
   return { path, bytes, gzipBytes };
 }
 
+/** Com a Rúbia no build, a imagem estática de 960 px dela também vem: as duas entram no 3D inicial. */
+const RUBIA_POSTER = file("assets/oficina-3d-rubia-960w-x.avif", 50 * KB);
+
 const WITHIN = [
   file("assets/index-abc.js", 120 * KB),
   file("assets/vendor-def.js", 50 * KB),
@@ -145,13 +148,13 @@ describe("budgetViolations", () => {
     it("o GLB da Rúbia até 8192 KB (ADR 030, 2026-11-22)", () => {
       expect(
         budgetViolations(
-          [...WITHIN, file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB)],
+          [...WITHIN, RUBIA_POSTER, file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB)],
           INDEX,
         ),
       ).toEqual([]);
       expect(
         budgetViolations(
-          [...WITHIN, file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB + 1)],
+          [...WITHIN, RUBIA_POSTER, file("assets/oficina-3d-rubia-x.glb", 1 * KB, 8192 * KB + 1)],
           INDEX,
         ),
       ).toEqual(["Modelo 3D (assets/oficina-3d-rubia-x.glb): 8192,0 KB passa do teto de 8192 KB"]);
@@ -175,13 +178,18 @@ describe("budgetViolations", () => {
     it("cada GLB das outras goblins até 6144 KB", () => {
       expect(
         budgetViolations(
-          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 6144 * KB)],
+          [...WITHIN, RUBIA, RUBIA_POSTER, file("assets/oficina-3d-jade-x.glb", 1 * KB, 6144 * KB)],
           INDEX,
         ),
       ).toEqual([]);
       expect(
         budgetViolations(
-          [...WITHIN, RUBIA, file("assets/oficina-3d-jade-x.glb", 1 * KB, 6144 * KB + 1)],
+          [
+            ...WITHIN,
+            RUBIA,
+            RUBIA_POSTER,
+            file("assets/oficina-3d-jade-x.glb", 1 * KB, 6144 * KB + 1),
+          ],
           INDEX,
         ),
       ).toEqual(["Modelo 3D (assets/oficina-3d-jade-x.glb): 6144,0 KB passa do teto de 6144 KB"]);
@@ -212,6 +220,22 @@ describe("budgetViolations", () => {
       ]);
     });
 
+    it("com a Rúbia no build, a imagem estática de 960 px dela precisa estar: ela entra no 3D inicial", () => {
+      expect(
+        budgetViolations(
+          [
+            ...WITHIN,
+            RUBIA,
+            file("assets/oficina-3d-rubia-640w-x.avif", 40 * KB),
+            file("assets/oficina-3d-rubia-960w-x.webp", 50 * KB),
+          ],
+          INDEX,
+        ),
+      ).toEqual([
+        "3D inicial: falta a imagem estática de 960 px da Rúbia (assets/oficina-3d-rubia-960w-*.avif)",
+      ]);
+    });
+
     it("com modelos no build, a Rúbia precisa estar entre eles: é ela que abre a página", () => {
       expect(
         budgetViolations(
@@ -233,6 +257,15 @@ describe("budgetViolations", () => {
       expect(budgetViolations([...WITHIN, file(path, kb * KB)], INDEX)).toEqual([]);
       expect(budgetViolations([...WITHIN, file(path, kb * KB + 1)], INDEX)).toEqual([
         `Ilustração (${path}): ${String(kb)},0 KB passa do teto de ${String(kb)} KB`,
+      ]);
+    });
+
+    it.each([
+      ["assets/rubia-1536w-x.webp", "Ilustração", 1280],
+      ["assets/oficina-3d-nyx-1280w-x.avif", "Imagem estática do 3D", 960],
+    ])("%s, mais larga que a maior faixa, falha mesmo leve", (path, what, maxWidth) => {
+      expect(budgetViolations([...WITHIN, file(path, 1 * KB)], INDEX)).toEqual([
+        `${what} (${path}): a largura passa da maior faixa com teto, de ${String(maxWidth)} px`,
       ]);
     });
   });
