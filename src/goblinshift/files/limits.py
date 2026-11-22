@@ -61,10 +61,9 @@ TRANSFER_MAX_DURATION = timedelta(minutes=10)
 TRANSFER_IDLE_TIMEOUT = timedelta(seconds=30)
 # Vazão mínima do envio, cobrada pela média de relógio desde o início da leitura depois da
 # carência; o tempo do servidor entre os pedaços entra, para pedaços minúsculos não esconderem um
-# envio lento. Sem ela,
-# 1 byte a cada 25 s nunca dispara o prazo sem progresso e segura a vaga os 10 min inteiros: duas
-# contas ocupavam as 4 vagas do ambiente. 32 KiB/s (256 kbit/s) depois de 30 s é a decisão D3 do
-# dono; a carência deixa a conexão arrancar sem ser cobrada.
+# envio lento. Sem ela, 1 byte a cada 25 s nunca dispara o prazo sem progresso e segura a vaga os
+# 10 min inteiros: duas contas ocupavam as 4 vagas do ambiente. 32 KiB/s (256 kbit/s) depois de
+# 30 s é a decisão D3 do dono; a carência deixa a conexão arrancar sem ser cobrada.
 TRANSFER_MIN_RATE_BYTES_PER_S = 32 * KIB
 TRANSFER_MIN_RATE_GRACE = timedelta(seconds=30)
 # A vaga vence sozinha um pouco depois da transferência mais longa possível: se a réplica cair

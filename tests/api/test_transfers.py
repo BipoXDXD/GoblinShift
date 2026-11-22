@@ -119,7 +119,7 @@ async def test_piso_de_vazao_conta_pelo_relogio_e_nao_so_pela_espera_do_cliente(
     )
     request = StreamedRequest([b"x"] * 100, pause_s=0.001, pause_before_end_s=0)
 
-    with pytest.raises(TransferTimeoutError):
+    with pytest.raises(TransferTimeoutError, match="vazão"):
         await consume(request, timeouts, work_per_chunk_s=0.01)
 
 
