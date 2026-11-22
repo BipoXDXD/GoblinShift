@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from goblinshift import capacity
 from goblinshift.files.errors import (
+    DailyUploadLimitError,
     InputNotAvailableError,
     InvalidUploadRequestError,
     LiveUploadLimitError,
@@ -35,8 +36,10 @@ from goblinshift.files.limits import (
     MAX_BATCH_FILES,
     MAX_LIVE_UPLOADS_PER_ACCOUNT,
     MAX_NAME_CHARS,
+    MAX_UPLOADS_CREATED_PER_DAY,
     MIN_INTENT_RESERVED_BYTES,
     READY_UPLOAD_TTL,
+    UPLOAD_CREATION_WINDOW,
     max_file_bytes_for,
 )
 from goblinshift.files.objects import request_deletion_of_unreferenced
@@ -143,7 +146,8 @@ def create_intents(
     """Cria um lote de intenções de upload, na ordem recebida, cada uma com seu objeto pendente.
 
     O lote que passaria de `MAX_LIVE_UPLOADS_PER_ACCOUNT` uploads vivos é recusado inteiro com
-    `LiveUploadLimitError`. Reserva o tamanho declarado de cada intenção, no mínimo
+    `LiveUploadLimitError`, e o que passaria de `MAX_UPLOADS_CREATED_PER_DAY` criados em 24 h, com
+    `DailyUploadLimitError`. Reserva o tamanho declarado de cada intenção, no mínimo
     `MIN_INTENT_RESERVED_BYTES` (detentor `upload`), tudo ou nada: acima do teto levanta
     `AccountCapacityExceededError` ou `GlobalCapacityExceededError`, e quem chama desfaz. Com
     `request`, cada linha guarda a chave, o hash do corpo e a própria posição no pedido, para
@@ -335,13 +339,13 @@ def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
 
 
 def _ensure_live_upload_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
-    """Recusa, com `LiveUploadLimitError`, o lote que passaria do teto de uploads vivos da conta.
+    """Recusa o lote que passaria do teto de uploads vivos ou do de criados em 24 h da conta.
 
-    A trava vale até o fim da transação e serializa só as criações de lote da mesma conta: cada
-    lote conta e insere antes que o próximo conte, então dois lotes paralelos não passam juntos
-    do teto. Ordem das travas: chave do lote (`upload_requests`) → vivos → pools do `capacity`.
-    O objeto da trava é um hash de 32 bits; uma colisão só faz duas contas esperarem uma pela
-    outra.
+    `LiveUploadLimitError` para o primeiro, `DailyUploadLimitError` para o segundo. A trava vale
+    até o fim da transação e serializa só as criações de lote da mesma conta: cada lote conta e
+    insere antes que o próximo conte, então dois lotes paralelos não passam juntos de um teto.
+    Ordem das travas: chave do lote (`upload_requests`) → vivos → pools do `capacity`. O objeto
+    da trava é um hash de 32 bits; uma colisão só faz duas contas esperarem uma pela outra.
     """
     session.execute(
         select(
@@ -352,6 +356,46 @@ def _ensure_live_upload_room(session: Session, owner_id: uuid.UUID, batch_size: 
     excess = live + batch_size - MAX_LIVE_UPLOADS_PER_ACCOUNT
     if excess > 0:
         raise LiveUploadLimitError(_until_expired(session, owner_id, min(excess, live)))
+    _ensure_daily_creation_room(session, owner_id, batch_size)
+
+
+def _ensure_daily_creation_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
+    """Sob a trava de `_ensure_live_upload_room`: o teto de uploads criados em 24 h pela conta.
+
+    Conta toda linha da janela, excluída ou falha, pelo índice `(owner_id, created_at)`.
+    """
+    created = session.execute(
+        select(func.count()).where(*_created_in_window_of(owner_id))
+    ).scalar_one()
+    excess = created + batch_size - MAX_UPLOADS_CREATED_PER_DAY
+    if excess > 0:
+        raise DailyUploadLimitError(_until_left_window(session, owner_id, min(excess, created)))
+
+
+def _created_in_window_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
+    return (
+        upload.c.owner_id == owner_id,
+        upload.c.created_at > func.now() - UPLOAD_CREATION_WINDOW,
+    )
+
+
+def _until_left_window(session: Session, owner_id: uuid.UUID, count: int) -> timedelta:
+    """Quanto falta para os `count` uploads mais antigos da janela saírem dela.
+
+    Uma instrução só, sem trava sobre as linhas: se elas somem entre a contagem e esta leitura
+    (a retenção remove incompletos vencidos), não há a `count`-ésima, e a espera fica em zero;
+    quem chama aplica o piso.
+    """
+    if count == 0:
+        return timedelta(0)
+    wait: timedelta | None = session.execute(
+        select(upload.c.created_at + UPLOAD_CREATION_WINDOW - func.now())
+        .where(*_created_in_window_of(owner_id))
+        .order_by(upload.c.created_at)
+        .offset(count - 1)
+        .limit(1)
+    ).scalar_one_or_none()
+    return max(wait or timedelta(0), timedelta(0))
 
 
 def _live_uploads_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:

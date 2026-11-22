@@ -24,6 +24,13 @@ MIN_INTENT_RESERVED_BYTES = 64 * KIB
 # a cota de bytes deixava as linhas crescerem pelo rate limit (60 lotes de 100 por minuto). 1000 é
 # dez lotes cheios, folga para o uso real, e põe teto nas linhas que cada conta mantém vivas.
 MAX_LIVE_UPLOADS_PER_ACCOUNT = 1000
+# Uploads criados pela conta nas últimas 24 h, inclusive excluídos e falhos (decisão do dono,
+# 22/11). O teto de vivos não limita linhas: criar, enviar vazio e excluir solta a vaga na hora, e
+# a linha excluída fica 90 dias para o histórico. 10.000 por dia é dez vezes o teto de vivos e põe
+# teto nas linhas que cada conta acumula na retenção. O incompleto que a retenção remove (1 h) sai
+# da contagem junto com a linha, e não acumula.
+MAX_UPLOADS_CREATED_PER_DAY = 10_000
+UPLOAD_CREATION_WINDOW = timedelta(hours=24)
 # Igual ao CHECK da coluna `upload.original_name`, contado em caracteres.
 MAX_NAME_CHARS = 255
 

@@ -48,6 +48,18 @@ class LiveUploadLimitError(FilesError):
         self.retry_after = retry_after
 
 
+class DailyUploadLimitError(FilesError):
+    """O lote passaria do teto de uploads criados em 24 h pela conta (→ 429 `QUOTA_EXCEEDED`).
+
+    `retry_after` é quanto falta, pelo relógio do banco, para saírem da janela uploads suficientes
+    para o lote caber (zero se nada da janela sobrar para sair).
+    """
+
+    def __init__(self, retry_after: timedelta) -> None:
+        super().__init__("a conta atingiu o teto de uploads criados em 24 h")
+        self.retry_after = retry_after
+
+
 class UploadNotFoundError(FilesError):
     """Inexistente ou de outra conta (→ 404)."""
 

@@ -21,6 +21,7 @@ from starlette.requests import ClientDisconnect
 from goblinshift.capacity import AccountCapacityExceededError, GlobalCapacityExceededError
 from goblinshift.entrypoints.api.capacity_problems import (
     account_storage_problem,
+    daily_uploads_problem,
     environment_storage_problem,
     live_uploads_problem,
 )
@@ -44,6 +45,7 @@ from goblinshift.entrypoints.api.transfers import (
     transfer_limit_problem,
 )
 from goblinshift.files.errors import (
+    DailyUploadLimitError,
     FilesError,
     InvalidUploadRequestError,
     LiveUploadLimitError,
@@ -189,6 +191,8 @@ def create_uploads(
         raise in_progress_problem() from None
     except LiveUploadLimitError as error:
         raise live_uploads_problem(error.retry_after) from None
+    except DailyUploadLimitError as error:
+        raise daily_uploads_problem(error.retry_after) from None
     except AccountCapacityExceededError:
         raise account_storage_problem(session, owner_id) from None
     except GlobalCapacityExceededError:
