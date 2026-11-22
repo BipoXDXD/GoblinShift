@@ -350,23 +350,31 @@ def test_worker_e_manutencao_rodam_o_ciclo_de_uma_run_com_os_papeis_novos(
 
 @pytest.mark.integration
 def test_manutencao_apaga_o_audit_event_vencido_e_a_conta_pedida(
-    runtime_factory: Callable[[str], sessionmaker[Session]],
+    runtime_factory: Callable[[str], sessionmaker[Session]], owner: Engine
 ) -> None:
     app = runtime_factory("gs_app")
+    now = datetime.now(UTC)
     user_id = create_user(app, "auditoria-vencida")
-    _audit(app, user_id)
+    _audit(app, user_id, now)
     # A API marca a exclusão como `gs_app`; a purga da conta é da manutenção.
     with unit_of_work(app) as session:
-        request_account_deletion(session, user_id, datetime.now(UTC))
-    later = datetime.now(UTC) + AFTER_AUDIT_RETENTION
+        request_account_deletion(session, user_id, now)
+    later = now + AFTER_AUDIT_RETENTION
 
     counts = AccountJobs(runtime_factory("gs_maintenance"), clock=lambda: later).run_cycle()
 
+    # Outro teste do módulo pode deixar outra conta com exclusão pedida: os contadores são do
+    # ciclo inteiro, e a prova de que a conta pedida sumiu é relê-la.
     assert counts["audit_events_removed"] >= 1
-    assert counts["accounts_purged"] == 1
+    assert counts["accounts_purged"] >= 1
+    with owner.connect() as connection:
+        remaining = connection.execute(
+            text("SELECT count(*) FROM app_user WHERE id = :id"), {"id": user_id}
+        ).scalar_one()
+    assert remaining == 0
 
 
-def _audit(factory: sessionmaker[Session], user_id: UUID) -> None:
+def _audit(factory: sessionmaker[Session], user_id: UUID, now: datetime) -> None:
     with unit_of_work(factory) as session:
         record_audit_event(
             session,
@@ -374,7 +382,7 @@ def _audit(factory: sessionmaker[Session], user_id: UUID) -> None:
             user_id=user_id,
             ip=None,
             outcome=AuditOutcome.SUCCESS,
-            now=datetime.now(UTC),
+            now=now,
         )
 
 

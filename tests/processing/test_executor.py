@@ -555,6 +555,40 @@ def test_outro_erro_de_disco_continua_infraestrutura(
     assert main([str(work)]) == ExitCode.INFRASTRUCTURE
 
 
+class MemoryHungryRecipe:
+    def execute(self, *_: object) -> Report:
+        raise MemoryError("/srv/area/tmp/segredo.pdf")
+
+
+def exhausted_package(*_: object) -> None:
+    raise MemoryError
+
+
+@pytest.mark.parametrize("phase", ["recipe", "package"])
+def test_memoria_esgotada_e_falha_deterministica_de_recurso(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+) -> None:
+    if phase == "recipe":
+        monkeypatch.setattr(execution, "RECIPES", {("csv-janitor", 1): MemoryHungryRecipe()})
+    else:
+        monkeypatch.setattr(execution, "package", exhausted_package)
+    work = make_work_dir(tmp_path, [("a.csv", VALID)])
+
+    assert main([str(work)]) == ExitCode.RECIPE_FAILURE
+
+    failure = json.loads((work / "failure.json").read_text(encoding="utf-8"))
+    assert failure == {
+        "code": "RESOURCE_LIMIT_EXCEEDED",
+        "detail": "a execução passou do limite de memória",
+    }
+    err = capsys.readouterr().err
+    assert "executor: memória esgotada" in err.splitlines()
+    assert "Traceback" not in err
+
+
 def test_falha_ao_gravar_os_tempos_nao_muda_o_codigo_de_saida(tmp_path: Path) -> None:
     work = make_work_dir(tmp_path, [("clientes.csv", VALID)])
     # Criação exclusiva: um diretório no lugar do arquivo faz a gravação falhar.

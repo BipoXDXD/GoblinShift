@@ -277,6 +277,23 @@ describe("Histórico", () => {
       expect(screen.getByRole("button", { name: "Carregar mais" })).toBeVisible();
     });
 
+    it("sessão que termina na página seguinte vira o convite e mantém a lista", async () => {
+      const { user } = setup((request) =>
+        new URL(request.url).searchParams.has("cursor")
+          ? problemResponse(401, "AUTHENTICATION_REQUIRED")
+          : page([runBody({ id: RUN_A })], "pagina-2"),
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Carregar mais" }));
+
+      const notice = await screen.findByRole("region", { name: "Entre para continuar" });
+      expect(notice).toBeVisible();
+      expect(screen.queryByRole("alert")).toBeNull();
+      // O convite traz a própria lista de provedores; a lista de execuções segue com a linha.
+      const rows = screen.getAllByRole("listitem").filter((item) => !notice.contains(item));
+      expect(rows).toHaveLength(1);
+    });
+
     it("na última página, o foco vai para a primeira linha nova e o fim da lista é anunciado", async () => {
       const { user } = setup((request) =>
         new URL(request.url).searchParams.get("cursor") === "pagina-2"

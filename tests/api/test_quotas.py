@@ -15,6 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.capacity.tables import capacity_pool
+from goblinshift.files.limits import MIN_INTENT_RESERVED_BYTES as MIN
 from goblinshift.files.tables import upload
 from goblinshift.platform.db import unit_of_work
 from goblinshift.runs.quotas import MAX_RUNS_PER_WINDOW
@@ -76,9 +77,9 @@ def test_upload_acima_da_cota_da_conta_429_quota_exceeded(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     owner, auth = new_account(factory)
-    create_account_pool(factory, owner, 10)
+    create_account_pool(factory, owner, MIN)
 
-    response = upload_batch(client, auth, 11)
+    response = upload_batch(client, auth, MIN + 1)
 
     assert_problem(response, 429, "QUOTA_EXCEEDED")
     assert int(response.headers["Retry-After"]) == MIN_RETRY_AFTER_S
@@ -88,11 +89,36 @@ def test_upload_na_cota_da_conta_e_aceito(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     owner, auth = new_account(factory)
-    create_account_pool(factory, owner, 10)
+    create_account_pool(factory, owner, MIN)
 
     response = upload_batch(client, auth, 10)
 
     assert response.status_code == 201
+
+
+def test_intencao_vazia_sem_espaco_para_o_minimo_429(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    create_account_pool(factory, owner, MIN - 1)
+
+    response = upload_batch(client, auth, 0)
+
+    assert_problem(response, 429, "QUOTA_EXCEEDED")
+    assert int(response.headers["Retry-After"]) == MIN_RETRY_AFTER_S
+
+
+def test_retry_after_com_intencoes_vazias_aponta_o_vencimento_delas(
+    client: TestClient, factory: sessionmaker[Session]
+) -> None:
+    owner, auth = new_account(factory)
+    create_account_pool(factory, owner, MIN)
+    assert upload_batch(client, auth, 0).status_code == 201
+
+    response = upload_batch(client, auth, 0)
+
+    assert_problem(response, 429, "QUOTA_EXCEEDED")
+    assert 3600 - 60 <= int(response.headers["Retry-After"]) <= 3600
 
 
 def test_retry_after_da_conta_aponta_a_proxima_expiracao(
@@ -113,9 +139,9 @@ def test_upload_acima_do_teto_do_ambiente_503_com_retry_after(
     client: TestClient, factory: sessionmaker[Session]
 ) -> None:
     _, auth = new_account(factory)
-    set_global_max(factory, 10)
+    set_global_max(factory, MIN)
 
-    response = upload_batch(client, auth, 11)
+    response = upload_batch(client, auth, MIN + 1)
 
     assert_problem(response, 503, "SERVICE_UNAVAILABLE")
     assert response.headers["Retry-After"] == str(ENVIRONMENT_RETRY_AFTER_S)
@@ -176,9 +202,9 @@ def test_recusa_de_cota_nao_traz_dados_de_outra_conta(
     _, other_auth = new_account(factory)
     other_upload = ready(client, other_auth)
     owner, auth = new_account(factory)
-    create_account_pool(factory, owner, 10)
+    create_account_pool(factory, owner, MIN)
 
-    response = upload_batch(client, auth, 11)
+    response = upload_batch(client, auth, MIN + 1)
 
     assert response.status_code == 429
     assert other_upload not in response.text
