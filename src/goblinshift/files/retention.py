@@ -43,6 +43,7 @@ from goblinshift.files.states import ObjectState, UploadState
 from goblinshift.files.storage import FileStorage, ObjectTamperedError
 from goblinshift.files.tables import artifact, object_use, stored_object, upload
 from goblinshift.platform.sql import skip_locked_batch
+from goblinshift.platform.telemetry import exception_fields
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +82,17 @@ def remove_file_after_commit(storage: FileStorage, key: str) -> bool:
     """
     try:
         storage.delete(key)
-    except OSError, ObjectTamperedError:
+    except (OSError, ObjectTamperedError) as error:
         logger.warning(
             "arquivo não removido do disco",
             exc_info=True,
-            extra={"fields": {"alert": "purge_file_not_removed", "storage_key": key}},
+            extra={
+                "fields": {
+                    "alert": "purge_file_not_removed",
+                    "storage_key": key,
+                    **exception_fields(error),
+                }
+            },
         )
         return False
     return True

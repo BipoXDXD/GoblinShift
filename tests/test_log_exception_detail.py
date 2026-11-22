@@ -9,6 +9,8 @@ import errno
 import io
 import json
 import logging
+import os
+import sys
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any, cast
@@ -21,9 +23,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.entrypoints import maintenance as maintenance_entrypoint
 from goblinshift.entrypoints.api import saturation
+from goblinshift.files import retention as retention_module
+from goblinshift.files import storage as storage_module
+from goblinshift.files.storage import FileStorage
 from goblinshift.platform.settings import MissingSecretError
 from goblinshift.platform.telemetry import (
     UVICORN_ERROR_LOGGER,
+    JsonFormatter,
     UserHasher,
     add_correlation_ids,
     configure_logging,
@@ -35,6 +41,8 @@ from goblinshift.runs import maintenance as maintenance_module
 from goblinshift.runs.finished import RunFinishedReporter
 from goblinshift.runs.worker.coordinator import PreparationError
 from goblinshift.runs.worker.executor_ctl_runner import ExecutorCtlError
+from goblinshift.runs.worker.runner import Runner
+from tests.production_log import production_handler
 
 UNIQUE_VIOLATION = "23505"
 CONFIG_MESSAGE = "GS_CURSOR_SECRET é obrigatório em produção"
@@ -65,6 +73,8 @@ def _chained(canary: str) -> BaseException:
 
 
 class _BrokenStrError(Exception):
+    """Guarda o canário nos `args`, mas o `__str__` levanta: a linha sai mesmo assim."""
+
     def __str__(self) -> str:
         raise RuntimeError("__str__ quebrado")
 
@@ -125,10 +135,11 @@ def test_notas_e_grupos_saem_sem_mensagem(
 
 
 def test_excecao_com_str_quebrado_ainda_gera_a_linha(
-    production_log: tuple[logging.Logger, io.StringIO],
+    production_log: tuple[logging.Logger, io.StringIO], canary: str
 ) -> None:
-    line = _log_exception(production_log, _BrokenStrError())
+    line = _log_exception(production_log, _BrokenStrError(canary))
 
+    assert canary not in production_log[1].getvalue()
     assert line["exception"].endswith("_BrokenStrError")
 
 
@@ -137,7 +148,8 @@ def test_erro_de_configuracao_mantem_a_mensagem(
 ) -> None:
     line = _log_exception(production_log, MissingSecretError(CONFIG_MESSAGE))
 
-    assert CONFIG_MESSAGE in line["exception"]
+    assert production_log[1].getvalue().count(CONFIG_MESSAGE) == 1
+    assert line["exception"].endswith(f"MissingSecretError: {CONFIG_MESSAGE}")
 
 
 class _DerivedSecretError(MissingSecretError):
@@ -252,7 +264,117 @@ def test_configure_logging_liga_os_ids_de_correlacao_no_root_e_no_uvicorn() -> N
     assert add_correlation_ids in logging.getLogger(UVICORN_ERROR_LOGGER).filters
 
 
+@pytest.mark.usefixtures("restore_logging")
+def test_configure_logging_monta_o_handler_que_os_testes_imitam() -> None:
+    configure_logging()
+
+    handler = logging.getLogger().handlers[0]
+    # O filtro reduz a exceção antes que o formatter a leia; os ids vêm depois, sobre o registro já
+    # reduzido. É a montagem que `production_handler` copia para os testes de canário.
+    assert handler.filters == [omit_exception_detail, add_correlation_ids]
+    assert isinstance(handler.formatter, JsonFormatter)
+    assert handler.filters == production_handler(io.StringIO()).filters
+    assert logging.getLogger(UVICORN_ERROR_LOGGER).filters[-2:] == [
+        omit_exception_detail,
+        add_correlation_ids,
+    ]
+
+
+def _formatted_without_filter(error: BaseException, *, cached_by_other_handler: bool) -> str:
+    try:
+        raise error
+    except BaseException:
+        record = logging.LogRecord("t", logging.ERROR, __file__, 1, "falhou", None, sys.exc_info())
+    if cached_by_other_handler:
+        # Um handler comum formatou antes e deixou o traceback completo em `exc_text`.
+        logging.Formatter().format(record)
+    return JsonFormatter().format(record)
+
+
+@pytest.mark.parametrize(
+    "cached_by_other_handler", [False, True], ids=["sem-filtro", "exc-text-cru"]
+)
+def test_formatter_reduz_a_excecao_que_nao_passou_pelo_filtro(
+    canary: str, cached_by_other_handler: bool
+) -> None:
+    output = _formatted_without_filter(
+        ValueError(canary), cached_by_other_handler=cached_by_other_handler
+    )
+
+    assert canary not in output
+    assert json.loads(output)["exception"].endswith("builtins.ValueError")
+
+
 # Fronteiras que registram exceções fora do banco ---------------------------------------------
+
+
+def _assert_errno_without_canary(stream: io.StringIO, canary: str) -> dict[str, Any]:
+    line = _only_line(stream)
+    assert canary not in stream.getvalue()
+    assert line["errno"] == "EIO"
+    assert line["error_type"] == "OSError"
+    return line
+
+
+class _FailingStorage:
+    """Storage cujo disco devolve `EIO` com o canário na mensagem, como o caminho de um arquivo."""
+
+    def __init__(self, canary: str) -> None:
+        self._canary = canary
+
+    def delete(self, key: str) -> None:
+        raise OSError(errno.EIO, self._canary, f"/srv/{self._canary}")
+
+    def sweep_stale_temporaries(self, modified_before: float, limit: int) -> None:
+        raise OSError(errno.EIO, self._canary, f"/srv/{self._canary}")
+
+
+def test_arquivo_nao_removido_leva_o_errno_sem_a_mensagem(
+    listen: Callable[[logging.Logger], io.StringIO], canary: str
+) -> None:
+    stream = listen(retention_module.logger)
+
+    removed = retention_module.remove_file_after_commit(
+        cast(FileStorage, _FailingStorage(canary)), "objects/chave"
+    )
+
+    assert removed is False
+    line = _assert_errno_without_canary(stream, canary)
+    assert (line["alert"], line["storage_key"]) == ("purge_file_not_removed", "objects/chave")
+
+
+def test_temporario_nao_removido_leva_o_errno_sem_a_mensagem(
+    listen: Callable[[logging.Logger], io.StringIO],
+    monkeypatch: pytest.MonkeyPatch,
+    canary: str,
+) -> None:
+    stream = listen(storage_module.logger)
+
+    def unlink(path: str, *, dir_fd: int | None = None) -> None:
+        raise OSError(errno.EIO, canary, f"/srv/{canary}")
+
+    monkeypatch.setattr(os, "unlink", unlink)
+
+    assert storage_module._unlink_temporary("a.part", 0) is False
+    line = _assert_errno_without_canary(stream, canary)
+    assert line["tmp_part"] == "a.part"
+
+
+def test_limpeza_de_temporarios_que_falha_leva_o_errno_sem_a_mensagem(
+    listen: Callable[[logging.Logger], io.StringIO], canary: str
+) -> None:
+    stream = listen(maintenance_module.logger)
+    maintenance = maintenance_module.Maintenance(
+        cast(sessionmaker[Session], None),
+        cast(FileStorage, _FailingStorage(canary)),
+        cast(Runner, None),
+    )
+
+    counts = maintenance.sweep_temporary_parts()
+
+    assert counts["tmp_parts_sweep_failed"] == 1
+    line = _assert_errno_without_canary(stream, canary)
+    assert line["exception"].endswith("builtins.OSError")
 
 
 def test_passo_da_manutencao_que_falha_sai_sem_a_mensagem(

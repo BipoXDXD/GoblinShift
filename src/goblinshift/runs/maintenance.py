@@ -668,8 +668,10 @@ class Maintenance:
             sweep = self._storage.sweep_stale_temporaries(
                 modified_before, self._config.retention_batch_size
             )
-        except OSError, ObjectTamperedError:
-            logger.exception("limpeza de temporários falhou")
+        except (OSError, ObjectTamperedError) as error:
+            logger.exception(
+                "limpeza de temporários falhou", extra={"fields": exception_fields(error)}
+            )
             return {
                 "tmp_parts_removed": 0,
                 "tmp_parts": 0,

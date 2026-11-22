@@ -176,8 +176,11 @@ class JsonFormatter(logging.Formatter):
             value = getattr(record, name, None)
             if value is not None:
                 entry[name] = value
-        if record.exc_info:
-            entry["exception"] = record.exc_text or self.formatException(record.exc_info)
+        exception = record.exc_info[1] if record.exc_info else None
+        if exception is not None:
+            # Reduzida aqui também, sem ler `exc_text`: um registro que não passou pelo filtro, ou
+            # que um handler comum formatou antes, traria nele o traceback com a mensagem.
+            entry["exception"] = _reduced_traceback(exception)
         if dropped:
             entry[_DROPPED_FIELDS] = dropped
         return json.dumps(entry, ensure_ascii=False)
@@ -263,7 +266,7 @@ def omit_exception_detail(record: logging.LogRecord) -> bool:
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
-    record.exc_text = "\n\n".join(_type_and_frames(item) for item in _exception_chain(exception))
+    record.exc_text = _reduced_traceback(exception)
     sqlstate = database_sqlstate(exception)
     if sqlstate is not None:
         setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
@@ -329,6 +332,11 @@ def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
             pending.append(linked)
         if isinstance(current, BaseExceptionGroup):
             pending.extend(current.exceptions)
+
+
+def _reduced_traceback(exception: BaseException) -> str:
+    """Tipos e frames de toda a cadeia da exceção, sem mensagens (ver `omit_exception_detail`)."""
+    return "\n\n".join(_type_and_frames(item) for item in _exception_chain(exception))
 
 
 def _type_and_frames(exception: BaseException) -> str:
