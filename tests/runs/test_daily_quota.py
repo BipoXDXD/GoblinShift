@@ -80,7 +80,7 @@ def usage_at(factory: sessionmaker[Session], owner: uuid.UUID, now: datetime) ->
 
 
 def test_conta_sem_execucoes_tem_uso_zero(factory: sessionmaker[Session]) -> None:
-    assert usage_at(factory, new_owner(factory), NOW) == DailyUsage(0, 0, None)
+    assert usage_at(factory, new_owner(factory), NOW) == DailyUsage(0, None, ())
 
 
 def test_conta_execucoes_e_bytes_de_entrada_da_janela(
@@ -101,10 +101,10 @@ def test_conta_execucoes_e_bytes_de_entrada_da_janela(
     # A mesma entrada processada por duas execuções conta duas vezes.
     assert usage == DailyUsage(
         runs=2,
-        input_bytes=207,
         oldest_run_at=NOW - timedelta(hours=5),
         input_bytes_by_run=((NOW - timedelta(hours=5), 100), (NOW - timedelta(hours=1), 107)),
     )
+    assert usage.input_bytes == 207
 
 
 def test_execucao_criada_exatamente_24h_antes_ja_saiu_da_janela(
@@ -123,7 +123,7 @@ def test_execucao_criada_um_segundo_antes_das_24h_ainda_conta(
     created = NOW - timedelta(hours=24) + timedelta(seconds=1)
     insert_finished_run(factory, owner, created)
 
-    assert usage_at(factory, owner, NOW) == DailyUsage(1, 0, created)
+    assert usage_at(factory, owner, NOW) == DailyUsage(1, created, ())
 
 
 def test_execucao_de_25h_atras_nao_conta(factory: sessionmaker[Session]) -> None:
@@ -137,7 +137,7 @@ def test_execucoes_de_outra_conta_nao_contam(factory: sessionmaker[Session]) -> 
     owner = new_owner(factory)
     insert_finished_run(factory, new_owner(factory), NOW - timedelta(hours=1))
 
-    assert usage_at(factory, owner, NOW) == DailyUsage(0, 0, None)
+    assert usage_at(factory, owner, NOW) == DailyUsage(0, None, ())
 
 
 def test_execucao_falha_tambem_conta(factory: sessionmaker[Session]) -> None:

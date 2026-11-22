@@ -117,11 +117,15 @@ def executor_time_ms(session: Session, owner_id: UUID, now: datetime) -> int:
 @dataclass(frozen=True)
 class DailyUsage:
     runs: int
-    input_bytes: int
     # Criação da Run mais antiga ainda na janela: base do `Retry-After` e de `resets_at`.
     oldest_run_at: datetime | None
     # (criação, bytes de entrada) de cada Run da janela com entrada, na ordem de criação.
-    input_bytes_by_run: tuple[tuple[datetime, int], ...] = ()
+    input_bytes_by_run: tuple[tuple[datetime, int], ...]
+
+    @property
+    def input_bytes(self) -> int:
+        """Bytes de entrada processados na janela."""
+        return sum(size for _, size in self.input_bytes_by_run)
 
     def resets_at(self) -> datetime | None:
         """Quando a Run mais antiga sai da janela e devolve parte da cota."""
@@ -157,12 +161,7 @@ def daily_usage(session: Session, owner_id: UUID, now: datetime) -> DailyUsage:
     ).all()
     # `sum` de bigint volta `numeric` do Postgres.
     by_run = tuple((created_at, int(size)) for created_at, size in rows)
-    return DailyUsage(
-        runs=runs,
-        input_bytes=sum(size for _, size in by_run),
-        oldest_run_at=oldest,
-        input_bytes_by_run=by_run,
-    )
+    return DailyUsage(runs=runs, oldest_run_at=oldest, input_bytes_by_run=by_run)
 
 
 def active_run_id(session: Session, owner_id: UUID) -> UUID | None:

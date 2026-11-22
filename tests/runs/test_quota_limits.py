@@ -33,11 +33,11 @@ def test_override_substitui_so_o_item_fixado(
 
 
 def test_uso_sem_execucoes_na_janela_nao_tem_data_de_reset() -> None:
-    assert DailyUsage(runs=0, input_bytes=0, oldest_run_at=None).resets_at() is None
+    assert DailyUsage(runs=0, oldest_run_at=None, input_bytes_by_run=()).resets_at() is None
 
 
 def test_cota_volta_24_horas_depois_da_execucao_mais_antiga() -> None:
-    usage = DailyUsage(runs=1, input_bytes=10, oldest_run_at=NOW)
+    usage = DailyUsage(runs=1, oldest_run_at=NOW, input_bytes_by_run=((NOW, 10),))
 
     assert usage.resets_at() == datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
@@ -47,7 +47,6 @@ DAY = timedelta(hours=24)
 # 450 bytes em três Runs, na ordem de criação: 100, 300 e 50.
 USAGE = DailyUsage(
     runs=3,
-    input_bytes=450,
     oldest_run_at=T0,
     input_bytes_by_run=(
         (T0, 100),
@@ -74,8 +73,16 @@ def test_bytes_free_at_acha_a_run_que_libera_o_suficiente(
     assert USAGE.bytes_free_at(needed) == free_at
 
 
+def test_bytes_de_entrada_somam_as_runs_da_janela() -> None:
+    assert USAGE.input_bytes == 450
+
+
+def test_uso_sem_execucoes_nao_tem_bytes_de_entrada() -> None:
+    assert DailyUsage(runs=0, oldest_run_at=None, input_bytes_by_run=()).input_bytes == 0
+
+
 def test_uso_sem_execucoes_nunca_libera_bytes() -> None:
-    assert DailyUsage(runs=0, input_bytes=0, oldest_run_at=None).bytes_free_at(1) is None
+    assert DailyUsage(runs=0, oldest_run_at=None, input_bytes_by_run=()).bytes_free_at(1) is None
 
 
 def test_mudanca_sem_nenhum_limite_e_recusada_antes_do_banco() -> None:
