@@ -14,6 +14,7 @@ import anyio
 import httpx2 as httpx
 import pytest
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from goblinshift.entrypoints.api.app import create_app
 from goblinshift.entrypoints.api.concurrency import (
@@ -25,6 +26,7 @@ from goblinshift.platform.settings import Settings
 from tests.api.support import assert_problem
 
 BLOCKING = "/api/v1/_test/blocking"
+STREAMING = "/api/v1/_test/streaming"
 FAST = "/api/v1/_test/fast"
 RAISING = "/api/v1/_test/raising"
 
@@ -62,6 +64,19 @@ async def client(gate: Gate) -> AsyncIterator[httpx.AsyncClient]:
         await gate.release.wait()
         return {"ok": True}
 
+    @router.get("/streaming")
+    async def streaming() -> StreamingResponse:
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"primeiro"
+            # A rota já devolveu a resposta; só o corpo segue em curso.
+            gate.inside += 1
+            if gate.inside == gate.expected:
+                gate.all_entered.set()
+            await gate.release.wait()
+            yield b"ultimo"
+
+        return StreamingResponse(chunks())
+
     @router.get("/fast")
     async def fast() -> dict[str, bool]:
         return {"ok": True}
@@ -77,12 +92,14 @@ async def client(gate: Gate) -> AsyncIterator[httpx.AsyncClient]:
 
 
 @asynccontextmanager
-async def saturated(client: httpx.AsyncClient, gate: Gate) -> AsyncIterator[list[httpx.Response]]:
-    """Ocupa todas as vagas com requisições presas e as solta ao sair."""
+async def saturated(
+    client: httpx.AsyncClient, gate: Gate, path: str = BLOCKING
+) -> AsyncIterator[list[httpx.Response]]:
+    """Ocupa todas as vagas com requisições presas em `path` e as solta ao sair."""
     held: list[httpx.Response] = []
 
     async def hit() -> None:
-        held.append(await client.get(BLOCKING))
+        held.append(await client.get(path))
 
     async with anyio.create_task_group() as group:
         for _ in range(MAX_CONCURRENT_REQUESTS):
@@ -162,3 +179,32 @@ async def test_cada_recusa_deixa_uma_linha_para_o_sinal_de_saturacao(
         SATURATED_LOG_MESSAGE,
         SATURATED_LOG_MESSAGE,
     ]
+
+
+@pytest.mark.anyio
+async def test_vaga_dura_ate_o_fim_do_corpo_por_streaming(
+    client: httpx.AsyncClient, gate: Gate
+) -> None:
+    async with saturated(client, gate, STREAMING) as held:
+        refused = await client.get(FAST)
+
+    assert_problem(refused, 503, "SERVICE_UNAVAILABLE")
+    assert [response.content for response in held] == [b"primeiroultimo"] * MAX_CONCURRENT_REQUESTS
+    assert (await client.get(FAST)).status_code == 200
+
+
+@pytest.mark.anyio
+async def test_cliente_que_desiste_no_meio_do_streaming_devolve_a_vaga(
+    client: httpx.AsyncClient, gate: Gate
+) -> None:
+    async with anyio.create_task_group() as group:
+        for _ in range(MAX_CONCURRENT_REQUESTS):
+            group.start_soon(client.get, STREAMING)
+        with anyio.fail_after(5):
+            await gate.all_entered.wait()
+        # Desconexão: a requisição em curso é cancelada no meio do corpo.
+        group.cancel_scope.cancel()
+
+    response = await client.get(FAST)
+
+    assert response.status_code == 200
