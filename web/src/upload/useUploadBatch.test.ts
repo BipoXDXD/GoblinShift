@@ -692,8 +692,8 @@ describe("useUploadBatch: a intenção não sobra no servidor", () => {
     });
     hook.unmount();
 
-    // O DELETE sairia por uma fila assíncrona: dá tempo a ela antes de afirmar que nada saiu.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // O DELETE sairia por uma fila assíncrona: dá vez a ela antes de afirmar que nada saiu.
+    await act(() => Promise.resolve());
     expect(api.deleted).toEqual([]);
     expect(api.live()).toBe(1);
   });

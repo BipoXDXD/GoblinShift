@@ -213,6 +213,7 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
   }, [deleteOnServer, failedDeletions]);
 
   const consume = useCallback(() => {
+    // Esvazia a mesma Map que a desmontagem guardou; trocá-la por outra faria a saída excluir tudo.
     serverUploads.current.clear();
   }, []);
 
@@ -232,12 +233,16 @@ export function useUploadBatch(services: UploadServices): UploadBatch {
 
   useEffect(() => {
     const active = controllers.current;
+    // A desmontagem guarda esta Map: `consume`, `remove` e afins precisam limpá-la, nunca trocá-la
+    // (`serverUploads.current = new Map()` deixaria a saída excluir uploads que já são de uma Run).
     const created = serverUploads.current;
     return () => {
       for (const controller of active.values()) {
         controller.abort();
       }
-      // Saiu sem Run (sem `consume`): os uploads do lote não servem mais e só reservam cota.
+      // Saiu sem Run (sem `consume`): os uploads do lote não servem mais e só reservam cota. Sair
+      // com o POST /runs ainda pendente também os exclui; se a Run chegar a ser criada, o servidor
+      // segura a remoção física enquanto ela os usa.
       deleteOnServer([...created.values()]);
       created.clear();
     };

@@ -276,8 +276,18 @@ describe("Bancada", () => {
     expect(body.input_upload_ids).toEqual([uploadIdFor(2), uploadIdFor(1)]);
     expect(body.recipe_id).toBe("csv-janitor");
     expect(body.parameters).toMatchObject({ input_delimiter: ",", output_columns: null });
-    // Os uploads viraram a Run: sair da Bancada não os exclui.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+
+  it("depois de criar a execução, sair da Bancada não exclui os uploads, que são da Run", async () => {
+    const { user, api } = await setup();
+    await chooseFiles(user, ["a.csv", "b.csv"]);
+    await waitUntilSent(2);
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+    await expectHeadingFocused("Execução");
+
+    // Dá vez à fila assíncrona do DELETE antes de afirmar que nada saiu.
+    await act(() => Promise.resolve());
     expect(deleteRequests(api.requests)).toEqual([]);
   });
 
@@ -308,6 +318,30 @@ describe("Bancada", () => {
     const keys = runRequests(api.requests).map((request) => request.headers.get("Idempotency-Key"));
     expect(keys[0]).toBe(keys[1]);
     expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("voltar a um comando já enviado reusa a Idempotency-Key dele", async () => {
+    let calls = 0;
+    const { user, api } = await setup({
+      runs: () => {
+        calls += 1;
+        return calls < 2 ? problemResponse(503, "SERVICE_UNAVAILABLE") : acceptedRun();
+      },
+    });
+    await chooseFiles(user, ["a.csv"]);
+    await waitUntilSent(1);
+    const delimiter = screen.getByRole("combobox", { name: "Delimitador dos arquivos de saída" });
+
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+    await screen.findByText(/O serviço está indisponível/);
+    await user.selectOptions(delimiter, ";");
+    await user.selectOptions(delimiter, ",");
+    await user.click(screen.getByRole("button", { name: "Executar" }));
+    await screen.findByRole("heading", { level: 1, name: "Execução" });
+
+    const keys = runRequests(api.requests).map((request) => request.headers.get("Idempotency-Key"));
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 
   it("sessão que termina ao Executar vira o convite para entrar, sem alerta", async () => {
