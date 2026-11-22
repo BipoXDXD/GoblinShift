@@ -3,12 +3,13 @@
 # (elenco.tsv) fora do repositório e grava o otimizado em
 # web/src/assets/art/oficina-3d/oficina-3d-ID.glb. Todas usam a mesma configuração da Rúbia.
 #
-# Origem dos modelos (desde 22/11): Hi3D Quality, em $ARTE/hi3d-quality-20261122/ (fontes.json com
-# o task_id e os tamanhos). O elenco.tsv aponta para o <id>-site.glb, que este script NÃO
-# reproduz: ele saiu de outra receita (erro do simplify, normais e tamanhos de textura próprios),
-# registrada em fontes.json → <id>.site.reducao. Reduzir um -site.glb de novo simplificaria duas
-# vezes, então o script recusa fonte terminada em -site.glb. Para refazer um GLB, baixe o bruto
-# pelo Hi3D (get_task_outputs com o task_id, sem crédito), passe FONTE= e compare com a receita.
+# Origem dos modelos (desde 22/11): Hi3D Quality, em $ARTE/hi3d-quality-20261122/. O task_id, os
+# bytes e o sha256 de cada um estão no ADR 030, seção "Modelos do Hi3D Quality (2026-11-22)". O
+# elenco.tsv aponta para o <id>-site.glb, que este script NÃO reproduz: ele saiu de outra receita
+# (erro do simplify, normais e tamanhos de textura próprios), registrada na mesma seção. Reduzir
+# um -site.glb de novo simplificaria duas vezes, então o script recusa fonte terminada em -site.glb.
+# Para refazer um GLB, baixe o bruto pelo Hi3D (get_task_outputs com o task_id, sem crédito), passe
+# FONTE= e compare com a receita.
 #
 # Passos e porquê:
 #   1. weld (gltf-transform): junta os vértices iguais, para o simplify enxergar as costuras de UV.
@@ -17,8 +18,8 @@
 #      só de posição, achatava a bochecha, apagava a íris do olho esquerdo e esticava o UV da
 #      coxa até amostrar o cabelo (ADR 030, "Defeitos da primeira versão").
 #   3. texturas redimensionadas para TEXTURE_PX (todas do mesmo tamanho) e gravadas em WebP
-#      (EXT_texture_webp). Os -site.glb de 22/11 usam tamanhos diferentes por textura; veja
-#      fontes.json → site.reducao antes de escolher um valor, e compare closes contra o bruto.
+#      (EXT_texture_webp). Os -site.glb de 22/11 usam tamanhos diferentes por textura; veja a
+#      receita no ADR 030 antes de escolher um valor, e compare closes contra o bruto.
 #   4. Meshopt (EXT_meshopt_compression) sobre a malha quantizada (KHR_mesh_quantization), com UV
 #      em 14 bits: o padrão de 12 bits dá passos de 1 texel numa textura de 4096 px.
 #

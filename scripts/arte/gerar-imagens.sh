@@ -6,8 +6,8 @@
 #     1280 px de largura (telas de 1× a 3×), em web/src/assets/art/goblins/;
 #   - imagem estática da cena 3D de cada goblin (placeholder, miniatura do seletor e fallback;
 #     ADR 038): 192, 384, 640 e 960 px, em web/src/assets/art/oficina-3d/, com o prefixo que o
-#     check-budget reconhece, e com a luz realista que a cena imita. A Rúbia sai de um render só:
-#     a mesma imagem vira a estática da cena e a goblin dos estados.
+#     check-budget reconhece, e com a luz realista que a cena imita. Cada goblin sai de um render
+#     só: a mesma imagem vira a estática da cena e a goblin dos estados.
 # A fonte de cada goblin é o GLB aprovado que o elenco.tsv aponta (desde 22/11, o <id>-site.glb do
 # Hi3D Quality, com a textura de cor em 4096 px). Se o recorte sair mais estreito que a maior
 # largura pedida, o script para antes de gravar qualquer arquivo daquela goblin, em vez de ampliar.
@@ -114,22 +114,17 @@ while IFS=$'\t' read -r -u 3 id glb _; do
   selected "$id" "$@" || continue
   source="${FONTE:-$ARTE/$glb}"
   [[ -f "$source" ]] || { echo "GLB de origem não encontrado: $source ($id)" >&2; exit 1; }
-  # A imagem da cena usa a luz realista (Cycles, três luzes, tom Standard), a mesma que a cena do
-  # three imita (ADR 030). As goblins dos estados ficam no modo padrão (EEVEE, tom AgX, um sol), o
-  # dos renders que o usuário aprovou para elas; a Rúbia é a exceção, com o render realista nos
-  # dois lugares. Todos os renders e conferências vêm antes de gravar o primeiro arquivo.
-  if wants cena || [[ "$id" == "rubia" ]]; then
-    render_framed "$source" "$work/$id-realista.png" "$id" --realista
-  fi
+  # Um render só por goblin, com a luz realista (Cycles, três luzes, tom Standard), a mesma que a
+  # cena do three imita (ADR 030): ele vira a imagem da cena e a goblin dos estados. Desde
+  # 2026-11-22, por decisão do usuário, os estados das seis usam esse render (antes, só a Rúbia; as
+  # outras saíam em EEVEE com tom AgX, escuras demais com os modelos do Hi3D Quality). Todos os
+  # renders e conferências vêm antes de gravar o primeiro arquivo.
+  render_framed "$source" "$work/$id-realista.png" "$id" --realista
   if wants cena; then
     wide_enough "$work/$id-realista.png" "$POSTER_WIDEST" "$id"
   fi
   if wants estados; then
-    if [[ "$id" == "rubia" ]]; then
-      cp "$work/$id-realista.png" "$work/$id.png"
-    else
-      render_framed "$source" "$work/$id.png" "$id"
-    fi
+    cp "$work/$id-realista.png" "$work/$id.png"
     wide_enough "$work/$id.png" "$STATE_WIDEST" "$id"
   fi
   if wants cena; then

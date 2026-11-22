@@ -158,3 +158,34 @@ def test_caminho_feliz_grava_as_doze_imagens_dos_estados(tmp_path: Path) -> None
     goblins = tmp_path / "web" / "src" / "assets" / "art" / "goblins"
     expected = {f"nyx-{w}w.{ext}" for w in STATE_WIDTHS for ext in ("avif", "webp")}
     assert {p.name for p in goblins.glob("nyx-*")} == expected
+
+
+# Blender falso que anota os argumentos de cada chamada antes de copiar o render.
+LOGGING_BLENDER = """#!/usr/bin/env bash
+set -euo pipefail
+echo "$*" >>"$FAKE_RENDER.calls"
+while [[ "$1" != "--" ]]; do shift; done
+cp "$FAKE_RENDER" "$3"
+"""
+
+
+@pytest.mark.parametrize("alvo", ["estados", "tudo"])
+def test_estados_usam_um_render_realista_so(tmp_path: Path, alvo: str) -> None:
+    # Decisão do dono em 2026-11-22: os estados das seis saem do render realista, como os da Rúbia,
+    # e a imagem da cena reaproveita o mesmo render (uma abertura do Blender por goblin).
+    _arte_com_nyx(tmp_path)
+
+    result = _gerar(
+        tmp_path,
+        ids=["nyx"],
+        fonte=None,
+        alvo=alvo,
+        blender_script=LOGGING_BLENDER,
+        canvas=BIG_CANVAS,
+        body=BIG_BODY,
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls = (tmp_path / "render.png.calls").read_text().splitlines()
+    assert len(calls) == 1
+    assert calls[0].endswith("--realista")

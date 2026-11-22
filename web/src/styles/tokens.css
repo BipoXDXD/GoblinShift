@@ -186,6 +186,9 @@
   --hero-band: var(--color-wood-200);
   --overlay: var(--color-wood-950);
 
+  /* Silhueta das goblins: no claro o fundo já recorta a figura, sem filtro. */
+  --goblin-silhouette: none;
+
   /* Três níveis (spec 2026-10-15): cartão sobre a página, flutuante (menu, popover, arrasto) e
      diálogo. Duas partes, a luz vem de cima (RUI cap. 6); no diálogo a parte pequena some. */
   --elevation-card: 0 2px 4px oklch(0.165 0.017 46 / 0.12), 0 1px 2px oklch(0.165 0.017 46 / 0.2);
@@ -250,6 +253,14 @@
   --hero-band: var(--color-wood-900);
   --overlay: oklch(0 0 0);
 
+  /* Os renders realistas não têm contorno: roupa e cabelo pretos sumiriam no cartão quase preto.
+     Um fio de luz de madeira clara e um halo de lamparina de cobre, atrás da figura, devolvem a
+     silhueta sem tocar na arte. */
+  --goblin-silhouette: drop-shadow(
+      0 0 1px color-mix(in oklch, var(--color-wood-200) 45%, transparent)
+    )
+    drop-shadow(0 0 12px color-mix(in oklch, var(--color-copper-300) 22%, transparent));
+
   --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
   --elevation-float: 0 10px 20px oklch(0 0 0 / 0.5);
   --elevation-dialog: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
@@ -305,6 +316,14 @@
     --hero-band: var(--color-wood-900);
     --overlay: oklch(0 0 0);
 
+    /* Os renders realistas não têm contorno: roupa e cabelo pretos sumiriam no cartão quase preto.
+       Um fio de luz de madeira clara e um halo de lamparina de cobre, atrás da figura, devolvem a
+       silhueta sem tocar na arte. */
+    --goblin-silhouette: drop-shadow(
+        0 0 1px color-mix(in oklch, var(--color-wood-200) 45%, transparent)
+      )
+      drop-shadow(0 0 12px color-mix(in oklch, var(--color-copper-300) 22%, transparent));
+
     --elevation-card: inset 0 1px 0 oklch(1 0 0 / 0.06);
     --elevation-float: 0 10px 20px oklch(0 0 0 / 0.5);
     --elevation-dialog: 0 20px 40px oklch(0 0 0 / 0.6), inset 0 0 0 1px oklch(1 0 0 / 0.08);
@@ -349,4 +368,15 @@
   --shadow-float: var(--elevation-float);
   --shadow-dialog: var(--elevation-dialog);
   --shadow-sunken: var(--elevation-sunken);
+}
+
+/* Filtro da silhueta das goblins, nos dois temas (none no claro). */
+@utility goblin-silhouette {
+  filter: var(--goblin-silhouette);
+}
+
+/* Miniatura do seletor ampliada de um ponto mais baixo que o topo (a Lua, para o sininho entrar
+   no círculo de 48 px). A régua do código não aceita valor arbitrário, então ganha nome. */
+@utility origin-bust-low {
+  transform-origin: 50% 20%;
 }

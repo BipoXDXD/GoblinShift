@@ -23,35 +23,79 @@ const LIMITS_KB = {
   latinFonts: 100,
   threeDChunk: 300,
   /**
-   * ADR 030: a Rúbia de 1 milhão de triângulos reduzida a ~240 mil, com texturas de 2048 px em
-   * WebP e Meshopt, mede 3283 KB; reduzir mais já tirava relevo do rosto.
+   * ADR 030 (revisto em 2026-11-22): a Rúbia do Hi3D Quality, com textura de 4096 px, mede
+   * 7309 KB (1,31 milhão de triângulos); o teto deixa folga até 8 MiB.
    */
-  threeDModel: 3400,
+  threeDModel: 8192,
   /**
-   * ADR 038: cada uma das outras cinco goblins, na mesma configuração da Rúbia, mede de 1492 KB
-   * (Nyx) a 2247 KB (Jade); só baixa quando a pessoa a escolhe no seletor.
+   * ADR 030 (revisto em 2026-11-22): cada uma das outras goblins do elenco, na mesma configuração
+   * da Rúbia, mede de 5292 KB (Ferrugem) a 5621 KB (Fagulha); só baixa quando a pessoa a escolhe
+   * no seletor.
    */
-  threeDCastModel: 2400,
+  threeDCastModel: 6144,
   /**
    * ADR 038: o que a abertura baixa para o 3D sem a pessoa pedir: o chunk (gzip), o GLB da
-   * Rúbia, a maior imagem estática dela em AVIF e as cinco miniaturas do seletor. Medido: ~3530 KB.
+   * Rúbia, a imagem estática de 960 px dela em AVIF e as miniaturas do seletor. Medido em
+   * 2026-11-22: chunk 159 KB gzip + Rúbia 7309 KB + imagem 58 KB + seis miniaturas 48 KB =
+   * 7574 KB. Teto = teto da Rúbia (8192) + 10% sobre o resto (265 KB), arredondado para cima em
+   * múltiplos de 64 KB.
    */
-  threeDInitial: 3600,
-  threeDPoster: 90,
-  /**
-   * Goblin de um estado ou do elenco, cada arquivo (AVIF ou WebP, de 256 a 768 px). Era 20 KB
-   * com a caixa de 128×160; em 2026-10-15 o usuário pediu as goblins em destaque (256×320 CSS) e
-   * o arquivo de 768 px, o das telas 3×, tem 9× a área. A maior é a Rúbia em WebP, com 61 KB. O
-   * navegador baixa um só arquivo por goblin (srcset e sizes), e só quando ela aparece (lazy).
-   */
-  illustration: 64,
+  threeDInitial: 8512,
 } as const;
+
+/**
+ * Teto de cada arquivo pela largura no nome (`-<N>w-`): o navegador baixa uma só largura por
+ * imagem (srcset e sizes), e a de 3× tem muito mais área que a de 1×. Cada faixa vale até a
+ * largura dela; sem sufixo de largura, vale a primeira. Acima da última não há teto: o arquivo
+ * falha até alguém decidir quanto ele pode pesar.
+ */
+type Band = readonly [maxWidth: number, limitKb: number];
+type WidthLimits = readonly [Band, ...Band[]];
+
+/**
+ * Goblin de um estado ou do elenco, AVIF ou WebP. Era 64 KB para todas as larguras (a maior,
+ * a Rúbia em WebP de 768 px, tinha 61 KB); a arte do Hi3D Quality ganha 1024 e 1280 px. Medido
+ * em 2026-11-22, o maior arquivo de cada largura é da Rúbia em WebP: 56 KB (768), 77 KB (1024)
+ * e 98 KB (1280).
+ */
+const ILLUSTRATION_LIMITS: WidthLimits = [
+  [768, 64],
+  [1024, 120],
+  [1280, 180],
+];
+/**
+ * Imagem estática do 3D (e miniatura do seletor). Hoje a abertura usa até 640 px; a de 960 px é a
+ * do palco maior (PR C), e o teto já a reserva. Medido em 2026-11-22, o maior arquivo é da Rúbia
+ * em WebP: 45 KB (640) e 71 KB (960).
+ */
+const POSTER_LIMITS: WidthLimits = [
+  [640, 90],
+  [960, 120],
+];
+
+/** O teto em KB, ou `null` quando a largura passa da maior faixa. */
+function limitByWidth(path: string, limits: WidthLimits): number | null {
+  const width = /-(\d+)w-/.exec(path)?.[1];
+  if (width === undefined) {
+    return limits[0][1];
+  }
+  return limits.find(([maxWidth]) => Number(width) <= maxWidth)?.[1] ?? null;
+}
+
+function overWidthLimit(what: string, file: BuiltFile, limits: WidthLimits): string | null {
+  const limitKb = limitByWidth(file.path, limits);
+  if (limitKb === null) {
+    const maxWidth = Math.max(...limits.map(([width]) => width));
+    return `${what}: a largura passa da maior faixa com teto, de ${String(maxWidth)} px`;
+  }
+  return overLimit({ what, bytes: file.bytes, limitKb, unit: "KB" });
+}
 
 /** Chunk e imagem estática do 3D seguem este prefixo no nome (ADR 027). */
 const THREE_D_PREFIX = "assets/oficina-3d";
 /** A goblin que abre a página (ADR 038): o modelo dela tem teto próprio e entra no 3D inicial. */
 const FIRST_MODEL = /^assets\/oficina-3d-rubia-[^/]*\.glb$/;
-const FIRST_POSTER = /^assets\/oficina-3d-rubia-640w-[^/]*\.avif$/;
+const FIRST_POSTER = /^assets\/oficina-3d-rubia-960w-[^/]*\.avif$/;
 const THUMBNAIL = /^assets\/oficina-3d-[a-z]+-192w-[^/]*\.avif$/;
 const THREE_D_CHUNK = /^assets\/oficina-3d-[^/]*\.js$/;
 
@@ -130,12 +174,7 @@ function illustrationViolation(file: BuiltFile): string | null {
   if (!/\.(avif|webp)$/.test(file.path) || file.path.startsWith(THREE_D_PREFIX)) {
     return null;
   }
-  return overLimit({
-    what: `Ilustração (${file.path})`,
-    bytes: file.bytes,
-    limitKb: LIMITS_KB.illustration,
-    unit: "KB",
-  });
+  return overWidthLimit(`Ilustração (${file.path})`, file, ILLUSTRATION_LIMITS);
 }
 
 function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (string | null)[] {
@@ -165,19 +204,13 @@ function threeDViolations(file: BuiltFile, referenced: ReadonlySet<string>): (st
         : null,
     ];
   }
-  return [
-    overLimit({
-      what: `Imagem estática do 3D (${file.path})`,
-      bytes: file.bytes,
-      limitKb: LIMITS_KB.threeDPoster,
-      unit: "KB",
-    }),
-  ];
+  return [overWidthLimit(`Imagem estática do 3D (${file.path})`, file, POSTER_LIMITS)];
 }
 
 /**
  * O 3D que a abertura baixa sem a pessoa pedir (ADR 038): só vale com modelos no build, e a
- * Rúbia tem de estar entre eles. As outras goblins não contam: o modelo delas vem sob demanda.
+ * Rúbia tem de estar entre eles, com a imagem estática de 960 px dela. As outras goblins não
+ * contam: o modelo delas vem sob demanda.
  */
 function initialThreeDViolations(files: readonly BuiltFile[]): (string | null)[] {
   if (!files.some((file) => file.path.endsWith(".glb"))) {
@@ -186,6 +219,11 @@ function initialThreeDViolations(files: readonly BuiltFile[]): (string | null)[]
   const firstModel = files.filter((file) => FIRST_MODEL.test(file.path));
   if (firstModel.length === 0) {
     return ["3D inicial: falta o modelo da Rúbia (assets/oficina-3d-rubia-*.glb)"];
+  }
+  if (!files.some((file) => FIRST_POSTER.test(file.path))) {
+    return [
+      "3D inicial: falta a imagem estática de 960 px da Rúbia (assets/oficina-3d-rubia-960w-*.avif)",
+    ];
   }
   const bytes = (pattern: RegExp, field: "bytes" | "gzipBytes"): number =>
     files.filter((file) => pattern.test(file.path)).reduce((total, file) => total + file[field], 0);

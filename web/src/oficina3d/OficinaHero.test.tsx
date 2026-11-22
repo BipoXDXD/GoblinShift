@@ -140,6 +140,12 @@ async function settle(scene: FakeScene, index: number, error?: Error): Promise<v
 }
 
 /** Monta com a cena falsa e conclui a carga da Rúbia. */
+function castButtons(): HTMLElement[] {
+  return within(screen.getByRole("group", { name: TEXT.art.stage.castLabel })).getAllByRole(
+    "button",
+  );
+}
+
 async function renderReady(scene: FakeScene, environment: Environment3D = READY) {
   const view = render(
     <OficinaHero environment={environment} whenPageIdle={runNow} loadScene={scene.loadScene} />,
@@ -163,7 +169,7 @@ describe("OficinaHero", () => {
     expect(img).not.toHaveAttribute("loading");
   });
 
-  it("o seletor tem as cinco goblins, na ordem do elenco, com a Rúbia escolhida", () => {
+  it("o seletor tem as seis goblins, na ordem do elenco, com a Rúbia escolhida", () => {
     render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
 
     const buttons = within(
@@ -174,6 +180,7 @@ describe("OficinaHero", () => {
       "Fagulha",
       "Ferrugem",
       "Jade",
+      "Lua",
       "Nyx",
     ]);
     expect(buttons.map((button) => button.getAttribute("aria-pressed"))).toEqual([
@@ -182,6 +189,34 @@ describe("OficinaHero", () => {
       "false",
       "false",
       "false",
+      "false",
+    ]);
+  });
+
+  it("as miniaturas ficam num disco de superfície elevada, com a silhueta do tema", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    for (const button of castButtons()) {
+      expect(button.querySelector("picture")).toHaveClass("bg-surface-raised");
+      expect(button.querySelector("img")).toHaveClass("goblin-silhouette");
+    }
+  });
+
+  it("a miniatura da Lua amplia de mais baixo, para o sininho entrar; as outras, do topo", () => {
+    render(<OficinaHero environment={REDUCED_MOTION} whenPageIdle={never} />);
+
+    const origins = castButtons().map((button) =>
+      [...(button.querySelector("img")?.classList ?? [])].filter((name) =>
+        name.startsWith("origin-"),
+      ),
+    );
+    expect(origins).toEqual([
+      ["origin-top"],
+      ["origin-top"],
+      ["origin-top"],
+      ["origin-top"],
+      ["origin-bust-low"],
+      ["origin-top"],
     ]);
   });
 
@@ -287,9 +322,9 @@ describe("OficinaHero", () => {
     await renderReady(scene);
 
     await userEvent.click(castButton("Nyx"));
-    await userEvent.click(castButton("Fagulha"));
+    await userEvent.click(castButton("Lua"));
 
-    expect(scene.shows.map((call) => call.goblin)).toEqual(["rubia", "nyx", "fagulha"]);
+    expect(scene.shows.map((call) => call.goblin)).toEqual(["rubia", "nyx", "lua"]);
     expect(scene.shows[1]?.signal.aborted).toBe(true);
     expect(scene.shows[2]?.signal.aborted).toBe(false);
   });
@@ -309,7 +344,7 @@ describe("OficinaHero", () => {
     expect(scene.host()).not.toHaveClass("cursor-grab");
     expect(scene.host()).not.toHaveClass("touch-pan-y");
 
-    await userEvent.click(castButton("Fagulha"));
+    await userEvent.click(castButton("Lua"));
     await settle(scene, 2);
     expect(heroState(container)).toBe("pronto");
   });
