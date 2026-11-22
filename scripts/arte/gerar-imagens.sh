@@ -57,13 +57,17 @@ mkdir -p "$art/goblins" "$art/oficina-3d"
 # Render transparente → recorte justo → caixa 4:5 com 4% de folga, centrada embaixo (os pés
 # ficam no mesmo lugar em todas as goblins).
 render_framed() {
-  local glb="$1" png="$2"
-  shift 2
+  local glb="$1" png="$2" id="$3"
+  shift 3
   # Sem --python-exit-code, o Blender sai com 0 mesmo se o script quebrar; o rm evita recortar o
-  # render da goblin anterior.
+  # render da goblin anterior. A saída vai para um log, mostrado só se o Blender falhar.
   rm -f "$work/render.png"
-  blender -b --factory-startup --python-exit-code 1 -P "$render" -- "$glb" "$work/render.png" \
-    "$RENDER_PX" "--yaw=$YAW_DEGREES" "$@" >/dev/null 2>&1
+  if ! blender -b --factory-startup --python-exit-code 1 -P "$render" -- "$glb" "$work/render.png" \
+    "$RENDER_PX" "--yaw=$YAW_DEGREES" "$@" >"$work/blender.log" 2>&1; then
+    echo "blender falhou ($id); fim do log:" >&2
+    tail -n 20 "$work/blender.log" >&2
+    exit 1
+  fi
   magick "$work/render.png" -trim +repage "$work/trim.png"
   local w h side_h side_w
   read -r w h < <(magick identify -format '%w %h\n' "$work/trim.png")
@@ -123,7 +127,7 @@ while IFS=$'\t' read -r -u 3 id glb _; do
   # dos renders que o usuário aprovou para elas; a Rúbia é a exceção, com o render realista nos
   # dois lugares. Todos os renders e conferências vêm antes de gravar o primeiro arquivo.
   if wants cena || [[ "$id" == "rubia" ]]; then
-    render_framed "$source" "$work/$id-realista.png" --realista
+    render_framed "$source" "$work/$id-realista.png" "$id" --realista
   fi
   if wants cena; then
     wide_enough "$work/$id-realista.png" "$POSTER_WIDEST" "$id"
@@ -132,7 +136,7 @@ while IFS=$'\t' read -r -u 3 id glb _; do
     if [[ "$id" == "rubia" ]]; then
       cp "$work/$id-realista.png" "$work/$id.png"
     else
-      render_framed "$source" "$work/$id.png"
+      render_framed "$source" "$work/$id.png" "$id"
     fi
     wide_enough "$work/$id.png" "$STATE_WIDEST" "$id"
   fi

@@ -1,4 +1,4 @@
-"""gerar-imagens.sh: recusa ampliar uma fonte menor que a maior largura pedida."""
+"""gerar-imagens.sh: recusa ampliar, mostra o erro do Blender e falha quando nada é processado."""
 
 import os
 import shutil
@@ -17,17 +17,22 @@ set -euo pipefail
 while [[ "$1" != "--" ]]; do shift; done
 cp "$FAKE_RENDER" "$3"
 """
+# Blender falso que quebra como um script Python com erro sob --python-exit-code 1.
+BROKEN_BLENDER = """#!/usr/bin/env bash
+echo "Traceback: render_glb.py explodiu" >&2
+exit 1
+"""
 # Tela de 600x750 com a goblin falsa de 500x722 encostada embaixo: o recorte justo com 4% de folga
 # volta a 600x750 (722 * 1,04 = 750; 750 * 4/5 = 600).
 FAKE_CANVAS = "600x750"
 FAKE_BODY = "rectangle 50,28 549,749"
 
 
-def _fake_tools(tmp_path: Path) -> tuple[Path, Path]:
+def _fake_tools(tmp_path: Path, blender_script: str) -> tuple[Path, Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     blender = bin_dir / "blender"
-    blender.write_text(FAKE_BLENDER)
+    blender.write_text(blender_script)
     blender.chmod(0o755)
     render = tmp_path / "render.png"
     subprocess.run(
@@ -48,12 +53,17 @@ def _fake_tools(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _gerar(
-    tmp_path: Path, *, ids: list[str], fonte: Path, alvo: str
+    tmp_path: Path,
+    *,
+    ids: list[str],
+    fonte: Path,
+    alvo: str,
+    blender_script: str = FAKE_BLENDER,
 ) -> subprocess.CompletedProcess[str]:
     """Roda uma cópia do script em tmp_path, para nada cair em web/src/assets/art/."""
     scripts = tmp_path / "scripts" / "arte"
     shutil.copytree(SCRIPTS, scripts)
-    bin_dir, render = _fake_tools(tmp_path)
+    bin_dir, render = _fake_tools(tmp_path, blender_script)
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -80,3 +90,16 @@ def test_largura_maior_que_o_recorte_falha_sem_gravar(tmp_path: Path) -> None:
     assert result.returncode == 1, result.stderr
     assert "fonte pequena demais: 600 px para 1280w (nyx)" in result.stderr
     assert not list((tmp_path / "web" / "src" / "assets" / "art" / "goblins").glob("nyx-*"))
+
+
+def test_erro_do_blender_aparece_no_stderr_com_o_id(tmp_path: Path) -> None:
+    fake_glb = tmp_path / "nyx-site.glb"
+    fake_glb.write_bytes(b"glTF")
+
+    result = _gerar(
+        tmp_path, ids=["nyx"], fonte=fake_glb, alvo="estados", blender_script=BROKEN_BLENDER
+    )
+
+    assert result.returncode != 0
+    assert "blender falhou (nyx)" in result.stderr
+    assert "Traceback: render_glb.py explodiu" in result.stderr
