@@ -790,7 +790,7 @@ describe("Acesso: chave nova", () => {
     );
   });
 
-  it("no teto de chaves ativas (409), explica o que fazer", async () => {
+  it("no teto de chaves (409), cita os dois limites", async () => {
     const { user } = setup({
       "POST /api/v1/api-keys": () => problemResponse(409, "STATE_CONFLICT"),
     });
@@ -799,7 +799,7 @@ describe("Acesso: chave nova", () => {
     await user.click(within(form).getByRole("button", { name: "Criar chave" }));
 
     expect(await within(form).findByRole("alert")).toHaveTextContent(
-      "A conta já tem o máximo de chaves ativas. Revogue uma antes de criar outra.",
+      "A conta chegou ao limite de chaves: 5 ativas, ou 100 guardadas contando as revogadas e vencidas, que saem 30 dias depois do fim.",
     );
   });
 

@@ -9,7 +9,7 @@ import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { TEXT } from "../text";
 import { API_KEYS_QUERY_KEY, createApiKey, SCOPES, type CreatedApiKey, type Scope } from "./api";
-import { KEY_DAYS, parseNewKey, type NewKeyErrors } from "./keys";
+import { KEY_DAYS, KEY_LIMITS, parseNewKey, type NewKeyErrors } from "./keys";
 
 const T = TEXT.account.keys;
 const NO_ERRORS: NewKeyErrors = { scopes: null, days: null };
@@ -139,7 +139,13 @@ export function NewKeyForm({ onCreated, onCancel }: NewKeyFormProps): ReactEleme
         <FailureNotice
           error={create.error}
           headingLevel={4}
-          messages={{ STATE_CONFLICT: T.tooMany }}
+          messages={{
+            STATE_CONFLICT: T.tooMany(
+              KEY_LIMITS.active,
+              KEY_LIMITS.stored,
+              KEY_LIMITS.retentionDays,
+            ),
+          }}
         />
       )}
       <div className="flex flex-col gap-3 sm:flex-row">
