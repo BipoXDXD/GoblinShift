@@ -154,7 +154,7 @@ def create_intents(
     `upload_requests` achar o lote de novo.
     """
     intents = parse_intents(items)
-    _ensure_live_upload_room(session, owner_id, len(intents))
+    _ensure_creation_room(session, owner_id, len(intents))
     object_ids = session.execute(
         insert(stored_object).returning(stored_object.c.id, sort_by_parameter_order=True),
         [{"owner_id": owner_id, "storage_key": _new_upload_key()} for _ in intents],
@@ -338,10 +338,11 @@ def stored_size_of(upload_id: ColumnElement[uuid.UUID]) -> ColumnElement[int]:
     )
 
 
-def _ensure_live_upload_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
+def _ensure_creation_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
     """Recusa o lote que passaria do teto de uploads vivos ou do de criados em 24 h da conta.
 
-    `LiveUploadLimitError` para o primeiro, `DailyUploadLimitError` para o segundo. A trava vale
+    `LiveUploadLimitError` para o primeiro, `DailyUploadLimitError` para o segundo; se os dois
+    estouram, vai o de espera maior, para o cliente não voltar cedo e levar outro 429. A trava vale
     até o fim da transação e serializa só as criações de lote da mesma conta: cada lote conta e
     insere antes que o próximo conte, então dois lotes paralelos não passam juntos de um teto.
     Ordem das travas: chave do lote (`upload_requests`) → vivos → pools do `capacity`. O objeto
@@ -352,24 +353,74 @@ def _ensure_live_upload_room(session: Session, owner_id: uuid.UUID, batch_size: 
             func.pg_advisory_xact_lock(ADVISORY_CLASS_LIVE_UPLOADS, func.hashtext(str(owner_id)))
         )
     )
+    refusals = [
+        refusal
+        for refusal in (
+            _live_refusal(session, owner_id, batch_size),
+            _daily_refusal(session, owner_id, batch_size),
+        )
+        if refusal is not None
+    ]
+    if refusals:
+        raise max(refusals, key=lambda refusal: refusal.retry_after)
+
+
+def _live_refusal(
+    session: Session, owner_id: uuid.UUID, batch_size: int
+) -> LiveUploadLimitError | None:
     live = session.execute(select(func.count()).where(*_live_uploads_of(owner_id))).scalar_one()
     excess = live + batch_size - MAX_LIVE_UPLOADS_PER_ACCOUNT
-    if excess > 0:
-        raise LiveUploadLimitError(_until_expired(session, owner_id, min(excess, live)))
-    _ensure_daily_creation_room(session, owner_id, batch_size)
+    if excess <= 0:
+        return None
+    wait = _wait_until_nth(
+        session,
+        upload.c.expires_at - func.now(),
+        _live_uploads_of(owner_id),
+        upload.c.expires_at,
+        min(excess, live),
+    )
+    return LiveUploadLimitError(wait)
 
 
-def _ensure_daily_creation_room(session: Session, owner_id: uuid.UUID, batch_size: int) -> None:
-    """Sob a trava de `_ensure_live_upload_room`: o teto de uploads criados em 24 h pela conta.
-
-    Conta toda linha da janela, excluída ou falha, pelo índice `(owner_id, created_at)`.
-    """
+def _daily_refusal(
+    session: Session, owner_id: uuid.UUID, batch_size: int
+) -> DailyUploadLimitError | None:
+    """Conta toda linha da janela, excluída ou falha, pelo índice `(owner_id, created_at)`."""
     created = session.execute(
         select(func.count()).where(*_created_in_window_of(owner_id))
     ).scalar_one()
     excess = created + batch_size - MAX_UPLOADS_CREATED_PER_DAY
-    if excess > 0:
-        raise DailyUploadLimitError(_until_left_window(session, owner_id, min(excess, created)))
+    if excess <= 0:
+        return None
+    wait = _wait_until_nth(
+        session,
+        upload.c.created_at + UPLOAD_CREATION_WINDOW - func.now(),
+        _created_in_window_of(owner_id),
+        upload.c.created_at,
+        min(excess, created),
+    )
+    return DailyUploadLimitError(wait)
+
+
+def _wait_until_nth(
+    session: Session,
+    time_left: ColumnElement[timedelta],
+    where: tuple[ColumnElement[bool], ...],
+    order_by: ColumnElement[Any],
+    count: int,
+) -> timedelta:
+    """`time_left` da `count`-ésima linha de `where` na ordem de `order_by`, nunca negativo.
+
+    Outra instrução, outro snapshot, sem trava sobre as linhas: se elas vencem, são excluídas ou a
+    retenção as remove depois da contagem, não há a `count`-ésima, e a espera fica em zero; quem
+    chama aplica o piso.
+    """
+    if count == 0:
+        return timedelta(0)
+    wait: timedelta | None = session.execute(
+        select(time_left).where(*where).order_by(order_by).offset(count - 1).limit(1)
+    ).scalar_one_or_none()
+    return max(wait or timedelta(0), timedelta(0))
 
 
 def _created_in_window_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
@@ -377,25 +428,6 @@ def _created_in_window_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...
         upload.c.owner_id == owner_id,
         upload.c.created_at > func.now() - UPLOAD_CREATION_WINDOW,
     )
-
-
-def _until_left_window(session: Session, owner_id: uuid.UUID, count: int) -> timedelta:
-    """Quanto falta para os `count` uploads mais antigos da janela saírem dela.
-
-    Uma instrução só, sem trava sobre as linhas: se elas somem entre a contagem e esta leitura
-    (a retenção remove incompletos vencidos), não há a `count`-ésima, e a espera fica em zero;
-    quem chama aplica o piso.
-    """
-    if count == 0:
-        return timedelta(0)
-    wait: timedelta | None = session.execute(
-        select(upload.c.created_at + UPLOAD_CREATION_WINDOW - func.now())
-        .where(*_created_in_window_of(owner_id))
-        .order_by(upload.c.created_at)
-        .offset(count - 1)
-        .limit(1)
-    ).scalar_one_or_none()
-    return max(wait or timedelta(0), timedelta(0))
 
 
 def _live_uploads_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
@@ -410,24 +442,6 @@ def _live_uploads_of(owner_id: uuid.UUID) -> tuple[ColumnElement[bool], ...]:
         upload.c.expires_at > func.now(),
         upload.c.state.in_(_LIVE_STATES),
     )
-
-
-def _until_expired(session: Session, owner_id: uuid.UUID, count: int) -> timedelta:
-    """Quanto falta para vencerem os `count` uploads vivos mais antigos da conta.
-
-    Outra instrução, outro snapshot: se os vivos vencem ou são excluídos depois da contagem, não
-    há o `count`-ésimo, e a espera fica em zero; quem chama aplica o piso.
-    """
-    if count == 0:
-        return timedelta(0)
-    wait: timedelta | None = session.execute(
-        select(upload.c.expires_at - func.now())
-        .where(*_live_uploads_of(owner_id))
-        .order_by(upload.c.expires_at)
-        .offset(count - 1)
-        .limit(1)
-    ).scalar_one_or_none()
-    return wait or timedelta(0)
 
 
 def _request_columns(request: IdempotentRequest | None, index: int) -> dict[str, object]:

@@ -9,6 +9,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import func, select, update
@@ -172,18 +173,26 @@ def test_replay_do_lote_no_teto_nao_conta_de_novo(
 
 
 def test_espera_sem_os_vivos_que_sumiram_depois_da_contagem_fica_em_zero(
-    factory: sessionmaker[Session], owner: uuid.UUID
+    factory: sessionmaker[Session], owner: uuid.UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Entre a contagem e a leitura da espera, os vivos podem vencer ou ser excluídos.
 
-    A espera pede mais vivos do que restam, como se a contagem tivesse visto os que sumiram: em
-    vez de um 500, fica em zero, e a borda HTTP aplica o piso do `Retry-After`.
+    A exclusão não pega a trava da conta: aqui ela entra, noutra transação, logo antes da leitura
+    da espera. Sem o `count`-ésimo vivo, a recusa sai com espera zero em vez de um 500, e a borda
+    HTTP aplica o piso do `Retry-After`.
     """
+    monkeypatch.setattr(uploads_module, "MAX_LIVE_UPLOADS_PER_ACCOUNT", 1)
     [upload_id] = create_batch(factory, owner, 1)
-    with unit_of_work(factory) as session:
-        request_deletion(session, owner, upload_id)
+    wait_until_nth = uploads_module._wait_until_nth
 
-    with unit_of_work(factory) as session:
-        wait = uploads_module._until_expired(session, owner, 1)
+    def deleted_after_count(*args: Any) -> timedelta:
+        with unit_of_work(factory) as other:
+            request_deletion(other, owner, upload_id)
+        return wait_until_nth(*args)
 
-    assert wait == timedelta(0)
+    monkeypatch.setattr(uploads_module, "_wait_until_nth", deleted_after_count)
+
+    with pytest.raises(LiveUploadLimitError) as refused:
+        create_batch(factory, owner, 1)
+
+    assert refused.value.retry_after == timedelta(0)

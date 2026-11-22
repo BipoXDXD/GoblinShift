@@ -113,3 +113,23 @@ def test_replay_do_lote_no_teto_de_criacoes_passa(
 
     assert was_replay
     assert [view.id for view in replayed] == [view.id for view in created]
+
+
+def test_lote_acima_dos_dois_tetos_espera_pelo_que_demora_mais(
+    factory: sessionmaker[Session], owner: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Os vivos vencem em até 1 h, mas a janela de criações só libera daqui a 3 h: com o Retry-After
+    # dos vivos, o cliente voltaria cedo e levaria outro 429.
+    monkeypatch.setattr(uploads_module, "MAX_LIVE_UPLOADS_PER_ACCOUNT", CAP)
+    create_batch(factory, owner, CAP)
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(upload)
+            .where(upload.c.owner_id == owner)
+            .values(created_at=func.now() - UPLOAD_CREATION_WINDOW + timedelta(hours=3))
+        )
+
+    with pytest.raises(DailyUploadLimitError) as refused:
+        create_batch(factory, owner, 1)
+
+    assert refused.value.retry_after > timedelta(hours=2)
