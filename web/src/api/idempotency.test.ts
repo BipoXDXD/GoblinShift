@@ -45,4 +45,65 @@ describe("useIdempotencyKey", () => {
     expect(result.current.key).not.toBe(first);
     expect(result.current.key).toMatch(KEY_FORMAT);
   });
+
+  it("A→B→A reaproveita a chave de A", () => {
+    const { result, rerender } = renderHook(({ intent }) => useIdempotencyKey(intent), {
+      initialProps: { intent: "A" },
+    });
+    const a = result.current.key;
+    rerender({ intent: "B" });
+    const b = result.current.key;
+
+    rerender({ intent: "A" });
+
+    expect(b).not.toBe(a);
+    expect(result.current.key).toBe(a);
+  });
+
+  it("rotate dá chave nova a todos os comandos", () => {
+    const { result, rerender } = renderHook(({ intent }) => useIdempotencyKey(intent), {
+      initialProps: { intent: "A" },
+    });
+    rerender({ intent: "B" });
+    const b = result.current.key;
+    rerender({ intent: "A" });
+    const a = result.current.key;
+
+    act(() => {
+      result.current.rotate();
+    });
+    const rotatedA = result.current.key;
+    rerender({ intent: "B" });
+
+    expect(rotatedA).not.toBe(a);
+    expect(result.current.key).not.toBe(b);
+  });
+
+  it("esquece a intenção mais antiga depois de 20", () => {
+    const { result, rerender } = renderHook(({ intent }) => useIdempotencyKey(intent), {
+      initialProps: { intent: "A" },
+    });
+    const a = result.current.key;
+    for (let other = 1; other <= 20; other += 1) {
+      rerender({ intent: `outra-${String(other)}` });
+    }
+
+    rerender({ intent: "A" });
+
+    expect(result.current.key).not.toBe(a);
+  });
+
+  it("lembra a intenção enquanto há até 20 no total", () => {
+    const { result, rerender } = renderHook(({ intent }) => useIdempotencyKey(intent), {
+      initialProps: { intent: "A" },
+    });
+    const a = result.current.key;
+    for (let other = 1; other <= 19; other += 1) {
+      rerender({ intent: `outra-${String(other)}` });
+    }
+
+    rerender({ intent: "A" });
+
+    expect(result.current.key).toBe(a);
+  });
 });
