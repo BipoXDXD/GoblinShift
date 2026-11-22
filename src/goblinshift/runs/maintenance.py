@@ -864,8 +864,9 @@ def _lease_expired() -> ColumnElement[bool]:
 def log_step_failure(step: str, error: Exception) -> None:
     """Registra o passo que falhou com o tipo e o SQLSTATE nos campos.
 
-    A mensagem do banco traz host, porta, usuário e valores (3.7): não entra nos campos, e o
-    filtro do processo (`omit_database_error_detail`) tira o texto dela do traceback.
+    A mensagem da exceção pode trazer host, porta, usuário e valores (3.7): não entra nos campos,
+    e o filtro do processo (`omit_exception_detail`) tira o texto dela do traceback, seja ou não
+    erro de banco.
     """
     driver_error = getattr(error, "orig", error)
     fields = {

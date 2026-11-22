@@ -40,17 +40,31 @@ from opentelemetry.trace import NoOpTracer, Span, Status, StatusCode, Tracer, ge
 from sqlalchemy import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from goblinshift.platform.settings import Settings
+from goblinshift.platform.settings import (
+    ExecutorConfigError,
+    MissingSecretError,
+    Settings,
+    WebConfigError,
+)
 
 ALERT_ATTRIBUTE_PREFIX = "alert."
 UVICORN_ERROR_LOGGER = "uvicorn.error"
 _DATABASE_ERRORS = (SQLAlchemyError, psycopg.Error)
+# Erros de configuração cujas mensagens são montadas só com nomes de variável de ambiente: a
+# mensagem diz o que corrigir e não traz entrada do usuário. Toda outra exceção sai sem ela.
+_MESSAGE_SAFE_ERRORS: tuple[type[BaseException], ...] = (
+    MissingSecretError,
+    ExecutorConfigError,
+    WebConfigError,
+)
 _POOL_LOGGER_PREFIX = "sqlalchemy.pool"
 # O repr da conexão traz host, porta, usuário e banco, e o pool o põe no texto das mensagens.
 _PSYCOPG_CONNECTION_REPR = re.compile(r"<psycopg\.\w*Connection [^>]*>")
 # Classe (2) e condição (3) do PostgreSQL; o que não casar não vai para o log nem para a tela.
 _SQLSTATE = re.compile(r"[0-9A-Z]{5}")
 _SQLSTATE_ATTRIBUTE = "sqlstate"
+# Motivo de contrato (`image_not_allowed`): identificador curto, nunca texto livre.
+_ERROR_REASON = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +89,16 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
-def omit_database_error_detail(record: logging.LogRecord) -> bool:
-    """Filtro de log: exceção com erro de banco na cadeia sai só com tipos e frames.
+def omit_exception_detail(record: logging.LogRecord) -> bool:
+    """Filtro de log: toda exceção sai só com tipos e frames, de banco ou não.
 
-    A mensagem do SQLAlchemy e do psycopg traz host, SQL e o `DETAIL` do PostgreSQL, com valores
-    do usuário (3.7). O texto vai em `exc_text`, que os formatadores usam no lugar de formatar
-    `exc_info`: o registro continua com a exceção. O SQLSTATE do PostgreSQL, que é só um código,
-    fica junto do tipo e no atributo `sqlstate` do registro. Qualquer outra exceção sai inteira. As
+    A mensagem de uma exceção pode trazer entrada do usuário: nome de arquivo, valor de parâmetro,
+    trecho de documento e, nos erros do SQLAlchemy e do psycopg, host, SQL e o `DETAIL` do
+    PostgreSQL (3.7). O local da falha vem dos frames, e o tipo de cada exceção da cadeia diz o
+    que houve. O texto vai em `exc_text`, que os formatadores usam no lugar de formatar `exc_info`:
+    o registro continua com a exceção. O SQLSTATE do PostgreSQL, que é só um código, fica junto do
+    tipo e no atributo `sqlstate` do registro. Só os erros de configuração de
+    `_MESSAGE_SAFE_ERRORS`, com mensagens montadas com nomes de variável, saem com a mensagem. As
     mensagens do pool perdem o repr da conexão.
     """
     if record.name.startswith(_POOL_LOGGER_PREFIX):
@@ -90,13 +107,27 @@ def omit_database_error_detail(record: logging.LogRecord) -> bool:
     exception = record.exc_info[1] if record.exc_info else None
     if exception is None:
         return True
-    if is_database_error(exception):
-        chain = _exception_chain(exception)
-        record.exc_text = "\n\n".join(_type_and_frames(item) for item in chain)
-        sqlstate = database_sqlstate(exception)
-        if sqlstate is not None:
-            setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
+    record.exc_text = "\n\n".join(_type_and_frames(item) for item in _exception_chain(exception))
+    sqlstate = database_sqlstate(exception)
+    if sqlstate is not None:
+        setattr(record, _SQLSTATE_ATTRIBUTE, sqlstate)
     return True
+
+
+def exception_fields(error: BaseException) -> dict[str, str]:
+    """Campos de evento que descrevem uma exceção sem a mensagem dela.
+
+    O tipo, o SQLSTATE do banco e o `code` de contrato (`ExecutorCtlError.code`) quando ele tem
+    a forma de identificador: um `code` com outra forma pode trazer texto livre e fica de fora.
+    """
+    fields = {"error_type": type(error).__name__}
+    sqlstate = database_sqlstate(error)
+    if sqlstate is not None:
+        fields[_SQLSTATE_ATTRIBUTE] = sqlstate
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and _ERROR_REASON.fullmatch(code):
+        fields["error_reason"] = code
+    return fields
 
 
 def is_database_error(exception: BaseException) -> bool:
@@ -141,13 +172,24 @@ def _exception_chain(exception: BaseException) -> Iterator[BaseException]:
 
 def _type_and_frames(exception: BaseException) -> str:
     frames = "".join(traceback.format_tb(exception.__traceback__))
+    return f"Traceback (most recent call last):\n{frames}{_described(exception)}"
+
+
+def _described(exception: BaseException) -> str:
+    """O tipo da exceção; a mensagem só nos erros de `_MESSAGE_SAFE_ERRORS`.
+
+    Nunca chama `str()` nem lê `__notes__` das outras: as duas coisas podem trazer entrada do
+    usuário, e um `__str__` quebrado não pode derrubar a linha de log.
+    """
+    if isinstance(exception, _MESSAGE_SAFE_ERRORS):
+        return "".join(traceback.format_exception_only(exception)).rstrip("\n")
     kind = type(exception)
     described = f"{kind.__module__}.{kind.__qualname__}"
     if isinstance(exception, psycopg.Error):
         sqlstate = _well_formed_sqlstate(exception)
         if sqlstate is not None:
             described = f"{described} (SQLSTATE {sqlstate})"
-    return f"Traceback (most recent call last):\n{frames}{described}"
+    return described
 
 
 class AlertEventCounter(logging.Handler):
@@ -178,10 +220,10 @@ class AlertEventCounter(logging.Handler):
 def configure_logging() -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
-    handler.addFilter(omit_database_error_detail)
+    handler.addFilter(omit_exception_detail)
     logging.basicConfig(level=logging.INFO, handlers=[handler, AlertEventCounter()], force=True)
     # O Uvicorn escreve por handlers próprios, fora do root (`propagate: False`).
-    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_database_error_detail)
+    logging.getLogger(UVICORN_ERROR_LOGGER).addFilter(omit_exception_detail)
 
 
 # Prefixos que sobram do IP do cliente no evento: o bastante para ver rede ou provedor, nunca a

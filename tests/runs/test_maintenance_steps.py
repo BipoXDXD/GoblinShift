@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.storage import FileStorage
-from goblinshift.platform.telemetry import JsonFormatter, omit_database_error_detail
+from goblinshift.platform.telemetry import JsonFormatter, omit_exception_detail
 from goblinshift.runs import maintenance as maintenance_module
 from goblinshift.runs.maintenance import STEPS_FAILED, STEPS_SKIPPED, Maintenance
 from goblinshift.runs.worker.runner import Runner
@@ -200,7 +200,7 @@ def test_log_do_passo_formatado_nao_traz_a_mensagem_do_banco(
 
     [record] = [r for r in caplog.records if r.getMessage() == STEP_FAILED_MESSAGE]
     # O mesmo caminho do processo: filtro de configure_logging e formatador JSON.
-    assert omit_database_error_detail(record)
+    assert omit_exception_detail(record)
     line = JsonFormatter().format(record)
     assert DB_CANARY not in line
     assert json.loads(line)["step"] == "apply_deadlines"
