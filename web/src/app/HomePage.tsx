@@ -23,7 +23,7 @@ export function HomePage(): ReactElement {
   const recipesHeadingId = useId();
   return (
     <div className="flex flex-col gap-12 md:gap-16">
-      {/* A partir de 1024 px o palco é alto (560 px mais controles e seletor): o título sobe para o
+      {/* A partir de 1024 px o palco é alto (480 px mais controles e seletor): o título sobe para o
           topo, ao lado do palco, em vez de boiar no meio da coluna, e a faixa perde 32 px de
           padding vertical, para as receitas ficarem mais perto da primeira tela. */}
       <section className="flex flex-col gap-8 rounded-lg bg-hero-band px-6 py-12 md:flex-row md:items-center md:px-12 md:py-16 lg:items-start lg:py-12">
