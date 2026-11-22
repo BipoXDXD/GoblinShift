@@ -14,8 +14,9 @@ from goblinshift.entrypoints.api.problems import ProblemCode, problem_response
 MAX_CONCURRENT_REQUESTS = 28
 # Um pedido termina e a vaga volta; o menor prazo que o cabeçalho expressa.
 SATURATED_RETRY_AFTER_SECONDS = 1
-# A sonda de vida responde mesmo com a API saturada: saturada não é morta.
-_EXEMPT_PATHS = frozenset({"/livez"})
+# As sondas respondem mesmo com a API saturada: saturada não é morta. O /readyz tem cache de 1 s e
+# zona própria no Nginx, então não pesa; recusado, o healthcheck tiraria do ar uma API viva.
+_EXEMPT_PATHS = frozenset({"/livez", "/readyz"})
 _DETAIL = "A API está no limite de requisições simultâneas; tente de novo depois do Retry-After."
 
 

@@ -129,3 +129,16 @@ async def test_livez_responde_com_a_api_saturada(client: httpx.AsyncClient, gate
         response = await client.get("/livez")
 
     assert response.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_readyz_responde_pela_propria_sonda_com_a_api_saturada(
+    client: httpx.AsyncClient, gate: Gate
+) -> None:
+    # O /readyz tem cache e zona própria no Nginx; o healthcheck não pode tirar do ar uma API
+    # saturada, mas viva. Sem banco, a própria sonda responde 503, e não o middleware.
+    async with saturated(client, gate):
+        response = await client.get("/readyz")
+
+    assert "simultâneas" not in response.text
+    assert response.headers.get("Retry-After") != "1"
