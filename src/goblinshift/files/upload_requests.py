@@ -52,7 +52,7 @@ def create_intents_once(
     parse_intents(items)
     _lock_request_key(session, owner_id, key)
     request = IdempotentRequest(key, _body_hash(items))
-    existing = _live_batch(session, owner_id, request)
+    existing = _live_batch(session, owner_id, request, len(items))
     if existing is not None:
         return existing, True
     return create_intents(session, owner_id, items, request), False
@@ -84,12 +84,15 @@ def _body_hash(items: Sequence[tuple[str, int]]) -> bytes:
 
 
 def _live_batch(
-    session: Session, owner_id: UUID, request: IdempotentRequest
+    session: Session, owner_id: UUID, request: IdempotentRequest, item_count: int
 ) -> list[UploadView] | None:
     """O lote vigente da chave, com o estado atual de cada upload, ou `None` se não há.
 
-    As linhas de um lote nascem na mesma transação, com o mesmo `created_at`: vencem juntas. Um
-    upload incompleto que o cliente excluiu e a retenção já removeu fica fora da resposta.
+    As linhas de um lote nascem na mesma transação, com o mesmo `created_at`: vencem juntas. Se a
+    retenção removeu parte delas (upload incompleto que o cliente excluiu), as posições do replay
+    não batem com as do pedido, e a chave é recusada (`UploadRequestKeyReusedError`). Se removeu
+    o lote inteiro, não há lote vigente: a chave cria um lote novo, o que é aceito, porque nenhum
+    upload do lote anterior sobrou para o cliente usar.
     """
     rows = session.execute(
         select(upload.c.id, upload.c.request_hash)
@@ -102,6 +105,6 @@ def _live_batch(
     ).all()
     if not rows:
         return None
-    if bytes(rows[0].request_hash) != request.body_hash:
+    if bytes(rows[0].request_hash) != request.body_hash or len(rows) != item_count:
         raise UploadRequestKeyReusedError
     return get_uploads(session, owner_id, [row.id for row in rows])

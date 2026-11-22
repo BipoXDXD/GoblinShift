@@ -1,8 +1,8 @@
 """Lote de upload criado uma vez por Idempotency-Key (#442, item 57a).
 
 A borda HTTP (409, 422, `Idempotency-Replayed`, concorrência) fica em
-`tests/api/test_uploads_idempotency.py`; aqui, a ordem do lote, o corpo canônico e o upload que a
-retenção já removeu.
+`tests/api/test_uploads_idempotency.py`; aqui, a ordem do lote, o corpo canônico, o lote que a
+retenção já removeu e a conferência do lote antes da chave.
 """
 
 import uuid
@@ -51,21 +51,20 @@ def test_mesmos_itens_em_outra_ordem_sao_outro_corpo(factory: sessionmaker[Sessi
         create_once(factory, owner, [("b.csv", 2), ("a.csv", 1)])
 
 
-def test_replay_omite_o_upload_excluido_que_a_retencao_ja_removeu(
+def test_replay_de_lote_que_a_retencao_removeu_em_parte_e_recusado(
     factory: sessionmaker[Session], storage: FileStorage
 ) -> None:
+    """Sem a linha removida, as posições do replay não batem com as do pedido."""
     owner = create_user(factory, "dono")
     items = [("a.csv", 1), ("b.csv", 2)]
-    (kept, removed), _ = create_once(factory, owner, items)
+    (_, removed), _ = create_once(factory, owner, items)
     with unit_of_work(factory) as session:
         request_deletion(session, owner, removed.id)
     with factory() as session:
         expire_incomplete_uploads(session, storage)
 
-    replayed, was_replayed = create_once(factory, owner, items)
-
-    assert was_replayed is True
-    assert [view.id for view in replayed] == [kept.id]
+    with pytest.raises(UploadRequestKeyReusedError):
+        create_once(factory, owner, items)
 
 
 def test_lote_invalido_com_chave_vigente_e_erro_de_validacao(
