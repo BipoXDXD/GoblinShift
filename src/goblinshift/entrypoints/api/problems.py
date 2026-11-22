@@ -349,10 +349,10 @@ def problem_response(
 
 
 def _capped_errors(errors: Sequence[Mapping[str, str]]) -> dict[str, Any]:
-    fields: dict[str, Any] = {"errors": list(errors[:MAX_PROBLEM_ERRORS])}
+    envelope: dict[str, Any] = {"errors": list(errors[:MAX_PROBLEM_ERRORS])}
     if len(errors) > MAX_PROBLEM_ERRORS:
-        fields["errors_truncated"] = True
-    return fields
+        envelope["errors_truncated"] = True
+    return envelope
 
 
 class RequestContextMiddleware:
