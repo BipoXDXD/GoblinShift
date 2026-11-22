@@ -38,13 +38,13 @@ class ConcurrencyLimitMiddleware:
     def __init__(self, app: ASGIApp, *, limit: int) -> None:
         self.app = app
         self.limit = limit
-        self.active = 0
+        self._active = 0
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["path"] in _EXEMPT_PATHS:
             await self.app(scope, receive, send)
             return
-        if self.active >= self.limit:
+        if self._active >= self.limit:
             logger.warning(SATURATED_LOG_MESSAGE)
             response = problem_response(
                 code=ProblemCode.SERVICE_UNAVAILABLE,
@@ -55,8 +55,8 @@ class ConcurrencyLimitMiddleware:
             )
             await response(scope, receive, send)
             return
-        self.active += 1
+        self._active += 1
         try:
             await self.app(scope, receive, send)
         finally:
-            self.active -= 1
+            self._active -= 1
