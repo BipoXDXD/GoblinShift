@@ -10,7 +10,8 @@ import uuid
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from goblinshift.files.errors import UploadRequestKeyReusedError
+from goblinshift.files.errors import InvalidUploadRequestError, UploadRequestKeyReusedError
+from goblinshift.files.limits import MAX_BATCH_FILES
 from goblinshift.files.retention import expire_incomplete_uploads
 from goblinshift.files.storage import FileStorage
 from goblinshift.files.upload_requests import create_intents_once
@@ -65,3 +66,20 @@ def test_replay_omite_o_upload_excluido_que_a_retencao_ja_removeu(
 
     assert was_replayed is True
     assert [view.id for view in replayed] == [kept.id]
+
+
+def test_lote_invalido_com_chave_vigente_e_erro_de_validacao(
+    factory: sessionmaker[Session],
+) -> None:
+    owner = create_user(factory, "dono")
+    create_once(factory, owner, [("a.csv", 1)])
+
+    with pytest.raises(InvalidUploadRequestError):
+        create_once(factory, owner, [(f"f{i}.csv", 1) for i in range(MAX_BATCH_FILES + 1)])
+
+
+def test_nome_com_surrogate_solto_e_erro_de_validacao(factory: sessionmaker[Session]) -> None:
+    owner = create_user(factory, "dono")
+
+    with pytest.raises(InvalidUploadRequestError):
+        create_once(factory, owner, [("a\ud800.csv", 1)])

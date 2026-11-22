@@ -4,12 +4,13 @@ O mesmo desenho da aceitação de execuções (`runs.acceptance`), sem o registr
 que tem FK obrigatória para `run` e fica num módulo que `files` não importa: a chave, o hash do
 corpo e a posição de cada item ficam nas linhas do próprio lote. Na transação de quem chama:
 
-1. Trava da chave (`pg_try_advisory_xact_lock`, sem espera): outro pedido com a mesma chave em
+1. O lote é conferido (`parse_intents`) antes de tudo que olha a chave.
+2. Trava da chave (`pg_try_advisory_xact_lock`, sem espera): outro pedido com a mesma chave em
    andamento é recusado na hora, em vez de esperar ou criar um segundo lote.
-2. Lote vigente da chave, criado há menos de `INCOMPLETE_UPLOAD_TTL` (o prazo de uma intenção):
+3. Lote vigente da chave, criado há menos de `INCOMPLETE_UPLOAD_TTL` (o prazo de uma intenção):
    mesmo hash → replay com o estado atual de cada upload, sem reservar de novo; hash diferente →
    recusa.
-3. Sem lote vigente, `create_intents` grava o lote com a chave.
+4. Sem lote vigente, `create_intents` grava o lote com a chave.
 """
 
 import hashlib
@@ -23,7 +24,13 @@ from sqlalchemy.orm import Session
 from goblinshift.files.errors import UploadRequestInProgressError, UploadRequestKeyReusedError
 from goblinshift.files.limits import INCOMPLETE_UPLOAD_TTL
 from goblinshift.files.tables import upload
-from goblinshift.files.uploads import IdempotentRequest, UploadView, create_intents, get_uploads
+from goblinshift.files.uploads import (
+    IdempotentRequest,
+    UploadView,
+    create_intents,
+    get_uploads,
+    parse_intents,
+)
 
 CREATE_UPLOADS_OPERATION = "create_uploads"
 # Classe do advisory lock, ao lado das de `runs.acceptance` (0x6773_0001 e 0x6773_0002).
@@ -36,10 +43,13 @@ def create_intents_once(
 ) -> tuple[list[UploadView], bool]:
     """Cria o lote ou, se a chave já criou um com o mesmo corpo, devolve-o; o `bool` é replay.
 
-    Levanta `UploadRequestInProgressError` se outro pedido com a chave está em curso e
+    O lote é conferido antes da chave: inválido, levanta `InvalidUploadRequestError` mesmo com a
+    chave vigente, e o hash só vê nomes que codificam em UTF-8. Levanta
+    `UploadRequestInProgressError` se outro pedido com a chave está em curso e
     `UploadRequestKeyReusedError` se a chave vigente veio com outro corpo. O formato da chave é
     de quem chama; o banco o confere de novo (CHECK).
     """
+    parse_intents(items)
     _lock_request_key(session, owner_id, key)
     request = IdempotentRequest(key, _body_hash(items))
     existing = _live_batch(session, owner_id, request)

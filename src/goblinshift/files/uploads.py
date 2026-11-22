@@ -153,7 +153,7 @@ def create_intents(
     `request`, cada linha guarda a chave, o hash do corpo e a própria posição no pedido, para
     `upload_requests` achar o lote de novo.
     """
-    intents = _parse_intents(items)
+    intents = parse_intents(items)
     _ensure_live_upload_room(session, owner_id, len(intents))
     object_ids = session.execute(
         insert(stored_object).returning(stored_object.c.id, sort_by_parameter_order=True),
@@ -454,7 +454,12 @@ def _current_view(row: Row[Any, *tuple[Any, ...]]) -> UploadView:
     )
 
 
-def _parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
+def parse_intents(items: Sequence[tuple[str, int]]) -> list[UploadIntent]:
+    """Confere o lote (contagem, nomes, tamanhos) e o devolve como intenções.
+
+    Levanta `InvalidUploadRequestError` com o caminho do item. `upload_requests` chama antes de
+    olhar a chave, para um lote inválido não virar recusa de chave nem quebrar o hash do corpo.
+    """
     if not 1 <= len(items) <= MAX_BATCH_FILES:
         raise InvalidUploadRequestError("items", f"o lote deve ter de 1 a {MAX_BATCH_FILES} itens")
     intents = [UploadIntent(*item) for item in items]
