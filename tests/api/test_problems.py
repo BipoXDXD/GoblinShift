@@ -100,7 +100,7 @@ def test_errors_tem_teto(sent: int, kept: int, truncated: bool | None) -> None:
         errors=errors,
     )
 
-    body = json.loads(response.body)
+    body = json.loads(bytes(response.body))
     assert len(body["errors"]) == kept
     assert body["errors"][0]["field"] == "f0"
     assert body.get("errors_truncated") is truncated
