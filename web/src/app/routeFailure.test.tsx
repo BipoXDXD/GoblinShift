@@ -1,10 +1,11 @@
 import { screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi, type MockInstance } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { appRoutes } from "../test/appRoutes";
 import { fakeApi, jsonResponse } from "../test/fakeApi";
 import { meBody } from "../test/account";
 import { axeViolations } from "../test/axe";
+import { allowConsole, consoleCalls } from "../test/consoleGuard";
 import { expectHeadingFocused } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 import { TEXT } from "../text";
@@ -38,23 +39,27 @@ const SCREENS = [
   { path: "/creditos", canary: RENDER_CANARY },
 ];
 
-function setup(
-  path: string,
-  onError: (label: unknown, value: unknown) => void = () => undefined,
-): MockInstance<typeof console.error> {
-  // O React e o router registram o erro no console; aqui ele é o cenário, não um defeito.
-  const consoleError = vi.spyOn(console, "error").mockImplementation(onError);
-  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+function setup(path: string, canary: string): void {
+  // O React, o router e o RouteFailure registram o erro no console; aqui ele é o cenário, não um
+  // defeito. O chunk ausente não passa pelo React: o canário casa só com o registro do RouteFailure.
+  allowConsole("error", /Falha ao abrir a tela:/, "o RouteFailure registra a falha: é o cenário");
+  allowConsole("error", new RegExp(canary), "o React e o router registram o erro: é o cenário");
   const api = fakeApi({ "GET /api/v1/me": () => jsonResponse(meBody()) });
   renderRoutes({ routes: appRoutes(api.client), path, client: api.client });
-  return consoleError;
+}
+
+/** O que o RouteFailure registrou com o rótulo, como unknown: os parâmetros do console são any[]. */
+function loggedFailures(): unknown[] {
+  return consoleCalls()
+    .filter((call) => call.method === "error" && call.args[0] === LOG_LABEL)
+    .map((call) => call.args[1]);
 }
 
 describe("falha ao abrir uma tela", () => {
   it.each(SCREENS)(
     "$path mostra só o aviso próprio, na moldura",
     async ({ path, canary }) => {
-      setup(path);
+      setup(path, canary);
 
       const alert = await screen.findByRole("alert");
 
@@ -69,8 +74,8 @@ describe("falha ao abrir uma tela", () => {
 
   it.each(SCREENS)(
     "$path tem título com foco, a ação de recarregar e o caminho de volta",
-    async ({ path }) => {
-      setup(path);
+    async ({ path, canary }) => {
+      setup(path, canary);
 
       await expectHeadingFocused("Não foi possível abrir esta tela");
       expect(screen.getByRole("button", { name: "Recarregar a página" })).toHaveAttribute(
@@ -85,9 +90,9 @@ describe("falha ao abrir uma tela", () => {
 
   it.each(SCREENS)(
     "$path troca o título da aba pelo do erro",
-    async ({ path }) => {
+    async ({ path, canary }) => {
       document.title = "Título anterior";
-      setup(path);
+      setup(path, canary);
 
       await screen.findByRole("alert");
 
@@ -102,36 +107,27 @@ describe("falha ao abrir uma tela", () => {
   it.each(SCREENS)(
     "$path registra o erro no console",
     async ({ path, canary }) => {
-      const consoleError = setup(path);
+      setup(path, canary);
 
       await screen.findByRole("alert");
 
       // O registro sai num efeito, que pode rodar depois de o aviso aparecer.
       await waitFor(() => {
-        expect(consoleError).toHaveBeenCalledWith(
-          LOG_LABEL,
-          expect.objectContaining({ message: canary }),
-        );
+        expect(loggedFailures()).toContainEqual(expect.objectContaining({ message: canary }));
       });
     },
     10_000,
   );
 
   it("/creditos registra só os campos permitidos do erro, sem o próprio erro", async () => {
-    // Os parâmetros de console.error são any[]; guardar o que sai com o rótulo como unknown.
-    const logged: unknown[] = [];
-    setup("/creditos", (label, value) => {
-      if (label === LOG_LABEL) {
-        logged.push(value);
-      }
-    });
+    setup("/creditos", RENDER_CANARY);
 
     await screen.findByRole("alert");
 
     await waitFor(() => {
-      expect(logged.length).toBeGreaterThan(0);
+      expect(loggedFailures().length).toBeGreaterThan(0);
     });
-    for (const value of logged) {
+    for (const value of loggedFailures()) {
       expect(value).not.toBeInstanceOf(Error);
       expect(JSON.stringify(value)).not.toContain(SECRET_CANARY);
     }

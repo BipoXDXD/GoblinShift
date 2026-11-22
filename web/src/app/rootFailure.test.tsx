@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
+import { allowConsole, consoleCalls } from "../test/consoleGuard";
 import { fakeApi, jsonResponse } from "../test/fakeApi";
 import { meBody } from "../test/account";
 import { expectHeadingFocused } from "../test/focus";
@@ -12,6 +13,7 @@ await preloadRoutes("/creditos");
 
 const { CANARY } = vi.hoisted(() => ({ CANARY: "CANARY-defeito-da-moldura" }));
 const STACK_FRAME = "rootFailure.test";
+const LOG_LABEL = "Falha ao abrir a tela:";
 
 // A moldura quebra: não há moldura em que mostrar o aviso.
 vi.mock("../notice/SiteNoticeBanner", () => ({
@@ -20,10 +22,16 @@ vi.mock("../notice/SiteNoticeBanner", () => ({
   },
 }));
 
+// O React, o router e o RouteFailure registram o erro no console; aqui ele é o cenário, não um
+// defeito.
+function allowFailureLogs(): void {
+  allowConsole("error", /Falha ao abrir a tela:/, "o RouteFailure registra a falha: é o cenário");
+  allowConsole("error", new RegExp(CANARY), "o React e o router registram o erro: é o cenário");
+}
+
 describe("falha na própria moldura", () => {
   it("tem título com foco, a ação de recarregar e o título da aba do erro", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    allowFailureLogs();
     document.title = "Título anterior";
     const api = fakeApi({ "GET /api/v1/me": () => jsonResponse(meBody()) });
 
@@ -38,9 +46,7 @@ describe("falha na própria moldura", () => {
   });
 
   it("mostra só o aviso próprio e registra o erro no console", async () => {
-    // O React e o router registram o erro no console; aqui ele é o cenário, não um defeito.
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    allowFailureLogs();
     const api = fakeApi({ "GET /api/v1/me": () => jsonResponse(meBody()) });
 
     renderRoutes({ routes: appRoutes(api.client), path: "/creditos", client: api.client });
@@ -53,10 +59,10 @@ describe("falha na própria moldura", () => {
     expect(document.body.textContent).not.toContain(STACK_FRAME);
     // O registro sai num efeito, que pode rodar depois de o aviso aparecer.
     await waitFor(() => {
-      expect(consoleError).toHaveBeenCalledWith(
-        "Falha ao abrir a tela:",
-        expect.objectContaining({ message: CANARY }),
-      );
+      const logged = consoleCalls()
+        .filter((call) => call.method === "error" && call.args[0] === LOG_LABEL)
+        .map((call) => call.args[1]);
+      expect(logged).toContainEqual(expect.objectContaining({ message: CANARY }));
     });
   });
 });
