@@ -23,6 +23,7 @@ CI = WORKFLOWS / "ci.yml"
 SECURITY_TXT_WORKFLOW = WORKFLOWS / "security-txt.yml"
 REAL_CLOCK_SELECTOR = "-m real_clock"
 REAL_CLOCK_EXCLUSION = "not real_clock"
+ARTE_EXCLUSION = "not arte"
 MARKER_SELECTOR = re.compile(r"""-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))""")
 NEGATION_PREFIX = "not "
 AND_SEPARATOR = " and "
@@ -123,13 +124,22 @@ def test_so_negacoes_le_o_seletor_de_marcadores_e_nao_o_modulo(
     assert _only_negations(command) is expected
 
 
-def test_chamadas_da_ci_que_so_excluem_marcadores_excluem_o_relogio_real() -> None:
-    # O lembrete `real_clock` reprovaria PRs sem relação 30 dias antes do vencimento do
-    # security.txt; um `-m` só de negações substitui o do `addopts` e precisa repetir a exclusão.
+@pytest.mark.parametrize(
+    "exclusion",
+    [
+        # O lembrete `real_clock` reprovaria PRs sem relação 30 dias antes do vencimento do
+        # security.txt.
+        pytest.param(REAL_CLOCK_EXCLUSION, id="relogio_real"),
+        # Os testes `arte` precisam de Blender e ImageMagick locais e ficam fora da CI.
+        pytest.param(ARTE_EXCLUSION, id="arte"),
+    ],
+)
+def test_chamadas_da_ci_que_so_excluem_marcadores_repetem_a_exclusao(exclusion: str) -> None:
+    # Um `-m` só de negações substitui o do `addopts` e precisa repetir cada exclusão dele.
     negations = [command for _, command in _pytest_commands() if _only_negations(command)]
 
     assert negations, _pytest_commands()
-    assert all(REAL_CLOCK_EXCLUSION in command for command in negations), negations
+    assert all(exclusion in command for command in negations), negations
 
 
 def test_workflow_do_security_txt_roda_o_lembrete_e_reprova_se_pulado() -> None:
