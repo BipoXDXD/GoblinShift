@@ -28,15 +28,15 @@ describe("EmptyState", () => {
   });
 
   // A goblin colada no título (8 px, o gap do texto) parecia parte dele: 24 px a separam do grupo.
-  it("dá respiro de 24 px entre a ilustração e o título", () => {
+  it("dá respiro de mb-4 (16 px + gap) entre a ilustração e o título", () => {
     render(<EmptyState title="Vazio" illustration={<svg data-testid="goblin" aria-hidden />} />);
 
     expect(screen.getByTestId("goblin").parentElement).toHaveClass("mb-4");
   });
 
   it("sem ilustração não deixa espaço vazio acima do título", () => {
-    const { container } = render(<EmptyState title="Vazio" />);
+    render(<EmptyState title="Vazio" />);
 
-    expect(container.querySelector(".mb-4")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Vazio" }).previousElementSibling).toBeNull();
   });
 });
