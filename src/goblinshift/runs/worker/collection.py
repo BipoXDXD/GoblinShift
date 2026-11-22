@@ -7,8 +7,12 @@ enquanto lê, e confere o `report.json` contra um schema próprio. Na raiz, `man
 `<recipe_id>.zip` (fatia 5) ficam fora do orçamento de conteúdo, cada um com o seu teto de 1.7, e
 vêm juntos ou não vêm: o executor anterior à fatia 5, fixado em Runs aceitas antes do deploy, não
 empacota. Cada arquivo de conteúdo precisa estar citado no relatório pelo caminho relativo a
-`out/` ("images/a.jpg"), e cada citação precisa existir. A coleta roda depois que o executor
-terminou: ninguém mais escreve em `out/`.
+`out/` ("images/a.jpg"), e cada citação precisa existir.
+
+A coleta roda depois que o executor terminou, mas não conta com isso: a varredura confere cada
+arquivo com `lstat` e a leitura desce de novo de `out/` por `dir_fd`, sem seguir link em nenhum
+nível (`out/`, grupo, arquivo), e confere o inode aberto contra o da varredura. Um `out/`, grupo
+ou arquivo trocado depois do `lstat` é recusado em vez de lido.
 
 Cada arquivo aceito sai com o SHA-256 que o worker calculou; manifesto e ZIP precisam bater com
 eles (`package_check`). Ler tudo isso leva tempo (o ZIP chega a 512 MiB): `heartbeat` é chamado a
@@ -25,6 +29,7 @@ Duas classes de recusa:
   como infraestrutura, com retentativa.
 """
 
+import errno
 import hashlib
 import os
 import stat
@@ -82,6 +87,9 @@ _GROUPS = frozenset(group.value for group in OutputGroup)
 _SUMMARY_REQUIRED_KEYS = frozenset({"inputs", "ok", "rejected", "outputs"})
 # `duplicates` entrou na fatia 5; o executor anterior, fixado em Runs antigas, não o escreve.
 _SUMMARY_KEYS = _SUMMARY_REQUIRED_KEYS | {"duplicates"}
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+# Link no caminho: ELOOP (Linux; o arquivo final em qualquer um) ou ENOTDIR (diretório, no macOS).
+_SWAPPED_ERRNOS = frozenset({errno.ELOOP, errno.ENOTDIR})
 
 
 class CollectionError(Exception):
@@ -107,20 +115,30 @@ class OutputLimits:
 
 
 @dataclass(frozen=True)
+class FileIdentity:
+    """Dispositivo e inode que o `lstat` da varredura viu: a leitura confere o arquivo aberto."""
+
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True)
 class OutputFile:
     name: str
     path: Path
     size: int
     sha256: bytes  # calculado pelo worker ao ler o arquivo, não declarado pelo executor
+    identity: FileIdentity
 
 
 @dataclass(frozen=True)
 class _Found:
-    """Arquivo regular de out/ ainda não lido: nome, caminho e tamanho do `lstat`."""
+    """Arquivo regular de out/ ainda não lido: nome, caminho, tamanho e identidade do `lstat`."""
 
     name: str
     path: Path
     size: int
+    identity: FileIdentity
 
 
 @dataclass(frozen=True)
@@ -238,7 +256,7 @@ def collect_outputs(
             ErrorCode.REPORT_LIMIT_EXCEEDED,
             f"relatório com {report_found.size} bytes; o teto é {limits.report_max_bytes}",
         )
-    report_data = _read_no_follow(report_found.path, limits.report_max_bytes)
+    report_data = _read_no_follow(report_found, limits.report_max_bytes)
     report = parse_report(report_data, input_count)
     cited = [name for item in report.items for name in item.outputs]
     cited_previews = [preview for item in report.items for preview in item.previews]
@@ -252,15 +270,30 @@ def collect_outputs(
     report_file = _from_bytes(report_found, report_data)
     if manifest is None or package is None:
         return Collected(outputs, report_file, report, previews=previews)
-    manifest_data = _read_no_follow(manifest.path, limits.manifest_max_bytes)
+    manifest_data = _read_no_follow(manifest, limits.manifest_max_bytes)
     manifest_file = _from_bytes(manifest, manifest_data)
-    package_file = _digested(package, heartbeat)
     try:
         verify_manifest(manifest_data, outputs, _manifest_inputs(report), recipe_id)
-        verify_zip(package.path, [*outputs, manifest_file, report_file], heartbeat)
+        package_file = _verified_package(package, [*outputs, manifest_file, report_file], heartbeat)
     except PackageError as error:
         raise CollectionError(str(error)) from error
     return Collected(outputs, report_file, report, manifest_file, package_file, previews)
+
+
+def _verified_package(
+    package: _Found, expected: list[OutputFile], heartbeat: Callable[[], None]
+) -> OutputFile:
+    """SHA-256 e verificação do ZIP no mesmo descritor, aberto uma vez pelo caminho seguro.
+
+    O hash é o que a cópia para o storage confere: se a verificação reabrisse pelo caminho, o
+    sandbox poria um B válido no lugar só durante ela e devolveria o A (mesmo inode) para a cópia.
+    Reescrever o próprio inode entre o hash e a verificação ainda escaparia; o executor já terminou
+    aqui, e isto é defesa em profundidade.
+    """
+    with _open_found(package) as source:
+        package_file = _digest_open(package, source, heartbeat)
+        verify_zip(source, expected, heartbeat)
+    return package_file
 
 
 def _checked_preview(found: _Found) -> OutputFile:
@@ -276,7 +309,7 @@ def _checked_preview(found: _Found) -> OutputFile:
         raise CollectionError(f"preview com extensão fora da lista: {found.name!r}")
     if found.size > limit:
         raise CollectionError(f"preview acima de {limit} bytes: {found.name!r}")
-    data = _read_no_follow(found.path, limit)
+    data = _read_no_follow(found, limit)
     if extension == _JPEG_EXTENSION and not data.startswith(_JPEG_MAGIC):
         raise CollectionError(f"preview que não é JPEG: {found.name!r}")
     if extension == _CSV_EXTENSION and not _is_plain_utf8(data):
@@ -321,20 +354,27 @@ def _status_of(item: ReportItem) -> str:
 
 def _digested(found: _Found, heartbeat: Callable[[], None]) -> OutputFile:
     """Lê o arquivo sem seguir symlink, calculando o SHA-256; nunca além do tamanho do `lstat`."""
+    with _open_found(found) as source:
+        return _digest_open(found, source, heartbeat)
+
+
+def _digest_open(found: _Found, source: BinaryIO, heartbeat: Callable[[], None]) -> OutputFile:
+    """SHA-256 de `source`, já aberto por `_open_found`, do byte em que está até o fim."""
     digest = hashlib.sha256()
     size = 0
-    with _open_output(found.path) as source:
-        while size <= found.size and (chunk := source.read(READ_CHUNK_BYTES)):
-            heartbeat()
-            size += len(chunk)
-            digest.update(chunk)
+    while size <= found.size and (chunk := source.read(READ_CHUNK_BYTES)):
+        heartbeat()
+        size += len(chunk)
+        digest.update(chunk)
     if size != found.size:
         raise CollectionError(f"out/ mudou durante a coleta: {found.name!r}")
-    return OutputFile(found.name, found.path, size, digest.digest())
+    return OutputFile(found.name, found.path, size, digest.digest(), found.identity)
 
 
 def _from_bytes(found: _Found, data: bytes) -> OutputFile:
-    return OutputFile(found.name, found.path, len(data), hashlib.sha256(data).digest())
+    return OutputFile(
+        found.name, found.path, len(data), hashlib.sha256(data).digest(), found.identity
+    )
 
 
 def _package_files(
@@ -450,7 +490,7 @@ def _regular_file(entry: os.DirEntry[str], name: str) -> _Found:
         raise CollectionError(f"out/ contém algo que não é arquivo regular: {name!r}")
     if info.st_nlink != 1:
         raise CollectionError(f"out/ contém hardlink: {name!r}")
-    return _Found(name, Path(entry.path), info.st_size)
+    return _Found(name, Path(entry.path), info.st_size, FileIdentity(info.st_dev, info.st_ino))
 
 
 def _require_output_name(component: str, name: str) -> None:
@@ -469,20 +509,62 @@ def _require_output_name(component: str, name: str) -> None:
         raise CollectionError(f"out/ contém nome com caractere de controle ou formato: {name!r}")
 
 
-def _open_output(path: Path) -> BinaryIO:
-    """Abre o arquivo que o `lstat` da varredura viu como regular, sem seguir link nem bloquear.
+def open_collected(output: OutputFile) -> BinaryIO:
+    """Reabre uma saída já coletada, com as mesmas garantias da leitura da coleta."""
+    return _open_verified(output.name, output.path, output.identity)
 
-    O sandbox pode trocá-lo por um FIFO entre o `lstat` e este `open`; isso é recusado como
-    qualquer outro desvio de out/, não prende a thread do worker.
+
+def _open_found(found: _Found) -> BinaryIO:
+    return _open_verified(found.name, found.path, found.identity)
+
+
+def _open_verified(name: str, path: Path, identity: FileIdentity) -> BinaryIO:
+    """Abre o arquivo que o `lstat` da varredura viu, descendo de out/ por `dir_fd`.
+
+    Nenhum nível segue link (`out/`, grupo, arquivo) e o arquivo aberto precisa ter o inode da
+    varredura. Um FIFO no lugar do arquivo é recusado sem bloquear a thread do worker. Link,
+    FIFO, diretório que virou arquivo e inode diferente viram `CollectionError`; nenhum
+    descritor sobra.
     """
     try:
-        return open_regular(path)
+        directory_fd = _open_parent_directory(name, path)
+        try:
+            source = open_regular(PurePosixPath(name).name, dir_fd=directory_fd)
+        finally:
+            os.close(directory_fd)
     except NotRegularFileError:
-        raise CollectionError(f"out/ mudou durante a coleta: {path.name!r} não é regular") from None
+        raise CollectionError(f"out/ mudou durante a coleta: {name!r} não é regular") from None
+    except OSError as error:
+        if error.errno not in _SWAPPED_ERRNOS:
+            raise
+        raise CollectionError(f"out/ mudou durante a coleta: caminho de {name!r} trocado") from None
+    try:
+        info = os.fstat(source.fileno())
+        if FileIdentity(info.st_dev, info.st_ino) != identity:
+            raise CollectionError(f"out/ mudou durante a coleta: {name!r} é outro arquivo")
+    except BaseException:
+        source.close()
+        raise
+    return source
 
 
-def _read_no_follow(path: Path, max_bytes: int) -> bytes:
-    with _open_output(path) as source:
+def _open_parent_directory(name: str, path: Path) -> int:
+    """Descritor do diretório que contém a saída: out/ ou o grupo, abertos sem seguir link.
+
+    O de out/ fecha assim que o do grupo abre: quem chama recebe um só descritor.
+    """
+    root_fd = os.open(path.parents[name.count("/")], _DIRECTORY_FLAGS)
+    group = PurePosixPath(name).parent.name
+    if not group:
+        return root_fd
+    try:
+        return os.open(group, _DIRECTORY_FLAGS, dir_fd=root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def _read_no_follow(found: _Found, max_bytes: int) -> bytes:
+    with _open_found(found) as source:
         data = source.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise OutputLimitError(

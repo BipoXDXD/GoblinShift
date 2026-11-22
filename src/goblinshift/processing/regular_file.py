@@ -21,17 +21,20 @@ class NotRegularFileError(OSError):
     """O caminho abriu, mas não é um arquivo regular (FIFO, diretório, dispositivo...)."""
 
 
-def open_regular(path: Path) -> BinaryIO:
+def open_regular(path: Path | str, *, dir_fd: int | None = None) -> BinaryIO:
     """Abre `path` para leitura binária; symlink é recusado pelo `open` e o resto, por tipo.
+
+    Com `dir_fd`, `path` é um nome só, aberto relativo a esse diretório: quem já desceu até ele
+    sem seguir link não depende de nenhum caminho que o sandbox ainda possa trocar.
 
     Levanta `NotRegularFileError` (um `OSError`) se não for arquivo regular. O descritor nunca
     vaza: em qualquer erro depois do `open`, é fechado aqui.
     """
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     try:
         # Antes do `fdopen`, que recusa diretório sem fechar o descritor recebido.
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise NotRegularFileError(f"saída não é arquivo regular: {path.name!r}")
+            raise NotRegularFileError(f"saída não é arquivo regular: {Path(path).name!r}")
         # Só arquivo regular chega aqui: devolve o descritor ao modo bloqueante.
         fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) & ~os.O_NONBLOCK)
         return os.fdopen(fd, "rb")
