@@ -145,7 +145,7 @@ def test_causa_e_contexto_saem_sem_mensagem(
 ) -> None:
     line = _log_exception(production_log, _chained(canary))
 
-    assert canary not in line["exception"]
+    assert canary not in production_log[1].getvalue()
     assert "builtins.ValueError" in line["exception"]
     assert "builtins.RuntimeError" in line["exception"]
 
@@ -158,7 +158,7 @@ def test_notas_e_grupos_saem_sem_mensagem(
 
     line = _log_exception(production_log, ExceptionGroup(canary, [inner, KeyError(canary)]))
 
-    assert canary not in line["exception"]
+    assert canary not in production_log[1].getvalue()
     assert "builtins.ExceptionGroup" in line["exception"]
     assert "builtins.ValueError" in line["exception"]
     assert "builtins.KeyError" in line["exception"]
@@ -180,6 +180,19 @@ def test_erro_de_configuracao_mantem_a_mensagem(
     assert CONFIG_MESSAGE in line["exception"]
 
 
+class _DerivedSecretError(MissingSecretError):
+    """Subclasse que não passou pela revisão das mensagens: não herda a dispensa."""
+
+
+def test_subclasse_de_erro_de_configuracao_sai_sem_mensagem(
+    production_log: tuple[logging.Logger, io.StringIO], canary: str
+) -> None:
+    line = _log_exception(production_log, _DerivedSecretError(canary))
+
+    assert canary not in production_log[1].getvalue()
+    assert line["exception"].endswith("_DerivedSecretError")
+
+
 def test_causa_de_erro_de_configuracao_sai_sem_mensagem(
     production_log: tuple[logging.Logger, io.StringIO], canary: str
 ) -> None:
@@ -191,7 +204,7 @@ def test_causa_de_erro_de_configuracao_sai_sem_mensagem(
     except MissingSecretError as error:
         line = _log_exception(production_log, error)
 
-    assert canary not in line["exception"]
+    assert canary not in production_log[1].getvalue()
     assert "GS_X_FILE aponta para um arquivo que não existe" in line["exception"]
 
 

@@ -181,7 +181,8 @@ def _described(exception: BaseException) -> str:
     Nunca chama `str()` nem lê `__notes__` das outras: as duas coisas podem trazer entrada do
     usuário, e um `__str__` quebrado não pode derrubar a linha de log.
     """
-    if isinstance(exception, _MESSAGE_SAFE_ERRORS):
+    # Tipo exato: uma subclasse pode montar a mensagem com entrada do usuário.
+    if type(exception) in _MESSAGE_SAFE_ERRORS:
         return "".join(traceback.format_exception_only(exception)).rstrip("\n")
     kind = type(exception)
     described = f"{kind.__module__}.{kind.__qualname__}"
