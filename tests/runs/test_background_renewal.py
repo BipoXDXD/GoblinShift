@@ -1,9 +1,13 @@
-"""Lease renovado em paralelo enquanto o `start` do executor bloqueia (issue #442, 14b).
+"""Lease renovado em paralelo enquanto o executor-ctl bloqueia (issue #442, 14b e 14c).
 
-O `start` pode levar até o prazo do executor-ctl, bem mais que o lease. Sem renovação durante ele,
-a manutenção veria o lease vencido e reagendaria a Run com o contêiner antigo ainda nascendo.
+O `start` (14b) e o `stop` da supervisão (14c) podem levar até o prazo do executor-ctl, bem mais
+que o lease. Sem renovação durante eles, a manutenção veria o lease vencido e reagendaria a Run
+com o contêiner antigo ainda nascendo ou parando. No teto da tentativa, o `stop` que devolve
+`absent` (contêiner que nunca iniciou) não marca estouro (F5): seria culpa do usuário para uma
+falha de infraestrutura.
+
 Sem banco: `renew_lease` é trocado no próprio coordenador; nenhum `sleep` serve de prova, só
-`threading.Event` com teto como guarda de falha.
+`threading.Event` com teto como guarda de falha, ou um relógio falso que o `sleep` avança.
 """
 
 import contextvars

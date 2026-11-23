@@ -8,15 +8,14 @@ escolhe montagens nem opções: só manda o `attempt_id` e a imagem fixada na Ru
 Uma conexão por chamada, com timeout de 10 s. `start` e `remove`, que tomam o lock da área no
 serviço, esperam mais que o pior caso dele (`START_TIMEOUT`, `REMOVE_TIMEOUT`): desistir antes
 deixaria o container nascer sem ninguém esperando, e a área ocupada recusaria o claim seguinte
-(`work_area_dirty`). O `stop` espera as 5 chamadas do pior caso no serviço (inspect, stop,
-inspect e, no container que nunca iniciou, inspect e rm sob o lock) mais a carência
-(`STOP_BASE_TIMEOUT`): desistir antes deixaria o `docker stop` seguindo lá, e o `supervise`, ao
-repetir, abriria outro concorrente. Qualquer
-falha de transporte (socket ausente, recusa, timeout, resposta ilegível ou fora do contrato) vira
-`ExecutorCtlError` com código `unavailable` ou `invalid_response`; recusas do serviço trazem o
-código do corpo (`image_not_allowed`, `work_area_dirty`, `still_running`…). Para quem chama, tudo
-é `RunnerError`: o coordenador encerra a tentativa como falha transitória, e a manutenção não
-toca no que não consegue inspecionar.
+(`work_area_dirty`). O `stop` espera as 5 chamadas do pior caso no serviço (`STOP_BASE_TIMEOUT`:
+inspect, stop, inspect e, no container que nunca iniciou, inspect e rm sob o lock), mais a
+carência: desistir antes deixaria o `docker stop` seguindo lá, e o `supervise`, ao repetir,
+abriria outro concorrente. Qualquer falha de transporte (socket ausente, recusa, timeout, resposta
+ilegível ou fora do contrato) vira `ExecutorCtlError` com código `unavailable` ou
+`invalid_response`; recusas do serviço trazem o código do corpo (`image_not_allowed`,
+`work_area_dirty`, `still_running`…). Para quem chama, tudo é `RunnerError`: o coordenador encerra
+a tentativa como falha transitória, e a manutenção não toca no que não consegue inspecionar.
 
 A área de trabalho (`<work_root>/<attempt_id>`) é criada pelo worker, que pertence ao grupo do
 executor (GID 61001), com modo 2770; o `remove` do serviço a apaga inteira, inclusive o que o

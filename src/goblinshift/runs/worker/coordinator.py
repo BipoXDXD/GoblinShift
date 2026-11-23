@@ -622,7 +622,9 @@ class Coordinator:
         """Pede `stop`; `None` se o Runner falhou (quem chamou decide se repete).
 
         O `stop` pode passar do lease (pior caso do executor-ctl): com `renewing`, uma thread
-        renova enquanto ele bloqueia, e o fencing perdido nela sai daqui como `LostFencing`.
+        renova enquanto ele bloqueia, e o fencing perdido nela sai daqui como `LostFencing`. Se o
+        próprio `stop` levanta `RunnerError`, o erro dele vence e a resposta é `None`: o
+        `LostFencing` reaparece na renovação seguinte.
         """
         renewal = self._background_renewal(claimed) if renewing else nullcontext()
         try:
