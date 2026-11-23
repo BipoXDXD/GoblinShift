@@ -30,9 +30,10 @@ def _jobs_of(arquivo: str) -> dict[str, Any]:
 
 
 def _e_production(environment: object) -> bool:
-    if isinstance(environment, dict):
-        return environment.get("name") == "production"
-    return environment == "production"
+    nome = environment.get("name") if isinstance(environment, dict) else environment
+    # Nome calculado escaparia da checagem: o job poderia cair em production sem a trava da main.
+    assert "${{" not in str(nome), f"environment com expressão não é auditável: {nome!r}"
+    return nome == "production"
 
 
 def _production_jobs() -> list[tuple[str, str, dict[str, Any]]]:
@@ -69,8 +70,8 @@ def _tem_ou_no_nivel_de_cima(expr: str) -> bool:
 
 
 def _ignora_needs_pulado(expr: str) -> bool:
-    # `!cancelled()` contém `cancelled()`: as três cobrem as quatro funções de status.
-    return re.search(r"\b(always|cancelled|failure)\(\)", expr) is not None
+    # `!cancelled()` contém `cancelled()`; `success() || x` também roda com o need pulado.
+    return re.search(r"\b(always|cancelled|failure|success)\(\)", expr) is not None
 
 
 def _travado_na_main(jobs: dict[str, Any], job_id: str) -> bool:
@@ -101,10 +102,10 @@ def test_job_no_environment_production_nao_restaura_cache() -> None:
             action = passo.get("uses", "").split("@")[0]
             assert not action.startswith("actions/cache"), (arquivo, job_id)
             if action == "actions/setup-node":
-                assert "cache" not in passo.get("with", {}), (arquivo, job_id)
+                assert "cache" not in (passo.get("with") or {}), (arquivo, job_id)
             if action in CACHE_OFF:
                 chave, valor = CACHE_OFF[action]
-                assert passo.get("with", {}).get(chave) is valor, (arquivo, job_id, action)
+                assert (passo.get("with") or {}).get(chave) is valor, (arquivo, job_id, action)
 
 
 @pytest.mark.parametrize(
@@ -117,3 +118,23 @@ def test_job_no_environment_production_nao_restaura_cache() -> None:
 )
 def test_trava_da_main_recusa_ou_no_nivel_de_cima(expr: str) -> None:
     assert not _travado_na_main({"j": {"if": expr}}, "j")
+
+
+@pytest.mark.parametrize(
+    "status", ["always()", "cancelled()", "!cancelled()", "failure()", "success()"]
+)
+def test_funcao_de_status_com_ou_nao_herda_trava_do_needs(status: str) -> None:
+    jobs = {
+        "pai": {"if": TRAVA_DA_MAIN},
+        "j": {"if": f"{status} || github.event_name == 'x'", "needs": ["pai"]},
+    }
+    assert not _travado_na_main(jobs, "j")
+
+
+@pytest.mark.parametrize(
+    "environment",
+    ["${{ inputs.environment }}", {"name": "${{ inputs.environment }}"}],
+)
+def test_environment_com_expressao_reprova(environment: object) -> None:
+    with pytest.raises(AssertionError, match="expressão"):
+        _e_production(environment)

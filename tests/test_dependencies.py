@@ -3,6 +3,9 @@
 A imagem do executor instala o grupo `executor` a partir do `uv.lock`; o ambiente de testes usa
 `[project.dependencies]`. Se os dois divergirem, os testes passam com uma versão e a produção roda
 outra. Pillow: ADR 018. pikepdf, com o qpdf que vem dentro da wheel: ADR 035.
+
+Também confere o cooldown do Dependabot: todo ecossistema espera o mínimo de dias antes de propor
+uma versão recém-publicada.
 """
 
 import tomllib

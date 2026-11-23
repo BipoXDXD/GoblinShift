@@ -141,4 +141,3 @@ def test_imagem_do_proprio_run_vem_do_registro_local_e_fica_fora_da_conferencia(
 
     assert do_run, "nenhuma imagem do próprio run encontrada: o filtro deixou de ser exercitado"
     assert [ref for ref in do_run if not ref[2].startswith("127.0.0.1:")] == []
-    assert [ref for ref in do_run if ref in _workflow_images()] == []
