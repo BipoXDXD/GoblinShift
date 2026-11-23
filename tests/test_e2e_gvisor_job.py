@@ -163,6 +163,30 @@ def test_o_usuario_do_app_nasce_como_no_provision() -> None:
     assert "id goblinshift" in body, "idempotente: só cria se faltar"
 
 
+def test_o_up_prepara_o_runner_para_o_instalador_antes_dele() -> None:
+    up = shell_function("up")
+    assert up.index("prepare_install_host") < up.index("deploy/executor-ctl/install.sh")
+
+
+def test_o_opt_do_runner_vira_do_root_sem_escrita_de_grupo_ou_outros() -> None:
+    # O require_root_dir do instalador recusa o /opt gravável do runner hospedado.
+    body = shell_function("prepare_install_host")
+    assert "sudo chown root:root /opt" in body
+    assert "sudo chmod go-w /opt" in body
+
+
+@pytest.mark.parametrize(("group", "gid"), [("gs-exec", "61001"), ("gs-ctl", "61002")])
+def test_os_gids_do_instalador_sao_conferidos_no_runner(group: str, gid: str) -> None:
+    assert f"require_free_group {group} {gid}" in shell_function("prepare_install_host")
+
+
+def test_o_usuario_do_app_que_nao_le_o_checkout_aborta_depois_do_grupo() -> None:
+    body = shell_function("ensure_app_user")
+    after = body[body.index("usermod") :]
+    assert "test -r" in after
+    assert "fail " in after
+
+
 @pytest.mark.parametrize("service", ["api", *EXECUTOR_CLIENTS])
 def test_a_pilha_usa_o_runner_de_producao(service: str) -> None:
     environment = services(GVISOR_COMPOSE)[service]["environment"]

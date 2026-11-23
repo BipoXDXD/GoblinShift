@@ -62,10 +62,44 @@ mount_work_area() {
 # ele e lê o checkout com os privilégios dele. No runner, o checkout é do usuário da CI; se o
 # goblinshift não o lê, entra no grupo desse usuário (só neste runner efêmero).
 ensure_app_user() {
+  local probe="$ROOT/deploy/executor_ctl/__main__.py"
   id goblinshift >/dev/null 2>&1 || sudo adduser --disabled-password --gecos "" goblinshift
-  if ! sudo runuser -u goblinshift -- test -r "$ROOT/deploy/executor_ctl/__main__.py"; then
+  if ! sudo runuser -u goblinshift -- test -r "$probe"; then
     sudo usermod -aG "$(id -gn)" goblinshift
+    sudo runuser -u goblinshift -- test -r "$probe" ||
+      fail "goblinshift não lê $probe nem no grupo $(id -gn); o instalador não copiaria o pacote"
   fi
+}
+
+# O que o install.sh confere depois do preflight e o runner hospedado pode não cumprir. Nada
+# disso afrouxa o instalador: só este runner efêmero é ajustado ao que a VPS já é.
+prepare_install_host() {
+  # require_root_dir: cada ancestral de /opt/goblinshift é do root e sem escrita para grupo ou
+  # outros. No runner o /opt não vem assim (toolcache), e o / só é conferido.
+  [[ ! -L /opt ]] || fail "/opt é symlink no runner; o instalador o recusa"
+  sudo chown root:root /opt
+  sudo chmod go-w /opt
+  local owner mode
+  read -r owner mode < <(stat -c '%u %a' /)
+  if [[ "$owner" != 0 ]] || (((8#$mode & 8#022) != 0)); then
+    fail "/ do runner não é do root sem escrita de grupo ou outros"
+  fi
+  # ensure_group: os GIDs são fixos (group_add e --user do executor); ocupados, ele recusa.
+  require_free_group gs-exec 61001
+  require_free_group gs-ctl 61002
+  # A unit exige docker.service e o python3 3.12 do sistema no ExecStart.
+  systemctl cat docker.service >/dev/null 2>&1 || fail "o runner não tem docker.service no systemd"
+  /usr/bin/python3 -c 'import sys; sys.exit(sys.version_info[:2] != (3, 12))' ||
+    fail "o ExecStart do executor-ctl usa /usr/bin/python3, que precisa ser 3.12"
+}
+
+# require_free_group <nome> <gid>: o GID está livre ou já é desse grupo, e o nome não tem outro GID.
+require_free_group() {
+  local name="$1" gid="$2" holder current
+  holder="$(getent group "$gid" | cut -d: -f1)" || true
+  [[ -z "$holder" || "$holder" == "$name" ]] || fail "o GID $gid é do grupo $holder no runner; o instalador o quer para $name"
+  current="$(getent group "$name" | cut -d: -f3)" || true
+  [[ -z "$current" || "$current" == "$gid" ]] || fail "o grupo $name existe com GID $current no runner, esperado $gid"
 }
 
 # Os dois arquivos que o instalador exige prontos, no lugar e com os donos de produção.
@@ -103,6 +137,7 @@ up() {
   mount_work_area
   write_executor_policy "$image"
   ensure_app_user
+  prepare_install_host
   sudo bash "$ROOT/deploy/executor-ctl/install.sh"
   # No .env, para os `docker compose` dos passos seguintes interpolarem a mesma imagem.
   echo "GS_EXECUTOR_IMAGE=$image" >>"$ROOT/.env"
