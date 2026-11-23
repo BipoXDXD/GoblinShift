@@ -5,6 +5,7 @@ import importlib
 import itertools
 import json
 import os
+import select
 import signal
 import socket as socketlib
 import stat
@@ -18,7 +19,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import IO, Any, cast
 from urllib.parse import quote
 
 import pytest
@@ -1006,6 +1007,13 @@ def _wait_until(condition: Any) -> bool:
     return True
 
 
+def _first_line(stream: IO[str]) -> str:
+    """Primeira linha do processo, com teto: um serviço que não imprime falha em vez de travar."""
+    ready, _, _ = select.select([stream], [], [], _PROCESS_GUARD_S)
+    assert ready, f"nada na saída do processo em {_PROCESS_GUARD_S} s"
+    return stream.readline()
+
+
 def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
     tmp_path: Path, socket_dir: Path
 ) -> None:
@@ -1041,7 +1049,7 @@ def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
     answers: list[Any] = []
     try:
         assert process.stdout is not None
-        assert "pronto" in process.stdout.readline()
+        assert "pronto" in _first_line(process.stdout)
         client = threading.Thread(
             target=lambda: answers.append(
                 call(
