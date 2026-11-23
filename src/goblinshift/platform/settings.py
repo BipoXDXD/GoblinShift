@@ -66,7 +66,15 @@ class WebIdentityConfig:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="GS_", extra="ignore", frozen=True)
+    # Erro de validação nomeia campo e tipo, nunca a entrada (pode ser segredo); `nan` e `inf`
+    # nunca são faixa válida (#442, 54 a e b).
+    model_config = SettingsConfigDict(
+        env_prefix="GS_",
+        extra="ignore",
+        frozen=True,
+        hide_input_in_errors=True,
+        allow_inf_nan=False,
+    )
 
     environment: Literal["development", "test", "production"] = "development"
     service_version: str = "dev"
@@ -81,13 +89,13 @@ class Settings(BaseSettings):
     db_password_file: Path | None = None
 
     # Timeouts de 3.2: defesa contra consultas presas e transações esquecidas.
-    db_statement_timeout_ms: int = 5_000
-    db_lock_timeout_ms: int = 2_000
-    db_idle_in_transaction_timeout_ms: int = 30_000
-    db_connect_timeout_s: int = 5
-    db_pool_size: int = 10
-    db_pool_max_overflow: int = 5
-    db_pool_timeout_s: float = 5.0
+    db_statement_timeout_ms: int = Field(default=5_000, gt=0)
+    db_lock_timeout_ms: int = Field(default=2_000, gt=0)
+    db_idle_in_transaction_timeout_ms: int = Field(default=30_000, gt=0)
+    db_connect_timeout_s: int = Field(default=5, gt=0)
+    db_pool_size: int = Field(default=10, gt=0)
+    db_pool_max_overflow: int = Field(default=5, ge=0)
+    db_pool_timeout_s: float = Field(default=5.0, gt=0)
 
     alembic_ini: Path = Path("alembic.ini")
 
@@ -112,18 +120,18 @@ class Settings(BaseSettings):
     # fixo do host, montado no worker e na manutenção.
     work_root: Path = Path(".work")
     # Lease da tentativa; o coordenador o renova a cada terço do prazo (3.4).
-    worker_lease_s: float = 60.0
+    worker_lease_s: float = Field(default=60.0, gt=0)
     # Garantia contra NOTIFY perdido: o worker consulta a fila pelo menos nesse intervalo.
-    worker_poll_interval_s: float = 2.0
+    worker_poll_interval_s: float = Field(default=2.0, gt=0)
     # Teto de cada tentativa (1.7, "Duração").
-    attempt_timeout_s: float = 600.0
-    maintenance_interval_s: float = 30.0
+    attempt_timeout_s: float = Field(default=600.0, gt=0)
+    maintenance_interval_s: float = Field(default=30.0, gt=0)
     # Cotas diárias por conta (1.7): o padrão de toda conta, que `gs-admin set-limits` sobrepõe
     # conta a conta. Os tetos de armazenamento ficam no livro-razão (ADR 024).
     quota_runs_per_24h: int = Field(default=30, gt=0)
     quota_input_bytes_per_24h: int = Field(default=2 * 1024**3, gt=0)
     # Lotes da manutenção toleram consultas mais longas que a API (3.2).
-    maintenance_statement_timeout_ms: int = 30_000
+    maintenance_statement_timeout_ms: int = Field(default=30_000, gt=0)
 
     # Chave HMAC dos cursores da listagem (1.6). Trocá-la invalida os cursores emitidos, o que
     # só custa ao cliente recomeçar a paginação.
