@@ -47,3 +47,13 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+
+  # O zizmor da CI e do portão local, fixado com o hash de todo arquivo publicado da versão
+  # (scripts/ci-zizmor.sh instala com --require-hashes).
+  - package-ecosystem: pip
+    directory: /.github/zizmor
+    open-pull-requests-limit: 1
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
