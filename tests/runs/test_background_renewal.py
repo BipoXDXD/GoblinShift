@@ -307,3 +307,61 @@ def test_teto_com_stop_falhando_repete_no_intervalo_curto(monkeypatch: pytest.Mo
     assert len(stops) == failures + 1
     # Tolerância só para o arredondamento da soma de `status_poll` no relógio falso.
     assert len(stops) <= math.floor(clock.now / retry_every + 1e-6) + 1
+
+
+def test_fencing_perdido_durante_o_stop_abandona_sem_registrar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O `LostFencing` da thread que renova durante o `stop` sai do `supervise`: o worker abandona,
+    # para e remove o próprio executor sem levar desfecho ao banco.
+    stopping = threading.Event()
+    lost_in_thread = threading.Event()
+    operations: list[str] = []
+
+    def renew(_claimed: object) -> Status:
+        if threading.current_thread().name == "lease-renewal" and stopping.is_set():
+            lost_in_thread.set()
+            raise LostFencing("outra tentativa assumiu")
+        return Status.STOPPING
+
+    class StopAfterLostFencing:
+        def __init__(self) -> None:
+            self._stops = 0
+
+        def start(self, attempt_id: uuid.UUID, image: str) -> None:
+            del attempt_id, image
+            operations.append("start")
+
+        def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+            del attempt_id
+            return RUNNING
+
+        def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+            del attempt_id, grace
+            operations.append("stop")
+            self._stops += 1
+            if self._stops == 1:
+                # Só o primeiro `stop` (o da supervisão) renova; o do abandono vem sem fencing.
+                stopping.set()
+                assert lost_in_thread.wait(FAILURE_GUARD_S), "fencing não perdido durante o stop"
+            return STOPPED
+
+        def remove(self, attempt_id: uuid.UUID) -> None:
+            del attempt_id
+            operations.append("remove")
+
+    def no_outcome(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("desfecho registrado sem fencing")
+
+    worker = worker_without_database(StopAfterLostFencing())
+    monkeypatch.setattr(worker, "renew_lease", renew)
+    monkeypatch.setattr(worker, "prepare", lambda _claimed: None)
+    monkeypatch.setattr(worker, "may_start", lambda _claimed: True)
+    monkeypatch.setattr(worker, "record_start", lambda _claimed: None)
+    monkeypatch.setattr(worker, "finish", no_outcome)
+    monkeypatch.setattr(worker, "_conclude", no_outcome)
+
+    applied = worker.run(attempt_without_database())
+
+    assert applied is None
+    assert operations == ["start", "stop", "stop", "remove"]
