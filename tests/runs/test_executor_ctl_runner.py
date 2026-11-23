@@ -291,6 +291,7 @@ def test_ctl_que_nao_responde_a_tempo_vira_indisponivel(
         work_group=os.getgid(),
         call_timeout=SHORT_TIMEOUT,
         start_timeout=SHORT_TIMEOUT,
+        stop_base_timeout=SHORT_TIMEOUT,
         remove_timeout=SHORT_TIMEOUT,
     )
     attempt_id = prepared(runner)
@@ -470,6 +471,26 @@ def test_operacao_espera_por_padrao_o_prazo_derivado_do_ctl(
     _call(runner, operation, prepared(runner))
 
     assert timeouts == [timeout_s]
+
+
+def test_stop_espera_por_padrao_o_prazo_derivado_do_ctl_mais_a_carencia(
+    ctl: FakeExecutorCtl, area: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timeouts: list[float] = []
+
+    class RecordingConnection(executor_ctl_runner._UnixConnection):
+        def __init__(self, socket_path: Path, timeout_s: float) -> None:
+            timeouts.append(timeout_s)
+            super().__init__(socket_path, timeout_s)
+
+    monkeypatch.setattr(executor_ctl_runner, "_UnixConnection", RecordingConnection)
+    runner = ExecutorCtlRunner(ctl.socket_path, area, work_group=os.getgid())
+
+    runner.stop(prepared(runner), timedelta(seconds=7))
+
+    # 5 chamadas do stop (inspect, stop, inspect, inspect, rm) x 30 s do Docker, 10 s de margem
+    # (lock de 5 s e o HTTP) e os 7 s de carência.
+    assert timeouts == [5 * 30 + 10 + 7]
 
 
 def test_executor_real_roda_ate_o_fim_pelo_ctl(area: Path) -> None:
