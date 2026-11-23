@@ -3,22 +3,17 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactElement } from "
 import { flushSync } from "react-dom";
 
 import { useApiClient } from "../api/ApiClientContext";
-import { ApiError } from "../api/response";
 import { Field } from "../components/a11y/Field";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { createPreset, PRESETS_QUERY_KEY, type PresetDraft } from "../presets/api";
+import { isNameRejected, normalizePresetName, presetNameError } from "../presets/presetName";
 import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
 
 const T = TEXT.presets;
-/**
- * Teto do nome na API (presets/drafts.py), em code points depois do NFC como lá; conferido aqui
- * para o erro aparecer no campo.
- */
-const MAX_NAME_LENGTH = 100;
 
 /**
  * "Salvar preset" da Bancada: secundária, ao lado da primária Executar. Guarda os parâmetros do
@@ -47,9 +42,8 @@ export function SavePreset({ draft }: { readonly draft: RecipeDraft<RecipeId> })
     if (!draft.ok || save.isPending) {
       return;
     }
-    // Uma forma só para o teto local e para o envio: o servidor mede o texto que recebe.
-    const finalName = name.trim().normalize("NFC");
-    const error = nameErrorOf(finalName);
+    const finalName = normalizePresetName(name);
+    const error = presetNameError(finalName);
     if (error !== null) {
       // O foco sai do botão para o campo, que o leitor de tela lê com o erro na descrição; o erro
       // entra no DOM antes do foco.
@@ -151,35 +145,4 @@ function useSave() {
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
     },
   });
-}
-
-/** Recebe o nome já aparado e em NFC, como vai para a API. */
-function nameErrorOf(finalName: string): string | null {
-  if (finalName === "") {
-    return T.nameRequired;
-  }
-  // Code points, não grafemas: é o que o `len` do Python conta no servidor.
-  const length = Array.from(finalName).length;
-  return length > MAX_NAME_LENGTH ? T.nameTooLong : null;
-}
-
-/** O servidor aponta o campo a partir do corpo (presets.py monta `("body", "name")`). */
-const NAME_FIELD = "body.name";
-
-/**
- * 422 só no nome: o erro vai para o campo. Com erro em outro campo junto, o aviso geral fica, para
- * não esconder esse outro erro.
- */
-function isNameRejected(error: Error): boolean {
-  if (!(error instanceof ApiError) || error.failure.kind !== "problem") {
-    return false;
-  }
-  const { code, errors } = error.failure.problem;
-  return (
-    code === "VALIDATION_FAILED" &&
-    errors !== null &&
-    errors !== undefined &&
-    errors.length > 0 &&
-    errors.every((fieldError) => fieldError.field === NAME_FIELD)
-  );
 }

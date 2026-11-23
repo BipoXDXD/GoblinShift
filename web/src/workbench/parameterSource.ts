@@ -4,7 +4,7 @@ import { z } from "zod";
 import { useApiClient } from "../api/ApiClientContext";
 import { PRESET_PARAM, RUN_PARAM } from "../app/paths";
 import { formatDateTime } from "../format";
-import { getPreset, PRESETS_QUERY_KEY } from "../presets/api";
+import { getPreset, PRESETS_QUERY_KEY, type Preset } from "../presets/api";
 import { getRun } from "../runs/api";
 import { TEXT } from "../text";
 
@@ -21,6 +21,8 @@ export interface ParameterSource {
   readonly stored: StoredParameters;
   readonly loadedNotice: string;
   readonly wrongRecipeNotice: string;
+  /** O preset lido, para "Atualizar preset" (id, revisão e nome); `null` na execução. */
+  readonly preset: Preset | null;
 }
 
 /**
@@ -47,10 +49,16 @@ export function sourceFromSearch(search: URLSearchParams): SourceRef | null {
   return null;
 }
 
+/**
+ * A origem não sobrevive à Bancada (`gcTime: 0`): cada abertura lê o preset ou a execução da API.
+ * O formulário e o "Atualizar preset" só a leem na montagem, então uma origem em cache, vencida por
+ * um `PUT` ou por outra aba, abriria com parâmetros e revisão velhos (e o próximo `PUT` daria 412).
+ * Enquanto a Bancada está aberta, ela observa a consulta e a entrada fica.
+ */
 export function useParameterSource(ref: SourceRef | null): UseQueryResult<ParameterSource> {
   const client = useApiClient();
   return useQuery({
-    queryKey: ref?.kind === "preset" ? [...PRESETS_QUERY_KEY, ref.id] : ["runs", ref?.id, "source"],
+    queryKey: ref?.kind === "preset" ? presetSourceKey(ref.id) : ["runs", ref?.id, "source"],
     queryFn: async ({ signal }): Promise<ParameterSource> => {
       if (ref === null) {
         throw new Error("origem ausente: a consulta só roda com uma");
@@ -61,16 +69,22 @@ export function useParameterSource(ref: SourceRef | null): UseQueryResult<Parame
     },
     enabled: ref !== null,
     retry: false,
+    gcTime: 0,
   });
 }
 
-function presetSource(preset: Awaited<ReturnType<typeof getPreset>>): ParameterSource {
+function presetSourceKey(id: string): readonly unknown[] {
+  return [...PRESETS_QUERY_KEY, id];
+}
+
+function presetSource(preset: Preset): ParameterSource {
   return {
     recipeId: preset.recipe_id,
     recipeVersion: preset.recipe_version,
     stored: { kind: "kept", parameters: preset.parameters },
     loadedNotice: TEXT.presets.loaded(preset.name),
     wrongRecipeNotice: TEXT.presets.wrongRecipe,
+    preset,
   };
 }
 
@@ -84,5 +98,6 @@ function runSource(run: Awaited<ReturnType<typeof getRun>>["data"]): ParameterSo
         : { kind: "kept", parameters: run.parameters },
     loadedNotice: TEXT.history.reuseLoaded(formatDateTime(run.created_at)),
     wrongRecipeNotice: TEXT.history.reuseWrongRecipe,
+    preset: null,
   };
 }
