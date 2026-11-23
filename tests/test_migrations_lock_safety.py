@@ -1150,6 +1150,53 @@ def test_dados_antes_do_autocommit_passam(rows: str) -> None:
     assert schema_change_beside_autocommit_lines(source + IMPORTS) == []
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        'op.add_column("run", sa.Column("a", sa.Text()))',
+        'op.execute("ALTER TABLE run ADD COLUMN a text")',
+        'op.drop_index("ix", table_name="run", postgresql_concurrently=True)',
+        "op.execute(sql)",
+    ],
+    ids=["add-column", "ddl-em-execute", "drop-concorrente-sem-if-exists", "sql-sem-texto"],
+)
+def test_mudanca_de_schema_dentro_do_autocommit_e_recusada(change: str) -> None:
+    # Dentro do bloco cada instrução é comitada na hora: o retry a repete e ela falha.
+    source = (
+        "def upgrade() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        f"        {change}  # lock-ok: coluna nova\n"
+        '        op.create_index("ix", "run", ["a"], postgresql_concurrently=True)\n'
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == [3]
+
+
+@pytest.mark.parametrize(
+    ("drop", "create"),
+    [
+        (
+            'op.drop_index("ix", table_name="run", postgresql_concurrently=True, if_exists=True)',
+            'op.create_index("ix", "run", ["a"], postgresql_concurrently=True)',
+        ),
+        (
+            'op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix")',
+            'op.execute("CREATE INDEX CONCURRENTLY ix ON run (a)")',
+        ),
+    ],
+    ids=["operacoes-do-alembic", "sql-literal"],
+)
+def test_limpeza_e_indice_concorrentes_dentro_do_autocommit_passam(drop: str, create: str) -> None:
+    source = (
+        "def upgrade() -> None:\n"
+        "    with op.get_context().autocommit_block():\n"
+        f"        {drop}  # lock-ok: limpeza\n"
+        f"        {create}\n"
+    )
+
+    assert schema_change_beside_autocommit_lines(source + IMPORTS) == []
+
+
 def test_revisao_sem_autocommit_pode_mudar_o_schema() -> None:
     # Sem o bloco, a revisão roda numa transação só: o retry começa do zero.
     source = _upgrade('op.add_column("run", sa.Column("a", sa.Text()))')

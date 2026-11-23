@@ -22,8 +22,9 @@ negativo. Quem precisa dela marca `# lock-ok: <motivo>` na linha da operação o
 comentário logo acima. Operação sobre uma tabela que a mesma função acabou de criar não trava
 ninguém e dispensa a marca.
 
-Numa revisão com `autocommit_block()`, o retry do `lock_timeout` repete a revisão inteira: fora
-do bloco não pode haver mudança de schema (`schema_change_beside_autocommit_lines`), só dados.
+Numa revisão com `autocommit_block()`, o retry do `lock_timeout` repete a revisão inteira: nela
+não pode haver mudança de schema (`schema_change_beside_autocommit_lines`), só dados e, dentro do
+bloco, o par `DROP INDEX CONCURRENTLY IF EXISTS` / CREATE INDEX CONCURRENTLY.
 
 `op` e `sa` só valem pelo import (`from alembic import op`, `import sqlalchemy as sa`) quando o
 nome não é ligado de nenhuma outra forma no módulo nem tem atributo atribuído; `import *` anula
@@ -273,14 +274,16 @@ def concurrent_index_without_cleanup_lines(source: str) -> list[int]:
 
 
 def schema_change_beside_autocommit_lines(source: str) -> list[int]:
-    """Mudanças de schema fora do `autocommit_block()`, numa revisão que tem um.
+    """Mudanças de schema numa revisão com `autocommit_block()`, dentro ou fora dele.
 
-    O bloco faz commit do que veio antes dele, mas o Alembic só grava o carimbo da revisão no
-    fim. Se o CREATE INDEX CONCURRENTLY estoura o `lock_timeout`, o retry do ADR 057 roda a
-    revisão inteira de novo, e um ADD COLUMN já aplicado falha com DuplicateColumn, sem retry.
-    Fora do bloco só passam `op.get_context()` e `execute` de SQL literal em que toda instrução
-    é UPDATE ou DELETE; a idempotência delas fica com a revisão do PR. A mudança de schema vai
-    para a revisão anterior (Split Phase). Nenhuma marca libera.
+    O bloco faz commit do que veio antes dele, e dentro dele cada instrução é comitada na hora,
+    mas o Alembic só grava o carimbo da revisão no fim. Se o CREATE INDEX CONCURRENTLY estoura o
+    `lock_timeout`, o retry do ADR 057 roda a revisão inteira de novo, e um ADD COLUMN já
+    aplicado falha com DuplicateColumn, sem retry. Passam só `op.get_context()`, `execute` de
+    SQL literal em que toda instrução é UPDATE ou DELETE (a idempotência delas fica com a
+    revisão do PR) e, dentro do bloco, o `DROP INDEX CONCURRENTLY IF EXISTS` e o CREATE INDEX
+    CONCURRENTLY que os checks de CONCURRENTLY reconhecem, uma instrução por chamada. A mudança
+    de schema vai para a revisão anterior (Split Phase). Nenhuma marca libera.
     """
     tree = ast.parse(source)
     roots = _checked_roots(tree)
@@ -295,8 +298,29 @@ def schema_change_beside_autocommit_lines(source: str) -> list[int]:
         for root in roots
         for node in ast.walk(root)
         if isinstance(node, ast.Call)
-        and id(node) not in inside_autocommit
         and _changes_schema(node, trusted, assignments)
+        and not (id(node) in inside_autocommit and _is_concurrent_index_step(node, assignments))
+    )
+
+
+def _is_concurrent_index_step(call: ast.Call, assignments: Assignments) -> bool:
+    """`DROP INDEX CONCURRENTLY IF EXISTS` ou CREATE INDEX CONCURRENTLY, repetíveis no retry."""
+    name = _operation(call)
+    if name in {"create_index", "drop_index"}:
+        return bool(
+            _created_concurrent_indexes(call, assignments)
+            or _dropped_concurrent_indexes(call, assignments)
+        )
+    if name in EXECUTE_OPERATIONS:
+        texts = _sql_texts(call, assignments)
+        return bool(texts) and all(_is_single_concurrent_index_statement(text) for text in texts)
+    return False
+
+
+def _is_single_concurrent_index_statement(sql: str) -> bool:
+    facts = analyze_sql(sql)
+    return facts.statements == 1 and bool(
+        facts.created_concurrent_indexes or facts.dropped_concurrent_indexes
     )
 
 
