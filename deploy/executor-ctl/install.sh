@@ -155,13 +155,15 @@ ensure_group() {
     groupadd --system --gid "$gid" "$name"
   fi
 }
+# Conferido antes dos grupos: um /opt/goblinshift gravável por outro usuário recusa sem mutar.
+root_dir /opt/goblinshift
+root_dir "$PREFIX"
+
 ensure_group "$GROUP" "$GROUP_ID"
 ensure_group "$SOCKET_GROUP" "$SOCKET_GROUP_ID"
 usermod -aG "$GROUP,$SOCKET_GROUP" "$APP_USER"
 
 note "Pacote em ${PREFIX}"
-root_dir /opt/goblinshift
-root_dir "$PREFIX"
 install -d -m 755 "$PREFIX/docker-config"
 if [[ -e "$RESTART_PENDING" ]]; then
   echo "   reinício pendente de uma execução anterior."

@@ -80,6 +80,13 @@ def test_area_sem_montagem_exigida_nao_confere_opcoes(tmp_path: Path) -> None:
     assert effects.read_text().strip() == "groupadd"
 
 
+def test_opt_gravavel_por_outro_usuario_recusa_antes_dos_grupos(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "opt_writable")
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "recusado:" in result.stderr and "/opt/goblinshift" in result.stderr, result.stderr
+
+
 def run_installer_copy(
     tmp_path: Path, case: str, *, app_user_exists: bool = True
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
@@ -96,8 +103,11 @@ def run_installer_copy(
         (ROOT / "deploy/executor-ctl/install.sh")
         .read_text()
         .replace("[[ $EUID -eq 0 ]]", "[[ 0 -eq 0 ]]")
+        .replace("/opt/goblinshift", f"{tmp_path / 'root'}/opt/goblinshift")
     )
     virtual = tmp_path / "root"
+    # Já criado: o root_dir não chama `install -d`, e a primeira mutação continua sendo o grupo.
+    (virtual / "opt/goblinshift/executor-ctl").mkdir(parents=True)
     config = virtual / "etc/goblinshift/executor-ctl.json"
     policy = virtual / POLICY.lstrip("/")
     config.parent.mkdir(parents=True)
@@ -174,6 +184,18 @@ def run_installer_copy(
         stub = binaries / name
         stub.write_text(f'#!/bin/sh\necho {name} >> "$MUTATIONS"\nexit 91\n')
         stub.chmod(0o755)
+    # `stat -c` é do GNU. O require_root_dir vê cada diretório como do root, 755; no caso
+    # opt_writable, /opt/goblinshift fica com escrita para outros.
+    fake_stat = binaries / "stat"
+    fake_stat.write_text(
+        """#!/bin/sh
+case "$3" in
+  */opt/goblinshift) [ "$CASE" = opt_writable ] && echo '0 777' || echo '0 755' ;;
+  *) echo '0 755' ;;
+esac
+"""
+    )
+    fake_stat.chmod(0o755)
     getent = binaries / "getent"
     getent.write_text("#!/bin/sh\nexit 1\n")
     getent.chmod(0o755)
