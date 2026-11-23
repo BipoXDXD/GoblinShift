@@ -32,7 +32,13 @@ from goblinshift.files.storage import FileStorage
 from goblinshift.identity import purge as identity_purge
 from goblinshift.identity import rate_limit
 from goblinshift.platform.db import make_engine, make_session_factory, unit_of_work
-from goblinshift.platform.settings import ExecutorConfigError, MissingSecretError, Settings
+from goblinshift.platform.settings import (
+    EXIT_CONFIGURATION,
+    ExecutorConfigError,
+    MissingSecretError,
+    Settings,
+    load_settings_or_exit,
+)
 from goblinshift.platform.telemetry import UserHasher, configure_logging, exception_fields
 from goblinshift.runs import purge as runs_purge
 from goblinshift.runs.finished import RunFinishedReporter
@@ -50,7 +56,6 @@ logger = logging.getLogger("goblinshift.maintenance")
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
-EXIT_CONFIGURATION = 2
 
 type _Clock = Callable[[], datetime]
 type Cycle = tuple[str, Callable[[], Mapping[str, int]]]
@@ -67,7 +72,7 @@ _FAILED_STEP_COUNTS = (STEPS_FAILED, ACCOUNT_STEPS_FAILED)
 
 def main() -> int:
     configure_logging()
-    settings = Settings()
+    settings = load_settings_or_exit(logger)
     try:
         runner = build_runner(settings)
         settings.user_hash_key()

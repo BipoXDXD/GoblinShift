@@ -1,16 +1,19 @@
 """Configuração lida do ambiente (prefixo `GS_`)."""
 
+import logging
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 MIN_SECRET_CHARS = 32
+# Código de saída de processo com configuração inválida: distingue "configuração" de falha comum.
+EXIT_CONFIGURATION = 2
 # Imagem do executor sempre por digest (contrato da fatia 4): `<repositório>@sha256:<64 hex>`.
 EXECUTOR_IMAGE_PATTERN = r"^[a-z0-9]+(?:[._/:-][a-z0-9]+)*@sha256:[0-9a-f]{64}$"
 # O Runner local roda o código do próprio repositório: a Run registra isto no lugar do digest.
@@ -304,3 +307,23 @@ def _read_secret(name: str, path: Path) -> str:
     if not value:
         raise MissingSecretError(f"{name} aponta para um arquivo vazio")
     return value
+
+
+def describe_config_error(error: ValidationError) -> list[str]:
+    """`<campo>:<tipo>` de cada erro, nunca o valor: a linha vai ao log do contêiner."""
+    return [
+        f"{'.'.join(str(part) for part in detail['loc'])}:{detail['type']}"
+        for detail in error.errors(include_input=False, include_url=False, include_context=False)
+    ]
+
+
+def load_settings_or_exit(logger: logging.Logger) -> Settings:
+    """`Settings()` do ambiente; inválida, uma linha com campo e tipo e saída 2, sem traceback."""
+    try:
+        return Settings()
+    except ValidationError as error:
+        logger.error(
+            "configuração inválida",
+            extra={"fields": {"config_errors": describe_config_error(error)}},
+        )
+        raise SystemExit(EXIT_CONFIGURATION) from None

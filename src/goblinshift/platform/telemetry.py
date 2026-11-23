@@ -95,6 +95,7 @@ LOGGED_FIELDS = frozenset(
         "attempt_ids",
         "attempts",
         "checked",
+        "config_errors",
         "cycle",
         "duration_ms",
         "errno",
