@@ -132,3 +132,6 @@ def test_unit_gerada_tem_killmode_mixed_e_prazo_acima_da_operacao_mais_longa(
     stop_timeout = timedelta(seconds=int(service["TimeoutStopSec"]))
     assert stop_timeout > client.START_TIMEOUT
     assert stop_timeout > client.REMOVE_TIMEOUT
+    # Stop no servidor, calculado à mão: 4 chamadas de 30 s, o stop com grace máximo (40 s),
+    # 5 s de lock e 10 s de leitura do pedido.
+    assert stop_timeout > timedelta(seconds=4 * 30 + 40 + 5 + 10)

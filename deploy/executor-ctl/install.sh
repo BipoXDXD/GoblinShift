@@ -221,9 +221,11 @@ RestartSec=2
 # voo; o docker que elas chamam não recebe o sinal e termina a operação. O SIGKILL (no fim do
 # prazo, ou no que sobrar quando o principal sai) vai ao cgroup inteiro.
 KillMode=mixed
-# Acima da operação mais longa em voo: o start, até 30 s por chamada ao Docker vezes 3 dele e 3
-# de quem segura o lock, mais 10 s (190 s, START_TIMEOUT do worker); remove 160 s; stop, com 5
-# chamadas (inspect, stop, inspect, inspect, rm), até 40 + 4 x 30 + 5 s de lock (165 s).
+# Acima da operação mais longa em voo no servidor. Toda espera pelo lock tem prazo de 5 s
+# (AREA_LOCK_WAIT_S), não uma operação inteira de quem o segura. Pior caso, o stop: 10 s para ler
+# o pedido + 5 s de lock + 5 chamadas ao Docker (inspect, stop, inspect, inspect, rm), 4 x 30 s
+# e 40 s do stop com o grace máximo = 175 s. O start fica em 10 + 5 + 3 x 30 = 105 s; o remove,
+# 10 + 5 + 2 x 30 = 75 s mais a remoção da área, sem teto próprio.
 TimeoutStopSec=210
 RuntimeDirectory=goblinshift
 RuntimeDirectoryMode=0755
