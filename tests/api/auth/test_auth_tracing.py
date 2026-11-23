@@ -61,7 +61,8 @@ def test_code_e_state_do_login_real_nao_vao_ao_span(
 
     assert response.status_code == 303
     text = _all_span_text(exporter)
-    assert "/auth/callback/google" in text
+    # O span do callback existe e leva o template da rota, nunca o caminho do pedido (#442, 37 b).
+    assert "/auth/callback/{provider}" in text
     assert query["code"] not in text
     assert query["state"] not in text
     assert traced_client.cookies["__Host-gs_session"] not in text
