@@ -121,7 +121,8 @@ export function isStaleRevision(error: Error): boolean {
   );
 }
 
-function isNotFound(error: unknown): boolean {
+/** Preset que já não existe (404): excluído em outra aba ou dispositivo. */
+export function isNotFound(error: unknown): boolean {
   return (
     error instanceof ApiError &&
     error.failure.kind === "problem" &&

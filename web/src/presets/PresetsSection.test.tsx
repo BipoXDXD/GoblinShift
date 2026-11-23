@@ -529,6 +529,83 @@ describe("Oficina: renomear preset", () => {
     expect(screen.getByRole("button", { name: "Renomear o preset Clientes do mês" })).toHaveFocus();
   });
 
+  it("Esc fecha sem chamar a API e devolve o foco ao Renomear", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Outro");
+    expect(escapeIsBlocked(dialog)).toBe(false);
+    forceClose(dialog);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent(api.requests, PUT_ROUTE)).toEqual([]);
+    expect(screen.getByRole("button", { name: "Renomear o preset Clientes do mês" })).toHaveFocus();
+    const reopened = await openRename(user);
+    expect(within(reopened).getByRole("textbox", { name: "Novo nome" })).toHaveValue(
+      "Clientes do mês",
+    );
+  });
+
+  // O <li> muda de posição na lista ordenada pelo nome; o navegador tira o foco de quem é movido.
+  it("nome novo que muda a posição na lista: o diálogo fecha antes da releitura e o foco fica no Renomear", async () => {
+    const relist = heldResponse();
+    let renamed = false;
+    const other = presetBody({ id: SECOND_PRESET_ID, name: "Fornecedores" });
+    const { user } = setup({
+      "GET /api/v1/presets": () =>
+        renamed ? relist.handler() : jsonResponse({ data: [presetBody(), other] }),
+      [PUT_ROUTE]: () => {
+        renamed = true;
+        return jsonResponse(presetBody({ name: "Zeta", revision: 2 }));
+      },
+    });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Zeta{Enter}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    relist.answer(jsonResponse({ data: [other, presetBody({ name: "Zeta", revision: 2 })] }));
+
+    const section = await presetsSection();
+    await waitFor(() => {
+      expect(
+        within(section)
+          .getAllByRole("heading", { level: 3 })
+          .map((h) => h.textContent),
+      ).toEqual(["Fornecedores", "Zeta"]);
+    });
+    await waitFor(() => {
+      expect(within(section).getByRole("button", { name: "Renomear o preset Zeta" })).toHaveFocus();
+    });
+  });
+
+  it("preset excluído em outro lugar (404): a falha aparece e, ao fechar, a lista é relida", async () => {
+    let gone = false;
+    const { api, user } = setup({
+      "GET /api/v1/presets": () => jsonResponse({ data: gone ? [] : [presetBody()] }),
+      [PUT_ROUTE]: () => {
+        gone = true;
+        return problemResponse(404, "NOT_FOUND");
+      },
+    });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Clientes de junho");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+    expect(await within(dialog).findByRole("alert")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    await waitFor(() => {
+      expect(sent(api.requests, "GET /api/v1/presets")).toHaveLength(2);
+    });
+    const section = await presetsSection();
+    await waitFor(() => {
+      expect(within(section).queryByRole("heading", { name: "Clientes do mês" })).toBeNull();
+    });
+  });
+
   it("não tem violações do axe com o diálogo de renomear aberto", async () => {
     const { user } = setup();
 
