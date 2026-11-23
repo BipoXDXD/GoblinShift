@@ -891,6 +891,15 @@ export const TEXT = {
     nameTaken: "Já existe um preset com esse nome.",
     changedElsewhereRename:
       "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira e tente de novo.",
+    update: "Atualizar preset",
+    updateOf: (name: string) => name,
+    updateTitle: (name: string) => `Atualizar o preset ${name}?`,
+    updateBody:
+      "Os parâmetros do formulário substituem os do preset. As execuções feitas com ele não mudam.",
+    updating: "Atualizando…",
+    updated: (name: string) => `Preset ${name} atualizado.`,
+    changedElsewhereUpdate:
+      "O preset mudou em outra aba ou dispositivo. Abra-o de novo pela Oficina para ver a versão atual.",
     updatedAt: (date: string) => `Atualizado em ${date}`,
     save: "Salvar preset",
     saveTitle: "Salvar os parâmetros como preset",
