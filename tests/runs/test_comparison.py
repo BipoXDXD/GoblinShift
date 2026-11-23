@@ -59,6 +59,10 @@ def without(details: dict[str, object], *keys: str) -> dict[str, object]:
     return {key: value for key, value in details.items() if key not in keys}
 
 
+def values(enum: type[StrEnum]) -> set[str]:
+    return {member.value for member in enum}
+
+
 # --- Por receita.
 
 
@@ -192,7 +196,7 @@ def test_json_traz_o_kind_e_os_valores_dos_enums() -> None:
 
 @pytest.mark.parametrize("comparison", EXAMPLES)
 def test_json_so_tem_inteiros_e_valores_das_listas_fechadas(comparison: ItemComparison) -> None:
-    closed = {member.value for member in [*ImageFormat, *AudioCodec, *AudioFormat]}
+    closed = values(ImageFormat) | values(AudioCodec) | values(AudioFormat)
     raw = comparison_as_json(comparison)
 
     assert raw.pop("kind") in {KIND_TABLE, KIND_PDF, KIND_IMAGE, KIND_MEDIA}
@@ -232,11 +236,7 @@ def test_json_fora_da_forma_vira_ausencia(raw: object) -> None:
 
 
 def test_codecs_de_audio_sao_os_da_allowlist_do_media_mill() -> None:
-    assert {codec.value for codec in AudioCodec} == set().union(*probe._AUDIO_CODECS.values())
-
-
-def values(enum: type[StrEnum]) -> set[str]:
-    return {member.value for member in enum}
+    assert values(AudioCodec) == set().union(*probe._AUDIO_CODECS.values())
 
 
 def test_formatos_de_imagem_cobrem_entrada_e_saida_da_v1() -> None:

@@ -106,6 +106,7 @@ def comparison_as_json(comparison: ItemComparison) -> dict[str, object]:
 
 
 def comparison_from_json(raw: object) -> ItemComparison | None:
+    """Fronteira de confiança do JSON do executor ou do banco: o que foge da forma vira `None`."""
     if not isinstance(raw, dict):
         return None
     kind = raw.get("kind")
@@ -150,9 +151,12 @@ class _Fields:
 
     def choice[E: StrEnum](self, key: str, enum: type[E]) -> E:
         value = self._raw[key]
-        if not isinstance(value, str) or value not in {member.value for member in enum}:
+        if not isinstance(value, str):
             raise _InvalidFieldError
-        return enum(value)
+        try:
+            return enum(value)
+        except ValueError:
+            raise _InvalidFieldError from None
 
     def absent(self, key: str) -> bool:
         return self._raw[key] is None
