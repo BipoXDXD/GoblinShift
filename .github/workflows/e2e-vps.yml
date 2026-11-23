@@ -1,8 +1,9 @@
 name: Jornadas na VPS
 
-# Depois do deploy (chamado pelo job vps-smoke do ci.yml) e à mão (workflow_dispatch): a borda da
-# SPA (scripts/check-spa-edge.sh) e as jornadas só de leitura (web/e2e/specs/vps.spec.ts) contra o
-# site no ar, no Chromium e no Firefox. Só GET: nada muda na conta nem no servidor.
+# Depois de cada release do Coolify (chamado por e2e-vps-pos-release.yml, gatilho workflow_run) e
+# à mão (workflow_dispatch, só da main): a borda da SPA (scripts/check-spa-edge.sh) e as jornadas
+# só de leitura (web/e2e/specs/vps.spec.ts) contra o site no ar, no Chromium e no Firefox. Só GET:
+# nada muda na conta nem no servidor.
 #
 # Sem conta, rodam as jornadas anônimas. Com o secret E2E_VPS_API_KEY no environment production
 # (de uma conta de teste que já aceitou os termos; a mesma chave da jornada com escrita, em
@@ -30,6 +31,10 @@ concurrency:
 jobs:
   vps:
     name: Borda e jornadas de leitura
+    # Job com a chave de produção: só na main, como a jornada com escrita e o deploy. Vale para o
+    # dispatch e para a chamada por workflow_call, cujo github.ref é o do chamador (no workflow_run
+    # do e2e-vps-pos-release.yml, a branch padrão). Um dispatch de outra branch fica `skipped`.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     # O environment dá acesso ao secret opcional; as regras de proteção dele valem aqui também.
     environment: production
@@ -46,8 +51,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.nvmrc
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          # Sem cache: o de uma branch restauraria node_modules alheio antes do Playwright com a
+          # chave no env. O setup-node v5+ liga o cache sozinho pelo packageManager do package.json.
+          package-manager-cache: false
       - run: npm ci
         working-directory: web
       - name: Chromium, Firefox e dependências do sistema
