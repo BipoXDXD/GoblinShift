@@ -6,7 +6,7 @@ geração e `traceparent` nunca saem daqui.
 """
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -72,6 +72,16 @@ from goblinshift.runs.acceptance import (
     parse_idempotency_key,
     preset_run_hash,
     validate_run,
+)
+from goblinshift.runs.comparison import (
+    AudioCodec,
+    AudioFormat,
+    ImageComparison,
+    ImageFormat,
+    ItemComparison,
+    MediaComparison,
+    PdfComparison,
+    TableComparison,
 )
 from goblinshift.runs.cursor import CursorScopeMismatchError, InvalidCursorError
 from goblinshift.runs.formula_cells import MAX_COLUMNS, MAX_REPORTED_COLUMN_NAME_CHARS, FormulaCells
@@ -198,6 +208,58 @@ class FormulaCellsResponse(BaseModel):
     more_columns: int = Field(ge=0)
 
 
+class TableComparisonResponse(BaseModel):
+    """CSV Janitor: registros lidos → escritos."""
+
+    kind: Literal["table"]
+    records_before: int = Field(ge=0)
+    records_after: int = Field(ge=0)
+
+
+class PdfComparisonResponse(BaseModel):
+    """PDF Press: páginas da entrada → da saída."""
+
+    kind: Literal["pdf"]
+    pages_before: int = Field(ge=0)
+    pages_after: int = Field(ge=0)
+
+
+class ImageComparisonResponse(BaseModel):
+    """Image Forge: dimensões, formato e tamanho em bytes."""
+
+    kind: Literal["image"]
+    width_before: int = Field(ge=1)
+    height_before: int = Field(ge=1)
+    width_after: int = Field(ge=1)
+    height_after: int = Field(ge=1)
+    format_before: ImageFormat
+    format_after: ImageFormat
+    bytes_before: int = Field(ge=0)
+    # Tamanho da saída medido pelo worker na coleta (ADR 059); nulo se não houve medida.
+    bytes_after: int | None = Field(ge=0)
+
+
+class MediaComparisonResponse(BaseModel):
+    """Media Mill: vídeo → miniatura e áudio de origem → extraído; cada par vem inteiro ou nulo."""
+
+    kind: Literal["media"]
+    width_before: int = Field(ge=1)
+    height_before: int = Field(ge=1)
+    width_after: int | None = Field(ge=1)
+    height_after: int | None = Field(ge=1)
+    audio_before: AudioCodec | None
+    audio_after: AudioFormat | None
+
+
+ItemComparisonResponse = Annotated[
+    TableComparisonResponse
+    | PdfComparisonResponse
+    | ImageComparisonResponse
+    | MediaComparisonResponse,
+    Field(discriminator="kind"),
+]
+
+
 class RunItemResponse(BaseModel):
     """Desfecho de uma entrada: códigos do catálogo e contagens, sem valor do conteúdo."""
 
@@ -214,6 +276,8 @@ class RunItemResponse(BaseModel):
     duplicate_of: int | None
     # Só com o aviso CSV_FORMULA_CELLS; nulo sem ele e depois de 30 dias, como `counts`.
     formula_cells: FormulaCellsResponse | None
+    # Antes → depois que a receita já mede (2.2); nulo sem dado e depois de 30 dias, como `counts`.
+    comparison: ItemComparisonResponse | None
 
 
 class RunDetailResponse(RunResponse):
@@ -531,6 +595,7 @@ def get_run_route(
                 counts=item.counts,
                 duplicate_of=item.duplicate_of,
                 formula_cells=_formula_cells(item.formula_cells),
+                comparison=_comparison(item.comparison),
             )
             for item in detail.items
         ],
@@ -672,6 +737,44 @@ def _formula_cells(summary: FormulaCells | None) -> FormulaCellsResponse | None:
         columns=[FormulaColumnResponse(name=c.name, cells=c.cells) for c in summary.columns],
         more_columns=summary.more_columns,
     )
+
+
+def _comparison(comparison: ItemComparison | None) -> ItemComparisonResponse | None:
+    match comparison:
+        case None:
+            return None
+        case TableComparison():
+            return TableComparisonResponse(
+                kind="table",
+                records_before=comparison.records_before,
+                records_after=comparison.records_after,
+            )
+        case PdfComparison():
+            return PdfComparisonResponse(
+                kind="pdf", pages_before=comparison.pages_before, pages_after=comparison.pages_after
+            )
+        case ImageComparison():
+            return ImageComparisonResponse(
+                kind="image",
+                width_before=comparison.width_before,
+                height_before=comparison.height_before,
+                width_after=comparison.width_after,
+                height_after=comparison.height_after,
+                format_before=comparison.format_before,
+                format_after=comparison.format_after,
+                bytes_before=comparison.bytes_before,
+                bytes_after=comparison.bytes_after,
+            )
+        case MediaComparison():
+            return MediaComparisonResponse(
+                kind="media",
+                width_before=comparison.width_before,
+                height_before=comparison.height_before,
+                width_after=comparison.width_after,
+                height_after=comparison.height_after,
+                audio_before=comparison.audio_before,
+                audio_after=comparison.audio_after,
+            )
 
 
 def _run_response(view: RunView) -> RunResponse:
