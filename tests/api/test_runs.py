@@ -1523,8 +1523,30 @@ IMAGE_COMPARISON = {
 }
 
 
+TABLE_COMPARISON = {"kind": "table", "records_before": 10, "records_after": 7}
+PDF_COMPARISON = {"kind": "pdf", "pages_before": 12, "pages_after": 3}
+# Vídeo sem miniatura: o par de dimensões de saída é nulo.
+MEDIA_COMPARISON = {
+    "kind": "media",
+    "width_before": 1920,
+    "height_before": 1080,
+    "width_after": None,
+    "height_after": None,
+    "audio_before": "aac",
+    "audio_after": "wav",
+}
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [TABLE_COMPARISON, PDF_COMPARISON, IMAGE_COMPARISON, MEDIA_COMPARISON],
+    ids=["table", "pdf", "image", "media"],
+)
 def test_detalhe_traz_a_comparacao_por_item(
-    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    stored: dict[str, object],
 ) -> None:
     account = Account(factory)
     run_id = insert_finished_run(factory, account.id, BASE_TIME)
@@ -1532,23 +1554,13 @@ def test_detalhe_traz_a_comparacao_por_item(
         "warnings": [],
         "counts": {},
         "duplicate_of": None,
-        "comparison": IMAGE_COMPARISON,
+        "comparison": stored,
     }
     with_items(factory, storage, account.id, run_id, [{"outcome": "ok", "details": details}])
 
     [item] = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()["items"]
 
-    assert item["comparison"] == {
-        "kind": "image",
-        "width_before": 2400,
-        "height_before": 1600,
-        "width_after": 1200,
-        "height_after": 800,
-        "format_before": "jpeg",
-        "format_after": "png",
-        "bytes_before": 900,
-        "bytes_after": 300,
-    }
+    assert item["comparison"] == stored
 
 
 def test_detalhe_sem_comparacao_responde_nulo(
