@@ -7,6 +7,7 @@ import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import {
+  isNotFound,
   isStaleRevision,
   PRESETS_QUERY_KEY,
   replacePreset,
@@ -15,7 +16,6 @@ import {
 } from "../presets/api";
 import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
-import { storePresetSource } from "./parameterSource";
 
 const T = TEXT.presets;
 
@@ -35,8 +35,11 @@ export function UpdatePreset({ draft, preset }: UpdatePresetProps): ReactElement
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const update = useUpdate();
-  // Repetir o mesmo `If-Match` vencido só daria outro 412: bloqueado até fechar e reabrir.
-  const blocked = update.isPending || (update.error !== null && isStaleRevision(update.error));
+  // Repetir daria o mesmo erro (412 com o `If-Match` vencido, 404 com o preset excluído): bloqueado
+  // até fechar e reabrir.
+  const blocked =
+    update.isPending ||
+    (update.error !== null && (isStaleRevision(update.error) || isNotFound(update.error)));
 
   // Fecha sempre, até com o pedido em voo (o navegador pode ter fechado o <dialog>).
   const close = (): void => {
@@ -109,8 +112,9 @@ interface UpdateRequest {
 }
 
 /**
- * Grava a origem com o preset devolvido e relê só a lista (`exact`): a origem já está atual, e
- * relê-la seria um refetch à toa, que ainda reprocessaria o formulário com o mesmo dado.
+ * Relê só a lista (`exact`). A origem da Bancada aberta fica como está: o `current` já guarda o
+ * preset devolvido, e relê-la seria um refetch à toa. Ela não sobrevive à Bancada (`gcTime: 0`),
+ * então a próxima abertura já lê a revisão nova.
  */
 function useUpdate() {
   const client = useApiClient();
@@ -118,8 +122,7 @@ function useUpdate() {
   return useMutation({
     mutationFn: ({ preset, replacement }: UpdateRequest) =>
       replacePreset(client, preset, replacement),
-    onSuccess: async (updated) => {
-      storePresetSource(queryClient, updated);
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY, exact: true });
     },
   });

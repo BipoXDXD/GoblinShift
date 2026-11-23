@@ -650,6 +650,76 @@ describe("Bancada: Atualizar preset", () => {
     ).toEqual(['"4"', '"5"']);
   });
 
+  it("depois de um 412, reaberto pela Oficina, mostra a versão do servidor e manda a revisão dela", async () => {
+    let stored = presetBody({ revision: 4 });
+    const { api, user } = setup(PRESET_ROUTE, {
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+      "GET /api/v1/presets": () => jsonResponse({ data: [stored] }),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(stored),
+      [PUT_PRESET]: (request) => {
+        if (request.headers.get("If-Match") !== `"${String(stored.revision)}"`) {
+          return problemResponse(412, "PRECONDITION_FAILED");
+        }
+        stored = presetBody({ revision: stored.revision + 1 });
+        return jsonResponse(stored);
+      },
+    });
+    await screen.findByRole("button", { name: "Atualizar preset Clientes do mês" });
+    // Outra aba muda o preset depois de a Bancada lê-lo.
+    stored = presetBody({
+      revision: 7,
+      parameters: { ...stored.parameters, output_delimiter: "," },
+    });
+    await confirmUpdate(user);
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    await within(dialog).findByText(/O preset mudou em outra aba ou dispositivo/);
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    await user.click(screen.getByRole("link", { name: "Oficina" }));
+    await user.click(
+      await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+    ).toHaveValue(",");
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+    expect(
+      sent(api.requests, PUT_PRESET).map((request) => request.headers.get("If-Match")),
+    ).toEqual(['"4"', '"7"']);
+  });
+
+  it("reaberta pela Oficina depois de o preset mudar no servidor, a Bancada lê a versão nova", async () => {
+    let stored = presetBody({ revision: 4 });
+    const { api, user } = setup(PRESET_ROUTE, {
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+      "GET /api/v1/presets": () => jsonResponse({ data: [stored] }),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(stored),
+      [PUT_PRESET]: nextRevision,
+    });
+    await screen.findByRole("button", { name: "Atualizar preset Clientes do mês" });
+    await user.click(screen.getByRole("link", { name: "Oficina" }));
+    await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" });
+
+    stored = presetBody({
+      revision: 9,
+      parameters: { ...stored.parameters, output_delimiter: "," },
+    });
+    await user.click(
+      screen.getByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+    ).toHaveValue(",");
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+    expect(
+      sent(api.requests, PUT_PRESET).map((request) => request.headers.get("If-Match")),
+    ).toEqual(['"9"']);
+  });
+
   it("depois de atualizar, o foco volta ao Atualizar preset", async () => {
     const { user } = setup(PRESET_ROUTE, { [PUT_PRESET]: nextRevision });
 
@@ -693,6 +763,20 @@ describe("Bancada: Atualizar preset", () => {
       "aria-disabled",
       "false",
     );
+  });
+
+  it("depois de um 404, Confirmar fica bloqueado e um clique não manda outro PUT", async () => {
+    const { api, user } = setup(PRESET_ROUTE, {
+      [PUT_PRESET]: () => problemResponse(404, "NOT_FOUND"),
+    });
+
+    await confirmUpdate(user);
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    await within(dialog).findByRole("alert");
+    const confirm = within(dialog).getByRole("button", { name: "Atualizar preset" });
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    await user.click(confirm);
+    expect(sent(api.requests, PUT_PRESET)).toHaveLength(1);
   });
 
   it("revisão vencida (412) avisa no diálogo, que continua aberto", async () => {

@@ -641,7 +641,7 @@ describe("Oficina: renomear preset", () => {
         return jsonResponse(stored);
       },
     });
-    // A primeira visita à Bancada deixa a origem (revisão 1) no cache.
+    // A primeira visita à Bancada lê a origem com a revisão 1.
     await user.click(
       await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
     );

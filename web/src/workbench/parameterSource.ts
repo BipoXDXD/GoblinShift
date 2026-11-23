@@ -1,4 +1,4 @@
-import { useQuery, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -49,6 +49,12 @@ export function sourceFromSearch(search: URLSearchParams): SourceRef | null {
   return null;
 }
 
+/**
+ * A origem não sobrevive à Bancada (`gcTime: 0`): cada abertura lê o preset ou a execução da API.
+ * O formulário e o "Atualizar preset" só a leem na montagem, então uma origem em cache, vencida por
+ * um `PUT` ou por outra aba, abriria com parâmetros e revisão velhos (e o próximo `PUT` daria 412).
+ * Enquanto a Bancada está aberta, ela observa a consulta e a entrada fica.
+ */
 export function useParameterSource(ref: SourceRef | null): UseQueryResult<ParameterSource> {
   const client = useApiClient();
   return useQuery({
@@ -63,17 +69,8 @@ export function useParameterSource(ref: SourceRef | null): UseQueryResult<Parame
     },
     enabled: ref !== null,
     retry: false,
+    gcTime: 0,
   });
-}
-
-/**
- * Grava, sem consultar a API, a origem do preset que um `PUT` devolveu. Uma invalidação só a marca
- * vencida, e a Bancada aberta depois dele montaria com o cache (revisão e parâmetros antigos), que
- * o refetch em segundo plano já não alcança: o formulário e o "Atualizar preset" só leem a origem
- * na montagem. A Bancada já aberta não remonta (a `key` dela vem da URL).
- */
-export function storePresetSource(queryClient: QueryClient, preset: Preset): void {
-  queryClient.setQueryData(presetSourceKey(preset.id), presetSource(preset));
 }
 
 function presetSourceKey(id: string): readonly unknown[] {

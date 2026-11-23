@@ -16,7 +16,6 @@ import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { TEXT } from "../text";
-import { storePresetSource } from "../workbench/parameterSource";
 import {
   isNotFound,
   isStaleRevision,
@@ -41,8 +40,8 @@ const T = TEXT.presets;
  * devolve ao mesmo botão depois do commit (WCAG 2.4.3). No 404 o item sai da lista com o Renomear
  * dentro, então o diálogo leva o foco a `goneFocus`, um alvo estável da seção, e não ao `<body>`.
  *
- * O sucesso também grava a origem da Bancada com o preset devolvido: aberta depois pelo preset,
- * ela começa com o nome e a revisão novos, e o "Atualizar preset" não tropeça num 412.
+ * A Bancada aberta depois pelo preset lê o nome e a revisão novos da API: a origem dela não fica
+ * em cache depois que ela fecha.
  */
 export function RenamePreset({
   preset,
@@ -111,7 +110,6 @@ export function RenamePreset({
       { preset, draft: { name: finalName, recipe_id, recipe_version, parameters } },
       {
         onSuccess: (renamed) => {
-          storePresetSource(queryClient, renamed);
           setMessage(T.renamed(renamed.name));
           closeAndRelist();
         },
@@ -196,7 +194,7 @@ interface RenameRequest {
   readonly draft: PresetReplacement;
 }
 
-/** A releitura da lista (cobre também `[...PRESETS_QUERY_KEY, id]`) fica com quem fecha o diálogo. */
+/** A releitura da lista fica com quem fecha o diálogo. */
 function useRename() {
   const client = useApiClient();
   return useMutation({
