@@ -12,7 +12,8 @@ Passos:
    aqui (disco cheio, storage ilegível) é infraestrutura: falha transitória na hora.
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
-   `processing`.
+   `processing`. O `start` pode passar do lease (prazo do executor-ctl): enquanto ele bloqueia,
+   uma thread renova (`BackgroundRenewal`), e o fencing perdido nela leva ao abandono.
 3. `supervise`: renova o lease a cada terço do prazo, grava o progresso, aplica o prazo vencido
    e, se a Run foi para `stopping` (cancelamento ou prazo) ou a tentativa passou do teto de
    duração, pede `stop` ao Runner. Runner fora do ar não interrompe a espera: o lease segue
@@ -43,6 +44,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from typing import BinaryIO
 
@@ -96,6 +98,7 @@ from goblinshift.runs.store import (
 )
 from goblinshift.runs.tables import attempt, run, run_input, run_output
 from goblinshift.runs.worker import attempt_event
+from goblinshift.runs.worker.background_renewal import BackgroundRenewal, next_renewal_wait
 from goblinshift.runs.worker.candidate_writer import CandidateWriter, StoredCandidate
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import (
@@ -412,7 +415,7 @@ class Coordinator:
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
         try:
-            self._runner.start(claimed.attempt_id, claimed.executor_image)
+            self.start_executor(claimed)
         except RunnerError as error:
             # Toda recusa do start é de infraestrutura, inclusive imagem fora da allowlist do
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
@@ -526,6 +529,16 @@ class Coordinator:
 
         return run_transaction(self._factory, check)
 
+    def start_executor(self, claimed: ClaimedAttempt) -> None:
+        """Inicia o executor com o lease renovado em paralelo: o `start` pode passar do lease."""
+        renewal = BackgroundRenewal(
+            partial(self._try_renew, claimed),
+            every=self._config.renew_every,
+            retry_every=self._config.renew_retry_every,
+        )
+        with renewal:
+            self._runner.start(claimed.attempt_id, claimed.executor_image)
+
     def record_start(self, claimed: ClaimedAttempt) -> None:
         def record(session: Session) -> None:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
@@ -548,9 +561,10 @@ class Coordinator:
             now = time.monotonic()
             if now >= next_renewal:
                 renewed = self._try_renew(claimed)
-                renewal_failed = renewed is None
-                wait = (
-                    self._config.renew_retry_every if renewal_failed else self._config.renew_every
+                wait = next_renewal_wait(
+                    renewed,
+                    every=self._config.renew_every,
+                    retry_every=self._config.renew_retry_every,
                 )
                 next_renewal = now + wait.total_seconds()
                 if renewed is Status.STOPPING:

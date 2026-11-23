@@ -15,8 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import psycopg
 import pytest
@@ -324,9 +323,11 @@ class _RunningUntilRenewed:
         return ExecutorStatus(ExecutorPhase.EXITED, exit_code=0)
 
 
-def worker_without_database(runner: object) -> Coordinator:
+def worker_without_database(
+    runner: object, *, lease: timedelta = timedelta(seconds=0.3)
+) -> Coordinator:
     config = CoordinatorConfig(
-        lease=timedelta(seconds=0.3),
+        lease=lease,
         status_poll=timedelta(seconds=0.001),
         jitter=lambda: MIN_RETRY_JITTER,
     )
@@ -339,13 +340,20 @@ def worker_without_database(runner: object) -> Coordinator:
 
 
 def attempt_without_database() -> ClaimedAttempt:
-    fields: dict[str, Any] = {
-        "run_id": uuid.uuid4(),
-        "attempt_id": uuid.uuid4(),
-        "generation": 1,
-        "number": 1,
-    }
-    return cast(ClaimedAttempt, SimpleNamespace(**fields))
+    return ClaimedAttempt(
+        run_id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        generation=1,
+        number=1,
+        recipe_id="image.resize",
+        recipe_version=1,
+        executor_image="registry.example/executor@sha256:" + "0" * 64,
+        parameters={},
+        input_upload_ids=(),
+        traceparent=None,
+        queue_wait_ms=0,
+    )
 
 
 def test_pool_esgotado_na_renovacao_tambem_e_transitorio(
