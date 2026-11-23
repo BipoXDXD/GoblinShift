@@ -9,24 +9,35 @@ from pathlib import Path
 import pytest
 
 from executor_ctl.docker_cli import (
+    ContainerNameConflictError,
     ContainerRunningError,
     ContainerStatus,
     DockerCli,
     DockerUnavailableError,
+    State,
 )
 from executor_ctl.profile import IoLimits
-from executor_ctl.service import AREA_LOCK_WAIT_S, AreaBusyError, ExecutorService
+from executor_ctl.service import (
+    AREA_LOCK_WAIT_S,
+    AreaBusyError,
+    ExecutorService,
+    ForeignContainerError,
+)
 from executor_ctl.workarea import WorkAreaDirtyError
 
-from .conftest import make_config
+from .conftest import container_id, make_config, owned_status
 from .counting_docker import CountingDocker
+from .labeled_docker import CONTAINER_ID, LabeledDocker
 from .stuck_docker import StuckDocker, holding_area
 
 pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
 HOLDER = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 LATECOMER = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abce")
+OTHER_ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcf")
+HOLDER_NAME = f"gs-exec-{HOLDER}"
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
+OTHER_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "f" * 64
 # Curto para o teste; o de produção é AREA_LOCK_WAIT_S.
 TEST_LOCK_WAIT_S = 0.2
 # Prazo do lock nos testes do `stop`, que só desiste dele quando a área está ocupada.
@@ -118,7 +129,7 @@ class FailingDocker(DockerCli):
         if failure == "docker_unavailable":
             raise DockerUnavailableError("daemon fora")
         if failure == "still_running":
-            return ContainerStatus("running", None, False, None, None)
+            return owned_status("running", HOLDER)
         return ContainerStatus.absent()
 
     def run(self, arguments: list[str]) -> None:
@@ -160,43 +171,43 @@ def test_operacao_que_falha_dentro_do_lock_o_libera(
 def test_stop_de_container_created_remove_e_responde_absent(tmp_path: Path) -> None:
     # O runtime falhou e o `docker run --detach` deixou o container em `created`: sem o rm, ele
     # seguiria aparecendo como existente e a área nunca seria liberada.
-    docker = CountingDocker("created")
+    docker = CountingDocker("created", HOLDER)
     service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
 
     status = service.stop(HOLDER, 0)
 
     assert status.state == "absent"
-    assert docker.calls == ["stop", "inspect", "inspect", "rm"]
+    assert docker.calls == ["inspect", "stop", "inspect", "inspect", "rm"]
 
 
 def test_stop_de_container_rodando_nao_remove(tmp_path: Path) -> None:
-    docker = CountingDocker("running")
+    docker = CountingDocker("running", HOLDER)
     service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
 
     status = service.stop(HOLDER, 0)
 
     assert status.state == "exited"
-    assert docker.calls == ["stop", "inspect"]
+    assert docker.calls == ["inspect", "stop", "inspect"]
 
 
 class CreatedThenStartedDocker(CountingDocker):
-    """O primeiro `inspect` vê `created`; antes do segundo, um start concorrente o iniciou."""
+    """Depois do stop, o `inspect` vê `created`; antes da releitura, um start o iniciou."""
 
     def inspect(self, name: str) -> ContainerStatus:
         status = super().inspect(name)
-        if self.state == "created":
+        if self.state == "created" and "stop" in self.calls:
             self.state = "running"
         return status
 
 
 def test_stop_reinspeciona_sob_o_lock(tmp_path: Path) -> None:
-    docker = CreatedThenStartedDocker("created")
+    docker = CreatedThenStartedDocker("created", HOLDER)
     service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
 
     status = service.stop(HOLDER, 0)
 
     assert status.state == "running"
-    assert docker.calls == ["stop", "inspect", "inspect"]
+    assert docker.calls == ["inspect", "stop", "inspect", "inspect"]
 
 
 class CreatedWhileStuckDocker(StuckDocker):
@@ -204,7 +215,7 @@ class CreatedWhileStuckDocker(StuckDocker):
 
     def inspect(self, name: str) -> ContainerStatus:
         super().inspect(name)
-        return ContainerStatus("created", None, False, None, None)
+        return owned_status("created", HOLDER)
 
     def stop(self, name: str, grace_s: int) -> None:
         self.calls.append(f"stop {name}")
@@ -220,16 +231,22 @@ def test_stop_nao_remove_created_com_start_em_curso(tmp_path: Path) -> None:
         status = service.stop(HOLDER, 0)
 
     assert status.state == "created"
-    # Lista exata: o `rm` seria gravado como "rm <nome>", e só ela prova que não houve remoção.
-    name = f"gs-exec-{HOLDER}"
-    assert docker.calls == [f"inspect {name}", f"stop {name}", f"inspect {name}"]
+    # Lista exata: o `rm` seria gravado como "rm <alvo>", e só ela prova que não houve remoção.
+    # A primeira é o inspect do start travado; o stop lê pelo nome e age pelo `Id` lido.
+    target = container_id(HOLDER)
+    assert docker.calls == [
+        f"inspect {HOLDER_NAME}",
+        f"inspect {HOLDER_NAME}",
+        f"stop {target}",
+        f"inspect {target}",
+    ]
 
 
 class RecordingDocker(CountingDocker):
     """Guarda os argumentos do `docker run` para conferir o perfil que o serviço montou."""
 
     def __init__(self) -> None:
-        super().__init__("absent")
+        super().__init__("absent", HOLDER)
         self.run_arguments: list[str] = []
 
     def run(self, arguments: list[str]) -> None:
@@ -260,3 +277,95 @@ def test_sem_io_limits_o_servico_nao_passa_dispositivo(tmp_path: Path) -> None:
 
     assert docker.run_arguments
     assert not [arg for arg in docker.run_arguments if arg.startswith("--device")]
+
+
+def run_operation(service: ExecutorService, operation: str) -> None:
+    if operation == "start":
+        service.start(HOLDER, IMAGE)
+    elif operation == "status":
+        service.status(HOLDER)
+    elif operation == "stop":
+        service.stop(HOLDER, 0)
+    else:
+        service.remove(HOLDER)
+
+
+@pytest.mark.parametrize("label", [str(OTHER_ATTEMPT), None], ids=["outra_tentativa", "sem_label"])
+@pytest.mark.parametrize("operation", ["start", "status", "stop", "remove"])
+def test_conteiner_alheio_e_recusado_nas_quatro_operacoes(
+    tmp_path: Path, operation: str, label: str | None
+) -> None:
+    # Outro projeto do host, ou um engano de operador, deu ao container o nome da tentativa.
+    docker = LabeledDocker("exited", label, IMAGE)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+    work_dir = tmp_path / "exec-work" / str(HOLDER)
+    (work_dir / "inputs").mkdir(parents=True)
+
+    with pytest.raises(ForeignContainerError):
+        run_operation(service, operation)
+
+    assert docker.calls == [f"inspect {HOLDER_NAME}"]
+    assert (work_dir / "inputs").is_dir()
+
+
+def test_start_nao_adota_conteiner_da_tentativa_com_outra_imagem(tmp_path: Path) -> None:
+    docker = LabeledDocker("running", str(HOLDER), OTHER_IMAGE)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+
+    with pytest.raises(ForeignContainerError):
+        service.start(HOLDER, IMAGE)
+
+    assert docker.calls == [f"inspect {HOLDER_NAME}"]
+
+
+def test_start_repetido_adota_o_proprio_conteiner(tmp_path: Path) -> None:
+    docker = LabeledDocker("running", str(HOLDER), IMAGE)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+
+    status = service.start(HOLDER, IMAGE)
+
+    assert status.state == "running"
+    assert docker.calls == [f"inspect {HOLDER_NAME}"]
+
+
+@pytest.mark.parametrize(
+    ("operation", "state", "expected"),
+    [
+        (
+            "stop",
+            "running",
+            [f"inspect {HOLDER_NAME}", f"stop {CONTAINER_ID}", f"inspect {CONTAINER_ID}"],
+        ),
+        ("remove", "exited", [f"inspect {HOLDER_NAME}", f"rm {CONTAINER_ID}"]),
+    ],
+)
+def test_stop_e_remove_agem_pelo_id_do_conteiner_inspecionado(
+    tmp_path: Path, operation: str, state: State, expected: list[str]
+) -> None:
+    # Entre o inspect e o stop/rm, o nome pode passar a outro container; o `Id` não muda de dono.
+    docker = LabeledDocker(state, str(HOLDER), IMAGE)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+
+    run_operation(service, operation)
+
+    assert docker.calls == expected
+
+
+class NameTakenOnRunDocker(LabeledDocker):
+    """Entre o inspect e o run do start, um container alheio tomou o nome da tentativa."""
+
+    def run(self, arguments: list[str]) -> None:
+        self.calls.append("run")
+        self.state = "running"
+        raise ContainerNameConflictError("Conflict. The container name is already in use")
+
+
+def test_corrida_no_start_com_nome_tomado_por_alheio_e_recusada(tmp_path: Path) -> None:
+    docker = NameTakenOnRunDocker("absent", None, IMAGE)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+    (tmp_path / "exec-work" / str(HOLDER) / "inputs").mkdir(parents=True)
+
+    with pytest.raises(ForeignContainerError):
+        service.start(HOLDER, IMAGE)
+
+    assert docker.calls == [f"inspect {HOLDER_NAME}", "run", f"inspect {HOLDER_NAME}"]

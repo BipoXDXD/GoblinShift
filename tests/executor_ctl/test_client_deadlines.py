@@ -43,14 +43,14 @@ def service_with(tmp_path: Path, docker: DockerCli) -> ExecutorService:
 
 def start_calls(tmp_path: Path) -> list[str]:
     """Chamadas do `start` no pior caminho: container ausente, criado agora."""
-    docker = CountingDocker("absent")
+    docker = CountingDocker("absent", ATTEMPT)
     service_with(tmp_path, docker).start(ATTEMPT, IMAGE)
     return docker.calls
 
 
 def remove_calls(tmp_path: Path) -> list[str]:
     """Chamadas do `remove` no pior caminho: container parado, removido agora."""
-    docker = CountingDocker("exited")
+    docker = CountingDocker("exited", ATTEMPT)
     service_with(tmp_path, docker).remove(ATTEMPT)
     return docker.calls
 

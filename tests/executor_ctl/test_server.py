@@ -40,6 +40,7 @@ from executor_ctl.server import (
 from executor_ctl.service import ExecutorService
 
 from .conftest import TEST_READ_TIMEOUT_S, make_config, running_server
+from .labeled_docker import LabeledDocker
 
 pytestmark = pytest.mark.host_python
 
@@ -963,16 +964,31 @@ main_module.load_config = lambda _path: config
 main_module._group_id = {"gs-exec": 61001, "gs-ctl": os.getgid()}.get
 sys.exit(main_module.main(["executor-ctl.json"]))
 """
-# `docker stop` que só termina quando o teste solta; o `inspect` depois dele vê o container parado.
-_SLOW_STOP_DOCKER = """#!/bin/sh
+# O `inspect` do docker falso: o container da própria tentativa (label e imagem certas), parado.
+_SLOW_STOP_INSPECT = json.dumps(
+    [
+        {
+            "Id": "e" * 64,
+            "Config": {"Image": ALLOWED, "Labels": {profile.ATTEMPT_LABEL: ATTEMPT}},
+            "State": {
+                "Status": "exited",
+                "ExitCode": 0,
+                "OOMKilled": False,
+                "StartedAt": "0001-01-01T00:00:00Z",
+                "FinishedAt": "0001-01-01T00:00:00Z",
+            },
+        }
+    ]
+)
+# `docker stop` que só termina quando o teste solta.
+_SLOW_STOP_DOCKER = f"""#!/bin/sh
 case "$1" in
   stop)
     : > "$DOCKER_ENTERED"
     while [ ! -e "$DOCKER_RELEASE" ]; do sleep 0.01; done
     ;;
   inspect)
-    echo '[{"State": {"Status": "exited", "ExitCode": 0, "OOMKilled": false,
-      "StartedAt": "0001-01-01T00:00:00Z", "FinishedAt": "0001-01-01T00:00:00Z"}}]'
+    echo '{_SLOW_STOP_INSPECT}'
     ;;
   *) exit 1 ;;
 esac
@@ -1057,3 +1073,14 @@ def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
             process.wait(_PROCESS_GUARD_S)
         if process.stdout is not None:
             process.stdout.close()
+
+
+def test_conteiner_alheio_vira_409_foreign_container(tmp_path: Path, socket_dir: Path) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    docker = LabeledDocker("exited", None, ALLOWED)
+
+    with running_server(config, docker) as socket:
+        response = call(socket, "GET", f"/v1/attempts/{ATTEMPT}")
+
+    assert response.status == 409
+    assert response.body["error"] == "foreign_container"

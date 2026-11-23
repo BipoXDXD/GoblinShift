@@ -82,6 +82,23 @@ Depois de preflight válido, mantém o comportamento de atualização do pacote/
 e serviço; por isso **executar o instalador pode reiniciar o executor-ctl** e
 exige a transição drenada abaixo. Esta entrega não executa o instalador.
 
+## Container alheio com o nome da tentativa (409 `foreign_container`)
+
+O ctl só age sobre o container que ele mesmo criou: nome `gs-exec-<id>`, label
+`goblinshift.attempt=<id>` e, no `start`, a imagem pedida. Um container com o
+nome da tentativa sem essa label (de outro projeto do host, ou de um engano de
+operador) faz `start`, `status`, `stop` e `remove` responderem 409
+`foreign_container` sem tocá-lo, e o journal registra um aviso com o nome.
+
+O que fazer (operador, no host): inspecionar antes de qualquer coisa,
+`docker inspect --format '{{.Config.Image}} {{json .Config.Labels}} {{.State.Status}}' gs-exec-<id>`,
+descobrir de quem é e, se for mesmo sobra ou engano, removê-lo à mão com
+`docker rm gs-exec-<id>` (ou `docker stop` antes, se roda). **Nunca pelo ctl**:
+o ctl não tem como saber de quem é, e por isso recusa. Enquanto o nome estiver
+tomado, a tentativa não sobe: para o worker a recusa é `RunnerError` com o
+código `foreign_container`, a tentativa termina como falha transitória e a
+manutenção não toca no container.
+
 ## Migração futura sob passagem exclusiva do operador
 
 1. Qualificar a composição final de leitor e receptor compartilhado, versão/hash

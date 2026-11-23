@@ -1,22 +1,28 @@
 """Docker de teste que só conta: mede quantas chamadas ao CLI cada operação do serviço faz."""
 
+import uuid
+
 from executor_ctl.docker_cli import ContainerStatus, DockerCli, State
+
+from .conftest import owned_status
 
 
 class CountingDocker(DockerCli):
-    """Docker sem processo: devolve o estado pedido pelo teste e conta cada chamada ao CLI."""
+    """Docker sem processo: devolve o estado pedido pelo teste e conta cada chamada ao CLI.
 
-    def __init__(self, state: State) -> None:
+    O container é sempre o da tentativa `attempt_id` (label e imagem certas), para o serviço o
+    aceitar como seu.
+    """
+
+    def __init__(self, state: State, attempt_id: uuid.UUID) -> None:
         super().__init__(binary="docker-que-nao-roda")
         self.state: State = state
+        self.attempt_id = attempt_id
         self.calls: list[str] = []
 
     def inspect(self, name: str) -> ContainerStatus:
         self.calls.append("inspect")
-        if self.state == "absent":
-            return ContainerStatus.absent()
-        exit_code = 0 if self.state == "exited" else None
-        return ContainerStatus(self.state, exit_code, False, None, None)
+        return owned_status(self.state, self.attempt_id)
 
     def run(self, arguments: list[str]) -> None:
         self.calls.append("run")

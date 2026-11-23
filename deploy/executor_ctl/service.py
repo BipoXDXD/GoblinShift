@@ -35,6 +35,13 @@ class AreaBusyError(Exception):
     """Outra operação segura a área além do prazo; nada foi feito, repetir depois é seguro."""
 
 
+class ForeignContainerError(Exception):
+    """O container com o nome da tentativa não é dela: outra label, nenhuma, ou outra imagem.
+
+    O ctl não o adota, não o para nem o remove; o operador o inspeciona e remove à mão.
+    """
+
+
 class ExecutorService:
     def __init__(
         self,
@@ -63,7 +70,7 @@ class ExecutorService:
             self._observer.observe(attempt_id, image, self._config, policy)
         name = profile.container_name(attempt_id)
         with self._holding_area():
-            existing = self._docker.inspect(name)
+            existing = self._owned(attempt_id, self._docker.inspect(name), image=image)
             if existing.state != "absent":
                 return existing
             prepared = workarea.prepare_for_start(
@@ -80,9 +87,10 @@ class ExecutorService:
             try:
                 self._docker.run(arguments)
             except ContainerNameConflictError:
-                # Outro start da mesma tentativa venceu a corrida: adota o container dele.
-                _log.info("container já existia; adotado", extra={"attempt_id": str(attempt_id)})
-        return self._docker.inspect(name)
+                # Outro start da mesma tentativa venceu a corrida, ou um alheio tomou o nome: o
+                # inspect abaixo só adota o container se ele for desta tentativa.
+                _log.info("nome do container já em uso", extra={"attempt_id": str(attempt_id)})
+        return self._owned(attempt_id, self._docker.inspect(name), image=image)
 
     def image_present(self, image: str) -> bool:
         """Se o daemon tem a imagem; só das que a política autoriza.
@@ -94,21 +102,30 @@ class ExecutorService:
         return self._docker.image_present(image)
 
     def status(self, attempt_id: uuid.UUID) -> ContainerStatus:
-        return self._docker.inspect(profile.container_name(attempt_id))
+        return self._owned(attempt_id, self._docker.inspect(profile.container_name(attempt_id)))
 
     def stop(self, attempt_id: uuid.UUID, grace_s: int) -> ContainerStatus:
-        """Para o container; o que nunca iniciou (`created`) é removido e volta `absent`."""
+        """Para o container; o que nunca iniciou (`created`) é removido e volta `absent`.
+
+        Depois do inspect, tudo vai pelo `Id` lido: se o nome passar a outro container no meio,
+        o stop e o rm não o alcançam.
+        """
         if not 0 <= grace_s <= MAX_STOP_GRACE_S:
             raise ValueError(f"carência fora de 0..{MAX_STOP_GRACE_S} s")
-        name = profile.container_name(attempt_id)
-        self._docker.stop(name, grace_s)
-        stopped = self._docker.inspect(name)
+        identity = self._owned(
+            attempt_id, self._docker.inspect(profile.container_name(attempt_id))
+        ).identity
+        if identity is None:
+            # `_owned` só deixa passar identidade nula no `absent`: nada a parar.
+            return ContainerStatus.absent()
+        self._docker.stop(identity.container_id, grace_s)
+        stopped = self._docker.inspect(identity.container_id)
         if stopped.state != "created":
             return stopped
-        return self._remove_never_started(attempt_id, name, stopped)
+        return self._remove_never_started(attempt_id, identity.container_id, stopped)
 
     def _remove_never_started(
-        self, attempt_id: uuid.UUID, name: str, seen: ContainerStatus
+        self, attempt_id: uuid.UUID, container_id: str, seen: ContainerStatus
     ) -> ContainerStatus:
         """Remove o container que o runtime não iniciou, se nenhum start está em curso.
 
@@ -120,10 +137,10 @@ class ExecutorService:
         """
         try:
             with self._holding_area():
-                current = self._docker.inspect(name)
+                current = self._docker.inspect(container_id)
                 if current.state != "created":
                     return current
-                self._docker.remove(name)
+                self._docker.remove(container_id)
         except AreaBusyError:
             return seen
         _log.info("container que não iniciou removido", extra={"attempt_id": str(attempt_id)})
@@ -133,12 +150,41 @@ class ExecutorService:
         """Remove o container parado e apaga `<area>/<id>`; repetir é sucesso."""
         name = profile.container_name(attempt_id)
         with self._holding_area():
+            current = self._owned(attempt_id, self._docker.inspect(name))
             # Sem a consulta, o `docker rm` também recusaria; ela só evita depender do texto
             # do erro no caso comum. A corrida entre as duas chamadas o próprio rm cobre.
-            if self._docker.inspect(name).state == "running":
+            if current.state == "running":
                 raise ContainerRunningError("o container ainda roda; pare-o antes")
-            self._docker.remove(name)
+            # Pelo `Id` lido, como no stop; ausente, pelo nome, e repetir é sucesso.
+            target = name if current.identity is None else current.identity.container_id
+            self._docker.remove(target)
             workarea.remove_attempt_dir(self._config.work_area, attempt_id)
+
+    def _owned(
+        self, attempt_id: uuid.UUID, status: ContainerStatus, *, image: str | None = None
+    ) -> ContainerStatus:
+        """Devolve `status` se o container é desta tentativa; senão, ForeignContainerError.
+
+        O host é compartilhado: um container de outro projeto, ou de um engano de operador, com
+        o nome da tentativa não pode ser adotado, parado nem removido. Fail-closed: sem a label
+        conta como alheio. Com `image` (o start), a imagem também precisa ser a pedida.
+        """
+        identity = status.identity
+        if status.state == "absent" or (
+            identity is not None
+            and identity.attempt_label == str(attempt_id)
+            and (image is None or identity.image == image)
+        ):
+            return status
+        name = profile.container_name(attempt_id)
+        _log.warning(
+            "container %s não é desta tentativa; recusado",
+            name,
+            extra={"attempt_id": str(attempt_id)},
+        )
+        raise ForeignContainerError(
+            f"{name} existe, mas não é desta tentativa; inspecione e remova à mão"
+        )
 
     @contextmanager
     def _holding_area(self) -> Iterator[None]:

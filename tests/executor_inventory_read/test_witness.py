@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from executor_ctl import config, images, service
-from executor_ctl.docker_cli import ContainerStatus, DockerCli
+from executor_ctl.docker_cli import ContainerIdentity, ContainerStatus, DockerCli
 from executor_ctl.witness import (
     InstanceBinding,
     ObservationReceipt,
@@ -57,7 +57,9 @@ class DockerBoundary(DockerCli):
 
     def inspect(self, name: str) -> ContainerStatus:
         self.calls.append(("inspect", name))
-        return ContainerStatus("running", None, False, None, None)
+        # O container da própria tentativa: o ctl só adota o que tem a label dela e a imagem A.
+        identity = ContainerIdentity("e" * 64, str(ATTEMPT), A)
+        return ContainerStatus("running", None, False, None, None, identity)
 
     def run(self, arguments: list[str]) -> None:
         pytest.fail("unexpected Docker run boundary")

@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,14 +15,32 @@ import pytest
 
 from executor_ctl import images
 from executor_ctl.config import Config
-from executor_ctl.docker_cli import DockerCli
+from executor_ctl.docker_cli import ContainerIdentity, ContainerStatus, DockerCli, State
 from executor_ctl.server import MAX_CONNECTIONS, REQUEST_READ_DEADLINE_S, bind_server
 from executor_ctl.service import AREA_LOCK_WAIT_S, ExecutorService
+
+IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 
 
 def current_group() -> str:
     """Grupo primário de quem roda o teste; no host, o equivalente é o gs-exec."""
     return grp.getgrgid(os.getgid()).gr_name
+
+
+def container_id(attempt_id: uuid.UUID) -> str:
+    """`Id` de teste do container da tentativa: 64 hex, como o do Docker, e fixo por tentativa."""
+    return attempt_id.hex * 2
+
+
+def owned_status(state: State, attempt_id: uuid.UUID, image: str = IMAGE) -> ContainerStatus:
+    """Estado do container que o ctl criou: label da tentativa e a imagem pedida ao `docker run`."""
+    if state == "absent":
+        return ContainerStatus.absent()
+    identity = ContainerIdentity(
+        container_id=container_id(attempt_id), attempt_label=str(attempt_id), image=image
+    )
+    exit_code = 0 if state == "exited" else None
+    return ContainerStatus(state, exit_code, False, None, None, identity)
 
 
 def make_config(

@@ -14,6 +14,9 @@
 Erros: `{"error": "<código>", "detail": "..."}`. `start` e `remove` disputam o lock da área com
 prazo: estourado, respondem 503 `busy` sem tocar no Docker nem na área, e repetir é seguro.
 
+Container com o nome da tentativa sem a label dela (no `start`, também com outra imagem) é alheio:
+as quatro operações respondem 409 `foreign_container` sem tocá-lo.
+
 `stop` pode responder `absent`: o container que nunca iniciou (`created`) é removido, com o lock
 da área. Se um start em curso o segura além do prazo, `stop` devolve o `created` lido, sem erro.
 
@@ -45,7 +48,7 @@ from urllib.parse import unquote
 from .config import Config
 from .docker_cli import ContainerRunningError, ContainerStatus, DockerUnavailableError
 from .images import IMAGE_REFERENCE, ImageNotAllowedError
-from .service import MAX_STOP_GRACE_S, AreaBusyError, ExecutorService
+from .service import MAX_STOP_GRACE_S, AreaBusyError, ExecutorService, ForeignContainerError
 from .workarea import WorkAreaDirtyError, WorkDirMissingError
 
 MAX_BODY_BYTES = 1024
@@ -80,6 +83,7 @@ _ERRORS: tuple[tuple[type[Exception], HTTPStatus, str], ...] = (
     (WorkAreaDirtyError, HTTPStatus.CONFLICT, "work_area_dirty"),
     (WorkDirMissingError, HTTPStatus.CONFLICT, "work_dir_missing"),
     (ContainerRunningError, HTTPStatus.CONFLICT, "still_running"),
+    (ForeignContainerError, HTTPStatus.CONFLICT, "foreign_container"),
     (DockerUnavailableError, HTTPStatus.SERVICE_UNAVAILABLE, "docker_unavailable"),
     (AreaBusyError, HTTPStatus.SERVICE_UNAVAILABLE, "busy"),
 )
