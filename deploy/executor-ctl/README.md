@@ -86,9 +86,38 @@ o leitor da política do checkout, antes de `getent`, `groupadd`, `usermod`,
 política ausente/insegura/vazia/inválida interrompem com indicação de migração
 administrativa. Ele não cria configuração, diretórios de política ou uma lista
 vazia, não copia a política antiga e não tenta corrigir donos/permissões.
+Com `require_mount` ligado (o padrão), o preflight também confere a área com a
+regra do próprio ctl: `work_area` montada e com `nosuid,nodev,noexec` em
+`/proc/self/mountinfo` do host; sem isso, recusa e aponta `deploy/filesystems.sh`
+e a remontagem. Antes dos grupos, `/opt/goblinshift` e o prefixo do pacote
+precisam ser do root e sem escrita para grupo ou outros.
 Depois de preflight válido, mantém o comportamento de atualização do pacote/unit
 e serviço; por isso **executar o instalador pode reiniciar o executor-ctl** e
 exige a transição drenada abaixo. Esta entrega não executa o instalador.
+
+## Atualização desta versão (ordem)
+
+Esta versão separa o socket no grupo `gs-ctl` (D11), exige a área com
+`nosuid,nodev,noexec` (D12) e troca a unit. A ordem importa:
+
+1. **Deploy da app** (Coolify), com o `group_add` de worker e manutenção em
+   61001 e 61002. A app nova funciona com o ctl velho; o contrário não: o ctl
+   novo põe o socket no `gs-ctl`, e a app velha toma `EACCES` nele.
+2. **Remontar `exec-work` com `nosuid,nodev,noexec`.** O `deploy/filesystems.sh`
+   grava essas opções numa linha nova do `/etc/fstab`, mas numa linha antiga só
+   avisa: acrescente as três à linha à mão, remonte
+   (`sudo mount -o remount /srv/goblinshift/exec-work`) e confira
+   com `findmnt -no OPTIONS /srv/goblinshift/exec-work`. O ctl novo recusa subir
+   sem as três opções, e o instalador recusa trocar o pacote antes disso.
+3. **`"socket_group": "gs-ctl"`** no JSON da configuração administrativa.
+4. **Reinstalar o ctl** (`sudo bash deploy/executor-ctl/install.sh`).
+
+Os passos 3 e 4 vão na mesma janela drenada: o parser do ctl velho recusa a
+chave nova, e um restart dele entre os dois passos o deixaria fora do ar. A unit
+nova traz `KillMode=mixed` (o SIGTERM vai só ao processo principal, que termina
+as requisições em voo), `TimeoutStopSec=210` (acima do pior caso, o stop de
+175 s) e o marcador `.restart-pending` no prefixo, que faz a execução seguinte
+do instalador reiniciar o serviço se a anterior falhou no meio.
 
 ## Container alheio com o nome da tentativa (409 `foreign_container`)
 
