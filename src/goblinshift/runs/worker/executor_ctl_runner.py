@@ -2,7 +2,7 @@
 
 O `executor-ctl` é o serviço do host, único com acesso ao Docker, que cria um container gVisor
 por tentativa com perfil fixo. O worker fala com ele por HTTP/1.1 num socket Unix
-(`/run/goblinshift/executor-ctl.sock`, grupo `gs-exec`), só com a biblioteca padrão, e nunca
+(`/run/goblinshift/executor-ctl.sock`, grupo `gs-ctl`), só com a biblioteca padrão, e nunca
 escolhe montagens nem opções: só manda o `attempt_id` e a imagem fixada na Run.
 
 Uma conexão por chamada, com timeout de 10 s. `start` e `remove`, que tomam o lock da área no
