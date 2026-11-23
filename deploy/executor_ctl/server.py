@@ -180,13 +180,17 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 def bind_server(
     config: Config,
     service: ExecutorService,
-    group_id: int,
+    socket_group_id: int,
     *,
     read_timeout_s: float = READ_TIMEOUT_S,
     max_connections: int = MAX_CONNECTIONS,
     read_deadline_s: float = REQUEST_READ_DEADLINE_S,
 ) -> ControlServer:
-    """Cria o socket com dono root, grupo `group_id` e modo 0660."""
+    """Cria o socket com dono root, grupo `socket_group_id` (gs-ctl) e modo 0660.
+
+    O grupo do socket não é o do executor (gs-exec, do `--user`): quem escapa do sandbox não
+    conecta aqui para parar ou remover o executor de outras Runs (D11).
+    """
     _remove_stale_socket(config.socket)
     previous_umask = os.umask(_BIND_UMASK)
     try:
@@ -199,7 +203,7 @@ def bind_server(
         )
     finally:
         os.umask(previous_umask)
-    os.chown(config.socket, -1, group_id)
+    os.chown(config.socket, -1, socket_group_id)
     os.chmod(config.socket, SOCKET_MODE)
     return server
 

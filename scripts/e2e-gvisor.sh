@@ -68,6 +68,7 @@ write_executor_policy() {
 {
   "socket": "/run/goblinshift/executor-ctl.sock",
   "group": "gs-exec",
+  "socket_group": "gs-ctl",
   "work_area": "$WORK_ROOT/exec-work",
   "runtime": "$RUNSC",
   "images_file": "$images_dir/executor-images.json"

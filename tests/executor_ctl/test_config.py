@@ -13,6 +13,7 @@ pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy
 VALID: dict[str, Any] = {
     "socket": "/run/goblinshift/executor-ctl.sock",
     "group": "gs-exec",
+    "socket_group": "gs-ctl",
     "work_area": "/srv/goblinshift/exec-work",
     "runtime": "runsc",
     "images_file": "/var/lib/coolify-release/goblinshift/executor-images.json",
@@ -31,6 +32,7 @@ def test_configuracao_valida_vira_config_com_montagem_exigida(tmp_path: Path) ->
     assert config == Config(
         socket=Path("/run/goblinshift/executor-ctl.sock"),
         group="gs-exec",
+        socket_group="gs-ctl",
         work_area=Path("/srv/goblinshift/exec-work"),
         runtime="runsc",
         images_file=Path("/var/lib/coolify-release/goblinshift/executor-images.json"),
@@ -55,6 +57,8 @@ def test_require_mount_pode_ser_desligado_para_testes(tmp_path: Path) -> None:
         ({"work_area": "/srv/a,dst=/etc"}, "vírgula quebraria o --mount"),
         ({"socket": 7}, "tipo errado"),
         ({"group": "gs exec"}, "grupo com espaço"),
+        ({"socket_group": "gs ctl"}, "grupo do socket com espaço"),
+        ({"socket_group": 61002}, "grupo do socket como número"),
         ({"require_mount": "sim"}, "booleano como texto"),
         ({"extra": 1}, "chave desconhecida"),
     ],
@@ -90,6 +94,7 @@ def test_runc_continua_valido_na_config_montada_no_codigo() -> None:
     config = Config(
         socket=Path(VALID["socket"]),
         group="gs-exec",
+        socket_group="gs-ctl",
         work_area=Path(VALID["work_area"]),
         runtime="runc",
         images_file=Path(VALID["images_file"]),
@@ -104,6 +109,21 @@ def test_chave_obrigatoria_ausente_e_recusada(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="images_file"):
         load_config(write_config(tmp_path, content))
+
+
+def test_configuracao_sem_socket_group_e_recusada(tmp_path: Path) -> None:
+    content = {key: value for key, value in VALID.items() if key != "socket_group"}
+
+    with pytest.raises(ConfigError, match="socket_group"):
+        load_config(write_config(tmp_path, content))
+
+
+def test_socket_group_igual_ao_group_e_recusado(tmp_path: Path) -> None:
+    # Com o mesmo grupo, o executor (--user=61000:<group>) voltaria a alcançar o socket.
+    path = write_config(tmp_path, {**VALID, "socket_group": VALID["group"]})
+
+    with pytest.raises(ConfigError, match="socket_group"):
+        load_config(path)
 
 
 def test_json_que_nao_e_objeto_e_recusado(tmp_path: Path) -> None:

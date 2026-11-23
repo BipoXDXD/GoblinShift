@@ -35,6 +35,9 @@ def make_config(
     return Config(
         socket=socket_dir / "ctl.sock",
         group=current_group(),
+        # Sem root, o chown do socket só aceita um grupo de quem roda o teste; o arquivo do host
+        # é que exige grupos distintos (config._parse_config).
+        socket_group=current_group(),
         work_area=area,
         runtime=runtime,
         images_file=images_file,
@@ -70,7 +73,7 @@ def running_server(
     server = bind_server(
         config,
         service,
-        group_id,
+        grp.getgrnam(config.socket_group).gr_gid,
         read_timeout_s=read_timeout_s,
         max_connections=max_connections,
         read_deadline_s=read_deadline_s,

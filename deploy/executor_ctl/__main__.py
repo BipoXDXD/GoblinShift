@@ -40,10 +40,9 @@ def main(
         # Sem o filesystem de 6 GiB, uma tentativa encheria o disco raiz da VPS (ADR 005).
         _log.error("área de trabalho não montada", extra={"detail": str(config.work_area)})
         return EXIT_HOST_NOT_READY
-    try:
-        group_id = grp.getgrnam(config.group).gr_gid
-    except KeyError:
-        _log.error("grupo inexistente", extra={"detail": config.group})
+    group_id = _group_id(config.group)
+    socket_group_id = _group_id(config.socket_group)
+    if group_id is None or socket_group_id is None:
         return EXIT_HOST_NOT_READY
 
     observer = None
@@ -60,7 +59,7 @@ def main(
         if observer is None
         else ExecutorService(config, DockerCli(), group_id, observer=observer)
     )
-    server = bind_server(config, service, group_id)
+    server = bind_server(config, service, socket_group_id)
 
     def shut_down(signum: int, frame: FrameType | None) -> None:
         # shutdown() espera o laço do serve_forever, que roda nesta mesma thread.
@@ -74,6 +73,14 @@ def main(
         server.server_close()
     _log.info("encerrado")
     return 0
+
+
+def _group_id(name: str) -> int | None:
+    try:
+        return grp.getgrnam(name).gr_gid
+    except KeyError:
+        _log.error("grupo inexistente", extra={"detail": name})
+        return None
 
 
 if __name__ == "__main__":

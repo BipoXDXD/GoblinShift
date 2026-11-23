@@ -35,7 +35,15 @@ def binding() -> InstanceBinding:
 
 
 def cfg(path: Path) -> config.Config:
-    return config.Config(path.parent / "socket", "test", path.parent / "work", "runsc", path, False)
+    return config.Config(
+        socket=path.parent / "socket",
+        group="test",
+        socket_group="test-ctl",
+        work_area=path.parent / "work",
+        runtime="runsc",
+        images_file=path,
+        require_mount=False,
+    )
 
 
 class DockerBoundary(DockerCli):

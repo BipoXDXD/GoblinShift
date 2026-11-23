@@ -11,6 +11,10 @@ set -euo pipefail
 
 GROUP=gs-exec
 GROUP_ID=61001
+# Só o socket de controle fica neste grupo, fora do --user do executor (61000:61001): quem
+# escapa do sandbox não para nem remove o executor de outras Runs (D11).
+SOCKET_GROUP=gs-ctl
+SOCKET_GROUP_ID=61002
 APP_USER=goblinshift
 SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../executor_ctl" && pwd)"
 PREFIX=/opt/goblinshift/executor-ctl
@@ -49,20 +53,26 @@ then
   exit 1
 fi
 
-note "Grupo ${GROUP} (GID ${GROUP_ID})"
-if getent group "$GROUP" >/dev/null; then
-  actual="$(getent group "$GROUP" | cut -d: -f3)"
-  # O GID entra no --user do executor e no group_add do Compose: outro número quebraria os dois.
-  [[ "$actual" == "$GROUP_ID" ]] || { echo "o grupo $GROUP existe com GID $actual, esperado $GROUP_ID" >&2; exit 1; }
-  echo "   já existe."
-elif getent group "$GROUP_ID" >/dev/null; then
-  echo "o GID $GROUP_ID já pertence ao grupo $(getent group "$GROUP_ID" | cut -d: -f1)" >&2
-  exit 1
-else
-  groupadd --system --gid "$GROUP_ID" "$GROUP"
-fi
+# Os dois GIDs entram no group_add do Compose, e o do gs-exec também no --user do executor:
+# outro número quebraria os dois.
+ensure_group() {
+  local name="$1" gid="$2" actual
+  note "Grupo ${name} (GID ${gid})"
+  if getent group "$name" >/dev/null; then
+    actual="$(getent group "$name" | cut -d: -f3)"
+    [[ "$actual" == "$gid" ]] || { echo "o grupo $name existe com GID $actual, esperado $gid" >&2; exit 1; }
+    echo "   já existe."
+  elif getent group "$gid" >/dev/null; then
+    echo "o GID $gid já pertence ao grupo $(getent group "$gid" | cut -d: -f1)" >&2
+    exit 1
+  else
+    groupadd --system --gid "$gid" "$name"
+  fi
+}
+ensure_group "$GROUP" "$GROUP_ID"
+ensure_group "$SOCKET_GROUP" "$SOCKET_GROUP_ID"
 if id "$APP_USER" >/dev/null 2>&1; then
-  usermod -aG "$GROUP" "$APP_USER"
+  usermod -aG "$GROUP,$SOCKET_GROUP" "$APP_USER"
 else
   echo "   usuário $APP_USER não existe; rode o provision.sh antes."
 fi

@@ -24,12 +24,19 @@ um caminho alternativo ou uma grafia com `./` não são aceitos. O `runtime` só
 aceita `runsc` (gVisor, ADR 004): `runc` é recusado no arquivo, e portanto no
 preflight do instalador, mesmo com `require_mount` desligado.
 
+O `group` (`gs-exec`, GID 61001) é o da área de trabalho e o do `--user` do
+executor; o `socket_group` (`gs-ctl`, GID 61002) é só o do socket de controle,
+e precisa ser outro grupo: quem escapa do sandbox fica com o primeiro e não
+conecta no socket (D11). O instalador cria os dois grupos e põe o usuário
+`goblinshift` nos dois; worker e manutenção recebem os dois no `group_add`.
+
 Exemplo de configuração administrativa a preparar e revisar pelo operador:
 
 ```json
 {
   "socket": "/run/goblinshift/executor-ctl.sock",
   "group": "gs-exec",
+  "socket_group": "gs-ctl",
   "work_area": "/srv/goblinshift/exec-work",
   "runtime": "runsc",
   "images_file": "/var/lib/coolify-release/goblinshift/executor-images.json"

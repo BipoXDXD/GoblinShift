@@ -1,6 +1,7 @@
 """Protocolo HTTP do executor-ctl sem Docker: tudo aqui é recusado antes de chamar o CLI."""
 
 import http.client
+import importlib
 import itertools
 import json
 import os
@@ -12,12 +13,16 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import quote
 
 import pytest
 
+from executor_ctl import profile
+from executor_ctl.__main__ import EXIT_HOST_NOT_READY
 from executor_ctl.client import UnixHTTPConnection, call
 from executor_ctl.docker_cli import DockerCli
 from executor_ctl.journal import JsonFormatter
@@ -28,6 +33,7 @@ from executor_ctl.server import (
     ControlHandler,
     ControlServer,
     _error_payload,
+    bind_server,
 )
 from executor_ctl.service import ExecutorService
 
@@ -776,3 +782,125 @@ def test_requisicao_cortada_no_prazo_total_nao_chega_ao_docker(
 
     assert answer == b""
     assert not calls.exists()
+
+
+# Os GIDs de produção: gs-exec (área e `--user` do executor) e gs-ctl (só o socket; D11).
+EXECUTOR_GROUP_GID = 61001
+SOCKET_GROUP_GID = 61002
+
+
+class _StoppedServer:
+    def serve_forever(self) -> None:
+        """Volta na hora: o teste só quer ver com que GIDs o main montou o serviço."""
+
+    def shutdown(self) -> None:
+        """Nada a encerrar."""
+
+    def server_close(self) -> None:
+        """Nada a fechar."""
+
+
+def _run_main_with_host_groups(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch, groups: dict[str, int]
+) -> tuple[int, dict[str, int]]:
+    main_module = importlib.import_module("executor_ctl.__main__")
+    config = replace(make_config(tmp_path, socket_dir), group="gs-exec", socket_group="gs-ctl")
+    seen: dict[str, int] = {}
+
+    def fake_service(_config: object, _docker: object, executor_gid: int) -> object:
+        seen["executor"] = executor_gid
+        return object()
+
+    def fake_bind(_config: object, _service: object, socket_group_id: int) -> _StoppedServer:
+        seen["socket"] = socket_group_id
+        return _StoppedServer()
+
+    def getgrnam(name: str) -> SimpleNamespace:
+        if name not in groups:
+            raise KeyError(name)
+        return SimpleNamespace(gr_gid=groups[name])
+
+    monkeypatch.setattr(main_module, "configure_logging", lambda: None)
+    monkeypatch.setattr(main_module, "load_config", lambda _path: config)
+    monkeypatch.setattr(main_module.grp, "getgrnam", getgrnam)
+    monkeypatch.setattr(main_module, "ExecutorService", fake_service)
+    monkeypatch.setattr(main_module, "bind_server", fake_bind)
+    monkeypatch.setattr(main_module.signal, "signal", lambda *_args: None)
+    return main_module.main(["/etc/goblinshift/executor-ctl.json"]), seen
+
+
+def test_gid_do_executor_difere_do_grupo_do_socket(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, seen = _run_main_with_host_groups(
+        tmp_path,
+        socket_dir,
+        monkeypatch,
+        {"gs-exec": EXECUTOR_GROUP_GID, "gs-ctl": SOCKET_GROUP_GID},
+    )
+    options = profile.run_options(
+        uuid.UUID(ATTEMPT), work_dir=tmp_path, runtime="runsc", executor_gid=seen["executor"]
+    )
+
+    assert code == 0
+    assert f"--user={profile.EXECUTOR_UID}:{EXECUTOR_GROUP_GID}" in options
+    assert seen["socket"] == SOCKET_GROUP_GID
+
+
+def test_main_sem_o_grupo_do_socket_no_host_nao_sobe(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, seen = _run_main_with_host_groups(
+        tmp_path, socket_dir, monkeypatch, {"gs-exec": EXECUTOR_GROUP_GID}
+    )
+
+    assert code == EXIT_HOST_NOT_READY
+    assert "socket" not in seen
+
+
+def _connect_as(socket_path: Path, uid: int, gid: int, extra_groups: list[int]) -> str:
+    """Conecta num processo filho com a identidade dada; devolve o resultado do `connect`."""
+    read_end, write_end = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - roda no filho
+        outcome = b"erro"
+        try:
+            os.setgroups(extra_groups)
+            os.setgid(gid)
+            os.setuid(uid)
+            with socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM) as client:
+                client.connect(str(socket_path))
+            outcome = b"conectou"
+        except PermissionError:
+            outcome = b"PermissionError"
+        finally:
+            # Qualquer outra exceção também termina aqui: o filho relata e nunca volta ao pytest.
+            os.write(write_end, outcome)
+            os._exit(0)
+    os.close(write_end)
+    try:
+        _, status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+        return os.read(read_end, 64).decode()
+    finally:
+        os.close(read_end)
+
+
+@pytest.mark.needs_root
+def test_sandbox_nao_conecta_no_socket(tmp_path: Path, socket_dir: Path) -> None:
+    # Diretório atravessável por todos: a única barreira que sobra é o modo 0660 do socket.
+    socket_dir.chmod(0o755)
+    config = make_config(tmp_path, socket_dir)
+    service = ExecutorService(config, DockerCli(binary=str(tmp_path / "sem-docker")), 0)
+    server = bind_server(config, service, SOCKET_GROUP_GID)
+    try:
+        sandbox = _connect_as(config.socket, profile.EXECUTOR_UID, EXECUTOR_GROUP_GID, [])
+        # Controle: a mesma identidade, com o grupo do socket, conecta (o teste não mente).
+        member = _connect_as(
+            config.socket, profile.EXECUTOR_UID, EXECUTOR_GROUP_GID, [SOCKET_GROUP_GID]
+        )
+    finally:
+        server.server_close()
+
+    assert sandbox == "PermissionError"
+    assert member == "conectou"

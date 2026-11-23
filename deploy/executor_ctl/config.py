@@ -18,7 +18,7 @@ PRODUCTION_RUNTIME = "runsc"
 _SAFE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
 _GROUP_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 _PATH_KEYS = ("socket", "work_area", "images_file")
-_REQUIRED_KEYS = frozenset({*_PATH_KEYS, "group", "runtime"})
+_REQUIRED_KEYS = frozenset({*_PATH_KEYS, "group", "socket_group", "runtime"})
 _OPTIONAL_KEYS = frozenset({"require_mount"})
 
 
@@ -29,7 +29,10 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class Config:
     socket: Path
+    # `group` (gs-exec) é o da área e o do `--user` do executor; `socket_group` (gs-ctl) é só o
+    # do socket: quem escapa do sandbox fica com o primeiro e não alcança o controle (D11).
     group: str
+    socket_group: str
     work_area: Path
     runtime: str
     images_file: Path
@@ -72,9 +75,14 @@ def _parse_config(raw: str | bytes, path: Path) -> Config:
         raise ConfigError(f"chaves desconhecidas em {path}: {sorted(unknown)}")
     if content["images_file"] != IMAGES_FILE:
         raise ConfigError(f"images_file exige migração administrativa para {IMAGES_FILE}")
+    group = _group(content, "group")
+    socket_group = _group(content, "socket_group")
+    if socket_group == group:
+        raise ConfigError("socket_group precisa ser diferente de group: o executor roda em group")
     return Config(
         socket=_absolute_path(content, "socket"),
-        group=_group(content["group"]),
+        group=group,
+        socket_group=socket_group,
         work_area=_absolute_path(content, "work_area"),
         runtime=_runtime(content["runtime"]),
         images_file=_absolute_path(content, "images_file"),
@@ -94,9 +102,10 @@ def _absolute_path(content: dict[str, object], key: str) -> Path:
     return Path(value)
 
 
-def _group(value: object) -> str:
+def _group(content: dict[str, object], key: str) -> str:
+    value = content[key]
     if not isinstance(value, str) or not _GROUP_NAME.fullmatch(value):
-        raise ConfigError("group precisa ser um nome de grupo do sistema")
+        raise ConfigError(f"{key} precisa ser um nome de grupo do sistema")
     return value
 
 

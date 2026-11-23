@@ -26,6 +26,8 @@ IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
         "config_legacy",
         "config_duplicate",
         "config_runc",
+        "config_without_socket_group",
+        "config_same_socket_group",
         "policy_not_private",
         "policy_missing",
         "policy_malformed",
@@ -75,6 +77,7 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
     content = {
         "socket": "/run/goblinshift/executor-ctl.sock",
         "group": "gs-exec",
+        "socket_group": "gs-ctl",
         "work_area": "/srv/goblinshift/exec-work",
         "runtime": "runsc",
         "images_file": POLICY,
@@ -94,6 +97,10 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
         )
     elif case == "config_runc":
         config.write_text(json.dumps({**content, "runtime": "runc"}))
+    elif case == "config_without_socket_group":
+        config.write_text(json.dumps({k: v for k, v in content.items() if k != "socket_group"}))
+    elif case == "config_same_socket_group":
+        config.write_text(json.dumps({**content, "socket_group": "gs-exec"}))
     elif case == "config_duplicate":
         config.write_text(json.dumps(content)[:-1] + ', "runtime": "runc"}')
     elif case == "policy_not_private":
