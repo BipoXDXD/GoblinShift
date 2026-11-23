@@ -49,13 +49,13 @@ publish_executor_image() {
     grep -F "$EXECUTOR_REPOSITORY@sha256:"
 }
 
-# O filesystem de tamanho fixo da área de trabalho, como no deploy/provision.sh.
+# O filesystem de tamanho fixo da área de trabalho, como no deploy/filesystems.sh (D12).
 mount_work_area() {
   local image="$WORK_ROOT/exec-work.img"
   sudo install -d -m 755 "$WORK_ROOT" "$WORK_ROOT/exec-work"
   sudo fallocate -l 6G "$image"
   sudo mkfs.ext4 -q -m 0 -L gs-exec-work "$image"
-  sudo mount -o loop,noatime "$image" "$WORK_ROOT/exec-work"
+  sudo mount -o loop,noatime,nosuid,nodev,noexec "$image" "$WORK_ROOT/exec-work"
 }
 
 # Os dois arquivos que o instalador exige prontos, no lugar e com os donos de produção.
