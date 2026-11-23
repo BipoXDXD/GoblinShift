@@ -160,7 +160,9 @@ class _Level:
 
 
 def _remove_tree(parent_fd: int, name: str, area_dev: int) -> None:
-    """Apaga o diretório `name` de `parent_fd` com no máximo dois descritores abertos por vez.
+    """Apaga o diretório `name` de `parent_fd` com no máximo três descritores abertos por vez.
+
+    São o da área (`parent_fd`), o do nível corrente e, na troca de nível, o do próximo.
 
     O caminho percorrido fica numa pilha de identidades, não de descritores: a profundidade
     não pesa no limite de arquivos abertos. Quem mover um diretório no meio da remoção faz
@@ -168,23 +170,23 @@ def _remove_tree(parent_fd: int, name: str, area_dev: int) -> None:
     """
     fd = _open_checked_dir(parent_fd, name, area_dev)
     try:
-        path = [_Level(name, _identity(fd))]
+        stack = [_Level(name, _identity(fd))]
         while True:
             subdir = _clear_files(fd)
             if subdir is not None:
                 fd, current = _open_checked_dir(fd, subdir, area_dev), fd
                 os.close(current)
-                path.append(_Level(subdir, _identity(fd)))
-            elif len(path) > 1:
-                emptied = path.pop()
-                fd, current = _open_parent(fd, path[-1]), fd
+                stack.append(_Level(subdir, _identity(fd)))
+            elif len(stack) > 1:
+                emptied = stack.pop()
+                fd, current = _open_parent(fd, stack[-1]), fd
                 os.close(current)
                 _rmdir_checked(fd, emptied)
             else:
                 break
     finally:
         os.close(fd)
-    _rmdir_checked(parent_fd, path[0])
+    _rmdir_checked(parent_fd, stack[0])
 
 
 def _clear_files(fd: int) -> str | None:
