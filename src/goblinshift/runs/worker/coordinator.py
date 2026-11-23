@@ -59,6 +59,7 @@ from goblinshift.files.candidates import HeldContent, HeldContentMissingError, h
 from goblinshift.files.errors import ObjectNotAvailableError
 from goblinshift.files.storage import FileStorage, ObjectTamperedError, StorageError
 from goblinshift.platform.telemetry import UserHasher, exception_fields
+from goblinshift.runs.comparison import comparison_as_json
 from goblinshift.runs.lifecycle import (
     DETERMINISTIC_CODES,
     MAX_RETRY_JITTER,
@@ -823,6 +824,11 @@ class Coordinator:
                             "formula_cells": (
                                 item.formula_cells.as_json()
                                 if item.formula_cells is not None
+                                else None
+                            ),
+                            "comparison": (
+                                comparison_as_json(item.comparison)
+                                if item.comparison is not None
                                 else None
                             ),
                         },

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from goblinshift.processing.recipe import ItemNoticeCode, ItemRejectionCode, ItemWarningCode
+from goblinshift.runs.comparison import ImageComparison, ImageFormat, TableComparison
 from goblinshift.runs.formula_cells import ColumnCells, FormulaCells
 from goblinshift.runs.lifecycle import ErrorCode, PublishOutcome
 from goblinshift.runs.worker.collection import (
@@ -24,6 +25,116 @@ from tests.runs.collection_support import (
     write_out,
     write_report,
 )
+
+IMAGE_RECIPE = "image-forge"
+
+
+def image_details(**overrides: object) -> dict[str, object]:
+    details: dict[str, object] = {
+        "width_before": 4,
+        "height_before": 2,
+        "width_after": 2,
+        "height_after": 1,
+        "format_before": "png",
+        "format_after": "jpeg",
+        "bytes_before": 900,
+    }
+    return details | overrides
+
+
+def test_item_de_imagem_coletado_traz_a_comparacao_com_o_tamanho_da_saida(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "images/a.jpg", "thumbnails/a.jpg")
+    item["details"] = image_details()
+    write_out(out, [item], {"images/a.jpg": b"x" * 300, "thumbnails/a.jpg": b"y" * 50})
+
+    collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=1)
+
+    assert collected.report.items[0].comparison == ImageComparison(
+        4, 2, 2, 1, ImageFormat.PNG, ImageFormat.JPEG, 900, 300
+    )
+
+
+def test_tamanho_da_saida_vem_da_primeira_saida_do_proprio_item(tmp_path: Path) -> None:
+    # As saídas são achatadas entre itens: a posição na lista não identifica o item (R3).
+    out = tmp_path / "out"
+    first = ok_item(0, "images/a.jpg", "thumbnails/a.jpg")
+    first["details"] = image_details()
+    second = ok_item(1, "images/b.jpg")
+    second["details"] = image_details(bytes_before=700)
+    files = {"images/a.jpg": b"x" * 300, "thumbnails/a.jpg": b"y" * 50, "images/b.jpg": b"z" * 70}
+    write_out(out, [first, second], files)
+
+    collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=2)
+
+    assert [item.comparison for item in collected.report.items] == [
+        ImageComparison(4, 2, 2, 1, ImageFormat.PNG, ImageFormat.JPEG, 900, 300),
+        ImageComparison(4, 2, 2, 1, ImageFormat.PNG, ImageFormat.JPEG, 700, 70),
+    ]
+
+
+def test_item_de_csv_coletado_traz_registros_antes_e_depois(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    counts = {"records_read": 5, "written": 4, "duplicates_removed": 1}
+    write_out(out, [ok_item(0, "a.csv", counts=counts)], {"a.csv": b"1"})
+
+    collected = collect_outputs(out, recipe_id=RECIPE, input_count=1)
+
+    assert collected.report.items[0].comparison == TableComparison(5, 4)
+
+
+def test_relatorio_sem_details_do_executor_anterior_e_aceito_sem_comparacao(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    write_out(out, [ok_item(0, "images/a.jpg")], {"images/a.jpg": b"x"})
+
+    collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=1)
+
+    assert collected.report.items[0].comparison is None
+
+
+@pytest.mark.parametrize("details", [["width_before"], "texto", 3, None])
+def test_details_que_nao_e_objeto_vira_ausencia_de_comparacao(
+    tmp_path: Path, details: object
+) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "images/a.jpg")
+    item["details"] = details
+    write_out(out, [item], {"images/a.jpg": b"x"})
+
+    collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=1)
+
+    assert collected.report.items[0].comparison is None
+
+
+def test_comparacao_com_texto_fora_da_lista_nao_e_gravada(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    item = ok_item(0, "images/a.jpg")
+    item["details"] = image_details(format_before="segredo.jpg")
+    write_out(out, [item], {"images/a.jpg": b"x"})
+
+    collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=1)
+
+    assert collected.report.items[0].comparison is None
+    assert "segredo" not in repr(collected.report)
+
+
+def test_rejeitado_e_duplicata_nao_tem_comparacao(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    first = ok_item(0, "images/a.jpg")
+    first["details"] = image_details()
+    rejected = rejected_item(1, "IMAGE_TOO_LARGE")
+    rejected["details"] = image_details()
+    duplicate = duplicate_item(2, 0)
+    duplicate["details"] = image_details()
+    write_out(out, [first, rejected, duplicate], {"images/a.jpg": b"x"})
+
+    collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=3)
+
+    assert [item.comparison is None for item in collected.report.items] == [False, True, True]
 
 
 def test_coleta_saidas_na_ordem_do_relatorio(tmp_path: Path) -> None:
