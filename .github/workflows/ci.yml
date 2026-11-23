@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# Só PR cancela o run anterior: no push da main, um merge seguido de outro não pode interromper
+# o primeiro run no meio da publicação (image, web-image, executor-image, tag-main); ele entra na fila.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # O Python vem do setup-python (.python-version); se o uv tentar baixar outro, o job falha
