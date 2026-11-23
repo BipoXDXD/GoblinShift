@@ -8,9 +8,12 @@ um falso que registra os comandos, porque o script inteiro só roda na VPS.
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
+import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 from acceptance import run
@@ -490,3 +493,54 @@ def test_inspect_le_o_runtime_do_hostconfig_do_docker_inspect(
         running=False, exit_code=0, oom_killed=False, error="", host_config=info["HostConfig"]
     )
     assert state.host_config["Runtime"] == runtime
+
+
+# GIDs de produção: gs-exec (área e `--user` do executor) e gs-ctl (só o socket; D11).
+EXECUTOR_GROUP_GID = 61001
+SOCKET_GROUP_GID = 61002
+
+
+def _host_config(socket: object) -> Any:
+    return types.SimpleNamespace(group="gs-exec", socket_group="gs-ctl", socket=socket)
+
+
+def test_host_resolve_o_grupo_do_executor_e_o_do_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    groups = {"gs-exec": EXECUTOR_GROUP_GID, "gs-ctl": SOCKET_GROUP_GID}
+    monkeypatch.setattr("grp.getgrnam", lambda name: types.SimpleNamespace(gr_gid=groups[name]))
+
+    host = run.Host.from_config(_host_config(Path("/run/goblinshift/executor-ctl.sock")))
+
+    assert (host.group_id, host.socket_group_id) == (EXECUTOR_GROUP_GID, SOCKET_GROUP_GID)
+
+
+class _SocketWithOwner:
+    """Um caminho cujo lstat diz root:<gid> 0660 num socket, sem precisar de root no teste."""
+
+    def __init__(self, gid: int) -> None:
+        self._gid = gid
+
+    def lstat(self) -> os.stat_result:
+        return os.stat_result((stat.S_IFSOCK | 0o660, 0, 0, 1, 0, self._gid, 0, 0, 0, 0))
+
+    def __str__(self) -> str:
+        return "/run/goblinshift/executor-ctl.sock"
+
+
+@pytest.mark.parametrize(
+    ("socket_gid", "accepted"), [(SOCKET_GROUP_GID, True), (EXECUTOR_GROUP_GID, False)]
+)
+def test_aceitacao_exige_o_socket_no_grupo_gs_ctl(
+    monkeypatch: pytest.MonkeyPatch, socket_gid: int, accepted: bool
+) -> None:
+    absent = types.SimpleNamespace(status=200, body={"state": "absent"})
+    monkeypatch.setattr(run, "call", lambda *_args, **_kwargs: absent)
+    host = run.Host(
+        _host_config(_SocketWithOwner(socket_gid)),
+        group_id=EXECUTOR_GROUP_GID,
+        socket_group_id=SOCKET_GROUP_GID,
+    )
+
+    outcome = run.check_control_socket(host)
+
+    assert outcome.passed is accepted, outcome.evidence
+    assert f"gs-ctl = {SOCKET_GROUP_GID}" in outcome.evidence

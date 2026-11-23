@@ -46,6 +46,11 @@ def cfg(path: Path) -> config.Config:
     )
 
 
+def host_group(name: str) -> SimpleNamespace:
+    """GIDs distintos para gs-exec e gs-ctl: o main recusa os dois no mesmo GID (D11)."""
+    return SimpleNamespace(gr_gid=8 if name == "test-ctl" else 7)
+
+
 class DockerBoundary(DockerCli):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -307,7 +312,7 @@ def test_optional_main_provider_wires_existing_start_without_cli_extension(
     received: list[config.Config] = []
     monkeypatch.setattr(main, "load_config", lambda path: loaded)
     monkeypatch.setattr(main, "configure_logging", lambda: None)
-    monkeypatch.setattr(main.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=7))
+    monkeypatch.setattr(main.grp, "getgrnam", host_group)
     monkeypatch.setattr(main, "DockerCli", lambda: docker)
     monkeypatch.setattr(main.signal, "signal", lambda *args: None)
 
@@ -345,7 +350,7 @@ def test_optin_main_provider_failure_does_not_construct_executor(
         main, "load_config", lambda config_path: replace(cfg(path), loaded_bytes_sha256="d" * 64)
     )
     monkeypatch.setattr(main, "configure_logging", lambda: None)
-    monkeypatch.setattr(main.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=7))
+    monkeypatch.setattr(main.grp, "getgrnam", host_group)
 
     def never() -> None:
         pytest.fail("executor must not be constructed")

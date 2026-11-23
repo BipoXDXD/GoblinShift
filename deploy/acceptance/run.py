@@ -104,7 +104,17 @@ class Host:
     """O que a configuração instalada do executor-ctl diz sobre este host."""
 
     config: Config
+    # gs-exec: área e `--user` do executor. gs-ctl: só o socket de controle (D11).
     group_id: int
+    socket_group_id: int
+
+    @classmethod
+    def from_config(cls, config: Config) -> "Host":
+        return cls(
+            config,
+            group_id=grp.getgrnam(config.group).gr_gid,
+            socket_group_id=grp.getgrnam(config.socket_group).gr_gid,
+        )
 
 
 @dataclass(frozen=True)
@@ -128,7 +138,7 @@ def main() -> int:
     print(f"Docker: {_first_line('docker', 'version', '--format', '{{.Server.Version}}')}")
     print(f"kernel do host: {os.uname().release}\n")
     config = load_config(DEFAULT_CONFIG_PATH)
-    host = Host(config, grp.getgrnam(config.group).gr_gid)
+    host = Host.from_config(config)
     subprocess.run(["docker", "pull", "--quiet", PROBE_IMAGE], check=True)
 
     outcomes = [
@@ -266,7 +276,7 @@ def _restart_command(containers: list[str]) -> str:
 
 
 def check_control_socket(host: Host) -> Outcome:
-    """O serviço systemd está no ar, com o socket root:gs-exec 0660, e responde ao status."""
+    """O serviço systemd está no ar, com o socket root:gs-ctl 0660, e responde ao status."""
     criterion = "executor-ctl responde no socket"
     path = host.config.socket
     try:
@@ -278,14 +288,14 @@ def check_control_socket(host: Host) -> Outcome:
     permissions_ok = (
         stat.S_ISSOCK(info.st_mode)
         and info.st_uid == 0
-        and info.st_gid == host.group_id
+        and info.st_gid == host.socket_group_id
         and mode == 0o660
     )
     answered = response.status == 200 and response.body.get("state") == "absent"
     return Outcome(
         criterion,
         permissions_ok and answered,
-        f"dono {info.st_uid}:{info.st_gid} (gs-exec = {host.group_id}), modo {mode:o}; "
+        f"dono {info.st_uid}:{info.st_gid} (gs-ctl = {host.socket_group_id}), modo {mode:o}; "
         f"status de tentativa inexistente: HTTP {response.status} {response.body}",
     )
 

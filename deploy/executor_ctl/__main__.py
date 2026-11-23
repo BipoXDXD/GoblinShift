@@ -44,6 +44,10 @@ def main(
     socket_group_id = _group_id(config.socket_group)
     if group_id is None or socket_group_id is None:
         return EXIT_HOST_NOT_READY
+    if socket_group_id == group_id:
+        # Dois nomes no mesmo GID (`groupadd -o`): o executor voltaria a alcançar o socket (D11).
+        _log.error("grupo do socket com o GID do executor", extra={"detail": str(group_id)})
+        return EXIT_HOST_NOT_READY
 
     observer = None
     if observer_provider is not None:

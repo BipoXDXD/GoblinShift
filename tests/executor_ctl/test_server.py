@@ -858,6 +858,21 @@ def test_main_sem_o_grupo_do_socket_no_host_nao_sobe(
     assert "socket" not in seen
 
 
+def test_main_com_gs_ctl_no_mesmo_gid_do_gs_exec_nao_sobe(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Dois nomes, um GID (`groupadd -o`): o executor voltaria a alcançar o socket.
+    code, seen = _run_main_with_host_groups(
+        tmp_path,
+        socket_dir,
+        monkeypatch,
+        {"gs-exec": EXECUTOR_GROUP_GID, "gs-ctl": EXECUTOR_GROUP_GID},
+    )
+
+    assert code == EXIT_HOST_NOT_READY
+    assert "socket" not in seen
+
+
 def _connect_as(socket_path: Path, uid: int, gid: int, extra_groups: list[int]) -> str:
     """Conecta num processo filho com a identidade dada; devolve o resultado do `connect`."""
     read_end, write_end = os.pipe()

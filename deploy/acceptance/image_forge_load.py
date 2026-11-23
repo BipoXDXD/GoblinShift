@@ -22,7 +22,6 @@ teto (1.7). Imprime o tempo para o ADR 018. Usa só a biblioteca padrão (Python
 """
 
 import argparse
-import grp
 import json
 import os
 import subprocess
@@ -63,7 +62,7 @@ def main(argv: list[str]) -> int:
         print("rode com sudo", file=sys.stderr)
         return 2
     config = load_config(DEFAULT_CONFIG_PATH)
-    host = Host(config, grp.getgrnam(config.group).gr_gid)
+    host = Host.from_config(config)
     if options.skip_build:
         require_image()
     else:

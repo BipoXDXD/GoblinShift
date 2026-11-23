@@ -66,7 +66,9 @@ def host_stubs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
 
     (tmp_path / "a.mp4").write_bytes(b"a")
     monkeypatch.setattr("os.geteuid", lambda: 0)
-    monkeypatch.setattr(media, "load_config", lambda _path: type("Config", (), {"group": "g"}))
+    monkeypatch.setattr(
+        media, "load_config", lambda _path: type("Config", (), {"group": "g", "socket_group": "c"})
+    )
     monkeypatch.setattr("grp.getgrnam", lambda _name: type("Group", (), {"gr_gid": 1}))
     monkeypatch.setattr(load, "build_image", lambda: steps.append("build"))
     monkeypatch.setattr(load, "require_image", lambda: steps.append("require"))
