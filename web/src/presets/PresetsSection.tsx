@@ -5,7 +5,6 @@ import { Link } from "react-router";
 
 import { useMe } from "../account/useMe";
 import { useApiClient } from "../api/ApiClientContext";
-import { ApiError } from "../api/response";
 import { workbenchPresetPath } from "../app/paths";
 import { LiveRegion } from "../components/a11y/LiveRegion";
 import { EmptyState } from "../components/feedback/EmptyState";
@@ -15,7 +14,8 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { formatDateTime } from "../format";
 import { findRecipe } from "../recipes/registry";
 import { TEXT } from "../text";
-import { deletePreset, listPresets, PRESETS_QUERY_KEY, type Preset } from "./api";
+import { deletePreset, isStaleRevision, listPresets, PRESETS_QUERY_KEY, type Preset } from "./api";
+import { RenamePreset } from "./RenamePreset";
 
 const T = TEXT.presets;
 
@@ -129,6 +129,7 @@ function PresetItem({
             <ChevronRight aria-hidden="true" className="size-4" />
           </Link>
         )}
+        <RenamePreset preset={preset} />
         <Button
           type="button"
           variant="tertiary"
@@ -175,7 +176,7 @@ function useRemoval(): Removal {
       setMessage(T.removed(preset.name));
     },
     onError: (error) => {
-      if (isStale(error)) {
+      if (isStaleRevision(error)) {
         setMessage(T.changedElsewhere);
       }
     },
@@ -183,11 +184,12 @@ function useRemoval(): Removal {
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY });
       // Pelo dado, não pelo foco: o Excluir só sai do DOM no próximo commit.
       const relisted = queryClient.getQueryData<readonly Preset[]>(PRESETS_QUERY_KEY);
-      setToHeading(error === null || isStale(error) || !isListed(relisted, preset));
+      setToHeading(error === null || isStaleRevision(error) || !isListed(relisted, preset));
       setTarget(null);
     },
   });
-  const failure = mutation.error !== null && !isStale(mutation.error) ? mutation.error : null;
+  const failure =
+    mutation.error !== null && !isStaleRevision(mutation.error) ? mutation.error : null;
   return {
     target,
     pending: mutation.isPending,
@@ -217,12 +219,4 @@ function useRemoval(): Removal {
 
 function isListed(presets: readonly Preset[] | undefined, preset: Preset): boolean {
   return presets?.some((candidate) => candidate.id === preset.id) ?? false;
-}
-
-function isStale(error: Error): boolean {
-  return (
-    error instanceof ApiError &&
-    error.failure.kind === "problem" &&
-    error.failure.problem.code === "PRECONDITION_FAILED"
-  );
 }

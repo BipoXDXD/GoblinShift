@@ -881,6 +881,16 @@ export const TEXT = {
     removed: (name: string) => `Preset ${name} excluído.`,
     changedElsewhere:
       "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira antes de excluir.",
+    rename: "Renomear",
+    renameOf: (name: string) => `o preset ${name}`,
+    renameTitle: (name: string) => `Renomear o preset ${name}`,
+    renameLabel: "Novo nome",
+    renameConfirm: "Renomear",
+    renaming: "Renomeando…",
+    renamed: (name: string) => `Preset renomeado para ${name}.`,
+    nameTaken: "Já existe um preset com esse nome.",
+    changedElsewhereRename:
+      "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira e tente de novo.",
     updatedAt: (date: string) => `Atualizado em ${date}`,
     save: "Salvar preset",
     saveTitle: "Salvar os parâmetros como preset",

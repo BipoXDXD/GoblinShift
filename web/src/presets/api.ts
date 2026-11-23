@@ -26,6 +26,15 @@ export type Preset = z.infer<typeof presetSchema>;
 /** Corpo de POST /presets: o nome e o comando da receita, sem as entradas. */
 export type PresetDraft = { name: string } & RecipeCommand;
 
+/**
+ * Corpo de PUT /presets/{id}: o `PresetDraft` da Bancada, ou o comando que o próprio preset guarda
+ * (Renomear), que pode ser de uma receita que a interface não conhece. O servidor valida os dois.
+ */
+export type PresetReplacement = Pick<
+  Preset,
+  "name" | "recipe_id" | "recipe_version" | "parameters"
+>;
+
 export const PRESETS_QUERY_KEY = ["presets"] as const;
 
 /** GET /presets: os presets da conta, até 100, já ordenados pelo nome. */
@@ -64,6 +73,26 @@ export async function createPreset(client: ApiClient, draft: PresetDraft): Promi
 }
 
 /**
+ * PUT /presets/{id}: troca nome e parâmetros com o `If-Match` da revisão lida. Revisão vencida
+ * volta como 412 e nome repetido como 409. O 404 sobe como falha: renomear o que sumiu não é
+ * sucesso.
+ */
+export async function replacePreset(
+  client: ApiClient,
+  preset: Preset,
+  draft: PresetReplacement,
+): Promise<Preset> {
+  const response = await client.request({
+    method: "PUT",
+    path: `/api/v1/presets/${encodeURIComponent(preset.id)}`,
+    ifMatch: etagOf(preset),
+    body: draft,
+    schema: presetSchema,
+  });
+  return response.data;
+}
+
+/**
  * DELETE /presets/{id} com `If-Match` derivado de `revision` (ETag documentado: a revisão entre
  * aspas; 2.2), porque o cache do TanStack guarda só o corpo. Revisão vencida volta como 412;
  * preset que já não existe conta como excluído.
@@ -81,6 +110,15 @@ export async function deletePreset(client: ApiClient, preset: Preset): Promise<v
       throw error;
     }
   }
+}
+
+/** Revisão vencida (412): o preset mudou em outra aba ou dispositivo depois da leitura. */
+export function isStaleRevision(error: Error): boolean {
+  return (
+    error instanceof ApiError &&
+    error.failure.kind === "problem" &&
+    error.failure.problem.code === "PRECONDITION_FAILED"
+  );
 }
 
 function isNotFound(error: unknown): boolean {

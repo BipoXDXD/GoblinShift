@@ -353,3 +353,187 @@ describe("Oficina: presets", () => {
     expect(sent(api.requests, DELETE_ROUTE)).toHaveLength(1);
   });
 });
+
+const PUT_ROUTE = `PUT /api/v1/presets/${PRESET_ID}`;
+
+async function openRename(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  const section = await presetsSection();
+  await user.click(
+    await within(section).findByRole("button", { name: "Renomear o preset Clientes do mês" }),
+  );
+  return screen.getByRole("dialog", { name: "Renomear o preset Clientes do mês" });
+}
+
+async function typeName(
+  user: ReturnType<typeof userEvent.setup>,
+  dialog: HTMLElement,
+  name: string,
+): Promise<HTMLElement> {
+  const field = within(dialog).getByRole("textbox", { name: "Novo nome" });
+  await user.clear(field);
+  if (name !== "") {
+    await user.type(field, name);
+  }
+  return field;
+}
+
+describe("Oficina: renomear preset", () => {
+  it("renomeia com o If-Match da revisão, o corpo do próprio preset e anuncia", async () => {
+    let renamed = false;
+    const { api, user } = setup({
+      "GET /api/v1/presets": () =>
+        jsonResponse({
+          data: [renamed ? presetBody({ name: "Clientes de junho", revision: 2 }) : presetBody()],
+        }),
+      [PUT_ROUTE]: () => {
+        renamed = true;
+        return jsonResponse(presetBody({ name: "Clientes de junho", revision: 2 }));
+      },
+    });
+
+    const dialog = await openRename(user);
+    const field = within(dialog).getByRole("textbox", { name: "Novo nome" });
+    expect(field).toHaveValue("Clientes do mês");
+    expect(field).toHaveFocus();
+    await typeName(user, dialog, "Clientes de junho{Enter}");
+
+    expect(await screen.findByText("Preset renomeado para Clientes de junho.")).toBeInTheDocument();
+    const [request] = sent(api.requests, PUT_ROUTE);
+    expect(request?.headers.get("If-Match")).toBe('"1"');
+    expect(request?.headers.get("X-CSRF-Token")).toBe(CSRF);
+    const preset = presetBody();
+    expect(await request?.json()).toEqual({
+      name: "Clientes de junho",
+      recipe_id: preset.recipe_id,
+      recipe_version: preset.recipe_version,
+      parameters: preset.parameters,
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Renomear o preset Clientes de junho" }),
+      ).toHaveFocus();
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("nome igual ao atual fecha sem chamar a API", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "  Clientes do mês ");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent(api.requests, PUT_ROUTE)).toEqual([]);
+  });
+
+  it("nome já usado aparece no campo", async () => {
+    const { user } = setup({ [PUT_ROUTE]: () => problemResponse(409, "STATE_CONFLICT") });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Fornecedores");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+
+    const field = within(dialog).getByRole("textbox", { name: "Novo nome" });
+    await waitFor(() => {
+      expect(field).toHaveAccessibleDescription(
+        expect.stringContaining("Já existe um preset com esse nome."),
+      );
+    });
+    expect(field).toHaveFocus();
+    expect(screen.getByRole("dialog", { name: "Renomear o preset Clientes do mês" })).toBeVisible();
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    { caso: "vazio", name: "   ", error: "Dê um nome ao preset." },
+    { caso: "longo demais", name: "a".repeat(101), error: "Use até 100 caracteres." },
+  ])("nome $caso é recusado no campo, sem pedido", async ({ name, error }) => {
+    const { api, user } = setup();
+
+    const dialog = await openRename(user);
+    const field = await typeName(user, dialog, name);
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+
+    expect(field).toHaveAccessibleDescription(expect.stringContaining(error));
+    expect(field).toHaveFocus();
+    expect(sent(api.requests, PUT_ROUTE)).toEqual([]);
+  });
+
+  it("nome recusado pelo servidor (422 só no nome) aparece no campo", async () => {
+    const { user } = setup({
+      [PUT_ROUTE]: () =>
+        problemResponse(422, "VALIDATION_FAILED", {
+          errors: [{ field: "body.name", code: "invalid", message: "x" }],
+        }),
+    });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Clientes​");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+
+    const field = within(dialog).getByRole("textbox", { name: "Novo nome" });
+    await waitFor(() => {
+      expect(field).toHaveAccessibleDescription(
+        expect.stringContaining("Tire do nome os caracteres invisíveis ou de controle."),
+      );
+    });
+  });
+
+  it("revisão vencida (412) avisa, relê a lista e fecha o diálogo", async () => {
+    const { api, user } = setup({
+      [PUT_ROUTE]: () => problemResponse(412, "PRECONDITION_FAILED"),
+    });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Clientes de junho");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+
+    expect(
+      await screen.findByText(
+        "O preset mudou em outra aba ou dispositivo. A lista foi atualizada; confira e tente de novo.",
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(sent(api.requests, "GET /api/v1/presets")).toHaveLength(2);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("falha de parâmetro (422 fora do nome) aparece no diálogo e o preset fica", async () => {
+    const { user } = setup({
+      [PUT_ROUTE]: () =>
+        problemResponse(422, "VALIDATION_FAILED", {
+          errors: [{ field: "body.parameters.output_delimiter", code: "invalid", message: "x" }],
+        }),
+    });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Clientes de junho");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+
+    expect(await within(dialog).findByRole("alert")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Renomear o preset Clientes do mês" })).toBeVisible();
+    const section = await presetsSection();
+    expect(within(section).getByRole("heading", { name: "Clientes do mês" })).toBeVisible();
+  });
+
+  it("cancelar não chama a API e devolve o foco ao Renomear", async () => {
+    const { api, user } = setup();
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Outro");
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(sent(api.requests, PUT_ROUTE)).toEqual([]);
+    expect(screen.getByRole("button", { name: "Renomear o preset Clientes do mês" })).toHaveFocus();
+  });
+
+  it("não tem violações do axe com o diálogo de renomear aberto", async () => {
+    const { user } = setup();
+
+    await openRename(user);
+
+    expect(await axeViolations(document.body)).toEqual([]);
+  });
+});
