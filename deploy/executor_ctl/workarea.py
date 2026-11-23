@@ -9,7 +9,11 @@ O ctl roda como root, e o worker (menos privilegiado) controla o conteúdo de `<
 isso nenhuma operação aqui segue symlink nem age sobre um caminho já conferido: cada diretório é
 aberto com `O_DIRECTORY | O_NOFOLLOW` a partir do descritor do pai, conferido por `fstat` (é
 diretório, no mesmo filesystem da área) e alterado por `fchown`/`fchmod` no próprio descritor.
-A remoção usa o `rmtree` baseado em descritores, e o serviço recusa remover sem ele.
+A remoção anda pela árvore com dois descritores por vez (o do diretório atual e o do filho,
+o do pai ou a cópia que o `scandir` faz), em vez de um por nível como o `rmtree`: uma árvore
+mais funda que o limite de descritores do ctl ainda sai. Ela desce sem seguir symlink e sobe
+por `..` conferindo que o pai é o diretório por onde desceu; o serviço recusa remover numa
+plataforma sem `rmdir`/`unlink` por `dir_fd` e `scandir` por fd.
 
 O `docker run` recebe `<area>/<id>` e `<id>/inputs` como caminho, e o daemon os resolve sozinho
 na hora de montar. Para que ninguém troque esses caminhos por symlink depois da conferência, o
@@ -30,7 +34,6 @@ Os donos usam o UID efetivo do ctl: root em produção, o usuário do teste nos 
 
 import errno
 import os
-import shutil
 import stat
 import uuid
 from collections.abc import Iterator
@@ -69,7 +72,7 @@ class WorkDirModeError(RuntimeError):
 
 
 class UnsafeRemovalError(RuntimeError):
-    """A plataforma não tem o rmtree resistente a symlink; o root não apaga sem ele."""
+    """A plataforma não remove por descritor (`dir_fd`); o root não apaga seguindo caminhos."""
 
 
 @dataclass(frozen=True)
@@ -123,8 +126,8 @@ def prepare_for_start(area: Path, attempt_id: uuid.UUID, executor_gid: int) -> P
 
 def remove_attempt_dir(area: Path, attempt_id: uuid.UUID) -> None:
     """Apaga `<area>/<id>` inteiro; já ausente é sucesso. Nunca segue symlink."""
-    if not shutil.rmtree.avoids_symlink_attacks:
-        raise UnsafeRemovalError("shutil.rmtree desta plataforma segue symlinks")
+    if not _removes_by_descriptor():
+        raise UnsafeRemovalError("esta plataforma não remove por descritor (dir_fd)")
     name = str(attempt_id)
     if not area.is_dir():
         return
@@ -134,11 +137,90 @@ def remove_attempt_dir(area: Path, attempt_id: uuid.UUID) -> None:
         except FileNotFoundError:
             return
         if stat.S_ISDIR(info.st_mode):
-            # A versão por descritores recusa um topo que virou symlink e não segue os de dentro.
-            shutil.rmtree(name, dir_fd=area_fd)
+            _remove_tree(area_fd, name, os.fstat(area_fd).st_dev)
         else:
             # Symlink ou arquivo: só a entrada sai, o destino não é da tentativa.
             os.unlink(name, dir_fd=area_fd)
+
+
+def _removes_by_descriptor() -> bool:
+    return (
+        os.rmdir in os.supports_dir_fd
+        and os.unlink in os.supports_dir_fd
+        and os.scandir in os.supports_fd
+    )
+
+
+@dataclass(frozen=True)
+class _Level:
+    """Um diretório aberto na descida: o nome no pai e a identidade conferida por fstat."""
+
+    name: str
+    identity: tuple[int, int]
+
+
+def _remove_tree(parent_fd: int, name: str, area_dev: int) -> None:
+    """Apaga o diretório `name` de `parent_fd` com no máximo dois descritores abertos por vez.
+
+    O caminho percorrido fica numa pilha de identidades, não de descritores: a profundidade
+    não pesa no limite de arquivos abertos. Quem mover um diretório no meio da remoção faz
+    a subida por `..` divergir da pilha; a remoção para e a área fica para o próximo remove.
+    """
+    fd = _open_checked_dir(parent_fd, name, area_dev)
+    try:
+        path = [_Level(name, _identity(fd))]
+        while True:
+            subdir = _clear_files(fd)
+            if subdir is not None:
+                fd, current = _open_checked_dir(fd, subdir, area_dev), fd
+                os.close(current)
+                path.append(_Level(subdir, _identity(fd)))
+            elif len(path) > 1:
+                emptied = path.pop()
+                fd, current = _open_parent(fd, path[-1]), fd
+                os.close(current)
+                _rmdir_checked(fd, emptied)
+            else:
+                break
+    finally:
+        os.close(fd)
+    _rmdir_checked(parent_fd, path[0])
+
+
+def _clear_files(fd: int) -> str | None:
+    """Apaga numa passada tudo o que não é diretório; devolve a primeira subpasta, se houver.
+
+    O iterador (a cópia do descritor que o `scandir` faz) fecha antes de o chamador descer.
+    """
+    subdir = None
+    with os.scandir(fd) as entries:
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                subdir = subdir or entry.name
+            else:
+                with suppress(FileNotFoundError):
+                    os.unlink(entry.name, dir_fd=fd)
+    return subdir
+
+
+def _open_parent(fd: int, expected: _Level) -> int:
+    """Abre o pai de `fd` e confere que é o diretório por onde a remoção desceu."""
+    above = os.open("..", _DIR_FLAGS, dir_fd=fd)
+    try:
+        if _identity(above) != expected.identity:
+            raise WorkDirMissingError(f"um diretório sob {expected.name} mudou de pai na remoção")
+    except BaseException:
+        os.close(above)
+        raise
+    return above
+
+
+def _rmdir_checked(parent_fd: int, level: _Level) -> None:
+    """Remove a entrada vazia `level.name` se ela ainda é o diretório por onde a remoção passou."""
+    info = os.stat(level.name, dir_fd=parent_fd, follow_symlinks=False)
+    if (info.st_dev, info.st_ino) != level.identity:
+        raise WorkDirMissingError(f"{level.name} foi trocado durante a remoção")
+    os.rmdir(level.name, dir_fd=parent_fd)
 
 
 @contextmanager
@@ -156,6 +238,15 @@ def _open_area(area: Path) -> Iterator[int]:
 
 @contextmanager
 def _open_subdir(parent_fd: int, name: str, area_dev: int) -> Iterator[int]:
+    fd = _open_checked_dir(parent_fd, name, area_dev)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _open_checked_dir(parent_fd: int, name: str, area_dev: int) -> int:
+    """Abre a subpasta sem seguir symlink e confere que é diretório do filesystem da área."""
     try:
         fd = os.open(name, _DIR_FLAGS, dir_fd=parent_fd)
     except OSError as error:
@@ -168,9 +259,10 @@ def _open_subdir(parent_fd: int, name: str, area_dev: int) -> Iterator[int]:
         info = os.fstat(fd)
         if not stat.S_ISDIR(info.st_mode) or info.st_dev != area_dev:
             raise WorkDirMissingError(f"{name} não é um diretório da área de trabalho")
-        yield fd
-    finally:
+    except BaseException:
         os.close(fd)
+        raise
+    return fd
 
 
 def _require_clean(area_fd: int, own_entry: str) -> None:
