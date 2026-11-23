@@ -32,7 +32,11 @@ from goblinshift.runs.lifecycle import MIN_RETRY_JITTER, Status
 from goblinshift.runs.store import LostFencing, lease_expired
 from goblinshift.runs.tables import attempt, run
 from goblinshift.runs.worker.claim import ClaimedAttempt
-from goblinshift.runs.worker.coordinator import Coordinator, CoordinatorConfig
+from goblinshift.runs.worker.coordinator import (
+    DEFAULT_ATTEMPT_TIMEOUT,
+    Coordinator,
+    CoordinatorConfig,
+)
 from goblinshift.runs.worker.runner import (
     ExecutorPhase,
     ExecutorStatus,
@@ -324,11 +328,15 @@ class _RunningUntilRenewed:
 
 
 def worker_without_database(
-    runner: object, *, lease: timedelta = timedelta(seconds=0.3)
+    runner: object,
+    *,
+    lease: timedelta = timedelta(seconds=0.3),
+    attempt_timeout: timedelta = DEFAULT_ATTEMPT_TIMEOUT,
 ) -> Coordinator:
     config = CoordinatorConfig(
         lease=lease,
         status_poll=timedelta(seconds=0.001),
+        attempt_timeout=attempt_timeout,
         jitter=lambda: MIN_RETRY_JITTER,
     )
     return Coordinator(
@@ -468,6 +476,16 @@ class _StopFailsOnce:
         return self.status(attempt_id)
 
 
+def _record_loop_renewal(events: list[str]) -> None:
+    """Grava só a renovação da própria volta do `supervise` (thread do teste).
+
+    O `stop` também renova numa thread enquanto bloqueia, em ordem livre com o próprio `stop`; essa
+    renovação tem teste em `test_background_renewal.py` e fica fora da sequência afirmada aqui.
+    """
+    if threading.current_thread() is threading.main_thread():
+        events.append("lease")
+
+
 def _stop_failures(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.name == COORDINATOR_LOGGER and r.msg == STOP_FAILED]
 
@@ -481,7 +499,7 @@ def test_stop_que_falha_mantem_lease_e_tenta_de_novo(
     worker = worker_without_database(runner)
 
     def renew(_claimed: ClaimedAttempt) -> Status:
-        events.append("lease")
+        _record_loop_renewal(events)
         return Status.STOPPING
 
     monkeypatch.setattr(worker, "renew_lease", renew)
@@ -519,7 +537,7 @@ def test_stop_do_teto_da_tentativa_que_falha_tenta_de_novo_e_marca_o_estouro(
     )
 
     def renew(_claimed: ClaimedAttempt) -> Status:
-        events.append("lease")
+        _record_loop_renewal(events)
         return Status.RUNNING
 
     monkeypatch.setattr(worker, "renew_lease", renew)

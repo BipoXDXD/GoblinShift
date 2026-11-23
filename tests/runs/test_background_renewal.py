@@ -169,3 +169,99 @@ def test_erro_do_corpo_tem_precedencia_sobre_o_da_renovacao() -> None:
     ):
         assert renewed.wait(FAILURE_GUARD_S), "nenhuma renovação"
         raise RunnerError("start recusado")
+
+
+# --- `stop` durante a supervisão (issue #442, 14c) ------------------------------------------------
+
+RUNNING = ExecutorStatus(ExecutorPhase.RUNNING)
+# 128 + SIGKILL: o código de quem parou pelo `stop` depois da carência.
+STOPPED = ExecutorStatus(ExecutorPhase.EXITED, exit_code=137)
+
+
+class _SupervisedRunner:
+    """Executor que roda até o `stop`; grava `status` e `stop` na ordem em que são pedidos.
+
+    `stop_results` é a resposta de cada `stop`, na ordem; um `stop` além da lista reprova o teste.
+    """
+
+    def __init__(self, calls: list[str], *, stop_results: list[ExecutorStatus]) -> None:
+        self._calls = calls
+        self._stop_results = iter(stop_results)
+
+    def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+        del attempt_id
+        self._calls.append("status")
+        return RUNNING
+
+    def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+        del attempt_id, grace
+        self._calls.append("stop")
+        for result in self._stop_results:
+            return result
+        pytest.fail("stop pedido além do previsto")
+
+
+def test_uma_volta_do_supervise_faz_no_maximo_um_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Run em `stopping` e teto vencido na mesma volta: dois `stop` seguidos somariam o pior caso do
+    # executor-ctl duas vezes, e o segundo ainda abriria uma parada concorrente à primeira.
+    calls: list[str] = []
+    runner = _SupervisedRunner(calls, stop_results=[RUNNING, STOPPED])
+    worker = worker_without_database(runner, attempt_timeout=timedelta(0))
+    monkeypatch.setattr(worker, "renew_lease", lambda _claimed: Status.STOPPING)
+
+    status = worker.supervise(attempt_without_database())
+
+    assert status.phase is ExecutorPhase.EXITED
+    assert calls.count("stop") == 2
+    assert "stop,stop" not in ",".join(calls)
+
+
+def test_stop_renova_o_lease_enquanto_bloqueia(monkeypatch: pytest.MonkeyPatch) -> None:
+    # O `stop` do executor-ctl chega a 160 s mais a carência, contra 60 s de lease. A fase "stop em
+    # curso" é marcada pelo próprio `stop`: a renovação de entrada pode cair antes ou depois dele, e
+    # só a segunda renovação dentro do `stop` prova que ela se repete enquanto ele bloqueia.
+    stopping = threading.Event()
+    renewed_during_stop = threading.Event()
+    during_stop: list[Status] = []
+
+    def renew(_claimed: object) -> Status:
+        if stopping.is_set():
+            during_stop.append(Status.STOPPING)
+            if len(during_stop) >= 2:
+                renewed_during_stop.set()
+        return Status.STOPPING
+
+    class SlowStop:
+        def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+            del attempt_id
+            return RUNNING
+
+        def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+            del attempt_id, grace
+            stopping.set()
+            assert renewed_during_stop.wait(FAILURE_GUARD_S), "lease não renovado durante o stop"
+            return STOPPED
+
+    worker = worker_without_database(SlowStop(), lease=LEASE)
+    monkeypatch.setattr(worker, "renew_lease", renew)
+
+    status = worker.supervise(attempt_without_database())
+
+    assert status == STOPPED
+    assert len(during_stop) >= 2
+
+
+def test_teto_com_executor_ausente_nao_marca_estouro(monkeypatch: pytest.MonkeyPatch) -> None:
+    # O `stop` de um contêiner que nunca iniciou (`created`) remove e devolve `absent`. Marcar o
+    # teto aqui viraria RESOURCE_LIMIT_EXCEEDED, culpa do usuário e sem nova tentativa, para uma
+    # falha de infraestrutura: o desfecho fica para o `finish`, sem código de saída (transitória).
+    calls: list[str] = []
+    absent = ExecutorStatus(ExecutorPhase.ABSENT)
+    runner = _SupervisedRunner(calls, stop_results=[absent])
+    worker = worker_without_database(runner, attempt_timeout=timedelta(0))
+    monkeypatch.setattr(worker, "renew_lease", lambda _claimed: Status.RUNNING)
+
+    status = worker.supervise(attempt_without_database())
+
+    assert status == absent
+    assert not status.timed_out

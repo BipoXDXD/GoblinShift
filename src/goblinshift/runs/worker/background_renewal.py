@@ -1,10 +1,10 @@
-"""Renovação do lease em paralelo a uma chamada que bloqueia (issue #442, 14b).
+"""Renovação do lease em paralelo a uma chamada que bloqueia (issue #442, 14b e 14c).
 
-O `start` do executor pode levar até o prazo do executor-ctl, bem mais que o lease. Enquanto a
-chamada bloqueia, uma thread renova: a primeira renovação sai já, as seguintes a cada `every`, ou
-a cada `retry_every` depois de uma falha transitória do banco (`renew` devolve `None`). Qualquer
-outra exceção de `renew` (`LostFencing`, por exemplo) encerra a thread e é relançada na saída do
-bloco, se o corpo não tiver levantado a sua.
+O `start` e o `stop` do executor podem levar até o prazo do executor-ctl, bem mais que o lease.
+Enquanto a chamada bloqueia, uma thread renova: a primeira renovação sai já, as seguintes a cada
+`every`, ou a cada `retry_every` depois de uma falha transitória do banco (`renew` devolve
+`None`). Qualquer outra exceção de `renew` (`LostFencing`, por exemplo) encerra a thread e é
+relançada na saída do bloco, se o corpo não tiver levantado a sua.
 
 A thread roda no contexto de quem abriu o bloco (`contextvars`): os logs de renovação levam o
 `trace_id` e o `span_id` da tentativa.
