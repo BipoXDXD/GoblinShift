@@ -13,6 +13,7 @@ import { Card } from "../components/ui/Card";
 import { formatCount } from "../format";
 import { TEXT } from "../text";
 import type { Coded, RunItem, RunSummary } from "./api";
+import { ItemComparison } from "./ItemComparison";
 
 const T = TEXT.run.items;
 type CountName = keyof typeof T.counts;
@@ -62,7 +63,7 @@ function summaryText(summary: RunSummary): string {
 }
 
 function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
-  const counts = countsText(item.counts);
+  const counts = countsText(item.counts, countsShownElsewhere(item.comparison));
   return (
     <li className="flex flex-col gap-2 rounded-lg bg-surface-sunken p-4">
       <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -100,6 +101,7 @@ function ItemRow({ item }: { readonly item: RunItem }): ReactElement {
           {codeText(notice, T.notices, T.unknownNotice)}
         </p>
       ))}
+      {item.comparison !== null && <ItemComparison comparison={item.comparison} />}
       {counts !== null && <p className="text-sm text-fg-muted tabular-nums">{counts}</p>}
     </li>
   );
@@ -183,10 +185,23 @@ function displayPosition(position: number): number {
   return position + 1;
 }
 
-/** Só as contagens que a interface sabe nomear; uma chave nova da API fica de fora. */
-function countsText(counts: Readonly<Record<string, number>>): string | null {
+const TABLE_COMPARED: readonly CountName[] = ["records_read", "written"];
+
+/** No CSV, registros lidos e gravados já aparecem no antes e depois. */
+function countsShownElsewhere(comparison: RunItem["comparison"]): readonly CountName[] {
+  return comparison?.kind === "table" ? TABLE_COMPARED : [];
+}
+
+/**
+ * Só as contagens que a interface sabe nomear, fora as de `omit`; uma chave nova da API fica
+ * de fora.
+ */
+function countsText(
+  counts: Readonly<Record<string, number>>,
+  omit: readonly CountName[],
+): string | null {
   const parts = Object.entries(counts).flatMap(([name, count]) =>
-    isCountName(name) ? [countedText(count, T.counts[name])] : [],
+    isCountName(name) && !omit.includes(name) ? [countedText(count, T.counts[name])] : [],
   );
   return parts.length === 0 ? null : parts.join(" · ");
 }
