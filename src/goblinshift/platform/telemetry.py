@@ -35,11 +35,21 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.sqlalchemy.engine import EngineTracer
 from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.propagate import set_global_textmap
+from opentelemetry.propagators.textmap import (
+    CarrierT,
+    Getter,
+    Setter,
+    TextMapPropagator,
+    default_getter,
+    default_setter,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event as SdkEvent
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace import Span as SdkSpan
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import (
     NoOpTracer,
     Span,
@@ -644,6 +654,34 @@ def _without_exception_detail(event: SdkEvent) -> SdkEvent:
 TRACING_SHUTDOWN_TIMEOUT_S = 1.5
 
 
+class _IgnoreIncomingContext(TextMapPropagator):
+    """Propagador que não lê nem escreve contexto: cada requisição começa um trace novo.
+
+    `CompositePropagator([])` (o que `OTEL_PROPAGATORS=none` monta) devolve `None` no `extract`
+    e derruba a instrumentação ASGI; este devolve o contexto vazio.
+    """
+
+    def extract(
+        self,
+        carrier: CarrierT,
+        context: Context | None = None,
+        getter: Getter[CarrierT] = default_getter,
+    ) -> Context:
+        return context if context is not None else Context()
+
+    def inject(
+        self,
+        carrier: CarrierT,
+        context: Context | None = None,
+        setter: Setter[CarrierT] = default_setter,
+    ) -> None:
+        return None
+
+    @property
+    def fields(self) -> set[str]:
+        return set()
+
+
 @dataclass(frozen=True)
 class ApiTracing:
     """Tracer dos eventos que a API emite fora da requisição e o provider que a parada encerra."""
@@ -691,6 +729,11 @@ def configure_tracing(
     Sem `exporter` e sem endpoint OTLP, não instrumenta nada e devolve um tracer que não grava.
     `exporter` serve aos testes, que leem os spans de um `InMemorySpanExporter`.
     """
+    # A API não aceita contexto de trace de fora: com o propagador global vazio, a instrumentação
+    # ignora `traceparent`, `tracestate` e `baggage` e cada requisição abre um trace novo. O
+    # Nginx já apaga esses cabeçalhos (proxy-api.conf); isto cobre quem chega sem passar por ele.
+    # Quem precisa do `traceparent` (aceitação, worker) usa um propagador explícito.
+    set_global_textmap(_IgnoreIncomingContext())
     provider = make_tracer_provider(settings, "goblinshift-api", exporter, API_SPAN_QUEUE)
     if provider is None:
         return ApiTracing(NoOpTracer())
@@ -762,6 +805,9 @@ def make_tracer_provider(
             "deployment.environment": settings.environment,
         }
     )
-    provider = TracerProvider(resource=resource)
+    # `ALWAYS_ON`, não o `ParentBased` padrão: um pai remoto sem amostragem não descarta o span
+    # do evento amplo nem os contadores dos alertas. Amostrar é decisão do servidor, nunca de quem
+    # manda o `traceparent`.
+    provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
     provider.add_span_processor(processor)
     return provider
