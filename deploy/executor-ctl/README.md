@@ -107,6 +107,15 @@ tomado, a tentativa não sobe: para o worker a recusa é `RunnerError` com o
 código `foreign_container`, a tentativa termina como falha transitória e a
 manutenção não toca no container.
 
+Exceção: um container com a label da tentativa e **outra imagem** é da
+tentativa. Só o `start` o recusa (409 `foreign_container`, motivo "outra imagem"
+no journal); `status`, `stop` e `remove` agem sobre ele normalmente, e a
+manutenção pode pará-lo e removê-lo pelo ctl.
+
+O `remove` sem container (`absent`) não chama `docker rm`: só apaga
+`<area>/<id>`. Assim um container alheio que tome o nome entre o `inspect` e o
+`rm` não é apagado.
+
 ## Migração futura sob passagem exclusiva do operador
 
 1. Qualificar a composição final de leitor e receptor compartilhado, versão/hash

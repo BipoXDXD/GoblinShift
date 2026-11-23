@@ -153,7 +153,11 @@ class ExecutorService:
         return ContainerStatus.absent()
 
     def remove(self, attempt_id: uuid.UUID) -> None:
-        """Remove o container parado e apaga `<area>/<id>`; repetir é sucesso."""
+        """Remove o container parado e apaga `<area>/<id>`; repetir é sucesso.
+
+        Sem container, só a área: um `rm <nome>` depois do inspect `absent` apagaria um container
+        alheio parado que tomasse o nome no meio.
+        """
         name = profile.container_name(attempt_id)
         with self._holding_area():
             current = self._owned(attempt_id, self._docker.inspect(name))
@@ -161,9 +165,9 @@ class ExecutorService:
             # do erro no caso comum. A corrida entre as duas chamadas o próprio rm cobre.
             if current.state == "running":
                 raise ContainerRunningError("o container ainda roda; pare-o antes")
-            # Pelo `Id` lido, como no stop; ausente, pelo nome, e repetir é sucesso.
-            target = name if current.identity is None else current.identity.container_id
-            self._docker.remove(target)
+            if current.identity is not None:
+                # Pelo `Id` lido, como no stop: o nome pode ter passado a outro container.
+                self._docker.remove(current.identity.container_id)
             workarea.remove_attempt_dir(self._config.work_area, attempt_id)
 
     def _owned(
@@ -183,14 +187,13 @@ class ExecutorService:
         ):
             return status
         name = profile.container_name(attempt_id)
-        _log.warning(
-            "container %s não é desta tentativa; recusado",
-            name,
-            extra={"attempt_id": str(attempt_id)},
-        )
-        raise ForeignContainerError(
-            f"{name} existe, mas não é desta tentativa; inspecione e remova à mão"
-        )
+        if identity is not None and identity.attempt_label == str(attempt_id):
+            # A label é desta tentativa: stop e remove agem sobre ele; só o start o recusa.
+            reason = f"{name} é desta tentativa, mas com outra imagem; pare-o e remova-o antes"
+        else:
+            reason = f"{name} existe, mas não é desta tentativa; inspecione e remova à mão"
+        _log.warning("container recusado: %s", reason, extra={"attempt_id": str(attempt_id)})
+        raise ForeignContainerError(reason)
 
     @contextmanager
     def _holding_area(self) -> Iterator[None]:

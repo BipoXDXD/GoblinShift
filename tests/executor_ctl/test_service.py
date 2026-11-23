@@ -1,5 +1,6 @@
 """Lock da área com prazo: quem chega atrás de uma operação travada desiste, não empilha."""
 
+import logging
 import os
 import time
 import uuid
@@ -74,7 +75,7 @@ def test_operacao_atras_de_um_remove_travado_desiste_no_prazo(
 
     assert TEST_LOCK_WAIT_S <= elapsed < TEST_LOCK_WAIT_S + SCHEDULING_SLACK_S
     # Quem desistiu não chegou ao Docker nem à área.
-    assert docker.calls == [f"inspect gs-exec-{HOLDER}", f"rm gs-exec-{HOLDER}"]
+    assert docker.calls == [f"inspect gs-exec-{HOLDER}"]
     assert not (tmp_path / "exec-work" / str(LATECOMER)).exists()
 
 
@@ -89,20 +90,23 @@ def test_operacao_atras_de_um_start_travado_desiste_no_prazo(tmp_path: Path) -> 
     ):
         service.remove(LATECOMER)
 
-    assert f"rm gs-exec-{LATECOMER}" not in docker.calls
+    assert [call for call in docker.calls if str(LATECOMER) in call] == []
 
 
 def test_lock_volta_a_servir_depois_que_a_operacao_a_frente_termina(tmp_path: Path) -> None:
     docker = StuckDocker()
     service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
 
+    latecomer_dir = tmp_path / "exec-work" / str(LATECOMER)
+    latecomer_dir.mkdir()
     with holding_area(docker, lambda: service.remove(HOLDER)), pytest.raises(AreaBusyError):
         service.remove(LATECOMER)
 
     # A desistência não deixou o lock preso: a mesma operação agora passa.
     service.remove(LATECOMER)
 
-    assert docker.calls[-1] == f"rm gs-exec-{LATECOMER}"
+    assert docker.calls[-1] == f"inspect gs-exec-{LATECOMER}"
+    assert not latecomer_dir.exists()
 
 
 def test_status_nao_espera_o_lock_da_area(tmp_path: Path) -> None:
@@ -162,10 +166,13 @@ def test_operacao_que_falha_dentro_do_lock_o_libera(
         else:
             service.remove(HOLDER)
 
+    latecomer_dir = tmp_path / "exec-work" / str(LATECOMER)
+    latecomer_dir.mkdir()
     # Lock preso pela falha faria esta chamada esperar o prazo e sair com AreaBusyError.
     service.remove(LATECOMER)
 
-    assert docker.calls[-1] == f"rm gs-exec-{LATECOMER}"
+    assert docker.calls[-1] == f"inspect gs-exec-{LATECOMER}"
+    assert not latecomer_dir.exists()
 
 
 def test_stop_de_container_created_remove_e_responde_absent(tmp_path: Path) -> None:
@@ -389,3 +396,44 @@ def test_corrida_no_start_com_nome_tomado_por_alheio_e_recusada(tmp_path: Path) 
         service.start(HOLDER, IMAGE)
 
     assert docker.calls == [f"inspect {HOLDER_NAME}", "run", f"inspect {HOLDER_NAME}"]
+
+
+def test_remove_sem_conteiner_nao_chama_rm_e_apaga_a_area(tmp_path: Path) -> None:
+    # Um `rm <nome>` depois do inspect `absent` apagaria um alheio parado que tomasse o nome no
+    # meio; sem container não há o que remover, só a área.
+    docker = LabeledDocker("absent", None, IMAGE)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+    work_dir = tmp_path / "exec-work" / str(HOLDER)
+    (work_dir / "out").mkdir(parents=True)
+
+    service.remove(HOLDER)
+    service.remove(HOLDER)
+
+    assert docker.calls == [f"inspect {HOLDER_NAME}"] * 2
+    assert not work_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("label", "image", "reason"),
+    [
+        (str(OTHER_ATTEMPT), IMAGE, "não é desta tentativa"),
+        (str(HOLDER), OTHER_IMAGE, "outra imagem"),
+    ],
+    ids=["label_alheia", "imagem_diferente"],
+)
+def test_recusa_do_start_diz_o_motivo_sem_a_imagem(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, label: str, image: str, reason: str
+) -> None:
+    docker = LabeledDocker("running", label, image)
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="executor_ctl.service"),
+        pytest.raises(ForeignContainerError) as refused,
+    ):
+        service.start(HOLDER, IMAGE)
+
+    [warning] = [record.getMessage() for record in caplog.records]
+    assert reason in warning
+    assert reason in str(refused.value)
+    assert image not in str(refused.value)
