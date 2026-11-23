@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 from unittest.mock import Mock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy
@@ -217,6 +217,7 @@ CANARY = f"CANARY-{UUID(int=11)}"
 TEST_SETTINGS = Settings.model_validate({"environment": "test"})
 REVISION = "rev-teste"
 QUERY_ROUTE = "/consulta"
+UPLOAD_CONTENT_ROUTE = "/api/v1/uploads/{upload_id}/content"
 
 
 @dataclass(frozen=True)
@@ -262,6 +263,10 @@ def traced_app(tmp_path: Path) -> Iterator[TracedApp]:
     def query(request: Request) -> dict[str, int]:
         with request.app.state.engine.connect() as conn:
             return {"valor": conn.execute(text("SELECT 1")).scalar_one()}
+
+    @app.get(UPLOAD_CONTENT_ROUTE)
+    def upload_content(upload_id: UUID) -> dict[str, str]:
+        return {"upload": str(upload_id)}
 
     exporter = InMemorySpanExporter()
     configure_tracing(app, engine, Settings.model_validate({"environment": "test"}), exporter)
@@ -320,6 +325,44 @@ def test_span_de_banco_e_filho_da_requisicao_e_nao_conta_como_evento(
         assert span.parent is not None
         assert span.parent.span_id == main.context.span_id
         assert "main" not in (span.attributes or {})
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "target", "url"),
+    [
+        # Sem rota: nenhum template para pôr no lugar do caminho; a URL fica só com a origem.
+        ("GET", "/api/v1/x/{c}", "unmatched", "http://localhost"),
+        # 422: o parâmetro não é UUID, mas a rota casou e o template está em `http.route`.
+        (
+            "GET",
+            "/api/v1/uploads/{c}/content",
+            UPLOAD_CONTENT_ROUTE,
+            f"http://localhost{UPLOAD_CONTENT_ROUTE}",
+        ),
+        # 405: a instrumentação grava o template também no casamento parcial.
+        (
+            "DELETE",
+            "/api/v1/uploads/{c}/content",
+            UPLOAD_CONTENT_ROUTE,
+            f"http://localhost{UPLOAD_CONTENT_ROUTE}",
+        ),
+    ],
+)
+def test_caminho_do_span_e_so_o_template_da_rota(
+    traced_app: TracedApp, method: str, path: str, target: str, url: str
+) -> None:
+    canary = f"CANARY-{uuid4()}"
+    with TestClient(traced_app.app) as client:
+        client.request(method, path.format(c=canary))
+
+    spans = traced_app.exporter.get_finished_spans()
+    (main,) = [s for s in spans if (s.attributes or {}).get("main") is True]
+    attributes = main.attributes or {}
+    assert attributes["http.target"] == target
+    assert attributes["http.url"] == url
+    for span in spans:
+        assert canary not in span.name
+        assert canary not in json.dumps(dict(span.attributes or {}), default=str)
 
 
 def test_header_host_do_cliente_nao_vai_ao_evento_da_requisicao(traced_app: TracedApp) -> None:

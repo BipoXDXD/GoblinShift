@@ -417,7 +417,11 @@ UNKNOWN_ADDRESS = "unknown"
 # Atributos que a instrumentação ASGI preenche com a URL completa, query string incluída, ou com
 # o IP do cliente; nomes antigos e novos das convenções semânticas.
 _URL_ATTRIBUTES = ("http.url", "url.full")
-_TARGET_ATTRIBUTES = ("http.target",)
+_TARGET_ATTRIBUTES = ("http.target", "url.path")
+# Template da rota que a instrumentação ASGI grava antes do hook, também no casamento parcial
+# (405); sem rota, este valor fica no lugar do caminho.
+_ROUTE_ATTRIBUTE = "http.route"
+UNMATCHED_ROUTE = "unmatched"
 # Preenchidos com o header `Host`, que o cliente escreve como quiser.
 _SERVER_NAME_ATTRIBUTES = ("http.server_name", "server.address")
 _QUERY_ATTRIBUTES = ("url.query",)
@@ -528,19 +532,22 @@ def _main_event_starter(public_origin: str) -> Callable[[Span, dict[str, Any]], 
 def _redact_request_attributes(
     span: Span, scope: dict[str, Any], public_origin: str, server_name: str
 ) -> None:
-    """Tira a query string, o IP completo e os headers que a instrumentação ASGI pôs no span.
+    """Tira o caminho, a query string, o IP completo e os headers que a instrumentação ASGI pôs.
 
-    A query carrega filtros e cursores, que são dados do usuário; User-Agent e Host são texto
-    livre do cliente, e nenhum header entra no evento (3.7). Só sobrescreve os atributos que já
-    existem, para não inventar nomes de outra versão das convenções.
+    O caminho cru carrega ids e qualquer texto de uma URL sem rota; no lugar dele vai o template
+    da rota (ou `UNMATCHED_ROUTE`), e a URL vira `public_origin` + template (sem rota, só a
+    origem: `UNMATCHED_ROUTE` colado nela pareceria outro host). A query carrega
+    filtros e cursores, que são dados do usuário; User-Agent e Host são texto livre do cliente,
+    e nenhum header entra no evento (3.7). Só sobrescreve os atributos que já existem, para não
+    inventar nomes de outra versão das convenções.
     """
     present = getattr(span, "attributes", None) or {}
-    path = str(scope.get("path", ""))
+    route = present.get(_ROUTE_ATTRIBUTE)
     client = scope.get("client")
     address = truncate_client_address(str(client[0])) if client else UNKNOWN_ADDRESS
     for names, value in (
-        (_URL_ATTRIBUTES, f"{public_origin}{path}"),
-        (_TARGET_ATTRIBUTES, path),
+        (_URL_ATTRIBUTES, f"{public_origin}{route}" if route else public_origin),
+        (_TARGET_ATTRIBUTES, str(route) if route else UNMATCHED_ROUTE),
         (_SERVER_NAME_ATTRIBUTES, server_name),
         (_QUERY_ATTRIBUTES, ""),
         (_CLIENT_ADDRESS_ATTRIBUTES, address),
