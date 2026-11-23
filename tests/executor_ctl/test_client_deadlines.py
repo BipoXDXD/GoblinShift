@@ -1,4 +1,4 @@
-"""Contrato de prazo do `start` e do `remove`: o worker espera mais que o pior caso do executor-ctl.
+"""Contrato de prazo de `start`, `stop` e `remove`: o worker espera o pior caso do executor-ctl.
 
 O worker não importa `deploy/executor_ctl` (o pacote é do host, fora da imagem do worker), então
 o cliente espelha o prazo do CLI do Docker e quantas chamadas cabem em cada operação que toma o
@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from executor_ctl.docker_cli import COMMAND_TIMEOUT_S, DockerCli
-from executor_ctl.service import ExecutorService
+from executor_ctl.service import AREA_LOCK_WAIT_S, ExecutorService
 from goblinshift.runs.worker import executor_ctl_runner as client
 
 from .conftest import make_config
@@ -55,6 +55,13 @@ def remove_calls(tmp_path: Path) -> list[str]:
     return docker.calls
 
 
+def stop_calls(tmp_path: Path) -> list[str]:
+    """Chamadas do `stop` no pior caminho: container que nunca iniciou, removido no stop."""
+    docker = CountingDocker("created", ATTEMPT)
+    service_with(tmp_path, docker).stop(ATTEMPT, 0)
+    return docker.calls
+
+
 def test_prazo_do_cli_do_docker_espelhado_no_cliente() -> None:
     assert timedelta(seconds=COMMAND_TIMEOUT_S) == client.CTL_DOCKER_CALL_TIMEOUT
 
@@ -82,6 +89,27 @@ def test_quem_segura_o_lock_da_area_cabe_no_espelho_do_cliente(tmp_path: Path) -
     longest = max(len(start_calls(tmp_path / "start")), len(remove_calls(tmp_path / "remove")))
 
     assert longest == client.CTL_LOCK_HOLDER_DOCKER_CALLS
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_chamadas_do_stop_espelhadas_no_cliente(tmp_path: Path) -> None:
+    calls = stop_calls(tmp_path)
+
+    assert calls == ["inspect", "stop", "inspect", "inspect", "rm"]
+    assert len(calls) == client.CTL_STOP_DOCKER_CALLS
+
+
+@pytest.mark.usefixtures("synthetic_policy_metadata")
+def test_stop_do_cliente_espera_o_pior_caso_do_servico(tmp_path: Path) -> None:
+    # Medido no serviço: as chamadas do próprio stop e a espera do lock da área antes do rm do
+    # container que nunca iniciou (o stop não espera uma operação inteira: lock ocupado devolve
+    # o que leu). A carência soma dos dois lados e fica fora da conta.
+    own = len(stop_calls(tmp_path))
+    server_ceiling = timedelta(seconds=COMMAND_TIMEOUT_S * own + AREA_LOCK_WAIT_S)
+
+    # Literal de propósito, calculado à mão (5 x 30 s + 5 s de lock), pelo mesmo motivo do start.
+    assert server_ceiling == timedelta(seconds=155)
+    assert server_ceiling < client.STOP_BASE_TIMEOUT
 
 
 def lock_wait_calls(tmp_path: Path) -> int:

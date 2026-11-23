@@ -12,13 +12,16 @@ Passos:
    aqui (disco cheio, storage ilegível) é infraestrutura: falha transitória na hora.
 2. `start`: confere que ninguém pediu parada, chama `runner.start` com a imagem fixada na Run e
    registra `ExecutorStarted` (a partir daqui a tentativa conta como física) e a fase
-   `processing`.
+   `processing`. O `start` pode passar do lease (prazo do executor-ctl): enquanto ele bloqueia,
+   uma thread renova (`BackgroundRenewal`), e o fencing perdido nela leva ao abandono.
 3. `supervise`: renova o lease a cada terço do prazo, grava o progresso, aplica o prazo vencido
    e, se a Run foi para `stopping` (cancelamento ou prazo) ou a tentativa passou do teto de
-   duração, pede `stop` ao Runner. Runner fora do ar não interrompe a espera: o lease segue
-   renovado e a consulta se repete (3.5: execuções aguardam dentro dos prazos). Falha transitória
-   do banco na renovação também não: a renovação é repetida logo, e o fencing decide, quando o
-   banco voltar, se a tentativa ainda é desta instância.
+   duração, pede `stop` ao Runner: no máximo um por volta, com o lease renovado numa thread
+   enquanto ele bloqueia (o pior caso do executor-ctl passa do lease). Runner fora do ar não
+   interrompe a espera: o lease segue renovado e a consulta se repete (3.5: execuções aguardam
+   dentro dos prazos). Falha transitória do banco na renovação também não: a renovação é
+   repetida logo, e o fencing decide, quando o banco voltar, se a tentativa ainda é desta
+   instância.
 4. `finish`: pelo código de saída, publica (0), falha de forma determinística (3, ou memória
    estourada) ou transitória (demais, inclusive o teto de 10 min). A publicação condiciona o
    `UPDATE` à geração, a `running`, à ausência de cancelamento e a `now() <= deadline_at`; se não
@@ -41,8 +44,10 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from typing import BinaryIO
 
@@ -96,6 +101,7 @@ from goblinshift.runs.store import (
 )
 from goblinshift.runs.tables import attempt, run, run_input, run_output
 from goblinshift.runs.worker import attempt_event
+from goblinshift.runs.worker.background_renewal import BackgroundRenewal, next_renewal_wait
 from goblinshift.runs.worker.candidate_writer import CandidateWriter, StoredCandidate
 from goblinshift.runs.worker.claim import ClaimedAttempt
 from goblinshift.runs.worker.collection import (
@@ -412,7 +418,7 @@ class Coordinator:
         if not self.may_start(claimed):
             return self.conclude_stop(claimed)
         try:
-            self._runner.start(claimed.attempt_id, claimed.executor_image)
+            self.start_executor(claimed)
         except RunnerError as error:
             # Toda recusa do start é de infraestrutura, inclusive imagem fora da allowlist do
             # host: não é culpa da receita nem da entrada, e o deploy pode corrigi-la a tempo.
@@ -526,6 +532,18 @@ class Coordinator:
 
         return run_transaction(self._factory, check)
 
+    def start_executor(self, claimed: ClaimedAttempt) -> None:
+        """Inicia o executor com o lease renovado em paralelo: o `start` pode passar do lease."""
+        with self._background_renewal(claimed):
+            self._runner.start(claimed.attempt_id, claimed.executor_image)
+
+    def _background_renewal(self, claimed: ClaimedAttempt) -> BackgroundRenewal:
+        return BackgroundRenewal(
+            partial(self._try_renew, claimed),
+            every=self._config.renew_every,
+            retry_every=self._config.renew_retry_every,
+        )
+
     def record_start(self, claimed: ClaimedAttempt) -> None:
         def record(session: Session) -> None:
             loaded = lock_fenced(session, _fence(claimed), ACTIVE_STATUSES)
@@ -541,27 +559,44 @@ class Coordinator:
         """Espera o executor terminar, renovando o lease; pede `stop` se a Run vai parar."""
         started = time.monotonic()
         next_renewal = float("-inf")
+        next_stop = float("-inf")
         while True:
             status = self._observe(claimed)
             if status is not None and not status.is_running:
                 return status
+            # Um `stop` por volta: cada um pode levar o pior caso do executor-ctl, e um segundo na
+            # mesma volta abriria uma parada concorrente à primeira.
+            stop_attempted = False
             now = time.monotonic()
             if now >= next_renewal:
                 renewed = self._try_renew(claimed)
-                renewal_failed = renewed is None
-                wait = (
-                    self._config.renew_retry_every if renewal_failed else self._config.renew_every
+                wait = next_renewal_wait(
+                    renewed,
+                    every=self._config.renew_every,
+                    retry_every=self._config.renew_retry_every,
                 )
                 next_renewal = now + wait.total_seconds()
                 if renewed is Status.STOPPING:
+                    stop_attempted = True
                     stopped = self._try_stop(claimed)
-                    # Sem confirmação de término não há desfecho: o lease segue renovado.
-                    if stopped is not None and not stopped.is_running:
+                    # Sem confirmação de término não há desfecho: o lease segue renovado. Um `stop`
+                    # falho também adia o do teto (mesmo intervalo curto, logo abaixo).
+                    if stopped is None:
+                        next_stop = now + self._config.renew_retry_every.total_seconds()
+                    elif not stopped.is_running:
                         return stopped
-            if time.monotonic() - started >= self._config.attempt_timeout.total_seconds():
+            now = time.monotonic()
+            timed_out = now - started >= self._config.attempt_timeout.total_seconds()
+            if timed_out and not stop_attempted and now >= next_stop:
                 stopped = self._try_stop(claimed)
-                if stopped is not None and not stopped.is_running:
-                    return replace(stopped, timed_out=True)
+                # `stop` falho espera `renew_retry_every`: repeti-lo a cada `status_poll` abriria
+                # uma thread de renovação, e uma transação no banco, por volta com o ctl fora.
+                if stopped is None:
+                    next_stop = now + self._config.renew_retry_every.total_seconds()
+                elif not stopped.is_running:
+                    # Sem executor (`absent`, contêiner que nunca iniciou), não houve estouro do
+                    # usuário: o `finish` trata a falta de código de saída como transitória.
+                    return replace(stopped, timed_out=True) if stopped.ran else stopped
             time.sleep(self._config.status_poll.total_seconds())
 
     def _try_renew(self, claimed: ClaimedAttempt) -> Status | None:
@@ -586,9 +621,18 @@ class Coordinator:
             )
             return None
 
-    def _try_stop(self, claimed: ClaimedAttempt) -> ExecutorStatus | None:
+    def _try_stop(self, claimed: ClaimedAttempt, *, renewing: bool = True) -> ExecutorStatus | None:
+        """Pede `stop`; `None` se o Runner falhou (quem chamou decide se repete).
+
+        O `stop` pode passar do lease (pior caso do executor-ctl): com `renewing`, uma thread
+        renova enquanto ele bloqueia, e o fencing perdido nela sai daqui como `LostFencing`. Se o
+        próprio `stop` levanta `RunnerError`, o erro dele vence e a resposta é `None`: o
+        `LostFencing` reaparece na renovação seguinte.
+        """
+        renewal = self._background_renewal(claimed) if renewing else nullcontext()
         try:
-            return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
+            with renewal:
+                return self._runner.stop(claimed.attempt_id, self._config.stop_grace)
         except RunnerError as error:
             logger.warning(
                 "executor não parou", extra={"fields": {**_ids(claimed), **exception_fields(error)}}
@@ -870,9 +914,10 @@ class Coordinator:
 
         Nada vai para o banco. O executor tem o nome desta Attempt, que nenhuma tentativa nova
         reutiliza, então pará-lo nunca atinge o trabalho de quem assumiu. Se o Runner falhar, a
-        manutenção encontra a área da tentativa encerrada e termina o serviço.
+        manutenção encontra a área da tentativa encerrada e termina o serviço. Sem renovação
+        durante o `stop`: o fencing já foi perdido.
         """
-        stopped = self._try_stop(claimed)
+        stopped = self._try_stop(claimed, renewing=False)
         if stopped is not None and not stopped.is_running:
             self._try_remove(claimed)
 
