@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
+import { ApiError } from "../api/response";
 import type { components, operations } from "../api/schema";
 import { fakeApi, jsonResponse, problemResponse } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
@@ -8,8 +9,10 @@ import {
   deletePreset,
   getPreset,
   listPresets,
+  replacePreset,
   type Preset,
   type PresetDraft,
+  type PresetReplacement,
 } from "./api";
 
 describe("tipos espelham a spec", () => {
@@ -21,6 +24,15 @@ describe("tipos espelham a spec", () => {
     expectTypeOf<PresetDraft>().toEqualTypeOf<
       operations["createPreset"]["requestBody"]["content"]["application/json"]
     >();
+  });
+});
+
+describe("tipos de replacePreset", () => {
+  it("o corpo do PUT é o mesmo do POST, e a Bancada pode mandá-lo", () => {
+    expectTypeOf<PresetDraft>().toEqualTypeOf<
+      operations["replacePreset"]["requestBody"]["content"]["application/json"]
+    >();
+    expectTypeOf<PresetDraft>().toExtend<PresetReplacement>();
   });
 });
 
@@ -93,5 +105,39 @@ describe("deletePreset", () => {
     });
 
     await expect(deletePreset(client, presetBody())).resolves.toBeUndefined();
+  });
+});
+
+describe("replacePreset", () => {
+  const draft: PresetDraft = {
+    name: "Clientes de junho",
+    recipe_id: "csv-janitor",
+    recipe_version: 1,
+    parameters: { output_delimiter: ";" },
+  };
+
+  it("PUT manda o If-Match da revisão e devolve o preset novo", async () => {
+    const { client, requests } = fakeApi(
+      {
+        [`PUT /api/v1/presets/${PRESET_ID}`]: () =>
+          jsonResponse(presetBody({ name: "Clientes de junho", revision: 4 })),
+      },
+      { csrfToken: "tok" },
+    );
+
+    const replaced = await replacePreset(client, presetBody({ revision: 3 }), draft);
+
+    expect(replaced).toMatchObject({ name: "Clientes de junho", revision: 4 });
+    expect(requests[0]?.headers.get("If-Match")).toBe('"3"');
+    expect(requests[0]?.headers.get("X-CSRF-Token")).toBe("tok");
+    expect(await requests[0]?.json()).toEqual(draft);
+  });
+
+  it("404 no PUT é falha, não sucesso", async () => {
+    const { client } = fakeApi({
+      [`PUT /api/v1/presets/${PRESET_ID}`]: () => problemResponse(404, "NOT_FOUND"),
+    });
+
+    await expect(replacePreset(client, presetBody(), draft)).rejects.toBeInstanceOf(ApiError);
   });
 });

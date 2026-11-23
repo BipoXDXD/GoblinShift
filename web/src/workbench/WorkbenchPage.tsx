@@ -12,6 +12,7 @@ import {
 } from "../catalog/api";
 import { ANNOUNCE_DELAY_MS, LiveRegion } from "../components/a11y/LiveRegion";
 import { FailureNotice } from "../components/feedback/FailureNotice";
+import type { Preset } from "../presets/api";
 import {
   recipeOf,
   withoutUploadBoundParameters,
@@ -128,7 +129,7 @@ function gateBody({ recipe, source, uploadServices, catalog, loaded }: GateBodyI
   }
   const prefilled =
     source === null || version === null
-      ? { form, notice: null, announcement: null }
+      ? { form, notice: null, announcement: null, preset: null }
       : prefilledForm({
           recipe,
           version,
@@ -143,6 +144,7 @@ function gateBody({ recipe, source, uploadServices, catalog, loaded }: GateBodyI
         recipe={recipe}
         form={prefilled.form}
         notice={prefilled.notice}
+        sourcePreset={prefilled.preset}
         uploadServices={uploadServices}
       />
     ),
@@ -199,12 +201,15 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
   readonly notice: ReactNode;
   /** O texto do aviso de origem, para a região viva; a falha já sai num `alert`. */
   readonly announcement: string | null;
+  /** O preset da origem, só quando os parâmetros dele foram aplicados ao formulário. */
+  readonly preset: Preset | null;
 } {
   if (source === null) {
     return {
       form: fallback,
       notice: error === null ? null : <FailureNotice error={error} />,
       announcement: null,
+      preset: null,
     };
   }
   const sameRecipe = source.recipeId === recipe.id && source.recipeVersion === recipe.version;
@@ -227,14 +232,21 @@ function prefilledForm({ recipe, version, fallback, source, error }: PrefillSour
     reusable.dropped
       ? `${source.loadedNotice} ${TEXT.workbench.uploadBoundDropped}`
       : source.loadedNotice,
+    source.preset,
   );
 }
 
 function withNotice(
   form: RecipeForm,
   text: string,
-): { readonly form: RecipeForm; readonly notice: ReactNode; readonly announcement: string } {
-  return { form, notice: <SourceNotice>{text}</SourceNotice>, announcement: text };
+  preset: Preset | null = null,
+): {
+  readonly form: RecipeForm;
+  readonly notice: ReactNode;
+  readonly announcement: string;
+  readonly preset: Preset | null;
+} {
+  return { form, notice: <SourceNotice>{text}</SourceNotice>, announcement: text, preset };
 }
 
 /**

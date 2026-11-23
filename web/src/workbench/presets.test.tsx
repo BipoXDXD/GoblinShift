@@ -7,13 +7,21 @@ import { untilFakeClock, installAnnounceClock } from "../test/announceClock";
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
 import { catalogHandler } from "../test/catalog";
-import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
+import {
+  fakeApi,
+  jsonResponse,
+  problemResponse,
+  runBody,
+  RUN_ID,
+  screenRequests,
+  uploadIntentsHandler,
+} from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose } from "../test/dialog";
 import { recordDescriptionOnFocus } from "../test/focus";
 import { renderRoutes } from "../test/renderRoutes";
 
-await preloadRoutes("/bancada/csv-janitor");
+await preloadRoutes("/", "/bancada/csv-janitor", "/bancada/image-forge");
 
 type Handler = (request: Request) => Response | Promise<Response> | null;
 
@@ -498,5 +506,348 @@ describe("Bancada aberta com um preset", () => {
     expect(
       screenRequests(api.requests).filter((request) => request.url.includes("/presets")),
     ).toEqual([]);
+  });
+});
+
+const PRESET_ROUTE = `/bancada/csv-janitor?preset=${PRESET_ID}`;
+const PUT_PRESET = `PUT /api/v1/presets/${PRESET_ID}`;
+
+/** PUT /presets/{id} que devolve o preset com a revisão seguinte à do `If-Match` recebido. */
+function nextRevision(request: Request): Response {
+  const revision = Number(request.headers.get("If-Match")?.replaceAll('"', ""));
+  return jsonResponse(presetBody({ revision: revision + 1 }));
+}
+
+async function openUpdateDialog(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.click(await screen.findByRole("button", { name: "Atualizar preset Clientes do mês" }));
+  return screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+}
+
+async function confirmUpdate(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const dialog = await openUpdateDialog(user);
+  await user.click(within(dialog).getByRole("button", { name: "Atualizar preset" }));
+}
+
+describe("Bancada: Atualizar preset", () => {
+  it("Bancada aberta pelo preset atualiza os parâmetros com o If-Match da revisão", async () => {
+    const { api, user } = setup(PRESET_ROUTE, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ revision: 4 })),
+      [PUT_PRESET]: nextRevision,
+    });
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+      ",",
+    );
+
+    const dialog = await openUpdateDialog(user);
+    expect(
+      within(dialog).getByText(
+        "Os parâmetros do formulário substituem os do preset. As execuções feitas com ele não mudam.",
+      ),
+    ).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Atualizar preset" }));
+
+    expect(await screen.findByText("Preset Clientes do mês atualizado.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sent(api.requests, "POST /api/v1/runs")).toEqual([]);
+    const [request] = sent(api.requests, PUT_PRESET);
+    expect(request?.headers.get("If-Match")).toBe('"4"');
+    expect(request?.headers.get("X-CSRF-Token")).toBe(CSRF);
+    expect(await request?.json()).toMatchObject({
+      name: "Clientes do mês",
+      recipe_id: "csv-janitor",
+      recipe_version: 1,
+      parameters: expect.objectContaining({
+        output_delimiter: ",",
+        trim_columns: ["nome"],
+      }) as unknown,
+    });
+  });
+
+  it("aberto, o diálogo de atualizar não tem violações do axe", async () => {
+    const { user } = setup(PRESET_ROUTE);
+
+    await openUpdateDialog(user);
+
+    expect(await axeViolations(document.body)).toEqual([]);
+  });
+
+  it("segunda atualização usa a revisão devolvida pela primeira", async () => {
+    const { api, user } = setup(PRESET_ROUTE, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ revision: 4 })),
+      [PUT_PRESET]: nextRevision,
+    });
+
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+    await confirmUpdate(user);
+
+    await waitFor(() => {
+      expect(sent(api.requests, PUT_PRESET)).toHaveLength(2);
+    });
+    expect(
+      sent(api.requests, PUT_PRESET).map((request) => request.headers.get("If-Match")),
+    ).toEqual(['"4"', '"5"']);
+  });
+
+  it("atualizar o preset não relê a origem nem perde as entradas", async () => {
+    const { api, user } = setup(PRESET_ROUTE, {
+      "POST /api/v1/uploads": uploadIntentsHandler(),
+      [PUT_PRESET]: nextRevision,
+    });
+    await user.upload(await screen.findByLabelText("Escolher arquivos"), [
+      new File(["a,b\n1,2\n"], "clientes.csv", { type: "text/csv" }),
+    ]);
+    expect(await screen.findByText("Enviado")).toBeVisible();
+
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+
+    // Reler `["presets", id]` remontaria o formulário da Bancada e perderia as entradas.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(sent(api.requests, `GET /api/v1/presets/${PRESET_ID}`)).toHaveLength(1);
+    expect(screen.getByText("clientes.csv")).toBeVisible();
+    expect(screen.getByText("Enviado")).toBeVisible();
+  });
+
+  it("reaberto pela Oficina depois de atualizar, mostra os parâmetros novos e manda a revisão nova", async () => {
+    let stored = presetBody({ revision: 4 });
+    const { api, user } = setup(PRESET_ROUTE, {
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+      "GET /api/v1/presets": () => jsonResponse({ data: [stored] }),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(stored),
+      [PUT_PRESET]: () => {
+        stored = presetBody({
+          revision: stored.revision + 1,
+          parameters: { ...stored.parameters, output_delimiter: "," },
+        });
+        return jsonResponse(stored);
+      },
+    });
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+      ",",
+    );
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+
+    await user.click(screen.getByRole("link", { name: "Oficina" }));
+    await user.click(
+      await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+    ).toHaveValue(",");
+    await confirmUpdate(user);
+    await waitFor(() => {
+      expect(sent(api.requests, PUT_PRESET)).toHaveLength(2);
+    });
+    expect(
+      sent(api.requests, PUT_PRESET).map((request) => request.headers.get("If-Match")),
+    ).toEqual(['"4"', '"5"']);
+  });
+
+  it("depois de um 412, reaberto pela Oficina, mostra a versão do servidor e manda a revisão dela", async () => {
+    let stored = presetBody({ revision: 4 });
+    const { api, user } = setup(PRESET_ROUTE, {
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+      "GET /api/v1/presets": () => jsonResponse({ data: [stored] }),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(stored),
+      [PUT_PRESET]: (request) => {
+        if (request.headers.get("If-Match") !== `"${String(stored.revision)}"`) {
+          return problemResponse(412, "PRECONDITION_FAILED");
+        }
+        stored = presetBody({ revision: stored.revision + 1 });
+        return jsonResponse(stored);
+      },
+    });
+    await screen.findByRole("button", { name: "Atualizar preset Clientes do mês" });
+    // Outra aba muda o preset depois de a Bancada lê-lo.
+    stored = presetBody({
+      revision: 7,
+      parameters: { ...stored.parameters, output_delimiter: "," },
+    });
+    await confirmUpdate(user);
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    await within(dialog).findByText(/O preset mudou em outra aba ou dispositivo/);
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    await user.click(screen.getByRole("link", { name: "Oficina" }));
+    await user.click(
+      await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+    ).toHaveValue(",");
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+    expect(
+      sent(api.requests, PUT_PRESET).map((request) => request.headers.get("If-Match")),
+    ).toEqual(['"4"', '"7"']);
+  });
+
+  it("reaberta pela Oficina depois de o preset mudar no servidor, a Bancada lê a versão nova", async () => {
+    let stored = presetBody({ revision: 4 });
+    const { api, user } = setup(PRESET_ROUTE, {
+      "GET /api/v1/runs": () => jsonResponse({ data: [], next_cursor: null }),
+      "GET /api/v1/presets": () => jsonResponse({ data: [stored] }),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(stored),
+      [PUT_PRESET]: nextRevision,
+    });
+    await screen.findByRole("button", { name: "Atualizar preset Clientes do mês" });
+    await user.click(screen.getByRole("link", { name: "Oficina" }));
+    await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" });
+
+    stored = presetBody({
+      revision: 9,
+      parameters: { ...stored.parameters, output_delimiter: "," },
+    });
+    await user.click(
+      screen.getByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
+    );
+
+    expect(
+      await screen.findByRole("combobox", { name: "Delimitador dos arquivos de saída" }),
+    ).toHaveValue(",");
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+    expect(
+      sent(api.requests, PUT_PRESET).map((request) => request.headers.get("If-Match")),
+    ).toEqual(['"9"']);
+  });
+
+  it("depois de atualizar, o foco volta ao Atualizar preset", async () => {
+    const { user } = setup(PRESET_ROUTE, { [PUT_PRESET]: nextRevision });
+
+    await confirmUpdate(user);
+    await screen.findByText("Preset Clientes do mês atualizado.");
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Atualizar preset Clientes do mês" }),
+      ).toHaveFocus();
+    });
+  });
+
+  it("Cancelar devolve o foco ao Atualizar preset sem chamar a API", async () => {
+    const { api, user } = setup(PRESET_ROUTE, { [PUT_PRESET]: nextRevision });
+
+    const dialog = await openUpdateDialog(user);
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Atualizar preset Clientes do mês" })).toHaveFocus();
+    expect(sent(api.requests, PUT_PRESET)).toEqual([]);
+  });
+
+  it("depois de um 412, Confirmar fica bloqueado até fechar e reabrir o diálogo", async () => {
+    const { api, user } = setup(PRESET_ROUTE, {
+      [PUT_PRESET]: () => problemResponse(412, "PRECONDITION_FAILED"),
+    });
+
+    await confirmUpdate(user);
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    await within(dialog).findByText(/O preset mudou em outra aba ou dispositivo/);
+    const confirm = within(dialog).getByRole("button", { name: "Atualizar preset" });
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    await user.click(confirm);
+    expect(sent(api.requests, PUT_PRESET)).toHaveLength(1);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    const reopened = await openUpdateDialog(user);
+    expect(within(reopened).getByRole("button", { name: "Atualizar preset" })).toHaveAttribute(
+      "aria-disabled",
+      "false",
+    );
+  });
+
+  it("depois de um 404, Confirmar fica bloqueado e um clique não manda outro PUT", async () => {
+    const { api, user } = setup(PRESET_ROUTE, {
+      [PUT_PRESET]: () => problemResponse(404, "NOT_FOUND"),
+    });
+
+    await confirmUpdate(user);
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    await within(dialog).findByRole("alert");
+    const confirm = within(dialog).getByRole("button", { name: "Atualizar preset" });
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    await user.click(confirm);
+    expect(sent(api.requests, PUT_PRESET)).toHaveLength(1);
+  });
+
+  it("revisão vencida (412) avisa no diálogo, que continua aberto", async () => {
+    const { user } = setup(PRESET_ROUTE, {
+      [PUT_PRESET]: () => problemResponse(412, "PRECONDITION_FAILED"),
+    });
+
+    await confirmUpdate(user);
+
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    expect(
+      await within(dialog).findByText(
+        "O preset mudou em outra aba ou dispositivo. Abra-o de novo pela Oficina para ver a versão atual.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("Preset Clientes do mês atualizado.")).toBeNull();
+  });
+
+  it("outra falha aparece no diálogo", async () => {
+    const { user } = setup(PRESET_ROUTE, {
+      [PUT_PRESET]: () => problemResponse(422, "VALIDATION_FAILED"),
+    });
+
+    await confirmUpdate(user);
+
+    const dialog = screen.getByRole("dialog", { name: "Atualizar o preset Clientes do mês?" });
+    expect(await within(dialog).findByRole("alert")).toBeVisible();
+  });
+
+  it.each([
+    ["sem origem", "/bancada/csv-janitor", {}],
+    [
+      "por preset de outra receita",
+      PRESET_ROUTE,
+      {
+        [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+          jsonResponse(presetBody({ recipe_id: "image-forge", parameters: {} })),
+      },
+    ],
+    [
+      "por preset de outra versão da mesma receita",
+      PRESET_ROUTE,
+      {
+        [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(presetBody({ recipe_version: 2 })),
+      },
+    ],
+    [
+      "por execução",
+      `/bancada/csv-janitor?execucao=${RUN_ID}`,
+      { [`GET /api/v1/runs/${RUN_ID}`]: () => jsonResponse(runBody()) },
+    ],
+  ] as const)("Bancada aberta %s não oferece Atualizar preset", async (_case, path, handlers) => {
+    setup(path, handlers);
+
+    expect(await screen.findByRole("button", { name: "Salvar preset" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Atualizar preset/ })).toBeNull();
+  });
+
+  it("parâmetros inválidos pedem correção em vez de abrir o diálogo", async () => {
+    const { api, user } = setup(`/bancada/image-forge?preset=${PRESET_ID}`, {
+      [`GET /api/v1/presets/${PRESET_ID}`]: () =>
+        jsonResponse(presetBody({ recipe_id: "image-forge", parameters: {} })),
+    });
+
+    const width = await screen.findByLabelText("Largura máxima, em pixels");
+    await user.clear(width);
+    await user.type(width, "0");
+    await user.click(screen.getByRole("button", { name: "Atualizar preset Clientes do mês" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Corrija os parâmetros antes de salvar o preset.")).toBeVisible();
+    expect(sent(api.requests, PUT_PRESET)).toEqual([]);
   });
 });
