@@ -55,6 +55,12 @@ def test_start_lento_renova_o_lease_enquanto_bloqueia(monkeypatch: pytest.Monkey
     worker.start_executor(attempt_without_database())
 
     assert seen_by_start[0] >= 2
+    assert not _renewal_threads_alive()
+
+
+def _renewal_threads_alive() -> list[threading.Thread]:
+    """Threads de renovação vivas: a saída do bloco espera a sua terminar (`join`)."""
+    return [thread for thread in threading.enumerate() if thread.name == "lease-renewal"]
 
 
 class _RecordingRunner:
@@ -161,9 +167,12 @@ def test_renovacao_ve_o_contexto_de_quem_abriu_o_bloco() -> None:
 
 def test_erro_do_corpo_tem_precedencia_sobre_o_da_renovacao() -> None:
     renewed = threading.Event()
+    body_failing = threading.Event()
 
     def renew() -> Status:
         renewed.set()
+        # Ainda renovando quando o corpo levanta: a saída do bloco precisa esperar esta thread.
+        assert body_failing.wait(FAILURE_GUARD_S), "o corpo não levantou"
         raise LostFencing("outra tentativa assumiu")
 
     with (
@@ -171,7 +180,10 @@ def test_erro_do_corpo_tem_precedencia_sobre_o_da_renovacao() -> None:
         BackgroundRenewal(renew, every=LEASE, retry_every=LEASE),
     ):
         assert renewed.wait(FAILURE_GUARD_S), "nenhuma renovação"
+        body_failing.set()
         raise RunnerError("start recusado")
+
+    assert not _renewal_threads_alive()
 
 
 # --- `stop` durante a supervisão (issue #442, 14c) ------------------------------------------------
