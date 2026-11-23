@@ -1,4 +1,5 @@
--- SLO de execução (docs/GoblinShiftPlan.md, 3.7): um evento por Run terminada, meta 99%.
+-- SLO de execução (docs/GoblinShiftPlan.md, 3.7): ao menos um evento por Run terminada
+-- (duplicata rara; README), meta 99%.
 -- O evento é o span "run.finished" com main = true que o worker, a manutenção, a API e o
 -- gs-admin emitem no término da Run (contrato em deploy/openobserve/README.md). Ele já diz se a
 -- Run é elegível: até 10 arquivos e 50 MiB de entrada, e não cancelada pela pessoa usuária.

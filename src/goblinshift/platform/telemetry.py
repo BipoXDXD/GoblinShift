@@ -418,7 +418,7 @@ UNKNOWN_ADDRESS = "unknown"
 # o IP do cliente; nomes antigos e novos das convenções semânticas.
 _URL_ATTRIBUTES = ("http.url", "url.full")
 _TARGET_ATTRIBUTES = ("http.target", "url.path")
-# Template da rota que a instrumentação ASGI grava antes do hook, também no casamento parcial
+# Template da rota que a instrumentação FastAPI grava antes do hook, também no casamento parcial
 # (405); sem rota, este valor fica no lugar do caminho.
 _ROUTE_ATTRIBUTE = "http.route"
 UNMATCHED_ROUTE = "unmatched"

@@ -49,11 +49,17 @@ def test_rotas_da_api_incluem_o_snippet() -> None:
     for line in template:
         if match := re.match(r"location\s+(.+?)\s*\{$", line):
             current = match.group(1)
+        elif line == "}":
+            # Fecha a location: nenhuma das locations do template tem bloco aninhado.
+            current = None
         elif line == INCLUDE_SNIPPET and current is not None:
             including.add(current)
     assert {
         "/api/",
         "/auth/",
+        "= /docs",
+        "/docs/assets/",
+        "= /openapi.json",
         "= /livez",
         "= /readyz",
         r"~ ^/api/v1/uploads/[^/]+/content$",

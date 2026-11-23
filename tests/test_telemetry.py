@@ -328,14 +328,15 @@ def test_span_de_banco_e_filho_da_requisicao_e_nao_conta_como_evento(
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "target", "url"),
+    ("method", "path", "status", "target", "url"),
     [
         # Sem rota: nenhum template para pôr no lugar do caminho; a URL fica só com a origem.
-        ("GET", "/api/v1/x/{c}", "unmatched", "http://localhost"),
+        ("GET", "/api/v1/x/{c}", 404, "unmatched", "http://localhost"),
         # 422: o parâmetro não é UUID, mas a rota casou e o template está em `http.route`.
         (
             "GET",
             "/api/v1/uploads/{c}/content",
+            422,
             UPLOAD_CONTENT_ROUTE,
             f"http://localhost{UPLOAD_CONTENT_ROUTE}",
         ),
@@ -343,17 +344,20 @@ def test_span_de_banco_e_filho_da_requisicao_e_nao_conta_como_evento(
         (
             "DELETE",
             "/api/v1/uploads/{c}/content",
+            405,
             UPLOAD_CONTENT_ROUTE,
             f"http://localhost{UPLOAD_CONTENT_ROUTE}",
         ),
     ],
 )
 def test_caminho_do_span_e_so_o_template_da_rota(
-    traced_app: TracedApp, method: str, path: str, target: str, url: str
+    traced_app: TracedApp, method: str, path: str, status: int, target: str, url: str
 ) -> None:
     canary = f"CANARY-{uuid4()}"
     with TestClient(traced_app.app) as client:
-        client.request(method, path.format(c=canary))
+        response = client.request(method, path.format(c=canary))
+
+    assert response.status_code == status
 
     spans = traced_app.exporter.get_finished_spans()
     (main,) = [s for s in spans if (s.attributes or {}).get("main") is True]
