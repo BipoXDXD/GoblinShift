@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from executor_ctl.config import Config, ConfigError, load_config
+from executor_ctl.profile import IoLimits
 
 pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
 
@@ -182,3 +183,48 @@ def test_config_por_symlink_e_recusada(tmp_path: Path) -> None:
     link.symlink_to(real)
     with pytest.raises(ConfigError):
         load_config(link)
+
+
+IO_LIMITS = {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
+
+
+def test_sem_io_limits_a_config_fica_sem_teto(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, VALID)).io_limits is None
+
+
+def test_io_limits_valido_vira_os_quatro_tetos(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, {**VALID, "io_limits": IO_LIMITS}))
+
+    assert config.io_limits == IoLimits(
+        read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000
+    )
+
+
+@pytest.mark.parametrize(
+    "io_limits",
+    [
+        {**IO_LIMITS, "write_bps": 0},
+        {**IO_LIMITS, "read_iops": -1},
+        {**IO_LIMITS, "read_bps": True},
+        {**IO_LIMITS, "write_iops": 1.5},
+        {**IO_LIMITS, "write_iops": "1000"},
+        {key: value for key, value in IO_LIMITS.items() if key != "read_bps"},
+        {**IO_LIMITS, "read_latency": 1},
+        [104857600, 52428800, 2000, 1000],
+        None,
+    ],
+    ids=[
+        "zero",
+        "negativo",
+        "booleano",
+        "fracionario",
+        "texto",
+        "chave-ausente",
+        "chave-desconhecida",
+        "lista",
+        "nulo",
+    ],
+)
+def test_io_limits_com_valor_zero_ou_negativo_e_recusado(tmp_path: Path, io_limits: object) -> None:
+    with pytest.raises(ConfigError):
+        load_config(write_config(tmp_path, {**VALID, "io_limits": io_limits}))

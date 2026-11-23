@@ -1,5 +1,6 @@
 """Perfil fixo do `docker run` do executor (docs/GoblinShiftPlan.md, 3.6; ADR 015)."""
 
+import os
 import uuid
 from pathlib import Path
 
@@ -61,3 +62,31 @@ def test_imagem_e_o_ultimo_argumento_sem_comando_depois() -> None:
     assert arguments.count(IMAGE) == 1
     assert "--runtime=runc" in arguments
     assert "--user=61000:20" in arguments
+
+
+LIMITS = profile.IoLimits(read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000)
+
+
+def test_sem_io_limits_nao_ha_flag_de_dispositivo() -> None:
+    arguments = profile.run_arguments(
+        ATTEMPT, IMAGE, work_dir=WORK_DIR, runtime="runsc", executor_gid=61001
+    )
+
+    assert not [argument for argument in arguments if argument.startswith("--device")]
+
+
+def test_io_limits_vira_as_quatro_flags_no_dispositivo_da_area() -> None:
+    # O dispositivo é o loop device do filesystem da área (major 7), não o disco do host.
+    throttle = profile.DiskThrottle(device=profile.block_device(os.makedev(7, 3)), limits=LIMITS)
+
+    arguments = profile.run_arguments(
+        ATTEMPT, IMAGE, work_dir=WORK_DIR, runtime="runsc", executor_gid=61001, throttle=throttle
+    )
+
+    assert [argument for argument in arguments if argument.startswith("--device")] == [
+        "--device-read-bps=/dev/block/7:3:104857600",
+        "--device-write-bps=/dev/block/7:3:52428800",
+        "--device-read-iops=/dev/block/7:3:2000",
+        "--device-write-iops=/dev/block/7:3:1000",
+    ]
+    assert arguments[-1] == IMAGE

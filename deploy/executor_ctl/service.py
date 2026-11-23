@@ -1,6 +1,7 @@
 """Operações do executor-ctl: quatro sobre o container e a leitura da imagem (3.6, "Sandbox")."""
 
 import logging
+import os
 import threading
 import uuid
 from collections.abc import Iterator
@@ -53,6 +54,7 @@ class ExecutorService:
         # toma para remover um container `created`, que pode ser o que um start em curso criou.
         self._area_lock = threading.Lock()
         self._area_lock_wait_s = area_lock_wait_s
+        self._throttle = _disk_throttle(config)
 
     def start(self, attempt_id: uuid.UUID, image: str) -> ContainerStatus:
         """Cria e inicia o container; se ele já existe, devolve o estado dele sem criar outro."""
@@ -73,6 +75,7 @@ class ExecutorService:
                 work_dir=prepared.path,
                 runtime=self._config.runtime,
                 executor_gid=self._executor_gid,
+                throttle=self._throttle,
             )
             try:
                 self._docker.run(arguments)
@@ -147,3 +150,15 @@ class ExecutorService:
             yield
         finally:
             self._area_lock.release()
+
+
+def _disk_throttle(config: Config) -> profile.DiskThrottle | None:
+    """O teto vai no dispositivo do filesystem da área (o loop device do exec-work).
+
+    Resolvido uma vez, na subida: a área é um filesystem montado antes do serviço e não troca
+    de dispositivo com ele no ar.
+    """
+    if config.io_limits is None:
+        return None
+    device = profile.block_device(os.stat(config.work_area).st_dev)
+    return profile.DiskThrottle(device=device, limits=config.io_limits)

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .images import ImageNotAllowedError, _read_root_file
+from .profile import IoLimits
 
 DEFAULT_CONFIG_PATH = Path("/etc/goblinshift/executor-ctl.json")
 IMAGES_FILE = "/var/lib/coolify-release/goblinshift/executor-images.json"
@@ -19,7 +20,8 @@ _SAFE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
 _GROUP_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 _PATH_KEYS = ("socket", "work_area", "images_file")
 _REQUIRED_KEYS = frozenset({*_PATH_KEYS, "group", "socket_group", "runtime"})
-_OPTIONAL_KEYS = frozenset({"require_mount"})
+_OPTIONAL_KEYS = frozenset({"require_mount", "io_limits"})
+_IO_LIMIT_KEYS = frozenset({"read_bps", "write_bps", "read_iops", "write_iops"})
 
 
 class ConfigError(ValueError):
@@ -39,6 +41,9 @@ class Config:
     # Sem o filesystem de tamanho fixo montado, o executor escreveria no disco raiz da VPS
     # (ADR 005); só os testes, com a área num diretório temporário, desligam a exigência.
     require_mount: bool = True
+    # Teto de I/O do executor no disco da área (D13): ausente = sem teto. O operador mede a vazão
+    # normal do disco no host e liga com valores abaixo dela (deploy/executor-ctl/README.md).
+    io_limits: IoLimits | None = None
     loaded_bytes_sha256: str | None = field(default=None, compare=False, repr=False)
 
 
@@ -87,6 +92,7 @@ def _parse_config(raw: str | bytes, path: Path) -> Config:
         runtime=_runtime(content["runtime"]),
         images_file=_absolute_path(content, "images_file"),
         require_mount=_flag(content.get("require_mount", True)),
+        io_limits=_io_limits(content["io_limits"]) if "io_limits" in content else None,
         loaded_bytes_sha256=hashlib.sha256(
             raw.encode("utf-8") if isinstance(raw, str) else raw
         ).hexdigest(),
@@ -119,3 +125,18 @@ def _flag(value: object) -> bool:
     if not isinstance(value, bool):
         raise ConfigError("require_mount precisa ser true ou false")
     return value
+
+
+def _io_limits(value: object) -> IoLimits:
+    if not isinstance(value, dict) or set(value) != _IO_LIMIT_KEYS:
+        raise ConfigError(f"io_limits precisa ser um objeto com {sorted(_IO_LIMIT_KEYS)}")
+    for key, limit in value.items():
+        # bool é subclasse de int: `true` não pode virar teto de 1 byte/s.
+        if type(limit) is not int or limit <= 0:
+            raise ConfigError(f"io_limits.{key} precisa ser um inteiro positivo")
+    return IoLimits(
+        read_bps=value["read_bps"],
+        write_bps=value["write_bps"],
+        read_iops=value["read_iops"],
+        write_iops=value["write_iops"],
+    )

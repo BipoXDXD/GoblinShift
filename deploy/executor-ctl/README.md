@@ -43,6 +43,35 @@ Exemplo de configuração administrativa a preparar e revisar pelo operador:
 }
 ```
 
+### Teto de I/O de disco (opcional, D13)
+
+A área de trabalho fica no mesmo disco do banco. A chave opcional `io_limits`
+limita o quanto um executor lê e escreve nele; **sem a chave não há teto**, e o
+`docker run` sai exatamente como antes. Com ela, as quatro chaves são
+obrigatórias e cada valor é um inteiro positivo (bytes/s e operações/s):
+
+```json
+"io_limits": {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
+```
+
+O serviço resolve o dispositivo uma vez, na subida: `/dev/block/<major>:<minor>`
+do `st_dev` de `work_area`, isto é, o loop device do filesystem de tamanho fixo
+da área (ADR 005), e passa `--device-read-bps`, `--device-write-bps`,
+`--device-read-iops` e `--device-write-iops` nesse dispositivo. Trocar a
+montagem da área exige reiniciar o executor-ctl.
+
+**Como medir (operador, no host):** com o worker parado, meça a vazão normal do
+disco do banco dentro da área, por exemplo
+`fio --name=area --directory=/srv/goblinshift/exec-work --rw=randrw --bs=64k --size=1g --direct=1 --runtime=30 --time_based`,
+e anote leitura/escrita em bytes/s e IOPS. Configure valores abaixo desses
+(sugestão: metade) e reinstale (Tarefa 26). A aceitação (`deploy/acceptance`)
+ainda monta o `docker run` sem o teto, então aprova as sondas mas não mede o
+efeito dele; até ela passar a aplicá-lo, confira com uma tentativa real
+(`docker inspect` mostra `BlkioDeviceReadBps` e afins). O efeito do teto com gVisor (`runsc`) sobre loop
+device só se prova no host: o throttling é do cgroup do container (onde ficam o
+sentry e o gofer), e a escrita com cache de página chega ao disco pelo
+writeback; se a sonda não mostrar o teto, registrar e voltar sem a chave.
+
 O instalador executa preflight somente leitura, usando `load_config` completo e
 o leitor da política do checkout, antes de `getent`, `groupadd`, `usermod`,
 `install`, qualquer escrita ou `systemctl`. Configuração ausente/legada/inválida,

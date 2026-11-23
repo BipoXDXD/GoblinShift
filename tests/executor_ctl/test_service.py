@@ -3,6 +3,7 @@
 import os
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from executor_ctl.docker_cli import (
     DockerCli,
     DockerUnavailableError,
 )
+from executor_ctl.profile import IoLimits
 from executor_ctl.service import AREA_LOCK_WAIT_S, AreaBusyError, ExecutorService
 from executor_ctl.workarea import WorkAreaDirtyError
 
@@ -221,3 +223,40 @@ def test_stop_nao_remove_created_com_start_em_curso(tmp_path: Path) -> None:
     # Lista exata: o `rm` seria gravado como "rm <nome>", e só ela prova que não houve remoção.
     name = f"gs-exec-{HOLDER}"
     assert docker.calls == [f"inspect {name}", f"stop {name}", f"inspect {name}"]
+
+
+class RecordingDocker(CountingDocker):
+    """Guarda os argumentos do `docker run` para conferir o perfil que o serviço montou."""
+
+    def __init__(self) -> None:
+        super().__init__("absent")
+        self.run_arguments: list[str] = []
+
+    def run(self, arguments: list[str]) -> None:
+        self.run_arguments = arguments
+        super().run(arguments)
+
+
+def test_io_limits_da_config_vai_ao_docker_run_no_dispositivo_da_area(tmp_path: Path) -> None:
+    limits = IoLimits(read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000)
+    config = replace(make_config(tmp_path, tmp_path, allowed=[IMAGE]), io_limits=limits)
+    docker = RecordingDocker()
+    area_device = os.stat(config.work_area).st_dev
+    device = f"/dev/block/{os.major(area_device)}:{os.minor(area_device)}"
+    (config.work_area / str(HOLDER) / "inputs").mkdir(parents=True)
+
+    ExecutorService(config, docker, os.getgid()).start(HOLDER, IMAGE)
+
+    assert f"--device-write-bps={device}:52428800" in docker.run_arguments
+    assert f"--device-read-iops={device}:2000" in docker.run_arguments
+
+
+def test_sem_io_limits_o_servico_nao_passa_dispositivo(tmp_path: Path) -> None:
+    docker = RecordingDocker()
+    service = service_with(tmp_path, docker, lock_wait_s=TEST_LOCK_WAIT_S)
+    (tmp_path / "exec-work" / str(HOLDER) / "inputs").mkdir(parents=True)
+
+    service.start(HOLDER, IMAGE)
+
+    assert docker.run_arguments
+    assert not [arg for arg in docker.run_arguments if arg.startswith("--device")]
