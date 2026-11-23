@@ -17,16 +17,21 @@ prazo: estourado, respondem 503 `busy` sem tocar no Docker nem na área, e repet
 `stop` pode responder `absent`: o container que nunca iniciou (`created`) é removido, com o lock
 da área. Se um start em curso o segura além do prazo, `stop` devolve o `created` lido, sem erro.
 
-Uma requisição por conexão, corpo JSON pequeno com Content-Length obrigatório e prazo de leitura
-curto: o cliente é o worker, mas um cliente lento ou com defeito não pode prender o serviço.
+Uma requisição por conexão, corpo JSON pequeno com Content-Length obrigatório e dois prazos de
+leitura: um por leitura e um total para a linha, os cabeçalhos e o corpo (não cobre a operação no
+Docker). No máximo `MAX_CONNECTIONS` conexões ao mesmo tempo; acima disso a conexão recebe 503
+`busy` e é fechada. O cliente é o worker, mas um cliente lento ou com defeito não pode prender o
+serviço nem esgotar as threads.
 """
 
 import json
 import logging
 import os
 import re
+import socket
 import socketserver
 import stat
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -54,6 +59,12 @@ _LENGTH_ABOVE_LIMITS: int = 10**_MAX_LENGTH_DIGITS
 # Sem Content-Length, quanto esperar pelo que o cliente já mandou antes de responder.
 _DRAIN_WAIT_S = 0.05
 READ_TIMEOUT_S = 5.0
+# Teto de conexões atendidas ao mesmo tempo (uma thread cada) e prazo total para ler a requisição
+# inteira: o prazo por leitura sozinho não para um cliente que manda um byte a cada poucos segundos.
+MAX_CONNECTIONS = 16
+REQUEST_READ_DEADLINE_S = 10.0
+# Quanto a recusa por teto espera para entregar a resposta: quem não lê perde o 503, não o loop.
+_REFUSAL_SEND_TIMEOUT_S = 0.1
 SOCKET_MODE = 0o660
 # Enquanto o socket nasce, só o dono (root) o acessa; o grupo entra depois do chown.
 _BIND_UMASK = 0o177
@@ -75,6 +86,8 @@ _ERRORS: tuple[tuple[type[Exception], HTTPStatus, str], ...] = (
 _log = logging.getLogger(__name__)
 
 Payload = dict[str, object] | None
+# O que o socketserver entrega por requisição; num servidor de stream é sempre o socket.
+_Request = socket.socket | tuple[bytes, socket.socket]
 
 
 class RequestError(Exception):
@@ -85,7 +98,7 @@ class RequestError(Exception):
 
 
 class _ClientGoneError(Exception):
-    """O cliente não mandou o corpo dentro do prazo; não há a quem responder."""
+    """O cliente não mandou a requisição inteira dentro do prazo; não há a quem responder."""
 
 
 class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -93,11 +106,63 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = False
     block_on_close = True
 
-    def __init__(self, path: Path, service: ExecutorService, read_timeout_s: float) -> None:
+    def __init__(
+        self,
+        path: Path,
+        service: ExecutorService,
+        read_timeout_s: float,
+        *,
+        max_connections: int = MAX_CONNECTIONS,
+        read_deadline_s: float = REQUEST_READ_DEADLINE_S,
+    ) -> None:
         self.service = service
         self.read_timeout_s = read_timeout_s
+        self.read_deadline_s = read_deadline_s
+        self.max_connections = max_connections
         self.socket_path = path
+        self._slots = threading.BoundedSemaphore(max_connections)
         super().__init__(str(path), ControlHandler)
+
+    def process_request(self, request: _Request, client_address: object) -> None:
+        """Atende numa thread nova se houver vaga; sem vaga, responde 503 `busy` e fecha."""
+        if not self._slots.acquire(blocking=False):
+            self._refuse_busy(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            # A thread não nasceu (Thread.start falhou): process_request_thread não devolve a vaga.
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request: _Request, client_address: object) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+    def _refuse_busy(self, request: _Request) -> None:
+        # Roda no loop do accept: nada aqui pode esperar pelo cliente além de um prazo curto.
+        _log.warning("conexão recusada no teto", extra={"status": 503, "error": "busy"})
+        body = json.dumps(
+            {
+                "error": "busy",
+                "detail": f"executor-ctl no teto de {self.max_connections} conexões; tente de novo",
+            }
+        ).encode()
+        head = (
+            "HTTP/1.1 503 Service Unavailable\r\n"
+            "Connection: close\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n"
+        ).encode()
+        connection = request if isinstance(request, socket.socket) else request[1]
+        with suppress(OSError):
+            connection.settimeout(_REFUSAL_SEND_TIMEOUT_S)
+            connection.sendall(head + body)
+            # O que o cliente já mandou é descartado: fechar com bytes não lidos vira reset.
+            connection.recv(DISCARD_LIMIT_BYTES, socket.MSG_DONTWAIT)
+        self.shutdown_request(request)
 
     def server_close(self) -> None:
         super().server_close()
@@ -118,12 +183,20 @@ def bind_server(
     group_id: int,
     *,
     read_timeout_s: float = READ_TIMEOUT_S,
+    max_connections: int = MAX_CONNECTIONS,
+    read_deadline_s: float = REQUEST_READ_DEADLINE_S,
 ) -> ControlServer:
     """Cria o socket com dono root, grupo `group_id` e modo 0660."""
     _remove_stale_socket(config.socket)
     previous_umask = os.umask(_BIND_UMASK)
     try:
-        server = ControlServer(config.socket, service, read_timeout_s)
+        server = ControlServer(
+            config.socket,
+            service,
+            read_timeout_s,
+            max_connections=max_connections,
+            read_deadline_s=read_deadline_s,
+        )
     finally:
         os.umask(previous_umask)
     os.chown(config.socket, -1, group_id)
@@ -251,6 +324,36 @@ class ControlHandler(BaseHTTPRequestHandler):
         self._body_consumed = False
         # Prazo por leitura: vale para a linha de requisição, os cabeçalhos e o corpo.
         self.connection.settimeout(self.server.read_timeout_s)
+        # Prazo total da leitura: estourado, a conexão é cortada e a requisição não segue.
+        self._read_lock = threading.Lock()
+        self._read_done = False
+        self._read_expired = False
+        self._read_deadline = threading.Timer(self.server.read_deadline_s, self._expire_read)
+        self._read_deadline.daemon = True
+        self._read_deadline.start()
+
+    def finish(self) -> None:
+        self._read_deadline.cancel()
+        super().finish()
+
+    def _expire_read(self) -> None:
+        with self._read_lock:
+            if self._read_done:
+                return
+            self._read_expired = True
+        with suppress(OSError):
+            self.connection.shutdown(socket.SHUT_RDWR)
+
+    def _request_read(self) -> None:
+        """A requisição foi lida inteira: desarma o prazo total antes da operação no serviço.
+
+        Se o prazo estourou antes, a conexão já foi cortada e nada mais é executado.
+        """
+        with self._read_lock:
+            if self._read_expired:
+                raise _ClientGoneError
+            self._read_done = True
+        self._read_deadline.cancel()
 
     def address_string(self) -> str:
         return "unix"
@@ -283,7 +386,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             status, payload = self._handle(method, fields)
         except _ClientGoneError:
             self.close_connection = True
-            _log.warning("cliente não mandou o corpo no prazo", extra=fields)
+            _log.warning("cliente não mandou a requisição no prazo", extra=fields)
             return
         self._respond(status, payload)
         fields["status"] = int(status)
@@ -323,6 +426,7 @@ class ControlHandler(BaseHTTPRequestHandler):
         fields["operation"] = "image"
         image = parse_image_ref(ref)
         fields["image"] = image
+        self._request_read()
         return HTTPStatus.OK, {"present": self.server.service.image_present(image)}
 
     def _start(
@@ -335,6 +439,7 @@ class ControlHandler(BaseHTTPRequestHandler):
     def _status(
         self, attempt_id: uuid.UUID, fields: dict[str, object]
     ) -> tuple[HTTPStatus, Payload]:
+        self._request_read()
         return HTTPStatus.OK, self.server.service.status(attempt_id).to_json()
 
     def _stop(self, attempt_id: uuid.UUID, fields: dict[str, object]) -> tuple[HTTPStatus, Payload]:
@@ -345,6 +450,7 @@ class ControlHandler(BaseHTTPRequestHandler):
     def _remove(
         self, attempt_id: uuid.UUID, fields: dict[str, object]
     ) -> tuple[HTTPStatus, Payload]:
+        self._request_read()
         self.server.service.remove(attempt_id)
         return HTTPStatus.NO_CONTENT, None
 
@@ -366,6 +472,7 @@ class ControlHandler(BaseHTTPRequestHandler):
         if len(body) != length:
             raise _ClientGoneError
         self._body_consumed = True
+        self._request_read()
         return body
 
     def _discard_unread_body(self) -> None:
@@ -392,6 +499,9 @@ class ControlHandler(BaseHTTPRequestHandler):
     def _respond(self, status: int, payload: Payload) -> None:
         # Uma requisição por conexão: sem keep-alive, nada sobra no buffer para a próxima.
         self.close_connection = True
+        if self._read_expired:
+            # Conexão cortada pelo prazo total: não há a quem responder.
+            return
         self._discard_unread_body()
         body = b"" if payload is None else json.dumps(payload).encode()
         self.send_response(status)

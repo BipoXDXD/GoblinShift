@@ -15,7 +15,7 @@ import pytest
 from executor_ctl import images
 from executor_ctl.config import Config
 from executor_ctl.docker_cli import DockerCli
-from executor_ctl.server import bind_server
+from executor_ctl.server import MAX_CONNECTIONS, REQUEST_READ_DEADLINE_S, bind_server
 from executor_ctl.service import AREA_LOCK_WAIT_S, ExecutorService
 
 
@@ -57,11 +57,24 @@ POLL_INTERVAL_S = 0.01
 
 @contextmanager
 def running_server(
-    config: Config, docker: DockerCli, *, area_lock_wait_s: float = AREA_LOCK_WAIT_S
+    config: Config,
+    docker: DockerCli,
+    *,
+    area_lock_wait_s: float = AREA_LOCK_WAIT_S,
+    read_timeout_s: float = TEST_READ_TIMEOUT_S,
+    max_connections: int = MAX_CONNECTIONS,
+    read_deadline_s: float = REQUEST_READ_DEADLINE_S,
 ) -> Iterator[Path]:
     group_id = grp.getgrnam(config.group).gr_gid
     service = ExecutorService(config, docker, group_id, area_lock_wait_s=area_lock_wait_s)
-    server = bind_server(config, service, group_id, read_timeout_s=TEST_READ_TIMEOUT_S)
+    server = bind_server(
+        config,
+        service,
+        group_id,
+        read_timeout_s=read_timeout_s,
+        max_connections=max_connections,
+        read_deadline_s=read_deadline_s,
+    )
     thread = threading.Thread(
         target=server.serve_forever, kwargs={"poll_interval": POLL_INTERVAL_S}, daemon=True
     )

@@ -1,12 +1,17 @@
 """Protocolo HTTP do executor-ctl sem Docker: tudo aqui é recusado antes de chamar o CLI."""
 
 import http.client
+import itertools
 import json
+import os
 import socket as socketlib
 import stat
 import sys
+import threading
+import time
 import uuid
 from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
@@ -16,9 +21,17 @@ import pytest
 from executor_ctl.client import UnixHTTPConnection, call
 from executor_ctl.docker_cli import DockerCli
 from executor_ctl.journal import JsonFormatter
-from executor_ctl.server import MAX_BODY_BYTES, ControlHandler, ControlServer, _error_payload
+from executor_ctl.server import (
+    MAX_BODY_BYTES,
+    MAX_CONNECTIONS,
+    REQUEST_READ_DEADLINE_S,
+    ControlHandler,
+    ControlServer,
+    _error_payload,
+)
+from executor_ctl.service import ExecutorService
 
-from .conftest import make_config, running_server
+from .conftest import TEST_READ_TIMEOUT_S, make_config, running_server
 
 pytestmark = pytest.mark.host_python
 
@@ -582,3 +595,184 @@ def test_excecao_que_escapa_do_handler_vai_ao_journal_so_com_tipos_e_frames(
     line = JsonFormatter().format(record)
     assert CANARY not in line
     assert "builtins.BrokenPipeError" in json.loads(line)["exception"]
+
+
+# Guardas de falha: só estouram se o comportamento testado não acontecer.
+ANSWER_GUARD_S = 5.0
+DRIP_GUARD_S = 10.0
+_RETRY_PACE_S = 0.01
+
+
+@contextmanager
+def serving(
+    tmp_path: Path,
+    socket_dir: Path,
+    *,
+    read_timeout_s: float = TEST_READ_TIMEOUT_S,
+    max_connections: int = MAX_CONNECTIONS,
+    read_deadline_s: float = REQUEST_READ_DEADLINE_S,
+) -> Iterator[Path]:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    with running_server(
+        config,
+        DockerCli(binary=str(tmp_path / "sem-docker")),
+        read_timeout_s=read_timeout_s,
+        max_connections=max_connections,
+        read_deadline_s=read_deadline_s,
+    ) as socket:
+        yield socket
+
+
+def open_partial_request(socket: Path, prefix: bytes) -> socketlib.socket:
+    """Conexão que manda o começo da requisição e fica parada, segurando uma vaga."""
+    raw = socketlib.socket(socketlib.AF_UNIX)
+    raw.connect(str(socket))
+    raw.sendall(prefix)
+    return raw
+
+
+def read_until_eof(raw: socketlib.socket) -> bytes:
+    chunks = []
+    while chunk := raw.recv(4096):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def parse_answer(answer: bytes) -> tuple[int, dict[str, Any]]:
+    head, _, body = answer.partition(b"\r\n\r\n")
+    parsed = json.loads(body)
+    assert isinstance(parsed, dict)
+    return int(head.split(b" ", 2)[1]), parsed
+
+
+def request_until_answered(socket: Path, method: str, path: str) -> tuple[int, dict[str, Any]]:
+    """Repete a conexão até vir uma resposta: a recusa pode fechar antes de ler o pedido."""
+    request = f"{method} {path} HTTP/1.1\r\nContent-Length: 0\r\n\r\n".encode()
+    deadline = time.monotonic() + ANSWER_GUARD_S
+    while True:
+        try:
+            with socketlib.socket(socketlib.AF_UNIX) as raw:
+                raw.settimeout(ANSWER_GUARD_S)
+                raw.connect(str(socket))
+                raw.sendall(request)
+                answer = read_until_eof(raw)
+        except BrokenPipeError, ConnectionResetError:
+            answer = b""
+        if answer or time.monotonic() > deadline:
+            return parse_answer(answer)
+        threading.Event().wait(_RETRY_PACE_S)
+
+
+def request_until_not_busy(socket: Path, method: str, path: str) -> tuple[int, dict[str, Any]]:
+    """A vaga volta quando a thread da conexão fechada termina, sem aviso ao cliente."""
+    deadline = time.monotonic() + ANSWER_GUARD_S
+    while True:
+        status, body = request_until_answered(socket, method, path)
+        if body.get("error") != "busy" or time.monotonic() > deadline:
+            return status, body
+        threading.Event().wait(_RETRY_PACE_S)
+
+
+def drip_until_closed(socket: Path, *, every_s: float) -> float:
+    """Manda a requisição um byte por vez e devolve quanto o servidor levou para cortar."""
+    pace = threading.Event()
+    started = time.monotonic()
+    with socketlib.socket(socketlib.AF_UNIX) as raw:
+        raw.connect(str(socket))
+        for byte in itertools.cycle(b"GET /v1/attempts/"):
+            elapsed = time.monotonic() - started
+            if elapsed > DRIP_GUARD_S:
+                return elapsed
+            try:
+                raw.sendall(bytes([byte]))
+                if raw.recv(1, socketlib.MSG_DONTWAIT) == b"":
+                    return time.monotonic() - started
+            except BlockingIOError:
+                pass
+            except BrokenPipeError, ConnectionResetError:
+                return time.monotonic() - started
+            pace.wait(every_s)
+    raise AssertionError("inalcançável: o ciclo de bytes não termina")
+
+
+def test_conexao_acima_do_teto_recebe_503_busy(tmp_path: Path, socket_dir: Path) -> None:
+    with (
+        serving(tmp_path, socket_dir, max_connections=2, read_timeout_s=60) as path,
+        ExitStack() as idle,
+    ):
+        for _ in range(2):
+            idle.enter_context(open_partial_request(path, b"GET /v1/"))
+
+        status, body = request_until_answered(path, "GET", f"/v1/attempts/{ATTEMPT}")
+
+    assert (status, body["error"]) == (503, "busy")
+
+
+def test_cliente_gotejando_e_desconectado_no_prazo_total(tmp_path: Path, socket_dir: Path) -> None:
+    with serving(tmp_path, socket_dir, read_timeout_s=5, read_deadline_s=0.3) as path:
+        closed_after = drip_until_closed(path, every_s=0.05)
+
+    # Cada byte chega bem antes do prazo por leitura (5 s): quem cortou foi o prazo total.
+    assert closed_after < 5
+
+
+def test_requisicao_normal_continua_respondendo_depois_do_teto_liberar(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    with serving(tmp_path, socket_dir, max_connections=1, read_timeout_s=60) as path:
+        with open_partial_request(path, b"GET /v1/"):
+            _, refused = request_until_answered(path, "GET", "/v1/attempts/x")
+
+        status, body = request_until_not_busy(path, "GET", "/v1/attempts/x")
+
+    assert refused["error"] == "busy"
+    assert (status, body["error"]) == (400, "invalid_attempt_id")
+
+
+def _fail_to_start(self: threading.Thread) -> None:
+    raise RuntimeError("can't start new thread")
+
+
+def test_vaga_volta_quando_a_thread_da_conexao_nao_inicia(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    service = ExecutorService(config, DockerCli(binary=str(tmp_path / "sem-docker")), os.getgid())
+    server = ControlServer(config.socket, service, TEST_READ_TIMEOUT_S, max_connections=1)
+    try:
+        lost, lost_peer = socketlib.socketpair(socketlib.AF_UNIX)
+        with lost, lost_peer, monkeypatch.context() as patch:
+            patch.setattr(threading.Thread, "start", _fail_to_start)
+            with pytest.raises(RuntimeError):
+                server.process_request(lost, None)
+
+        accepted, client = socketlib.socketpair(socketlib.AF_UNIX)
+        with client:
+            client.settimeout(ANSWER_GUARD_S)
+            server.process_request(accepted, None)
+            client.sendall(b"GET /v1/attempts/x HTTP/1.1\r\nContent-Length: 0\r\n\r\n")
+            status, body = parse_answer(read_until_eof(client))
+    finally:
+        server.server_close()
+
+    assert (status, body["error"]) == (400, "invalid_attempt_id")
+
+
+def test_requisicao_cortada_no_prazo_total_nao_chega_ao_docker(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    docker, calls = recording_docker(tmp_path)
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+
+    # A linha chega inteira; o cabeçalho fica pela metade até o prazo total cortar.
+    request = f"DELETE /v1/attempts/{ATTEMPT} HTTP/1.1\r\nX-Lento: a".encode()
+    with (
+        running_server(config, docker, read_timeout_s=5, read_deadline_s=0.3) as socket,
+        open_partial_request(socket, request) as stalled,
+    ):
+        stalled.settimeout(ANSWER_GUARD_S)
+        answer = read_until_eof(stalled)
+    # Ao sair, o servidor já esperou a thread da conexão terminar.
+
+    assert answer == b""
+    assert not calls.exists()
