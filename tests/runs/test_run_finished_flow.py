@@ -15,6 +15,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import INVALID_SPAN_CONTEXT, NonRecordingSpan, NoOpTracer, Span
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -73,6 +74,33 @@ def maintenance(
     return Maintenance(
         factory, storage, local_runner(work_root), config, on_finished=spans.reporter.report
     )
+
+
+class _SpanThatFailsToEnd(NonRecordingSpan):
+    def end(self, end_time: int | None = None) -> None:
+        raise RuntimeError("exportador fora do ar")
+
+
+class _TracerThatFailsToEmit(NoOpTracer):
+    """A emissão falha no `span.end()`, como um processor que estoura ao receber o span."""
+
+    def start_span(self, *args: Any, **kwargs: Any) -> Span:
+        return _SpanThatFailsToEnd(INVALID_SPAN_CONTEXT)
+
+
+class _FactoryThatFailsFromSession(sessionmaker[Session]):
+    """Abre as primeiras sessões e recusa a partir da `fail_from`-ésima."""
+
+    def __init__(self, factory: sessionmaker[Session], fail_from: int) -> None:
+        super().__init__(**factory.kw)
+        self._opened = 0
+        self._fail_from = fail_from
+
+    def __call__(self, **local_kw: Any) -> Session:
+        self._opened += 1
+        if self._opened >= self._fail_from:
+            raise RuntimeError("banco fora do ar")
+        return super().__call__(**local_kw)
 
 
 def set_run(factory: sessionmaker[Session], run_id: uuid.UUID, **values: object) -> None:
@@ -204,6 +232,28 @@ def test_falha_ao_montar_o_evento_nao_interrompe_quem_concluiu_a_run(
     assert any(str(missing) in str(getattr(r, "fields", "")) for r in caplog.records)
 
 
+def test_falha_so_ao_gravar_a_marca_nao_diz_que_o_evento_se_perdeu(
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    spans: Spans,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # O evento saiu; sem a marca, a varredura o repete: duplicata, não perda.
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    cancel_run(factory, storage, owner, run_id)
+    marking_fails = _FactoryThatFailsFromSession(factory, fail_from=2)
+    reporter = RunFinishedReporter(marking_fails, HASHER, spans.provider.get_tracer("test"))
+
+    reporter.report(run_id)
+
+    messages = [r.getMessage() for r in caplog.records if r.name == "goblinshift.runs.finished"]
+    assert (len(spans.finished()), messages) == (
+        1,
+        ["término da execução emitido sem a marca; a varredura vai repeti-lo"],
+    )
+
+
 # Ao menos uma vez: a varredura da manutenção --------------------------------------------------
 
 
@@ -235,6 +285,21 @@ def test_queda_depois_do_commit_e_a_manutencao_emite_o_termino_uma_vez(
     assert (first["finishes_reported"], second["finishes_reported"]) == (1, 0)
 
 
+def test_emissao_que_falha_nao_grava_a_marca_e_a_varredura_reemite(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
+) -> None:
+    # A marca só sai depois de emitir: gravada antes, a falha viraria perda (no máximo uma vez).
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    failing = RunFinishedReporter(factory, HASHER, _TracerThatFailsToEmit())
+    cancel_run(factory, storage, owner, run_id, on_finished=failing.report)
+    set_run(factory, run_id, finished_at=func.now() - timedelta(minutes=6))
+
+    counts = maintenance(factory, storage, work_root, spans).run_cycle()
+
+    assert (reported_run_ids(spans), counts["finishes_reported"]) == ([str(run_id)], 1)
+
+
 def test_run_reportada_nao_e_emitida_de_novo(
     factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
 ) -> None:
@@ -260,6 +325,16 @@ def test_run_dentro_da_carencia_espera(
     counts = maintenance(factory, storage, work_root, spans).run_cycle()
 
     assert (reported_run_ids(spans), counts["finishes_reported"]) == ([], 0)
+
+
+def test_run_perto_do_horizonte_ainda_e_reemitida(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
+) -> None:
+    run_id = finished_unreported(factory, storage, timedelta(hours=23))
+
+    counts = maintenance(factory, storage, work_root, spans).run_cycle()
+
+    assert (reported_run_ids(spans), counts["finishes_reported"]) == ([str(run_id)], 1)
 
 
 def test_run_alem_do_horizonte_nao_e_reemitida(

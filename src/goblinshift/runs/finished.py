@@ -4,7 +4,7 @@ Ao menos um por Run que chega a estado terminal, emitido depois do commit por qu
 (worker, claim, manutenção, API ou `gs-admin`). Depois de emitir, o reporter grava
 `run.finished_reported_at`; a manutenção reemite as Runs terminais que ficaram sem a marca (quem as
 concluiu caiu antes de emitir). A garantia vale até a fila de exportação, e a duplicata é possível
-(processo que cai entre emitir e marcar). É o evento do SLO de execução,
+(processo que cai entre emitir e marcar, ou marca que não se grava). É o evento do SLO de execução,
 `deploy/openobserve/sql/execucao.eventos.sql`; o contrato dos atributos está no runbook
 `deploy/openobserve/README.md`.
 
@@ -106,13 +106,22 @@ class RunFinishedReporter:
                 SPAN_NAME, context=Context(), attributes=finished.attributes(self._hasher)
             )
             span.end()
-            run_transaction(self._factory, lambda session: _mark_reported(session, run_id))
         except Exception:
             # A Run já está terminal, com os usos liberados; perder o evento custa só telemetria
             # (sem a marca, a varredura da manutenção tenta de novo), e propagar faria o worker
             # abandonar a limpeza e a manutenção, o resto do ciclo.
             logger.exception(
                 "evento de término da execução perdido", extra={"fields": {"run_id": str(run_id)}}
+            )
+            return
+        # A marca só depois de emitir: gravada antes, uma falha na emissão viraria perda.
+        try:
+            run_transaction(self._factory, lambda session: _mark_reported(session, run_id))
+        except Exception:
+            # O evento saiu; sem a marca, a varredura o repete (duplicata, não perda).
+            logger.exception(
+                "término da execução emitido sem a marca; a varredura vai repeti-lo",
+                extra={"fields": {"run_id": str(run_id)}},
             )
 
 
