@@ -5,14 +5,18 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+from .installer_copy import installer_copy
 
 pytestmark = pytest.mark.host_python
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = "/var/lib/coolify-release/goblinshift/executor-images.json"
+SERVICE = "goblinshift-executor-ctl.service"
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "b" * 64
 
 
@@ -207,3 +211,54 @@ def fixture_snapshot(root: Path) -> dict[str, tuple[int, bytes | str | None]]:
         )
         result[str(path.relative_to(root))] = (path.lstat().st_mode, payload)
     return result
+
+
+def test_falha_no_daemon_reload_deixa_o_restart_para_a_proxima(tmp_path: Path) -> None:
+    with installer_copy(tmp_path, fail_first_daemon_reload=True) as copy:
+        marker = copy.prefix / ".restart-pending"
+
+        first = copy.run()
+        assert first.returncode != 0
+        assert marker.exists(), first.stderr
+        assert not any(call.startswith("restart") for call in copy.systemctl_calls())
+
+        second = copy.run()
+        assert second.returncode == 0, second.stderr
+        assert f"restart {SERVICE}" in copy.systemctl_calls()
+        assert not marker.exists()
+
+
+def test_sem_mudanca_nem_marcador_nao_reinicia(tmp_path: Path) -> None:
+    with installer_copy(tmp_path) as copy:
+        assert copy.run().returncode == 0
+        calls_before = len(copy.systemctl_calls())
+
+        again = copy.run()
+
+        assert again.returncode == 0, again.stderr
+        assert not any(c.startswith("restart") for c in copy.systemctl_calls()[calls_before:])
+
+
+def test_falha_nao_deixa_staging(tmp_path: Path) -> None:
+    with installer_copy(tmp_path, failing=("chmod",)) as copy:
+        result = copy.run()
+
+        assert result.returncode != 0
+        assert list(copy.prefix.glob(".executor_ctl.*")) == []
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="systemd-analyze só existe no Linux")
+def test_unit_gerada_passa_no_systemd_analyze(tmp_path: Path) -> None:
+    with installer_copy(tmp_path) as copy:
+        assert copy.run().returncode == 0
+        with tempfile.TemporaryDirectory() as directory:
+            unit = Path(directory) / SERVICE
+            shutil.copyfile(copy.unit, unit)
+            result = subprocess.run(
+                ["systemd-analyze", "verify", str(unit)],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+    assert result.returncode == 0, result.stderr

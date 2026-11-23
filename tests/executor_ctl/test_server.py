@@ -5,8 +5,10 @@ import importlib
 import itertools
 import json
 import os
+import signal
 import socket as socketlib
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -937,3 +939,121 @@ def test_fechar_o_servidor_depois_de_uma_thread_que_nao_iniciou_nao_falha(
     server.server_close()
 
     assert not config.socket.exists()
+
+
+# Serviço real em processo próprio: só o carregamento da configuração e os GIDs vêm do teste
+# (sem root, o socket só aceita um grupo de quem roda o teste).
+_REAL_SERVICE = """
+import json, os, sys
+from pathlib import Path
+from executor_ctl import __main__ as main_module
+from executor_ctl.config import Config
+
+spec = json.loads(sys.argv[1])
+config = Config(
+    socket=Path(spec["socket"]),
+    group="gs-exec",
+    socket_group="gs-ctl",
+    work_area=Path(spec["area"]),
+    runtime="runc",
+    images_file=Path(spec["images"]),
+    require_mount=False,
+)
+main_module.load_config = lambda _path: config
+main_module._group_id = {"gs-exec": 61001, "gs-ctl": os.getgid()}.get
+sys.exit(main_module.main(["executor-ctl.json"]))
+"""
+# `docker stop` que só termina quando o teste solta; o `inspect` depois dele vê o container parado.
+_SLOW_STOP_DOCKER = """#!/bin/sh
+case "$1" in
+  stop)
+    : > "$DOCKER_ENTERED"
+    while [ ! -e "$DOCKER_RELEASE" ]; do sleep 0.01; done
+    ;;
+  inspect)
+    echo '[{"State": {"Status": "exited", "ExitCode": 0, "OOMKilled": false,
+      "StartedAt": "0001-01-01T00:00:00Z", "FinishedAt": "0001-01-01T00:00:00Z"}}]'
+    ;;
+  *) exit 1 ;;
+esac
+"""
+# Teto das esperas do teste: só estoura se o serviço travar de verdade.
+_PROCESS_GUARD_S = 10.0
+
+
+def _wait_until(condition: Any) -> bool:
+    deadline = time.monotonic() + _PROCESS_GUARD_S
+    while not condition():
+        if time.monotonic() > deadline:
+            return False
+        threading.Event().wait(_RETRY_PACE_S)
+    return True
+
+
+def test_sigterm_so_no_processo_principal_durante_stop_ainda_responde_200(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    """Como o `KillMode=mixed` da unit: o SIGTERM vai só ao PID principal, não ao `docker`.
+
+    O servidor para de aceitar conexões, mas espera o `stop` em voo e o responde antes de sair.
+    """
+    config = make_config(tmp_path, socket_dir)
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    docker = binaries / "docker"
+    docker.write_text(_SLOW_STOP_DOCKER)
+    docker.chmod(0o755)
+    entered, release = tmp_path / "docker-stop-entrou", tmp_path / "docker-stop-solto"
+    spec = {
+        "socket": str(config.socket),
+        "area": str(config.work_area),
+        "images": str(config.images_file),
+    }
+    env = {
+        **os.environ,
+        "PATH": f"{binaries}:{os.environ['PATH']}",
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "deploy"),
+        "DOCKER_ENTERED": str(entered),
+        "DOCKER_RELEASE": str(release),
+    }
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-c", _REAL_SERVICE, json.dumps(spec)],
+        env=env,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    answers: list[Any] = []
+    try:
+        assert process.stdout is not None
+        assert "pronto" in process.stdout.readline()
+        client = threading.Thread(
+            target=lambda: answers.append(
+                call(
+                    config.socket,
+                    "POST",
+                    f"/v1/attempts/{ATTEMPT}/stop",
+                    {"grace_s": 0},
+                    timeout_s=_PROCESS_GUARD_S,
+                )
+            )
+        )
+        client.start()
+        assert _wait_until(entered.exists), "o stop não chegou ao docker"
+
+        os.kill(process.pid, signal.SIGTERM)
+
+        assert _wait_until(lambda: not config.socket.exists()), "o SIGTERM não fechou o servidor"
+        assert process.poll() is None, "o servidor saiu com o stop em voo"
+        assert answers == []
+        release.touch()
+        client.join(_PROCESS_GUARD_S)
+        assert [answer.status for answer in answers] == [200]
+        assert answers[0].body["state"] == "exited"
+        assert process.wait(_PROCESS_GUARD_S) == 0
+    finally:
+        release.touch(exist_ok=True)
+        if process.poll() is None:
+            process.kill()
+            process.wait(_PROCESS_GUARD_S)
+        if process.stdout is not None:
+            process.stdout.close()

@@ -25,9 +25,24 @@ IMAGES_FILE=/var/lib/coolify-release/goblinshift/executor-images.json
 SERVICE=goblinshift-executor-ctl.service
 UNIT="/etc/systemd/system/$SERVICE"
 SOCKET=/run/goblinshift/executor-ctl.sock
+# Gravado antes de trocar pacote ou unit e apagado só depois do restart: uma falha no meio (no
+# daemon-reload, por exemplo) não deixa a execução seguinte ver tudo igual e pular o reinício.
+RESTART_PENDING="$PREFIX/.restart-pending"
 [[ $EUID -eq 0 ]] || { echo "rode com sudo" >&2; exit 1; }
 note() { printf '==> %s\n' "$*"; }
 changed=0
+staging=""
+unit_tmp=""
+# Falha no meio não deixa o staging em /opt nem a unit temporária.
+cleanup() {
+  if [[ -n "$staging" ]]; then rm -rf "$staging"; fi
+  if [[ -n "$unit_tmp" ]]; then rm -f "$unit_tmp"; fi
+}
+trap cleanup EXIT
+mark_restart_pending() {
+  : > "$RESTART_PENDING"
+  changed=1
+}
 
 # A migration must prepare BOTH files before this script can mutate even a group.
 # Read the source package without PYTHONPATH/user site; do not trust a stale installed reader.
@@ -79,13 +94,18 @@ fi
 
 note "Pacote em ${PREFIX}"
 install -d -m 755 /opt/goblinshift "$PREFIX" "$PREFIX/docker-config"
+if [[ -e "$RESTART_PENDING" ]]; then
+  echo "   reinício pendente de uma execução anterior."
+  changed=1
+fi
 if ! diff -rq --exclude=__pycache__ "$SOURCE" "$PREFIX/executor_ctl" >/dev/null 2>&1; then
   staging="$(mktemp -d "$PREFIX/.executor_ctl.XXXXXX")"
   install -m 644 "$SOURCE"/*.py "$staging/"
   chmod 755 "$staging"
+  mark_restart_pending
   rm -rf "$PREFIX/executor_ctl"
   mv "$staging" "$PREFIX/executor_ctl"
-  changed=1
+  staging=""
   echo "   atualizado."
 else
   echo "   já está igual ao checkout."
@@ -105,7 +125,6 @@ fi
 
 note "Unit ${SERVICE}"
 unit_tmp="$(mktemp)"
-trap 'rm -f "$unit_tmp"' EXIT
 cat > "$unit_tmp" <<EOF
 # Gerado por deploy/executor-ctl/install.sh; mudanças manuais são sobrescritas.
 [Unit]
@@ -123,8 +142,14 @@ ExecStart=/usr/bin/python3 -E -s -B -m executor_ctl ${CONFIG}
 Environment=DOCKER_CONFIG=${PREFIX}/docker-config
 Restart=on-failure
 RestartSec=2
-# stop em voo leva até 10 s de carência; o servidor espera as requisições antes de sair.
-TimeoutStopSec=30
+# mixed: o SIGTERM vai só ao processo principal, que para de aceitar conexões e espera as em
+# voo; o docker que elas chamam não recebe o sinal e termina a operação. O SIGKILL (no fim do
+# prazo, ou no que sobrar quando o principal sai) vai ao cgroup inteiro.
+KillMode=mixed
+# Acima da operação mais longa em voo: o start, até 30 s por chamada ao Docker vezes 3 dele e 3
+# de quem segura o lock, mais 10 s (190 s, START_TIMEOUT do worker); remove 160 s; stop até
+# 40 + 4 x 30 + 5 s de lock (165 s).
+TimeoutStopSec=210
 RuntimeDirectory=goblinshift
 RuntimeDirectoryMode=0755
 # O worker monta /run/goblinshift; recriar o diretório num restart cortaria esse bind mount.
@@ -156,8 +181,8 @@ SystemCallArchitectures=native
 WantedBy=multi-user.target
 EOF
 if ! cmp -s "$unit_tmp" "$UNIT"; then
+  mark_restart_pending
   install -m 644 "$unit_tmp" "$UNIT"
-  changed=1
   echo "   escrita."
 else
   echo "   já está igual."
@@ -168,11 +193,13 @@ systemctl daemon-reload
 if systemctl is-active --quiet "$SERVICE"; then
   if [[ $changed -eq 1 ]]; then
     systemctl restart "$SERVICE"
-    echo "   reiniciado (pacote, configuração ou unit mudaram)."
+    rm -f "$RESTART_PENDING"
+    echo "   reiniciado (pacote, unit ou reinício pendente)."
   fi
   systemctl enable --quiet "$SERVICE"
 else
   systemctl enable --now "$SERVICE"
+  rm -f "$RESTART_PENDING"
 fi
 for _ in $(seq 1 20); do
   [[ -S "$SOCKET" ]] && break

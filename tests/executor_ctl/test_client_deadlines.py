@@ -14,6 +14,7 @@ O fechamento definitivo é do servidor: tomar o lock com prazo e responder 503 `
 reinstalar o executor-ctl no host e fica para uma frente própria.
 """
 
+import configparser
 import os
 import uuid
 from datetime import timedelta
@@ -27,6 +28,7 @@ from goblinshift.runs.worker import executor_ctl_runner as client
 
 from .conftest import make_config
 from .counting_docker import CountingDocker
+from .installer_copy import installer_copy
 
 ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
@@ -108,3 +110,25 @@ def test_cliente_espera_mais_que_o_pior_caso_do_remove_no_servidor(tmp_path: Pat
     # Literal de propósito, calculado à mão ((2 + 3) x 30 s), pelo mesmo motivo do start.
     assert server_ceiling == timedelta(seconds=150)
     assert server_ceiling < client.REMOVE_TIMEOUT
+
+
+def test_unit_gerada_tem_killmode_mixed_e_prazo_acima_da_operacao_mais_longa(
+    tmp_path: Path,
+) -> None:
+    """O restart só sinaliza o processo principal, e o systemd espera a operação mais longa.
+
+    Sem `KillMode=mixed`, o SIGTERM vai ao cgroup inteiro e mata o `docker` em voo; com prazo
+    menor que o pior caso, o SIGKILL chega antes de o servidor responder o que já aceitou.
+    """
+    with installer_copy(tmp_path) as copy:
+        result = copy.run()
+        assert result.returncode == 0, result.stderr
+        unit = configparser.ConfigParser(interpolation=None, strict=False)
+        unit.optionxform = str  # type: ignore[assignment,method-assign]
+        unit.read_string(copy.unit.read_text())
+
+    service = unit["Service"]
+    assert service["KillMode"] == "mixed"
+    stop_timeout = timedelta(seconds=int(service["TimeoutStopSec"]))
+    assert stop_timeout > client.START_TIMEOUT
+    assert stop_timeout > client.REMOVE_TIMEOUT
