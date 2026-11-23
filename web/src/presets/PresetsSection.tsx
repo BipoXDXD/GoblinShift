@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { useId, useRef, useState, type ReactElement } from "react";
+import { useId, useRef, useState, type ReactElement, type RefObject } from "react";
 import { Link } from "react-router";
 
 import { useMe } from "../account/useMe";
@@ -52,7 +52,12 @@ export function PresetsSection(): ReactElement | null {
       >
         {T.heading}
       </h2>
-      <PresetsBody presets={presets.data ?? null} error={presets.error} onRemove={removal.ask} />
+      <PresetsBody
+        presets={presets.data ?? null}
+        error={presets.error}
+        onRemove={removal.ask}
+        heading={heading}
+      />
       {removal.failure !== null && <FailureNotice error={removal.failure} headingLevel={3} />}
       <LiveRegion message={removal.message} />
       <ConfirmDialog
@@ -76,9 +81,11 @@ interface PresetsBodyProps {
   readonly presets: readonly Preset[] | null;
   readonly error: Error | null;
   readonly onRemove: (preset: Preset) => void;
+  /** O título da seção, destino do foco quando o item some (404 no renomear). */
+  readonly heading: RefObject<HTMLHeadingElement | null>;
 }
 
-function PresetsBody({ presets, error, onRemove }: PresetsBodyProps): ReactElement {
+function PresetsBody({ presets, error, onRemove, heading }: PresetsBodyProps): ReactElement {
   if (presets === null) {
     return error === null ? (
       <p className="text-fg-muted">{T.loading}</p>
@@ -96,7 +103,7 @@ function PresetsBody({ presets, error, onRemove }: PresetsBodyProps): ReactEleme
   return (
     <ul aria-label={T.listLabel} className="grid gap-4 md:grid-cols-2">
       {presets.map((preset) => (
-        <PresetItem key={preset.id} preset={preset} onRemove={onRemove} />
+        <PresetItem key={preset.id} preset={preset} onRemove={onRemove} heading={heading} />
       ))}
     </ul>
   );
@@ -105,9 +112,11 @@ function PresetsBody({ presets, error, onRemove }: PresetsBodyProps): ReactEleme
 function PresetItem({
   preset,
   onRemove,
+  heading,
 }: {
   readonly preset: Preset;
   readonly onRemove: (preset: Preset) => void;
+  readonly heading: RefObject<HTMLHeadingElement | null>;
 }): ReactElement {
   // Receita que a interface não conhece (versão nova da API): o preset aparece, sem link.
   const recipe = findRecipe(preset.recipe_id);
@@ -129,7 +138,7 @@ function PresetItem({
             <ChevronRight aria-hidden="true" className="size-4" />
           </Link>
         )}
-        <RenamePreset preset={preset} />
+        <RenamePreset preset={preset} goneFocus={heading} />
         <Button
           type="button"
           variant="tertiary"

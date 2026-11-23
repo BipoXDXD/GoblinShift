@@ -1,5 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import {
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+  type RefObject,
+} from "react";
 import { flushSync } from "react-dom";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -9,6 +16,7 @@ import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { TEXT } from "../text";
+import { storePresetSource } from "../workbench/parameterSource";
 import {
   isNotFound,
   isStaleRevision,
@@ -30,14 +38,25 @@ const T = TEXT.presets;
  * O diálogo fecha antes de a lista ser relida: o nome novo pode mudar a posição do item na lista
  * ordenada, e mover o `<li>` com o `<dialog>` aberto o tira da top layer, e o `close()` deixa de
  * devolver o foco. Fechado antes, o foco já está no Renomear quando o `<li>` se move, e o React o
- * devolve ao mesmo botão depois do commit (WCAG 2.4.3).
+ * devolve ao mesmo botão depois do commit (WCAG 2.4.3). No 404 o item sai da lista com o Renomear
+ * dentro, então o diálogo leva o foco a `goneFocus`, um alvo estável da seção, e não ao `<body>`.
+ *
+ * O sucesso também grava a origem da Bancada com o preset devolvido: aberta depois pelo preset,
+ * ela começa com o nome e a revisão novos, e o "Atualizar preset" não tropeça num 412.
  */
-export function RenamePreset({ preset }: { readonly preset: Preset }): ReactElement {
+export function RenamePreset({
+  preset,
+  goneFocus,
+}: {
+  readonly preset: Preset;
+  readonly goneFocus: RefObject<HTMLElement | null>;
+}): ReactElement {
   const nameId = useId();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(preset.name);
   const [nameError, setNameError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [gone, setGone] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const rename = useRename();
@@ -92,6 +111,7 @@ export function RenamePreset({ preset }: { readonly preset: Preset }): ReactElem
       { preset, draft: { name: finalName, recipe_id, recipe_version, parameters } },
       {
         onSuccess: (renamed) => {
+          storePresetSource(queryClient, renamed);
           setMessage(T.renamed(renamed.name));
           closeAndRelist();
         },
@@ -103,6 +123,8 @@ export function RenamePreset({ preset }: { readonly preset: Preset }): ReactElem
             showNameError(T.nameTaken);
           } else if (isNameRejected(renameError)) {
             showNameError(T.nameRejected);
+          } else if (isNotFound(renameError)) {
+            setGone(true);
           }
         },
       },
@@ -128,6 +150,7 @@ export function RenamePreset({ preset }: { readonly preset: Preset }): ReactElem
           }
           setMessage(null);
           setNameError(null);
+          setGone(false);
           setName(preset.name);
           setOpen(true);
         }}
@@ -143,6 +166,7 @@ export function RenamePreset({ preset }: { readonly preset: Preset }): ReactElem
         confirmBlocked={rename.isPending}
         busy={rename.isPending}
         destructive={false}
+        returnFocusTo={gone ? goneFocus : undefined}
         onCancel={close}
         onConfirm={submit}
       >

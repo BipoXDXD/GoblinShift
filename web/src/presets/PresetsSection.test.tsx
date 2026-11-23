@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { appRoutes, preloadRoutes } from "../test/appRoutes";
 import { axeViolations } from "../test/axe";
+import { catalogHandler } from "../test/catalog";
 import { fakeApi, jsonResponse, problemResponse, screenRequests } from "../test/fakeApi";
 import { presetBody, PRESET_ID } from "../test/presets";
 import { escapeIsBlocked, forceClose, heldResponse } from "../test/dialog";
@@ -604,6 +605,66 @@ describe("Oficina: renomear preset", () => {
     await waitFor(() => {
       expect(within(section).queryByRole("heading", { name: "Clientes do mês" })).toBeNull();
     });
+  });
+
+  it("preset excluído em outro lugar (404): ao fechar, o foco vai para o título da seção", async () => {
+    let gone = false;
+    const { user } = setup({
+      "GET /api/v1/presets": () => jsonResponse({ data: gone ? [] : [presetBody()] }),
+      [PUT_ROUTE]: () => {
+        gone = true;
+        return problemResponse(404, "NOT_FOUND");
+      },
+    });
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Clientes de junho");
+    await user.click(within(dialog).getByRole("button", { name: "Renomear" }));
+    await within(dialog).findByRole("alert");
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+
+    const section = await presetsSection();
+    await waitFor(() => {
+      expect(within(section).queryByRole("heading", { name: "Clientes do mês" })).toBeNull();
+    });
+    expect(within(section).getByRole("heading", { name: "Presets" })).toHaveFocus();
+  });
+
+  it("depois de renomear, a Bancada aberta pelo preset atualiza com a revisão nova", async () => {
+    let stored = presetBody();
+    const { api, user } = setup({
+      "GET /api/v1/catalog": catalogHandler(),
+      "GET /api/v1/presets": () => jsonResponse({ data: [stored] }),
+      [`GET /api/v1/presets/${PRESET_ID}`]: () => jsonResponse(stored),
+      [PUT_ROUTE]: () => {
+        stored = presetBody({ name: "Clientes de junho", revision: stored.revision + 1 });
+        return jsonResponse(stored);
+      },
+    });
+    // A primeira visita à Bancada deixa a origem (revisão 1) no cache.
+    await user.click(
+      await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes do mês" }),
+    );
+    await user.click(await screen.findByRole("link", { name: "Oficina" }));
+
+    const dialog = await openRename(user);
+    await typeName(user, dialog, "Clientes de junho{Enter}");
+    await screen.findByText("Preset renomeado para Clientes de junho.");
+    await user.click(
+      await screen.findByRole("link", { name: "Abrir na Bancada o preset Clientes de junho" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Atualizar preset Clientes de junho" }),
+    );
+    const update = screen.getByRole("dialog", { name: "Atualizar o preset Clientes de junho?" });
+    await user.click(within(update).getByRole("button", { name: "Atualizar preset" }));
+
+    await waitFor(() => {
+      expect(sent(api.requests, PUT_ROUTE)).toHaveLength(2);
+    });
+    expect(sent(api.requests, PUT_ROUTE).map((request) => request.headers.get("If-Match"))).toEqual(
+      ['"1"', '"2"'],
+    );
   });
 
   it("não tem violações do axe com o diálogo de renomear aberto", async () => {

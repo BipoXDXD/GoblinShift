@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useQuery, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { useApiClient } from "../api/ApiClientContext";
@@ -52,7 +52,7 @@ export function sourceFromSearch(search: URLSearchParams): SourceRef | null {
 export function useParameterSource(ref: SourceRef | null): UseQueryResult<ParameterSource> {
   const client = useApiClient();
   return useQuery({
-    queryKey: ref?.kind === "preset" ? [...PRESETS_QUERY_KEY, ref.id] : ["runs", ref?.id, "source"],
+    queryKey: ref?.kind === "preset" ? presetSourceKey(ref.id) : ["runs", ref?.id, "source"],
     queryFn: async ({ signal }): Promise<ParameterSource> => {
       if (ref === null) {
         throw new Error("origem ausente: a consulta só roda com uma");
@@ -64,6 +64,20 @@ export function useParameterSource(ref: SourceRef | null): UseQueryResult<Parame
     enabled: ref !== null,
     retry: false,
   });
+}
+
+/**
+ * Grava, sem consultar a API, a origem do preset que um `PUT` devolveu. Uma invalidação só a marca
+ * vencida, e a Bancada aberta depois dele montaria com o cache (revisão e parâmetros antigos), que
+ * o refetch em segundo plano já não alcança: o formulário e o "Atualizar preset" só leem a origem
+ * na montagem. A Bancada já aberta não remonta (a `key` dela vem da URL).
+ */
+export function storePresetSource(queryClient: QueryClient, preset: Preset): void {
+  queryClient.setQueryData(presetSourceKey(preset.id), presetSource(preset));
+}
+
+function presetSourceKey(id: string): readonly unknown[] {
+  return [...PRESETS_QUERY_KEY, id];
 }
 
 function presetSource(preset: Preset): ParameterSource {

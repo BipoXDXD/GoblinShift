@@ -7,6 +7,7 @@ import { FailureNotice } from "../components/feedback/FailureNotice";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import {
+  isStaleRevision,
   PRESETS_QUERY_KEY,
   replacePreset,
   type Preset,
@@ -14,6 +15,7 @@ import {
 } from "../presets/api";
 import type { RecipeDraft, RecipeId } from "../recipes/types";
 import { TEXT } from "../text";
+import { storePresetSource } from "./parameterSource";
 
 const T = TEXT.presets;
 
@@ -33,6 +35,8 @@ export function UpdatePreset({ draft, preset }: UpdatePresetProps): ReactElement
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const update = useUpdate();
+  // Repetir o mesmo `If-Match` vencido só daria outro 412: bloqueado até fechar e reabrir.
+  const blocked = update.isPending || (update.error !== null && isStaleRevision(update.error));
 
   // Fecha sempre, até com o pedido em voo (o navegador pode ter fechado o <dialog>).
   const close = (): void => {
@@ -43,7 +47,7 @@ export function UpdatePreset({ draft, preset }: UpdatePresetProps): ReactElement
   };
 
   const submit = (): void => {
-    if (!draft.ok || update.isPending) {
+    if (!draft.ok || blocked) {
       return;
     }
     update.mutate(
@@ -80,7 +84,7 @@ export function UpdatePreset({ draft, preset }: UpdatePresetProps): ReactElement
         title={T.updateTitle(current.name)}
         confirmLabel={update.isPending ? T.updating : T.update}
         cancelLabel={T.cancel}
-        confirmBlocked={update.isPending}
+        confirmBlocked={blocked}
         busy={update.isPending}
         destructive={false}
         onCancel={close}
@@ -105,8 +109,8 @@ interface UpdateRequest {
 }
 
 /**
- * Relê só a lista (`exact`): reler `[...PRESETS_QUERY_KEY, id]`, a origem da Bancada, remontaria
- * o formulário e perderia as entradas já enviadas.
+ * Grava a origem com o preset devolvido e relê só a lista (`exact`): a origem já está atual, e
+ * relê-la seria um refetch à toa, que ainda reprocessaria o formulário com o mesmo dado.
  */
 function useUpdate() {
   const client = useApiClient();
@@ -114,7 +118,8 @@ function useUpdate() {
   return useMutation({
     mutationFn: ({ preset, replacement }: UpdateRequest) =>
       replacePreset(client, preset, replacement),
-    onSuccess: async () => {
+    onSuccess: async (updated) => {
+      storePresetSource(queryClient, updated);
       await queryClient.invalidateQueries({ queryKey: PRESETS_QUERY_KEY, exact: true });
     },
   });
