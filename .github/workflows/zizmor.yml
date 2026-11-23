@@ -1,14 +1,16 @@
 name: Auditoria dos workflows
 
-# zizmor (análise estática de segurança do GitHub Actions) só quando um workflow muda: fora disso
-# não há o que auditar, e o job fica fora do commit stage do ci.yml. `--offline` dispensa o token
-# da API do GitHub; o achado justificado leva `# zizmor: ignore[...]` na própria linha.
+# zizmor (análise estática de segurança do GitHub Actions e do dependabot.yml) só quando muda o que
+# ele audita (`.github/`) ou o script que o instala: fora disso não há o que auditar, e o job fica
+# fora do commit stage do ci.yml. O scripts/ci-zizmor.sh instala o zizmor por hash (versão e hashes
+# em .github/zizmor/requirements.txt) e é o mesmo portão local; o achado justificado leva
+# `# zizmor: ignore[...]` na própria linha.
 on:
   pull_request:
-    paths: [".github/workflows/**"]
+    paths: [".github/**", "scripts/ci-zizmor.sh"]
   push:
     branches: [main]
-    paths: [".github/workflows/**"]
+    paths: [".github/**", "scripts/ci-zizmor.sh"]
 
 permissions:
   contents: read
@@ -26,7 +28,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: zizmor
         # Versão fixada: um audit novo numa versão nova não pode quebrar um PR sem relação com ele.
-        run: uvx zizmor@1.30.1 --offline --format=github .github/workflows
+        run: scripts/ci-zizmor.sh --format=github
