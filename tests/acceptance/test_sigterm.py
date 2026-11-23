@@ -100,7 +100,7 @@ area = pathlib.Path(sys.argv[1])
 run.create_attempt_dir = lambda host, attempt: (area / str(attempt)).mkdir()
 workarea.prepare_for_start = lambda _a, attempt, _g: types.SimpleNamespace(path=area / str(attempt))
 profile.run_options = lambda *_args, **_kwargs: []
-config = types.SimpleNamespace(work_area=area, runtime="runsc")
+config = types.SimpleNamespace(work_area=area, runtime="runsc", io_limits=None)
 host = types.SimpleNamespace(config=config, group_id=0)
 run.run_with_maintenance_suspended(lambda: [run.run_probe(host, "identity", timeout_s=60)])
 """
@@ -127,7 +127,7 @@ load.create_attempt_dir = create_attempt_dir
 load._fill_work_dir = lambda *_args: None
 workarea.prepare_for_start = lambda _a, attempt, _g: types.SimpleNamespace(path=area / str(attempt))
 profile.run_options = lambda *_args, **_kwargs: []
-config = types.SimpleNamespace(work_area=area, runtime="runsc")
+config = types.SimpleNamespace(work_area=area, runtime="runsc", io_limits=None)
 host = types.SimpleNamespace(config=config, group_id=0)
 run.run_with_maintenance_suspended(
     lambda: [load.measure(host, area, {}, criterion="carga")]

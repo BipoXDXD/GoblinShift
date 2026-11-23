@@ -54,23 +54,31 @@ obrigatórias e cada valor é um inteiro positivo (bytes/s e operações/s):
 "io_limits": {"read_bps": 104857600, "write_bps": 52428800, "read_iops": 2000, "write_iops": 1000}
 ```
 
-O serviço resolve o dispositivo uma vez, na subida: `/dev/block/<major>:<minor>`
-do `st_dev` de `work_area`, isto é, o loop device do filesystem de tamanho fixo
-da área (ADR 005), e passa `--device-read-bps`, `--device-write-bps`,
-`--device-read-iops` e `--device-write-iops` nesse dispositivo. Trocar a
-montagem da área exige reiniciar o executor-ctl.
+O dispositivo sai do `st_dev` de `work_area` (o loop device do filesystem de
+tamanho fixo da área, ADR 005), seguindo o link do udev `/dev/block/<major>:<minor>`
+até o nó real (`/dev/loopN`): o Docker separa dispositivo e valor no primeiro
+`:` de `--device-read-bps`, e o link com `:` faria todo start falhar. O ctl
+resolve o nó na subida e **não sobe** (host não pronto) se o resultado não for
+um caminho em `/dev/` sem `:`; depois, resolve de novo a cada start, sob o lock
+da área, porque uma remontagem pode trocar o loopN. As quatro flags são
+`--device-read-bps`, `--device-write-bps`, `--device-read-iops` e
+`--device-write-iops`.
 
-**Como medir (operador, no host):** com o worker parado, meça a vazão normal do
-disco do banco dentro da área, por exemplo
-`fio --name=area --directory=/srv/goblinshift/exec-work --rw=randrw --bs=64k --size=1g --direct=1 --runtime=30 --time_based`,
-e anote leitura/escrita em bytes/s e IOPS. Configure valores abaixo desses
-(sugestão: metade) e reinstale (Tarefa 26). A aceitação (`deploy/acceptance`)
-ainda monta o `docker run` sem o teto, então aprova as sondas mas não mede o
-efeito dele; até ela passar a aplicá-lo, confira com uma tentativa real
-(`docker inspect` mostra `BlkioDeviceReadBps` e afins). O efeito do teto com gVisor (`runsc`) sobre loop
-device só se prova no host: o throttling é do cgroup do container (onde ficam o
-sentry e o gofer), e a escrita com cache de página chega ao disco pelo
-writeback; se a sonda não mostrar o teto, registrar e voltar sem a chave.
+**Como medir (operador, no host):** pela sonda de disco da aceitação, que roda
+com as mesmas opções do executor, inclusive o teto. Sem a chave, rode a
+aceitação e leia a evidência da sonda `ENOSPC aos 6 GiB` (GiB escritos e
+segundos): isso é a vazão normal de escrita da área. Ligue `io_limits` com
+valores abaixo dela (sugestão: metade), reinstale (Tarefa 26) e rode a
+aceitação de novo: a mesma sonda mostra a vazão já com o teto. Cuidado: a sonda
+escreve 6 GiB e tem prazo de 900 s, então um `write_bps` abaixo de ~7 MB/s
+(6 GiB / 900 s ≈ 7,2 MB/s) a reprova por prazo, não por defeito. A carga do
+Image Forge (`image_forge_load.py`) também roda com o teto e mostra se ele
+cabe no teto de 10 min de uma tentativa.
+
+O efeito do teto com gVisor (`runsc`) sobre loop device só se prova no host: o
+throttling é do cgroup do container (onde ficam o sentry e o gofer), e a escrita
+com cache de página chega ao disco pelo writeback. Se a sonda com o teto não
+mostrar vazão menor, registrar isso e voltar sem a chave.
 
 O instalador executa preflight somente leitura, usando `load_config` completo e
 o leitor da política do checkout, antes de `getent`, `groupadd`, `usermod`,

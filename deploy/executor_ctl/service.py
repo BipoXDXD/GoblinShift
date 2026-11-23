@@ -1,10 +1,9 @@
 """Operações do executor-ctl: quatro sobre o container e a leitura da imagem (3.6, "Sandbox")."""
 
 import logging
-import os
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from . import profile, workarea
@@ -51,6 +50,7 @@ class ExecutorService:
         *,
         observer: PassiveObserver | None = None,
         area_lock_wait_s: float = AREA_LOCK_WAIT_S,
+        resolve_device: Callable[[int], str] | None = None,
     ) -> None:
         self._config = config
         self._docker = docker
@@ -61,7 +61,9 @@ class ExecutorService:
         # toma para remover um container `created`, que pode ser o que um start em curso criou.
         self._area_lock = threading.Lock()
         self._area_lock_wait_s = area_lock_wait_s
-        self._throttle = _disk_throttle(config)
+        # O dispositivo do teto de I/O (D13) sai a cada start, sob o lock: uma remontagem da área
+        # pode trocar o loopN. Os testes injetam o resolvedor; o padrão segue o link do udev.
+        self._resolve_device = resolve_device
 
     def start(self, attempt_id: uuid.UUID, image: str) -> ContainerStatus:
         """Cria e inicia o container; se ele já existe, devolve o estado dele sem criar outro."""
@@ -73,6 +75,10 @@ class ExecutorService:
             existing = self._owned(attempt_id, self._docker.inspect(name), image=image)
             if existing.state != "absent":
                 return existing
+            # Antes de preparar a área: um dispositivo sem nó recusa o start sem deixar nada nela.
+            throttle = profile.disk_throttle(
+                self._config.work_area, self._config.io_limits, resolve_device=self._resolve_device
+            )
             prepared = workarea.prepare_for_start(
                 self._config.work_area, attempt_id, self._executor_gid
             )
@@ -82,7 +88,7 @@ class ExecutorService:
                 work_dir=prepared.path,
                 runtime=self._config.runtime,
                 executor_gid=self._executor_gid,
-                throttle=self._throttle,
+                throttle=throttle,
             )
             try:
                 self._docker.run(arguments)
@@ -196,15 +202,3 @@ class ExecutorService:
             yield
         finally:
             self._area_lock.release()
-
-
-def _disk_throttle(config: Config) -> profile.DiskThrottle | None:
-    """O teto vai no dispositivo do filesystem da área (o loop device do exec-work).
-
-    Resolvido uma vez, na subida: a área é um filesystem montado antes do serviço e não troca
-    de dispositivo com ele no ar.
-    """
-    if config.io_limits is None:
-        return None
-    device = profile.block_device(os.stat(config.work_area).st_dev)
-    return profile.DiskThrottle(device=device, limits=config.io_limits)

@@ -75,18 +75,51 @@ def test_sem_io_limits_nao_ha_flag_de_dispositivo() -> None:
     assert not [argument for argument in arguments if argument.startswith("--device")]
 
 
-def test_io_limits_vira_as_quatro_flags_no_dispositivo_da_area() -> None:
-    # O dispositivo é o loop device do filesystem da área (major 7), não o disco do host.
-    throttle = profile.DiskThrottle(device=profile.block_device(os.makedev(7, 3)), limits=LIMITS)
+def test_io_limits_vira_as_quatro_flags_no_no_real_do_dispositivo() -> None:
+    # O Docker separa dispositivo e valor no PRIMEIRO `:`: o caminho não pode ter `:` (/dev/loop3).
+    throttle = profile.DiskThrottle(device="/dev/loop3", limits=LIMITS)
 
     arguments = profile.run_arguments(
         ATTEMPT, IMAGE, work_dir=WORK_DIR, runtime="runsc", executor_gid=61001, throttle=throttle
     )
 
     assert [argument for argument in arguments if argument.startswith("--device")] == [
-        "--device-read-bps=/dev/block/7:3:104857600",
-        "--device-write-bps=/dev/block/7:3:52428800",
-        "--device-read-iops=/dev/block/7:3:2000",
-        "--device-write-iops=/dev/block/7:3:1000",
+        "--device-read-bps=/dev/loop3:104857600",
+        "--device-write-bps=/dev/loop3:52428800",
+        "--device-read-iops=/dev/loop3:2000",
+        "--device-write-iops=/dev/loop3:1000",
     ]
     assert arguments[-1] == IMAGE
+
+
+def test_block_device_segue_o_link_do_udev_ate_o_no_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    links = {"/dev/block/7:3": "/dev/loop3"}
+    monkeypatch.setattr(os.path, "realpath", lambda path: links.get(path, path))
+
+    assert profile.block_device(os.makedev(7, 3)) == "/dev/loop3"
+
+
+def test_disk_throttle_resolve_o_dispositivo_do_st_dev_da_area(tmp_path: Path) -> None:
+    seen: list[int] = []
+
+    def resolve(st_dev: int) -> str:
+        seen.append(st_dev)
+        return "/dev/loop3"
+
+    throttle = profile.disk_throttle(tmp_path, LIMITS, resolve_device=resolve)
+
+    assert throttle == profile.DiskThrottle(device="/dev/loop3", limits=LIMITS)
+    assert seen == [os.stat(tmp_path).st_dev]
+
+
+def test_disk_throttle_sem_io_limits_nao_resolve_nada(tmp_path: Path) -> None:
+    def resolve(_st_dev: int) -> str:
+        raise AssertionError("sem teto não há dispositivo a resolver")
+
+    assert profile.disk_throttle(tmp_path / "nem-existe", None, resolve_device=resolve) is None
+
+
+@pytest.mark.parametrize("device", ["/dev/block/7:3", "loop3", "/dev/loop3:1", ""])
+def test_dispositivo_com_dois_pontos_ou_fora_de_dev_e_recusado(tmp_path: Path, device: str) -> None:
+    with pytest.raises(profile.UnusableDiskDeviceError):
+        profile.disk_throttle(tmp_path, LIMITS, resolve_device=lambda _st_dev: device)

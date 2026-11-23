@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import types
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from acceptance import run
 from acceptance.run import Outcome
 
 from executor_ctl import profile
+from executor_ctl.profile import IoLimits
 
 pytestmark = pytest.mark.host_python
 
@@ -544,3 +546,33 @@ def test_aceitacao_exige_o_socket_no_grupo_gs_ctl(
 
     assert outcome.passed is accepted, outcome.evidence
     assert f"gs-ctl = {SOCKET_GROUP_GID}" in outcome.evidence
+
+
+IO_LIMITS = IoLimits(read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000)
+
+
+def _host_with_io_limits(area: Path, io_limits: IoLimits | None) -> Any:
+    config = types.SimpleNamespace(work_area=area, runtime="runsc", io_limits=io_limits)
+    return types.SimpleNamespace(config=config, group_id=61001)
+
+
+def test_sondas_rodam_com_o_teto_de_io_da_configuracao(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # D13: o operador mede com a sonda de disco; ela precisa rodar sob o mesmo teto do executor.
+    monkeypatch.setattr(profile, "block_device", lambda _st_dev: "/dev/loop3")
+    attempt = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
+
+    options = run.executor_options(_host_with_io_limits(tmp_path, IO_LIMITS), attempt, tmp_path)
+
+    assert "--device-write-bps=/dev/loop3:52428800" in options
+    assert "--device-read-iops=/dev/loop3:2000" in options
+
+
+def test_sondas_sem_io_limits_rodam_sem_flag_de_dispositivo(tmp_path: Path) -> None:
+    attempt = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
+
+    options = run.executor_options(_host_with_io_limits(tmp_path, None), attempt, tmp_path)
+
+    assert options
+    assert not [option for option in options if option.startswith("--device")]

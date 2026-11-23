@@ -258,14 +258,34 @@ def test_io_limits_da_config_vai_ao_docker_run_no_dispositivo_da_area(tmp_path: 
     limits = IoLimits(read_bps=104857600, write_bps=52428800, read_iops=2000, write_iops=1000)
     config = replace(make_config(tmp_path, tmp_path, allowed=[IMAGE]), io_limits=limits)
     docker = RecordingDocker()
-    area_device = os.stat(config.work_area).st_dev
-    device = f"/dev/block/{os.major(area_device)}:{os.minor(area_device)}"
+    seen: list[int] = []
+
+    def resolve(st_dev: int) -> str:
+        seen.append(st_dev)
+        return "/dev/loop3"
+
     (config.work_area / str(HOLDER) / "inputs").mkdir(parents=True)
 
-    ExecutorService(config, docker, os.getgid()).start(HOLDER, IMAGE)
+    ExecutorService(config, docker, os.getgid(), resolve_device=resolve).start(HOLDER, IMAGE)
 
-    assert f"--device-write-bps={device}:52428800" in docker.run_arguments
-    assert f"--device-read-iops={device}:2000" in docker.run_arguments
+    assert seen == [os.stat(config.work_area).st_dev]
+    assert "--device-write-bps=/dev/loop3:52428800" in docker.run_arguments
+    assert "--device-read-iops=/dev/loop3:2000" in docker.run_arguments
+
+
+def test_dispositivo_e_resolvido_a_cada_start_e_nao_na_construcao(tmp_path: Path) -> None:
+    # Uma remontagem da área pode trocar o loopN: vale o dispositivo da hora do start.
+    limits = IoLimits(read_bps=1, write_bps=2, read_iops=3, write_iops=4)
+    config = replace(make_config(tmp_path, tmp_path, allowed=[IMAGE]), io_limits=limits)
+    devices = ["/dev/loop3", "/dev/loop5"]
+    docker = RecordingDocker()
+    service = ExecutorService(config, docker, os.getgid(), resolve_device=lambda _: devices[0])
+    devices.pop(0)
+    (config.work_area / str(HOLDER) / "inputs").mkdir(parents=True)
+
+    service.start(HOLDER, IMAGE)
+
+    assert "--device-write-bps=/dev/loop5:2" in docker.run_arguments
 
 
 def test_sem_io_limits_o_servico_nao_passa_dispositivo(tmp_path: Path) -> None:

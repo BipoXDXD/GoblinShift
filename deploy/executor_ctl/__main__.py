@@ -14,6 +14,7 @@ from .config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 from .docker_cli import DockerCli
 from .journal import configure_logging
 from .mounts import mount_options, read_self_mountinfo
+from .profile import UnusableDiskDeviceError, disk_throttle
 from .server import bind_server
 from .service import ExecutorService
 from .witness import PassiveObserver
@@ -40,6 +41,8 @@ def main(
         _log.error("configuração inválida", extra={"detail": str(error)})
         return EXIT_CONFIG_ERROR
     if config.require_mount and not _work_area_ready(config.work_area, read_mountinfo):
+        return EXIT_HOST_NOT_READY
+    if not _io_device_ready(config):
         return EXIT_HOST_NOT_READY
     group_id = _group_id(config.group)
     socket_group_id = _group_id(config.socket_group)
@@ -88,6 +91,18 @@ def _work_area_ready(work_area: Path, read_mountinfo: Callable[[], str]) -> bool
     if not mount_options(read_mountinfo(), work_area).issuperset(REQUIRED_AREA_OPTIONS):
         # Um arquivo escrito pelo sandbox não vira binário, setuid nem dispositivo no host (D12).
         _log.error("área montada sem nosuid,nodev,noexec", extra={"detail": str(work_area)})
+        return False
+    return True
+
+
+def _io_device_ready(config: Config) -> bool:
+    # Com teto e sem nó utilizável, todo start falharia no Docker: melhor não subir (D13).
+    try:
+        disk_throttle(config.work_area, config.io_limits)
+    except UnusableDiskDeviceError as error:
+        _log.error(
+            "dispositivo da área sem nó utilizável para o teto de I/O", extra={"detail": str(error)}
+        )
         return False
     return True
 

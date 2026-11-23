@@ -464,6 +464,21 @@ def check_app_without_docker_socket() -> Outcome:
     return Outcome(criterion, blocked, evidence or "o socket abriu")
 
 
+def executor_options(host: Host, attempt: uuid.UUID, work_dir: Path) -> list[str]:
+    """As opções do perfil de produção, com o teto de I/O da configuração (D13), se houver.
+
+    Sem o teto, a sonda de disco não mediria o que o executor de verdade consegue escrever.
+    """
+    throttle = profile.disk_throttle(host.config.work_area, host.config.io_limits)
+    return profile.run_options(
+        attempt,
+        work_dir=work_dir,
+        runtime=host.config.runtime,
+        executor_gid=host.group_id,
+        throttle=throttle,
+    )
+
+
 def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     attempt = uuid.uuid4()
     name = profile.container_name(attempt)
@@ -471,9 +486,7 @@ def run_probe(host: Host, probe: str, *, timeout_s: float) -> ProbeRun:
     with attempt_workspace(host, attempt) as docker:
         # As mesmas regras do start de produção: recusa área suja e prepara as permissões.
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
-        options = profile.run_options(
-            attempt, work_dir=prepared.path, runtime=host.config.runtime, executor_gid=host.group_id
-        )
+        options = executor_options(host, attempt, prepared.path)
         started = time.monotonic()
         _docker_output(
             "run",

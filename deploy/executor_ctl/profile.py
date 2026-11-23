@@ -6,6 +6,7 @@ Quem chama não escolhe opção, montagem nem comando: o nome e os caminhos deri
 
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,9 +55,33 @@ class DiskThrottle:
     limits: IoLimits
 
 
+class UnusableDiskDeviceError(Exception):
+    """O dispositivo da área não tem um nó que o Docker aceite no `--device-*`; o teto não sai."""
+
+
 def block_device(st_dev: int) -> str:
-    """Caminho do dispositivo de bloco de um `st_dev`, como o udev o publica no Linux."""
-    return f"/dev/block/{os.major(st_dev)}:{os.minor(st_dev)}"
+    """Nó real do dispositivo de um `st_dev`: o udev publica /dev/block/M:m como link (/dev/loopN).
+
+    O Docker separa dispositivo e valor no primeiro `:` de `--device-read-bps`, então o link
+    /dev/block/M:m não serve; sem o link, o caminho fica com `:` e `disk_throttle` o recusa.
+    """
+    return os.path.realpath(f"/dev/block/{os.major(st_dev)}:{os.minor(st_dev)}")
+
+
+def disk_throttle(
+    work_area: Path, limits: IoLimits | None, *, resolve_device: Callable[[int], str] | None = None
+) -> DiskThrottle | None:
+    """O teto no dispositivo do filesystem da área (o loop device do exec-work), ou nada sem teto.
+
+    Resolvido na hora de cada uso: uma remontagem da área pode trocar o loopN.
+    """
+    if limits is None:
+        return None
+    resolve = block_device if resolve_device is None else resolve_device
+    device = resolve(os.stat(work_area).st_dev)
+    if not device.startswith("/dev/") or ":" in device:
+        raise UnusableDiskDeviceError(f"{device!r} não serve de dispositivo no --device-*")
+    return DiskThrottle(device=device, limits=limits)
 
 
 def container_name(attempt_id: uuid.UUID) -> str:

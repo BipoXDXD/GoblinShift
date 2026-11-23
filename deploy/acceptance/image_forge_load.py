@@ -39,6 +39,7 @@ from acceptance.run import (
     Host,
     Outcome,
     attempt_workspace,
+    executor_options,
     run_with_maintenance_suspended,
 )
 from executor_ctl import profile, workarea
@@ -168,9 +169,7 @@ def measure(
         work_dir = workarea.attempt_dir(area, attempt)
         _fill_work_dir(work_dir, fixtures, expected, host.group_id)
         prepared = workarea.prepare_for_start(area, attempt, host.group_id)
-        options = profile.run_options(
-            attempt, work_dir=prepared.path, runtime=host.config.runtime, executor_gid=host.group_id
-        )
+        options = executor_options(host, attempt, prepared.path)
         started = time.monotonic()
         _docker("run", "--detach", *options, IMAGE)
         timed_out = False
