@@ -444,6 +444,29 @@ describe("Execução: detalhe por arquivo", () => {
       expect(definitions(group)).toEqual([["Áudio", "AAC → para WAV"]]);
     });
 
+    it("mídia sem miniatura e sem áudio não mostra um bloco vazio", async () => {
+      setup({
+        summary,
+        items: [
+          item(0, {
+            comparison: {
+              kind: "media",
+              width_before: 1920,
+              height_before: 1080,
+              width_after: null,
+              height_after: null,
+              audio_before: null,
+              audio_after: null,
+            },
+          }),
+        ],
+      });
+
+      const region = await itemsRegion();
+      expect(within(region).getByRole("listitem")).toBeInTheDocument();
+      expect(within(region).queryByRole("group", GROUP)).toBeNull();
+    });
+
     it("sem comparação, a entrada fica como antes", async () => {
       setup({ summary, items: [item(0, { counts: { written: 5 } })] });
 

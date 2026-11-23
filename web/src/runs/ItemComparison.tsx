@@ -17,12 +17,19 @@ interface Line {
 /**
  * Antes e depois de uma entrada, uma linha por grandeza. A seta é só visual; o leitor de tela
  * ouve "para". O `role="group"` dá nome à lista: `aria-label` direto no `<dl>` é proibido.
+ * Sem nenhuma linha (mídia sem miniatura e sem áudio), não há bloco.
  */
-export function ItemComparison({ comparison }: { readonly comparison: Comparison }): ReactElement {
+export function ItemComparison({
+  comparison,
+}: {
+  readonly comparison: Comparison;
+}): ReactElement | null {
+  const lines = linesOf(comparison);
+  if (lines.length === 0) return null;
   return (
     <div role="group" aria-label={T.label}>
       <dl className="flex flex-col gap-1 text-sm text-fg-muted tabular-nums">
-        {linesOf(comparison).map(({ label, before, after }) => (
+        {lines.map(({ label, before, after }) => (
           <div key={label} className="flex flex-wrap gap-x-2">
             <dt className="font-semibold">{label}</dt>
             <dd>
