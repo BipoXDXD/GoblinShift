@@ -1,8 +1,12 @@
 """Evento de término da Run (docs/GoblinShiftPlan.md, 3.7): o span `run.finished`.
 
-Um por Run que chega a estado terminal, emitido depois do commit por quem a concluiu (worker,
-claim ou manutenção). É o evento do SLO de execução, `deploy/openobserve/sql/execucao.eventos.sql`;
-o contrato dos atributos está no runbook `deploy/openobserve/README.md`.
+Ao menos um por Run que chega a estado terminal, emitido depois do commit por quem a concluiu
+(worker, claim, manutenção, API ou `gs-admin`). Depois de emitir, o reporter grava
+`run.finished_reported_at`; a manutenção reemite as Runs terminais que ficaram sem a marca (quem as
+concluiu caiu antes de emitir). A garantia vale até a fila de exportação, e a duplicata é possível
+(processo que cai entre emitir e marcar). É o evento do SLO de execução,
+`deploy/openobserve/sql/execucao.eventos.sql`; o contrato dos atributos está no runbook
+`deploy/openobserve/README.md`.
 
 O span é instantâneo, no momento da emissão: o OpenObserve filtra as janelas dos alertas pelo
 início do span, e uma Run de 30 min cairia fora da janela de 15 min se o span começasse com ela.
@@ -17,7 +21,7 @@ from datetime import datetime, timedelta
 from opentelemetry.context import Context
 from opentelemetry.trace import Tracer
 from opentelemetry.util.types import AttributeValue
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.files.candidates import HeldContentMissingError, held_input_contents
@@ -86,7 +90,7 @@ class FinishedRun:
 
 
 class RunFinishedReporter:
-    """Lê os fatos da Run terminal e emite o `run.finished`."""
+    """Lê os fatos da Run terminal, emite o `run.finished` e marca a Run como reportada."""
 
     def __init__(self, factory: sessionmaker[Session], hasher: UserHasher, tracer: Tracer) -> None:
         self._factory = factory
@@ -102,12 +106,22 @@ class RunFinishedReporter:
                 SPAN_NAME, context=Context(), attributes=finished.attributes(self._hasher)
             )
             span.end()
+            run_transaction(self._factory, lambda session: _mark_reported(session, run_id))
         except Exception:
-            # A Run já está terminal, com os usos liberados; perder o evento custa só telemetria,
-            # e propagar faria o worker abandonar a limpeza e a manutenção, o resto do ciclo.
+            # A Run já está terminal, com os usos liberados; perder o evento custa só telemetria
+            # (sem a marca, a varredura da manutenção tenta de novo), e propagar faria o worker
+            # abandonar a limpeza e a manutenção, o resto do ciclo.
             logger.exception(
                 "evento de término da execução perdido", extra={"fields": {"run_id": str(run_id)}}
             )
+
+
+def _mark_reported(session: Session, run_id: uuid.UUID) -> None:
+    session.execute(
+        update(run)
+        .where(run.c.id == run_id, run.c.finished_reported_at.is_(None))
+        .values(finished_reported_at=func.now())
+    )
 
 
 def _load(session: Session, run_id: uuid.UUID) -> FinishedRun:

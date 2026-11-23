@@ -202,3 +202,71 @@ def test_falha_ao_montar_o_evento_nao_interrompe_quem_concluiu_a_run(
 
     assert spans.finished() == []
     assert any(str(missing) in str(getattr(r, "fields", "")) for r in caplog.records)
+
+
+# Ao menos uma vez: a varredura da manutenção --------------------------------------------------
+
+
+def finished_unreported(
+    factory: sessionmaker[Session], storage: FileStorage, ago: timedelta
+) -> uuid.UUID:
+    """Run terminal há `ago` sem `run.finished`: quem a concluiu caiu antes de `on_finished`."""
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    cancel_run(factory, storage, owner, run_id)
+    set_run(factory, run_id, finished_at=func.now() - ago)
+    return run_id
+
+
+def reported_run_ids(spans: Spans) -> list[object]:
+    return [(span.attributes or {})["run_id"] for span in spans.finished()]
+
+
+def test_queda_depois_do_commit_e_a_manutencao_emite_o_termino_uma_vez(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
+) -> None:
+    run_id = finished_unreported(factory, storage, timedelta(minutes=6))
+    janitor = maintenance(factory, storage, work_root, spans)
+
+    first = janitor.run_cycle()
+    second = janitor.run_cycle()
+
+    assert reported_run_ids(spans) == [str(run_id)]
+    assert (first["finishes_reported"], second["finishes_reported"]) == (1, 0)
+
+
+def test_run_reportada_nao_e_emitida_de_novo(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
+) -> None:
+    # Quem concluiu reportou dentro da carência; a varredura só roda depois dela.
+    owner = create_user(factory)
+    run_id = queue_run(factory, storage, owner)
+    cancel_run(factory, storage, owner, run_id, on_finished=spans.reporter.report)
+    set_run(factory, run_id, finished_at=func.now() - timedelta(minutes=6))
+    janitor = maintenance(factory, storage, work_root, spans)
+
+    janitor.run_cycle()
+    janitor.run_cycle()
+
+    assert reported_run_ids(spans) == [str(run_id)]
+
+
+def test_run_dentro_da_carencia_espera(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
+) -> None:
+    # Quem concluiu ainda pode estar emitindo: a varredura não corre na frente dele.
+    finished_unreported(factory, storage, timedelta(minutes=4))
+
+    counts = maintenance(factory, storage, work_root, spans).run_cycle()
+
+    assert (reported_run_ids(spans), counts["finishes_reported"]) == ([], 0)
+
+
+def test_run_alem_do_horizonte_nao_e_reemitida(
+    factory: sessionmaker[Session], storage: FileStorage, work_root: Path, spans: Spans
+) -> None:
+    finished_unreported(factory, storage, timedelta(hours=25))
+
+    counts = maintenance(factory, storage, work_root, spans).run_cycle()
+
+    assert (reported_run_ids(spans), counts["finishes_reported"]) == ([], 0)
