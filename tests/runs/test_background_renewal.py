@@ -7,15 +7,18 @@ Sem banco: `renew_lease` é trocado no próprio coordenador; nenhum `sleep` serv
 """
 
 import contextvars
+import math
 import threading
 import uuid
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import OperationalError
 
 from goblinshift.runs.lifecycle import Status
 from goblinshift.runs.store import LostFencing
+from goblinshift.runs.worker import coordinator
 from goblinshift.runs.worker.background_renewal import BackgroundRenewal
 from goblinshift.runs.worker.runner import ExecutorPhase, ExecutorStatus, RunnerError
 from tests.runs.test_lease_renewal_failure import attempt_without_database, worker_without_database
@@ -265,3 +268,42 @@ def test_teto_com_executor_ausente_nao_marca_estouro(monkeypatch: pytest.MonkeyP
 
     assert status == absent
     assert not status.timed_out
+
+
+def test_teto_com_stop_falhando_repete_no_intervalo_curto(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Com o executor-ctl fora, o `stop` falha na hora. Repeti-lo a cada `status_poll` abriria uma
+    # thread de renovação por volta, cada uma com uma transação no banco: o teto espera
+    # `renew_retry_every` entre um `stop` falho e o próximo. Relógio falso: o `sleep` o avança.
+    clock = SimpleNamespace(now=0.0)
+
+    def advance(seconds: float) -> None:
+        clock.now += seconds
+
+    monkeypatch.setattr(
+        coordinator, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=advance)
+    )
+    failures = 20
+    stops: list[float] = []
+
+    class StopFailingFirst:
+        def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+            del attempt_id
+            return RUNNING
+
+        def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+            del attempt_id, grace
+            stops.append(clock.now)
+            if len(stops) <= failures:
+                raise RunnerError("executor-ctl indisponível")
+            return STOPPED
+
+    worker = worker_without_database(StopFailingFirst(), lease=LEASE, attempt_timeout=timedelta(0))
+    monkeypatch.setattr(worker, "renew_lease", lambda _claimed: Status.RUNNING)
+    retry_every = EVERY_S / 10
+
+    status = worker.supervise(attempt_without_database())
+
+    assert status.timed_out
+    assert len(stops) == failures + 1
+    # Tolerância só para o arredondamento da soma de `status_poll` no relógio falso.
+    assert len(stops) <= math.floor(clock.now / retry_every + 1e-6) + 1

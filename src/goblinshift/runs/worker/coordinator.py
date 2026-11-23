@@ -559,6 +559,7 @@ class Coordinator:
         """Espera o executor terminar, renovando o lease; pede `stop` se a Run vai parar."""
         started = time.monotonic()
         next_renewal = float("-inf")
+        next_stop = float("-inf")
         while True:
             status = self._observe(claimed)
             if status is not None and not status.is_running:
@@ -581,10 +582,15 @@ class Coordinator:
                     # Sem confirmação de término não há desfecho: o lease segue renovado.
                     if stopped is not None and not stopped.is_running:
                         return stopped
-            timed_out = time.monotonic() - started >= self._config.attempt_timeout.total_seconds()
-            if timed_out and not stop_attempted:
+            now = time.monotonic()
+            timed_out = now - started >= self._config.attempt_timeout.total_seconds()
+            if timed_out and not stop_attempted and now >= next_stop:
                 stopped = self._try_stop(claimed)
-                if stopped is not None and not stopped.is_running:
+                # `stop` falho espera `renew_retry_every`: repeti-lo a cada `status_poll` abriria
+                # uma thread de renovação, e uma transação no banco, por volta com o ctl fora.
+                if stopped is None:
+                    next_stop = now + self._config.renew_retry_every.total_seconds()
+                elif not stopped.is_running:
                     # Sem executor (`absent`, contêiner que nunca iniciou), não houve estouro do
                     # usuário: o `finish` trata a falta de código de saída como transitória.
                     return replace(stopped, timed_out=True) if stopped.ran else stopped
