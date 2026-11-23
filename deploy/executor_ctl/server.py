@@ -20,8 +20,9 @@ da área. Se um start em curso o segura além do prazo, `stop` devolve o `create
 Uma requisição por conexão, corpo JSON pequeno com Content-Length obrigatório e dois prazos de
 leitura: um por leitura e um total para a linha, os cabeçalhos e o corpo (não cobre a operação no
 Docker). No máximo `MAX_CONNECTIONS` conexões ao mesmo tempo; acima disso a conexão recebe 503
-`busy` e é fechada. O cliente é o worker, mas um cliente lento ou com defeito não pode prender o
-serviço nem esgotar as threads.
+`busy` e é fechada. Cada conexão usa até 2 threads (a da conexão e o Timer do prazo total): o teto
+efetivo é 2 * `MAX_CONNECTIONS` = 32. O cliente é o worker, mas um cliente lento ou com defeito não
+pode prender o serviço nem esgotar as threads.
 """
 
 import json
@@ -103,8 +104,10 @@ class _ClientGoneError(Exception):
 
 class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     # stop pode levar a carência inteira; no SIGTERM, server_close espera as requisições em voo.
+    # O join é desta classe (`_handler_threads`), não do ThreadingMixIn: a stdlib guarda a thread
+    # antes do start, e uma que não nasceu faria o join do server_close levantar RuntimeError.
     daemon_threads = False
-    block_on_close = True
+    block_on_close = False
 
     def __init__(
         self,
@@ -121,6 +124,8 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         self.max_connections = max_connections
         self.socket_path = path
         self._slots = threading.BoundedSemaphore(max_connections)
+        # Só o loop do accept acrescenta e só server_close, depois dele, esvazia.
+        self._handler_threads: list[threading.Thread] = []
         super().__init__(str(path), ControlHandler)
 
     def process_request(self, request: _Request, client_address: object) -> None:
@@ -128,12 +133,19 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         if not self._slots.acquire(blocking=False):
             self._refuse_busy(request)
             return
+        thread = threading.Thread(
+            target=self.process_request_thread,
+            args=(request, client_address),
+            daemon=self.daemon_threads,
+        )
         try:
-            super().process_request(request, client_address)
+            thread.start()
         except BaseException:
-            # A thread não nasceu (Thread.start falhou): process_request_thread não devolve a vaga.
+            # A thread não nasceu: process_request_thread não devolve a vaga nem há o que esperar.
             self._slots.release()
             raise
+        self._handler_threads[:] = [t for t in self._handler_threads if t.is_alive()]
+        self._handler_threads.append(thread)
 
     def process_request_thread(self, request: _Request, client_address: object) -> None:
         try:
@@ -167,6 +179,9 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     def server_close(self) -> None:
         super().server_close()
         _remove_stale_socket(self.socket_path)
+        threads, self._handler_threads = self._handler_threads, []
+        for thread in threads:
+            thread.join()
 
     def handle_error(self, request: object, client_address: object) -> None:
         """Exceção que escapou do handler (cliente que fechou no meio da resposta, por exemplo).
@@ -337,6 +352,10 @@ class ControlHandler(BaseHTTPRequestHandler):
         self._read_deadline.start()
 
     def finish(self) -> None:
+        # cancel() não para um callback que já começou; com `_read_done` marcado sob o lock, o
+        # shutdown do prazo nunca alcança o descritor depois que a conexão é fechada.
+        with self._read_lock:
+            self._read_done = True
         self._read_deadline.cancel()
         super().finish()
 
@@ -345,8 +364,9 @@ class ControlHandler(BaseHTTPRequestHandler):
             if self._read_done:
                 return
             self._read_expired = True
-        with suppress(OSError):
-            self.connection.shutdown(socket.SHUT_RDWR)
+            # Dentro do lock: finish espera o shutdown terminar antes de a conexão ser fechada.
+            with suppress(OSError):
+                self.connection.shutdown(socket.SHUT_RDWR)
 
     def _request_read(self) -> None:
         """A requisição foi lida inteira: desarma o prazo total antes da operação no serviço.

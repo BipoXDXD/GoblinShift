@@ -662,7 +662,7 @@ def request_until_answered(socket: Path, method: str, path: str) -> tuple[int, d
                 raw.connect(str(socket))
                 raw.sendall(request)
                 answer = read_until_eof(raw)
-        except BrokenPipeError, ConnectionResetError:
+        except ConnectionError:
             answer = b""
         if answer or time.monotonic() > deadline:
             return parse_answer(answer)
@@ -695,7 +695,7 @@ def drip_until_closed(socket: Path, *, every_s: float) -> float:
                     return time.monotonic() - started
             except BlockingIOError:
                 pass
-            except BrokenPipeError, ConnectionResetError:
+            except ConnectionError:
                 return time.monotonic() - started
             pace.wait(every_s)
     raise AssertionError("inalcançável: o ciclo de bytes não termina")
@@ -904,3 +904,21 @@ def test_sandbox_nao_conecta_no_socket(tmp_path: Path, socket_dir: Path) -> None
 
     assert sandbox == "PermissionError"
     assert member == "conectou"
+
+
+def test_fechar_o_servidor_depois_de_uma_thread_que_nao_iniciou_nao_falha(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path, socket_dir, allowed=[ALLOWED])
+    service = ExecutorService(config, DockerCli(binary=str(tmp_path / "sem-docker")), os.getgid())
+    server = ControlServer(config.socket, service, TEST_READ_TIMEOUT_S)
+    lost, lost_peer = socketlib.socketpair(socketlib.AF_UNIX)
+    with lost, lost_peer, monkeypatch.context() as patch:
+        patch.setattr(threading.Thread, "start", _fail_to_start)
+        with pytest.raises(RuntimeError):
+            server.process_request(lost, None)
+
+    # Sem outra conexão no meio: o join do fechamento não pode alcançar a thread que não nasceu.
+    server.server_close()
+
+    assert not config.socket.exists()
