@@ -76,9 +76,9 @@ if config.require_mount and not (
     and mount_options(read_self_mountinfo(), area).issuperset(REQUIRED_AREA_OPTIONS)
 ):
     print(
-        f"{area} precisa estar montada com nosuid,nodev,noexec antes de instalar: rode "
-        "deploy/filesystems.sh (linha do fstab) e remonte a área (mount -o remount "
-        f"{area}, ou umount e mount)",
+        f"{area} precisa estar montada com nosuid,nodev,noexec antes de instalar: a linha "
+        "dela no /etc/fstab leva essas opções (deploy/filesystems.sh grava assim numa linha "
+        f"nova e só avisa numa antiga, que se edita à mão); depois, mount -o remount {area}",
         file=sys.stderr,
     )
     sys.exit(1)
