@@ -16,7 +16,7 @@ Quem usa o grupo de fato:
 | Backup diário (ADR 022)        | `docker exec` no PostgreSQL, pela unit `goblinshift-pg-backup.service` com `User=goblinshift`                 |
 | Operador                       | `sudo -u goblinshift deploy/compose.sh …`; já tem sudo, então o grupo não lhe acrescenta nada                 |
 
-O worker e a manutenção não têm o socket do Docker (ADR 004). O `executor-ctl` é root, via systemd, e expõe só quatro operações ao grupo `gs-exec`.
+O worker e a manutenção não têm o socket do Docker (ADR 004). O `executor-ctl` é root, via systemd, e expõe suas operações só ao grupo `gs-ctl` (GID 61002), dono do socket; o `gs-exec` (61001) fica com a área de trabalho e o `--user` do executor, que assim não alcança o socket.
 
 O risco real não é o grupo em si. O `release.sh` e os arquivos Compose vêm do commit implantado, e um Compose com `privileged: true` ou `volumes: ["/:/host"]` basta para tomar o host. Por isso, **quem põe código na `main` é root na VPS compartilhada**. Tirar o grupo e dar sudo a um script dentro do checkout não muda isso, porque o `goblinshift` é dono de `/srv/goblinshift/app` e reescreveria o script. Fora a chave da CI, presa ao forced command, ninguém chega a um shell como `goblinshift`.
 
@@ -71,7 +71,7 @@ Reforços deste ADR:
 - `uv run pytest tests/test_compose_host_policy.py` passa no job "Verificações" do CI (o runner `ubuntu-24.04` traz o Docker com o plugin Compose; o `docker compose config` não precisa do daemon). Um `privileged: true` injetado num Compose extra reprova o teste (`test_privileged_injetado_no_compose_de_producao_e_reprovado`).
 - `.github/CODEOWNERS` cobre `/deploy/`, `/compose*.yaml` e `/.github/workflows/`.
 - Revisão de código: uma mudança em `tests/compose_host_policy.py` cita este ADR e explica por que a allowlist cresceu.
-- Na VPS, `id goblinshift` mostra os grupos `docker` e `gs-exec`, e nenhum outro usuário além dele está no grupo `docker` (`getent group docker`).
+- Na VPS, `id goblinshift` mostra os grupos `docker`, `gs-exec` e `gs-ctl`, e nenhum outro usuário além dele está no grupo `docker` (`getent group docker`).
 
 ## Atualização de 2026-11-09
 

@@ -5,14 +5,13 @@ import json
 import logging
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from executor_ctl import service
 
 from .test_snapshot import A, policy
-from .test_witness import ATTEMPT, DockerBoundary, binding, cfg, witness_module
+from .test_witness import ATTEMPT, DockerBoundary, binding, cfg, host_group, witness_module
 
 pytestmark = pytest.mark.host_python
 
@@ -59,7 +58,7 @@ def test_provider_exception_never_echoes_arbitrary_error(
     )
     # No logging configuration, group lookup or Docker call reaches the host.
     monkeypatch.setattr(main, "configure_logging", lambda: None)
-    monkeypatch.setattr(main.grp, "getgrnam", lambda group: SimpleNamespace(gr_gid=7))
+    monkeypatch.setattr(main.grp, "getgrnam", host_group)
 
     def provider(config: object) -> object:
         raise RuntimeError("SYNTHETIC_PROVIDER_SECRET_NEVER_JOURNAL")

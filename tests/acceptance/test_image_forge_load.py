@@ -4,6 +4,11 @@ O script inteiro só roda no host, como root e sob runsc; aqui ficam as partes p
 ele monta a partir do expected.json do gerador e o veredito sobre o que a tentativa relatou.
 """
 
+import contextlib
+import subprocess
+import types
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +16,8 @@ import pytest
 from acceptance import image_forge_load as load
 from acceptance.run import MAINTENANCE_CRITERION, Outcome
 
+from executor_ctl import profile, workarea
+from executor_ctl.profile import IoLimits
 from tests.acceptance.test_run import FakeDocker
 
 pytestmark = pytest.mark.host_python
@@ -167,7 +174,9 @@ def host_stubs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return 0
 
     monkeypatch.setattr("os.geteuid", lambda: 0)
-    monkeypatch.setattr(load, "load_config", lambda _path: type("Config", (), {"group": "g"}))
+    monkeypatch.setattr(
+        load, "load_config", lambda _path: type("Config", (), {"group": "g", "socket_group": "c"})
+    )
     monkeypatch.setattr("grp.getgrnam", lambda _name: type("Group", (), {"gr_gid": 1}))
     monkeypatch.setattr(load, "build_image", lambda: steps.append("build"))
     monkeypatch.setattr(load, "require_image", lambda: steps.append("require"))
@@ -216,3 +225,37 @@ def test_require_image_para_com_a_receita_de_retag_quando_a_tag_falta(
 
     with pytest.raises(SystemExit, match="docker tag"):
         load.require_image()
+
+
+def test_carga_roda_com_o_teto_de_io_da_configuracao(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docker_calls: list[tuple[str, ...]] = []
+
+    @contextlib.contextmanager
+    def workspace(_host: Any, _attempt: uuid.UUID) -> Iterator[FakeDocker]:
+        yield FakeDocker()
+
+    def fake_docker(*args: str, timeout: float = 120) -> str:
+        docker_calls.append(args)
+        return "0\n"
+
+    monkeypatch.setattr(load, "attempt_workspace", workspace)
+    monkeypatch.setattr(load, "_fill_work_dir", lambda *_args: None)
+    monkeypatch.setattr(
+        workarea,
+        "prepare_for_start",
+        lambda *_args: types.SimpleNamespace(path=tmp_path),
+    )
+    monkeypatch.setattr(load, "_docker", fake_docker)
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(profile, "block_device", lambda _st_dev: "/dev/loop3")
+    limits = IoLimits(read_bps=1, write_bps=2, read_iops=3, write_iops=4)
+    config = types.SimpleNamespace(work_area=tmp_path, runtime="runsc", io_limits=limits)
+
+    host: Any = types.SimpleNamespace(config=config, group_id=61001)
+
+    load.measure(host, tmp_path, {})
+
+    run_call = next(call for call in docker_calls if call[0] == "run")
+    assert "--device-write-bps=/dev/loop3:2" in run_call

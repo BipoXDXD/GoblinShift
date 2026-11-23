@@ -106,6 +106,7 @@ def test_config_hash_is_the_raw_buffer_used_by_parser(
     content = {
         "socket": "/run/test.sock",
         "group": "test",
+        "socket_group": "test-ctl",
         "work_area": "/work/test",
         "runtime": "runsc",
         "images_file": config.IMAGES_FILE,
@@ -116,7 +117,12 @@ def test_config_hash_is_the_raw_buffer_used_by_parser(
     loaded = config.load_config(path)
     assert getattr(loaded, "loaded_bytes_sha256", None) == hashlib.sha256(raw).hexdigest()
     plain = config.Config(
-        loaded.socket, loaded.group, loaded.work_area, loaded.runtime, loaded.images_file
+        socket=loaded.socket,
+        group=loaded.group,
+        socket_group=loaded.socket_group,
+        work_area=loaded.work_area,
+        runtime=loaded.runtime,
+        images_file=loaded.images_file,
     )
     assert loaded == plain
     assert getattr(plain, "loaded_bytes_sha256", None) is None
