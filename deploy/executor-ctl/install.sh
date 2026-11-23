@@ -49,12 +49,15 @@ mark_restart_pending() {
 # Read the source package without PYTHONPATH/user site; do not trust a stale installed reader.
 note "Preflight administrativo (somente leitura)"
 if ! python3 -I -B - "$SOURCE" "$CONFIG" <<'PY_PREFLIGHT'
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
+from executor_ctl.__main__ import REQUIRED_AREA_OPTIONS
 from executor_ctl.config import ConfigError, load_config
 from executor_ctl.images import ImageNotAllowedError, _read_allowlist
+from executor_ctl.mounts import mount_options, read_self_mountinfo
 
 try:
     path = Path(sys.argv[2])
@@ -63,6 +66,21 @@ try:
         raise ImageNotAllowedError("política vazia não autoriza instalação")
 except (ConfigError, ImageNotAllowedError) as error:
     print(f"migração administrativa revisada necessária antes de instalar: {error}", file=sys.stderr)
+    sys.exit(1)
+
+# A mesma regra do ctl (__main__.py), lida no namespace do host: o ctl novo não sobe sem ela, e
+# trocar o pacote deixaria o serviço reiniciando em laço.
+area = config.work_area
+if config.require_mount and not (
+    os.path.ismount(area)
+    and mount_options(read_self_mountinfo(), area).issuperset(REQUIRED_AREA_OPTIONS)
+):
+    print(
+        f"{area} precisa estar montada com nosuid,nodev,noexec antes de instalar: rode "
+        "deploy/filesystems.sh (linha do fstab) e remonte a área (mount -o remount "
+        f"{area}, ou umount e mount)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 PY_PREFLIGHT
 then
@@ -175,7 +193,7 @@ if mountpoint -q "$WORK_AREA"; then
   chown root:"$GROUP" "$WORK_AREA"
   chmod 3770 "$WORK_AREA"
 else
-  echo "   $WORK_AREA não está montada; o serviço não sobe sem ela (provision.sh a cria)."
+  echo "   $WORK_AREA não está montada; o serviço não sobe sem ela (deploy/filesystems.sh a cria, com nosuid,nodev,noexec)."
 fi
 
 note "Unit ${SERVICE}"

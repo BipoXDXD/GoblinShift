@@ -65,6 +65,21 @@ def test_installer_sem_usuario_do_app_recusa_antes_de_mutar(tmp_path: Path) -> N
     assert "goblinshift" in result.stderr, result.stderr
 
 
+@pytest.mark.parametrize("case", ["area_not_mounted", "area_without_noexec"])
+def test_area_sem_nosuid_nodev_noexec_recusa_antes_de_mutar(tmp_path: Path, case: str) -> None:
+    # O ctl novo não sobe sem as opções (__main__.py): trocar o pacote derrubaria o serviço.
+    result, effects = run_installer_copy(tmp_path, case)
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "deploy/filesystems.sh" in result.stderr, result.stderr
+
+
+def test_area_sem_montagem_exigida_nao_confere_opcoes(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "area_not_required")
+    assert result.returncode == 91, result.stderr
+    assert effects.read_text().strip() == "groupadd"
+
+
 def run_installer_copy(
     tmp_path: Path, case: str, *, app_user_exists: bool = True
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
@@ -116,6 +131,8 @@ def run_installer_copy(
         config.write_text(json.dumps({**content, "socket_group": "gs-exec"}))
     elif case == "config_duplicate":
         config.write_text(json.dumps(content)[:-1] + ', "runtime": "runc"}')
+    elif case == "area_not_required":
+        config.write_text(json.dumps({**content, "require_mount": False}))
     elif case == "policy_not_private":
         policy.chmod(0o644)
     elif case == "policy_missing":
@@ -130,6 +147,15 @@ def run_installer_copy(
         renamed = policy.parent.with_name("real")
         policy.parent.rename(renamed)
         policy.parent.symlink_to(renamed)
+
+    # Visão do host que o preflight lê no lugar de /proc/self/mountinfo.
+    options = (
+        "rw,nosuid,nodev,relatime" if case == "area_without_noexec" else "rw,nosuid,nodev,noexec"
+    )
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(
+        f"36 25 7:1 / {content['work_area']} {options} shared:1 - ext4 /dev/loop1 rw\n"
+    )
 
     binaries = tmp_path / "bin"
     binaries.mkdir()
@@ -165,7 +191,10 @@ from types import SimpleNamespace
 sys.dont_write_bytecode = "-B" in sys.argv
 source, config = sys.argv[-2:]
 sys.path.insert(0, os.path.dirname(source))
-from executor_ctl import images
+from pathlib import Path
+from executor_ctl import images, mounts
+mounts.MOUNTINFO_PATH = Path(os.environ["MOUNTINFO"])
+os.path.ismount = lambda path: os.environ["CASE"] not in ("area_not_mounted", "area_not_required")
 opened = {}
 real_open = os.open
 
@@ -199,6 +228,7 @@ exec(compile(sys.stdin.read(), "<installer-preflight>", "exec"))
         "MUTATIONS": str(effects),
         "VIRTUAL_ROOT": str(virtual),
         "CASE": case,
+        "MOUNTINFO": str(mountinfo),
     }
     before = fixture_snapshot(virtual)
     before_checkout = fixture_snapshot(checkout)

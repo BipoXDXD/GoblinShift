@@ -28,6 +28,8 @@ CONFIG_CONTENT = json.dumps(
         "work_area": "/srv/goblinshift/exec-work",
         "runtime": "runsc",
         "images_file": POLICY,
+        # O container não tem o filesystem da área: o preflight não confere a montagem.
+        "require_mount": False,
     }
 )
 
