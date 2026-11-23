@@ -22,6 +22,7 @@ function item(position: number, overrides: Record<string, unknown> = {}) {
     counts: {},
     duplicate_of: null,
     formula_cells: null,
+    comparison: null,
     ...overrides,
   };
 }
@@ -331,6 +332,144 @@ describe("Execução: detalhe por arquivo", () => {
       expect(
         within(region).queryByRole("list", { name: "Células que parecem fórmulas, por coluna" }),
       ).toBeNull();
+    });
+  });
+
+  describe("comparação antes e depois", () => {
+    const GROUP = { name: "Antes e depois" } as const;
+
+    /** Cada par da lista: o rótulo e o valor, com o espaço normalizado. */
+    function definitions(group: HTMLElement): [string, string][] {
+      return [...group.querySelectorAll("dt")].map((dt) => [
+        normalized(dt.textContent),
+        normalized(dt.nextElementSibling?.textContent ?? ""),
+      ]);
+    }
+
+    function normalized(text: string): string {
+      return text.replace(/\s+/g, " ").trim();
+    }
+
+    async function comparisonOf(comparison: Record<string, unknown>): Promise<HTMLElement> {
+      setup({ summary, items: [item(0, { comparison })] });
+      return within(await itemsRegion()).getByRole("group", GROUP);
+    }
+
+    const image = {
+      kind: "image",
+      width_before: 2400,
+      height_before: 1200,
+      width_after: 1600,
+      height_after: 800,
+      format_before: "mpo",
+      format_after: "jpeg",
+      bytes_before: 5_242_880,
+      bytes_after: 838_861,
+    };
+
+    it("imagem: dimensões, formato e tamanho, com o 'para' para o leitor de tela", async () => {
+      const group = await comparisonOf(image);
+
+      expect(definitions(group)).toEqual([
+        ["Dimensões", "2.400 × 1.200 → para 1.600 × 800"],
+        ["Formato", "MPO → para JPEG"],
+        ["Tamanho", "5 MiB → para 819,2 KiB"],
+      ]);
+    });
+
+    it("imagem sem o tamanho da saída não mostra a linha do tamanho", async () => {
+      const group = await comparisonOf({ ...image, format_before: "png", bytes_after: null });
+
+      expect(definitions(group)).toEqual([
+        ["Dimensões", "2.400 × 1.200 → para 1.600 × 800"],
+        ["Formato", "PNG → para JPEG"],
+      ]);
+    });
+
+    it("CSV: registros antes e depois, e a linha de contagens só com o que explica a diferença", async () => {
+      const counts = { records_read: 120, filtered_out: 3, duplicates_removed: 19, written: 98 };
+      setup({
+        summary,
+        items: [
+          item(0, {
+            counts,
+            comparison: { kind: "table", records_before: 120, records_after: 98 },
+          }),
+        ],
+      });
+
+      const entry = within(await itemsRegion()).getByRole("listitem");
+      expect(definitions(within(entry).getByRole("group", GROUP))).toEqual([
+        ["Registros", "120 → para 98"],
+      ]);
+      expect(within(entry).getByText("3 filtrados · 19 duplicatas removidas")).toBeVisible();
+      expect(entry).not.toHaveTextContent("registros lidos");
+      expect(entry).not.toHaveTextContent("gravados");
+    });
+
+    it("PDF: páginas antes e depois", async () => {
+      const group = await comparisonOf({ kind: "pdf", pages_before: 12, pages_after: 5 });
+
+      expect(definitions(group)).toEqual([["Páginas", "12 → para 5"]]);
+    });
+
+    it("vídeo com miniatura e áudio: o vídeo contra a miniatura, depois o áudio", async () => {
+      const group = await comparisonOf({
+        kind: "media",
+        width_before: 1920,
+        height_before: 1080,
+        width_after: 320,
+        height_after: 180,
+        audio_before: "pcm_s24le",
+        audio_after: "flac",
+      });
+
+      expect(definitions(group)).toEqual([
+        ["Dimensões", "1.920 × 1.080 → para 320 × 180"],
+        ["Áudio", "PCM 24 bits → para FLAC"],
+      ]);
+    });
+
+    it("vídeo só com áudio mostra só a linha do áudio", async () => {
+      const group = await comparisonOf({
+        kind: "media",
+        width_before: 1920,
+        height_before: 1080,
+        width_after: null,
+        height_after: null,
+        audio_before: "aac",
+        audio_after: "wav",
+      });
+
+      expect(definitions(group)).toEqual([["Áudio", "AAC → para WAV"]]);
+    });
+
+    it("sem comparação, a entrada fica como antes", async () => {
+      setup({ summary, items: [item(0, { counts: { written: 5 } })] });
+
+      const region = await itemsRegion();
+      expect(within(region).getByRole("listitem")).toHaveTextContent("5 gravados");
+      expect(within(region).queryByRole("group", GROUP)).toBeNull();
+    });
+
+    it.each([
+      ["tipo", { kind: "zip" }],
+      ["formato", { ...image, format_after: "webp" }],
+    ])(
+      "comparação com %s que a interface não conhece não derruba a tela",
+      async (_, comparison) => {
+        setup({ summary, items: [item(0, { comparison })] });
+
+        const region = await itemsRegion();
+        expect(within(region).getByRole("listitem")).toHaveTextContent("Arquivo 1");
+        expect(within(region).queryByRole("group", GROUP)).toBeNull();
+      },
+    );
+
+    it("não tem violações do axe com a comparação", async () => {
+      await comparisonOf(image);
+
+      expect(await axeViolations(await itemsRegion())).toEqual([]);
     });
   });
 });
