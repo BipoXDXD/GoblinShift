@@ -41,10 +41,17 @@ exit 0
 _STUBS = {
     "python3": "#!/bin/sh\nexit 0\n",
     "getent": _GETENT,
-    "id": "#!/bin/sh\nexit 1\n",
+    # O usuário goblinshift existe; `runuser -u goblinshift -- <cmd>` roda <cmd> como o teste.
+    "id": "#!/bin/sh\nexit 0\n",
+    "runuser": '#!/bin/sh\nshift 3\nexec "$@"\n',
+    "usermod": "#!/bin/sh\nexit 0\n",
     "mountpoint": "#!/bin/sh\nexit 1\n",
-    # O `stat -c` do fim é do GNU; o socket aqui é do teste.
-    "stat": "#!/bin/sh\nexit 0\n",
+    # `stat -c` é do GNU. O require_root_dir vê cada diretório como do root, 755 (a raiz sintética
+    # é do usuário do teste); o socket do fim é do teste.
+    "stat": """#!/bin/sh
+if [ "$2" = '%u %a' ]; then echo '0 755'; fi
+exit 0
+""",
     "systemctl": _SYSTEMCTL,
 }
 
@@ -87,6 +94,8 @@ def installer_copy(
     """Prepara a cópia; `failing` lista comandos que saem com erro (ex.: `chmod`)."""
     root = tmp_path / "root"
     (root / "etc/systemd/system").mkdir(parents=True)
+    # Já criado: o root_dir só chamaria `install -o root`, que o usuário do teste não pode.
+    (root / "opt/goblinshift/executor-ctl").mkdir(parents=True)
     binaries = tmp_path / "bin"
     binaries.mkdir()
     for name, body in {**_STUBS, **{name: "#!/bin/sh\nexit 1\n" for name in failing}}.items():

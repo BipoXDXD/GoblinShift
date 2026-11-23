@@ -33,7 +33,8 @@ note() { printf '==> %s\n' "$*"; }
 changed=0
 staging=""
 unit_tmp=""
-# Falha no meio não deixa o staging em /opt nem a unit temporária.
+# Falha no meio não deixa o staging em /opt nem a unit temporária. Único trap EXIT do script:
+# acrescente a limpeza aqui, não em outro trap (um segundo `trap ... EXIT` substitui este).
 cleanup() {
   if [[ -n "$staging" ]]; then rm -rf "$staging"; fi
   if [[ -n "$unit_tmp" ]]; then rm -f "$unit_tmp"; fi
@@ -68,6 +69,58 @@ then
   exit 1
 fi
 
+# Funções copiadas de deploy/acceptance/install.sh; o deploy/backup/install.sh tem o mesmo código,
+# e uma correção vale para os três. O ctl roda como root o código copiado para PREFIX: a cópia lê o
+# checkout com os privilégios do goblinshift, e um symlink plantado ali não leva para PREFIX um
+# arquivo que só o root lê.
+as_app() { (cd / && runuser -u "$APP_USER" -- "$@"); }
+if ! id "$APP_USER" >/dev/null 2>&1; then
+  echo "usuário $APP_USER não existe; rode o provision.sh antes" >&2
+  exit 1
+fi
+
+# require_root_dir <diretório>: ele e cada ancestral são diretórios de verdade (não symlinks), do
+# root e sem escrita para grupo ou outros. Quem grava num deles troca o que o root executa ou lê.
+require_root_dir() {
+  local dir="$1" owner mode
+  while :; do
+    if [[ -L "$dir" || ! -d "$dir" ]]; then
+      echo "recusado: $dir não é um diretório (ou é symlink)" >&2
+      exit 1
+    fi
+    read -r owner mode < <(stat -c '%u %a' "$dir")
+    if [[ "$owner" != 0 ]] || (((8#$mode & 8#022) != 0)); then
+      echo "recusado: $dir precisa ser do root e sem escrita para grupo ou outros" >&2
+      exit 1
+    fi
+    [[ "$dir" != / ]] || return 0
+    dir="$(dirname "$dir")"
+  done
+}
+
+# copy_from_checkout <modo> <destino> <arquivo...>: o conteúdo é lido pelo goblinshift, dono do
+# checkout, então um symlink no arquivo ou num diretório do caminho só alcança o que ele já lê. O
+# destino é aberto pelo root, num diretório que só o root grava.
+copy_from_checkout() {
+  local mode="$1" dest="$2" src
+  shift 2
+  for src in "$@"; do
+    if [[ -L "$src" || ! -f "$src" ]]; then
+      echo "recusado: $src não é um arquivo comum (ou é symlink)" >&2
+      exit 1
+    fi
+    as_app cat -- "$src" >"$dest/${src##*/}"
+    chmod "$mode" "$dest/${src##*/}"
+  done
+}
+
+# root_dir <diretório>: cria (root, 755) se faltar e confere com require_root_dir.
+root_dir() {
+  require_root_dir "$(dirname "$1")"
+  [[ -e "$1" || -L "$1" ]] || install -d -m 755 -o root -g root "$1"
+  require_root_dir "$1"
+}
+
 # Os dois GIDs entram no group_add do Compose, e o do gs-exec também no --user do executor:
 # outro número quebraria os dois.
 ensure_group() {
@@ -86,29 +139,31 @@ ensure_group() {
 }
 ensure_group "$GROUP" "$GROUP_ID"
 ensure_group "$SOCKET_GROUP" "$SOCKET_GROUP_ID"
-if id "$APP_USER" >/dev/null 2>&1; then
-  usermod -aG "$GROUP,$SOCKET_GROUP" "$APP_USER"
-else
-  echo "   usuário $APP_USER não existe; rode o provision.sh antes."
-fi
+usermod -aG "$GROUP,$SOCKET_GROUP" "$APP_USER"
 
 note "Pacote em ${PREFIX}"
-install -d -m 755 /opt/goblinshift "$PREFIX" "$PREFIX/docker-config"
+root_dir /opt/goblinshift
+root_dir "$PREFIX"
+install -d -m 755 "$PREFIX/docker-config"
 if [[ -e "$RESTART_PENDING" ]]; then
   echo "   reinício pendente de uma execução anterior."
   changed=1
 fi
-if ! diff -rq --exclude=__pycache__ "$SOURCE" "$PREFIX/executor_ctl" >/dev/null 2>&1; then
-  staging="$(mktemp -d "$PREFIX/.executor_ctl.XXXXXX")"
-  install -m 644 "$SOURCE"/*.py "$staging/"
-  chmod 755 "$staging"
+# A comparação é com o que foi copiado, não com o checkout: o root não lê o checkout (nem segue
+# symlink de lá), e o que vai para PREFIX é exatamente o que foi comparado.
+staging="$(mktemp -d "$PREFIX/.executor_ctl.XXXXXX")"
+copy_from_checkout 644 "$staging" "$SOURCE"/*.py
+chmod 755 "$staging"
+if diff -rq --exclude=__pycache__ "$staging" "$PREFIX/executor_ctl" >/dev/null 2>&1; then
+  rm -rf "$staging"
+  staging=""
+  echo "   já está igual ao checkout."
+else
   mark_restart_pending
   rm -rf "$PREFIX/executor_ctl"
   mv "$staging" "$PREFIX/executor_ctl"
   staging=""
   echo "   atualizado."
-else
-  echo "   já está igual ao checkout."
 fi
 
 note "Configuração ${CONFIG} e política ${IMAGES_FILE} validadas; mantidas sem escrita."
@@ -147,8 +202,8 @@ RestartSec=2
 # prazo, ou no que sobrar quando o principal sai) vai ao cgroup inteiro.
 KillMode=mixed
 # Acima da operação mais longa em voo: o start, até 30 s por chamada ao Docker vezes 3 dele e 3
-# de quem segura o lock, mais 10 s (190 s, START_TIMEOUT do worker); remove 160 s; stop até
-# 40 + 4 x 30 + 5 s de lock (165 s).
+# de quem segura o lock, mais 10 s (190 s, START_TIMEOUT do worker); remove 160 s; stop, com 5
+# chamadas (inspect, stop, inspect, inspect, rm), até 40 + 4 x 30 + 5 s de lock (165 s).
 TimeoutStopSec=210
 RuntimeDirectory=goblinshift
 RuntimeDirectoryMode=0755

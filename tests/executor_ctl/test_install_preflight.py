@@ -58,7 +58,16 @@ def test_installer_valid_preflight_reaches_first_mutation_only(tmp_path: Path) -
     assert effects.read_text().strip() == "groupadd"
 
 
-def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+def test_installer_sem_usuario_do_app_recusa_antes_de_mutar(tmp_path: Path) -> None:
+    result, effects = run_installer_copy(tmp_path, "valid", app_user_exists=False)
+    assert result.returncode != 0
+    assert not effects.exists(), effects.read_text() if effects.exists() else ""
+    assert "goblinshift" in result.stderr, result.stderr
+
+
+def run_installer_copy(
+    tmp_path: Path, case: str, *, app_user_exists: bool = True
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     checkout = tmp_path / "checkout"
     scripts = checkout / "deploy/executor-ctl"
     scripts.mkdir(parents=True)
@@ -142,6 +151,10 @@ def run_installer_copy(tmp_path: Path, case: str) -> tuple[subprocess.CompletedP
     getent = binaries / "getent"
     getent.write_text("#!/bin/sh\nexit 1\n")
     getent.chmod(0o755)
+    # `id goblinshift`: o instalador recusa antes de mutar quando o usuário do app não existe.
+    user = binaries / "id"
+    user.write_text(f"#!/bin/sh\nexit {0 if app_user_exists else 1}\n")
+    user.chmod(0o755)
     # The Python executable boundary maps '/' to a private fixture root and simulates UID0.
     # Real descriptor-relative opens, nofollow flags, parsing and installer order still execute.
     python = binaries / "python3"
