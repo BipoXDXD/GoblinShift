@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, null, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from goblinshift.catalog import CATALOG, Catalog, VersionStatus
@@ -76,6 +76,7 @@ ITEM_KEYS = {
     "counts",
     "duplicate_of",
     "formula_cells",
+    "comparison",
 }
 BASE_TIME = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 EXECUTOR_IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "c" * 64
@@ -1478,6 +1479,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
                 ],
                 "more_columns": 2,
             },
+            "comparison": None,
         },
         {
             "position": 1,
@@ -1490,6 +1492,7 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "counts": {},
             "duplicate_of": None,
             "formula_cells": None,
+            "comparison": None,
         },
         {
             "position": 2,
@@ -1502,8 +1505,121 @@ def test_detalhe_traz_rejeicoes_avisos_e_contagens_por_item(
             "counts": {},
             "duplicate_of": 0,
             "formula_cells": None,
+            "comparison": None,
         },
     ]
+
+
+IMAGE_COMPARISON = {
+    "kind": "image",
+    "width_before": 2400,
+    "height_before": 1600,
+    "width_after": 1200,
+    "height_after": 800,
+    "format_before": "jpeg",
+    "format_after": "png",
+    "bytes_before": 900,
+    "bytes_after": 300,
+}
+
+
+TABLE_COMPARISON = {"kind": "table", "records_before": 10, "records_after": 7}
+PDF_COMPARISON = {"kind": "pdf", "pages_before": 12, "pages_after": 3}
+# Vídeo sem miniatura: o par de dimensões de saída é nulo.
+MEDIA_COMPARISON = {
+    "kind": "media",
+    "width_before": 1920,
+    "height_before": 1080,
+    "width_after": None,
+    "height_after": None,
+    "audio_before": "aac",
+    "audio_after": "wav",
+}
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [TABLE_COMPARISON, PDF_COMPARISON, IMAGE_COMPARISON, MEDIA_COMPARISON],
+    ids=["table", "pdf", "image", "media"],
+)
+def test_detalhe_traz_a_comparacao_por_item(
+    client: TestClient,
+    factory: sessionmaker[Session],
+    storage: FileStorage,
+    stored: dict[str, object],
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    details: dict[str, Any] = {
+        "warnings": [],
+        "counts": {},
+        "duplicate_of": None,
+        "comparison": stored,
+    }
+    with_items(factory, storage, account.id, run_id, [{"outcome": "ok", "details": details}])
+
+    [item] = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()["items"]
+
+    assert item["comparison"] == stored
+
+
+def test_detalhe_sem_comparacao_responde_nulo(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    # Execução de antes da comparação: o detalhe não tem a chave.
+    old: dict[str, Any] = {"warnings": [], "counts": {}, "duplicate_of": None}
+    retained: dict[str, Any] = {
+        "warnings": [],
+        "counts": {},
+        "duplicate_of": None,
+        "comparison": IMAGE_COMPARISON,
+    }
+    with_items(
+        factory,
+        storage,
+        account.id,
+        run_id,
+        [
+            {"outcome": "ok", "error_code": None, "details": old},
+            {"outcome": "ok", "error_code": None, "details": retained},
+            {"outcome": "rejected", "error_code": "CSV_STRUCTURE_INVALID", "details": old},
+        ],
+    )
+    # A retenção de 30 dias anula `details` inteiro, com a comparação junto.
+    with unit_of_work(factory) as session:
+        session.execute(
+            update(run_input)
+            .where(run_input.c.run_id == run_id, run_input.c.position == 1)
+            .values(details=null())
+        )
+
+    items = client.get(f"{RUNS}/{run_id}", headers=account.headers).json()["items"]
+
+    assert [item["comparison"] for item in items] == [None, None, None]
+
+
+def test_comparacao_gravada_fora_da_forma_responde_nulo(
+    client: TestClient, factory: sessionmaker[Session], storage: FileStorage
+) -> None:
+    account = Account(factory)
+    run_id = insert_finished_run(factory, account.id, BASE_TIME)
+    tampered = {**IMAGE_COMPARISON, "format_before": "a.jpg"}
+    details: dict[str, Any] = {
+        "warnings": [],
+        "counts": {},
+        "duplicate_of": None,
+        "comparison": tampered,
+    }
+    with_items(factory, storage, account.id, run_id, [{"outcome": "ok", "details": details}])
+
+    response = client.get(f"{RUNS}/{run_id}", headers=account.headers)
+
+    assert response.status_code == 200
+    [item] = response.json()["items"]
+    assert item["comparison"] is None
+    assert "a.jpg" not in response.text
 
 
 def test_item_ainda_nao_avaliado_aparece_pendente(
