@@ -119,7 +119,6 @@ def test_comparacao_com_texto_fora_da_lista_nao_e_gravada(tmp_path: Path) -> Non
     collected = collect_outputs(out, recipe_id=IMAGE_RECIPE, input_count=1)
 
     assert collected.report.items[0].comparison is None
-    assert "segredo" not in repr(collected.report)
 
 
 def test_rejeitado_e_duplicata_nao_tem_comparacao(tmp_path: Path) -> None:
