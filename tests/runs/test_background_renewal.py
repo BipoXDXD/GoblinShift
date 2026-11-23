@@ -11,6 +11,7 @@ Sem banco: `renew_lease` é trocado no próprio coordenador; nenhum `sleep` serv
 """
 
 import contextvars
+import itertools
 import math
 import threading
 import uuid
@@ -323,6 +324,52 @@ def test_teto_com_stop_falhando_repete_no_intervalo_curto(monkeypatch: pytest.Mo
     assert len(stops) == failures + 1
     # Tolerância só para o arredondamento da soma de `status_poll` no relógio falso.
     assert len(stops) <= math.floor(clock.now / retry_every + 1e-6) + 1
+    # O primeiro `stop` sai na hora; os seguintes esperam o intervalo curto.
+    assert stops[0] == 0.0
+    assert all(b - a >= retry_every - 1e-6 for a, b in itertools.pairwise(stops))
+
+
+def test_stop_falho_ao_parar_tambem_espera_o_intervalo_curto_no_teto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A Run vai parar (renovação devolve STOPPING) e o teto já venceu. Um `stop` que falha no ramo
+    # STOPPING não pode ser repetido pelo ramo do teto na volta seguinte: o intervalo curto vale
+    # para qualquer `stop` falho.
+    clock = SimpleNamespace(now=0.0)
+
+    def advance(seconds: float) -> None:
+        clock.now += seconds
+
+    monkeypatch.setattr(
+        coordinator, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=advance)
+    )
+    failures = 20
+    stops: list[float] = []
+
+    class StopFailingFirst:
+        def status(self, attempt_id: uuid.UUID) -> ExecutorStatus:
+            del attempt_id
+            return RUNNING
+
+        def stop(self, attempt_id: uuid.UUID, grace: timedelta) -> ExecutorStatus:
+            del attempt_id, grace
+            stops.append(clock.now)
+            if len(stops) <= failures:
+                raise RunnerError("executor-ctl indisponível")
+            return STOPPED
+
+    worker = worker_without_database(StopFailingFirst(), lease=LEASE, attempt_timeout=timedelta(0))
+    monkeypatch.setattr(worker, "renew_lease", lambda _claimed: Status.STOPPING)
+    retry_every = EVERY_S / 10
+
+    status = worker.supervise(attempt_without_database())
+
+    assert not status.is_running
+    assert len(stops) == failures + 1
+    # O `stop` do ramo STOPPING falha em t=0; o do teto só vem depois do intervalo curto. (O ramo
+    # STOPPING segue no ritmo da renovação, `every`, sem consultar esse intervalo.)
+    assert stops[0] == 0.0
+    assert stops[1] >= retry_every - 1e-6
 
 
 def test_fencing_perdido_durante_o_stop_abandona_sem_registrar(

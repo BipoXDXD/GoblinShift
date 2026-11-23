@@ -579,8 +579,11 @@ class Coordinator:
                 if renewed is Status.STOPPING:
                     stop_attempted = True
                     stopped = self._try_stop(claimed)
-                    # Sem confirmação de término não há desfecho: o lease segue renovado.
-                    if stopped is not None and not stopped.is_running:
+                    # Sem confirmação de término não há desfecho: o lease segue renovado. Um `stop`
+                    # falho também adia o do teto (mesmo intervalo curto, logo abaixo).
+                    if stopped is None:
+                        next_stop = now + self._config.renew_retry_every.total_seconds()
+                    elif not stopped.is_running:
                         return stopped
             now = time.monotonic()
             timed_out = now - started >= self._config.attempt_timeout.total_seconds()
