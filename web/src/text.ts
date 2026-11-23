@@ -367,6 +367,28 @@ export const TEXT = {
       unknownNotice: (code: string) => `Nota desconhecida (${code}).`,
       duplicateOf: (position: number) =>
         `Igual ao arquivo ${String(position)}; não gerou outra saída.`,
+      comparison: {
+        label: "Antes e depois",
+        to: "para",
+        dimensions: "Dimensões",
+        format: "Formato",
+        size: "Tamanho",
+        records: "Registros",
+        pages: "Páginas",
+        audio: "Áudio",
+        formats: { jpeg: "JPEG", png: "PNG", mpo: "MPO" },
+        codecs: {
+          aac: "AAC",
+          pcm_s16le: "PCM 16 bits",
+          pcm_s16be: "PCM 16 bits",
+          pcm_s24le: "PCM 24 bits",
+          pcm_s24be: "PCM 24 bits",
+          opus: "Opus",
+          vorbis: "Vorbis",
+          wav: "WAV",
+          flac: "FLAC",
+        },
+      },
       // Singular e plural, como em `nouns`.
       counts: {
         records_read: ["registro lido", "registros lidos"],
