@@ -14,6 +14,9 @@
 Erros: `{"error": "<código>", "detail": "..."}`. `start` e `remove` disputam o lock da área com
 prazo: estourado, respondem 503 `busy` sem tocar no Docker nem na área, e repetir é seguro.
 
+`stop` pode responder `absent`: o container que nunca iniciou (`created`) é removido, com o lock
+da área. Se um start em curso o segura além do prazo, `stop` devolve o `created` lido, sem erro.
+
 Uma requisição por conexão, corpo JSON pequeno com Content-Length obrigatório e prazo de leitura
 curto: o cliente é o worker, mas um cliente lento ou com defeito não pode prender o serviço.
 """

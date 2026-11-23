@@ -17,6 +17,7 @@ from executor_ctl.service import AREA_LOCK_WAIT_S, AreaBusyError, ExecutorServic
 from executor_ctl.workarea import WorkAreaDirtyError
 
 from .conftest import make_config
+from .counting_docker import CountingDocker
 from .stuck_docker import StuckDocker, holding_area
 
 pytestmark = [pytest.mark.host_python, pytest.mark.usefixtures("synthetic_policy_metadata")]
@@ -26,6 +27,8 @@ LATECOMER = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abce")
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
 # Curto para o teste; o de produção é AREA_LOCK_WAIT_S.
 TEST_LOCK_WAIT_S = 0.2
+# Prazo do lock nos testes do `stop`, que só desiste dele quando a área está ocupada.
+STOP_LOCK_WAIT_S = 0.05
 # Folga para o agendador da máquina de CI; ainda bem abaixo do prazo de produção.
 SCHEDULING_SLACK_S = 2.0
 
@@ -150,3 +153,71 @@ def test_operacao_que_falha_dentro_do_lock_o_libera(
     service.remove(LATECOMER)
 
     assert docker.calls[-1] == f"rm gs-exec-{LATECOMER}"
+
+
+def test_stop_de_container_created_remove_e_responde_absent(tmp_path: Path) -> None:
+    # O runtime falhou e o `docker run --detach` deixou o container em `created`: sem o rm, ele
+    # seguiria aparecendo como existente e a área nunca seria liberada.
+    docker = CountingDocker("created")
+    service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
+
+    status = service.stop(HOLDER, 0)
+
+    assert status.state == "absent"
+    assert docker.calls == ["stop", "inspect", "inspect", "rm"]
+
+
+def test_stop_de_container_rodando_nao_remove(tmp_path: Path) -> None:
+    docker = CountingDocker("running")
+    service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
+
+    status = service.stop(HOLDER, 0)
+
+    assert status.state == "exited"
+    assert docker.calls == ["stop", "inspect"]
+
+
+class CreatedThenStartedDocker(CountingDocker):
+    """O primeiro `inspect` vê `created`; antes do segundo, um start concorrente o iniciou."""
+
+    def inspect(self, name: str) -> ContainerStatus:
+        status = super().inspect(name)
+        if self.state == "created":
+            self.state = "running"
+        return status
+
+
+def test_stop_reinspeciona_sob_o_lock(tmp_path: Path) -> None:
+    docker = CreatedThenStartedDocker("created")
+    service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
+
+    status = service.stop(HOLDER, 0)
+
+    assert status.state == "running"
+    assert docker.calls == ["stop", "inspect", "inspect"]
+
+
+class CreatedWhileStuckDocker(StuckDocker):
+    """Docker travado no primeiro `inspect`, como o de um start em curso, que vê `created`."""
+
+    def inspect(self, name: str) -> ContainerStatus:
+        super().inspect(name)
+        return ContainerStatus("created", None, False, None, None)
+
+    def stop(self, name: str, grace_s: int) -> None:
+        self.calls.append(f"stop {name}")
+
+
+def test_stop_nao_remove_created_com_start_em_curso(tmp_path: Path) -> None:
+    # O start em curso segura o lock da área: o `created` que o stop lê pode ser o container que
+    # o `run` acabou de criar e ainda vai iniciar. Removê-lo agora derrubaria a tentativa.
+    docker = CreatedWhileStuckDocker()
+    service = service_with(tmp_path, docker, lock_wait_s=STOP_LOCK_WAIT_S)
+
+    with holding_area(docker, lambda: service.start(HOLDER, IMAGE)):
+        status = service.stop(HOLDER, 0)
+
+    assert status.state == "created"
+    # Lista exata: o `rm` seria gravado como "rm <nome>", e só ela prova que não houve remoção.
+    name = f"gs-exec-{HOLDER}"
+    assert docker.calls == [f"inspect {name}", f"stop {name}", f"inspect {name}"]

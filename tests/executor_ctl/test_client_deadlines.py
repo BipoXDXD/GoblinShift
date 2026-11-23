@@ -21,38 +21,15 @@ from pathlib import Path
 
 import pytest
 
-from executor_ctl.docker_cli import COMMAND_TIMEOUT_S, ContainerStatus, DockerCli, State
+from executor_ctl.docker_cli import COMMAND_TIMEOUT_S, DockerCli
 from executor_ctl.service import ExecutorService
 from goblinshift.runs.worker import executor_ctl_runner as client
 
 from .conftest import make_config
+from .counting_docker import CountingDocker
 
 ATTEMPT = uuid.UUID("0193a3f0-7b2c-7def-8a01-23456789abcd")
 IMAGE = "ghcr.io/bipoxdxd/goblinshift-executor@sha256:" + "a" * 64
-
-
-class CountingDocker(DockerCli):
-    """Docker sem processo: devolve o estado pedido pelo teste e conta cada chamada ao CLI."""
-
-    def __init__(self, state: State) -> None:
-        super().__init__(binary="docker-que-nao-roda")
-        self.state: State = state
-        self.calls: list[str] = []
-
-    def inspect(self, name: str) -> ContainerStatus:
-        self.calls.append("inspect")
-        if self.state == "absent":
-            return ContainerStatus.absent()
-        exit_code = 0 if self.state == "exited" else None
-        return ContainerStatus(self.state, exit_code, False, None, None)
-
-    def run(self, arguments: list[str]) -> None:
-        self.calls.append("run")
-        self.state = "running"
-
-    def remove(self, name: str) -> None:
-        self.calls.append("rm")
-        self.state = "absent"
 
 
 def service_with(tmp_path: Path, docker: DockerCli) -> ExecutorService:
