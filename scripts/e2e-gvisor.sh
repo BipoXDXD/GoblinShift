@@ -58,6 +58,16 @@ mount_work_area() {
   sudo mount -o loop,noatime,nosuid,nodev,noexec "$image" "$WORK_ROOT/exec-work"
 }
 
+# O usuário do app, como o deploy/provision.sh o cria: o instalador do executor-ctl recusa sem
+# ele e lê o checkout com os privilégios dele. No runner, o checkout é do usuário da CI; se o
+# goblinshift não o lê, entra no grupo desse usuário (só neste runner efêmero).
+ensure_app_user() {
+  id goblinshift >/dev/null 2>&1 || sudo adduser --disabled-password --gecos "" goblinshift
+  if ! sudo runuser -u goblinshift -- test -r "$ROOT/deploy/executor_ctl/__main__.py"; then
+    sudo usermod -aG "$(id -gn)" goblinshift
+  fi
+}
+
 # Os dois arquivos que o instalador exige prontos, no lugar e com os donos de produção.
 write_executor_policy() {
   local image="$1" images_dir=/var/lib/coolify-release/goblinshift
@@ -92,6 +102,7 @@ up() {
   image="$(publish_executor_image)"
   mount_work_area
   write_executor_policy "$image"
+  ensure_app_user
   sudo bash "$ROOT/deploy/executor-ctl/install.sh"
   # No .env, para os `docker compose` dos passos seguintes interpolarem a mesma imagem.
   echo "GS_EXECUTOR_IMAGE=$image" >>"$ROOT/.env"

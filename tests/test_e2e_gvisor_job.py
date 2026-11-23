@@ -140,6 +140,29 @@ def test_o_job_sobe_a_pilha_antes_das_jornadas() -> None:
     )
 
 
+def shell_function(name: str) -> str:
+    """Corpo da função `name()` do e2e-gvisor.sh, até a chave que a fecha na coluna 0."""
+    match = re.search(rf"^{name}\(\) \{{\n(.*?)^\}}", SCRIPT.read_text(), re.MULTILINE | re.DOTALL)
+    assert match is not None, name
+    return match.group(1)
+
+
+def test_o_up_cria_o_usuario_do_app_antes_do_instalador() -> None:
+    # O instalador recusa sem o usuário goblinshift (ele lê o checkout com os privilégios dele).
+    up = shell_function("up")
+    assert "ensure_app_user" in up
+    assert up.index("ensure_app_user") < up.index("deploy/executor-ctl/install.sh")
+
+
+def test_o_usuario_do_app_nasce_como_no_provision() -> None:
+    provision = (ROOT / "deploy" / "provision.sh").read_text()
+    created = re.search(r'adduser (.*) "\$APP_USER"', provision)
+    assert created is not None
+    body = shell_function("ensure_app_user")
+    assert f"adduser {created.group(1)} goblinshift" in body
+    assert "id goblinshift" in body, "idempotente: só cria se faltar"
+
+
 @pytest.mark.parametrize("service", ["api", *EXECUTOR_CLIENTS])
 def test_a_pilha_usa_o_runner_de_producao(service: str) -> None:
     environment = services(GVISOR_COMPOSE)[service]["environment"]
