@@ -173,8 +173,31 @@ def test_lista_so_vale_nos_sites_atras_da_cloudflare() -> None:
         assert "CF-Connecting-IP" not in text, path
 
 
+# Cabeçalhos de resposta que só o site do GoblinShift emite (tests/test_caddy_headers.py).
+CABECALHOS_DO_GOBLINSHIFT = (
+    "header -Server",
+    'header Strict-Transport-Security "max-age=63072000; includeSubDomains"',
+)
+
+
+def _sem_cabecalhos_de_resposta(site: str) -> str:
+    """Tira as linhas de `CABECALHOS_DO_GOBLINSHIFT` e o comentário logo acima de cada uma."""
+    linhas = site.splitlines(keepends=True)
+    fica = [True] * len(linhas)
+    for i, linha in enumerate(linhas):
+        if linha.strip() in CABECALHOS_DO_GOBLINSHIFT:
+            fica[i] = False
+            j = i - 1
+            while j >= 0 and linhas[j].startswith(" #"):
+                fica[j] = False
+                j -= 1
+    return "".join(linha for linha, manter in zip(linhas, fica, strict=True) if manter)
+
+
 def test_site_do_stillon_tem_a_mesma_regra_do_site_do_goblinshift() -> None:
-    goblinshift = (SITES / "goblinshift.dev.caddy").read_text()
+    # Os cabeçalhos de resposta (HSTS do www, `header -Server`) são do GoblinShift
+    # (tests/test_caddy_headers.py); a regra comparada é a da Cloudflare e do proxy.
+    goblinshift = _sem_cabecalhos_de_resposta((SITES / "goblinshift.dev.caddy").read_text())
     expected = goblinshift.replace(GOBLINSHIFT, STILLON).replace("172.31.0.4:80", "172.31.0.3:80")
 
     assert (SITES / "stillon.tech.caddy").read_text() == expected
